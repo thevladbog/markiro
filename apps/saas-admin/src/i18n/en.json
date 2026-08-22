@@ -227,6 +227,10 @@
   },
   "offers": {
     "title": "Commercial offers",
+    "description": "Commercial terms before an invoice is issued.",
+    "newDescription": "Build the items, pricing, and terms for the selected tenant.",
+    "actionsLabel": "Offer actions",
+    "registryTitle": "Offer register",
     "newTitle": "New offer",
     "tenantId": "Tenant ID",
     "amount": "Amount",
@@ -247,10 +251,14 @@
     "terms": { "label": "Terms of cooperation" }
   },
   "billing": {
-    "title": "Invoices and payments",
+    "title": "Invoices",
+    "description": "Issuing, payment, and application of catalog items.",
+    "actionsLabel": "Invoice actions",
+    "registryTitle": "Invoice register",
     "loading": "Loading invoices",
     "loadError": "Could not load invoices",
     "newTitle": "New invoice",
+    "newDescription": "Build the catalog items and their post-payment application rules.",
     "tenantId": "Tenant ID",
     "amount": "Amount",
     "create": "Create invoice",
@@ -266,6 +274,8 @@
     "document": "Generate document",
     "back": "Back to invoice register",
     "detailTitle": "Invoice {{number}}",
+    "detailDescription": "Payment state and application result for every invoice line.",
+    "detailActionsLabel": "Invoice state",
     "loadingDetail": "Loading invoice state",
     "detailLoadError": "Could not load invoice",
     "issueDate": "Issued",
@@ -342,6 +352,7 @@
   },
   "payments": {
     "title": "Payments",
+    "description": "Import, reconciliation, and recording of bank payments.",
     "open": "Payment register",
     "loading": "Loading payments",
     "import": {
@@ -599,6 +610,9 @@
   },
   "catalog": {
     "title": "Catalog",
+    "description": "Plan, add-on, and service versions used in commercial documents.",
+    "actionsLabel": "Catalog actions",
+    "registryTitle": "Catalog versions",
     "loading": "Loading catalog versions",
     "loadError": "Could not load the catalog.",
     "groupLabel": "Catalog item type",

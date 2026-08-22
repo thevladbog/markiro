@@ -189,6 +189,8 @@ describe("offer editor route", () => {
     renderSaasApp({ initialEntry: "/offers" });
 
     expect(await screen.findByText(TENANT_ID)).toBeDefined();
+    expect(screen.getByText("Коммерческие условия до выставления счёта.")).toBeDefined();
+    expect(screen.getByRole("region", { name: "Реестр предложений" })).toBeDefined();
     expect(screen.getByText("expired")).toBeDefined();
     expect(screen.queryByText("Не удалось загрузить предложения")).toBeNull();
   });

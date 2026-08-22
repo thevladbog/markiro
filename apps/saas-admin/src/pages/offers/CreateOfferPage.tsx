@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, PageHeader, Spinner } from "@markiro/ui";
+import { Alert, SectionHeader, Spinner } from "@markiro/ui";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
@@ -96,7 +96,11 @@ function OfferEditor() {
   ) {
     return (
       <section className="catalog-page">
-        <PageHeader title="" />
+        <SectionHeader
+          eyebrow="COMMERCE / OFFERS / NEW"
+          title={t("offers.newTitle")}
+          description={t("offers.newDescription")}
+        />
         <Spinner label={t("shell.routeLoading")} />
       </section>
     );
@@ -109,7 +113,11 @@ function OfferEditor() {
   ) {
     return (
       <section className="catalog-page">
-        <PageHeader title="" />
+        <SectionHeader
+          eyebrow="COMMERCE / OFFERS / NEW"
+          title={t("offers.newTitle")}
+          description={t("offers.newDescription")}
+        />
         <Alert tone="error">{t("documents.errors.loadOfferEditor")}</Alert>
       </section>
     );

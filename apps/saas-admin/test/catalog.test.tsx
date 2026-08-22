@@ -67,9 +67,27 @@ describe("commercial catalog", () => {
     renderSaasApp();
 
     expect(await screen.findByRole("heading", { name: "Каталог" })).toBeDefined();
+    expect(
+      screen.getByText("Версии тарифов, дополнений и услуг для коммерческих документов."),
+    ).toBeDefined();
+    expect(await screen.findByRole("region", { name: "Версии каталога" })).toBeDefined();
     expect(await screen.findByRole("tab", { name: "Тарифы" })).toBeDefined();
     expect(screen.getByRole("tab", { name: "Дополнения" })).toBeDefined();
     expect(screen.getByRole("tab", { name: "Услуги" })).toBeDefined();
+  });
+
+  it("switches catalog groups from the keyboard", async () => {
+    installCatalogApi();
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    const plans = await screen.findByRole("tab", { name: "Тарифы" });
+    plans.focus();
+    await user.keyboard("{ArrowRight}");
+
+    expect(screen.getByRole("tab", { name: "Дополнения" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
   });
 
   it("paginates large catalog groups instead of rendering every row", async () => {

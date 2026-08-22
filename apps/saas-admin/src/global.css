@@ -781,6 +781,99 @@ textarea {
   gap: 16px;
 }
 
+.catalog-page .mk-section-header__actions > a,
+.billing-header-actions > a {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  color: var(--fg-1);
+  text-decoration: none;
+  font: 600 13px/1 var(--font-ui);
+}
+
+.catalog-page .mk-section-header__actions > a:hover,
+.billing-header-actions > a:hover {
+  background: var(--surface-panel);
+}
+
+.commerce-ledger,
+.commerce-detail-panel {
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-card);
+}
+
+.commerce-ledger__header,
+.commerce-detail-panel > header {
+  min-height: 74px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.commerce-ledger__header h2,
+.commerce-detail-panel > header h2 {
+  margin: 4px 0 0;
+  color: var(--fg-1);
+  font: var(--text-h2);
+}
+
+.commerce-ledger__eyebrow,
+.commerce-ledger__count {
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.commerce-ledger__count {
+  min-width: 40px;
+  padding-top: 4px;
+  text-align: right;
+}
+
+.commerce-ledger > .mk-table,
+.commerce-ledger > .mk-table > .mk-table__scroll,
+.commerce-ledger > .mk-data-tabs {
+  border: 0;
+  border-radius: 0;
+}
+
+.commerce-ledger > .mk-table {
+  border-top: 1px solid var(--line-strong);
+}
+
+.commerce-detail-panel {
+  display: grid;
+  gap: 0;
+}
+
+.commerce-detail-panel > p,
+.commerce-detail-panel > .mk-button,
+.commerce-detail-panel > div {
+  margin: 0;
+  padding: 16px 20px;
+}
+
+.commerce-detail-panel > .mk-button {
+  width: max-content;
+  margin: 16px 20px;
+  padding: 0 18px;
+}
+
+.offer-detail-actions {
+  max-width: 520px;
+  display: grid;
+  gap: 12px;
+}
+
+.catalog-data-tabs .mk-data-tabs__tab {
+  min-height: 56px;
+}
+
 .payments-page {
   display: grid;
   gap: 16px;
@@ -799,6 +892,7 @@ textarea {
 .payment-match-card {
   border: 1px solid var(--line-strong);
   background: var(--surface-card);
+  border-radius: 0;
 }
 
 .payments-panel > header,

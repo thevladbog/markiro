@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router";
-import { Alert, Button, Card, Input, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
+import { Alert, Button, Input, SectionHeader, Spinner, StatusChip, Table } from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { getOffer, listOffers, payOffer, publishOffer, type Offer } from "./api.js";
 
@@ -32,21 +32,32 @@ export function OffersPage() {
   if (offers.isPending)
     return (
       <section className="catalog-page">
-        <PageHeader title={t("offers.title")} />
+        <SectionHeader
+          eyebrow="COMMERCE / OFFERS"
+          title={t("offers.title")}
+          description={t("offers.description")}
+        />
         <Spinner label={t("shell.routeLoading")} />
       </section>
     );
   if (offers.error)
     return (
       <section className="catalog-page">
-        <PageHeader title={t("offers.title")} />
+        <SectionHeader
+          eyebrow="COMMERCE / OFFERS"
+          title={t("offers.title")}
+          description={t("offers.description")}
+        />
         <Alert tone="error">{t("offers.loadError")}</Alert>
       </section>
     );
   return (
     <section className="catalog-page">
-      <PageHeader
+      <SectionHeader
+        eyebrow="COMMERCE / OFFERS"
         title={t("offers.title")}
+        description={t("offers.description")}
+        actionsLabel={t("offers.actionsLabel")}
         actions={
           <>
             <Link to="/catalog">{t("offers.catalogLink")}</Link>
@@ -59,36 +70,57 @@ export function OffersPage() {
       {(location.state as { createdDocument?: unknown } | null)?.createdDocument === "offer" ? (
         <Alert tone="ok">{t("offers.created")}</Alert>
       ) : null}
-      <Table
-        columns={[
-          {
-            key: "tenantId",
-            title: t("offers.tenant"),
-            render: (offer: Offer) => (
-              <button type="button" className="table-link" onClick={() => setSelectedId(offer.id)}>
-                {offer.tenantId}
-              </button>
-            ),
-          },
-          {
-            key: "status",
-            title: t("offers.status"),
-            render: (offer: Offer) => (
-              <StatusChip
-                status={
-                  offer.status === "paid" ? "ok" : offer.status === "cancelled" ? "neutral" : "warn"
-                }
-                label={offer.status}
-              />
-            ),
-          },
-          { key: "total", title: t("offers.total") },
-        ]}
-        rows={offers.data ?? []}
-        empty={t("offers.empty")}
-      />
+      <section className="commerce-ledger" aria-labelledby="offers-ledger-title">
+        <header className="commerce-ledger__header">
+          <div>
+            <span className="commerce-ledger__eyebrow">SALES PIPELINE</span>
+            <h2 id="offers-ledger-title">{t("offers.registryTitle")}</h2>
+          </div>
+          <span className="commerce-ledger__count">{offers.data?.length ?? 0}</span>
+        </header>
+        <Table
+          columns={[
+            {
+              key: "tenantId",
+              title: t("offers.tenant"),
+              render: (offer: Offer) => (
+                <button
+                  type="button"
+                  className="table-link"
+                  onClick={() => setSelectedId(offer.id)}
+                >
+                  {offer.tenantId}
+                </button>
+              ),
+            },
+            {
+              key: "status",
+              title: t("offers.status"),
+              render: (offer: Offer) => (
+                <StatusChip
+                  status={
+                    offer.status === "paid"
+                      ? "ok"
+                      : offer.status === "cancelled"
+                        ? "neutral"
+                        : "warn"
+                  }
+                  label={offer.status}
+                />
+              ),
+            },
+            { key: "total", title: t("offers.total") },
+          ]}
+          rows={offers.data ?? []}
+          empty={t("offers.empty")}
+        />
+      </section>
       {selected.data ? (
-        <Card title={`${t("offers.detail")} · ${selected.data.total} ₽`}>
+        <section className="commerce-detail-panel" aria-labelledby="offer-detail-title">
+          <header>
+            <span className="commerce-ledger__eyebrow">SELECTED OFFER</span>
+            <h2 id="offer-detail-title">{`${t("offers.detail")} · ${selected.data.total} ₽`}</h2>
+          </header>
           <p>{t("offers.lines", { count: selected.data.lines.length })}</p>
           {selected.data.status === "draft" && principal.capabilities.includes("billing.write") ? (
             <Button onClick={() => void publish.mutateAsync()} loading={publish.isPending}>
@@ -97,7 +129,7 @@ export function OffersPage() {
           ) : null}
           {selected.data.status === "published" &&
           principal.capabilities.includes("billing.write") ? (
-            <div style={{ display: "grid", gap: 10, maxWidth: 420 }}>
+            <div className="offer-detail-actions">
               <Button
                 variant="secondary"
                 onClick={() =>
@@ -120,7 +152,7 @@ export function OffersPage() {
               </Button>
             </div>
           ) : null}
-        </Card>
+        </section>
       ) : selected.isPending ? (
         <Spinner label={t("shell.routeLoading")} />
       ) : null}

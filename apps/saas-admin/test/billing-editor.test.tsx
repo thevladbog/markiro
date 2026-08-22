@@ -139,7 +139,7 @@ describe("invoice editor route", () => {
     installInvoiceEditorApi({ me: SUPPORT_ME });
     renderSaasApp({ initialEntry: "/billing/new" });
 
-    expect(await screen.findByRole("heading", { name: "Счета и платежи" })).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "Счета" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Создать черновик счёта" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Тенант" })).toBeNull();
   });
@@ -150,6 +150,8 @@ describe("invoice editor route", () => {
     const billing = renderSaasApp({ initialEntry: "/billing" });
 
     const createLink = await screen.findByRole("link", { name: "Создать счёт" });
+    expect(screen.getByText("Выставление, оплата и применение номенклатуры.")).toBeDefined();
+    expect(screen.getByRole("region", { name: "Реестр счетов" })).toBeDefined();
     expect(createLink.getAttribute("href")).toBe("/invoices/new");
     expect(api.calls()).toEqual([]);
     billing.unmount();

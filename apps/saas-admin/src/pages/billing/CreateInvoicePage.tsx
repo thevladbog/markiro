@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, PageHeader, Spinner } from "@markiro/ui";
+import { Alert, SectionHeader, Spinner } from "@markiro/ui";
 import { useTranslation } from "react-i18next";
 import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router";
 import { z } from "zod";
@@ -115,7 +115,11 @@ function InvoiceEditor() {
   ) {
     return (
       <section className="catalog-page">
-        <PageHeader title="" />
+        <SectionHeader
+          eyebrow="COMMERCE / INVOICES / NEW"
+          title={t("billing.newTitle")}
+          description={t("billing.newDescription")}
+        />
         <Spinner label={t("shell.routeLoading")} />
       </section>
     );
@@ -129,7 +133,11 @@ function InvoiceEditor() {
   ) {
     return (
       <section className="catalog-page">
-        <PageHeader title="" />
+        <SectionHeader
+          eyebrow="COMMERCE / INVOICES / NEW"
+          title={t("billing.newTitle")}
+          description={t("billing.newDescription")}
+        />
         <Alert tone="error">{t("documents.errors.loadInvoiceEditor")}</Alert>
       </section>
     );

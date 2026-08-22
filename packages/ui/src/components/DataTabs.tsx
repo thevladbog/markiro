@@ -60,6 +60,7 @@ export function DataTabs({ items, activeId, onChange, label, className, style }:
             className={cn("mk-data-tabs__tab", selected && "mk-data-tabs__tab--active")}
             type="button"
             role="tab"
+            aria-label={item.label}
             aria-selected={selected}
             aria-controls={item.panelId}
             tabIndex={selected ? 0 : -1}

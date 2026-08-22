@@ -64,6 +64,7 @@ describe("payments registry", () => {
     renderSaasApp({ initialEntry: "/payments" });
 
     expect(await screen.findByRole("heading", { name: "Платежи" })).toBeDefined();
+    expect(screen.getByText("Импорт, сверка и фиксация банковских оплат.")).toBeDefined();
     expect(await screen.findByText("Неизвестный счёт · •••• 9999")).toBeDefined();
     expect(document.body.textContent).not.toContain("40702810900000009999");
     expect(screen.getByRole("link", { name: "INV-700003" }).getAttribute("href")).toBe(
