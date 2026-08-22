@@ -528,9 +528,7 @@ test("private v-b deploy rejects trust, evidence, and mutation-boundary regressi
     [
       "optional confirmation",
       (value) =>
-        value
-          .replace("confirm_private_deploy:\n", "confirm_private_deploy:\n")
-          .replace(/(confirm_private_deploy:\n(?:.*\n){0,4}?\s+required:) true/, "$1 false"),
+        value.replace(/(confirm_private_deploy:\n(?:.*\n){0,4}?\s+required:) true/, "$1 false"),
     ],
     [
       "ignored confirmation",

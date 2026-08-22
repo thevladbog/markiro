@@ -687,7 +687,7 @@ test("hosted parser rejects stale, widened, and non-canonical remote responses",
   stale.version = 2;
   const widened = structuredClone(snapshot);
   widened.environment = { leaked: true };
-  const oversized = JSON.stringify(snapshot).replace("{", `{${" ".repeat(17 * 1024)}`);
+  const oversized = `${JSON.stringify(snapshot)}${" ".repeat(17 * 1024)}`;
   for (const output of [
     `MARKIRO_RUNTIME_DIAGNOSTICS ${JSON.stringify(stale)}\n`,
     `MARKIRO_RUNTIME_DIAGNOSTICS ${JSON.stringify(widened)}\n`,
