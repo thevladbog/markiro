@@ -1,37 +1,14 @@
 import { Controller, Get, Query, Req } from "@nestjs/common";
 import { and, desc, eq, gte, like, lte, or } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { z } from "zod";
+import { platformAuditContracts, type PlatformAuditQuery } from "@markiro/platform-contracts";
 import { DB } from "../auth/auth.module";
 import { Inject } from "@nestjs/common";
 import { ZodValidationPipe } from "../zod.pipe";
 import { RequirePlatformCapabilities } from "./platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "./platform-auth.guard";
 import { sanitizeAuditMetadata, sanitizeSupportAuditMetadata } from "./platform-audit.service";
-
-const auditQuerySchema = z.object({
-  tenantId: z.string().trim().min(1).max(128).optional(),
-  actorId: z.string().trim().min(1).max(128).optional(),
-  action: z
-    .string()
-    .trim()
-    .min(1)
-    .max(120)
-    .regex(/^[a-z0-9_.-]+$/)
-    .optional(),
-  outcome: z.enum(["success", "failed", "denied"]).optional(),
-  from: z.iso
-    .datetime()
-    .transform((value) => new Date(value))
-    .optional(),
-  to: z.iso
-    .datetime()
-    .transform((value) => new Date(value))
-    .optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
-  offset: z.coerce.number().int().min(0).max(10_000).default(0),
-});
-type AuditQuery = z.infer<typeof auditQuerySchema>;
+import { parsePlatformResponse } from "../platform-http/platform-response";
 
 @Controller("platform/audit")
 @RequirePlatformCapabilities("audit.read")
@@ -41,7 +18,7 @@ export class PlatformAuditController {
   @Get()
   async list(
     @Req() request: RequestWithPlatformPrincipal,
-    @Query(new ZodValidationPipe(auditQuerySchema)) query: AuditQuery,
+    @Query(new ZodValidationPipe(platformAuditContracts.list.query)) query: PlatformAuditQuery,
   ) {
     const sanitizeResponseMetadata =
       request.platformPrincipal!.role === "support"
@@ -79,13 +56,13 @@ export class PlatformAuditController {
       .limit(query.limit)
       .offset(query.offset);
 
-    return {
+    return parsePlatformResponse(platformAuditContracts.list.response, {
       items: rows.map((row) => ({
         ...row,
         before: sanitizeResponseMetadata(row.before),
         after: sanitizeResponseMetadata(row.after),
       })),
       nextOffset: rows.length === query.limit ? query.offset + query.limit : null,
-    };
+    });
   }
 }

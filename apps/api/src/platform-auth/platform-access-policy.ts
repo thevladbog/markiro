@@ -1,46 +1,13 @@
 import { SetMetadata } from "@nestjs/common";
-import type { PlatformRole } from "@markiro/db";
+import {
+  platformCapabilitiesForRole as PLATFORM_ROLE_CAPABILITIES,
+  type PlatformCapability,
+  type PlatformRole,
+} from "@markiro/platform-contracts";
+
+export type { PlatformCapability, PlatformPrincipal } from "@markiro/platform-contracts";
 
 export const PLATFORM_ACCESS_POLICY = Symbol("PLATFORM_ACCESS_POLICY");
-
-export type PlatformCapability =
-  | "tenants.read"
-  | "tenants.write"
-  | "catalog.read"
-  | "catalog.write"
-  | "billing.read"
-  | "billing.write"
-  | "platformTeam.write"
-  | "audit.read";
-
-export interface PlatformPrincipal {
-  userId: string;
-  role: PlatformRole;
-  capabilities: readonly PlatformCapability[];
-  twoFactorReady: boolean;
-}
-
-const PLATFORM_ROLE_CAPABILITIES = {
-  platform_admin: [
-    "tenants.read",
-    "tenants.write",
-    "catalog.read",
-    "catalog.write",
-    "billing.read",
-    "billing.write",
-    "platformTeam.write",
-    "audit.read",
-  ],
-  support: ["tenants.read", "tenants.write", "catalog.read", "audit.read"],
-  accountant: [
-    "tenants.read",
-    "catalog.read",
-    "catalog.write",
-    "billing.read",
-    "billing.write",
-    "audit.read",
-  ],
-} as const satisfies Record<PlatformRole, readonly PlatformCapability[]>;
 
 export interface PlatformCapabilityPolicy {
   mode: "capabilities";

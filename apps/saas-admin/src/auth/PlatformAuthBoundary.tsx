@@ -4,28 +4,17 @@ import { Navigate, Outlet, useLocation } from "react-router";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, Spinner } from "@markiro/ui";
+import { platformAuthContracts, type PlatformPrincipal } from "@markiro/platform-contracts";
 
 import { ApiRequestError, platformApiFetch } from "../api/client.js";
 import { useAuthClient } from "./client.js";
 import { isPlatformChallengePending } from "./challenge.js";
 
-export type PlatformRole = "platform_admin" | "support" | "accountant";
-export type PlatformCapability =
-  | "tenants.read"
-  | "tenants.write"
-  | "catalog.read"
-  | "catalog.write"
-  | "billing.read"
-  | "billing.write"
-  | "platformTeam.write"
-  | "audit.read";
-
-export interface PlatformPrincipal {
-  userId: string;
-  role: PlatformRole;
-  capabilities: readonly PlatformCapability[];
-  twoFactorReady: boolean;
-}
+export type {
+  PlatformCapability,
+  PlatformPrincipal,
+  PlatformRole,
+} from "@markiro/platform-contracts";
 
 const PrincipalContext = createContext<PlatformPrincipal | null>(null);
 
@@ -50,7 +39,7 @@ export function PlatformAuthBoundary() {
   const location = useLocation();
   const principal = useQuery({
     queryKey: ["platform", "me", session.data?.user.id],
-    queryFn: () => platformApiFetch<PlatformPrincipal>("/me"),
+    queryFn: () => platformApiFetch("/me", platformAuthContracts.me.response),
     enabled: Boolean(session.data && session.data.user.twoFactorEnabled !== false),
     staleTime: 30_000,
   });

@@ -6,13 +6,10 @@ import { Link, useNavigate } from "react-router";
 import { z } from "zod";
 
 import { Alert, Button, Input } from "@markiro/ui";
+import { platformAuthContracts } from "@markiro/platform-contracts";
 
 import { platformApiFetch } from "../../api/client.js";
 import { AuthFrame } from "./AuthFrame.js";
-
-interface ActivationResponse {
-  twoFactorEnrollmentRequired: true;
-}
 
 const activationSchema = z
   .object({
@@ -56,10 +53,14 @@ export function ActivatePlatformUser() {
     tokenRef.current = null;
     setSubmitError(null);
     try {
-      await platformApiFetch<ActivationResponse>("/activation/complete", {
-        method: "POST",
-        body: JSON.stringify({ token, password }),
-      });
+      await platformApiFetch(
+        "/activation/complete",
+        platformAuthContracts.activationComplete.response,
+        {
+          method: "POST",
+          body: JSON.stringify({ token, password }),
+        },
+      );
       form.reset();
       setComplete(true);
     } catch {

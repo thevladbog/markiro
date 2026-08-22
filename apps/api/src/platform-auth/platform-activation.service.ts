@@ -10,6 +10,7 @@ import {
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
 import { schema, type Db, type PlatformRole } from "@markiro/db";
+import { platformActivationCompleteRequestSchema } from "@markiro/platform-contracts";
 import { z } from "zod";
 import { DB } from "../auth/auth.module";
 import { MailDeliveryService } from "../modules/mail/mail-delivery.service";
@@ -26,10 +27,6 @@ const emailSchema = z
   .transform((value) => value.trim().toLocaleLowerCase("en-US"))
   .pipe(z.email());
 const passwordSchema = z.string().min(8).max(128);
-const completeActivationRequestSchema = z.object({
-  token: z.string().min(16).max(512),
-  password: passwordSchema,
-});
 
 export interface PlatformActivationRuntime {
   now?: () => Date;
@@ -437,7 +434,7 @@ export class PlatformActivationService {
   }
 
   async completePublicRequest(input: unknown): Promise<{ twoFactorEnrollmentRequired: true }> {
-    const parsed = completeActivationRequestSchema.safeParse(input);
+    const parsed = platformActivationCompleteRequestSchema.safeParse(input);
     if (!parsed.success) {
       await this.db.transaction((tx) =>
         this.recordCompletionDenial(tx, {

@@ -81,6 +81,48 @@ describe("platform authentication", () => {
     expect(requests).toHaveLength(1);
   });
 
+  it("does not accept a malformed activation success", async () => {
+    window.history.replaceState(null, "", "/activate#token=backend-produced-activation-token-2026");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { twoFactorEnrollmentRequired: false })),
+    );
+    renderSaasApp({ initialEntry: "/activate", state: authState() });
+    const user = userEvent.setup();
+
+    await user.type(await screen.findByLabelText("Новый пароль"), "correct horse battery staple");
+    await user.type(screen.getByLabelText("Повторите пароль"), "correct horse battery staple");
+    await user.click(screen.getByRole("button", { name: "Активировать доступ" }));
+
+    expect(
+      await screen.findByText(
+        "Активация недоступна. Запросите новую ссылку у администратора платформы.",
+      ),
+    ).toBeDefined();
+    expect(screen.queryByText("Доступ активирован")).toBeNull();
+  });
+
+  it("does not open a protected page for a malformed platform principal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith("/api/platform/me")) {
+          return jsonResponse(200, {
+            userId: "platform-user-1",
+            role: "support",
+            capabilities: ["billing.write"],
+            twoFactorReady: true,
+          });
+        }
+        return jsonResponse(200, []);
+      }),
+    );
+    renderSaasApp({ initialEntry: "/catalog", state: authState({ session: readySession(true) }) });
+
+    expect(await screen.findByText("Не удалось загрузить актуальные полномочия.")).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "Каталог" })).toBeNull();
+  });
+
   it("routes a password sign-in that needs 2FA to the TOTP challenge", async () => {
     const state = authState({ signInResult: { data: { twoFactorRedirect: true }, error: null } });
     renderSaasApp({ initialEntry: "/login", state });
