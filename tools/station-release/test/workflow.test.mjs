@@ -80,6 +80,8 @@ test("station beta publication is protected, serialized, main-only and channel-l
   assert.match(text, /export TAURI_SIGNING_PRIVATE_KEY=\"\$normalized_key_file\"/);
   assert.match(text, /bundle=\"\$installer\"/);
   assert.match(text, /signature=\"\$bundle\.sig\"/);
+  assert.match(text, /artifacts\.mjs stage beta/);
+  assert.match(text, /artifacts\.mjs validate beta/);
   assert.match(
     text,
     /auth_header=\"AUTHORIZATION: basic \$\(printf 'x-access-token:%s' \"\$GH_TOKEN\" \| base64 -w0\)\"/,
