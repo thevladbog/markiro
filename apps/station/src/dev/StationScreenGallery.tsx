@@ -1103,9 +1103,13 @@ function galleryExceptionScanSource(): ScanSource {
  * button variants, and (critically) the "confirm" stage's irreversible
  * double-confirmation dialog, which only the "disassemble" action reaches.
  * "reprint" shares the same "target"/"reason" stages but a different,
- * non-double-confirmed "confirm" screen -- this fixture always drives the
- * "disassemble" path so exception-confirm/-result show the disassemble
- * copy the design spec calls for, never the reprint one.
+ * non-double-confirmed "confirm" screen. This fixture drives the "reprint"
+ * path only for the "reason" stage, so exception-reason shows the reprint
+ * reason directory ("Этикетка повреждена" et al.) instead of the
+ * disassemble one; every other stage -- including "confirm"/"result" --
+ * drives the "disassemble" path so exception-confirm/-result keep showing
+ * the disassemble copy (irreversible double-confirmation) the design spec
+ * calls for.
  */
 function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLocale }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -1121,7 +1125,9 @@ function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLoc
       );
       button?.click();
     };
-    const steps: Array<() => void> = [() => clickByText(t("box.disassembleAction"))];
+    // Only the "reason" stage drives the reprint path -- see the comment above.
+    const initialAction = stage === "reason" ? t("box.reprintAction") : t("box.disassembleAction");
+    const steps: Array<() => void> = [() => clickByText(initialAction)];
     if (stage !== "target") {
       steps.push(() => root.querySelector<HTMLButtonElement>(".shift-boxes__row")?.click());
     }
