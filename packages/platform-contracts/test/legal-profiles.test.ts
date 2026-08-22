@@ -136,7 +136,9 @@ describe("billing legal-profile contracts", () => {
       }).success,
     ).toBe(true);
     expect(
-      (contracts.billingProfileInputSchema as { safeParse(value: unknown): { success: boolean } }).safeParse({
+      (
+        contracts.billingProfileInputSchema as { safeParse(value: unknown): { success: boolean } }
+      ).safeParse({
         kind: "self_employed",
         fullName: "Петров Пётр Петрович",
         displayName: "Петров П. П.",

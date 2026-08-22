@@ -61,9 +61,9 @@ describe("tenant billing schema", () => {
     );
     expect(operatorCheckNames).not.toContain("operator_billing_profiles_legal_entity_check");
     expect(operatorCheckNames).toContain("operator_billing_profiles_actual_same_check");
-    expect(getTableConfig(schema.tenantBillingProfiles).checks.map((constraint) => constraint.name)).toContain(
-      "tenant_billing_profiles_actual_same_check",
-    );
+    expect(
+      getTableConfig(schema.tenantBillingProfiles).checks.map((constraint) => constraint.name),
+    ).toContain("tenant_billing_profiles_actual_same_check");
   });
 
   it("defines separate constrained operator and tenant bank-account tables", () => {
