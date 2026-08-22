@@ -580,6 +580,141 @@ describe("platform commercial contracts", () => {
     }
   });
 
+  it("rejects a paid invoice detail without its atomic payment and application state", () => {
+    expect(
+      platformCommercialContracts.invoices.detail.response.safeParse({
+        ...invoiceBase,
+        ...issuedInvoiceMetadata,
+        status: "paid",
+        paidAt: CREATED_AT,
+        lines: [invoiceLine],
+        documents: [],
+        payment: null,
+        application: {
+          status: "not_paid",
+          latestByLine: [],
+          attempts: [],
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("parses only the application states possible for each invoice detail status", () => {
+    const relations = {
+      lines: [invoiceLine],
+      documents: [],
+    } as const;
+    const pendingEvent = {
+      ...applicationEvent,
+      status: "pending",
+      afterSnapshot: null,
+      errorCode: null,
+    } as const;
+    const appliedEvent = {
+      ...applicationEvent,
+      status: "applied",
+      afterSnapshot: { id: OFFER_ID },
+      errorCode: null,
+    } as const;
+    const failedEvent = {
+      ...applicationEvent,
+      status: "failed",
+      afterSnapshot: null,
+      errorCode: "activation_failed",
+    } as const;
+    const paidApplications = [
+      { status: "pending", latestByLine: [pendingEvent], attempts: [pendingEvent] },
+      { status: "partial_failure", latestByLine: [failedEvent], attempts: [failedEvent] },
+      { status: "applied", latestByLine: [appliedEvent], attempts: [appliedEvent] },
+      {
+        status: "applied",
+        latestByLine: [applicationEvent],
+        attempts: [applicationEvent],
+      },
+    ] as const;
+
+    for (const application of paidApplications) {
+      const parsed = platformCommercialContracts.invoices.detail.response.parse({
+        ...invoiceBase,
+        ...issuedInvoiceMetadata,
+        status: "paid",
+        paidAt: CREATED_AT,
+        ...relations,
+        payment: billingPayment,
+        application,
+      });
+      expect(parsed.application.status).toBe(application.status);
+    }
+
+    const unpaidRecords = [
+      { name: "draft", record: { ...invoiceBase, status: "draft" } },
+      {
+        name: "issued",
+        record: { ...invoiceBase, ...issuedInvoiceMetadata, status: "issued" },
+      },
+      {
+        name: "cancelled",
+        record: {
+          ...invoiceBase,
+          ...issuedInvoiceMetadata,
+          status: "cancelled",
+          cancelledAt: CREATED_AT,
+        },
+      },
+    ] as const;
+    const notPaidApplication = {
+      status: "not_paid",
+      latestByLine: [],
+      attempts: [],
+    } as const;
+
+    for (const { name, record } of unpaidRecords) {
+      const valid = { ...record, ...relations, payment: null, application: notPaidApplication };
+      expect(
+        platformCommercialContracts.invoices.detail.response.parse(valid).application.status,
+        `${name} valid`,
+      ).toBe("not_paid");
+      expect(
+        platformCommercialContracts.invoices.detail.response.safeParse({
+          ...valid,
+          payment: billingPayment,
+        }).success,
+        `${name} payment`,
+      ).toBe(false);
+      expect(
+        platformCommercialContracts.invoices.detail.response.safeParse({
+          ...valid,
+          application: paidApplications[0],
+        }).success,
+        `${name} application`,
+      ).toBe(false);
+    }
+
+    const paid = {
+      ...invoiceBase,
+      ...issuedInvoiceMetadata,
+      status: "paid",
+      paidAt: CREATED_AT,
+      ...relations,
+      payment: billingPayment,
+      application: paidApplications[0],
+    } as const;
+    expect(
+      platformCommercialContracts.invoices.detail.response.safeParse({
+        ...paid,
+        payment: null,
+      }).success,
+      "paid payment",
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.invoices.detail.response.safeParse({
+        ...paid,
+        application: notPaidApplication,
+      }).success,
+      "paid application",
+    ).toBe(false);
+  });
+
   it("rejects result and error metadata that contradicts every application state", () => {
     const resultBase = {
       lineId: INVOICE_LINE_ID,

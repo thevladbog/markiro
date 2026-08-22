@@ -683,29 +683,47 @@ const invoiceApplicationEventServiceSchema = invoiceApplicationEventCommonSchema
   })
   .strict();
 
-const invoiceApplicationStateSchema = z
+const unpaidInvoiceApplicationStateSchema = z
   .object({
-    status: z.enum(["not_paid", "pending", "partial_failure", "applied"]),
+    status: z.literal("not_paid"),
     latestByLine: z.array(invoiceApplicationEventSchema),
     attempts: z.array(invoiceApplicationEventSchema),
   })
   .strict();
-const invoiceApplicationServiceStateSchema = invoiceApplicationStateSchema
-  .extend({
+const paidInvoiceApplicationStateSchema = z
+  .object({
+    status: z.enum(["pending", "partial_failure", "applied"]),
+    latestByLine: z.array(invoiceApplicationEventSchema),
+    attempts: z.array(invoiceApplicationEventSchema),
+  })
+  .strict();
+const invoiceApplicationServiceStateSchema = z
+  .object({
+    status: z.enum(["not_paid", "pending", "partial_failure", "applied"]),
     latestByLine: z.array(invoiceApplicationEventServiceSchema),
     attempts: z.array(invoiceApplicationEventServiceSchema),
   })
   .strict();
-const invoiceDetailFields = {
+const invoiceDetailRelationFields = {
   lines: z.array(invoiceLineSchema),
   documents: z.array(invoiceDocumentRecordSchema),
-  payment: billingPaymentSchema.nullable(),
-  application: invoiceApplicationStateSchema,
 };
-const draftInvoiceDetailSchema = draftInvoiceSchema.extend(invoiceDetailFields).strict();
-const issuedInvoiceDetailSchema = issuedInvoiceSchema.extend(invoiceDetailFields).strict();
-const paidInvoiceDetailSchema = paidInvoiceSchema.extend(invoiceDetailFields).strict();
-const cancelledInvoiceDetailSchema = cancelledInvoiceSchema.extend(invoiceDetailFields).strict();
+const unpaidInvoiceDetailFields = {
+  ...invoiceDetailRelationFields,
+  payment: z.null(),
+  application: unpaidInvoiceApplicationStateSchema,
+};
+const paidInvoiceDetailFields = {
+  ...invoiceDetailRelationFields,
+  payment: billingPaymentSchema,
+  application: paidInvoiceApplicationStateSchema,
+};
+const draftInvoiceDetailSchema = draftInvoiceSchema.extend(unpaidInvoiceDetailFields).strict();
+const issuedInvoiceDetailSchema = issuedInvoiceSchema.extend(unpaidInvoiceDetailFields).strict();
+const paidInvoiceDetailSchema = paidInvoiceSchema.extend(paidInvoiceDetailFields).strict();
+const cancelledInvoiceDetailSchema = cancelledInvoiceSchema
+  .extend(unpaidInvoiceDetailFields)
+  .strict();
 
 export const invoiceDetailSchema = z.discriminatedUnion("status", [
   draftInvoiceDetailSchema,
