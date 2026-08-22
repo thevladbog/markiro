@@ -4,11 +4,13 @@ import { mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { validateAcceptedBeta } from "../promotion.mjs";
 
 const execFile = promisify(execFileCallback);
+const promotionCli = fileURLToPath(new URL("../promotion.mjs", import.meta.url));
 const allowedDiff = ["apps/station/src-tauri/Cargo.toml", "apps/station/src-tauri/tauri.conf.json"];
 
 function validInput() {
@@ -74,14 +76,7 @@ test("writes only validated promotion fields and refuses existing output", async
 
   await execFile(
     process.execPath,
-    [
-      new URL("../promotion.mjs", import.meta.url).pathname,
-      "validate-beta",
-      releasePath,
-      evidencePath,
-      diffPath,
-      outputPath,
-    ],
+    [promotionCli, "validate-beta", releasePath, evidencePath, diffPath, outputPath],
     { maxBuffer: 1024 * 1024 },
   );
 
@@ -98,14 +93,7 @@ test("writes only validated promotion fields and refuses existing output", async
   await assert.rejects(
     execFile(
       process.execPath,
-      [
-        new URL("../promotion.mjs", import.meta.url).pathname,
-        "validate-beta",
-        releasePath,
-        evidencePath,
-        diffPath,
-        outputPath,
-      ],
+      [promotionCli, "validate-beta", releasePath, evidencePath, diffPath, outputPath],
       { maxBuffer: 1024 * 1024 },
     ),
   );
@@ -126,7 +114,7 @@ test("rejects symlinked promotion inputs", async () => {
     execFile(
       process.execPath,
       [
-        new URL("../promotion.mjs", import.meta.url).pathname,
+        promotionCli,
         "validate-beta",
         releasePath,
         evidencePath,

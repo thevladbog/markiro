@@ -4,11 +4,13 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { buildStableChangelog, stationChangeTouchesScope } from "../changelog.mjs";
 
 const execFile = promisify(execFileCallback);
+const changelogCli = fileURLToPath(new URL("../changelog.mjs", import.meta.url));
 const fromSha = "a".repeat(40);
 const toSha = "b".repeat(40);
 const compareUrl = `https://github.com/thevladbog/markiro/compare/${fromSha}...${toSha}`;
@@ -184,7 +186,7 @@ test("CLI collects bounded git history and creates output exclusively", async ()
     execFile(
       process.execPath,
       [
-        new URL("../changelog.mjs", import.meta.url).pathname,
+        changelogCli,
         "generate",
         invalidMetadataPath,
         highlightsPath,
@@ -199,13 +201,7 @@ test("CLI collects bounded git history and creates output exclusively", async ()
     },
   );
 
-  const args = [
-    new URL("../changelog.mjs", import.meta.url).pathname,
-    "generate",
-    metadataPath,
-    highlightsPath,
-    outputPath,
-  ];
+  const args = [changelogCli, "generate", metadataPath, highlightsPath, outputPath];
   await execFile(process.execPath, args, { cwd: repository, maxBuffer: 1024 * 1024 });
   assert.match(await readFile(outputPath, "utf8"), /fix\(station\): recover scanner/);
   await assert.rejects(
