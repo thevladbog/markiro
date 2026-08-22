@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { isMainModule } from "./cli-main.mjs";
 import { productionComposeArgs, PRODUCTION_COMPOSE_PROJECT } from "./compose-files.mjs";
+import { loopbackTlsRequest } from "./loopback-tls-request.mjs";
 import { runPrivateVbtechSmoke } from "./vbtech-private-smoke.mjs";
 import {
   latestHealthyVbtechRelease,
@@ -179,12 +180,15 @@ function processRunner() {
 }
 
 async function defaultProbeEdge({ transportOrigin, timeoutMs }) {
-  const response = await fetch(new URL("/health/live", transportOrigin), {
-    method: "GET",
-    headers: { accept: "application/json" },
-    redirect: "manual",
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  const response = await loopbackTlsRequest(
+    new URL("/health/live", transportOrigin),
+    {
+      method: "GET",
+      headers: { accept: "application/json" },
+      redirect: "manual",
+    },
+    AbortSignal.timeout(timeoutMs),
+  );
   const status = response.status;
   await response.body?.cancel();
   return { status };
@@ -1333,6 +1337,9 @@ export async function deployVbtechRelease(options, supplied = {}) {
         active.releaseDirectory,
         SERVICE_TIMEOUT_MS,
       ),
+    );
+    await emitStage(system, "edge-readiness", "edge-activation", () =>
+      waitForEdgeReadiness(system, input),
     );
     await emitStage(
       system,

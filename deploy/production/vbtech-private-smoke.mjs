@@ -1,5 +1,6 @@
 import { isIP } from "node:net";
 
+import { loopbackTlsRequest } from "./loopback-tls-request.mjs";
 import { runVbtechSmoke } from "./smoke.mjs";
 
 const apexHost = "v-b.tech";
@@ -120,7 +121,7 @@ export function privateVbtechRequestClient({
 
 export async function runPrivateVbtechSmoke(
   { transportOrigin, expectedVbtechReleaseSha },
-  client = { request: (url, init, signal) => fetch(url, { ...init, signal }) },
+  client = { request: loopbackTlsRequest },
 ) {
   if (typeof client?.request !== "function") throw privateRequestError();
   const privateClient = privateVbtechRequestClient({
