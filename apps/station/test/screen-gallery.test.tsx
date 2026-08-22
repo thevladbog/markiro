@@ -87,7 +87,7 @@ describe("development screen gallery", () => {
     );
   });
 
-  it("renders aggregation with the production scan, 20-place box, and six-row history instruments", () => {
+  it("renders aggregation with the production scan, 10-place box, and six-row history instruments", () => {
     const view = render(
       <StationScreenGallery request={{ state: "work-aggregation", locale: "ru" }} />,
     );
@@ -111,12 +111,14 @@ describe("development screen gallery", () => {
     expect(box).not.toBeNull();
     if (!box) throw new Error("work box fill was not rendered");
     expect(within(box).getByText("Короб № 1")).toBeDefined();
-    expect(within(box).getByTestId("box-progress").textContent).toBe("2 / 20");
+    expect(within(box).getByTestId("box-progress").textContent).toBe("2 / 10");
+    expect(box.querySelector('.work-box-fill__grid[data-large="true"]')).not.toBeNull();
     const cells = box.querySelectorAll(".work-box-fill__cell");
-    expect(cells).toHaveLength(20);
+    expect(cells).toHaveLength(10);
     expect(cells[0]?.getAttribute("data-state")).toBe("filled");
     expect(cells[1]?.getAttribute("data-state")).toBe("filled");
     expect(cells[2]?.getAttribute("data-state")).toBe("next");
+    expect(cells[2]?.textContent).toBe("3");
     expect(within(box).getByRole("button", { name: "Закрыть короб" })).toBeDefined();
     expect(within(box).getByRole("button", { name: "Отменить последний скан" })).toBeDefined();
     expect(within(box).getByRole("button", { name: "Очистить короб" })).toBeDefined();

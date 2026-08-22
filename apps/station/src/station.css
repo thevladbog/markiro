@@ -1092,10 +1092,33 @@ body,
     radial-gradient(circle at 32% 30%, var(--line-strong) 0 8%, transparent 9%);
 }
 
+/*
+ * The identity hero's photo: 3:4 portrait, contained (a bottle is never
+ * cropped into a square), on the light pad the catalogue shots are shot for.
+ * Width scales with the viewport so a 1920px line monitor is not showing the
+ * 1024px tablet's thumbnail.
+ */
 .work-scan-result__image {
-  width: min(100%, 240px);
-  height: 150px;
-  margin: 0 auto var(--sp-3);
+  width: clamp(120px, 11vw, 200px);
+  height: auto;
+  flex: 0 0 auto;
+  aspect-ratio: 3 / 4;
+  margin: 0;
+  border-radius: 14px;
+  background: #f4f2ee;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+  object-fit: contain;
+}
+
+/* The photo slot's stand-in when the product has no photo. */
+.work-scan-result__monogram {
+  display: grid;
+  place-items: center;
+  border: 2px solid rgb(255 255 255 / 18%);
+  background: rgb(255 255 255 / 8%);
+  box-shadow: none;
+  color: rgb(255 255 255 / 70%);
+  font: 700 clamp(32px, 3.4vw, 64px) / 1 var(--font-ui);
 }
 
 .shift-card__product {
@@ -2060,13 +2083,33 @@ body,
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+/*
+ * The identity hero (design 2026-08: гибрид A+C). The gradient's HUE comes
+ * from the product — the photo's dominant colour, or a GTIN hash when there
+ * is no photo (src/lib/product-accent.ts). Lightness is clamped here, in one
+ * place, so white text keeps contrast on every product; only the hue may vary.
+ */
 .work-scan-result__identity {
   min-width: 0;
+  display: flex;
+  gap: clamp(16px, 1.8vw, 28px);
+  align-items: center;
   overflow: hidden;
+  padding: clamp(14px, 1.6vw, 24px);
+  border-radius: var(--r-2);
+  background: linear-gradient(305deg, #2c2b31, #1d1c21 55%, #141317);
+}
+
+.work-scan-result__identity[data-accent="true"] {
+  background: linear-gradient(
+    305deg,
+    hsl(var(--product-hue) 46% 21%),
+    hsl(var(--product-hue) 42% 11%) 55%,
+    hsl(var(--product-hue) 38% 6%)
+  );
 }
 
 .work-scan-result__identity h2,
-.work-scan-result__identity p,
 .work-box-fill h2,
 .work-recent h2,
 .work-box-fill__empty,
@@ -2075,21 +2118,44 @@ body,
   margin: 0;
 }
 
+.work-scan-result__copy {
+  min-width: 0;
+  display: grid;
+  gap: clamp(8px, 1vw, 14px);
+}
+
 .work-scan-result__identity h2 {
   display: -webkit-box;
   overflow: hidden;
-  font: var(--floor-title);
+  color: #fff;
+  font: 700 clamp(26px, 2.2vw, 42px) / 1.15 var(--font-ui);
+  letter-spacing: -0.015em;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
-.work-scan-result__identity p {
+.work-scan-result__chips {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.work-scan-result__chip {
   overflow: hidden;
-  margin-top: var(--sp-1);
-  color: var(--fg-2);
-  font: var(--floor-body);
+  max-width: 100%;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 10%);
+  color: rgb(255 255 255 / 85%);
+  font: 600 15px/1.2 var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.work-scan-result__chip--mono {
+  font-family: var(--font-mono);
+  font-weight: 400;
 }
 
 .work-scan-result__verdict {
@@ -2105,6 +2171,7 @@ body,
   text-align: center;
 }
 
+/* Verdict typography reads through the whole workshop, not just at the desk. */
 .work-scan-result__verdict strong {
   display: inline-flex;
   max-width: 100%;
@@ -2113,7 +2180,8 @@ body,
   gap: var(--sp-2);
   align-items: center;
   justify-content: center;
-  font: var(--floor-counter-sm);
+  font: 700 clamp(30px, 2.6vw, 52px) / 1.1 var(--font-ui);
+  letter-spacing: 0.01em;
   overflow-wrap: anywhere;
   white-space: normal;
 }
@@ -2207,6 +2275,34 @@ body,
 
 .work-box-fill__grid[data-dense="true"] {
   gap: 3px;
+}
+
+/*
+ * Ten or fewer places: one row of large numbered segments (the component sets
+ * the column count inline). The number doubles as the physical position, so
+ * the operator sees both "how full" and "which slot is next" from a distance.
+ */
+.work-box-fill__grid[data-large="true"] {
+  gap: 8px;
+  justify-items: stretch;
+}
+
+.work-box-fill__grid[data-large="true"] .work-box-fill__cell {
+  display: grid;
+  aspect-ratio: auto;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--fg-3);
+  font: 700 clamp(20px, 2vw, 30px) / 1 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.work-box-fill__grid[data-large="true"] .work-box-fill__cell[data-state="filled"] {
+  color: #fff;
+}
+
+.work-box-fill__grid[data-large="true"] .work-box-fill__cell[data-state="next"] {
+  color: var(--fg-1);
 }
 
 .work-box-fill__cell {
@@ -2960,29 +3056,33 @@ body,
     grid-template-rows: minmax(0, 1fr);
   }
 
-  .work-scan-result__identity:has(.work-scan-result__image) {
-    display: grid;
-    gap: var(--sp-1) var(--sp-3);
-    grid-template-columns: 96px minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto;
-    align-items: center;
+  .work-scan-result__identity {
+    gap: var(--sp-3);
+    padding: var(--sp-3);
   }
 
+  /* Compact hero: the photo shrinks but stays a portrait, never a square crop. */
   .work-scan-result__image {
     width: 96px;
-    height: 96px;
-    margin: 0;
-    grid-row: 1 / -1;
-    object-fit: contain;
+    border-radius: 10px;
+    box-shadow: none;
   }
 
-  .work-scan-result__identity:has(.work-scan-result__image) h2,
-  .work-scan-result__identity:has(.work-scan-result__image) p {
-    grid-column: 2;
+  .work-scan-result__copy {
+    gap: var(--sp-2);
   }
 
   .work-scan-result__identity h2 {
-    font: var(--floor-lg);
+    font: 700 20px/24px var(--font-ui);
+  }
+
+  .work-scan-result__chips {
+    gap: 6px;
+  }
+
+  .work-scan-result__chip {
+    padding: 5px 10px;
+    font-size: 13px;
   }
 
   .work-scan-result__verdict[data-compact-success="true"] {

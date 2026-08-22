@@ -76,6 +76,9 @@ export function BoxFillInstrument({
   const fill = box && usableCapacity ? Math.min(box.itemCount, usableCapacity) : 0;
   const cells = usableCapacity ? buildBoxCells(fill, usableCapacity) : [];
   const grouped = usableCapacity !== null && usableCapacity > 100;
+  // A box of ten or fewer gets one row of large numbered segments readable
+  // from across the line, instead of a strip of ten small squares.
+  const large = usableCapacity !== null && usableCapacity <= 10;
   const rowCount = Math.ceil(cells.length / 10);
   const persistentState = boxFillPersistentState(box, capacity);
   return (
@@ -99,7 +102,13 @@ export function BoxFillInstrument({
               className="work-box-fill__grid"
               data-dense={cells.length > 20}
               data-grouped={grouped}
-              style={{ gridTemplateRows: `repeat(${rowCount}, minmax(0, 1fr))` }}
+              data-large={large ? "true" : undefined}
+              style={{
+                gridTemplateRows: `repeat(${rowCount}, minmax(0, 1fr))`,
+                ...(large
+                  ? { gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))` }
+                  : {}),
+              }}
               role="progressbar"
               aria-label={labels.title}
               aria-valuemin={0}
@@ -118,7 +127,9 @@ export function BoxFillInstrument({
                     data-latest={isLatest ? "true" : undefined}
                     aria-label={cell.from === cell.to ? `${cell.from}` : `${cell.from}–${cell.to}`}
                     aria-hidden="true"
-                  />
+                  >
+                    {large ? cell.from : null}
+                  </span>
                 );
               })}
             </div>

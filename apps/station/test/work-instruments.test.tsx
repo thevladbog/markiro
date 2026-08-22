@@ -1,8 +1,9 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { hueFromGtin } from "../src/lib/product-accent.js";
 import { BoxFillInstrument, buildBoxCells } from "../src/ui/work/BoxFillInstrument.js";
 import { RecentOperations } from "../src/ui/work/RecentOperations.js";
-import { ScanResultInstrument } from "../src/ui/work/ScanResultInstrument.js";
+import { ScanResultInstrument, productMonogram } from "../src/ui/work/ScanResultInstrument.js";
 import { WorkCounters } from "../src/ui/work/WorkCounters.js";
 import { WorkFooter } from "../src/ui/work/WorkFooter.js";
 
@@ -44,6 +45,55 @@ describe("work instruments", () => {
     );
 
     expect(screen.getByText("Plan: 120")).toBeDefined();
+  });
+
+  it("prints the expected GTIN as a chip and seeds the identity accent from it", () => {
+    const { container } = render(
+      <ScanResultInstrument
+        productName="Widget"
+        counterpartyName="Plant North"
+        operation={null}
+        labels={labels}
+        gtin="04607000000042"
+      />,
+    );
+
+    expect(screen.getByText("GTIN 04607000000042")).toBeDefined();
+    const identity = container.querySelector<HTMLElement>(".work-scan-result__identity");
+    expect(identity?.getAttribute("data-accent")).toBe("true");
+    expect(identity?.style.getPropertyValue("--product-hue")).toBe(
+      String(hueFromGtin("04607000000042")),
+    );
+    // The GTIN chip is product identity, not scan output -- it must stay out
+    // of the verdict live region.
+    expect(screen.getByRole("status").textContent).not.toContain("GTIN");
+  });
+
+  it("keeps a neutral hero and shows a monogram when there is no photo and no GTIN", () => {
+    const { container } = render(
+      <ScanResultInstrument
+        productName="Ягодный морс"
+        counterpartyName={null}
+        operation={null}
+        labels={labels}
+      />,
+    );
+
+    const identity = container.querySelector<HTMLElement>(".work-scan-result__identity");
+    expect(identity?.getAttribute("data-accent")).toBeNull();
+    expect(container.querySelector(".work-scan-result__monogram")?.textContent).toBe("Я");
+  });
+
+  it("derives a stable in-range hue from the GTIN and a first-letter monogram", () => {
+    expect(hueFromGtin("04607000000042")).toBe(hueFromGtin("04607000000042"));
+    expect(hueFromGtin("04607000000042")).not.toBe(hueFromGtin("04607000000043"));
+    for (const gtin of ["04607000000042", "04600000000015", "1"]) {
+      const hue = hueFromGtin(gtin);
+      expect(hue).toBeGreaterThanOrEqual(0);
+      expect(hue).toBeLessThan(360);
+    }
+    expect(productMonogram("«Балтика 7»")).toBe("Б");
+    expect(productMonogram("  ")).toBe("?");
   });
 
   it("keeps a long product identity and a non-color-only latest result visible", () => {
@@ -153,6 +203,53 @@ describe("work instruments", () => {
     expect(undo.classList.contains("mk-btn--floor")).toBe(true);
     fireEvent.click(undo);
     expect(callbacks.onUndo).toHaveBeenCalledOnce();
+  });
+
+  it("renders a ten-place box as one row of numbered segments", () => {
+    const { container } = render(
+      <BoxFillInstrument
+        box={{ boxId: "b1", itemCount: 7 }}
+        ordinal={1}
+        acceptedToken={null}
+        capacity={10}
+        canUndo={false}
+        labels={boxLabels}
+        onClose={vi.fn()}
+        onUndo={vi.fn()}
+        onClear={vi.fn()}
+      />,
+    );
+
+    const grid = container.querySelector<HTMLElement>(".work-box-fill__grid");
+    expect(grid?.getAttribute("data-large")).toBe("true");
+    expect(grid?.style.gridTemplateColumns).toBe("repeat(10, minmax(0, 1fr))");
+    const cells = container.querySelectorAll(".work-box-fill__cell");
+    expect(cells).toHaveLength(10);
+    expect(cells[0]?.textContent).toBe("1");
+    expect(cells[9]?.textContent).toBe("10");
+    expect(cells[6]?.getAttribute("data-state")).toBe("filled");
+    expect(cells[7]?.getAttribute("data-state")).toBe("next");
+  });
+
+  it("keeps the rows-of-ten grid without numbers above ten places", () => {
+    const { container } = render(
+      <BoxFillInstrument
+        box={{ boxId: "b1", itemCount: 2 }}
+        ordinal={1}
+        acceptedToken={null}
+        capacity={20}
+        canUndo={false}
+        labels={boxLabels}
+        onClose={vi.fn()}
+        onUndo={vi.fn()}
+        onClear={vi.fn()}
+      />,
+    );
+
+    const grid = container.querySelector<HTMLElement>(".work-box-fill__grid");
+    expect(grid?.getAttribute("data-large")).toBeNull();
+    expect(grid?.style.gridTemplateColumns).toBe("");
+    expect(container.querySelector(".work-box-fill__cell")?.textContent).toBe("");
   });
 
   it("builds exact cells and marks the next physical position", () => {
