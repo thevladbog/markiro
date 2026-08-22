@@ -6,6 +6,59 @@ const root = new URL("../../../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const proseRegExp = (value) => new RegExp(escapeRegExp(value).replaceAll(" ", "\\s+"), "i");
+const privateVbtechSection = (runbook) => {
+  const heading = "## Приватная выкладка v-b.tech";
+  const start = runbook.indexOf(heading);
+  assert.notEqual(start, -1, "private v-b runbook section must exist");
+  return runbook.slice(start);
+};
+const privateVbtechInputNames = (section) => {
+  const start = section.indexOf("#### Фаза 5.");
+  const end = section.indexOf("#### Фаза 6.");
+  assert.ok(start >= 0 && end > start, "private v-b dispatch phase must be bounded");
+  const bullets = section.slice(start, end).match(/^- .+$/gm) ?? [];
+  assert.equal(bullets.length, 3, "private v-b dispatch phase must document exactly three inputs");
+  return bullets.map((bullet) => {
+    const match = bullet.match(/^- `([^`]+)` —/);
+    assert.ok(match, "every private v-b dispatch bullet must name one input");
+    return match[1];
+  });
+};
+const assertPrivateVbtechTextIsSafe = (section) => {
+  assert.doesNotMatch(section, /-----BEGIN (?:OPENSSH|RSA|EC) PRIVATE KEY-----/);
+  assert.doesNotMatch(
+    section,
+    /(?:^|[\n`])\s*(?:[$>]\s*)?ssh\s+(?:-[^\s]+\s+)*(?:\S+@)?\S+\s+(?:sudo\s+)?(?:docker|podman|systemctl|systemd-run|node)\b/im,
+  );
+  assert.doesNotMatch(
+    section,
+    /(?:^|\n)\s*(?:v-b\.tech\.?|www\.v-b\.tech\.?)\s+(?:\d+\s+)?(?:IN\s+)?(?:A|AAAA|CNAME)\s+\S+/im,
+  );
+  assert.doesNotMatch(
+    section,
+    /(?:^|\n)\s*(?:A|AAAA|CNAME)\s+(?:@|www|v-b\.tech\.?|www\.v-b\.tech\.?)\s+\S+/im,
+  );
+  assert.doesNotMatch(
+    section,
+    /"type"\s*:\s*"(?:A|AAAA|CNAME)"[\s\S]{0,120}"name"\s*:\s*"(?:@|www|v-b\.tech\.?|www\.v-b\.tech\.?)"/i,
+  );
+  assert.doesNotMatch(
+    section,
+    /"name"\s*:\s*"(?:@|www|v-b\.tech\.?|www\.v-b\.tech\.?)"[\s\S]{0,120}"type"\s*:\s*"(?:A|AAAA|CNAME)"/i,
+  );
+  assert.doesNotMatch(
+    section,
+    /(?:YC_APP_DEPLOY_SSH_PRIVATE_KEY|GHCR_TOKEN|APP_SSH_HOST_KEYS_B64|password|token|secret)\s*[:=]\s*(?!<[^>\n]+>|\$\{[^}\n]+\}|REDACTED\b)[^\s`]+/i,
+  );
+  assert.doesNotMatch(
+    section,
+    /(?:Слияние этого изменения|Merge of this change)\s+(?:прямо\s+)?(?:разрешает|authorizes)\s+(?:live dispatch|живой запуск)/i,
+  );
+  assert.doesNotMatch(
+    section,
+    /После\s+(?:слияния|merge)[^\n]{0,80}(?:можно|разрешается|allowed|authorized)[^\n]{0,40}(?:live dispatch|живой запуск)/i,
+  );
+};
 
 test("production deploy runbook describes one direct immutable Compose delivery", async () => {
   const runbook = await read("docs/runbooks/saas-production-deploy.md");
@@ -43,6 +96,7 @@ test("production runbooks keep API private and assign public TLS to direct Caddy
 
 test("production deploy runbook defines the private v-b approval and ownership boundary", async () => {
   const runbook = await read("docs/runbooks/saas-production-deploy.md");
+  const section = privateVbtechSection(runbook);
 
   for (const required of [
     "активен и валидирован Markiro-релиз с v-b executor",
@@ -53,7 +107,8 @@ test("production deploy runbook defines the private v-b approval and ownership b
     "confirm_private_deploy",
     "exact source SHA",
     "exact OCI digest",
-    "до и после: runtime diagnostics version 3",
+    "before snapshot — strict runtime diagnostics version 3",
+    "after snapshot — strict runtime diagnostics version 3",
     "VBTECH_SUBMISSION_STATE=disabled",
     "function origin не требуется",
     "только `vbtech-web`, пересоздание общего `edge` и приватные записи жизненного цикла v-b",
@@ -74,9 +129,27 @@ test("production deploy runbook defines the private v-b approval and ownership b
     "новое явное одобрение с exact v-b source SHA и exact OCI digest",
     "production-deploy",
     "MARKIRO_VBTECH_DEPLOY_HEALTHY",
-    "MARKIRO_VBTECH_DEPLOY_FAILURE <stage> [ROLLBACK <rollback-stage>]",
+    "MARKIRO_VBTECH_EXECUTOR_BOOTSTRAP_REQUIRED",
+    "MARKIRO_VBTECH_REMOTE_DEPLOY_FAILURE",
+    "VM-local `MARKIRO_VBTECH_DEPLOY_FAILURE <stage> [ROLLBACK <rollback-stage>]` не выводится hosted wrapper",
+    "До попытки активации service/edge rollback не выполняется",
+    "После попытки активации candidate service",
   ])
-    assert.match(runbook, proseRegExp(required));
+    assert.match(section, proseRegExp(required));
+
+  assert.deepEqual(privateVbtechInputNames(section), [
+    "vbtech_release_sha",
+    "vbtech_image_digest",
+    "confirm_private_deploy",
+  ]);
+  assert.throws(() =>
+    privateVbtechInputNames(
+      section.replace(
+        "- `confirm_private_deploy` —",
+        "- undocumented fourth input\n- `confirm_private_deploy` —",
+      ),
+    ),
+  );
 });
 
 test("production deploy runbook orders the private v-b operator phases", async () => {
@@ -101,6 +174,7 @@ test("production deploy runbook orders the private v-b operator phases", async (
 
 test("production deploy runbook keeps private v-b evidence bounded and non-authorizing", async () => {
   const runbook = await read("docs/runbooks/saas-production-deploy.md");
+  const section = privateVbtechSection(runbook);
 
   for (const required of [
     "beforeRelease",
@@ -111,17 +185,37 @@ test("production deploy runbook keeps private v-b evidence bounded and non-autho
     "private routing/content",
     "Слияние этого изменения не разрешает live dispatch",
   ])
-    assert.match(runbook, proseRegExp(required));
+    assert.match(section, proseRegExp(required));
 
-  assert.doesNotMatch(runbook, /-----BEGIN (?:OPENSSH|RSA|EC) PRIVATE KEY-----/);
-  assert.doesNotMatch(runbook, /```(?:bash|sh)[\s\S]*?\bssh\b[\s\S]*?```/i);
-  assert.doesNotMatch(
-    runbook,
-    /(?:^|\n)\s*(?:v-b\.tech|www\.v-b\.tech)\s+\d+\s+IN\s+(?:A|AAAA|CNAME)\s+/i,
+  assertPrivateVbtechTextIsSafe(section);
+
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(
+      section.replace(
+        "Слияние этого изменения не разрешает live dispatch",
+        "Слияние этого изменения разрешает live dispatch",
+      ),
+    ),
   );
-  assert.doesNotMatch(
-    runbook,
-    /(?:слияние|merge) (?:этого изменения )?(?:разрешает|авторизует) live dispatch/i,
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(`${section}\nssh operator@app sudo docker compose up -d\n`),
+  );
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(
+      `${section}\n\`$ ssh operator@app sudo systemctl restart edge\`\n`,
+    ),
+  );
+  assert.throws(() => assertPrivateVbtechTextIsSafe(`${section}\nA v-b.tech 203.0.113.10\n`));
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(
+      `${section}\n{"type":"A","name":"v-b.tech","value":"203.0.113.10"}\n`,
+    ),
+  );
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(`${section}\nGHCR_TOKEN=ghp_exampleliteral123456789\n`),
+  );
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(`${section}\nПосле merge можно выполнить live dispatch.\n`),
   );
 });
 

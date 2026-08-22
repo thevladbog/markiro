@@ -93,17 +93,25 @@ lowercase `sha256:` exact OCI digest образа `ghcr.io/thevladbog/vbtech-web
 - `vbtech_image_digest` — одобренный exact OCI digest;
 - `confirm_private_deploy` — `true`, только после сверки двух значений выше.
 
-Workflow повторно валидирует input shape и attestation, затем до и после: runtime diagnostics
-version 3. Перед удалённой мутацией он также требует активный executor contract. Не используйте
-ручные SSH-команды как замену этому workflow.
+Workflow повторно валидирует input shape и attestation. До удалённой мутации он сохраняет before
+snapshot — strict runtime diagnostics version 3, а после успешной выкладки — after snapshot —
+strict runtime diagnostics version 3. Перед мутацией он также требует активный executor contract.
+Не используйте ручные SSH-команды как замену этому workflow.
 
 #### Фаза 6. Проверить private smoke и evidence до/после
 
-Успешная строка `MARKIRO_VBTECH_DEPLOY_HEALTHY` означает, что bounded deploy, service health,
-shared-edge recreation и private smoke route/content завершились. Ошибка публикуется только как
-санитизированная строка
-`MARKIRO_VBTECH_DEPLOY_FAILURE <stage> [ROLLBACK <rollback-stage>]`; сырые команды, environment,
-логи контейнеров и HTML bodies не являются evidence.
+Hosted wrapper выводит оператору только эти санитизированные маркеры:
+
+- `MARKIRO_VBTECH_DEPLOY_HEALTHY` — bounded deploy, service health, shared-edge recreation и private
+  smoke route/content завершились;
+- `MARKIRO_VBTECH_EXECUTOR_BOOTSTRAP_REQUIRED` — активный Markiro release не предоставляет нужный
+  executor contract; v-b mutation не разрешена;
+- `MARKIRO_VBTECH_REMOTE_DEPLOY_FAILURE` — любая иная hosted deployment failure.
+
+VM-local `MARKIRO_VBTECH_DEPLOY_FAILURE <stage> [ROLLBACK <rollback-stage>]` не выводится hosted
+wrapper. Поэтому по hosted output нельзя приписывать сбою primary stage или rollback-stage: при
+failure сохраняйте generic marker и failed job conclusion. Сырые команды, environment, логи
+контейнеров и HTML bodies не являются evidence.
 
 Оба встроенных snapshot должны быть строгими runtime diagnostics version 3. В
 `MARKIRO_VBTECH_CAPACITY_DELTA` прочитайте:
@@ -129,12 +137,18 @@ email или captcha. Каждая такая операция находитс�
 
 ### Интерпретация rollback
 
-- **Rollback первого запуска.** Исполнитель удаляет только failed candidate `vbtech-web`, помечает
-  его приватную lifecycle record как failed и пересоздаёт подтверждённую Markiro-only конфигурацию
-  общего `edge`. Другие Markiro services и cloud resources не входят в rollback.
-- **Rollback замены.** Исполнитель восстанавливает точный selector и service предыдущего healthy
-  v-b release, проверяет его health, пересоздаёт и проверяет общий `edge`, затем повторяет private
-  route verification и помечает новый candidate failed.
-- Если rollback сам не завершился, оператор получает только primary stage и стабильный
+- **До попытки активации service/edge rollback не выполняется.** Если pending record уже создана, а
+  pull или digest verification завершается ошибкой, исполнитель публикует для candidate failed
+  state, не меняя service или `edge`. Если не удалось создать саму pending record, candidate record
+  ещё нет и rollback также не начинается.
+- **Rollback первого запуска после активации.** После попытки активации candidate service
+  исполнитель удаляет candidate `vbtech-web`, пересоздаёт и проверяет подтверждённую Markiro-only
+  конфигурацию общего `edge`, а затем публикует candidate failed state. Другие Markiro services и
+  cloud resources не входят в rollback.
+- **Rollback замены после активации.** Исполнитель восстанавливает точный selector и service
+  предыдущего healthy v-b release, проверяет его health, пересоздаёт и проверяет общий `edge`, затем
+  повторяет private route verification и публикует новый candidate failed.
+- Если VM-local rollback сам не завершился, executor всё равно пытается опубликовать failed state,
+  но hosted operator видит только `MARKIRO_VBTECH_REMOTE_DEPLOY_FAILURE`, без primary stage и
   rollback-stage. Такой результат не разрешает изменения API, database, DNS, TLS или cloud; для
   дальнейшего действия нужен отдельный диагноз и одобрение.
