@@ -37,7 +37,7 @@ function jsonResponse(): Response {
   return { json: (body: unknown) => body } as unknown as Response;
 }
 
-function operatorHarness() {
+function operatorHarness(profileInput: OperatorBillingProfileInput = input) {
   const current = {
     id: "00000000-0000-4000-8000-000000000611",
     revision: 2,
@@ -53,10 +53,14 @@ function operatorHarness() {
     id: "00000000-0000-4000-8000-000000000612",
     revision: 3,
     isCurrent: true,
-    ...input,
-    actualSameAsLegal: false,
-    actualAddressRaw: "г Москва, ул Тверская, 2",
-    actualAddress: { value: "г Москва, ул Тверская, 2", city: "Москва" },
+    ...profileInput,
+    actualSameAsLegal: profileInput.actualAddress.sameAsLegal,
+    actualAddressRaw: profileInput.actualAddress.sameAsLegal
+      ? null
+      : profileInput.actualAddress.raw,
+    actualAddress: profileInput.actualAddress.sameAsLegal
+      ? null
+      : (profileInput.actualAddress.normalized ?? null),
     postalSameAsLegal: true,
     postalAddressRaw: null,
     postalAddress: null,
@@ -235,6 +239,51 @@ describe("BillingProfilesService", () => {
       requestId: null,
     });
     expect(result).toEqual(created);
+  });
+
+  it("persists null actual-address data when it matches the legal address", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-08-22T04:00:00.000Z");
+    const sameActualInput: OperatorBillingProfileInput = {
+      ...input,
+      actualAddress: { sameAsLegal: true },
+    };
+    const { service, tx, audit, insertedValues, created } = operatorHarness(sameActualInput);
+
+    await service.setOperator(actor, sameActualInput);
+
+    expect(insertedValues).toEqual([
+      expect.objectContaining({
+        actualSameAsLegal: true,
+        actualAddressRaw: null,
+        actualAddress: null,
+      }),
+    ]);
+    expect(audit.record).toHaveBeenCalledWith(tx, {
+      actorPlatformUserId: actor.userId,
+      actorRole: "accountant",
+      action: "billing.operator_profile.revised",
+      outcome: "success",
+      tenantId: null,
+      targetType: "operator_billing_profile",
+      targetId: created.id,
+      reason: null,
+      before: {
+        revision: 2,
+        kind: "legal_entity",
+        displayName: "Старое имя",
+        confirmed: true,
+        actualSameAsLegal: true,
+      },
+      after: {
+        revision: 3,
+        kind: "legal_entity",
+        displayName: "Маркиро",
+        confirmed: true,
+        actualSameAsLegal: true,
+      },
+      requestId: null,
+    });
   });
 
   it("returns an individual operator profile at the response boundary", async () => {
