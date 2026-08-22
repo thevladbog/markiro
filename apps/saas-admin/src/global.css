@@ -1534,6 +1534,50 @@ textarea {
   font: var(--text-meta);
 }
 
+.tenant-ledger {
+  min-width: 0;
+  border: 1px solid var(--mk-border-operational);
+  background: var(--mk-surface-paper);
+}
+
+.tenant-ledger__header {
+  min-height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--mk-border-operational-strong);
+}
+
+.tenant-ledger__header p,
+.tenant-ledger__header h2 {
+  margin: 0;
+}
+
+.tenant-ledger__header p {
+  margin-bottom: 4px;
+  color: var(--fg-3);
+  font: var(--text-meta);
+  letter-spacing: 0.08em;
+}
+
+.tenant-ledger__header h2 {
+  color: var(--fg-1);
+  font: 650 20px/26px var(--font-ui);
+  letter-spacing: -0.025em;
+}
+
+.tenant-ledger__header > span {
+  color: var(--fg-3);
+  font: 500 30px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tenant-ledger__state {
+  padding: 20px;
+}
+
 .tenant-policy-note {
   margin: -8px 0 0;
   color: var(--fg-3);
@@ -1554,6 +1598,11 @@ textarea {
 .tenant-table-card .mk-table {
   min-width: 0;
   border-radius: 0 !important;
+}
+
+.tenant-ledger .tenant-table-card,
+.tenant-ledger .tenant-table-card > .mk-card__body {
+  border: 0 !important;
 }
 
 .tenant-table-card .mk-table {
@@ -1679,6 +1728,27 @@ textarea {
   overflow-wrap: anywhere;
   letter-spacing: 0.08em;
   font: var(--text-meta);
+}
+
+.tenant-detail-page .mk-section-header__actions > a {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  color: var(--fg-1);
+  text-decoration: none;
+  font: 600 13px/1 var(--font-ui);
+}
+
+.tenant-detail-page .mk-section-header__actions > a:hover {
+  background: var(--surface-panel);
+}
+
+.tenant-tab-panel {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
 }
 
 .tenant-overview-grid,
@@ -2781,6 +2851,15 @@ textarea {
 .tenant-detail-tabs button span {
   color: var(--fg-3);
   font: var(--text-code);
+}
+
+.tenant-detail-tabs .mk-data-tabs__tab > span:first-child {
+  color: inherit;
+  font: inherit;
+}
+
+.tenant-detail-tabs .mk-data-tabs__count {
+  order: -1;
 }
 
 @media (max-width: 900px) {

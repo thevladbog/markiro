@@ -757,6 +757,10 @@
   },
   "tenants": {
     "title": "Tenants",
+    "description": "Organizations, access, and subscription status.",
+    "actions": "Tenant actions",
+    "registry": "Tenant registry",
+    "total": "Total tenants",
     "create": "Create tenant",
     "cancel": "Cancel",
     "loading": "Loading tenants",
@@ -852,6 +856,8 @@
       "createdPending": "Tenant created. Owner activation is pending; the demo has not started.",
       "createInvoice": "Create invoice",
       "createOffer": "Create offer",
+      "description": "Organization access, subscription, billing, and legal details.",
+      "actions": "Tenant actions",
       "pendingActivation": "Owner activation pending",
       "overviewTitle": "Overview",
       "tabs": {

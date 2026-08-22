@@ -5,7 +5,7 @@ import { useForm, type FieldError } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate } from "react-router";
 
-import { Alert, Button, Card, Input, PageHeader } from "@markiro/ui";
+import { Alert, Button, Card, Input, SectionHeader } from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { createTenant, createTenantInputSchema, type CreateTenantInput } from "./api.js";
@@ -52,14 +52,14 @@ export function CreateTenantPanel() {
 
   return (
     <section className="tenant-create-page">
-      <PageHeader title={t("tenants.createForm.title")} />
-      <div className="catalog-coordinate" aria-hidden="true">
-        TENANTS / PROVISION
-      </div>
+      <SectionHeader
+        eyebrow="TENANTS / PROVISION"
+        title={t("tenants.createForm.title")}
+        description={t("tenants.createForm.demoNotice")}
+      />
       <Card className="tenant-create-card">
         <div className="tenant-create-intro">
           <h2>{t("tenants.createForm.ownerTitle")}</h2>
-          <p>{t("tenants.createForm.demoNotice")}</p>
         </div>
         {submitErrorKey ? <Alert tone="error">{t(submitErrorKey)}</Alert> : null}
         <form className="tenant-create-form" noValidate onSubmit={(event) => void submit(event)}>

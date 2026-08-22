@@ -3,7 +3,15 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useParams, useSearchParams } from "react-router";
 
-import { Alert, Button, Card, ConfirmDialog, PageHeader, StatusChip } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  ConfirmDialog,
+  DataTabs,
+  SectionHeader,
+  StatusChip,
+} from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { PanelState } from "../../components/PanelState.js";
@@ -61,7 +69,7 @@ export function TenantPage() {
   if (!validTenantId.success) {
     return (
       <section className="tenant-detail-page">
-        <PageHeader title={t("tenants.detail.invalidTitle")} />
+        <SectionHeader title={t("tenants.detail.invalidTitle")} />
         <Alert tone="error">{t("tenants.detail.invalidId")}</Alert>
       </section>
     );
@@ -70,7 +78,7 @@ export function TenantPage() {
   if (tenant.isPending) {
     return (
       <section className="tenant-detail-page">
-        <PageHeader title={t("tenants.detail.loadingTitle")} />
+        <SectionHeader title={t("tenants.detail.loadingTitle")} />
         <PanelState loading empty={false} error={null} loadingText={t("tenants.detail.loading")}>
           {null}
         </PanelState>
@@ -81,7 +89,7 @@ export function TenantPage() {
   if (tenant.error || !tenant.data) {
     return (
       <section className="tenant-detail-page">
-        <PageHeader title={t("tenants.detail.loadErrorTitle")} />
+        <SectionHeader title={t("tenants.detail.loadErrorTitle")} />
         <PanelState
           loading={false}
           empty={false}
@@ -113,8 +121,11 @@ export function TenantPage() {
       <div className="tenant-detail-backline">
         <Link to="/tenants">{t("tenants.detail.back")}</Link>
       </div>
-      <PageHeader
+      <SectionHeader
+        eyebrow={`TENANT / ${detail.tenant.slug.toUpperCase()}`}
         title={detail.tenant.name}
+        description={t("tenants.detail.description")}
+        actionsLabel={t("tenants.detail.actions")}
         actions={
           <>
             <StatusChip
@@ -134,43 +145,38 @@ export function TenantPage() {
           </>
         }
       />
-      <div className="tenant-detail-coordinate" aria-hidden="true">
-        TENANT / {detail.tenant.slug.toUpperCase()}
-      </div>
       {createdNotice ? <Alert tone="ok">{t("tenants.detail.createdPending")}</Alert> : null}
       {detail.subscriptionStatus === "pending_activation" ? (
         <Alert tone="warn">{t("tenants.detail.pendingActivation")}</Alert>
       ) : null}
 
-      <div
+      <DataTabs
         className="tenant-detail-tabs"
-        role="tablist"
-        aria-label={t("tenants.detail.tabs.label")}
-      >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "overview"}
-          onClick={() => setSearchParams({})}
-        >
-          <span aria-hidden="true">01</span>
-          {t("tenants.detail.tabs.overview")}
-        </button>
-        {financialVisible ? (
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "legal"}
-            onClick={() => setSearchParams({ tab: "legal" })}
-          >
-            <span aria-hidden="true">02</span>
-            {t("tenants.detail.tabs.legal")}
-          </button>
-        ) : null}
-      </div>
+        label={t("tenants.detail.tabs.label")}
+        activeId={activeTab}
+        items={[
+          {
+            id: "overview",
+            label: t("tenants.detail.tabs.overview"),
+            count: "01",
+            panelId: "tenant-overview-panel",
+          },
+          ...(financialVisible
+            ? [
+                {
+                  id: "legal",
+                  label: t("tenants.detail.tabs.legal"),
+                  count: "02",
+                  panelId: "tenant-legal-panel",
+                },
+              ]
+            : []),
+        ]}
+        onChange={(id) => setSearchParams(id === "legal" ? { tab: "legal" } : {})}
+      />
 
       {activeTab === "overview" ? (
-        <>
+        <div id="tenant-overview-panel" role="tabpanel" className="tenant-tab-panel">
           <Card
             className="tenant-overview-card"
             title={t("tenants.detail.overviewTitle")}
@@ -235,12 +241,14 @@ export function TenantPage() {
             financialVisible={financialVisible}
             accountant={principal.role === "accountant"}
           />
-        </>
+        </div>
       ) : (
-        <TenantLegalPanel
-          tenantId={detail.tenant.id}
-          canWrite={principal.capabilities.includes("billing.write")}
-        />
+        <div id="tenant-legal-panel" role="tabpanel" className="tenant-tab-panel">
+          <TenantLegalPanel
+            tenantId={detail.tenant.id}
+            canWrite={principal.capabilities.includes("billing.write")}
+          />
+        </div>
       )}
 
       <ConfirmDialog

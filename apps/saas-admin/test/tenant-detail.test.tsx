@@ -44,6 +44,15 @@ describe("tenant subscription detail", () => {
     expect(
       screen.getByRole("tab", { name: /Обзор и подписка/ }).getAttribute("aria-selected"),
     ).toBe("true");
+    screen.getByRole("tab", { name: /Обзор и подписка/ }).focus();
+    await user.keyboard("{ArrowRight}");
+    expect(
+      screen.getByRole("tab", { name: /Юридические данные/ }).getAttribute("aria-selected"),
+    ).toBe("true");
+    await user.keyboard("{ArrowLeft}");
+    expect(
+      screen.getByRole("tab", { name: /Обзор и подписка/ }).getAttribute("aria-selected"),
+    ).toBe("true");
     await user.click(screen.getByRole("tab", { name: /Юридические данные/ }));
 
     expect(await screen.findByText("Юридические данные тенанта")).toBeDefined();
