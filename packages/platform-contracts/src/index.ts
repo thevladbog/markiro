@@ -93,6 +93,9 @@ export type {
   TenantSubscriptionStatus,
 } from "./tenants.js";
 export {
+  bankAccountInputSchema,
+  bankAccountSchema,
+  bankAccountStatusSchema,
   billingContactSchema,
   billingPostalAddressInputSchema,
   billingProfileInputSchema,
@@ -134,16 +137,21 @@ export {
   offerServiceRecordSchema,
   operatorBillingProfileInputSchema,
   operatorBillingProfileSchema,
+  operatorBankAccountSchema,
   paymentImportResultSchema,
   paymentImportServiceResultSchema,
   paymentImportSchema,
   platformCommercialContracts,
   normalizedBillingAddressSchema,
   tenantBillingProfileSchema,
+  tenantBankAccountSchema,
 } from "./commercial.js";
 export type {
   ApplyInvoiceDto,
   ApplyInvoiceInput,
+  BankAccount,
+  BankAccountInput,
+  BankAccountStatus,
   BillingProfile,
   BillingProfileInput,
   BillingPayment,
@@ -187,12 +195,14 @@ export type {
   OfferSource,
   OperatorBillingProfile,
   OperatorBillingProfileInput,
+  OperatorBankAccount,
   PaymentImportDto,
   PaymentImportInput,
   PaymentImportResult,
   PaymentImportServiceResultSource,
   PaymentImportResultSource,
   TenantBillingProfile,
+  TenantBankAccount,
 } from "./commercial.js";
 export {
   platformActivationCompleteRequestSchema,

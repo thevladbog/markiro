@@ -157,6 +157,41 @@ export const tenantBillingProfileSchema = billingProfileSchema.extend({
   tenantId: platformTenantIdSchema,
 });
 
+export const bankAccountStatusSchema = z.enum(["active", "archived"]);
+export const bankAccountInputSchema = z
+  .object({
+    label: z.string().trim().min(1).max(200),
+    settlementAccount: z.string().regex(/^\d{20}$/),
+    bic: z.string().regex(/^\d{9}$/),
+    bankName: z.string().trim().min(1).max(500),
+    correspondentAccount: z.string().regex(/^\d{20}$/),
+    currency: z.literal("RUB"),
+  })
+  .strict();
+export const bankAccountSchema = z
+  .object({
+    id: platformUuidSchema,
+    label: z.string().min(1).max(200),
+    settlementAccount: z.string().regex(/^\d{20}$/),
+    bic: z.string().regex(/^\d{9}$/),
+    bankName: z.string().min(1).max(500),
+    correspondentAccount: z.string().regex(/^\d{20}$/),
+    currency: z.literal("RUB"),
+    status: bankAccountStatusSchema,
+    isDefault: z.boolean(),
+    migrationSourceProfileId: platformUuidSchema.nullable(),
+    createdByPlatformUserId: platformUserIdSchema,
+    archivedByPlatformUserId: nullablePlatformUserIdSchema,
+    archivedAt: nullableResponseTimestampSchema,
+    createdAt: responseTimestampSchema,
+    updatedAt: responseTimestampSchema,
+  })
+  .strict();
+export const operatorBankAccountSchema = bankAccountSchema;
+export const tenantBankAccountSchema = bankAccountSchema.extend({
+  tenantId: platformTenantIdSchema,
+});
+
 export const offerActivationPolicySchema = z.enum(["immediately", "after_current"]);
 export const invoiceActivationPolicySchema = z.enum(["immediate", "after_current", "manual"]);
 export const commercialDocumentStatusSchema = z.enum(["pending", "ready", "failed"]);
@@ -1059,3 +1094,8 @@ export type OperatorBillingProfileInput = z.output<typeof operatorBillingProfile
 export type BillingProfile = z.output<typeof billingProfileSchema>;
 export type OperatorBillingProfile = z.output<typeof operatorBillingProfileSchema>;
 export type TenantBillingProfile = z.output<typeof tenantBillingProfileSchema>;
+export type BankAccountStatus = z.output<typeof bankAccountStatusSchema>;
+export type BankAccountInput = z.output<typeof bankAccountInputSchema>;
+export type BankAccount = z.output<typeof bankAccountSchema>;
+export type OperatorBankAccount = z.output<typeof operatorBankAccountSchema>;
+export type TenantBankAccount = z.output<typeof tenantBankAccountSchema>;

@@ -428,6 +428,13 @@
       "when": 1787372724777,
       "tag": "0060_saas_legal_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1787373399569,
+      "tag": "0061_saas_bank_accounts",
+      "breakpoints": true
     }
   ]
 }
