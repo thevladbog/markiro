@@ -36,7 +36,7 @@ export interface PublishedLegalArtifact {
 
 const DEFAULT_PUBLIC_ROOT = path.resolve(process.cwd(), "public");
 const SAFE_FILE_NAME =
-  /^markiro_mkr-(?:pd-0[12]|dpa-01|brd-01|ins-0[12])_\d{4}\.\d{2}-\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
+  /^markiro_mkr-(?:pd-0[12]|dpa-01|brd-01|ins-0[123])_\d{4}\.\d{2}-\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const PUBLISHED_RELEASES = (LEGAL_RELEASES as readonly LegalDocumentRelease[]).filter(
   ({ status }) => status !== "draft",

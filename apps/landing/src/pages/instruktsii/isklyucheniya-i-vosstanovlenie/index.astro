@@ -1,0 +1,26 @@
+---
+import exceptionAction from "@markiro/legal-documents/assets/instructions/mkr-ins-03/exception-action.png?url";
+import exceptionTarget from "@markiro/legal-documents/assets/instructions/mkr-ins-03/exception-target.png?url";
+import exceptionReason from "@markiro/legal-documents/assets/instructions/mkr-ins-03/exception-reason.png?url";
+import exceptionConfirm from "@markiro/legal-documents/assets/instructions/mkr-ins-03/exception-confirm.png?url";
+import exceptionResult from "@markiro/legal-documents/assets/instructions/mkr-ins-03/exception-result.png?url";
+import boxPrintFailed from "@markiro/legal-documents/assets/instructions/mkr-ins-03/box-print-failed.png?url";
+import printMismatch from "@markiro/legal-documents/assets/instructions/mkr-ins-03/print-mismatch.png?url";
+import conflicts from "@markiro/legal-documents/assets/instructions/mkr-ins-03/conflicts.png?url";
+
+import { getLegalDocumentPage } from "../../../content/legal-pages";
+import InstructionDocument from "../../../components/InstructionDocument.astro";
+
+const images = {
+  "exception-action": exceptionAction,
+  "exception-target": exceptionTarget,
+  "exception-reason": exceptionReason,
+  "exception-confirm": exceptionConfirm,
+  "exception-result": exceptionResult,
+  "box-print-failed": boxPrintFailed,
+  "print-mismatch": printMismatch,
+  conflicts,
+};
+---
+
+<InstructionDocument page={getLegalDocumentPage("MKR-INS-03", "ru")} images={images} />
