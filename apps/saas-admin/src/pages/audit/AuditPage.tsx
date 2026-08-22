@@ -41,7 +41,7 @@ export function AuditPage() {
       <section className="commerce-ledger" aria-labelledby="audit-ledger-title">
         <header className="commerce-ledger__header">
           <div>
-            <span className="commerce-ledger__eyebrow">IMMUTABLE EVENT LOG</span>
+            <span className="commerce-ledger__eyebrow">{t("audit.registryEyebrow")}</span>
             <h2 id="audit-ledger-title">{t("audit.registryTitle")}</h2>
           </div>
           <span className="commerce-ledger__count">{audit.data?.items.length ?? 0}</span>

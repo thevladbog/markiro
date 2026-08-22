@@ -73,7 +73,7 @@ export function OffersPage() {
       <section className="commerce-ledger" aria-labelledby="offers-ledger-title">
         <header className="commerce-ledger__header">
           <div>
-            <span className="commerce-ledger__eyebrow">SALES PIPELINE</span>
+            <span className="commerce-ledger__eyebrow">{t("offers.registryEyebrow")}</span>
             <h2 id="offers-ledger-title">{t("offers.registryTitle")}</h2>
           </div>
           <span className="commerce-ledger__count">{offers.data?.length ?? 0}</span>
@@ -118,7 +118,7 @@ export function OffersPage() {
       {selected.data ? (
         <section className="commerce-detail-panel" aria-labelledby="offer-detail-title">
           <header>
-            <span className="commerce-ledger__eyebrow">SELECTED OFFER</span>
+            <span className="commerce-ledger__eyebrow">{t("offers.selectedEyebrow")}</span>
             <h2 id="offer-detail-title">{`${t("offers.detail")} · ${selected.data.total} ₽`}</h2>
           </header>
           <p>{t("offers.lines", { count: selected.data.lines.length })}</p>

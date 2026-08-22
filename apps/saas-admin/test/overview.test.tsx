@@ -2,6 +2,8 @@ import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import i18n from "../src/i18n/index.js";
+
 import { ACCOUNTANT_ME, renderSaasApp } from "./render.js";
 import {
   DEGRADED_PLATFORM,
@@ -9,9 +11,11 @@ import {
   OPERATIONS_OVERVIEW,
 } from "./operationsFixtures.js";
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  await i18n.changeLanguage("ru");
 });
 
 describe("operational overview", () => {
@@ -95,7 +99,17 @@ describe("operational overview", () => {
     expect(screen.queryByRole("heading", { name: "Состояние платформы" })).toBeNull();
   });
 
-  it("does not render billing metrics or decisions for support", async () => {
+  it("formats activity timestamps with the active interface language", async () => {
+    await i18n.changeLanguage("en");
+    const format = vi.spyOn(Date.prototype, "toLocaleString").mockReturnValue("localized-time");
+    installOperationsApi();
+    renderSaasApp({ initialEntry: "/" });
+
+    expect(await screen.findByText("localized-time")).toBeDefined();
+    expect(format).toHaveBeenCalledWith("en-GB");
+  });
+
+  it("renders a supplied overview without billing metrics or decisions", async () => {
     installOperationsApi({
       overview: {
         ...OPERATIONS_OVERVIEW,

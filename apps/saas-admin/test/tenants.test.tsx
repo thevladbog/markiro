@@ -134,6 +134,7 @@ describe("platform tenants", () => {
 
     expect(await screen.findByRole("heading", { name: "Тенанты" })).toBeDefined();
     expect(screen.getByText("Организации, доступ и состояние подписок.")).toBeDefined();
+    expect(screen.getByText("Реестр · текущая выборка")).toBeDefined();
     expect(screen.getByRole("region", { name: "Реестр тенантов" })).toBeDefined();
     expect(screen.queryByText(/₽|Цена/)).toBeNull();
     expect(

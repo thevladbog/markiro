@@ -321,6 +321,7 @@ describe("invoice editor route", () => {
 
     await screen.findByRole("heading", { name: "Коммерческие предложения" });
     await user.click(await screen.findByRole("button", { name: TENANT_ID }));
+    expect(await screen.findByText("Выбранное предложение")).toBeDefined();
     await user.click(await screen.findByRole("button", { name: "Создать счёт по предложению" }));
 
     expect(await screen.findByDisplayValue("321.00")).toBeDefined();

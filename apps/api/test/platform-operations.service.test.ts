@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { createDb, schema } from "@markiro/db";
+import { createDb, schema, type Db } from "@markiro/db";
 import type { PlatformRole } from "@markiro/platform-contracts";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -195,6 +195,30 @@ describe("PlatformOperationsService", () => {
     expect(result.health).toBeNull();
     expect(readiness.ready).not.toHaveBeenCalled();
     expect(dadata.status).not.toHaveBeenCalled();
+  });
+
+  it("keeps every non-empty decision category represented at the queue limit", async () => {
+    const repository = repositoryFixture();
+    vi.mocked(repository.overdueInvoiceFacts).mockResolvedValue(
+      Array.from({ length: 25 }, (_, index) => ({
+        tenantId: `tenant-overdue-${index}`,
+        tenantName: `Overdue tenant ${index}`,
+        invoiceId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        invoiceNumber: `СЧ-${index + 1}`,
+        dueAt: "2026-08-20T00:00:00.000Z",
+      })),
+    );
+    const { readiness, dadata } = healthDependencies();
+    const service = new PlatformOperationsService(repository, readiness, dadata, () => NOW);
+
+    const result = await service.overview("platform_admin");
+
+    expect(result.decisionQueue).toHaveLength(25);
+    expect(result.decisionQueue.map((item) => item.kind)).toEqual([
+      ...Array.from({ length: 23 }, () => "overdue_invoice"),
+      "subscription_ending",
+      "billing_readiness",
+    ]);
   });
 
   it("returns cached readiness and DaData state without infrastructure details", async () => {
@@ -443,6 +467,55 @@ describe.skipIf(!databaseUrl)("DrizzlePlatformOperationsRepository", () => {
     ]);
     expect((await repository.recentActivity("support", 10)).map((item) => item.id)).toEqual([
       "00000000-0000-4000-8000-000000000206",
+    ]);
+  });
+});
+
+describe("DrizzlePlatformOperationsRepository timestamp normalization", () => {
+  it("normalizes Date-valued subscription and invoice rows at the database boundary", async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            tenantId: "tenant-ending",
+            tenantName: "Ending tenant",
+            subscriptionId: "00000000-0000-4000-8000-000000000102",
+            endsAt: new Date("2026-08-26T08:00:00.000Z"),
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            tenantId: "tenant-overdue",
+            tenantName: "Overdue tenant",
+            invoiceId: "00000000-0000-4000-8000-000000000101",
+            invoiceNumber: "СЧ-000101",
+            dueAt: new Date("2026-08-20T00:00:00.000Z"),
+          },
+        ],
+      });
+    const repository = new DrizzlePlatformOperationsRepository({ execute } as unknown as Db);
+
+    await expect(
+      repository.subscriptionsEnding(NOW, new Date("2026-09-05T08:00:00.000Z"), 25),
+    ).resolves.toEqual([
+      {
+        tenantId: "tenant-ending",
+        tenantName: "Ending tenant",
+        subscriptionId: "00000000-0000-4000-8000-000000000102",
+        endsAt: "2026-08-26T08:00:00.000Z",
+      },
+    ]);
+    await expect(repository.overdueInvoiceFacts(NOW, 25)).resolves.toEqual([
+      {
+        tenantId: "tenant-overdue",
+        tenantName: "Overdue tenant",
+        invoiceId: "00000000-0000-4000-8000-000000000101",
+        invoiceNumber: "СЧ-000101",
+        dueAt: "2026-08-20T00:00:00.000Z",
+      },
     ]);
   });
 });

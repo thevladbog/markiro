@@ -10,8 +10,9 @@ import { HealthSummary } from "./HealthSummary.js";
 import { getOperationsOverview, getPlatformMonitoring } from "./api.js";
 
 export function OverviewPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const principal = usePlatformPrincipal();
+  const locale = i18n.resolvedLanguage?.startsWith("en") ? "en-GB" : "ru-RU";
   const canReadDiagnostics = principal.capabilities.includes("diagnostics.read");
   const overview = useQuery({
     queryKey: ["platform", "operations", "overview"],
@@ -116,7 +117,7 @@ export function OverviewPage() {
                         />
                         <span className="activity-list__action">{event.action}</span>
                         <time dateTime={event.createdAt}>
-                          {new Date(event.createdAt).toLocaleString()}
+                          {new Date(event.createdAt).toLocaleString(locale)}
                         </time>
                       </li>
                     ))}

@@ -166,7 +166,7 @@ export function CatalogPage() {
           </div>
           <span className="commerce-ledger__count">{visibleItems.length}</span>
         </header>
-        <DataTabs
+        <DataTabs<CatalogKind>
           className="catalog-data-tabs"
           label={t("catalog.groupLabel")}
           activeId={activeKind}
@@ -177,7 +177,7 @@ export function CatalogPage() {
           }))}
           onChange={(id) =>
             pageGuard.requestProtectedAction(() => {
-              setActiveKind(id as CatalogKind);
+              setActiveKind(id);
               setPage(1);
               setCreating(false);
               setDrawerDirty(false);

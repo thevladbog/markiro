@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
 import {
   createRoutesFromElements,
+  type Location,
   Navigate,
   Outlet,
   Route,
@@ -104,7 +105,7 @@ function SuspenseBoundary() {
 }
 
 function LegacyBillingRedirect({ target }: { target: "index" | "new" | "detail" }) {
-  const location = useLocation();
+  const location: Location<unknown> = useLocation();
   const { invoiceId } = useParams();
   const pathname =
     target === "index"
@@ -112,13 +113,7 @@ function LegacyBillingRedirect({ target }: { target: "index" | "new" | "detail" 
       : target === "new"
         ? "/invoices/new"
         : `/invoices/${invoiceId ?? ""}`;
-  return (
-    <Navigate
-      to={{ pathname, search: location.search }}
-      replace
-      state={location.state as unknown}
-    />
-  );
+  return <Navigate to={{ pathname, search: location.search }} replace state={location.state} />;
 }
 
 export const appRoutes = createRoutesFromElements(

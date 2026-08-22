@@ -45,6 +45,7 @@ describe("platform audit page", () => {
 
     expect(await screen.findByRole("heading", { name: "Аудит платформы" })).toBeDefined();
     expect(screen.getByText("Неизменяемая история действий и результатов.")).toBeDefined();
+    expect(await screen.findByText("Неизменяемый журнал событий")).toBeDefined();
     expect(await screen.findByRole("region", { name: "Журнал аудита" })).toBeDefined();
     expect(screen.getByText("tenant.created")).toBeDefined();
   });

@@ -93,6 +93,25 @@ describe("platform operations routes", () => {
     expect(service.overview).toHaveBeenCalledWith("platform_admin");
   });
 
+  it("fails closed when the platform principal is absent", async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [PlatformOperationsController],
+      providers: [{ provide: PlatformOperationsService, useValue: service }],
+    }).compile();
+    const appWithoutPrincipal = moduleRef.createNestApplication();
+    appWithoutPrincipal.setGlobalPrefix("api");
+    await appWithoutPrincipal.init();
+    await listenOnLoopback(appWithoutPrincipal);
+
+    try {
+      await request(appWithoutPrincipal.getHttpServer())
+        .get("/api/platform/operations/overview")
+        .expect(401);
+    } finally {
+      await appWithoutPrincipal.close();
+    }
+  });
+
   it("declares overview for every tenant-reading role and reserves monitoring for diagnostics", () => {
     const overviewPolicy = Reflect.getMetadata(
       PLATFORM_ACCESS_POLICY,

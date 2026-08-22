@@ -87,7 +87,7 @@ describe("OperationalRail", () => {
 
 describe("DataTabs", () => {
   function Harness() {
-    const [active, setActive] = useState("overview");
+    const [active, setActive] = useState<"overview" | "legal" | "usage">("overview");
     return (
       <DataTabs
         label="Разделы тенанта"
@@ -137,7 +137,13 @@ describe("operational display primitives", () => {
       <MetricStrip
         label="Ключевые показатели"
         items={[
-          { id: "tenants", label: "Активные тенанты", value: "128", tone: "positive" },
+          {
+            id: "tenants",
+            label: "Активные тенанты",
+            value: "128",
+            hint: "Подтверждено контрактом",
+            tone: "positive",
+          },
           { id: "overdue", label: "Просроченные счета", value: "4", tone: "critical" },
         ]}
       />,
@@ -146,6 +152,7 @@ describe("operational display primitives", () => {
     expect(screen.getByRole("group", { name: "Ключевые показатели" })).toBeDefined();
     expect(screen.getByText("Активные тенанты").tagName).toBe("DT");
     expect(screen.getByText("128").tagName).toBe("DD");
+    expect(screen.getByText("Подтверждено контрактом").closest("dd")).toBe(screen.getByText("128"));
     expect(screen.getByText("Просроченные счета")).toBeDefined();
   });
 

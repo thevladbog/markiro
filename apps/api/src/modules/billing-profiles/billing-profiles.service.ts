@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { billingContactSchema } from "@markiro/platform-contracts";
+import type { ZodType } from "zod";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
@@ -202,10 +203,7 @@ function normalizeLegacyContact(contact: unknown) {
   };
 }
 
-function parseContactField<T>(
-  schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } },
-  value: unknown,
-): T | null {
+function parseContactField<T>(schema: ZodType<T>, value: unknown): T | null {
   const candidate = typeof value === "string" ? value.trim() : null;
   const parsed = schema.safeParse(candidate);
   return parsed.success ? parsed.data : null;

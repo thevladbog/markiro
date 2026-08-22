@@ -80,12 +80,17 @@ const operationsSummaryFactsSchema = z
   })
   .strict();
 
+const databaseTimestampSchema = z.preprocess(
+  (value) => (value instanceof Date ? value.toISOString() : value),
+  platformTimestampSchema,
+);
+
 const subscriptionEndingFactSchema = z
   .object({
     tenantId: platformTenantIdSchema,
     tenantName: z.string().trim().min(1).max(300),
     subscriptionId: platformUuidSchema,
-    endsAt: platformTimestampSchema,
+    endsAt: databaseTimestampSchema,
   })
   .strict();
 
@@ -95,7 +100,7 @@ const overdueInvoiceFactSchema = z
     tenantName: z.string().trim().min(1).max(300),
     invoiceId: platformUuidSchema,
     invoiceNumber: z.string().trim().min(1).max(120),
-    dueAt: platformTimestampSchema,
+    dueAt: databaseTimestampSchema,
   })
   .strict();
 
@@ -332,18 +337,18 @@ export class PlatformOperationsService {
       canReadDiagnostics ? this.monitoring() : Promise.resolve(null),
     ]);
 
-    const decisionQueue: OperationsDecisionItem[] = [
-      ...overdueInvoices.map((invoice): OperationsDecisionItem => ({
-        id: `invoice-overdue:${invoice.invoiceId}`,
-        kind: "overdue_invoice",
-        severity: "critical",
-        tenantId: invoice.tenantId,
-        tenantName: invoice.tenantName,
-        invoiceId: invoice.invoiceId,
-        invoiceNumber: invoice.invoiceNumber,
-        dueAt: serializeTimestamp(invoice.dueAt),
-      })),
-      ...endingSubscriptions.map((subscription): OperationsDecisionItem => ({
+    const overdueDecisions = overdueInvoices.map((invoice): OperationsDecisionItem => ({
+      id: `invoice-overdue:${invoice.invoiceId}`,
+      kind: "overdue_invoice",
+      severity: "critical",
+      tenantId: invoice.tenantId,
+      tenantName: invoice.tenantName,
+      invoiceId: invoice.invoiceId,
+      invoiceNumber: invoice.invoiceNumber,
+      dueAt: serializeTimestamp(invoice.dueAt),
+    }));
+    const subscriptionDecisions = endingSubscriptions.map(
+      (subscription): OperationsDecisionItem => ({
         id: `subscription-ending:${subscription.tenantId}:${subscription.subscriptionId}`,
         kind: "subscription_ending",
         severity: "warning",
@@ -351,9 +356,12 @@ export class PlatformOperationsService {
         tenantName: subscription.tenantName,
         subscriptionId: subscription.subscriptionId,
         endsAt: serializeTimestamp(subscription.endsAt),
-      })),
-      ...billingReadinessDecisions(billingReadiness),
-    ].slice(0, DECISION_QUEUE_LIMIT);
+      }),
+    );
+    const decisionQueue = boundedDecisionQueue(
+      [overdueDecisions, subscriptionDecisions, billingReadinessDecisions(billingReadiness)],
+      DECISION_QUEUE_LIMIT,
+    );
 
     return platformOperationsContracts.overview.response.parse({
       generatedAt,
@@ -392,6 +400,26 @@ export class PlatformOperationsService {
       integrations: { dadata },
     });
   }
+}
+
+function boundedDecisionQueue(
+  categories: readonly (readonly OperationsDecisionItem[])[],
+  limit: number,
+): OperationsDecisionItem[] {
+  const decisions: OperationsDecisionItem[] = [];
+  for (const [index, category] of categories.entries()) {
+    const remainingCapacity = limit - decisions.length;
+    if (remainingCapacity <= 0) break;
+    const laterNonEmptyCategories = categories
+      .slice(index + 1)
+      .filter((candidate) => candidate.length > 0).length;
+    const take = Math.min(
+      category.length,
+      Math.max(0, remainingCapacity - laterNonEmptyCategories),
+    );
+    decisions.push(...category.slice(0, take));
+  }
+  return decisions;
 }
 
 function billingReadinessDecisions(readiness: {

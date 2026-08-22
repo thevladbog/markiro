@@ -2,28 +2,35 @@ import { useId, useRef, type CSSProperties, type KeyboardEvent } from "react";
 
 import { cn } from "../cn.js";
 
-export interface DataTabItem {
-  id: string;
+export interface DataTabItem<Id extends string = string> {
+  id: Id;
   label: string;
   panelId?: string;
   disabled?: boolean;
   count?: number | string;
 }
 
-export interface DataTabsProps {
-  items: readonly DataTabItem[];
-  activeId: string;
-  onChange: (id: string) => void;
+export interface DataTabsProps<Id extends string = string> {
+  items: readonly DataTabItem<Id>[];
+  activeId: Id;
+  onChange: (id: Id) => void;
   label: string;
   className?: string;
   style?: CSSProperties;
 }
 
-export function DataTabs({ items, activeId, onChange, label, className, style }: DataTabsProps) {
+export function DataTabs<Id extends string>({
+  items,
+  activeId,
+  onChange,
+  label,
+  className,
+  style,
+}: DataTabsProps<Id>) {
   const tabListId = useId();
-  const tabRefs = useRef(new Map<string, HTMLButtonElement>());
+  const tabRefs = useRef(new Map<Id, HTMLButtonElement>());
 
-  function move(event: KeyboardEvent<HTMLButtonElement>, currentId: string) {
+  function move(event: KeyboardEvent<HTMLButtonElement>, currentId: Id) {
     const enabled = items.filter((item) => !item.disabled);
     const currentIndex = enabled.findIndex((item) => item.id === currentId);
     if (currentIndex < 0) return;

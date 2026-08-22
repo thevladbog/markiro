@@ -31,8 +31,10 @@ export function MetricStrip({ items, label, className, style }: MetricStripProps
           key={item.id}
         >
           <dt className="mk-metric-strip__label">{item.label}</dt>
-          <dd className="mk-metric-strip__value">{item.value}</dd>
-          {item.hint ? <span className="mk-metric-strip__hint">{item.hint}</span> : null}
+          <dd className="mk-metric-strip__value">
+            {item.value}
+            {item.hint ? <span className="mk-metric-strip__hint">{item.hint}</span> : null}
+          </dd>
         </div>
       ))}
     </dl>

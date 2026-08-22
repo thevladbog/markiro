@@ -202,7 +202,7 @@ export function TenantsPage() {
       <section className="tenant-ledger" aria-labelledby="tenant-ledger-title">
         <header className="tenant-ledger__header">
           <div>
-            <p>REGISTRY / CURRENT SCOPE</p>
+            <p>{t("tenants.registryEyebrow")}</p>
             <h2 id="tenant-ledger-title">{t("tenants.registry")}</h2>
           </div>
           <span aria-label={t("tenants.total")}>{tenants.data?.total ?? "—"}</span>

@@ -177,6 +177,8 @@
 
 .mk-metric-strip__value {
   color: var(--fg-1);
+  display: grid;
+  gap: var(--sp-2);
   font: 600 30px/34px var(--font-mono);
   font-variant-numeric: tabular-nums;
 }

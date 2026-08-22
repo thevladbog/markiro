@@ -228,6 +228,8 @@
   "offers": {
     "title": "Commercial offers",
     "description": "Commercial terms before an invoice is issued.",
+    "registryEyebrow": "Sales pipeline",
+    "selectedEyebrow": "Selected offer",
     "newDescription": "Build the items, pricing, and terms for the selected tenant.",
     "actionsLabel": "Offer actions",
     "registryTitle": "Offer register",
@@ -602,6 +604,7 @@
   "audit": {
     "title": "Platform audit",
     "description": "Immutable history of actions and outcomes.",
+    "registryEyebrow": "Immutable event log",
     "registryTitle": "Audit log",
     "loading": "Loading audit",
     "loadError": "Could not load audit",
@@ -776,6 +779,7 @@
   "tenants": {
     "title": "Tenants",
     "description": "Organizations, access, and subscription status.",
+    "registryEyebrow": "Registry / current scope",
     "actions": "Tenant actions",
     "registry": "Tenant registry",
     "total": "Total tenants",

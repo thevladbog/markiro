@@ -486,7 +486,7 @@ textarea {
 
 .app-rail {
   position: sticky;
-  z-index: var(--z-sticky);
+  z-index: var(--z-overlay-panel);
   top: 0;
   height: 100dvh;
   min-width: 0;
@@ -536,7 +536,7 @@ textarea {
 
 .workspace-header {
   position: sticky;
-  z-index: calc(var(--z-sticky) - 1);
+  z-index: calc(var(--z-overlay-panel) - 1);
   top: 0;
   min-width: 0;
   display: flex;
@@ -3063,14 +3063,14 @@ textarea {
 
   .app-rail {
     position: fixed;
-    z-index: var(--z-modal);
+    z-index: var(--z-overlay-dialog);
     top: 0;
     bottom: 0;
     left: 0;
     width: var(--mk-rail-width);
     transform: translateX(-100%);
     visibility: hidden;
-    transition: transform var(--mk-motion-operational) ease;
+    transition: transform var(--mk-motion-fast) ease;
   }
 
   .app-rail--open {
@@ -3080,7 +3080,7 @@ textarea {
 
   .app-rail__backdrop {
     position: fixed;
-    z-index: calc(var(--z-modal) - 1);
+    z-index: calc(var(--z-overlay-dialog) - 1);
     inset: 0;
     display: block;
     border: 0;

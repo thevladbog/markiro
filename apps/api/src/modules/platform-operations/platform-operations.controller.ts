@@ -1,4 +1,4 @@
-import { Controller, Get, Req } from "@nestjs/common";
+import { Controller, Get, Req, UnauthorizedException } from "@nestjs/common";
 import { platformOperationsContracts } from "@markiro/platform-contracts";
 
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
@@ -15,9 +15,11 @@ export class PlatformOperationsController {
   @PlatformApiProtectedOk({ response: platformOperationsContracts.overview.response })
   @RequirePlatformCapabilities("tenants.read")
   async overview(@Req() request: RequestWithPlatformPrincipal) {
+    const principal = request.platformPrincipal;
+    if (!principal) throw new UnauthorizedException();
     return parsePlatformResponse(
       platformOperationsContracts.overview.response,
-      await this.operations.overview(request.platformPrincipal!.role),
+      await this.operations.overview(principal.role),
     );
   }
 
