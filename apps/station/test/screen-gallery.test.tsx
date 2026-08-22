@@ -319,6 +319,11 @@ describe("development screen gallery", () => {
         // renders without the shared FloorShell status bar.
         expect(view.container.querySelector(".operator-login")).not.toBeNull();
         expect(view.container.querySelector(".station-root")).toBeNull();
+      } else if (fixture?.kind === "pairing") {
+        // Pairing has no station/operator/shift identity yet either -- like
+        // login, App.tsx's `stage === "pairing"` branch mounts Enrollment
+        // without the shared FloorShell status bar.
+        expect(view.container.querySelector(".station-root")).toBeNull();
       } else {
         expect(view.container.querySelector(".station-root")).not.toBeNull();
         expect(view.container.querySelector(".station-screen-slot")).not.toBeNull();
