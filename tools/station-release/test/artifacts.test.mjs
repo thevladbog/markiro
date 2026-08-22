@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   createBetaUpdateManifest,
+  createStationUpdateManifest,
   parseBetaUpdateManifest,
   stageStationRelease,
   stationAssetNames,
@@ -15,6 +16,9 @@ import {
 const version = "0.1.0-beta.1";
 const names = stationAssetNames(version);
 const bundleUrl = `https://github.com/thevladbog/markiro/releases/download/station-v${version}/${names.bundle}`;
+const stableVersion = "0.1.0";
+const stableNames = stationAssetNames(stableVersion);
+const stableBundleUrl = `https://github.com/thevladbog/markiro/releases/download/station-v${stableVersion}/${stableNames.bundle}`;
 
 test("creates the exact one-platform Tauri beta manifest", () => {
   const manifest = createBetaUpdateManifest({
@@ -79,7 +83,29 @@ test("rejects extra platforms, mutable URLs, traversal, symlinks and secret-shap
 });
 
 test("rejects noncanonical versions, dates, signatures and secret-shaped text", () => {
-  assert.throws(() => stationAssetNames("0.1.0"), /invalid station release artifacts/);
+  assert.throws(() => stationAssetNames("0.1.0-rc.1"), /invalid station release artifacts/);
+  assert.throws(
+    () =>
+      createStationUpdateManifest({
+        channel: "beta",
+        version: stableVersion,
+        pubDate: "2026-08-11T12:00:00.000Z",
+        bundleUrl: stableBundleUrl,
+        signature: "signature",
+      }),
+    /invalid station release artifacts/,
+  );
+  assert.throws(
+    () =>
+      createBetaUpdateManifest({
+        channel: "stable",
+        version: stableVersion,
+        pubDate: "2026-08-11T12:00:00.000Z",
+        bundleUrl: stableBundleUrl,
+        signature: "signature",
+      }),
+    /invalid station release artifacts/,
+  );
   assert.throws(
     () =>
       createBetaUpdateManifest({
@@ -108,6 +134,165 @@ test("rejects noncanonical versions, dates, signatures and secret-shaped text", 
         bundleUrl,
         signature: "TAURI_SIGNING_PRIVATE_KEY=secret",
       }),
+    /invalid station release artifacts/,
+  );
+});
+
+test("stages and validates stable artifacts with accepted beta provenance", async () => {
+  const input = await mkdtemp(join(tmpdir(), "markiro-station-stable-input-"));
+  const output = await mkdtemp(join(tmpdir(), "markiro-station-stable-output-"));
+  const notesPath = join(input, "notes.md");
+  await rm(output, { recursive: true });
+  for (const [name, content] of [
+    [stableNames.installer, "stable-installer"],
+    [stableNames.bundle, "stable-bundle"],
+    [stableNames.signature, "trusted-stable-signature"],
+  ]) {
+    await writeFile(join(input, name), content);
+  }
+  await writeFile(notesPath, "# Markiro Station 0.1.0\n\nПервый стабильный релиз.\n");
+
+  const evidence = await stageStationRelease({
+    channel: "stable",
+    inputDirectory: input,
+    outputDirectory: output,
+    version: stableVersion,
+    pubDate: "2026-08-20T10:00:00.000Z",
+    baseSha: "a".repeat(40),
+    releaseSha: "c".repeat(40),
+    notesPath,
+    stableProvenance: {
+      sourceBetaTag: "station-v0.1.0-beta.19",
+      betaVersion: "0.1.0-beta.19",
+      betaReleaseSha: "b".repeat(40),
+      betaEvidenceSha256: "d".repeat(64),
+      acceptanceConfirmed: true,
+      previousStableTag: null,
+      previousStableBaseSha: null,
+      changelogFromSha: "e".repeat(40),
+      changelogToSha: "a".repeat(40),
+    },
+  });
+
+  assert.equal(evidence.schemaVersion, 2);
+  assert.equal(evidence.channel, "stable");
+  assert.equal(evidence.sourceBetaTag, "station-v0.1.0-beta.19");
+  assert.equal(evidence.acceptanceConfirmed, true);
+  const validated = await validateStationReleaseDirectory(output, {
+    channel: "stable",
+    version: stableVersion,
+  });
+  assert.equal(validated.manifest.version, stableVersion);
+  assert.equal(validated.evidence.betaReleaseSha, "b".repeat(40));
+});
+
+test("rejects stable evidence without acceptance and rejects channel/version mismatch", async () => {
+  const input = await mkdtemp(join(tmpdir(), "markiro-station-stable-invalid-input-"));
+  const output = await mkdtemp(join(tmpdir(), "markiro-station-stable-invalid-output-"));
+  const notesPath = join(input, "notes.md");
+  await rm(output, { recursive: true });
+  for (const [name, content] of [
+    [stableNames.installer, "stable-installer"],
+    [stableNames.bundle, "stable-bundle"],
+    [stableNames.signature, "trusted-stable-signature"],
+  ]) {
+    await writeFile(join(input, name), content);
+  }
+  await writeFile(notesPath, "Stable notes\n");
+  const stableProvenance = {
+    sourceBetaTag: "station-v0.1.0-beta.19",
+    betaVersion: "0.1.0-beta.19",
+    betaReleaseSha: "b".repeat(40),
+    betaEvidenceSha256: "d".repeat(64),
+    acceptanceConfirmed: true,
+    previousStableTag: null,
+    previousStableBaseSha: null,
+    changelogFromSha: "e".repeat(40),
+    changelogToSha: "a".repeat(40),
+  };
+  const downgradeOutput = await mkdtemp(join(tmpdir(), "markiro-station-stable-downgrade-output-"));
+  await rm(downgradeOutput, { recursive: true });
+  await assert.rejects(
+    stageStationRelease({
+      channel: "stable",
+      inputDirectory: input,
+      outputDirectory: downgradeOutput,
+      version: stableVersion,
+      pubDate: "2026-08-20T10:00:00.000Z",
+      baseSha: "a".repeat(40),
+      releaseSha: "c".repeat(40),
+      notesPath,
+      stableProvenance: {
+        ...stableProvenance,
+        previousStableTag: "station-v0.2.0",
+        previousStableBaseSha: "f".repeat(40),
+      },
+    }),
+    /invalid station release artifacts/,
+  );
+  await stageStationRelease({
+    channel: "stable",
+    inputDirectory: input,
+    outputDirectory: output,
+    version: stableVersion,
+    pubDate: "2026-08-20T10:00:00.000Z",
+    baseSha: "a".repeat(40),
+    releaseSha: "c".repeat(40),
+    notesPath,
+    stableProvenance,
+  });
+
+  await assert.rejects(
+    validateStationReleaseDirectory(output, { channel: "beta", version: stableVersion }),
+    /invalid station release artifacts/,
+  );
+  const evidencePath = join(output, stableNames.evidence);
+  const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
+  await writeFile(evidencePath, `${JSON.stringify({ ...evidence, acceptanceConfirmed: false })}\n`);
+  await assert.rejects(
+    validateStationReleaseDirectory(output, { channel: "stable", version: stableVersion }),
+    /invalid station release artifacts/,
+  );
+});
+
+test("rejects stable notes whose bytes no longer match evidence", async () => {
+  const input = await mkdtemp(join(tmpdir(), "markiro-station-stable-notes-input-"));
+  const output = await mkdtemp(join(tmpdir(), "markiro-station-stable-notes-output-"));
+  const notesPath = join(input, "notes.md");
+  await rm(output, { recursive: true });
+  for (const [name, content] of [
+    [stableNames.installer, "stable-installer"],
+    [stableNames.bundle, "stable-bundle"],
+    [stableNames.signature, "trusted-stable-signature"],
+  ]) {
+    await writeFile(join(input, name), content);
+  }
+  await writeFile(notesPath, "Stable notes\n");
+  await stageStationRelease({
+    channel: "stable",
+    inputDirectory: input,
+    outputDirectory: output,
+    version: stableVersion,
+    pubDate: "2026-08-20T10:00:00.000Z",
+    baseSha: "a".repeat(40),
+    releaseSha: "c".repeat(40),
+    notesPath,
+    stableProvenance: {
+      sourceBetaTag: "station-v0.1.0-beta.19",
+      betaVersion: "0.1.0-beta.19",
+      betaReleaseSha: "b".repeat(40),
+      betaEvidenceSha256: "d".repeat(64),
+      acceptanceConfirmed: true,
+      previousStableTag: null,
+      previousStableBaseSha: null,
+      changelogFromSha: "e".repeat(40),
+      changelogToSha: "a".repeat(40),
+    },
+  });
+  await writeFile(join(output, stableNames.notes), "tampered notes\n");
+
+  await assert.rejects(
+    validateStationReleaseDirectory(output, { channel: "stable", version: stableVersion }),
     /invalid station release artifacts/,
   );
 });

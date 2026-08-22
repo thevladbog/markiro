@@ -16,7 +16,7 @@ import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
-import { parseStationBetaTag } from "./version.mjs";
+import { parseStationBetaTag, parseStationStableTag } from "./version.mjs";
 
 const execFile = promisify(execFileCallback);
 const REPOSITORY_PREFIX = "https://github.com/thevladbog/markiro/releases/download/";
@@ -24,26 +24,73 @@ const MAX_ARTIFACT_BYTES = 512 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES = 64 * 1024;
 const MAX_TEXT_BYTES = 256 * 1024;
 const SECRET_TEXT = /ghp_|github_pat_|TAURI_SIGNING_PRIVATE_KEY|api[_ -]?key|pairing_code/i;
+const UNSAFE_CONTROL_TEXT = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const SHA = /^[0-9a-f]{40}$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+const STABLE_CHANNEL_URL = `${REPOSITORY_PREFIX}station-stable-channel/latest.json`;
+const CHANNELS = new Set(["beta", "stable"]);
+const STABLE_PROVENANCE_KEYS = [
+  "sourceBetaTag",
+  "betaVersion",
+  "betaReleaseSha",
+  "betaEvidenceSha256",
+  "acceptanceConfirmed",
+  "previousStableTag",
+  "previousStableBaseSha",
+  "changelogFromSha",
+  "changelogToSha",
+];
+const STABLE_EVIDENCE_KEYS = [
+  "schemaVersion",
+  "channel",
+  "channelUrl",
+  "version",
+  "publishedAt",
+  "baseSha",
+  "releaseSha",
+  ...STABLE_PROVENANCE_KEYS,
+  "authenticode",
+  "physicalAcceptance",
+  "notesSha256",
+  "assets",
+];
 
 function invalid() {
   throw new Error("invalid station release artifacts");
 }
 
-function isCanonicalVersion(version) {
-  return (
-    typeof version === "string" && parseStationBetaTag(`station-v${version}`)?.text === version
-  );
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function ensureVersion(version) {
-  if (!isCanonicalVersion(version)) invalid();
+function hasExactKeys(value, keys) {
+  return isPlainObject(value) && Object.keys(value).sort().join(",") === [...keys].sort().join(",");
+}
+
+function parsedVersion(channel, version) {
+  if (typeof version !== "string") return null;
+  if (channel === "beta") return parseStationBetaTag(`station-v${version}`);
+  if (channel === "stable") return parseStationStableTag(`station-v${version}`);
+  return null;
+}
+
+function ensureChannelVersion(channel, version) {
+  if (!CHANNELS.has(channel) || parsedVersion(channel, version)?.text !== version) invalid();
+}
+
+function ensureAnyVersion(version) {
+  if (
+    typeof version !== "string" ||
+    (!parseStationBetaTag(`station-v${version}`) && !parseStationStableTag(`station-v${version}`))
+  ) {
+    invalid();
+  }
 }
 
 function ensureSafeText(value, maxBytes = MAX_TEXT_BYTES) {
   if (typeof value !== "string" || value.length === 0 || Buffer.byteLength(value) > maxBytes)
     invalid();
-  if (SECRET_TEXT.test(value)) invalid();
+  if (SECRET_TEXT.test(value) || UNSAFE_CONTROL_TEXT.test(value)) invalid();
 }
 
 function ensureDate(value) {
@@ -74,7 +121,7 @@ function ensureBundleUrl(version, url, expectedUrl = url) {
 }
 
 export function stationAssetNames(version) {
-  ensureVersion(version);
+  ensureAnyVersion(version);
   return {
     installer: `markiro-station-${version}-windows-x86_64-setup.exe`,
     bundle: `markiro-station-${version}-windows-x86_64.nsis.zip`,
@@ -86,7 +133,8 @@ export function stationAssetNames(version) {
   };
 }
 
-export function createBetaUpdateManifest({ version, pubDate, bundleUrl, signature }) {
+export function createStationUpdateManifest({ channel, version, pubDate, bundleUrl, signature }) {
+  ensureChannelVersion(channel, version);
   const names = stationAssetNames(version);
   ensureDate(pubDate);
   const expectedUrl = `${REPOSITORY_PREFIX}station-v${version}/${names.bundle}`;
@@ -99,7 +147,11 @@ export function createBetaUpdateManifest({ version, pubDate, bundleUrl, signatur
   };
 }
 
-export function parseBetaUpdateManifest(text, expected) {
+export function createBetaUpdateManifest(input) {
+  return createStationUpdateManifest({ ...input, channel: "beta" });
+}
+
+function parseStationUpdateManifest(text, expected) {
   ensureSafeText(text);
   let manifest;
   try {
@@ -109,7 +161,7 @@ export function parseBetaUpdateManifest(text, expected) {
   }
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) invalid();
   if (Object.keys(manifest).sort().join(",") !== "platforms,pub_date,version") invalid();
-  ensureVersion(manifest.version);
+  ensureChannelVersion(expected?.channel, manifest.version);
   ensureDate(manifest.pub_date);
   if (manifest.version !== expected?.version) invalid();
   if (!manifest.platforms || Object.keys(manifest.platforms).join(",") !== "windows-x86_64")
@@ -119,6 +171,10 @@ export function parseBetaUpdateManifest(text, expected) {
   ensureBundleUrl(manifest.version, platform.url, expected?.bundleUrl);
   ensureSafeText(platform.signature, MAX_SIGNATURE_BYTES);
   return manifest;
+}
+
+export function parseBetaUpdateManifest(text, expected) {
+  return parseStationUpdateManifest(text, { ...expected, channel: "beta" });
 }
 
 async function regularFile(path, maxBytes = MAX_ARTIFACT_BYTES) {
@@ -148,25 +204,81 @@ async function ensureEmptyDirectory(path) {
   }
 }
 
+function compareStableVersions(left, right) {
+  for (const field of ["major", "minor", "patch"]) {
+    if (left[field] !== right[field]) return left[field] - right[field];
+  }
+  return 0;
+}
+
+function validateStableProvenance(provenance, version, baseSha) {
+  if (!hasExactKeys(provenance, STABLE_PROVENANCE_KEYS)) invalid();
+  const beta = parseStationBetaTag(provenance.sourceBetaTag);
+  const stable = parseStationStableTag(`station-v${version}`);
+  const previous =
+    provenance.previousStableTag === null
+      ? null
+      : parseStationStableTag(provenance.previousStableTag);
+  if (
+    !beta ||
+    !stable ||
+    beta.text !== provenance.betaVersion ||
+    beta.major !== stable.major ||
+    beta.minor !== stable.minor ||
+    beta.patch !== stable.patch ||
+    !SHA.test(provenance.betaReleaseSha) ||
+    !SHA256.test(provenance.betaEvidenceSha256) ||
+    provenance.acceptanceConfirmed !== true ||
+    !SHA.test(provenance.changelogFromSha) ||
+    provenance.changelogToSha !== baseSha ||
+    (provenance.previousStableTag === null) !== (provenance.previousStableBaseSha === null) ||
+    (provenance.previousStableTag !== null &&
+      (!previous ||
+        !SHA.test(provenance.previousStableBaseSha) ||
+        compareStableVersions(previous, stable) >= 0))
+  ) {
+    invalid();
+  }
+  return provenance;
+}
+
 export async function stageStationRelease({
+  channel = "beta",
   inputDirectory,
   outputDirectory,
   version,
   pubDate,
   baseSha,
   releaseSha,
+  notesPath,
+  stableProvenance,
 }) {
+  ensureChannelVersion(channel, version);
   const names = stationAssetNames(version);
   ensureDate(pubDate);
   validateSha(baseSha);
   validateSha(releaseSha);
+  if (channel === "stable") {
+    validateStableProvenance(stableProvenance, version, baseSha);
+    if (typeof notesPath !== "string" || notesPath.length === 0) invalid();
+    await regularFile(notesPath, MAX_TEXT_BYTES);
+    ensureSafeText(await readFile(notesPath, "utf8"));
+  } else if (notesPath !== undefined || stableProvenance !== undefined) {
+    invalid();
+  }
   await ensureEmptyDirectory(outputDirectory);
   const inputNames = [names.installer, names.bundle, names.signature];
   for (const name of inputNames) await regularFile(join(inputDirectory, name));
   const signature = (await readFile(join(inputDirectory, names.signature), "utf8")).trim();
   ensureSafeText(signature, MAX_SIGNATURE_BYTES);
   const bundleUrl = `${REPOSITORY_PREFIX}station-v${version}/${names.bundle}`;
-  const manifest = createBetaUpdateManifest({ version, pubDate, bundleUrl, signature });
+  const manifest = createStationUpdateManifest({
+    channel,
+    version,
+    pubDate,
+    bundleUrl,
+    signature,
+  });
   const assets = {};
   for (const name of inputNames) {
     await copyFile(join(inputDirectory, name), join(outputDirectory, name));
@@ -182,30 +294,53 @@ export async function stageStationRelease({
     .map(([name, digest]) => `${digest}  ${name}`)
     .join("\n")}\n`;
   await writeFile(join(outputDirectory, names.checksums), checksums, { flag: "wx", mode: 0o600 });
-  await writeFile(
-    join(outputDirectory, names.notes),
-    [
-      `Markiro Station ${version}`,
-      "",
-      "Manual Windows x64 beta release.",
-      "Installer is unsigned; verify SHA256SUMS before manual installation.",
-      "Acceptance status: Windows and hardware checks pending operator validation.",
-      `baseSha: ${baseSha}`,
-      `releaseSha: ${releaseSha}`,
-      `publishedAt: ${pubDate}`,
-      "",
-    ].join("\n"),
-    { flag: "wx", mode: 0o600 },
-  );
-  await writeFile(
-    join(outputDirectory, names.evidence),
-    `${JSON.stringify({ baseSha, releaseSha, version, publishedAt: pubDate, assets }, null, 2)}\n`,
-    { flag: "wx", mode: 0o600 },
-  );
-  return { version, baseSha, releaseSha, publishedAt: pubDate, assets };
+  if (channel === "stable") {
+    await copyFile(notesPath, join(outputDirectory, names.notes));
+    await chmod(join(outputDirectory, names.notes), 0o600);
+  } else {
+    await writeFile(
+      join(outputDirectory, names.notes),
+      [
+        `Markiro Station ${version}`,
+        "",
+        "Manual Windows x64 beta release.",
+        "Installer is unsigned; verify SHA256SUMS before manual installation.",
+        "Acceptance status: Windows and hardware checks pending operator validation.",
+        `baseSha: ${baseSha}`,
+        `releaseSha: ${releaseSha}`,
+        `publishedAt: ${pubDate}`,
+        "",
+      ].join("\n"),
+      { flag: "wx", mode: 0o600 },
+    );
+  }
+  const evidence =
+    channel === "stable"
+      ? {
+          schemaVersion: 2,
+          channel: "stable",
+          channelUrl: STABLE_CHANNEL_URL,
+          version,
+          publishedAt: pubDate,
+          baseSha,
+          releaseSha,
+          ...stableProvenance,
+          authenticode: false,
+          physicalAcceptance: "NOT RUN",
+          notesSha256: await sha256(join(outputDirectory, names.notes)),
+          assets,
+        }
+      : { baseSha, releaseSha, version, publishedAt: pubDate, assets };
+  await writeFile(join(outputDirectory, names.evidence), `${JSON.stringify(evidence, null, 2)}\n`, {
+    flag: "wx",
+    mode: 0o600,
+  });
+  return evidence;
 }
 
 export async function validateStationReleaseDirectory(directory, expected) {
+  const channel = expected?.channel ?? "beta";
+  ensureChannelVersion(channel, expected?.version);
   const names = stationAssetNames(expected.version);
   const entries = await readdir(directory);
   const allowed = new Set(Object.values(names));
@@ -224,9 +359,10 @@ export async function validateStationReleaseDirectory(directory, expected) {
       name === names.signature ? MAX_SIGNATURE_BYTES : MAX_ARTIFACT_BYTES,
     );
   }
-  const manifest = parseBetaUpdateManifest(
+  const manifest = parseStationUpdateManifest(
     await readFile(join(directory, names.manifest), "utf8"),
     {
+      channel,
       version: expected.version,
       bundleUrl: `${REPOSITORY_PREFIX}station-v${expected.version}/${names.bundle}`,
     },
@@ -256,15 +392,42 @@ export async function validateStationReleaseDirectory(directory, expected) {
   }
   for (const name of expectedChecksumNames)
     if (checksumByName.get(name) !== (await sha256(join(directory, name)))) invalid();
-  const evidence = JSON.parse(await readFile(join(directory, names.evidence), "utf8"));
-  if (
-    !evidence ||
-    Object.keys(evidence).sort().join(",") !== "assets,baseSha,publishedAt,releaseSha,version" ||
-    evidence.version !== expected.version ||
-    !evidence.assets ||
-    Object.keys(evidence.assets).sort().join(",") !== expectedChecksumNames.join(",")
-  )
+  let evidence;
+  try {
+    evidence = JSON.parse(await readFile(join(directory, names.evidence), "utf8"));
+  } catch {
     invalid();
+  }
+  if (channel === "beta") {
+    if (!hasExactKeys(evidence, ["assets", "baseSha", "publishedAt", "releaseSha", "version"])) {
+      invalid();
+    }
+  } else if (
+    !hasExactKeys(evidence, STABLE_EVIDENCE_KEYS) ||
+    evidence.schemaVersion !== 2 ||
+    evidence.channel !== "stable" ||
+    evidence.channelUrl !== STABLE_CHANNEL_URL ||
+    evidence.authenticode !== false ||
+    evidence.physicalAcceptance !== "NOT RUN" ||
+    !SHA256.test(evidence.notesSha256) ||
+    evidence.notesSha256 !== (await sha256(join(directory, names.notes)))
+  ) {
+    invalid();
+  }
+  if (
+    evidence.version !== expected.version ||
+    !isPlainObject(evidence.assets) ||
+    Object.keys(evidence.assets).sort().join(",") !== expectedChecksumNames.join(",")
+  ) {
+    invalid();
+  }
+  if (channel === "stable") {
+    validateStableProvenance(
+      Object.fromEntries(STABLE_PROVENANCE_KEYS.map((key) => [key, evidence[key]])),
+      expected.version,
+      evidence.baseSha,
+    );
+  }
   for (const name of expectedChecksumNames)
     if (evidence.assets[name] !== checksumByName.get(name)) invalid();
   validateSha(evidence.baseSha);
@@ -273,6 +436,7 @@ export async function validateStationReleaseDirectory(directory, expected) {
   ensureSafeText(await readFile(join(directory, names.notes), "utf8"));
   return {
     manifest,
+    evidence,
     assets: Object.fromEntries(
       await Promise.all(entries.map(async (name) => [name, await sha256(join(directory, name))])),
     ),
@@ -293,16 +457,65 @@ export async function checksumsForDirectory(directory, version) {
 async function main() {
   const [, , command, ...args] = process.argv;
   if (command === "stage") {
-    const [inputDirectory, outputDirectory, version, pubDate, baseSha, releaseSha] = args;
+    const hasChannel = CHANNELS.has(args[0]);
+    const channel = hasChannel ? args.shift() : "beta";
+    const [inputDirectory, outputDirectory, version, pubDate, baseSha, releaseSha, ...extra] = args;
     if (!inputDirectory || !outputDirectory || !version || !pubDate || !baseSha || !releaseSha)
       invalid();
+    if (extra.length > 0) invalid();
     await stageStationRelease({
+      channel,
       inputDirectory,
       outputDirectory,
       version,
       pubDate,
       baseSha,
       releaseSha,
+    });
+    return;
+  }
+  if (command === "stage-stable") {
+    const [
+      inputDirectory,
+      outputDirectory,
+      version,
+      pubDate,
+      baseSha,
+      releaseSha,
+      notesPath,
+      provenanceJsonPath,
+      ...extra
+    ] = args;
+    if (
+      !inputDirectory ||
+      !outputDirectory ||
+      !version ||
+      !pubDate ||
+      !baseSha ||
+      !releaseSha ||
+      !notesPath ||
+      !provenanceJsonPath ||
+      extra.length > 0
+    ) {
+      invalid();
+    }
+    await regularFile(provenanceJsonPath, MAX_TEXT_BYTES);
+    let stableProvenance;
+    try {
+      stableProvenance = JSON.parse(await readFile(provenanceJsonPath, "utf8"));
+    } catch {
+      invalid();
+    }
+    await stageStationRelease({
+      channel: "stable",
+      inputDirectory,
+      outputDirectory,
+      version,
+      pubDate,
+      baseSha,
+      releaseSha,
+      notesPath,
+      stableProvenance,
     });
     return;
   }
@@ -313,9 +526,11 @@ async function main() {
     return;
   }
   if (command === "validate") {
-    const [directory, version] = args;
-    if (!directory || !version) invalid();
-    await validateStationReleaseDirectory(directory, { version });
+    const hasChannel = CHANNELS.has(args[0]);
+    const channel = hasChannel ? args.shift() : "beta";
+    const [directory, version, ...extra] = args;
+    if (!directory || !version || extra.length > 0) invalid();
+    await validateStationReleaseDirectory(directory, { channel, version });
     return;
   }
   invalid();
