@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-23
 
-**Status:** Proposed
+**Status:** Accepted
 
 **Scope:** `apps/saas-admin`, platform commercial contracts, billing profiles, commercial snapshots,
 and the supporting Postgres migration
@@ -82,10 +82,12 @@ The rules are:
 - postal address retains its existing independent `sameAsLegal` behavior;
 - choosing a DaData address only fills the draft; explicit profile confirmation remains required.
 
-The first migration adds `actual_same_as_legal boolean not null default true`,
-`actual_address_raw text`, and `actual_address jsonb` to both versioned profile tables. Existing
-revisions therefore mean "actual address equals legal address" without fabricating copied provider
-metadata. A check constraint prevents stored actual-address values when the flag is true.
+Migration `0065` removes the existing `operator_billing_profiles_legal_entity_check`, then adds
+`actual_same_as_legal boolean not null default true`, `actual_address_raw text`, and
+`actual_address jsonb` to both versioned profile tables. Existing revisions therefore mean "actual
+address equals legal address" without fabricating copied provider metadata. A check constraint
+prevents stored actual-address values when the flag is true. Existing seller rows keep their current
+`legal_entity` kind; the migration does not synthesize a different party kind.
 
 Saving still inserts a new current revision transactionally. No prior revision is updated in place.
 
