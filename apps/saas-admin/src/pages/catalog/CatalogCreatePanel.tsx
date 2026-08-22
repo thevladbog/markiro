@@ -140,7 +140,7 @@ export function CatalogCreatePanel({
     },
     onError: (cause) =>
       setError(
-        cause instanceof ApiRequestError && cause.status === 409
+        cause instanceof ApiRequestError && cause.kind === "domain" && cause.status === 409
           ? t("catalog.createConflict")
           : t("catalog.createError"),
       ),

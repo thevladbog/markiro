@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   Logger,
+  Param,
   Post,
   UnauthorizedException,
   type INestApplication,
@@ -15,11 +16,28 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service.js";
 import { PlatformHttpModule } from "../src/platform-http/platform-http.module.js";
+import { currentPlatformRequestId } from "../src/platform-http/platform-request-context.middleware.js";
 import { listenOnLoopback } from "./support/listen-loopback.js";
 
 const PASSTHROUGH_REQUEST_ID = "11111111-1111-4111-8111-111111111111";
 const EXPLICIT_AUDIT_REQUEST_ID = "21111111-1111-4111-8111-111111111111";
-const auditRequestIds: Array<string | null> = [];
+const auditRecords: Array<{ targetId: string | null; requestId: string | null }> = [];
+let overlapArrivals = 0;
+let releaseOverlap: () => void = () => undefined;
+let overlapGate: Promise<void> = Promise.resolve();
+
+function resetOverlapBarrier(): void {
+  overlapArrivals = 0;
+  overlapGate = new Promise<void>((resolve) => {
+    releaseOverlap = resolve;
+  });
+}
+
+async function waitForOverlap(): Promise<void> {
+  overlapArrivals += 1;
+  if (overlapArrivals === 2) releaseOverlap();
+  await overlapGate;
+}
 
 class DatabaseFailure extends Error {}
 
@@ -68,12 +86,19 @@ class PlatformBoundaryController {
     return { ok: true };
   }
 
-  private async recordAudit(requestId: string | null) {
+  @Get("audit-overlap/:label")
+  async auditOverlap(@Param("label") label: string) {
+    await waitForOverlap();
+    await this.recordAudit(null, label);
+    return { label, requestId: currentPlatformRequestId() };
+  }
+
+  private async recordAudit(requestId: string | null, targetId: string | null = null) {
     await this.audit.record(
       {
         insert: () => ({
-          values: async (values: { requestId: string | null }) => {
-            auditRequestIds.push(values.requestId);
+          values: async (values: { targetId: string | null; requestId: string | null }) => {
+            auditRecords.push({ targetId: values.targetId, requestId: values.requestId });
           },
         }),
       } as never,
@@ -84,7 +109,7 @@ class PlatformBoundaryController {
         outcome: "success",
         tenantId: null,
         targetType: "platform_route",
-        targetId: null,
+        targetId,
         reason: null,
         before: null,
         after: null,
@@ -138,6 +163,19 @@ describe("platform HTTP boundary", () => {
       );
       expect(response.headers["x-request-id"]).not.toBe(supplied);
     }
+  });
+
+  it("rejects duplicate valid request IDs instead of reusing either supplied value", async () => {
+    const response = await request(app.getHttpServer())
+      .get("/platform/boundary/success")
+      .set("x-request-id", `${PASSTHROUGH_REQUEST_ID}, ${EXPLICIT_AUDIT_REQUEST_ID}`)
+      .expect(200);
+
+    expect(response.headers["x-request-id"]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(response.headers["x-request-id"]).not.toBe(PASSTHROUGH_REQUEST_ID);
+    expect(response.headers["x-request-id"]).not.toBe(EXPLICIT_AUDIT_REQUEST_ID);
   });
 
   it.each([
@@ -211,7 +249,7 @@ describe("platform HTTP boundary", () => {
   });
 
   it("inherits the request ID into audit writes while explicit event IDs win", async () => {
-    auditRequestIds.length = 0;
+    auditRecords.length = 0;
     await request(app.getHttpServer())
       .get("/platform/boundary/audit")
       .set("x-request-id", PASSTHROUGH_REQUEST_ID)
@@ -221,6 +259,38 @@ describe("platform HTTP boundary", () => {
       .set("x-request-id", PASSTHROUGH_REQUEST_ID)
       .expect(200);
 
-    expect(auditRequestIds).toEqual([PASSTHROUGH_REQUEST_ID, EXPLICIT_AUDIT_REQUEST_ID]);
+    expect(auditRecords.map((record) => record.requestId)).toEqual([
+      PASSTHROUGH_REQUEST_ID,
+      EXPLICIT_AUDIT_REQUEST_ID,
+    ]);
+  });
+
+  it("isolates concurrent request IDs across response headers, bodies, and audit writes", async () => {
+    auditRecords.length = 0;
+    resetOverlapBarrier();
+
+    const [first, second] = await Promise.all([
+      request(app.getHttpServer())
+        .get("/platform/boundary/audit-overlap/first")
+        .set("x-request-id", PASSTHROUGH_REQUEST_ID)
+        .expect(200),
+      request(app.getHttpServer())
+        .get("/platform/boundary/audit-overlap/second")
+        .set("x-request-id", EXPLICIT_AUDIT_REQUEST_ID)
+        .expect(200),
+    ]);
+
+    expect(first.headers["x-request-id"]).toBe(PASSTHROUGH_REQUEST_ID);
+    expect(first.body).toEqual({ label: "first", requestId: PASSTHROUGH_REQUEST_ID });
+    expect(second.headers["x-request-id"]).toBe(EXPLICIT_AUDIT_REQUEST_ID);
+    expect(second.body).toEqual({ label: "second", requestId: EXPLICIT_AUDIT_REQUEST_ID });
+    expect(
+      auditRecords.sort((left, right) =>
+        String(left.targetId).localeCompare(String(right.targetId)),
+      ),
+    ).toEqual([
+      { targetId: "first", requestId: PASSTHROUGH_REQUEST_ID },
+      { targetId: "second", requestId: EXPLICIT_AUDIT_REQUEST_ID },
+    ]);
   });
 });

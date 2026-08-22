@@ -119,7 +119,8 @@ describe("platform authentication", () => {
     );
     renderSaasApp({ initialEntry: "/catalog", state: authState({ session: readySession(true) }) });
 
-    expect(await screen.findByText("Не удалось загрузить актуальные полномочия.")).toBeDefined();
+    expect(await screen.findByText("Формат ответа платформы изменился")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Повторить" })).toBeDefined();
     expect(screen.queryByRole("heading", { name: "Каталог" })).toBeNull();
   });
 

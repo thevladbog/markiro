@@ -7,6 +7,7 @@ import { Alert, Button, Card, Spinner } from "@markiro/ui";
 import { platformAuthContracts, type PlatformPrincipal } from "@markiro/platform-contracts";
 
 import { ApiRequestError, platformApiFetch } from "../api/client.js";
+import { PanelState } from "../components/PanelState.js";
 import { useAuthClient } from "./client.js";
 import { isPlatformChallengePending } from "./challenge.js";
 
@@ -88,10 +89,14 @@ export function PlatformAuthBoundary() {
   }
 
   if (principal.error) {
-    if (principal.error instanceof ApiRequestError && principal.error.status === 401) {
+    const authorizationError =
+      principal.error instanceof ApiRequestError && principal.error.kind === "authorization"
+        ? principal.error
+        : null;
+    if (authorizationError?.status === 401) {
       return <Navigate to="/login" replace />;
     }
-    if (principal.error instanceof ApiRequestError && principal.error.status === 403) {
+    if (authorizationError?.status === 403) {
       return (
         <AuthStateFrame>
           <h1>{t("auth.boundary.forbiddenTitle")}</h1>
@@ -102,9 +107,14 @@ export function PlatformAuthBoundary() {
     }
     return (
       <AuthStateFrame>
-        <Alert title={t("auth.boundary.apiTitle")} tone="error">
-          {t("auth.boundary.apiBody")}
-        </Alert>
+        <PanelState
+          loading={false}
+          empty={false}
+          error={principal.error}
+          onRetry={() => void principal.refetch()}
+        >
+          {null}
+        </PanelState>
       </AuthStateFrame>
     );
   }
