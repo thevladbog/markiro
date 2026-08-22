@@ -113,6 +113,7 @@ export {
   bankAccountArchiveSchema,
   bankAccountSchema,
   bankAccountStatusSchema,
+  billingActualAddressInputSchema,
   billingContactSchema,
   billingPostalAddressInputSchema,
   billingProfileInputSchema,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as exportedContracts from "../src/index.js";
 
 const contracts = exportedContracts as unknown as Record<string, unknown>;
+const actualMatchesLegal = { sameAsLegal: true } as const;
 
 describe("billing legal-profile contracts", () => {
   it("requires the legal-entity identifiers without leaking them into an individual", () => {
@@ -19,6 +20,7 @@ describe("billing legal-profile contracts", () => {
         kpp: "770001001",
         ogrn: "1027700000000",
         legalAddressRaw: "г Москва",
+        actualAddress: { sameAsLegal: true },
         postalAddress: { sameAsLegal: true },
         contact: { name: null, email: null, phone: null },
       }).success,
@@ -31,6 +33,7 @@ describe("billing legal-profile contracts", () => {
         fullName: "Иванов Иван Иванович",
         displayName: "Иванов И. И.",
         legalAddressRaw: "г Москва",
+        actualAddress: { sameAsLegal: true },
         postalAddress: { sameAsLegal: true },
         contact: { name: null, email: null, phone: null },
       }).success,
@@ -45,6 +48,7 @@ describe("billing legal-profile contracts", () => {
     const common = {
       displayName: "Плательщик",
       legalAddressRaw: "г Казань",
+      actualAddress: { sameAsLegal: true },
       postalAddress: {
         sameAsLegal: false,
         raw: "420000, г Казань",
@@ -97,7 +101,7 @@ describe("billing legal-profile contracts", () => {
     ).toBe(false);
   });
 
-  it("keeps the operator input restricted to one Markiro legal entity", () => {
+  it("accepts every seller party kind and validates actual-address inputs", () => {
     expect(contracts.operatorBillingProfileInputSchema).toBeDefined();
     const schema = contracts.operatorBillingProfileInputSchema as {
       safeParse(value: unknown): { success: boolean };
@@ -106,6 +110,7 @@ describe("billing legal-profile contracts", () => {
       fullName: "ООО Маркиро",
       displayName: "Маркиро",
       legalAddressRaw: "г Москва",
+      actualAddress: { sameAsLegal: true },
       postalAddress: { sameAsLegal: true },
       contact: { name: null, email: null, phone: null },
     };
@@ -121,9 +126,25 @@ describe("billing legal-profile contracts", () => {
     ).toBe(true);
     expect(
       schema.safeParse({
-        ...common,
+        kind: "individual",
+        fullName: "Иванов Иван Иванович",
+        displayName: "Иванов И. И.",
+        legalAddressRaw: "г Москва",
+        actualAddress: actualMatchesLegal,
+        postalAddress: { sameAsLegal: true },
+        contact: { name: null, email: null, phone: null },
+      }).success,
+    ).toBe(true);
+    expect(
+      (contracts.billingProfileInputSchema as { safeParse(value: unknown): { success: boolean } }).safeParse({
         kind: "self_employed",
+        fullName: "Петров Пётр Петрович",
+        displayName: "Петров П. П.",
         inn: "123456789012",
+        legalAddressRaw: "г Казань",
+        actualAddress: { sameAsLegal: false },
+        postalAddress: { sameAsLegal: true },
+        contact: { name: null, email: null, phone: null },
       }).success,
     ).toBe(false);
   });
@@ -146,6 +167,9 @@ describe("billing legal-profile contracts", () => {
         ogrnip: null,
         legalAddressRaw: "г Москва",
         legalAddress: { value: "г Москва", city: "Москва" },
+        actualSameAsLegal: true,
+        actualAddressRaw: null,
+        actualAddress: null,
         postalSameAsLegal: false,
         postalAddressRaw: null,
         postalAddress: null,

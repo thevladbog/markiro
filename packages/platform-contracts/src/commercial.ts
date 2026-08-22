@@ -75,11 +75,25 @@ export const billingPostalAddressInputSchema = z.discriminatedUnion("sameAsLegal
   separatePostalAddressSchema,
 ]);
 
+const actualMatchesLegalSchema = z.object({ sameAsLegal: z.literal(true) }).strict();
+const separateActualAddressSchema = z
+  .object({
+    sameAsLegal: z.literal(false),
+    raw: z.string().trim().min(1).max(1_000),
+    normalized: normalizedBillingAddressSchema.nullable().optional(),
+  })
+  .strict();
+export const billingActualAddressInputSchema = z.discriminatedUnion("sameAsLegal", [
+  actualMatchesLegalSchema,
+  separateActualAddressSchema,
+]);
+
 const billingProfileInputCommonFields = {
   fullName: z.string().trim().min(1).max(500),
   displayName: z.string().trim().min(1).max(300),
   legalAddressRaw: z.string().trim().min(1).max(1_000),
   legalAddress: normalizedBillingAddressSchema.nullable().optional(),
+  actualAddress: billingActualAddressInputSchema,
   postalAddress: billingPostalAddressInputSchema,
   contact: billingContactSchema,
 };
@@ -110,7 +124,7 @@ const soleProprietorBillingProfileInputSchema = z
     ogrnip: z.string().regex(/^\d{15}$/),
   })
   .strict();
-export const operatorBillingProfileInputSchema = z
+const legalEntityBillingProfileInputSchema = z
   .object({
     ...billingProfileInputCommonFields,
     kind: z.literal("legal_entity"),
@@ -124,8 +138,9 @@ export const billingProfileInputSchema = z.discriminatedUnion("kind", [
   individualBillingProfileInputSchema,
   selfEmployedBillingProfileInputSchema,
   soleProprietorBillingProfileInputSchema,
-  operatorBillingProfileInputSchema,
+  legalEntityBillingProfileInputSchema,
 ]);
+export const operatorBillingProfileInputSchema = billingProfileInputSchema;
 
 export const billingProfileSchema = z.object({
   id: platformUuidSchema,
@@ -138,6 +153,9 @@ export const billingProfileSchema = z.object({
   ogrnip: z.string().nullable(),
   legalAddressRaw: z.string().min(1).max(1_000),
   legalAddress: normalizedBillingAddressSchema.nullable(),
+  actualSameAsLegal: z.boolean(),
+  actualAddressRaw: z.string().max(1_000).nullable(),
+  actualAddress: normalizedBillingAddressSchema.nullable(),
   postalSameAsLegal: z.boolean(),
   postalAddressRaw: z.string().max(1_000).nullable(),
   postalAddress: normalizedBillingAddressSchema.nullable(),
@@ -150,9 +168,7 @@ export const billingProfileSchema = z.object({
   createdByPlatformUserId: nullablePlatformUserIdSchema,
   createdAt: responseTimestampSchema,
 });
-export const operatorBillingProfileSchema = billingProfileSchema.extend({
-  kind: z.literal("legal_entity"),
-});
+export const operatorBillingProfileSchema = billingProfileSchema;
 export const tenantBillingProfileSchema = billingProfileSchema.extend({
   tenantId: platformTenantIdSchema,
 });
