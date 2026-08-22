@@ -8,6 +8,15 @@ import { useAuthClient, type OrganizationSummary } from "../../auth/client.js";
 import { useClearAuthQueryCache } from "../../query/AuthQueryBoundary.js";
 import { AccountShell } from "../account/AccountShell.js";
 
+/**
+ * The organization the user just activated, kept outside React state:
+ * AuthQueryBoundary remounts the entire router subtree the moment the session
+ * picks up the new active organization, which wipes component state before
+ * the navigate effect below can run. The freshly mounted page consumes this
+ * to finish the navigation the previous instance started.
+ */
+const pendingActivation: { id: string | null } = { id: null };
+
 export function SelectOrgPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -22,7 +31,9 @@ export function SelectOrgPage() {
   const [selectError, setSelectError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (activatedId && session?.session.activeOrganizationId === activatedId) {
+    const target = activatedId ?? pendingActivation.id;
+    if (target && session?.session.activeOrganizationId === target) {
+      pendingActivation.id = null;
       void navigate("/", { replace: true });
     }
   }, [activatedId, navigate, session?.session.activeOrganizationId]);
@@ -61,6 +72,7 @@ export function SelectOrgPage() {
       setSelectingId(null);
       return;
     }
+    pendingActivation.id = organizationId;
     setActivatedId(organizationId);
   };
 
