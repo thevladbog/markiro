@@ -35,6 +35,7 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
     await rm(join(legacyMigrations, "0060_saas_legal_profiles.sql"), { force: true });
     await rm(join(legacyMigrations, "0061_saas_bank_accounts.sql"), { force: true });
     await rm(join(legacyMigrations, "0062_document_account_snapshots.sql"), { force: true });
+    await rm(join(legacyMigrations, "0063_payment_account_evidence.sql"), { force: true });
     await rm(join(legacyMigrations, "meta", "0060_snapshot.json"), { force: true });
     await rm(join(legacyMigrations, "meta", "0061_snapshot.json"), { force: true });
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
@@ -45,7 +46,8 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
       (entry) =>
         entry.tag !== "0060_saas_legal_profiles" &&
         entry.tag !== "0061_saas_bank_accounts" &&
-        entry.tag !== "0062_document_account_snapshots",
+        entry.tag !== "0062_document_account_snapshots" &&
+        entry.tag !== "0063_payment_account_evidence",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 

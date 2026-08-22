@@ -153,8 +153,8 @@ async function createPlatformDocument(): Promise<{
 }
 
 describe("current SaaS platform OpenAPI contracts", () => {
-  it("converts all 80 current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(80);
+  it("converts all 83 current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(83);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }

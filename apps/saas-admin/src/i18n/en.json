@@ -340,6 +340,59 @@
       }
     }
   },
+  "payments": {
+    "title": "Payments",
+    "open": "Payment register",
+    "loading": "Loading payments",
+    "import": {
+      "title": "Import bank statement",
+      "help": "Upload a CSV file. Invoice and account matches stay in review until payment is recorded.",
+      "file": "Bank statement file",
+      "submit": "Import",
+      "success": "Statement imported. Review the suggested matches.",
+      "error": "Could not import the statement"
+    },
+    "review": {
+      "title": "Payment reconciliation",
+      "help": "Unknown and archived accounts need an explicit decision. New bank details are never created automatically.",
+      "empty": "No payments need review",
+      "loadError": "Could not load payments for review",
+      "payerUnavailable": "Payer not provided",
+      "legalData": "Legal details",
+      "reason": "Decision reason {{reference}}",
+      "confirm": "Confirm match",
+      "confirmUnknown": "Confirm without adding account",
+      "reject": "Reject",
+      "resolveError": "Could not save the decision"
+    },
+    "recorded": {
+      "title": "Recorded payments",
+      "help": "Payments already linked to invoices and preserved in the history.",
+      "empty": "No recorded payments yet",
+      "loadError": "Could not load recorded payments"
+    },
+    "columns": {
+      "date": "Date",
+      "invoice": "Invoice",
+      "amount": "Amount",
+      "source": "Source",
+      "account": "Payer account",
+      "legal": "Legal details"
+    },
+    "statuses": {
+      "unmatched": "Unmatched",
+      "suggested": "Suggested",
+      "matched": "Confirmed",
+      "rejected": "Rejected",
+      "needs_review": "Needs review"
+    },
+    "accounts": {
+      "unavailable": "Account not provided",
+      "unknown": "Unknown account · •••• {{last4}}",
+      "known": "{{label}} · •••• {{last4}} · {{status}}",
+      "statuses": { "active": "active", "archived": "archived" }
+    }
+  },
   "documents": {
     "eyebrow": { "invoice": "Invoice issuance", "offer": "Commercial terms" },
     "title": { "invoice": "New invoice", "offer": "New offer" },

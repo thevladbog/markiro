@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { platformCommercialContracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
@@ -12,8 +12,11 @@ import { invoiceIdSchema } from "../billing/dto";
 import {
   importBankFileSchema,
   manualPaymentSchema,
+  paymentMatchIdSchema,
+  paymentMatchResolveSchema,
   type ImportBankFileDto,
   type ManualPaymentDto,
+  type PaymentMatchResolveDto,
 } from "./dto";
 import { BillingPaymentsService } from "./billing-payments.service";
 
@@ -28,6 +31,33 @@ export class BillingPaymentsController {
     return parsePlatformResponse(
       platformCommercialContracts.payments.list.response,
       await this.payments.list(tenantId),
+    );
+  }
+
+  @Get("matches")
+  @PlatformApiProtectedOk({ response: platformCommercialContracts.payments.matches.list.response })
+  @RequirePlatformCapabilities("billing.read")
+  async listMatches(@Query("tenantId") tenantId?: string) {
+    return parsePlatformResponse(
+      platformCommercialContracts.payments.matches.list.response,
+      await this.payments.listMatches(tenantId),
+    );
+  }
+
+  @Patch("matches/:matchId")
+  @PlatformApiProtectedOk({
+    body: platformCommercialContracts.payments.matches.resolve.body,
+    response: platformCommercialContracts.payments.matches.resolve.response,
+  })
+  @RequirePlatformCapabilities("billing.write")
+  async resolveMatch(
+    @Req() req: RequestWithPlatformPrincipal,
+    @Param("matchId", new ZodValidationPipe(paymentMatchIdSchema)) matchId: string,
+    @Body(new ZodValidationPipe(paymentMatchResolveSchema)) body: PaymentMatchResolveDto,
+  ) {
+    return parsePlatformResponse(
+      platformCommercialContracts.payments.matches.resolve.response,
+      await this.payments.resolveMatch(req.platformPrincipal!, matchId, body),
     );
   }
 

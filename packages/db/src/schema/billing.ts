@@ -459,6 +459,8 @@ export const paymentMatches = pgTable(
     importRowId: uuid("import_row_id").notNull(),
     tenantId: text("tenant_id"),
     invoiceId: uuid("invoice_id"),
+    tenantBankAccountId: uuid("tenant_bank_account_id"),
+    payerAccountEvidence: jsonb("payer_account_evidence"),
     status: paymentMatchStatus("status").notNull().default("unmatched"),
     score: integer("score"),
     reason: text("reason"),
@@ -478,6 +480,15 @@ export const paymentMatches = pgTable(
       columns: [table.tenantId, table.invoiceId],
       foreignColumns: [invoices.tenantId, invoices.id],
     }),
+    foreignKey({
+      name: "payment_matches_tenant_account_fk",
+      columns: [table.tenantId, table.tenantBankAccountId],
+      foreignColumns: [tenantBankAccounts.tenantId, tenantBankAccounts.id],
+    }),
+    check(
+      "payment_matches_account_tenant_check",
+      sql`${table.tenantBankAccountId} is null or ${table.tenantId} is not null`,
+    ),
     check(
       "payment_matches_score_check",
       sql`${table.score} is null or (${table.score} >= 0 and ${table.score} <= 100)`,

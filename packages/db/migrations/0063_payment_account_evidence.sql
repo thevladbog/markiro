@@ -1,0 +1,4 @@
+ALTER TABLE "payment_matches" ADD COLUMN "tenant_bank_account_id" uuid;--> statement-breakpoint
+ALTER TABLE "payment_matches" ADD COLUMN "payer_account_evidence" jsonb;--> statement-breakpoint
+ALTER TABLE "payment_matches" ADD CONSTRAINT "payment_matches_tenant_account_fk" FOREIGN KEY ("tenant_id","tenant_bank_account_id") REFERENCES "public"."tenant_bank_accounts"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "payment_matches" ADD CONSTRAINT "payment_matches_account_tenant_check" CHECK ("payment_matches"."tenant_bank_account_id" is null or "payment_matches"."tenant_id" is not null);

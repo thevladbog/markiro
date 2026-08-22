@@ -29,9 +29,12 @@ export function BillingPage() {
       <PageHeader
         title={t("billing.title")}
         actions={
-          principal.capabilities.includes("billing.write") ? (
-            <Link to="/billing/new">{t("billing.create")}</Link>
-          ) : undefined
+          <span className="billing-header-actions">
+            <Link to="/payments">{t("payments.open")}</Link>
+            {principal.capabilities.includes("billing.write") ? (
+              <Link to="/billing/new">{t("billing.create")}</Link>
+            ) : null}
+          </span>
         }
       />
       {(location.state as { createdDocument?: unknown } | null)?.createdDocument === "invoice" ? (

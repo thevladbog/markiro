@@ -845,6 +845,60 @@ describe("platform commercial contracts", () => {
     ).toBe("ready");
   });
 
+  it("exposes only masked payer account evidence in payment matches", () => {
+    const match = {
+      id: "65111111-1111-4111-8111-111111111111",
+      importId: "64111111-1111-4111-8111-111111111111",
+      importRowId: "63111111-1111-4111-8111-111111111111",
+      sourceRowId: "1",
+      operationDate: CREATED_AT,
+      amount: "15000.00",
+      currency: "RUB",
+      payerName: "ООО Покупатель",
+      paymentPurpose: "Оплата INV-000021",
+      bankReference: "BANK-21",
+      tenantId: TENANT_ID,
+      invoiceId: INVOICE_ID,
+      invoiceNumber: "INV-000021",
+      status: "needs_review",
+      score: 80,
+      reason: "unknown_payer_account",
+      tenantBankAccountId: null,
+      payerAccountEvidence: { kind: "unknown", last4: "9999" },
+      decidedByPlatformUserId: null,
+      decidedAt: null,
+      createdAt: CREATED_AT,
+    } as const;
+
+    expect(
+      platformCommercialContracts.payments.matches.list.response.parse({ items: [match] }).items[0]
+        ?.payerAccountEvidence,
+    ).toEqual({ kind: "unknown", last4: "9999" });
+    expect(
+      platformCommercialContracts.payments.matches.list.response.safeParse({
+        items: [
+          {
+            ...match,
+            payerAccountEvidence: {
+              kind: "unknown",
+              last4: "9999",
+              settlementAccount: "40702810900000009999",
+            },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.payments.matches.resolve.body.parse({
+        decision: "matched",
+        tenantId: TENANT_ID,
+        invoiceId: INVOICE_ID,
+        tenantBankAccountId: null,
+        reason: "operator_verified_external_account",
+      }),
+    ).toMatchObject({ decision: "matched", tenantBankAccountId: null });
+  });
+
   it("validates offer and invoice request activation policies without normalizing spellings", () => {
     const offer = platformCommercialContracts.offers.create.body.parse({
       tenantId: TENANT_ID,

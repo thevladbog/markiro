@@ -333,6 +333,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "BillingPaymentsController.import": platform(
     "platform bank import is guarded by platform billing capabilities",
   ),
+  "BillingPaymentsController.resolveMatch": platform(
+    "platform payment matching decisions are guarded by platform billing capabilities",
+  ),
   "BillingProfilesController.setOperator": platform(
     "operator billing profile mutation is guarded by platform billing capabilities",
   ),

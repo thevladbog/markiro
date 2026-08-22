@@ -244,6 +244,19 @@ export const CURRENT_SAAS_ROUTES = [
   ),
   route("get", "/platform/payments", "200", platformCommercialContracts.payments.list.response),
   route(
+    "get",
+    "/platform/payments/matches",
+    "200",
+    platformCommercialContracts.payments.matches.list.response,
+  ),
+  route(
+    "patch",
+    "/platform/payments/matches/{matchId}",
+    "200",
+    platformCommercialContracts.payments.matches.resolve.response,
+    { body: platformCommercialContracts.payments.matches.resolve.body },
+  ),
+  route(
     "post",
     "/platform/payments/invoices/{invoiceId}",
     "201",

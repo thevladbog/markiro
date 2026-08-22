@@ -1051,6 +1051,76 @@ export const paymentImportServiceResultSchema = paymentImportResultSchema
   })
   .strict();
 
+export const payerAccountEvidenceSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("known"),
+      last4: z.string().regex(/^\d{4}$/),
+      accountStatus: bankAccountStatusSchema,
+      label: z.string().min(1).max(200),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("unknown"),
+      last4: z.string().regex(/^\d{4}$/),
+    })
+    .strict(),
+  z.object({ kind: z.literal("unavailable"), last4: z.null() }).strict(),
+]);
+
+export const paymentMatchSchema = z
+  .object({
+    id: platformUuidSchema,
+    importId: platformUuidSchema,
+    importRowId: platformUuidSchema,
+    sourceRowId: z.string().min(1).max(200),
+    operationDate: nullableResponseTimestampSchema,
+    amount: platformMoneySchema.nullable(),
+    currency: z.string().max(10).nullable(),
+    payerName: z.string().max(1_000).nullable(),
+    paymentPurpose: z.string().max(5_000).nullable(),
+    bankReference: z.string().max(1_000).nullable(),
+    tenantId: platformTenantIdSchema.nullable(),
+    invoiceId: platformUuidSchema.nullable(),
+    invoiceNumber: z.string().min(1).nullable(),
+    status: z.enum(["unmatched", "suggested", "matched", "rejected", "needs_review"]),
+    score: z.number().int().min(0).max(100).nullable(),
+    reason: z.string().max(1_000).nullable(),
+    tenantBankAccountId: platformUuidSchema.nullable(),
+    payerAccountEvidence: payerAccountEvidenceSchema.nullable(),
+    decidedByPlatformUserId: nullablePlatformUserIdSchema,
+    decidedAt: nullableResponseTimestampSchema,
+    createdAt: responseTimestampSchema,
+  })
+  .strict();
+
+export const paymentMatchServiceSchema = paymentMatchSchema
+  .extend({
+    operationDate: nullableServiceTimestampSchema,
+    decidedAt: nullableServiceTimestampSchema,
+    createdAt: serviceTimestampSchema,
+  })
+  .strict();
+
+export const paymentMatchResolveSchema = z.discriminatedUnion("decision", [
+  z
+    .object({
+      decision: z.literal("matched"),
+      tenantId: platformTenantIdSchema,
+      invoiceId: platformUuidSchema,
+      tenantBankAccountId: platformUuidSchema.nullable(),
+      reason: z.string().trim().min(1).max(1_000),
+    })
+    .strict(),
+  z
+    .object({
+      decision: z.literal("rejected"),
+      reason: z.string().trim().min(1).max(1_000),
+    })
+    .strict(),
+]);
+
 const offerIdSchema = platformUuidSchema;
 const invoiceIdSchema = platformUuidSchema;
 const documentIdSchema = platformUuidSchema;
@@ -1158,6 +1228,14 @@ export const platformCommercialContracts = {
   },
   payments: {
     list: { response: z.object({ items: z.array(billingPaymentSchema) }).strict() },
+    matches: {
+      list: { response: z.object({ items: z.array(paymentMatchSchema) }).strict() },
+      resolve: {
+        params: platformUuidSchema,
+        body: paymentMatchResolveSchema,
+        response: paymentMatchSchema,
+      },
+    },
     manual: {
       params: invoiceIdSchema,
       body: manualPaymentSchema,
@@ -1219,6 +1297,11 @@ export type PaymentImportDto = z.output<typeof paymentImportSchema>;
 export type PaymentImportResult = z.output<typeof paymentImportResultSchema>;
 export type PaymentImportResultSource = z.input<typeof paymentImportResultSchema>;
 export type PaymentImportServiceResultSource = z.input<typeof paymentImportServiceResultSchema>;
+export type PayerAccountEvidence = z.output<typeof payerAccountEvidenceSchema>;
+export type PaymentMatch = z.output<typeof paymentMatchSchema>;
+export type PaymentMatchServiceSource = z.input<typeof paymentMatchServiceSchema>;
+export type PaymentMatchResolveInput = z.input<typeof paymentMatchResolveSchema>;
+export type PaymentMatchResolveDto = z.output<typeof paymentMatchResolveSchema>;
 export type BillingProfileInput = z.output<typeof billingProfileInputSchema>;
 export type OperatorBillingProfileInput = z.output<typeof operatorBillingProfileInputSchema>;
 export type BillingProfile = z.output<typeof billingProfileSchema>;
