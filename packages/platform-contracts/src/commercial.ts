@@ -191,6 +191,63 @@ export const operatorBankAccountSchema = bankAccountSchema;
 export const tenantBankAccountSchema = bankAccountSchema.extend({
   tenantId: platformTenantIdSchema,
 });
+
+export const dadataSuggestionStatusSchema = z.enum([
+  "ready",
+  "unconfigured",
+  "unavailable",
+  "no_results",
+]);
+export const dadataAddressSuggestionSchema = normalizedBillingAddressSchema.strict();
+export const dadataOrganizationSuggestionSchema = z
+  .object({
+    value: z.string().trim().min(1).max(1_000),
+    kind: z.enum(["legal_entity", "sole_proprietor"]),
+    fullName: z.string().trim().min(1).max(500),
+    displayName: z.string().trim().min(1).max(300),
+    inn: z.string().regex(/^\d{10}(?:\d{2})?$/),
+    kpp: z
+      .string()
+      .regex(/^\d{9}$/)
+      .nullable(),
+    ogrn: z
+      .string()
+      .regex(/^\d{13}$/)
+      .nullable(),
+    ogrnip: z
+      .string()
+      .regex(/^\d{15}$/)
+      .nullable(),
+    legalAddress: dadataAddressSuggestionSchema.nullable(),
+  })
+  .strict();
+export const dadataBankSuggestionSchema = z
+  .object({
+    value: z.string().trim().min(1).max(500),
+    bic: z.string().regex(/^\d{9}$/),
+    bankName: z.string().trim().min(1).max(500),
+    correspondentAccount: z
+      .string()
+      .regex(/^\d{20}$/)
+      .nullable(),
+  })
+  .strict();
+
+const dadataResultSchema = <T extends z.ZodType>(item: T) =>
+  z
+    .object({
+      status: dadataSuggestionStatusSchema,
+      items: z.array(item).max(20),
+    })
+    .strict();
+export const dadataOrganizationResultSchema = dadataResultSchema(
+  dadataOrganizationSuggestionSchema,
+);
+export const dadataAddressResultSchema = dadataResultSchema(dadataAddressSuggestionSchema);
+export const dadataBankResultSchema = dadataResultSchema(dadataBankSuggestionSchema);
+export const dadataStatusResponseSchema = z
+  .object({ status: dadataSuggestionStatusSchema })
+  .strict();
 export const bankAccountArchiveSchema = z
   .object({
     replacementAccountId: platformUuidSchema.optional(),
@@ -1142,3 +1199,7 @@ export type BankAccount = z.output<typeof bankAccountSchema>;
 export type OperatorBankAccount = z.output<typeof operatorBankAccountSchema>;
 export type TenantBankAccount = z.output<typeof tenantBankAccountSchema>;
 export type BankAccountArchiveInput = z.output<typeof bankAccountArchiveSchema>;
+export type DadataSuggestionStatus = z.output<typeof dadataSuggestionStatusSchema>;
+export type DadataAddressSuggestion = z.output<typeof dadataAddressSuggestionSchema>;
+export type DadataOrganizationSuggestion = z.output<typeof dadataOrganizationSuggestionSchema>;
+export type DadataBankSuggestion = z.output<typeof dadataBankSuggestionSchema>;

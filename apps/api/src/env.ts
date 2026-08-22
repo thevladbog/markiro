@@ -186,6 +186,8 @@ const EnvSchema = z
     S3_ACCESS_KEY_ID: z.string().min(1),
     S3_SECRET_ACCESS_KEY: z.string().min(1),
     S3_FORCE_PATH_STYLE: explicitBooleanSchema,
+    DADATA_TOKEN: z.string().trim().min(1).optional(),
+    DADATA_SECRET: z.string().trim().min(1).optional(),
   })
   .superRefine((env, ctx) => {
     if (env.PLATFORM_AUTH_SECRET === env.BETTER_AUTH_SECRET) {
@@ -235,6 +237,13 @@ const EnvSchema = z
         }
       }
     }
+    if (env.DADATA_SECRET && !env.DADATA_TOKEN) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["DADATA_SECRET"],
+        message: "requires DADATA_TOKEN",
+      });
+    }
     if (env.NODE_ENV !== "production") return;
     if (!env.SMTP_USER) {
       ctx.addIssue({ code: "custom", path: ["SMTP_USER"], message: "required in production" });
@@ -276,6 +285,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     "LANDING_DEMO_SOURCE_LIMIT",
     "LANDING_DEMO_GLOBAL_LIMIT",
     ...Object.keys(DEVELOPMENT_STORAGE_DEFAULTS),
+    "DADATA_TOKEN",
+    "DADATA_SECRET",
   ]) {
     if (normalizedSource[name]?.trim() === "") delete normalizedSource[name];
   }
