@@ -35,16 +35,25 @@ test("API image keeps the production runtime closure minimal and hardened", asyn
   assert.match(source, /pnpm install --frozen-lockfile/);
   assert.match(
     source,
+    /COPY packages\/platform-contracts\/package\.json \.\/packages\/platform-contracts\/package\.json/,
+  );
+  assert.match(
+    source,
     /COPY packages\/legal-documents\/package\.json \.\/packages\/legal-documents\/package\.json/,
   );
+  assert.match(source, /COPY packages\/platform-contracts \.\/packages\/platform-contracts/);
   assert.match(source, /COPY packages\/legal-documents \.\/packages\/legal-documents/);
+  const platformContractsBuild = source.indexOf(
+    "RUN pnpm --filter @markiro/platform-contracts build",
+  );
   const domainBuild = source.indexOf("RUN pnpm --filter @markiro/domain build");
   const dbBuild = source.indexOf("RUN pnpm --filter @markiro/db build");
   const emailBuild = source.indexOf("RUN pnpm --filter @markiro/email build");
   const legalBuild = source.indexOf("RUN pnpm --filter @markiro/legal-documents build");
   const apiBuild = source.indexOf("RUN pnpm --filter @markiro/api build");
   assert.ok(
-    domainBuild >= 0 &&
+    platformContractsBuild >= 0 &&
+      domainBuild > platformContractsBuild &&
       dbBuild > domainBuild &&
       emailBuild > dbBuild &&
       legalBuild > emailBuild &&
@@ -116,6 +125,8 @@ test("Docker build context excludes local state while retaining required build i
     "!packages/db/**",
     "!packages/domain/**",
     "!packages/email/**",
+    "!packages/platform-contracts/",
+    "!packages/platform-contracts/**",
     "!packages/legal-documents/**",
     "!packages/db/migrations/**",
     "!deploy/production/yandex-cloud-ca.pem",

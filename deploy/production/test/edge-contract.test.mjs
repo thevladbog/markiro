@@ -769,11 +769,13 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
     "apps/saas-admin/package.json ./apps/saas-admin/package.json",
     "apps/kiosk/package.json ./apps/kiosk/package.json",
     "apps/landing/package.json ./apps/landing/package.json",
+    "packages/platform-contracts/package.json ./packages/platform-contracts/package.json",
     "packages/legal-documents/package.json ./packages/legal-documents/package.json",
     "apps/admin ./apps/admin",
     "apps/saas-admin ./apps/saas-admin",
     "apps/kiosk ./apps/kiosk",
     "apps/landing ./apps/landing",
+    "packages/platform-contracts ./packages/platform-contracts",
     "packages/legal-documents ./packages/legal-documents",
   ]) {
     assert.match(base, new RegExp(`COPY ${escapeRegExp(input)}`));
@@ -878,6 +880,8 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
     "!packages/",
     "!packages/ui/",
     "!packages/ui/**",
+    "!packages/platform-contracts/",
+    "!packages/platform-contracts/**",
     "!packages/legal-documents/",
     "!packages/legal-documents/**",
     "!deploy/",

@@ -3,6 +3,7 @@ import express from "express";
 import { Controller, Get, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { schema } from "@markiro/db";
+import { platformErrorSchema } from "@markiro/platform-contracts";
 import { and, desc, eq, sql } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -413,7 +414,12 @@ describe.skipIf(!ready)("platform authentication isolation", () => {
         .post("/platform/activation/complete")
         .send(attempt)
         .expect(404);
-      expect(response.body).toEqual({ code: "activation_unavailable" });
+      const error = platformErrorSchema.parse(response.body);
+      expect(error).toMatchObject({
+        code: "activation_unavailable",
+        message: "The requested platform resource was not found.",
+      });
+      expect(error.requestId).toBe(response.headers["x-request-id"]);
 
       const afterCountRows = await setup.db
         .select({ count: sql<number>`count(*)::int` })

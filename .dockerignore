@@ -24,6 +24,8 @@
 !packages/domain/**
 !packages/email/
 !packages/email/**
+!packages/platform-contracts/
+!packages/platform-contracts/**
 !packages/legal-documents/
 !packages/legal-documents/**
 !packages/ui/
