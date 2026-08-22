@@ -477,17 +477,95 @@
     "routeLoading": "Загружаем раздел",
     "skip": "Перейти к содержимому",
     "navigation": "Разделы платформы",
+    "scope": "Управление платформой",
+    "workspace": "SaaS · Операционный контур",
+    "openNavigation": "Меню",
+    "closeNavigation": "Закрыть меню",
+    "groups": {
+      "operations": "Операции",
+      "commerce": "Коммерция",
+      "platform": "Платформа",
+      "settings": "Настройки"
+    },
+    "overview": "Обзор",
     "tenants": "Тенанты",
     "catalog": "Каталог",
     "offers": "Предложения",
-    "billing": "Счета",
+    "invoices": "Счета",
+    "payments": "Платежи",
+    "monitoring": "Мониторинг",
     "team": "Команда",
     "audit": "Аудит",
-    "settings": "Настройки",
+    "organization": "Наша организация",
     "language": "Язык интерфейса",
-    "statusLabel": "Состояние платформы",
-    "sessionConfirmed": "Сеанс · подтверждён",
-    "secureSession": "2FA · СЕАНС ЗАЩИЩЁН"
+    "sessionConfirmed": "2FA · сеанс защищён"
+  },
+  "overview": {
+    "title": "Операционный обзор",
+    "description": "Тенанты, расчёты и состояние платформы — только подтверждённые данные.",
+    "loading": "Загружаем операционные показатели",
+    "metrics": {
+      "label": "Ключевые показатели",
+      "active": "Активные тенанты",
+      "activeHint": "Пробные и активные подписки",
+      "restriction": "Близки к ограничению",
+      "restrictionHint": "Подписка закончится в течение {{days}} дней",
+      "overdue": "Просроченные счета",
+      "overdueHint": "Выставлены, не оплачены, срок истёк"
+    },
+    "severity": { "critical": "Критично", "warning": "Срок", "attention": "Нужно заполнить" },
+    "decisions": {
+      "eyebrow": "Очередь решений",
+      "title": "Требует внимания",
+      "empty": "Решений, требующих внимания, нет",
+      "open": "Открыть →",
+      "overdue": "Счёт {{number}} · {{tenant}}",
+      "subscription": "Подписка · {{tenant}}",
+      "tenantLegal": "Юридические данные · {{tenant}}",
+      "operatorLegal": "Наша организация · реквизиты и счета"
+    },
+    "activity": {
+      "eyebrow": "Журнал",
+      "title": "Последние действия",
+      "empty": "Действий пока нет"
+    },
+    "health": {
+      "eyebrow": "Инфраструктура",
+      "title": "Состояние платформы",
+      "loading": "Проверяем состояние платформы",
+      "checkedAt": "Проверено: {{value}}",
+      "status": {
+        "ok": "Все системы работают штатно",
+        "degraded": "Есть отклонения",
+        "unavailable": "Система недоступна"
+      },
+      "components": {
+        "database": "База данных",
+        "jobs": "Фоновые задачи",
+        "smtp": "SMTP",
+        "storage": "Хранилище"
+      },
+      "componentStatus": {
+        "healthy": "Работает",
+        "degraded": "Есть отклонения",
+        "unavailable": "Недоступно"
+      },
+      "categories": {
+        "database_unavailable": "Недоступна",
+        "database_timeout": "Задержка ответа",
+        "jobs_unavailable": "Недоступны",
+        "jobs_timeout": "Задержка ответа",
+        "smtp_unavailable": "Недоступен",
+        "smtp_timeout": "Задержка ответа",
+        "storage_unavailable": "Недоступно",
+        "storage_timeout": "Задержка ответа"
+      },
+      "dadata": { "ready": "Подключена", "unconfigured": "Не настроена" }
+    }
+  },
+  "monitoring": {
+    "title": "Мониторинг",
+    "description": "Актуальная готовность основных сервисов и интеграций."
   },
   "navigationGuard": {
     "title": "Есть несохранённые изменения",

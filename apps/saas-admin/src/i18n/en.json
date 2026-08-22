@@ -472,17 +472,91 @@
     "routeLoading": "Loading section",
     "skip": "Skip to content",
     "navigation": "Platform sections",
+    "scope": "Platform operations",
+    "workspace": "SaaS · Operations",
+    "openNavigation": "Menu",
+    "closeNavigation": "Close menu",
+    "groups": {
+      "operations": "Operations",
+      "commerce": "Commerce",
+      "platform": "Platform",
+      "settings": "Settings"
+    },
+    "overview": "Overview",
     "tenants": "Tenants",
     "catalog": "Catalog",
     "offers": "Offers",
-    "billing": "Invoices",
+    "invoices": "Invoices",
+    "payments": "Payments",
+    "monitoring": "Monitoring",
     "team": "Team",
     "audit": "Audit",
-    "settings": "Settings",
+    "organization": "Our organization",
     "language": "Interface language",
-    "statusLabel": "Platform status",
-    "sessionConfirmed": "Session · confirmed",
-    "secureSession": "2FA · SESSION SECURED"
+    "sessionConfirmed": "2FA · session secured"
+  },
+  "overview": {
+    "title": "Operational overview",
+    "description": "Tenants, billing, and platform health — confirmed data only.",
+    "loading": "Loading operational metrics",
+    "metrics": {
+      "label": "Key metrics",
+      "active": "Active tenants",
+      "activeHint": "Trial and active subscriptions",
+      "restriction": "Approaching restriction",
+      "restrictionHint": "Subscription ends within {{days}} days",
+      "overdue": "Overdue invoices",
+      "overdueHint": "Issued, unpaid, and past due"
+    },
+    "severity": { "critical": "Critical", "warning": "Due soon", "attention": "Missing data" },
+    "decisions": {
+      "eyebrow": "Decision queue",
+      "title": "Needs attention",
+      "empty": "No decisions require attention",
+      "open": "Open →",
+      "overdue": "Invoice {{number}} · {{tenant}}",
+      "subscription": "Subscription · {{tenant}}",
+      "tenantLegal": "Legal details · {{tenant}}",
+      "operatorLegal": "Our organization · details and accounts"
+    },
+    "activity": { "eyebrow": "Journal", "title": "Recent activity", "empty": "No activity yet" },
+    "health": {
+      "eyebrow": "Infrastructure",
+      "title": "Platform health",
+      "loading": "Checking platform health",
+      "checkedAt": "Checked: {{value}}",
+      "status": {
+        "ok": "All systems operational",
+        "degraded": "Degraded components",
+        "unavailable": "System unavailable"
+      },
+      "components": {
+        "database": "Database",
+        "jobs": "Background jobs",
+        "smtp": "SMTP",
+        "storage": "Storage"
+      },
+      "componentStatus": {
+        "healthy": "Operational",
+        "degraded": "Degraded",
+        "unavailable": "Unavailable"
+      },
+      "categories": {
+        "database_unavailable": "Unavailable",
+        "database_timeout": "Response delay",
+        "jobs_unavailable": "Unavailable",
+        "jobs_timeout": "Response delay",
+        "smtp_unavailable": "Unavailable",
+        "smtp_timeout": "Response delay",
+        "storage_unavailable": "Unavailable",
+        "storage_timeout": "Response delay"
+      },
+      "dadata": { "ready": "Connected", "unconfigured": "Not configured" }
+    }
+  },
+  "monitoring": {
+    "title": "Monitoring",
+    "description": "Current readiness of core services and integrations."
   },
   "navigationGuard": {
     "title": "Unsaved changes",

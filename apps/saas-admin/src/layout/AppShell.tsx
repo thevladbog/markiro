@@ -1,13 +1,19 @@
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 
-import { Button, StatusChip } from "@markiro/ui";
+import { Button, OperationalRail, type OperationalRailGroup } from "@markiro/ui";
+import type { PlatformCapability } from "@markiro/platform-contracts";
 
 import { usePlatformPrincipal } from "../auth/PlatformAuthBoundary.js";
 import { useAuthClient } from "../auth/client.js";
 import { MarkiroLogo } from "../components/MarkiroLogo.js";
 import i18n from "../i18n/index.js";
 import { NavigationGuardProvider, useNavigationGuard } from "./NavigationGuard.js";
+
+function RailIndex({ children }: { children: string }) {
+  return <span className="app-rail__index">{children}</span>;
+}
 
 function AppShellContent() {
   const { t } = useTranslation();
@@ -16,6 +22,83 @@ function AppShellContent() {
   const location = useLocation();
   const navigate = useNavigate();
   const guard = useNavigationGuard(false, false);
+  const [railOpen, setRailOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+
+  const hasCapability = (capability: PlatformCapability) =>
+    principal.capabilities.includes(capability);
+  const isActive = (path: string) =>
+    path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
+  const item = (id: string, label: string, to: string, index: string) => ({
+    id,
+    label,
+    to,
+    active: isActive(to),
+    icon: <RailIndex>{index}</RailIndex>,
+  });
+
+  const groups: OperationalRailGroup[] = [
+    {
+      id: "operations",
+      label: t("shell.groups.operations"),
+      items: [
+        item("overview", t("shell.overview"), "/", "01"),
+        item("tenants", t("shell.tenants"), "/tenants", "02"),
+      ],
+    },
+    {
+      id: "commerce",
+      label: t("shell.groups.commerce"),
+      items: [
+        ...(hasCapability("catalog.read")
+          ? [
+              item("catalog", t("shell.catalog"), "/catalog", "03"),
+              item("offers", t("shell.offers"), "/offers", "04"),
+            ]
+          : []),
+        ...(hasCapability("billing.read")
+          ? [
+              item("invoices", t("shell.invoices"), "/invoices", "05"),
+              item("payments", t("shell.payments"), "/payments", "06"),
+            ]
+          : []),
+      ],
+    },
+    {
+      id: "platform",
+      label: t("shell.groups.platform"),
+      items: [
+        ...(hasCapability("diagnostics.read")
+          ? [item("monitoring", t("shell.monitoring"), "/monitoring", "07")]
+          : []),
+        ...(hasCapability("platformTeam.write")
+          ? [item("team", t("shell.team"), "/team", "08")]
+          : []),
+        ...(hasCapability("audit.read") ? [item("audit", t("shell.audit"), "/audit", "09")] : []),
+      ],
+    },
+    ...(hasCapability("billing.read")
+      ? [
+          {
+            id: "settings",
+            label: t("shell.groups.settings"),
+            items: [item("organization", t("shell.organization"), "/settings/organization", "10")],
+          },
+        ]
+      : []),
+  ].filter((group) => group.items.length > 0);
+
+  useEffect(() => {
+    if (!railOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setRailOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [railOpen]);
 
   const signOut = async () => {
     await auth.signOut();
@@ -27,102 +110,91 @@ function AppShellContent() {
       <a className="skip-link" href="#main-content">
         {t("shell.skip")}
       </a>
-      <header className="app-header">
-        <div className="app-brand">
-          <MarkiroLogo className="app-brand__logo" />
-          <span className="app-brand__scope">PLATFORM OPERATIONS</span>
-        </div>
-        <nav className="app-nav" aria-label={t("shell.navigation")}>
-          <NavLink to="/tenants" className={({ isActive }) => (isActive ? "active" : undefined)}>
-            <span className="nav-index" aria-hidden="true">
-              01
-            </span>
-            {t("shell.tenants")}
-          </NavLink>
-          <NavLink to="/catalog" className={({ isActive }) => (isActive ? "active" : undefined)}>
-            <span className="nav-index" aria-hidden="true">
-              02
-            </span>
-            {t("shell.catalog")}
-          </NavLink>
-          <NavLink to="/offers" className={({ isActive }) => (isActive ? "active" : undefined)}>
-            <span className="nav-index" aria-hidden="true">
-              03
-            </span>
-            {t("shell.offers")}
-          </NavLink>
-          <NavLink
-            to="/billing"
-            className={({ isActive }) =>
-              isActive || location.pathname.startsWith("/payments") ? "active" : undefined
-            }
-          >
-            <span className="nav-index" aria-hidden="true">
-              04
-            </span>
-            {t("shell.billing")}
-          </NavLink>
-          <NavLink to="/team" className={({ isActive }) => (isActive ? "active" : undefined)}>
-            <span className="nav-index" aria-hidden="true">
-              05
-            </span>
-            {t("shell.team")}
-          </NavLink>
-          <NavLink to="/audit" className={({ isActive }) => (isActive ? "active" : undefined)}>
-            <span className="nav-index" aria-hidden="true">
-              06
-            </span>
-            {t("shell.audit")}
-          </NavLink>
-          {principal.capabilities.includes("billing.read") ? (
+      <div className={railOpen ? "app-rail app-rail--open" : "app-rail"} id="platform-navigation">
+        <OperationalRail
+          brand={
+            <div className="app-rail__brand">
+              <MarkiroLogo className="app-rail__logo" variant="on-dark" />
+              <span>{t("shell.scope")}</span>
+            </div>
+          }
+          groups={groups}
+          navLabel={t("shell.navigation")}
+          renderLink={(railItem, content, linkProps) => (
             <NavLink
-              to="/settings/organization"
-              className={({ isActive }) => (isActive ? "active" : undefined)}
+              to={railItem.to}
+              className={linkProps.className}
+              aria-current={linkProps["aria-current"]}
+              onClick={() => setRailOpen(false)}
             >
-              <span className="nav-index" aria-hidden="true">
-                07
-              </span>
-              {t("shell.settings")}
+              {content}
             </NavLink>
-          ) : null}
-        </nav>
-        <div className="app-tools">
-          <span className="role-tag">{t(`roles.${principal.role}`)}</span>
-          <div className="language-switch" aria-label={t("shell.language")}>
-            <button
-              type="button"
-              aria-pressed={i18n.language.startsWith("ru")}
-              onClick={() => void i18n.changeLanguage("ru")}
-            >
-              RU
-            </button>
-            <button
-              type="button"
-              aria-pressed={i18n.language.startsWith("en")}
-              onClick={() => void i18n.changeLanguage("en")}
-            >
-              EN
-            </button>
-          </div>
-          <Button
-            variant="secondary"
-            onClick={() => guard.requestProtectedAction(() => void signOut())}
+          )}
+          footer={
+            <div className="app-rail__footer">
+              <span>{t(`roles.${principal.role}`)}</span>
+              <strong>{t("shell.sessionConfirmed")}</strong>
+            </div>
+          }
+        />
+      </div>
+      {railOpen ? (
+        <button
+          className="app-rail__backdrop"
+          type="button"
+          aria-label={t("shell.closeNavigation")}
+          onClick={() => {
+            setRailOpen(false);
+            menuButtonRef.current?.focus();
+          }}
+        />
+      ) : null}
+      <div className="app-workspace">
+        <div className="workspace-header">
+          <button
+            ref={menuButtonRef}
+            className="workspace-header__menu"
+            type="button"
+            aria-expanded={railOpen}
+            aria-controls="platform-navigation"
+            onClick={() => setRailOpen((open) => !open)}
           >
-            {t("auth.signOut")}
-          </Button>
+            <span aria-hidden="true">☰</span>
+            {t("shell.openNavigation")}
+          </button>
+          <div className="workspace-header__context">
+            <span>{t("shell.workspace")}</span>
+            <strong>{t(`roles.${principal.role}`)}</strong>
+          </div>
+          <div className="workspace-header__tools">
+            <div className="language-switch" aria-label={t("shell.language")}>
+              <button
+                type="button"
+                aria-pressed={i18n.language.startsWith("ru")}
+                onClick={() => void i18n.changeLanguage("ru")}
+              >
+                RU
+              </button>
+              <button
+                type="button"
+                aria-pressed={i18n.language.startsWith("en")}
+                onClick={() => void i18n.changeLanguage("en")}
+              >
+                EN
+              </button>
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() => guard.requestProtectedAction(() => void signOut())}
+            >
+              {t("auth.signOut")}
+            </Button>
+          </div>
         </div>
-      </header>
-      <main className="app-main" id="main-content">
-        <Outlet />
-      </main>
-      <footer className="status-rail" role="status" aria-label={t("shell.statusLabel")}>
-        <span>SAAS CONSOLE · 01</span>
-        <span className="status-rail__separator" aria-hidden="true" />
-        <StatusChip status="ok" label={t("shell.sessionConfirmed")} />
-        <span className="status-rail__spacer" />
-        <span>{t("shell.secureSession")}</span>
-        <span className="rail-coordinate">MOW · UTC+3</span>
-      </footer>
+        <main className="app-main" id="main-content">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

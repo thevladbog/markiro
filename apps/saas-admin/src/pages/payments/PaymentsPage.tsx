@@ -120,7 +120,7 @@ export function PaymentsPage() {
                 key: "invoiceId",
                 title: t("payments.columns.invoice"),
                 render: (payment: BillingPayment) => (
-                  <Link className="table-link" to={`/billing/${payment.invoiceId}`}>
+                  <Link className="table-link" to={`/invoices/${payment.invoiceId}`}>
                     {payment.bankReference}
                   </Link>
                 ),
@@ -196,7 +196,7 @@ function PaymentMatchCard({ match, canWrite }: { match: PaymentMatch; canWrite: 
           <dt>{t("payments.columns.invoice")}</dt>
           <dd>
             {match.invoiceId && match.invoiceNumber ? (
-              <Link to={`/billing/${match.invoiceId}`}>{match.invoiceNumber}</Link>
+              <Link to={`/invoices/${match.invoiceId}`}>{match.invoiceNumber}</Link>
             ) : (
               "—"
             )}

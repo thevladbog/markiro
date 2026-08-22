@@ -126,7 +126,7 @@ export function InvoiceDetailPage() {
   return (
     <section className="invoice-detail-page">
       <div className="invoice-detail-backline">
-        <Link to="/billing">← {t("billing.back")}</Link>
+        <Link to="/invoices">← {t("billing.back")}</Link>
       </div>
       <PageHeader
         title={t("billing.detailTitle", { number: invoice.number })}

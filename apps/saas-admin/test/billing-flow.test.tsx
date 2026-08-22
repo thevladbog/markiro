@@ -217,7 +217,7 @@ describe("invoice commercial lifecycle", () => {
     renderSaasApp({ initialEntry: "/billing" });
 
     const link = await screen.findByRole("link", { name: "INV-000021" });
-    expect(link.getAttribute("href")).toBe(`/billing/${INVOICE_ID}`);
+    expect(link.getAttribute("href")).toBe(`/invoices/${INVOICE_ID}`);
     await user.click(link);
     expect(await screen.findByRole("heading", { name: "Счёт INV-000021" })).toBeDefined();
   });

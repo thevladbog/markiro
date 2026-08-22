@@ -101,7 +101,7 @@ export function OffersPage() {
               <Button
                 variant="secondary"
                 onClick={() =>
-                  void navigate("/billing/new", { state: { sourceOfferId: selected.data.id } })
+                  void navigate("/invoices/new", { state: { sourceOfferId: selected.data.id } })
                 }
               >
                 {t("offers.createInvoice")}

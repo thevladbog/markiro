@@ -150,7 +150,7 @@ describe("invoice editor route", () => {
     const billing = renderSaasApp({ initialEntry: "/billing" });
 
     const createLink = await screen.findByRole("link", { name: "Создать счёт" });
-    expect(createLink.getAttribute("href")).toBe("/billing/new");
+    expect(createLink.getAttribute("href")).toBe("/invoices/new");
     expect(api.calls()).toEqual([]);
     billing.unmount();
 

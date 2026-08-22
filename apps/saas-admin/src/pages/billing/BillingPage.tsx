@@ -32,7 +32,7 @@ export function BillingPage() {
           <span className="billing-header-actions">
             <Link to="/payments">{t("payments.open")}</Link>
             {principal.capabilities.includes("billing.write") ? (
-              <Link to="/billing/new">{t("billing.create")}</Link>
+              <Link to="/invoices/new">{t("billing.create")}</Link>
             ) : null}
           </span>
         }
@@ -46,7 +46,7 @@ export function BillingPage() {
             key: "number",
             title: t("billing.number"),
             render: (invoice: Invoice) => (
-              <Link className="table-link" to={`/billing/${invoice.id}`}>
+              <Link className="table-link" to={`/invoices/${invoice.id}`}>
                 {invoice.number}
               </Link>
             ),

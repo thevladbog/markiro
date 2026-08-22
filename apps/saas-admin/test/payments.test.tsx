@@ -67,7 +67,7 @@ describe("payments registry", () => {
     expect(await screen.findByText("Неизвестный счёт · •••• 9999")).toBeDefined();
     expect(document.body.textContent).not.toContain("40702810900000009999");
     expect(screen.getByRole("link", { name: "INV-700003" }).getAttribute("href")).toBe(
-      `/billing/${INVOICE_ID}`,
+      `/invoices/${INVOICE_ID}`,
     );
     expect(screen.getByRole("link", { name: "Юридические данные" }).getAttribute("href")).toBe(
       `/tenants/${TENANT_ID}?tab=legal`,

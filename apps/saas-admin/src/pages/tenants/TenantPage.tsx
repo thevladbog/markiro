@@ -123,7 +123,7 @@ export function TenantPage() {
             />
             {principal.capabilities.includes("billing.write") ? (
               <>
-                <Link to={`/billing/new?tenantId=${detail.tenant.id}`}>
+                <Link to={`/invoices/new?tenantId=${detail.tenant.id}`}>
                   {t("tenants.detail.createInvoice")}
                 </Link>
                 <Link to={`/offers/new?tenantId=${detail.tenant.id}`}>

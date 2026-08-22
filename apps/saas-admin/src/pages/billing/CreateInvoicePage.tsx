@@ -36,7 +36,7 @@ function toTenantListItem(detail: TenantDetail): TenantListItem {
 export function CreateInvoicePage() {
   const principal = usePlatformPrincipal();
   if (!principal.capabilities.includes("billing.write")) {
-    return <Navigate to="/billing" replace />;
+    return <Navigate to="/invoices" replace />;
   }
   return <InvoiceEditor />;
 }
@@ -168,8 +168,8 @@ function InvoiceEditor() {
       onSubmit={async (draft) => {
         await create.mutateAsync(draft);
       }}
-      onSuccess={() => void navigate("/billing", { state: { createdDocument: "invoice" } })}
-      onCancel={() => void navigate("/billing")}
+      onSuccess={() => void navigate("/invoices", { state: { createdDocument: "invoice" } })}
+      onCancel={() => void navigate("/invoices")}
     />
   );
 }
