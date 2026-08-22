@@ -32,6 +32,7 @@ function environment(overrides = {}) {
     MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.markiro.example",
     MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
     MARKIRO_LANDING_DOMAIN: "markiro.example",
+    ACME_EMAIL: "ops@markiro.example",
     VBTECH_RELEASE_SHA: RELEASE_SHA,
     VBTECH_IMAGE_DIGEST: IMAGE_DIGEST,
     ...overrides,
@@ -142,6 +143,7 @@ test("hosted wrapper uses the active executor, fixed SSH trust, and an exact rem
     "MARKIRO_SAAS_ADMIN_DOMAIN=saas-admin.markiro.example",
     "MARKIRO_KIOSK_DOMAIN=kiosk.markiro.example",
     "MARKIRO_LANDING_DOMAIN=markiro.example",
+    "ACME_EMAIL=ops@markiro.example",
     `VBTECH_RELEASE_SHA=${RELEASE_SHA}`,
     `VBTECH_IMAGE_DIGEST=${IMAGE_DIGEST}`,
     `VBTECH_IMAGE_REF=${IMAGE_REF}`,
@@ -172,6 +174,7 @@ test("hosted wrapper uses the active executor, fixed SSH trust, and an exact rem
     "MARKIRO_SAAS_ADMIN_DOMAIN=saas-admin.markiro.example",
     "MARKIRO_KIOSK_DOMAIN=kiosk.markiro.example",
     "MARKIRO_LANDING_DOMAIN=markiro.example",
+    "ACME_EMAIL=ops@markiro.example",
     `VBTECH_RELEASE_SHA=${RELEASE_SHA}`,
     `VBTECH_IMAGE_DIGEST=${IMAGE_DIGEST}`,
     `VBTECH_IMAGE_REF=${IMAGE_REF}`,
@@ -287,6 +290,8 @@ test("hosted wrapper rejects malformed, legacy, and caller-controlled fixed inpu
     ["unknown v-b input", { VBTECH_EXTRA: "private" }],
     ["v-b apex as Markiro domain", { MARKIRO_DOMAIN: "v-b.tech" }],
     ["v-b www as Markiro domain", { MARKIRO_LANDING_DOMAIN: "www.v-b.tech" }],
+    ["missing ACME email", { ACME_EMAIL: "" }],
+    ["malformed ACME email", { ACME_EMAIL: "ops markiro.example" }],
   ];
   for (const [name, overrides] of cases) {
     const fixture = systemFixture();

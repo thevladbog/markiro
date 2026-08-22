@@ -522,6 +522,13 @@ function validatedInput(options, paths) {
     environment.MARKIRO_EDGE_IMAGE_DIGEST !== undefined
   )
     throw new Error("executor environment is invalid");
+  const acmeEmail = environment.ACME_EMAIL;
+  if (
+    typeof acmeEmail !== "string" ||
+    acmeEmail.length > 254 ||
+    !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$/.test(acmeEmail)
+  )
+    throw new Error("executor environment is invalid");
   const markiroDomains = [
     environment.MARKIRO_DOMAIN,
     environment.MARKIRO_SAAS_ADMIN_DOMAIN,
@@ -550,6 +557,7 @@ function validatedInput(options, paths) {
     submissionState: environment.VBTECH_SUBMISSION_STATE,
   });
   return {
+    acmeEmail,
     environment,
     markiroDomains,
     selector,
@@ -825,6 +833,7 @@ function commandEnvironment(input, active, vbtech) {
     MARKIRO_SAAS_ADMIN_DOMAIN: saasAdminDomain,
     MARKIRO_KIOSK_DOMAIN: kioskDomain,
     MARKIRO_LANDING_DOMAIN: landingDomain,
+    ACME_EMAIL: input.acmeEmail,
   };
   if (vbtech === undefined) return environment;
   return {
