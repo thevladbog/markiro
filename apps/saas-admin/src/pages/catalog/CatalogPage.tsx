@@ -5,9 +5,9 @@ import { useTranslation } from "react-i18next";
 import {
   Alert,
   Button,
-  Card,
+  DataTabs,
   Pager,
-  PageHeader,
+  SectionHeader,
   Spinner,
   StatusChip,
   Table,
@@ -103,7 +103,11 @@ export function CatalogPage() {
   if (catalog.isPending || defaultDemo.isPending) {
     return (
       <section className="catalog-page">
-        <PageHeader title={t("catalog.title")} />
+        <SectionHeader
+          eyebrow="COMMERCE / CATALOG"
+          title={t("catalog.title")}
+          description={t("catalog.description")}
+        />
         <div className="catalog-state" role="status">
           <Spinner label={t("catalog.loading")} />
           <span>{t("catalog.loading")}</span>
@@ -115,7 +119,11 @@ export function CatalogPage() {
   if (catalog.error || defaultDemo.error) {
     return (
       <section className="catalog-page">
-        <PageHeader title={t("catalog.title")} />
+        <SectionHeader
+          eyebrow="COMMERCE / CATALOG"
+          title={t("catalog.title")}
+          description={t("catalog.description")}
+        />
         <Alert tone="error">{t("catalog.loadError")}</Alert>
       </section>
     );
@@ -129,50 +137,54 @@ export function CatalogPage() {
 
   return (
     <section className="catalog-page">
-      <PageHeader title={t("catalog.title")} />
-      <div className="catalog-coordinate" aria-hidden="true">
-        CATALOG / VERSION CONTROL / {activeKind.toUpperCase()}
-      </div>
-      {principal.capabilities.includes("catalog.write") ? (
-        <div className="catalog-toolbar">
-          <Button
-            onClick={() =>
-              pageGuard.requestProtectedAction(() => {
-                setSelectedId(null);
-                setDrawerDirty(false);
-                setCreating(true);
-              })
-            }
-          >
-            {t("catalog.create")}
-          </Button>
-        </div>
-      ) : null}
-      <Card className="catalog-frame" padding={0}>
-        <div className="catalog-tabs" role="tablist" aria-label={t("catalog.groupLabel")}>
-          {tabs.map((tab) => (
-            <button
-              key={tab.kind}
-              type="button"
-              role="tab"
-              aria-label={tab.label}
-              aria-selected={activeKind === tab.kind}
+      <SectionHeader
+        eyebrow="COMMERCE / CATALOG"
+        title={t("catalog.title")}
+        description={t("catalog.description")}
+        actionsLabel={t("catalog.actionsLabel")}
+        actions={
+          principal.capabilities.includes("catalog.write") ? (
+            <Button
               onClick={() =>
                 pageGuard.requestProtectedAction(() => {
-                  setActiveKind(tab.kind);
-                  setPage(1);
-                  setCreating(false);
-                  setDrawerDirty(false);
                   setSelectedId(null);
+                  setDrawerDirty(false);
+                  setCreating(true);
                 })
               }
             >
-              <span>{String(tabs.indexOf(tab) + 1).padStart(2, "0")}</span>
-              {tab.label}
-              <b>{items.filter((item) => item.kind === tab.kind).length}</b>
-            </button>
-          ))}
-        </div>
+              {t("catalog.create")}
+            </Button>
+          ) : null
+        }
+      />
+      <section className="commerce-ledger catalog-frame" aria-labelledby="catalog-ledger-title">
+        <header className="commerce-ledger__header">
+          <div>
+            <span className="commerce-ledger__eyebrow">VERSION CONTROL</span>
+            <h2 id="catalog-ledger-title">{t("catalog.registryTitle")}</h2>
+          </div>
+          <span className="commerce-ledger__count">{visibleItems.length}</span>
+        </header>
+        <DataTabs<CatalogKind>
+          className="catalog-data-tabs"
+          label={t("catalog.groupLabel")}
+          activeId={activeKind}
+          items={tabs.map((tab) => ({
+            id: tab.kind,
+            label: tab.label,
+            count: items.filter((item) => item.kind === tab.kind).length,
+          }))}
+          onChange={(id) =>
+            pageGuard.requestProtectedAction(() => {
+              setActiveKind(id);
+              setPage(1);
+              setCreating(false);
+              setDrawerDirty(false);
+              setSelectedId(null);
+            })
+          }
+        />
         <Table
           columns={columns}
           rows={pagedItems}
@@ -199,7 +211,7 @@ export function CatalogPage() {
             }
           />
         ) : null}
-      </Card>
+      </section>
       {selected ? (
         <CatalogDrawer
           title={t("catalog.panelLabel", { version: selected.version, name: selected.nameRu })}

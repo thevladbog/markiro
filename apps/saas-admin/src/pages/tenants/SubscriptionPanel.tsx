@@ -574,7 +574,7 @@ export function SubscriptionPanel({
   };
 
   return (
-    <div className="subscription-panel">
+    <div className="subscription-panel" id="tenant-subscription">
       <section className="subscription-grid" aria-label={t("tenants.detail.subscription.title")}>
         <SubscriptionCard
           title={t("tenants.detail.subscription.current")}

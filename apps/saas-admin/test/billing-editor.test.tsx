@@ -139,7 +139,7 @@ describe("invoice editor route", () => {
     installInvoiceEditorApi({ me: SUPPORT_ME });
     renderSaasApp({ initialEntry: "/billing/new" });
 
-    expect(await screen.findByRole("heading", { name: "Счета и платежи" })).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "Счета" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Создать черновик счёта" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Тенант" })).toBeNull();
   });
@@ -150,7 +150,9 @@ describe("invoice editor route", () => {
     const billing = renderSaasApp({ initialEntry: "/billing" });
 
     const createLink = await screen.findByRole("link", { name: "Создать счёт" });
-    expect(createLink.getAttribute("href")).toBe("/billing/new");
+    expect(screen.getByText("Выставление, оплата и применение номенклатуры.")).toBeDefined();
+    expect(screen.getByRole("region", { name: "Реестр счетов" })).toBeDefined();
+    expect(createLink.getAttribute("href")).toBe("/invoices/new");
     expect(api.calls()).toEqual([]);
     billing.unmount();
 
@@ -319,6 +321,7 @@ describe("invoice editor route", () => {
 
     await screen.findByRole("heading", { name: "Коммерческие предложения" });
     await user.click(await screen.findByRole("button", { name: TENANT_ID }));
+    expect(await screen.findByText("Выбранное предложение")).toBeDefined();
     await user.click(await screen.findByRole("button", { name: "Создать счёт по предложению" }));
 
     expect(await screen.findByDisplayValue("321.00")).toBeDefined();

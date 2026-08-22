@@ -1,6 +1,8 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { billingContactSchema } from "@markiro/platform-contracts";
+import type { ZodType } from "zod";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
@@ -26,7 +28,7 @@ export class BillingProfilesService {
       .from(schema.operatorBillingProfiles)
       .where(eq(schema.operatorBillingProfiles.isCurrent, true))
       .limit(1);
-    return profile ?? null;
+    return profile ? withCompatibleContact(profile) : null;
   }
 
   async setOperator(
@@ -82,7 +84,7 @@ export class BillingProfilesService {
         ),
       )
       .limit(1);
-    return profile ?? null;
+    return profile ? withCompatibleContact(profile) : null;
   }
 
   async setTenant(
@@ -185,4 +187,28 @@ function auditProfileSummary(profile: {
     displayName: profile.displayName,
     confirmed: profile.isConfirmed,
   };
+}
+
+function withCompatibleContact<T extends { contact: unknown }>(profile: T): T {
+  return { ...profile, contact: normalizeLegacyContact(profile.contact) };
+}
+
+function normalizeLegacyContact(contact: unknown) {
+  if (!isRecord(contact)) return null;
+
+  return {
+    name: parseContactField(billingContactSchema.shape.name, contact.name),
+    email: parseContactField(billingContactSchema.shape.email, contact.email),
+    phone: parseContactField(billingContactSchema.shape.phone, contact.phone),
+  };
+}
+
+function parseContactField<T>(schema: ZodType<T>, value: unknown): T | null {
+  const candidate = typeof value === "string" ? value.trim() : null;
+  const parsed = schema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

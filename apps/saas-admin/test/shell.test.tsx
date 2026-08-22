@@ -1,50 +1,82 @@
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  authState,
-  installCatalogApi,
-  jsonResponse,
-  readySession,
-  renderSaasApp,
-} from "./render.js";
+import { authState, jsonResponse, readySession, renderSaasApp, SUPPORT_ME } from "./render.js";
+import { installOperationsApi } from "./operationsFixtures.js";
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
 
-describe("SaaS-admin shell", () => {
+describe("SaaS-admin operational shell", () => {
   const requestId = "31111111-1111-4111-8111-111111111111";
 
-  it("uses one h1, semantic landmarks, and a slim operational status rail", async () => {
-    installCatalogApi();
-    renderSaasApp();
+  it("opens on the operational overview with a grouped left rail and real identity", async () => {
+    installOperationsApi();
+    renderSaasApp({ initialEntry: "/" });
 
-    expect(await screen.findByRole("heading", { name: "Каталог" })).toBeDefined();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Операционный обзор" }),
+    ).toBeDefined();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole("banner")).toBeDefined();
+    expect(document.querySelector(".app-header")).toBeNull();
     expect(screen.getByRole("navigation", { name: "Разделы платформы" })).toBeDefined();
     expect(screen.getByRole("main")).toBeDefined();
-    expect(screen.getByRole("status", { name: "Состояние платформы" }).textContent).toContain(
-      "Сеанс · подтверждён",
+    expect(screen.getByText("Операции")).toBeDefined();
+    expect(screen.getByText("Коммерция")).toBeDefined();
+    expect(screen.getByText("Платформа")).toBeDefined();
+    expect(screen.getByText("Настройки")).toBeDefined();
+    expect(screen.getByRole("link", { name: "Обзор" }).getAttribute("href")).toBe("/");
+    expect(screen.getByRole("link", { name: "Счета" }).getAttribute("href")).toBe("/invoices");
+    expect(screen.getByRole("link", { name: "Мониторинг" }).getAttribute("href")).toBe(
+      "/monitoring",
     );
-    expect(screen.getByText("SAAS CONSOLE · 01")).toBeDefined();
-    const logo = screen.getByRole("img", { name: "Логотип Маркиро" });
-    expect(logo.querySelector("img")).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Наша организация" }).getAttribute("href")).toBe(
+      "/settings/organization",
+    );
+    expect(
+      screen.getByRole("img", { name: "Логотип Маркиро" }).querySelector("img"),
+    ).not.toBeNull();
+    expect(screen.queryByText("SAAS CONSOLE · 01")).toBeNull();
   });
 
-  it("does not claim API availability when catalog loading fails", async () => {
-    installCatalogApi({ catalogStatus: 500 });
-    renderSaasApp();
+  it("shows only capability-backed rail entries", async () => {
+    installOperationsApi({ me: SUPPORT_ME });
+    renderSaasApp({ initialEntry: "/" });
 
-    expect((await screen.findByRole("alert")).textContent).toContain(
-      "Не удалось загрузить каталог",
-    );
-    expect(screen.getByRole("heading", { level: 1, name: "Каталог" })).toBeDefined();
-    const rail = screen.getByRole("status", { name: "Состояние платформы" });
-    expect(rail.textContent).toContain("Сеанс · подтверждён");
-    expect(rail.textContent).not.toContain("API · доступен");
+    expect(await screen.findByRole("heading", { name: "Операционный обзор" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "Мониторинг" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "Каталог" })).toBeDefined();
+    expect(screen.queryByRole("link", { name: "Предложения" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Счета" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Платежи" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Наша организация" })).toBeNull();
+  });
+
+  it("moves focus into the mobile rail and restores it on Escape", async () => {
+    const user = userEvent.setup();
+    installOperationsApi();
+    renderSaasApp({ initialEntry: "/" });
+
+    const menu = await screen.findByRole("button", { name: /Меню/ });
+    await user.click(menu);
+
+    expect(document.querySelector(".app-workspace")?.hasAttribute("inert")).toBe(true);
+    expect(document.activeElement).toBe(screen.getByRole("link", { name: "Обзор" }));
+    screen.getByRole("link", { name: "Наша организация" }).focus();
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole("link", { name: "Обзор" }));
+
+    await user.click(screen.getByRole("link", { name: "Тенанты" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Тенанты" })).toBeDefined();
+    await waitFor(() => expect(document.activeElement).toBe(menu));
+    expect(document.querySelector(".app-workspace")?.hasAttribute("inert")).toBe(false);
+
+    await user.click(menu);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(document.activeElement).toBe(menu));
   });
 
   it("distinguishes loading, network, and unauthenticated states", async () => {
@@ -74,9 +106,7 @@ describe("SaaS-admin shell", () => {
           }),
         ),
       );
-
       renderSaasApp({ state: authState({ session: readySession(true) }) });
-
       expect(await screen.findByRole("heading", { name: title })).toBeDefined();
       expect(screen.queryByText("Формат ответа платформы изменился")).toBeNull();
     },
@@ -90,14 +120,15 @@ describe("SaaS-admin shell", () => {
         vi.fn(async () =>
           jsonResponse(
             status,
-            { message: "raw-server-diagnostic-must-not-render", zod: "must-not-render" },
+            {
+              message: "raw-server-diagnostic-must-not-render",
+              zod: "must-not-render",
+            },
             { "x-request-id": requestId },
           ),
         ),
       );
-
       renderSaasApp({ state: authState({ session: readySession(true) }) });
-
       const alert = await screen.findByRole("alert");
       expect(alert.textContent).toContain("Формат ответа платформы изменился");
       expect(alert.textContent).toContain(requestId);

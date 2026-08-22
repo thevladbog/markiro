@@ -1,6 +1,14 @@
 import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
-import { createRoutesFromElements, Navigate, Outlet, Route } from "react-router";
+import {
+  createRoutesFromElements,
+  type Location,
+  Navigate,
+  Outlet,
+  Route,
+  useLocation,
+  useParams,
+} from "react-router";
 
 import { Spinner } from "@markiro/ui";
 
@@ -22,6 +30,14 @@ const TwoFactor = lazy(() =>
 );
 const CatalogPage = lazy(() =>
   import("./pages/catalog/CatalogPage.js").then((module) => ({ default: module.CatalogPage })),
+);
+const OverviewPage = lazy(() =>
+  import("./pages/overview/OverviewPage.js").then((module) => ({ default: module.OverviewPage })),
+);
+const MonitoringPage = lazy(() =>
+  import("./pages/overview/MonitoringPage.js").then((module) => ({
+    default: module.MonitoringPage,
+  })),
 );
 const TenantsPage = lazy(() =>
   import("./pages/tenants/TenantsPage.js").then((module) => ({ default: module.TenantsPage })),
@@ -88,6 +104,18 @@ function SuspenseBoundary() {
   );
 }
 
+function LegacyBillingRedirect({ target }: { target: "index" | "new" | "detail" }) {
+  const location: Location<unknown> = useLocation();
+  const { invoiceId } = useParams();
+  const pathname =
+    target === "index"
+      ? "/invoices"
+      : target === "new"
+        ? "/invoices/new"
+        : `/invoices/${invoiceId ?? ""}`;
+  return <Navigate to={{ pathname, search: location.search }} replace state={location.state} />;
+}
+
 export const appRoutes = createRoutesFromElements(
   <Route element={<SuspenseBoundary />}>
     <Route path="/login" element={<Login />} />
@@ -96,22 +124,26 @@ export const appRoutes = createRoutesFromElements(
     <Route path="/recovery" element={<Recovery />} />
     <Route element={<PlatformAuthBoundary />}>
       <Route element={<AppShell />}>
+        <Route index element={<OverviewPage />} />
         <Route path="/catalog" element={<CatalogPage />} />
         <Route path="/offers" element={<OffersPage />} />
         <Route path="/offers/new" element={<CreateOfferPage />} />
-        <Route path="/billing" element={<BillingPage />} />
+        <Route path="/invoices" element={<BillingPage />} />
+        <Route path="/invoices/new" element={<CreateInvoicePage />} />
+        <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
+        <Route path="/billing" element={<LegacyBillingRedirect target="index" />} />
         <Route path="/payments" element={<PaymentsPage />} />
-        <Route path="/billing/new" element={<CreateInvoicePage />} />
-        <Route path="/billing/:invoiceId" element={<InvoiceDetailPage />} />
+        <Route path="/billing/new" element={<LegacyBillingRedirect target="new" />} />
+        <Route path="/billing/:invoiceId" element={<LegacyBillingRedirect target="detail" />} />
+        <Route path="/monitoring" element={<MonitoringPage />} />
         <Route path="/team" element={<TeamPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/settings/organization" element={<OrganizationPage />} />
         <Route path="/tenants" element={<TenantsPage />} />
         <Route path="/tenants/new" element={<CreateTenantPanel />} />
         <Route path="/tenants/:tenantId" element={<TenantPage />} />
-        <Route index element={<Navigate to="/catalog" replace />} />
       </Route>
     </Route>
-    <Route path="*" element={<Navigate to="/catalog" replace />} />
+    <Route path="*" element={<Navigate to="/" replace />} />
   </Route>,
 );

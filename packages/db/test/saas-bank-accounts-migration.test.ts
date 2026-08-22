@@ -48,7 +48,11 @@ describe.skipIf(!databaseUrl)("SaaS bank-account migration", () => {
     await rm(join(legacyMigrations, "0061_saas_bank_accounts.sql"), { force: true });
     await rm(join(legacyMigrations, "0062_document_account_snapshots.sql"), { force: true });
     await rm(join(legacyMigrations, "0063_payment_account_evidence.sql"), { force: true });
+    await rm(join(legacyMigrations, "0064_normalize_operator_billing_profile_kind.sql"), {
+      force: true,
+    });
     await rm(join(legacyMigrations, "meta", "0061_snapshot.json"), { force: true });
+    await rm(join(legacyMigrations, "meta", "0064_snapshot.json"), { force: true });
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -57,7 +61,8 @@ describe.skipIf(!databaseUrl)("SaaS bank-account migration", () => {
       (entry) =>
         entry.tag !== "0061_saas_bank_accounts" &&
         entry.tag !== "0062_document_account_snapshots" &&
-        entry.tag !== "0063_payment_account_evidence",
+        entry.tag !== "0063_payment_account_evidence" &&
+        entry.tag !== "0064_normalize_operator_billing_profile_kind",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 

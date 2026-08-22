@@ -25,6 +25,7 @@ export const platformCapabilitySchema = z.enum([
   "billing.write",
   "platformTeam.write",
   "audit.read",
+  "diagnostics.read",
 ]);
 export type PlatformCapability = z.infer<typeof platformCapabilitySchema>;
 
@@ -38,8 +39,9 @@ export const platformCapabilitiesForRole = {
     "billing.write",
     "platformTeam.write",
     "audit.read",
+    "diagnostics.read",
   ],
-  support: ["tenants.read", "tenants.write", "catalog.read", "audit.read"],
+  support: ["tenants.read", "tenants.write", "catalog.read", "audit.read", "diagnostics.read"],
   accountant: [
     "tenants.read",
     "catalog.read",

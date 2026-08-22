@@ -17,6 +17,7 @@ export class PlatformDadataModule {
         PlatformDadataService,
         { provide: PlatformDadataRateLimit, useFactory: () => new PlatformDadataRateLimit() },
       ],
+      exports: [PlatformDadataService],
     };
   }
 }

@@ -227,6 +227,12 @@
   },
   "offers": {
     "title": "Commercial offers",
+    "description": "Commercial terms before an invoice is issued.",
+    "registryEyebrow": "Sales pipeline",
+    "selectedEyebrow": "Selected offer",
+    "newDescription": "Build the items, pricing, and terms for the selected tenant.",
+    "actionsLabel": "Offer actions",
+    "registryTitle": "Offer register",
     "newTitle": "New offer",
     "tenantId": "Tenant ID",
     "amount": "Amount",
@@ -247,10 +253,14 @@
     "terms": { "label": "Terms of cooperation" }
   },
   "billing": {
-    "title": "Invoices and payments",
+    "title": "Invoices",
+    "description": "Issuing, payment, and application of catalog items.",
+    "actionsLabel": "Invoice actions",
+    "registryTitle": "Invoice register",
     "loading": "Loading invoices",
     "loadError": "Could not load invoices",
     "newTitle": "New invoice",
+    "newDescription": "Build the catalog items and their post-payment application rules.",
     "tenantId": "Tenant ID",
     "amount": "Amount",
     "create": "Create invoice",
@@ -266,6 +276,8 @@
     "document": "Generate document",
     "back": "Back to invoice register",
     "detailTitle": "Invoice {{number}}",
+    "detailDescription": "Payment state and application result for every invoice line.",
+    "detailActionsLabel": "Invoice state",
     "loadingDetail": "Loading invoice state",
     "detailLoadError": "Could not load invoice",
     "issueDate": "Issued",
@@ -342,6 +354,7 @@
   },
   "payments": {
     "title": "Payments",
+    "description": "Import, reconciliation, and recording of bank payments.",
     "open": "Payment register",
     "loading": "Loading payments",
     "import": {
@@ -472,17 +485,91 @@
     "routeLoading": "Loading section",
     "skip": "Skip to content",
     "navigation": "Platform sections",
+    "scope": "Platform operations",
+    "workspace": "SaaS · Operations",
+    "openNavigation": "Menu",
+    "closeNavigation": "Close menu",
+    "groups": {
+      "operations": "Operations",
+      "commerce": "Commerce",
+      "platform": "Platform",
+      "settings": "Settings"
+    },
+    "overview": "Overview",
     "tenants": "Tenants",
     "catalog": "Catalog",
     "offers": "Offers",
-    "billing": "Invoices",
+    "invoices": "Invoices",
+    "payments": "Payments",
+    "monitoring": "Monitoring",
     "team": "Team",
     "audit": "Audit",
-    "settings": "Settings",
+    "organization": "Our organization",
     "language": "Interface language",
-    "statusLabel": "Platform status",
-    "sessionConfirmed": "Session · confirmed",
-    "secureSession": "2FA · SESSION SECURED"
+    "sessionConfirmed": "2FA · session secured"
+  },
+  "overview": {
+    "title": "Operational overview",
+    "description": "Tenants, billing, and platform health — confirmed data only.",
+    "loading": "Loading operational metrics",
+    "metrics": {
+      "label": "Key metrics",
+      "active": "Active tenants",
+      "activeHint": "Trial and active subscriptions",
+      "restriction": "Approaching restriction",
+      "restrictionHint": "Subscription ends within {{days}} days",
+      "overdue": "Overdue invoices",
+      "overdueHint": "Issued, unpaid, and past due"
+    },
+    "severity": { "critical": "Critical", "warning": "Due soon", "attention": "Missing data" },
+    "decisions": {
+      "eyebrow": "Decision queue",
+      "title": "Needs attention",
+      "empty": "No decisions require attention",
+      "open": "Open →",
+      "overdue": "Invoice {{number}} · {{tenant}}",
+      "subscription": "Subscription · {{tenant}}",
+      "tenantLegal": "Legal details · {{tenant}}",
+      "operatorLegal": "Our organization · details and accounts"
+    },
+    "activity": { "eyebrow": "Journal", "title": "Recent activity", "empty": "No activity yet" },
+    "health": {
+      "eyebrow": "Infrastructure",
+      "title": "Platform health",
+      "loading": "Checking platform health",
+      "checkedAt": "Checked: {{value}}",
+      "status": {
+        "ok": "All systems operational",
+        "degraded": "Degraded components",
+        "unavailable": "System unavailable"
+      },
+      "components": {
+        "database": "Database",
+        "jobs": "Background jobs",
+        "smtp": "SMTP",
+        "storage": "Storage"
+      },
+      "componentStatus": {
+        "healthy": "Operational",
+        "degraded": "Degraded",
+        "unavailable": "Unavailable"
+      },
+      "categories": {
+        "database_unavailable": "Unavailable",
+        "database_timeout": "Response delay",
+        "jobs_unavailable": "Unavailable",
+        "jobs_timeout": "Response delay",
+        "smtp_unavailable": "Unavailable",
+        "smtp_timeout": "Response delay",
+        "storage_unavailable": "Unavailable",
+        "storage_timeout": "Response delay"
+      },
+      "dadata": { "ready": "Connected", "unconfigured": "Not configured" }
+    }
+  },
+  "monitoring": {
+    "title": "Monitoring",
+    "description": "Current readiness of core services and integrations."
   },
   "navigationGuard": {
     "title": "Unsaved changes",
@@ -493,6 +580,8 @@
   },
   "team": {
     "title": "Platform team",
+    "description": "Operator access to SaaS platform administration.",
+    "registryTitle": "Platform operators",
     "loading": "Loading team",
     "loadError": "Could not load team",
     "inviteTitle": "Invite a colleague",
@@ -514,6 +603,9 @@
   },
   "audit": {
     "title": "Platform audit",
+    "description": "Immutable history of actions and outcomes.",
+    "registryEyebrow": "Immutable event log",
+    "registryTitle": "Audit log",
     "loading": "Loading audit",
     "loadError": "Could not load audit",
     "time": "Time",
@@ -525,6 +617,9 @@
   },
   "catalog": {
     "title": "Catalog",
+    "description": "Plan, add-on, and service versions used in commercial documents.",
+    "actionsLabel": "Catalog actions",
+    "registryTitle": "Catalog versions",
     "loading": "Loading catalog versions",
     "loadError": "Could not load the catalog.",
     "groupLabel": "Catalog item type",
@@ -683,6 +778,11 @@
   },
   "tenants": {
     "title": "Tenants",
+    "description": "Organizations, access, and subscription status.",
+    "registryEyebrow": "Registry / current scope",
+    "actions": "Tenant actions",
+    "registry": "Tenant registry",
+    "total": "Total tenants",
     "create": "Create tenant",
     "cancel": "Cancel",
     "loading": "Loading tenants",
@@ -778,6 +878,8 @@
       "createdPending": "Tenant created. Owner activation is pending; the demo has not started.",
       "createInvoice": "Create invoice",
       "createOffer": "Create offer",
+      "description": "Organization access, subscription, billing, and legal details.",
+      "actions": "Tenant actions",
       "pendingActivation": "Owner activation pending",
       "overviewTitle": "Overview",
       "tabs": {

@@ -19,6 +19,7 @@ import {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -35,12 +36,34 @@ const PRODUCTION_PLAN = "Производственный · plan-production · 
 const STATION_ADDON = "Дополнительная станция · addon-station · версия 1";
 
 describe("tenant subscription detail", () => {
+  it("scrolls a decision-queue anchor to the subscription section after loading", async () => {
+    const scrollIntoView = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    installTenantApi();
+
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}#tenant-subscription` });
+
+    expect(await screen.findByRole("heading", { name: "Первый завод" })).toBeDefined();
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" }));
+    expect((scrollIntoView.mock.instances[0] as HTMLElement).id).toBe("tenant-subscription");
+  });
+
   it("keeps overview stable and opens non-blocking legal data in a dedicated tab", async () => {
     installTenantApi();
     renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
     const user = userEvent.setup();
 
     expect(await screen.findByRole("heading", { name: "Первый завод" })).toBeDefined();
+    expect(
+      screen.getByRole("tab", { name: /Обзор и подписка/ }).getAttribute("aria-selected"),
+    ).toBe("true");
+    screen.getByRole("tab", { name: /Обзор и подписка/ }).focus();
+    await user.keyboard("{ArrowRight}");
+    expect(
+      screen.getByRole("tab", { name: /Юридические данные/ }).getAttribute("aria-selected"),
+    ).toBe("true");
+    await user.keyboard("{ArrowLeft}");
     expect(
       screen.getByRole("tab", { name: /Обзор и подписка/ }).getAttribute("aria-selected"),
     ).toBe("true");
@@ -51,6 +74,17 @@ describe("tenant subscription detail", () => {
       screen.getByText(/не блокируют работу тенанта и производственные операции/i),
     ).toBeDefined();
     expect(screen.queryByText("Текущий и запланированный тарифы")).toBeNull();
+  });
+
+  it("keeps tenant legal data usable when optional DaData health is unavailable", async () => {
+    installTenantApi({ dadataResponseStatus: 503 });
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}?tab=legal` });
+
+    expect(await screen.findByText("Юридические данные тенанта")).toBeDefined();
+    expect(await screen.findByText("Расчётные счета")).toBeDefined();
+    expect(
+      await screen.findByText("DaData временно недоступна — ручной ввод доступен"),
+    ).toBeDefined();
   });
 
   it("accepts a production-like legacy tenant detail with PostgreSQL timestamps", async () => {

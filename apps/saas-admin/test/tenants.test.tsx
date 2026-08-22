@@ -133,6 +133,9 @@ describe("platform tenants", () => {
     const user = userEvent.setup();
 
     expect(await screen.findByRole("heading", { name: "Тенанты" })).toBeDefined();
+    expect(screen.getByText("Организации, доступ и состояние подписок.")).toBeDefined();
+    expect(screen.getByText("Реестр · текущая выборка")).toBeDefined();
+    expect(screen.getByRole("region", { name: "Реестр тенантов" })).toBeDefined();
     expect(screen.queryByText(/₽|Цена/)).toBeNull();
     expect(
       screen.getByText("Поиск выполняется только по текущей странице (до 50 тенантов)."),

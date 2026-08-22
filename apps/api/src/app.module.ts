@@ -1,9 +1,7 @@
 import { Module, type DynamicModule } from "@nestjs/common";
-import { HealthController } from "./health.controller";
-import { ReadinessService } from "./health/readiness.service";
-import { AuthModule, DB_POOL } from "./auth/auth.module";
+import { AuthModule } from "./auth/auth.module";
 import type { AuthSetup } from "./auth/auth.setup";
-import { JobsModule, PgBossService } from "./jobs/jobs.module";
+import { JobsModule } from "./jobs/jobs.module";
 import { OrgProfileModule } from "./modules/org-profile/org-profile.module";
 import { CounterpartiesModule } from "./modules/counterparties/counterparties.module";
 import { ProductsModule } from "./modules/products/products.module";
@@ -38,8 +36,6 @@ import { InvitationsModule } from "./modules/invitations/invitations.module";
 import { StorageModule } from "./modules/storage/storage.module";
 import { ProfileModule } from "./modules/profile/profile.module";
 import { TenantOwnerActivationModule } from "./modules/tenant-owner-activation/tenant-owner-activation.module";
-import { MailTransportService } from "./modules/mail/mail-transport.service";
-import { ObjectStorageService } from "./modules/storage/object-storage.service";
 import { PlatformAuthModule } from "./platform-auth/platform-auth.module";
 import { PlatformCatalogModule } from "./modules/platform-catalog/platform-catalog.module";
 import { PlatformTenantsModule } from "./modules/platform-tenants/platform-tenants.module";
@@ -48,13 +44,14 @@ import { BillingProfilesModule } from "./modules/billing-profiles/billing-profil
 import { BillingAccountsModule } from "./modules/billing-accounts/billing-accounts.module";
 import { BillingModule } from "./modules/billing/billing.module";
 import { BillingPaymentsModule } from "./modules/billing-payments/billing-payments.module";
-import { PlatformDadataModule } from "./modules/platform-dadata/platform-dadata.module";
+import { PlatformOperationsModule } from "./modules/platform-operations/platform-operations.module";
 import type { PlatformAuth } from "@markiro/db";
 import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
 import { ShiftExportsModule } from "./modules/shift-exports/shift-exports.module";
 import { StationShiftCloseModule } from "./modules/station-shift-close/station-shift-close.module";
 import { DemoRequestsModule } from "./modules/demo-requests/demo-requests.module";
 import { PlatformHttpModule } from "./platform-http/platform-http.module";
+import { HealthModule } from "./health/health.module";
 
 @Module({})
 export class AppModule {
@@ -92,7 +89,7 @@ export class AppModule {
               BillingAccountsModule,
               BillingModule,
               BillingPaymentsModule,
-              PlatformDadataModule.forRoot(env),
+              PlatformOperationsModule.forRoot(env),
             ]
           : []),
         AuthorizationModule,
@@ -133,36 +130,10 @@ export class AppModule {
         InvitationsModule.forRoot(setup.databaseUrl),
         ProfileModule,
         TenantOwnerActivationModule,
+        HealthModule.forRoot(),
       ],
-      controllers: [HealthController],
-      providers: [
-        {
-          provide: ReadinessService,
-          inject: [DB_POOL, PgBossService, MailTransportService, ObjectStorageService],
-          useFactory: (
-            pool: AuthSetup["pool"],
-            jobs: PgBossService,
-            mail: MailTransportService,
-            storage: ObjectStorageService,
-          ) =>
-            new ReadinessService({
-              database: async () => {
-                await pool.query("SELECT 1");
-              },
-              jobs: async () => {
-                await jobs.checkReady();
-              },
-              smtp: async () => {
-                await mail.verify();
-                return { status: mail.health.status };
-              },
-              storage: async () => {
-                await storage.ensureBucket();
-              },
-              now: () => new Date(),
-            }),
-        },
-      ],
+      controllers: [],
+      providers: [],
     };
   }
 }

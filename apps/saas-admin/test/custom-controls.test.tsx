@@ -75,6 +75,8 @@ describe("SaaS admin custom controls", () => {
     const user = userEvent.setup();
 
     await screen.findByRole("heading", { name: "Команда платформы" });
+    expect(screen.getByText("Доступ операторов к управлению SaaS-платформой.")).toBeDefined();
+    expect(await screen.findByRole("region", { name: "Операторы платформы" })).toBeDefined();
     expect(visibleNativeSelects()).toEqual([]);
 
     const role = screen.getByRole("combobox", { name: "Роль для admin@example.com" });

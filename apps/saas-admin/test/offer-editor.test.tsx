@@ -156,6 +156,15 @@ async function addPosition(
 }
 
 describe("offer editor route", () => {
+  it("renders an empty offer register without a stale detail loader", async () => {
+    installOfferEditorApi();
+
+    renderSaasApp({ initialEntry: "/offers" });
+
+    expect(await screen.findByText("Предложений пока нет")).toBeDefined();
+    expect(screen.queryByText("Загружаем раздел")).toBeNull();
+  });
+
   it("rejects a malformed offer success body at the browser boundary", async () => {
     installOfferEditorApi({
       offers: [
@@ -189,6 +198,9 @@ describe("offer editor route", () => {
     renderSaasApp({ initialEntry: "/offers" });
 
     expect(await screen.findByText(TENANT_ID)).toBeDefined();
+    expect(screen.getByText("Коммерческие условия до выставления счёта.")).toBeDefined();
+    expect(screen.getByText("Воронка продаж")).toBeDefined();
+    expect(screen.getByRole("region", { name: "Реестр предложений" })).toBeDefined();
     expect(screen.getByText("expired")).toBeDefined();
     expect(screen.queryByText("Не удалось загрузить предложения")).toBeNull();
   });

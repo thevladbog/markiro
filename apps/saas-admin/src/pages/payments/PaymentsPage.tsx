@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
-import { Alert, Button, PageHeader, StatusChip, Table } from "@markiro/ui";
+import { Alert, Button, SectionHeader, StatusChip, Table } from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import {
@@ -46,10 +46,11 @@ export function PaymentsPage() {
 
   return (
     <section className="payments-page">
-      <PageHeader title={t("payments.title")} />
-      <div className="catalog-coordinate" aria-hidden="true">
-        BILLING / PAYMENTS / RECONCILIATION
-      </div>
+      <SectionHeader
+        eyebrow="COMMERCE / PAYMENTS"
+        title={t("payments.title")}
+        description={t("payments.description")}
+      />
 
       {canWrite ? (
         <section className="payments-panel" aria-labelledby="payment-import-title">
@@ -120,7 +121,7 @@ export function PaymentsPage() {
                 key: "invoiceId",
                 title: t("payments.columns.invoice"),
                 render: (payment: BillingPayment) => (
-                  <Link className="table-link" to={`/billing/${payment.invoiceId}`}>
+                  <Link className="table-link" to={`/invoices/${payment.invoiceId}`}>
                     {payment.bankReference}
                   </Link>
                 ),
@@ -196,7 +197,7 @@ function PaymentMatchCard({ match, canWrite }: { match: PaymentMatch; canWrite: 
           <dt>{t("payments.columns.invoice")}</dt>
           <dd>
             {match.invoiceId && match.invoiceNumber ? (
-              <Link to={`/billing/${match.invoiceId}`}>{match.invoiceNumber}</Link>
+              <Link to={`/invoices/${match.invoiceId}`}>{match.invoiceNumber}</Link>
             ) : (
               "—"
             )}

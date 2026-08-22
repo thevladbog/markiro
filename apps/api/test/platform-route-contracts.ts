@@ -3,6 +3,7 @@ import {
   platformAuthContracts,
   platformCatalogContracts,
   platformCommercialContracts,
+  platformOperationsContracts,
   platformTeamContracts,
   platformTenantContracts,
 } from "@markiro/platform-contracts";
@@ -58,6 +59,18 @@ export const CURRENT_SAAS_ROUTES = [
     platformTeamContracts.recoverTwoFactor.response,
   ),
   route("get", "/platform/audit", "200", platformAuditContracts.list.response),
+  route(
+    "get",
+    "/platform/operations/overview",
+    "200",
+    platformOperationsContracts.overview.response,
+  ),
+  route(
+    "get",
+    "/platform/operations/monitoring",
+    "200",
+    platformOperationsContracts.monitoring.response,
+  ),
   route("get", "/platform/tenants", "200", platformTenantContracts.list.response),
   route("post", "/platform/tenants", "201", platformTenantContracts.create.response, {
     body: platformTenantContracts.create.body,

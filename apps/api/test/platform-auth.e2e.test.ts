@@ -500,7 +500,13 @@ describe.skipIf(!ready)("platform authentication isolation", () => {
     expect(response.body).toEqual({
       userId: platformUserId,
       role: "support",
-      capabilities: ["tenants.read", "tenants.write", "catalog.read", "audit.read"],
+      capabilities: [
+        "tenants.read",
+        "tenants.write",
+        "catalog.read",
+        "audit.read",
+        "diagnostics.read",
+      ],
       twoFactorReady: true,
     });
     expect(response.text).not.toMatch(/secret|backup|session|token/i);

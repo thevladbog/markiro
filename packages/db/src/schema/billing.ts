@@ -123,6 +123,7 @@ export const operatorBillingProfiles = pgTable(
       .on(table.isCurrent)
       .where(sql`${table.isCurrent} = true`),
     check("operator_billing_profiles_revision_positive", sql`${table.revision} > 0`),
+    check("operator_billing_profiles_legal_entity_check", sql`${table.kind} = 'legal_entity'`),
     check(
       "operator_billing_profiles_confirmation_check",
       sql`(${table.isConfirmed} = false and ${table.confirmedByPlatformUserId} is null and ${table.confirmedAt} is null) or (${table.isConfirmed} = true and ${table.confirmedByPlatformUserId} is not null and ${table.confirmedAt} is not null)`,

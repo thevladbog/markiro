@@ -10,7 +10,7 @@ import {
   EmptyState,
   FilterBar,
   Input,
-  PageHeader,
+  SectionHeader,
   Select,
   Spinner,
   StatusChip,
@@ -158,17 +158,17 @@ export function TenantsPage() {
 
   return (
     <section className="tenants-page">
-      <PageHeader
+      <SectionHeader
+        eyebrow="OPERATIONS / TENANTS"
         title={t("tenants.title")}
+        description={t("tenants.description")}
+        actionsLabel={t("tenants.actions")}
         actions={
           canCreate ? (
             <Button onClick={() => void navigate("/tenants/new")}>{t("tenants.create")}</Button>
           ) : null
         }
       />
-      <div className="catalog-coordinate" aria-hidden="true">
-        TENANTS / SUBSCRIPTION CONTROL
-      </div>
       <FilterBar
         label={t("tenants.filters.label")}
         resultSummary={
@@ -199,63 +199,76 @@ export function TenantsPage() {
         />
       </FilterBar>
       <p className="tenant-search-scope">{t("tenants.filters.pageScope")}</p>
-      {tenants.isPending ? (
-        <div className="tenant-list-state" role="status">
-          <Spinner label={t("tenants.loading")} />
-        </div>
-      ) : tenants.error ? (
-        <Alert tone="error">{t("tenants.loadError")}</Alert>
-      ) : tenants.data.items.length === 0 ? (
-        <Card padding={0}>
-          <EmptyState
-            title={t(
-              status === "all" && tenants.data.total === 0
-                ? "tenants.empty.title"
-                : "tenants.filteredEmpty.title",
-            )}
-            hint={t(
-              status === "all" && tenants.data.total === 0
-                ? "tenants.empty.hint"
-                : "tenants.filteredEmpty.hint",
-            )}
-            action={
-              status === "all" && tenants.data.total === 0 && canCreate ? (
-                <Button onClick={() => void navigate("/tenants/new")}>{t("tenants.create")}</Button>
-              ) : null
-            }
-          />
-        </Card>
-      ) : (
-        <>
-          <Card className="tenant-table-card" padding={0}>
-            <Table
-              columns={columns}
-              rows={visibleItems}
-              empty={t("tenants.noMatchesOnPage")}
-              scrollLabel={t("tenants.tableRegion")}
+      <section className="tenant-ledger" aria-labelledby="tenant-ledger-title">
+        <header className="tenant-ledger__header">
+          <div>
+            <p>{t("tenants.registryEyebrow")}</p>
+            <h2 id="tenant-ledger-title">{t("tenants.registry")}</h2>
+          </div>
+          <span aria-label={t("tenants.total")}>{tenants.data?.total ?? "—"}</span>
+        </header>
+        {tenants.isPending ? (
+          <div className="tenant-list-state" role="status">
+            <Spinner label={t("tenants.loading")} />
+          </div>
+        ) : tenants.error ? (
+          <div className="tenant-ledger__state">
+            <Alert tone="error">{t("tenants.loadError")}</Alert>
+          </div>
+        ) : tenants.data.items.length === 0 ? (
+          <Card padding={0}>
+            <EmptyState
+              title={t(
+                status === "all" && tenants.data.total === 0
+                  ? "tenants.empty.title"
+                  : "tenants.filteredEmpty.title",
+              )}
+              hint={t(
+                status === "all" && tenants.data.total === 0
+                  ? "tenants.empty.hint"
+                  : "tenants.filteredEmpty.hint",
+              )}
+              action={
+                status === "all" && tenants.data.total === 0 && canCreate ? (
+                  <Button onClick={() => void navigate("/tenants/new")}>
+                    {t("tenants.create")}
+                  </Button>
+                ) : null
+              }
             />
           </Card>
-          {pageCount > 1 ? (
-            <nav className="tenant-pagination" aria-label={t("tenants.pagination.label")}>
-              <Button
-                variant="secondary"
-                disabled={page <= 1}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-              >
-                {t("tenants.pagination.previous")}
-              </Button>
-              <span aria-live="polite">{t("tenants.pagination.page", { page, pageCount })}</span>
-              <Button
-                variant="secondary"
-                disabled={page >= pageCount}
-                onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
-              >
-                {t("tenants.pagination.next")}
-              </Button>
-            </nav>
-          ) : null}
-        </>
-      )}
+        ) : (
+          <>
+            <Card className="tenant-table-card" padding={0}>
+              <Table
+                columns={columns}
+                rows={visibleItems}
+                empty={t("tenants.noMatchesOnPage")}
+                scrollLabel={t("tenants.tableRegion")}
+              />
+            </Card>
+            {pageCount > 1 ? (
+              <nav className="tenant-pagination" aria-label={t("tenants.pagination.label")}>
+                <Button
+                  variant="secondary"
+                  disabled={page <= 1}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                >
+                  {t("tenants.pagination.previous")}
+                </Button>
+                <span aria-live="polite">{t("tenants.pagination.page", { page, pageCount })}</span>
+                <Button
+                  variant="secondary"
+                  disabled={page >= pageCount}
+                  onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+                >
+                  {t("tenants.pagination.next")}
+                </Button>
+              </nav>
+            ) : null}
+          </>
+        )}
+      </section>
     </section>
   );
 }

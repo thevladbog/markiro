@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
-import { Alert, Button, PageHeader, StatusChip } from "@markiro/ui";
+import { Alert, Button, SectionHeader, StatusChip } from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import {
   applyInvoice,
@@ -126,10 +126,13 @@ export function InvoiceDetailPage() {
   return (
     <section className="invoice-detail-page">
       <div className="invoice-detail-backline">
-        <Link to="/billing">← {t("billing.back")}</Link>
+        <Link to="/invoices">← {t("billing.back")}</Link>
       </div>
-      <PageHeader
+      <SectionHeader
+        eyebrow="COMMERCE / INVOICES / DETAIL"
         title={t("billing.detailTitle", { number: invoice.number })}
+        description={t("billing.detailDescription")}
+        actionsLabel={t("billing.detailActionsLabel")}
         actions={
           <StatusChip
             status={invoice.status === "paid" ? "ok" : "warn"}

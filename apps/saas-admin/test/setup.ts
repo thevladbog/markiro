@@ -30,7 +30,7 @@ Object.defineProperties(HTMLElement.prototype, {
   hasPointerCapture: { value: () => false },
   setPointerCapture: { value: () => undefined },
   releasePointerCapture: { value: () => undefined },
-  scrollIntoView: { value: () => undefined },
+  scrollIntoView: { configurable: true, writable: true, value: () => undefined },
 });
 
 Object.defineProperty(globalThis, "ResizeObserver", {
