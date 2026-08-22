@@ -632,6 +632,22 @@ blocks installation during an active shift. Review
 before installing a Windows artifact. Pending outbox data remains local across
 an update and restart.
 
+### Manual stable updates
+
+Stable builds use the separate immutable `station-vX.Y.Z` release line and
+embed only `station-stable-channel/latest.json`. A stable build is rebuilt from
+one explicitly accepted beta `baseSha`; it is not a renamed beta binary and it
+does not include newer unaccepted `main` changes. See
+[`docs/runbooks/station-stable-release.md`](../../docs/runbooks/station-stable-release.md).
+
+Beta → stable uses a manual NSIS installation outside an active shift. Later
+stable updates remain manual-only: no background download, install, restart or
+line lockout. Retain pairing, SQLite, device settings, journal, boxes,
+exceptions and pending outbox, and record the real Windows/hardware result in
+[`docs/acceptance/station-stable-release.md`](../../docs/acceptance/station-stable-release.md).
+Rollback uses a retained immutable installer only within the documented schema
+compatibility window; deleting local state is never a rollback procedure.
+
 ```bash
 pnpm --filter @markiro/station test    # vitest (jsdom); uses node:sqlite
 cargo test --manifest-path apps/station/src-tauri/Cargo.toml

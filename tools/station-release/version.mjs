@@ -9,6 +9,8 @@ const execFile = promisify(execFileCallback);
 export const STATION_TAG_PREFIX = "station-v";
 const STATION_BETA_TAG = /^station-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.([1-9]\d*)$/;
 const STATION_BETA_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.([1-9]\d*)$/;
+const STATION_STABLE_TAG = /^station-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const STATION_STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const BUMPS = new Set(["next-beta", "next-patch-beta", "next-minor-beta", "next-major-beta"]);
 
 function invalid(message = "invalid station beta version") {
@@ -27,10 +29,28 @@ export function parseStationBetaTag(tag) {
   return match ? parseVersion(match, `${match[1]}.${match[2]}.${match[3]}-beta.${match[4]}`) : null;
 }
 
+export function parseStationStableTag(tag) {
+  if (typeof tag !== "string") return null;
+  const match = STATION_STABLE_TAG.exec(tag);
+  if (!match) return null;
+  const [major, minor, patch] = match.slice(1).map(Number);
+  if (![major, minor, patch].every(Number.isSafeInteger)) return null;
+  return { major, minor, patch, text: `${major}.${minor}.${patch}` };
+}
+
 function parseStationBetaVersion(version) {
   if (typeof version !== "string") return null;
   const match = STATION_BETA_VERSION.exec(version);
   return match ? parseVersion(match, version) : null;
+}
+
+function parseStationStableVersion(version) {
+  if (typeof version !== "string") return null;
+  const match = STATION_STABLE_VERSION.exec(version);
+  if (!match) return null;
+  const [major, minor, patch] = match.slice(1).map(Number);
+  if (![major, minor, patch].every(Number.isSafeInteger)) return null;
+  return { major, minor, patch, text: version };
 }
 
 function compareVersions(left, right) {
@@ -38,6 +58,43 @@ function compareVersions(left, right) {
     if (left[field] !== right[field]) return left[field] - right[field];
   }
   return 0;
+}
+
+function compareStableVersions(left, right) {
+  for (const field of ["major", "minor", "patch"]) {
+    if (left[field] !== right[field]) return left[field] - right[field];
+  }
+  return 0;
+}
+
+export function stablePromotionFromBeta(tags, sourceBetaTag) {
+  if (!Array.isArray(tags)) invalid("invalid station stable promotion");
+  const beta = parseStationBetaTag(sourceBetaTag);
+  if (!beta) invalid("invalid station stable promotion");
+
+  const stableVersions = tags
+    .map((tag) => ({ tag, version: parseStationStableTag(tag) }))
+    .filter(({ version }) => version !== null)
+    .sort((left, right) => compareStableVersions(left.version, right.version));
+  const previous = stableVersions.at(-1) ?? null;
+  const target = { major: beta.major, minor: beta.minor, patch: beta.patch };
+  const version = `${target.major}.${target.minor}.${target.patch}`;
+  const tag = `${STATION_TAG_PREFIX}${version}`;
+
+  if (
+    stableVersions.some((candidate) => candidate.tag === tag) ||
+    (previous && compareStableVersions(target, previous.version) <= 0)
+  ) {
+    invalid("invalid station stable promotion");
+  }
+
+  return {
+    sourceBetaTag,
+    betaVersion: beta.text,
+    version,
+    tag,
+    previousStableTag: previous?.tag ?? null,
+  };
 }
 
 function ensureSafeIncrement(value) {
@@ -107,7 +164,7 @@ async function readSources(root) {
 
 export async function readStationSourceVersion(root) {
   const source = await readSources(root);
-  if (!parseStationBetaVersion(source.version) && source.version !== "0.1.0") {
+  if (!parseStationBetaVersion(source.version) && !parseStationStableVersion(source.version)) {
     invalid("invalid station beta source tree");
   }
   return source.version;
@@ -126,7 +183,9 @@ async function writeAtomic(path, content) {
 }
 
 export async function writeStationSourceVersion(root, version) {
-  if (!parseStationBetaVersion(version)) invalid("invalid station beta version");
+  if (!parseStationBetaVersion(version) && !parseStationStableVersion(version)) {
+    invalid("invalid station beta version");
+  }
   const source = await readSources(root);
   const config = `${JSON.stringify({ ...source.config, version }, null, 2)}\n`;
   const cargo = source.cargo.replace(/^(version\s*=\s*")[^"]+("\s*)$/m, `$1${version}$2`);
@@ -191,8 +250,34 @@ async function prepare(bump, outputPath) {
   }
 }
 
+async function setStable(version, outputPath) {
+  if (
+    !parseStationStableVersion(version) ||
+    typeof outputPath !== "string" ||
+    outputPath.length === 0
+  ) {
+    invalid("invalid station stable release arguments");
+  }
+  const root = pathToFileURL(`${dirname(fileURLToPath(import.meta.url))}/../../`);
+  const reservation = await open(outputPath, "wx", 0o600);
+  await reservation.close();
+  try {
+    await writeStationSourceVersion(root, version);
+    await rm(outputPath, { force: true });
+    await writeOutput(outputPath, version);
+  } catch (error) {
+    await rm(outputPath, { force: true });
+    throw error;
+  }
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const [, , command, bump, outputPath] = process.argv;
-  if (command !== "prepare") invalid("invalid station beta release command");
-  await prepare(bump, outputPath);
+  const [, , command, argument, outputPath] = process.argv;
+  if (command === "prepare") {
+    await prepare(argument, outputPath);
+  } else if (command === "set-stable") {
+    await setStable(argument, outputPath);
+  } else {
+    invalid("invalid station beta release command");
+  }
 }

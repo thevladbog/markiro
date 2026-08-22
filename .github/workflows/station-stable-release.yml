@@ -1,0 +1,550 @@
+name: Publish station stable
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Publish an accepted beta as stable or repair its stable channel
+        required: true
+        type: choice
+        default: publish
+        options: [publish, promote-existing]
+      source_beta_tag:
+        description: Exact accepted Station beta tag
+        required: true
+        type: string
+      acceptance_confirmed:
+        description: Confirm beta acceptance and known external limitations
+        required: true
+        type: boolean
+        default: false
+      highlights:
+        description: Optional Russian release highlights
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: station-stable-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    environment: station-stable
+    permissions:
+      actions: read
+      contents: write
+    env:
+      VITE_STATION_API_URL: https://admin.markiro.app
+
+    steps:
+      - name: Checkout stable release tooling
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Validate stable dispatch inputs
+        env:
+          MODE: ${{ inputs.mode }}
+          SOURCE_BETA_TAG: ${{ inputs.source_beta_tag }}
+          ACCEPTANCE_CONFIRMED: ${{ inputs.acceptance_confirmed }}
+          HIGHLIGHTS: ${{ inputs.highlights }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$(git rev-parse origin/main)"
+          mode="$MODE"
+          source_beta_tag="$SOURCE_BETA_TAG"
+          acceptance_confirmed="$ACCEPTANCE_CONFIRMED"
+          test "$mode" = "publish" -o "$mode" = "promote-existing"
+          test "$acceptance_confirmed" = "true"
+          [[ "$source_beta_tag" =~ ^station-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.([1-9][0-9]*)$ ]]
+          highlights_file="$RUNNER_TEMP/station-stable-highlights.txt"
+          printf '%s' "$HIGHLIGHTS" > "$highlights_file"
+          node --input-type=module - "$highlights_file" <<'NODE'
+          import { readFileSync } from "node:fs";
+          const text = readFileSync(process.argv[2], "utf8");
+          if (
+            Buffer.byteLength(text) > 8192 ||
+            /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text) ||
+            /ghp_|github_pat_|TAURI_SIGNING_PRIVATE_KEY|api[_ -]?key|pairing_code/i.test(text)
+          ) throw new Error("invalid station stable highlights");
+          NODE
+          printf 'mode=%s\nsource_beta_tag=%s\nhighlights_file=%s\n' \
+            "$mode" "$source_beta_tag" "$highlights_file" >> "$GITHUB_ENV"
+
+      - name: Resolve and verify accepted beta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          beta_release_json="$RUNNER_TEMP/station-beta-release.json"
+          beta_dir="$RUNNER_TEMP/station-accepted-beta"
+          rm -rf "$beta_dir"
+          mkdir "$beta_dir"
+          gh release view "$source_beta_tag" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isDraft,isPrerelease,targetCommitish > "$beta_release_json"
+          gh release download "$source_beta_tag" --repo "$GITHUB_REPOSITORY" --dir "$beta_dir"
+          beta_version="${source_beta_tag#station-v}"
+          node tools/station-release/artifacts.mjs validate beta "$beta_dir" "$beta_version"
+          evidence_path="$beta_dir/release-evidence.json"
+          base_sha="$(node -e 'const e=require(process.argv[1]); process.stdout.write(e.baseSha)' "$evidence_path")"
+          beta_release_sha="$(node -e 'const e=require(process.argv[1]); process.stdout.write(e.releaseSha)' "$evidence_path")"
+          [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$beta_release_sha" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$base_sha^{commit}"
+          git cat-file -e "$beta_release_sha^{commit}"
+          diff_paths="$RUNNER_TEMP/station-beta-diff-paths.txt"
+          git diff --name-only "$base_sha" "$beta_release_sha" > "$diff_paths"
+          promotion_output="$RUNNER_TEMP/station-beta-promotion.txt"
+          node tools/station-release/promotion.mjs validate-beta \
+            "$beta_release_json" "$evidence_path" "$diff_paths" "$promotion_output"
+          test "$base_sha" = "$(sed -n 's/^base_sha=//p' "$promotion_output")"
+          test "$beta_release_sha" = "$(sed -n 's/^beta_release_sha=//p' "$promotion_output")"
+          for required_path in \
+            apps/station/src-tauri/tauri.stable.conf.json \
+            tools/station-release/promotion.mjs \
+            tools/station-release/changelog.mjs \
+            .github/workflows/station-stable-release.yml; do
+            git cat-file -e "$base_sha:$required_path"
+          done
+          git merge-base --is-ancestor "$base_sha" origin/main
+          ci_ok=false
+          for attempt in {1..90}; do
+            ci_state="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --commit "$base_sha" --limit 20 --json status,conclusion,headSha --jq '.[] | select(.headSha == "'"$base_sha"'") | [.status, (.conclusion // "")] | @tsv' | head -n 1)"
+            ci_status="${ci_state%%$'\t'*}"
+            ci_conclusion="${ci_state#*$'\t'}"
+            if [ "$ci_status" = "completed" ]; then
+              test "$ci_conclusion" = "success"
+              ci_ok=true
+              break
+            fi
+            echo "Waiting for CI for accepted beta base (attempt $attempt/90; status: ${ci_status:-not found})"
+            sleep 20
+          done
+          test "$ci_ok" = true
+          beta_evidence_sha256="$(node -e 'const{createHash}=require("node:crypto"),{readFileSync}=require("node:fs");process.stdout.write(createHash("sha256").update(readFileSync(process.argv[1])).digest("hex"))' "$evidence_path")"
+          tags_file="$RUNNER_TEMP/station-tags.txt"
+          git tag --list 'station-v*' > "$tags_file"
+          release_state="$RUNNER_TEMP/station-stable-state.txt"
+          node --input-type=module - "$mode" "$source_beta_tag" "$tags_file" "$release_state" <<'NODE'
+          import { openSync, readFileSync, writeFileSync, closeSync } from "node:fs";
+          import {
+            parseStationBetaTag,
+            parseStationStableTag,
+            stablePromotionFromBeta,
+          } from "./tools/station-release/version.mjs";
+          const [mode, sourceBetaTag, tagsPath, outputPath] = process.argv.slice(2);
+          const tags = readFileSync(tagsPath, "utf8").split(/\r?\n/).filter(Boolean);
+          for (const tag of tags) {
+            if (tag.startsWith("station-v") && !parseStationBetaTag(tag) && !parseStationStableTag(tag)) {
+              throw new Error("invalid station stable tag state");
+            }
+          }
+          let result;
+          if (mode === "publish") {
+            result = stablePromotionFromBeta(tags, sourceBetaTag);
+          } else {
+            const beta = parseStationBetaTag(sourceBetaTag);
+            if (!beta) throw new Error("invalid station stable retry");
+            const version = `${beta.major}.${beta.minor}.${beta.patch}`;
+            const tag = `station-v${version}`;
+            const stable = tags
+              .map((candidate) => ({ tag: candidate, parsed: parseStationStableTag(candidate) }))
+              .filter((candidate) => candidate.parsed)
+              .sort((left, right) =>
+                ["major", "minor", "patch"].reduce(
+                  (order, field) => order || left.parsed[field] - right.parsed[field],
+                  0,
+                ),
+              );
+            if (!stable.some((candidate) => candidate.tag === tag) || stable.at(-1)?.tag !== tag) {
+              throw new Error("invalid station stable retry");
+            }
+            result = {
+              sourceBetaTag,
+              betaVersion: beta.text,
+              version,
+              tag,
+              previousStableTag: stable.at(-2)?.tag ?? null,
+            };
+          }
+          const handle = openSync(outputPath, "wx", 0o600);
+          try {
+            writeFileSync(
+              handle,
+              `version=${result.version}\ntag=${result.tag}\nprevious_stable_tag=${result.previousStableTag ?? ""}\n`,
+            );
+          } finally {
+            closeSync(handle);
+          }
+          NODE
+          version="$(sed -n 's/^version=//p' "$release_state")"
+          tag="$(sed -n 's/^tag=//p' "$release_state")"
+          previous_stable_tag="$(sed -n 's/^previous_stable_tag=//p' "$release_state")"
+          if [ "$mode" = "publish" ]; then
+            if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              exit 1
+            fi
+          else
+            gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+              --json tagName,isDraft,isPrerelease,targetCommitish > "$RUNNER_TEMP/station-stable-release.json"
+            node -e 'const r=require(process.argv[1]);if(r.tagName!==process.argv[2]||r.isDraft||r.isPrerelease||!/^[0-9a-f]{40}$/.test(r.targetCommitish))process.exit(1)' \
+              "$RUNNER_TEMP/station-stable-release.json" "$tag"
+          fi
+          printf 'beta_version=%s\nbase_sha=%s\nbeta_release_sha=%s\nbeta_evidence_sha256=%s\nversion=%s\ntag=%s\nprevious_stable_tag=%s\n' \
+            "$beta_version" "$base_sha" "$beta_release_sha" "$beta_evidence_sha256" \
+            "$version" "$tag" "$previous_stable_tag" >> "$GITHUB_ENV"
+
+      - name: Prepare stable release source
+        if: inputs.mode == 'publish'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach "$base_sha"
+          version_output="$RUNNER_TEMP/station-stable-version.txt"
+          node tools/station-release/version.mjs set-stable "$version" "$version_output"
+          test "$(sed -n 's/^version=//p' "$version_output")" = "$version"
+          test "$(sed -n 's/^tag=//p' "$version_output")" = "$tag"
+          while IFS= read -r changed_path; do
+            test "$changed_path" = "apps/station/src-tauri/Cargo.toml" -o \
+              "$changed_path" = "apps/station/src-tauri/tauri.conf.json"
+          done < <(git diff --name-only)
+          git diff --check
+          git config user.name "markiro-release-bot"
+          git config user.email "release-bot@markiro.local"
+          git add apps/station/src-tauri/Cargo.toml apps/station/src-tauri/tauri.conf.json
+          git commit --allow-empty -m "chore(station): prepare stable $version"
+          release_sha="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$base_sha"
+          node --test tools/station-release/test/channel-config.test.mjs
+          printf 'release_sha=%s\n' "$release_sha" >> "$GITHUB_ENV"
+
+      - name: Install locked workspace dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and verify stable source
+        if: inputs.mode == 'publish'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @markiro/domain build
+          pnpm --filter @markiro/ui build
+          pnpm --filter @markiro/db build
+          pnpm --filter @markiro/station exec vitest run --maxWorkers=2 --testTimeout=30000
+          pnpm --filter @markiro/station typecheck
+          pnpm --filter @markiro/station lint
+          pnpm --filter @markiro/station build
+          pnpm test:station-release:contract
+          cargo test --manifest-path apps/station/src-tauri/Cargo.toml
+          git diff --check
+
+      - name: Verify production station CORS
+        run: pnpm verify:station-production-cors
+
+      - name: Build signed stable Windows artifacts
+        if: inputs.mode == 'publish'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          normalized_key="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | node tools/station-release/normalize-signing-key.mjs)"
+          normalized_key_file="$RUNNER_TEMP/station-stable-updater.key"
+          trap 'rm -f "$normalized_key_file"' EXIT
+          printf '%s' "$normalized_key" > "$normalized_key_file"
+          chmod 600 "$normalized_key_file"
+          export TAURI_SIGNING_PRIVATE_KEY="$normalized_key_file"
+          pnpm --filter @markiro/station tauri build \
+            --config src-tauri/tauri.stable.conf.json
+          bundle_dir="apps/station/src-tauri/target/release/bundle/nsis"
+          installer="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.exe' -print -quit)"
+          bundle="$installer"
+          signature="$bundle.sig"
+          test -f "$installer" -a -f "$bundle" -a -f "$signature"
+          input_dir="$RUNNER_TEMP/station-stable-input"
+          rm -rf "$input_dir"
+          mkdir "$input_dir"
+          cp "$installer" "$input_dir/markiro-station-${version}-windows-x86_64-setup.exe"
+          cp "$bundle" "$input_dir/markiro-station-${version}-windows-x86_64.nsis.zip"
+          cp "$signature" "$input_dir/markiro-station-${version}-windows-x86_64.nsis.zip.sig"
+
+      - name: Generate changelog and stage stable assets
+        if: inputs.mode == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous_stable_base_sha=""
+          if [ -n "$previous_stable_tag" ]; then
+            previous_dir="$RUNNER_TEMP/station-previous-stable"
+            rm -rf "$previous_dir"
+            mkdir "$previous_dir"
+            previous_version="${previous_stable_tag#station-v}"
+            gh release view "$previous_stable_tag" --repo "$GITHUB_REPOSITORY" \
+              --json tagName,isDraft,isPrerelease,targetCommitish > "$RUNNER_TEMP/station-previous-stable.json"
+            node -e 'const r=require(process.argv[1]);if(r.tagName!==process.argv[2]||r.isDraft||r.isPrerelease)process.exit(1)' \
+              "$RUNNER_TEMP/station-previous-stable.json" "$previous_stable_tag"
+            gh release download "$previous_stable_tag" --repo "$GITHUB_REPOSITORY" --dir "$previous_dir"
+            node tools/station-release/artifacts.mjs validate stable "$previous_dir" "$previous_version"
+            previous_stable_base_sha="$(node -e 'const e=require(process.argv[1]);process.stdout.write(e.baseSha)' "$previous_dir/release-evidence.json")"
+            from_sha="$previous_stable_base_sha"
+          else
+            beta_line_json="$RUNNER_TEMP/station-beta-line.json"
+            beta_line_tags="$RUNNER_TEMP/station-beta-line-tags.txt"
+            gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+              --json tagName,isDraft,isPrerelease > "$beta_line_json"
+            node --input-type=module -e '
+              import { openSync, readFileSync, writeFileSync, closeSync } from "node:fs";
+              import { parseStationBetaTag } from "./tools/station-release/version.mjs";
+              const [inputPath, version, outputPath] = process.argv.slice(1);
+              const tags = JSON.parse(readFileSync(inputPath, "utf8"))
+                .filter((release) => release.isDraft === false && release.isPrerelease === true)
+                .map((release) => ({ tag: release.tagName, parsed: parseStationBetaTag(release.tagName) }))
+                .filter((release) => release.parsed && release.parsed.text.startsWith(`${version}-beta.`))
+                .sort((left, right) => left.parsed.beta - right.parsed.beta)
+                .map((release) => release.tag);
+              if (tags.length === 0) throw new Error("missing verified beta line");
+              const handle = openSync(outputPath, "wx", 0o600);
+              try { writeFileSync(handle, `${tags.join("\n")}\n`); } finally { closeSync(handle); }
+            ' "$beta_line_json" "$version" "$beta_line_tags"
+            earliest_base_sha=""
+            while IFS= read -r beta_tag; do
+              beta_number="${beta_tag##*.}"
+              line_dir="$RUNNER_TEMP/station-beta-line-$beta_number"
+              rm -rf "$line_dir"
+              mkdir "$line_dir"
+              gh release download "$beta_tag" --repo "$GITHUB_REPOSITORY" --dir "$line_dir"
+              candidate_version="${beta_tag#station-v}"
+              node tools/station-release/artifacts.mjs validate beta "$line_dir" "$candidate_version"
+              candidate_base_sha="$(node -e 'const e=require(process.argv[1]);process.stdout.write(e.baseSha)' "$line_dir/release-evidence.json")"
+              if git merge-base --is-ancestor "$candidate_base_sha" "$base_sha"; then
+                earliest_base_sha="$candidate_base_sha"
+                break
+              fi
+            done < "$beta_line_tags"
+            test -n "$earliest_base_sha"
+            if earliest_parent="$(git rev-parse "$earliest_base_sha^" 2>/dev/null)"; then
+              from_sha="$earliest_parent"
+            else
+              from_sha="$earliest_base_sha"
+            fi
+          fi
+          to_sha="$base_sha"
+          compare_url="https://github.com/$GITHUB_REPOSITORY/compare/${from_sha}...${to_sha}"
+          metadata_path="$RUNNER_TEMP/station-stable-changelog.json"
+          VERSION="$version" SOURCE_BETA_TAG="$source_beta_tag" \
+          PREVIOUS_STABLE_TAG="$previous_stable_tag" FROM_SHA="$from_sha" TO_SHA="$to_sha" \
+          COMPARE_URL="$compare_url" METADATA_PATH="$metadata_path" node --input-type=module <<'NODE'
+          import { openSync, writeFileSync, closeSync } from "node:fs";
+          const metadata = {
+            version: process.env.VERSION,
+            sourceBetaTag: process.env.SOURCE_BETA_TAG,
+            previousStableTag: process.env.PREVIOUS_STABLE_TAG || null,
+            fromSha: process.env.FROM_SHA,
+            toSha: process.env.TO_SHA,
+            compareUrl: process.env.COMPARE_URL,
+          };
+          const handle = openSync(process.env.METADATA_PATH, "wx", 0o600);
+          try { writeFileSync(handle, `${JSON.stringify(metadata)}\n`); } finally { closeSync(handle); }
+          NODE
+          notes_path="$RUNNER_TEMP/station-stable-release-notes.md"
+          node tools/station-release/changelog.mjs generate \
+            "$metadata_path" "$highlights_file" "$notes_path"
+          provenance_path="$RUNNER_TEMP/station-stable-provenance.json"
+          SOURCE_BETA_TAG="$source_beta_tag" BETA_VERSION="$beta_version" \
+          BETA_RELEASE_SHA="$beta_release_sha" BETA_EVIDENCE_SHA256="$beta_evidence_sha256" \
+          PREVIOUS_STABLE_TAG="$previous_stable_tag" PREVIOUS_STABLE_BASE_SHA="$previous_stable_base_sha" \
+          FROM_SHA="$from_sha" TO_SHA="$to_sha" PROVENANCE_PATH="$provenance_path" \
+          node --input-type=module <<'NODE'
+          import { openSync, writeFileSync, closeSync } from "node:fs";
+          const provenance = {
+            sourceBetaTag: process.env.SOURCE_BETA_TAG,
+            betaVersion: process.env.BETA_VERSION,
+            betaReleaseSha: process.env.BETA_RELEASE_SHA,
+            betaEvidenceSha256: process.env.BETA_EVIDENCE_SHA256,
+            acceptanceConfirmed: true,
+            previousStableTag: process.env.PREVIOUS_STABLE_TAG || null,
+            previousStableBaseSha: process.env.PREVIOUS_STABLE_BASE_SHA || null,
+            changelogFromSha: process.env.FROM_SHA,
+            changelogToSha: process.env.TO_SHA,
+          };
+          const handle = openSync(process.env.PROVENANCE_PATH, "wx", 0o600);
+          try { writeFileSync(handle, `${JSON.stringify(provenance)}\n`); } finally { closeSync(handle); }
+          NODE
+          staged_dir="$RUNNER_TEMP/station-stable-staged"
+          rm -rf "$staged_dir"
+          published_at="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          node tools/station-release/artifacts.mjs stage-stable \
+            "$RUNNER_TEMP/station-stable-input" "$staged_dir" "$version" "$published_at" \
+            "$base_sha" "$release_sha" "$notes_path" "$provenance_path"
+          node tools/station-release/artifacts.mjs validate stable "$staged_dir" "$version"
+
+      - name: Prepare existing stable release for channel recovery
+        if: inputs.mode == 'promote-existing'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          staged_dir="$RUNNER_TEMP/station-stable-staged"
+          rm -rf "$staged_dir"
+          mkdir "$staged_dir"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$staged_dir"
+          node tools/station-release/artifacts.mjs validate stable "$staged_dir" "$version"
+          evidence_path="$staged_dir/release-evidence.json"
+          SOURCE_BETA_TAG="$source_beta_tag" BETA_RELEASE_SHA="$beta_release_sha" \
+          BETA_EVIDENCE_SHA256="$beta_evidence_sha256" BASE_SHA="$base_sha" \
+          VERSION="$version" node -e '
+            const e=require(process.argv[1]);
+            if(e.sourceBetaTag!==process.env.SOURCE_BETA_TAG||e.betaReleaseSha!==process.env.BETA_RELEASE_SHA||e.betaEvidenceSha256!==process.env.BETA_EVIDENCE_SHA256||e.baseSha!==process.env.BASE_SHA||e.version!==process.env.VERSION||e.acceptanceConfirmed!==true)process.exit(1)
+          ' "$evidence_path"
+          release_sha="$(node -e 'const e=require(process.argv[1]);process.stdout.write(e.releaseSha)' "$evidence_path")"
+          stable_target_sha="$(node -e 'const r=require(process.argv[1]);process.stdout.write(r.targetCommitish)' "$RUNNER_TEMP/station-stable-release.json")"
+          test "$release_sha" = "$stable_target_sha"
+          printf 'release_sha=%s\n' "$release_sha" >> "$GITHUB_ENV"
+
+      - name: Publish immutable stable release
+        if: inputs.mode == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_ref="station-stable-release-candidate-${GITHUB_RUN_ID}"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=$auth_header" push origin "HEAD:refs/heads/$candidate_ref"
+          printf 'candidate_ref=%s\n' "$candidate_ref" >> "$GITHUB_ENV"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --target "$release_sha" \
+            --title "Markiro Station $version" \
+            --notes-file "$RUNNER_TEMP/station-stable-staged/release-notes.md"
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-stable-staged"/*
+          downloaded_dir="$RUNNER_TEMP/station-stable-downloaded"
+          rm -rf "$downloaded_dir"
+          mkdir "$downloaded_dir"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$downloaded_dir"
+          node tools/station-release/artifacts.mjs validate stable "$downloaded_dir" "$version"
+          for staged_file in "$RUNNER_TEMP/station-stable-staged"/*; do
+            cmp "$staged_file" "$downloaded_dir/$(basename "$staged_file")"
+          done
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
+
+      - name: Promote stable channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isDraft,isPrerelease,targetCommitish > "$RUNNER_TEMP/station-stable-final.json"
+          node -e 'const r=require(process.argv[1]);if(r.tagName!==process.argv[2]||r.isDraft||r.isPrerelease||r.targetCommitish!==process.argv[3])process.exit(1)' \
+            "$RUNNER_TEMP/station-stable-final.json" "$tag" "$release_sha"
+          backup_dir="$RUNNER_TEMP/station-channel-backup"
+          rm -rf "$backup_dir"
+          mkdir "$backup_dir"
+          channel_had_manifest=false
+          if ! gh release view station-stable-channel --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create station-stable-channel --repo "$GITHUB_REPOSITORY" --prerelease \
+              --title "Markiro Station stable channel" \
+              --notes "Mutable stable channel pointer; immutable stable releases remain versioned."
+          else
+            channel_json="$RUNNER_TEMP/station-stable-channel.json"
+            gh release view station-stable-channel --repo "$GITHUB_REPOSITORY" \
+              --json tagName,isDraft,isPrerelease,assets > "$channel_json"
+            channel_had_manifest="$(node -e '
+              const r=require(process.argv[1]);
+              if(r.tagName!=="station-stable-channel"||r.isDraft||!r.isPrerelease)process.exit(1);
+              process.stdout.write(r.assets.some((asset)=>asset.name==="latest.json")?"true":"false")
+            ' "$channel_json")"
+            if [ "$channel_had_manifest" = "true" ]; then
+              gh release download station-stable-channel --repo "$GITHUB_REPOSITORY" \
+                --pattern latest.json --dir "$backup_dir"
+              test -f "$backup_dir/latest.json"
+            fi
+          fi
+          channel_dir="$RUNNER_TEMP/station-stable-channel"
+          rm -rf "$channel_dir"
+          mkdir "$channel_dir"
+          channel_manifest="$RUNNER_TEMP/station-stable-channel/latest.json"
+          cp "$RUNNER_TEMP/station-stable-staged/latest.json" "$channel_manifest"
+          if ! gh release upload station-stable-channel --repo "$GITHUB_REPOSITORY" \
+            "$channel_manifest" --clobber; then
+            if [ -f "$backup_dir/latest.json" ]; then
+              gh release upload station-stable-channel --repo "$GITHUB_REPOSITORY" \
+                "$backup_dir/latest.json" --clobber
+            elif [ "$channel_had_manifest" = "false" ]; then
+              gh release delete-asset station-stable-channel latest.json \
+                --repo "$GITHUB_REPOSITORY" --yes || true
+            fi
+            exit 1
+          fi
+          verify_dir="$RUNNER_TEMP/station-channel-verify"
+          rm -rf "$verify_dir"
+          mkdir "$verify_dir"
+          if ! gh release download station-stable-channel --repo "$GITHUB_REPOSITORY" \
+            --pattern latest.json --dir "$verify_dir" || \
+            ! cmp "$verify_dir/latest.json" "$RUNNER_TEMP/station-stable-staged/latest.json"; then
+            if [ -f "$backup_dir/latest.json" ]; then
+              gh release upload station-stable-channel --repo "$GITHUB_REPOSITORY" \
+                "$backup_dir/latest.json" --clobber
+            elif [ "$channel_had_manifest" = "false" ]; then
+              gh release delete-asset station-stable-channel latest.json \
+                --repo "$GITHUB_REPOSITORY" --yes || true
+            fi
+            exit 1
+          fi
+
+      - name: Summarize stable release
+        shell: bash
+        run: |
+          {
+            echo "## Markiro Station stable"
+            echo "- Source beta: \`$source_beta_tag\`"
+            echo "- Stable: \`$tag\`"
+            echo "- baseSha: \`$base_sha\`"
+            echo "- releaseSha: \`$release_sha\`"
+            echo "- Channel: \`station-stable-channel/latest.json\`"
+            echo "- Authenticode: not enabled; Windows physical acceptance remains external"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup owned stable release material
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set +e
+          candidate_ref="station-stable-release-candidate-${GITHUB_RUN_ID}"
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$candidate_ref"
+          rm -rf \
+            "$RUNNER_TEMP/station-accepted-beta" \
+            "$RUNNER_TEMP/station-stable-input" \
+            "$RUNNER_TEMP/station-stable-staged" \
+            "$RUNNER_TEMP/station-stable-downloaded" \
+            "$RUNNER_TEMP/station-previous-stable" \
+            "$RUNNER_TEMP/station-stable-channel" \
+            "$RUNNER_TEMP/station-channel-backup" \
+            "$RUNNER_TEMP/station-channel-verify"
+          rm -f \
+            "$RUNNER_TEMP/station-stable-updater.key" \
+            "$RUNNER_TEMP/station-stable-highlights.txt"

@@ -168,10 +168,10 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf "$RUNNER_TEMP/station-staged"
-          node tools/station-release/artifacts.mjs stage \
+          node tools/station-release/artifacts.mjs stage beta \
             "$RUNNER_TEMP/station-input" "$RUNNER_TEMP/station-staged" "$version" \
             "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$GITHUB_SHA" "$release_sha"
-          node tools/station-release/artifacts.mjs validate "$RUNNER_TEMP/station-staged" "$version"
+          node tools/station-release/artifacts.mjs validate beta "$RUNNER_TEMP/station-staged" "$version"
 
       - name: Publish immutable version release
         id: immutable-release
@@ -190,7 +190,7 @@ jobs:
           rm -rf "$RUNNER_TEMP/station-downloaded"
           mkdir "$RUNNER_TEMP/station-downloaded"
           gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/station-downloaded"
-          node tools/station-release/artifacts.mjs validate "$RUNNER_TEMP/station-downloaded" "$version"
+          node tools/station-release/artifacts.mjs validate beta "$RUNNER_TEMP/station-downloaded" "$version"
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
           echo "candidate_ref=$candidate_ref" >> "$GITHUB_OUTPUT"
 
@@ -204,7 +204,7 @@ jobs:
           rm -rf "$RUNNER_TEMP/station-staged"
           mkdir "$RUNNER_TEMP/station-staged"
           gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/station-staged"
-          node tools/station-release/artifacts.mjs validate "$RUNNER_TEMP/station-staged" "$version"
+          node tools/station-release/artifacts.mjs validate beta "$RUNNER_TEMP/station-staged" "$version"
 
       - name: Promote beta channel
         if: inputs.mode == 'publish' || inputs.mode == 'promote-existing'
