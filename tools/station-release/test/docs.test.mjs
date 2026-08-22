@@ -26,3 +26,27 @@ test("station beta docs cover manual promotion and recovery", async () => {
   await access(new URL("docs/runbooks/station-beta-release.md", root));
   await access(new URL("docs/acceptance/station-beta-release.md", root));
 });
+
+test("station stable docs separate automated release proof from physical acceptance", async () => {
+  const [stableRunbook, stableAcceptance, betaRunbook, readme, checklist] = await Promise.all([
+    read("docs/runbooks/station-stable-release.md"),
+    read("docs/acceptance/station-stable-release.md"),
+    read("docs/runbooks/station-beta-release.md"),
+    read("apps/station/README.md"),
+    read("docs/hardware-acceptance-checklist.md"),
+  ]);
+  assert.match(stableRunbook, /station-stable/);
+  assert.match(stableRunbook, /source_beta_tag/);
+  assert.match(stableRunbook, /acceptance_confirmed/);
+  assert.match(stableRunbook, /promote-existing/);
+  assert.match(stableRunbook, /station-stable-channel/);
+  assert.match(stableRunbook, /SmartScreen|неизвестн.*издател/i);
+  assert.match(stableRunbook, /beta.*stable/is);
+  assert.match(stableRunbook, /TAURI_SIGNING_PRIVATE_KEY/);
+  assert.match(stableAcceptance, /NOT RUN/);
+  assert.match(stableAcceptance, /beta.*stable/is);
+  assert.match(stableAcceptance, /stable.*stable/is);
+  assert.match(betaRunbook, /station-stable-release/);
+  assert.match(readme, /Manual stable updates/);
+  assert.match(checklist, /Station stable/);
+});

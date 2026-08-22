@@ -188,6 +188,30 @@ were used. A host browser or macOS Tauri run does not satisfy these checks.
       the wrong control and that repeated scanning does not leave focus on a
       destructive or exit action.
 
+### Station stable beta-to-stable and stable-to-stable
+
+- [ ] Record the exact accepted beta tag, beta evidence SHA-256, stable tag,
+      stable evidence SHA-256, immutable installer SHA-256 and workflow URL.
+- [ ] Outside an active shift, install the stable NSIS manually over the
+      accepted beta. Record the SmartScreen/unknown-publisher path without
+      treating the Tauri updater signature as Authenticode proof.
+- [ ] Before and after beta → stable, compare pairing identity, Station SQLite,
+      scanner/printer settings, journal, open/closed boxes, exceptions and
+      pending outbox. Do not record credentials, PIN/badge or pairing codes.
+- [ ] Confirm the installed stable checks only
+      `station-stable-channel/latest.json` and does not automatically download,
+      install or restart.
+- [ ] Publish a later accepted beta/stable pair and perform stable → stable via
+      the manual updater. Confirm installation is denied during an active shift
+      and succeeds after the shift is safely closed.
+- [ ] Exercise scanner, printer, sound, touch, fullscreen, offline restart,
+      reconnect and pending-outbox synchronization on the packaged Windows
+      stable build.
+- [ ] Within the documented schema window, manually install a retained older
+      immutable stable NSIS and verify the rollback without deleting SQLite or
+      outbox. Record `PASS`, `FAIL` or `NOT RUN` in
+      `docs/acceptance/station-stable-release.md`.
+
 ### Live roster and floor recovery (next Station beta)
 
 These checks apply to the packaged Windows beta. Keep them unchecked until the
