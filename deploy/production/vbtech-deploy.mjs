@@ -520,6 +520,7 @@ function validatedInput(options, paths) {
     throw new Error("executor environment is invalid");
   const markiroDomains = [
     environment.MARKIRO_DOMAIN,
+    environment.MARKIRO_SAAS_ADMIN_DOMAIN,
     environment.MARKIRO_KIOSK_DOMAIN,
     environment.MARKIRO_LANDING_DOMAIN,
   ];
@@ -805,7 +806,7 @@ function requireRepoDigest(expected, output) {
 }
 
 function commandEnvironment(input, active, vbtech) {
-  const [markiroDomain, kioskDomain, landingDomain] = input.markiroDomains;
+  const [markiroDomain, saasAdminDomain, kioskDomain, landingDomain] = input.markiroDomains;
   const environment = {
     PATH: FIXED_PATH,
     ...(input.environment.DOCKER_CONFIG === undefined
@@ -817,6 +818,7 @@ function commandEnvironment(input, active, vbtech) {
     MARKIRO_API_IMAGE_DIGEST: digestFromReference(API_REPOSITORY, active.release.apiDigest),
     MARKIRO_EDGE_IMAGE_DIGEST: digestFromReference(EDGE_REPOSITORY, active.release.edgeDigest),
     MARKIRO_DOMAIN: markiroDomain,
+    MARKIRO_SAAS_ADMIN_DOMAIN: saasAdminDomain,
     MARKIRO_KIOSK_DOMAIN: kioskDomain,
     MARKIRO_LANDING_DOMAIN: landingDomain,
   };
