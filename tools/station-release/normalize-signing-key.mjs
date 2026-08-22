@@ -9,7 +9,9 @@ export function normalizeTauriSigningKey(value) {
   if (!decoded.startsWith(HEADER)) {
     throw new Error("TAURI_SIGNING_PRIVATE_KEY is not a Tauri rsign private key");
   }
-  return Buffer.from(decoded, "utf8").toString("base64");
+  // Tauri accepted the exact stored value in beta.5. Even semantically equivalent
+  // decode/re-encode output can break updater signing, so validation must be lossless.
+  return value;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

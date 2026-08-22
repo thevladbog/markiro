@@ -110,11 +110,13 @@ test("station beta publication is protected, serialized, main-only and channel-l
   assert.doesNotMatch(text, /continue-on-error/i);
 });
 
-test("canonicalizes raw and wrapped Tauri keys to CLI-compatible base64", async () => {
+test("validates raw and wrapped Tauri keys without rewriting them", async () => {
   const raw = "untrusted comment: rsign encrypted secret key\nRWZha2U=\n";
   const wrapped = Buffer.from(raw, "utf8").toString("base64");
-  assert.equal(normalizeTauriSigningKey(raw), wrapped);
-  assert.equal(normalizeTauriSigningKey(`  ${wrapped}\n`), wrapped);
+  const paddedWrapped = `  ${wrapped}\n`;
+  assert.equal(normalizeTauriSigningKey(raw), raw);
+  assert.equal(normalizeTauriSigningKey(wrapped), wrapped);
+  assert.equal(normalizeTauriSigningKey(paddedWrapped), paddedWrapped);
   assert.throws(() => normalizeTauriSigningKey("not-a-signing-key"), /not a Tauri rsign/);
 });
 
