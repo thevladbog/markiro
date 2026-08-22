@@ -94,6 +94,7 @@ export type {
 } from "./tenants.js";
 export {
   bankAccountInputSchema,
+  bankAccountArchiveSchema,
   bankAccountSchema,
   bankAccountStatusSchema,
   billingContactSchema,
@@ -150,6 +151,7 @@ export type {
   ApplyInvoiceDto,
   ApplyInvoiceInput,
   BankAccount,
+  BankAccountArchiveInput,
   BankAccountInput,
   BankAccountStatus,
   BillingProfile,

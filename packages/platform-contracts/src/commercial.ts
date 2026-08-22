@@ -191,6 +191,16 @@ export const operatorBankAccountSchema = bankAccountSchema;
 export const tenantBankAccountSchema = bankAccountSchema.extend({
   tenantId: platformTenantIdSchema,
 });
+export const bankAccountArchiveSchema = z
+  .object({
+    replacementAccountId: platformUuidSchema.optional(),
+  })
+  .strict();
+
+const bankAccountParamsSchema = z.object({ accountId: platformUuidSchema }).strict();
+const tenantBankAccountParamsSchema = z
+  .object({ tenantId: platformTenantIdSchema, accountId: platformUuidSchema })
+  .strict();
 
 export const offerActivationPolicySchema = z.enum(["immediately", "after_current"]);
 export const invoiceActivationPolicySchema = z.enum(["immediate", "after_current", "manual"]);
@@ -984,6 +994,38 @@ export const platformCommercialContracts = {
       },
     },
   },
+  billingAccounts: {
+    operator: {
+      list: { response: z.array(operatorBankAccountSchema) },
+      create: { body: bankAccountInputSchema, response: operatorBankAccountSchema },
+      setDefault: { params: bankAccountParamsSchema, response: operatorBankAccountSchema },
+      archive: {
+        params: bankAccountParamsSchema,
+        body: bankAccountArchiveSchema,
+        response: operatorBankAccountSchema,
+      },
+    },
+    tenant: {
+      list: {
+        params: z.object({ tenantId: platformTenantIdSchema }).strict(),
+        response: z.array(tenantBankAccountSchema),
+      },
+      create: {
+        params: z.object({ tenantId: platformTenantIdSchema }).strict(),
+        body: bankAccountInputSchema,
+        response: tenantBankAccountSchema,
+      },
+      setDefault: {
+        params: tenantBankAccountParamsSchema,
+        response: tenantBankAccountSchema,
+      },
+      archive: {
+        params: tenantBankAccountParamsSchema,
+        body: bankAccountArchiveSchema,
+        response: tenantBankAccountSchema,
+      },
+    },
+  },
   offers: {
     list: { response: z.array(offerSchema) },
     detail: { params: offerIdSchema, response: offerDetailSchema },
@@ -1099,3 +1141,4 @@ export type BankAccountInput = z.output<typeof bankAccountInputSchema>;
 export type BankAccount = z.output<typeof bankAccountSchema>;
 export type OperatorBankAccount = z.output<typeof operatorBankAccountSchema>;
 export type TenantBankAccount = z.output<typeof tenantBankAccountSchema>;
+export type BankAccountArchiveInput = z.output<typeof bankAccountArchiveSchema>;

@@ -257,6 +257,58 @@ export const CURRENT_SAAS_ROUTES = [
     platformCommercialContracts.payments.import.response,
     { body: platformCommercialContracts.payments.import.body },
   ),
+  route(
+    "get",
+    "/platform/billing/operator/accounts",
+    "200",
+    platformCommercialContracts.billingAccounts.operator.list.response,
+  ),
+  route(
+    "post",
+    "/platform/billing/operator/accounts",
+    "201",
+    platformCommercialContracts.billingAccounts.operator.create.response,
+    { body: platformCommercialContracts.billingAccounts.operator.create.body },
+  ),
+  route(
+    "patch",
+    "/platform/billing/operator/accounts/{accountId}/default",
+    "200",
+    platformCommercialContracts.billingAccounts.operator.setDefault.response,
+  ),
+  route(
+    "post",
+    "/platform/billing/operator/accounts/{accountId}/archive",
+    "200",
+    platformCommercialContracts.billingAccounts.operator.archive.response,
+    { body: platformCommercialContracts.billingAccounts.operator.archive.body },
+  ),
+  route(
+    "get",
+    "/platform/billing/tenants/{tenantId}/accounts",
+    "200",
+    platformCommercialContracts.billingAccounts.tenant.list.response,
+  ),
+  route(
+    "post",
+    "/platform/billing/tenants/{tenantId}/accounts",
+    "201",
+    platformCommercialContracts.billingAccounts.tenant.create.response,
+    { body: platformCommercialContracts.billingAccounts.tenant.create.body },
+  ),
+  route(
+    "patch",
+    "/platform/billing/tenants/{tenantId}/accounts/{accountId}/default",
+    "200",
+    platformCommercialContracts.billingAccounts.tenant.setDefault.response,
+  ),
+  route(
+    "post",
+    "/platform/billing/tenants/{tenantId}/accounts/{accountId}/archive",
+    "200",
+    platformCommercialContracts.billingAccounts.tenant.archive.response,
+    { body: platformCommercialContracts.billingAccounts.tenant.archive.body },
+  ),
 ] as const satisfies readonly PlatformRouteContract[];
 
 export const CURRENT_SAAS_ROUTE_KEYS = CURRENT_SAAS_ROUTES.map(

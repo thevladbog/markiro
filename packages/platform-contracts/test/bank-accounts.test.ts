@@ -24,4 +24,26 @@ describe("billing bank-account contracts", () => {
     expect(schema.safeParse({ ...valid, currency: "USD" }).success).toBe(false);
     expect(schema.safeParse({ ...valid, hiddenProviderPayload: {} }).success).toBe(false);
   });
+
+  it("publishes the exact operator and tenant lifecycle contracts", () => {
+    const commercial = contracts.platformCommercialContracts as {
+      billingAccounts?: {
+        operator?: Record<string, unknown>;
+        tenant?: Record<string, unknown>;
+      };
+    };
+
+    expect(Object.keys(commercial.billingAccounts?.operator ?? {}).sort()).toEqual([
+      "archive",
+      "create",
+      "list",
+      "setDefault",
+    ]);
+    expect(Object.keys(commercial.billingAccounts?.tenant ?? {}).sort()).toEqual([
+      "archive",
+      "create",
+      "list",
+      "setDefault",
+    ]);
+  });
 });

@@ -11,6 +11,8 @@ import { BillingController } from "../src/modules/billing/billing.controller";
 import { BillingService } from "../src/modules/billing/billing.service";
 import { BillingPaymentsController } from "../src/modules/billing-payments/billing-payments.controller";
 import { BillingPaymentsService } from "../src/modules/billing-payments/billing-payments.service";
+import { BillingAccountsController } from "../src/modules/billing-accounts/billing-accounts.controller";
+import { BillingAccountsService } from "../src/modules/billing-accounts/billing-accounts.service";
 import {
   PlatformCatalogController,
   PlatformSettingsController,
@@ -106,6 +108,7 @@ async function createPlatformDocument(): Promise<{
     BillingDocumentsService,
     BillingApplicationService,
     BillingPaymentsService,
+    BillingAccountsService,
     DB,
   ].map((provide) => ({ provide, useValue: {} }));
   const moduleRef = await Test.createTestingModule({
@@ -120,6 +123,7 @@ async function createPlatformDocument(): Promise<{
       PlatformOffersController,
       BillingController,
       BillingPaymentsController,
+      BillingAccountsController,
     ],
     providers,
   }).compile();
@@ -143,8 +147,8 @@ async function createPlatformDocument(): Promise<{
 }
 
 describe("current SaaS platform OpenAPI contracts", () => {
-  it("converts all 64 current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(64);
+  it("converts all 76 current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(76);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }
