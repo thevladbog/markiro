@@ -120,7 +120,7 @@ export function privateVbtechRequestClient({
 }
 
 export async function runPrivateVbtechSmoke(
-  { transportOrigin, expectedVbtechReleaseSha },
+  { transportOrigin, expectedVbtechReleaseSha, vbtechSubmissionState = "disabled" },
   client = { request: loopbackTlsRequest },
 ) {
   if (typeof client?.request !== "function") throw privateRequestError();
@@ -135,7 +135,7 @@ export async function runPrivateVbtechSmoke(
       vbtechBaseUrl: `https://${apexHost}`,
       vbtechWwwBaseUrl: `https://${wwwHost}`,
       expectedVbtechReleaseSha,
-      vbtechSubmissionState: "disabled",
+      vbtechSubmissionState,
     },
     privateClient,
   );

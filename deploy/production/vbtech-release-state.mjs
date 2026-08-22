@@ -6,6 +6,7 @@ const MAX_RECORD_BYTES = 16 * 1024;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 const REPOSITORY = "ghcr.io/thevladbog/vbtech-web";
+const ENABLED_FUNCTION_PATH = "/d4egihdqfci0mhota3ac";
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
@@ -89,7 +90,7 @@ function isLifecycleRecord(value) {
   return (
     hasExactKeys(value, RECORD_KEYS) &&
     isImageIdentity(value) &&
-    value.submissionState === "disabled" &&
+    (value.submissionState === "disabled" || value.submissionState === "enabled") &&
     isCanonicalIsoDate(value.createdAt) &&
     (value.state === "pending" || value.state === "healthy" || value.state === "failed")
   );
@@ -565,8 +566,10 @@ export function validateVbtechSelector(value) {
     if (
       !hasExactKeys(value, SELECTOR_KEYS) ||
       !isImageIdentity(value) ||
-      value.functionPath !== "" ||
-      value.submissionState !== "disabled"
+      !(
+        (value.submissionState === "disabled" && value.functionPath === "") ||
+        (value.submissionState === "enabled" && value.functionPath === ENABLED_FUNCTION_PATH)
+      )
     )
       throw selectorError();
   } catch (error) {

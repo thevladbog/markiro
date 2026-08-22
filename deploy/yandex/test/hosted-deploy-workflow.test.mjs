@@ -261,14 +261,21 @@ async function assertPrivateVbtechDeployWorkflow(source, { executePrograms = tru
   assert.deepEqual(Object.keys(inputs), [
     "vbtech_release_sha",
     "vbtech_image_digest",
+    "submission_state",
     "confirm_private_deploy",
+    "confirm_enable",
   ]);
   assert.equal(inputs.vbtech_release_sha.required, true);
   assert.equal(inputs.vbtech_release_sha.type, "string");
   assert.equal(inputs.vbtech_image_digest.required, true);
   assert.equal(inputs.vbtech_image_digest.type, "string");
+  assert.equal(inputs.submission_state.required, true);
+  assert.equal(inputs.submission_state.type, "choice");
+  assert.deepEqual(inputs.submission_state.options, ["disabled", "enabled"]);
   assert.equal(inputs.confirm_private_deploy.required, true);
   assert.equal(inputs.confirm_private_deploy.type, "boolean");
+  assert.equal(inputs.confirm_enable.required, true);
+  assert.equal(inputs.confirm_enable.type, "boolean");
   assert.deepEqual(workflow.permissions, {});
   assert.deepEqual(workflow.concurrency, {
     group: "markiro-production-deployment",
@@ -326,6 +333,8 @@ async function assertPrivateVbtechDeployWorkflow(source, { executePrograms = tru
     CONFIRM_PRIVATE_DEPLOY: "${{ inputs.confirm_private_deploy }}",
     VBTECH_RELEASE_SHA: "${{ inputs.vbtech_release_sha }}",
     VBTECH_IMAGE_DIGEST: "${{ inputs.vbtech_image_digest }}",
+    VBTECH_SUBMISSION_STATE: "${{ inputs.submission_state }}",
+    CONFIRM_ENABLE: "${{ inputs.confirm_enable }}",
   });
   assert.ok(
     deploy.if === "${{ inputs.confirm_private_deploy == true }}" ||
@@ -337,6 +346,11 @@ async function assertPrivateVbtechDeployWorkflow(source, { executePrograms = tru
     '[[ "$CONFIRM_PRIVATE_DEPLOY" == "true" ]]',
     '[[ "$VBTECH_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]',
     '[[ "$VBTECH_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]',
+    '[[ "$VBTECH_SUBMISSION_STATE" =~ ^(disabled|enabled)$ ]]',
+    'if [[ "$VBTECH_SUBMISSION_STATE" == "enabled" ]]',
+    "then",
+    '[[ "$CONFIRM_ENABLE" == "true" ]]',
+    "fi",
   ]);
 
   const verification = stepByName(deploy, "Verify exact attested v-b image");
@@ -347,6 +361,7 @@ async function assertPrivateVbtechDeployWorkflow(source, { executePrograms = tru
     GHCR_USERNAME: "${{ github.actor }}",
     VBTECH_IMAGE_DIGEST: "${{ inputs.vbtech_image_digest }}",
     VBTECH_RELEASE_SHA: "${{ inputs.vbtech_release_sha }}",
+    VBTECH_SUBMISSION_STATE: "${{ inputs.submission_state }}",
   });
   assert.match(
     verification.run,
@@ -445,8 +460,10 @@ async function assertPrivateVbtechDeployWorkflow(source, { executePrograms = tru
     GHCR_TOKEN: "${{ github.token }}",
     VBTECH_RELEASE_SHA: "${{ inputs.vbtech_release_sha }}",
     VBTECH_IMAGE_DIGEST: "${{ inputs.vbtech_image_digest }}",
+    VBTECH_SUBMISSION_STATE: "${{ inputs.submission_state }}",
   });
-  assert.match(delivery.run, /submission_state=disabled/);
+  assert.match(verification.run, /actualState !== submissionState/);
+  assert.match(verification.run, /VBT-PD-02\/2026\.08\/01/);
   assert.deepEqual(
     [...delivery.run.matchAll(/node deploy\/yandex\/[a-z-]+[.]mjs run/g)].map((match) => match[0]),
     ["node deploy/yandex/remote-vbtech-deploy.mjs run"],
@@ -682,8 +699,8 @@ test("private v-b deploy rejects trust, evidence, and mutation-boundary regressi
       (value) => value.replace("remote-vbtech-deploy.mjs run", "remote-deploy.mjs run"),
     ],
     [
-      "enabled submission",
-      (value) => value.replace("submission_state=disabled", "submission_state=enabled"),
+      "unbound artifact state",
+      (value) => value.replace("actualState !== submissionState", 'actualState !== "unknown"'),
     ],
     [
       "capacity recommendation",

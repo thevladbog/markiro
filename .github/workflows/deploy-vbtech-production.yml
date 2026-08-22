@@ -1,4 +1,4 @@
-name: Deploy v-b.tech private web
+name: Deploy v-b.tech web
 
 on:
   workflow_dispatch:
@@ -11,10 +11,21 @@ on:
         description: Exact lowercase sha256 v-b.tech image digest
         required: true
         type: string
+      submission_state:
+        description: Exact contact state embedded in the attested image
+        required: true
+        type: choice
+        options: [disabled, enabled]
+        default: disabled
       confirm_private_deploy:
-        description: Confirm the private disabled v-b.tech deployment
+        description: Confirm the v-b.tech web deployment
         required: true
         type: boolean
+      confirm_enable:
+        description: Confirm routing public contact submissions to the reviewed function
+        required: true
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -47,11 +58,18 @@ jobs:
           CONFIRM_PRIVATE_DEPLOY: ${{ inputs.confirm_private_deploy }}
           VBTECH_RELEASE_SHA: ${{ inputs.vbtech_release_sha }}
           VBTECH_IMAGE_DIGEST: ${{ inputs.vbtech_image_digest }}
+          VBTECH_SUBMISSION_STATE: ${{ inputs.submission_state }}
+          CONFIRM_ENABLE: ${{ inputs.confirm_enable }}
         run: |
           set -euo pipefail
           [[ "$CONFIRM_PRIVATE_DEPLOY" == "true" ]]
           [[ "$VBTECH_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$VBTECH_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$VBTECH_SUBMISSION_STATE" =~ ^(disabled|enabled)$ ]]
+          if [[ "$VBTECH_SUBMISSION_STATE" == "enabled" ]]
+          then
+            [[ "$CONFIRM_ENABLE" == "true" ]]
+          fi
 
       - name: Checkout protected Markiro executor
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -77,6 +95,7 @@ jobs:
           GHCR_USERNAME: ${{ github.actor }}
           VBTECH_IMAGE_DIGEST: ${{ inputs.vbtech_image_digest }}
           VBTECH_RELEASE_SHA: ${{ inputs.vbtech_release_sha }}
+          VBTECH_SUBMISSION_STATE: ${{ inputs.submission_state }}
         run: |
           set -euo pipefail
           umask 077
@@ -90,6 +109,26 @@ jobs:
             --source-digest "$VBTECH_RELEASE_SHA" \
             --source-ref refs/heads/main > /dev/null
           docker manifest inspect "$image_ref" > /dev/null
+          web_dir="$RUNNER_TEMP/vbtech-verified-web"
+          install -d -m 700 "$web_dir"
+          container_id="$(docker create "$image_ref")"
+          trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
+          docker cp "$container_id:/srv/vbtech/." "$web_dir"
+          node --input-type=module - \
+            "$web_dir/index.html" "$web_dir/en/index.html" \
+            "$VBTECH_RELEASE_SHA" "$VBTECH_SUBMISSION_STATE" <<'VERIFY_VBTECH_ARTIFACT'
+          import { readFile } from "node:fs/promises";
+          import { extractArtifactIdentity } from "./vbtech-source/deploy/production/release-manifest.mjs";
+          const [ruPath, enPath, releaseSha, submissionState] = process.argv.slice(2);
+          const identity = extractArtifactIdentity(await Promise.all([
+            readFile(ruPath, "utf8"),
+            readFile(enPath, "utf8"),
+          ]));
+          const actualState = identity.submissionEnabled ? "enabled" : "disabled";
+          if (identity.releaseSha !== releaseSha || actualState !== submissionState) throw new Error();
+          if (actualState === "enabled" && identity.consentId !== "VBT-PD-02/2026.08/01")
+            throw new Error();
+          VERIFY_VBTECH_ARTIFACT
 
       - name: Create protected SSH identity
         env:
@@ -150,10 +189,9 @@ jobs:
           GHCR_TOKEN: ${{ github.token }}
           VBTECH_RELEASE_SHA: ${{ inputs.vbtech_release_sha }}
           VBTECH_IMAGE_DIGEST: ${{ inputs.vbtech_image_digest }}
+          VBTECH_SUBMISSION_STATE: ${{ inputs.submission_state }}
         run: |
           set -euo pipefail
-          submission_state=disabled
-          [[ "$submission_state" == "disabled" ]]
           node deploy/yandex/remote-vbtech-deploy.mjs run
 
       - name: Capture after runtime diagnostics
@@ -276,3 +314,4 @@ jobs:
             "$RUNNER_TEMP/vbtech-after.line" \
             "$RUNNER_TEMP/vbtech-after.json"
           rm -rf -- "$RUNNER_TEMP/vbtech-docker-config"
+          rm -rf -- "$RUNNER_TEMP/vbtech-verified-web"

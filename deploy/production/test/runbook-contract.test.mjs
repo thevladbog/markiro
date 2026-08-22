@@ -7,7 +7,7 @@ const read = (path) => readFile(new URL(path, root), "utf8");
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const proseRegExp = (value) => new RegExp(escapeRegExp(value).replaceAll(" ", "\\s+"), "i");
 const privateVbtechSection = (runbook) => {
-  const heading = "## Приватная выкладка v-b.tech";
+  const heading = "## Защищённая выкладка v-b.tech";
   const start = runbook.indexOf(heading);
   assert.notEqual(start, -1, "private v-b runbook section must exist");
   const nextHeading = runbook.indexOf("\n## ", start + heading.length);
@@ -19,7 +19,7 @@ const privateVbtechInputNames = (section) => {
   assert.ok(start >= 0 && end > start, "private v-b dispatch phase must be bounded");
   const phase = section.slice(start, end);
   const bullets = phase.match(/^- .+$/gm) ?? [];
-  assert.equal(bullets.length, 3, "private v-b dispatch phase must document exactly three inputs");
+  assert.equal(bullets.length, 5, "v-b dispatch phase must document exactly five inputs");
   const bulletNames = bullets.map((bullet) => {
     const match = bullet.match(/^- `([^`]+)` —/);
     assert.ok(match, "every private v-b dispatch bullet must name one input");
@@ -110,16 +110,18 @@ test("production deploy runbook defines the private v-b approval and ownership b
   for (const required of [
     "активен и валидирован Markiro-релиз с v-b executor",
     "отдельное защищённое production-одобрение",
-    "Deploy v-b.tech private web",
+    "Deploy v-b.tech web",
     "vbtech_release_sha",
     "vbtech_image_digest",
+    "submission_state",
     "confirm_private_deploy",
+    "confirm_enable",
     "exact source SHA",
     "exact OCI digest",
     "before snapshot — strict runtime diagnostics version 3",
     "after snapshot — strict runtime diagnostics version 3",
-    "VBTECH_SUBMISSION_STATE=disabled",
-    "function origin не требуется",
+    "Для `disabled` function path пуст",
+    "reviewed path `/d4egihdqfci0mhota3ac`",
     "только `vbtech-web`, пересоздание общего `edge` и приватные записи жизненного цикла v-b",
     "API и миграции",
     "PostgreSQL и другие изменения базы данных",
@@ -130,12 +132,12 @@ test("production deploy runbook defines the private v-b approval and ownership b
     "DNS",
     "выпуск и активацию TLS-сертификата",
     "публичную доступность",
-    "backend и активацию contact form",
-    "внешние email и captcha",
+    "не изменяет Cloud Functions или IAM",
+    "email или captcha mutation",
     "не доказывает публичный DNS, TLS v-b.tech или публичную доступность",
     "Rollback первого запуска",
     "Rollback замены",
-    "новое явное одобрение с exact v-b source SHA и exact OCI digest",
+    "новое явное одобрение с exact v-b source SHA, exact OCI digest и состоянием формы",
     "production-deploy",
     "MARKIRO_VBTECH_DEPLOY_HEALTHY",
     "MARKIRO_VBTECH_EXECUTOR_BOOTSTRAP_REQUIRED",
@@ -156,7 +158,9 @@ test("production deploy runbook defines the private v-b approval and ownership b
   assert.deepEqual(privateVbtechInputNames(section), [
     "vbtech_release_sha",
     "vbtech_image_digest",
+    "submission_state",
     "confirm_private_deploy",
+    "confirm_enable",
   ]);
   assert.throws(() =>
     privateVbtechInputNames(
@@ -210,9 +214,9 @@ test("production deploy runbook orders the private v-b operator phases", async (
     "Фаза 2. Отдельно одобрить и развернуть Markiro-релиз с executor",
     "Фаза 3. Снять и прочитать read-only baseline version 3",
     "Фаза 4. Отдельно одобрить exact v-b source SHA и exact OCI digest",
-    "Фаза 5. Запустить Deploy v-b.tech private web с явным подтверждением",
+    "Фаза 5. Запустить Deploy v-b.tech web с явным подтверждением",
     "Фаза 6. Проверить private smoke и evidence до/после",
-    "Фаза 7. Остановиться до DNS, сертификата v-b.tech, backend и contact activation",
+    "Фаза 7. Передать управление public acceptance v-b.tech",
   ];
 
   let previous = -1;

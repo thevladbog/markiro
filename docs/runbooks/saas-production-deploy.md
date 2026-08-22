@@ -34,11 +34,11 @@ env материализуется из runtime Lockbox; `SAAS_ADMIN_ORIGIN` о�
 совпадать с `https://$MARKIRO_SAAS_ADMIN_DOMAIN`. Секреты не передаются в
 аргументах или release archive.
 
-## Приватная выкладка v-b.tech
+## Защищённая выкладка v-b.tech
 
 Слияние этого изменения не разрешает live dispatch. Для каждого живого запуска требуется новое
-явное одобрение с exact v-b source SHA и exact OCI digest. Разрешение охватывает только приватную
-выкладку статического сайта на существующую VM с выключенной отправкой и сбор read-only evidence.
+явное одобрение с exact v-b source SHA, exact OCI digest и состоянием формы. Разрешение охватывает
+только выкладку статического сайта на существующую VM и сбор bounded evidence.
 
 ### Предварительные условия и границы
 
@@ -49,8 +49,9 @@ env материализуется из runtime Lockbox; `SAAS_ADMIN_ORIGIN` о�
   host keys и SSH secret из раздела «Требования». Значения credentials в evidence и runbook не
   переносятся. Если executor contract отсутствует, сначала отдельно разверните и валидируйте
   executor-bearing Markiro release; v-b workflow должен завершиться до мутаций.
-- В этой фазе неизменны `VBTECH_SUBMISSION_STATE=disabled`; function origin не требуется, backend
-  формы не создаётся и контактная отправка не включается.
+- Для `disabled` function path пуст. Для `enabled` до web deployment должны быть отдельно
+  активированы exact `vbtech-contact-http`, SmartCaptcha и abuse controls; executor принимает только
+  reviewed path `/d4egihdqfci0mhota3ac` и не изменяет Cloud Functions или IAM.
 - Операция изменяет только `vbtech-web`, пересоздание общего `edge` и приватные записи жизненного
   цикла v-b. Она не охватывает API и миграции; PostgreSQL и другие изменения базы данных; IAM и
   service accounts; Lockbox; buckets и Object Storage; VPC и сетевой control plane; DNS; выпуск и
@@ -58,8 +59,8 @@ env материализуется из runtime Lockbox; `SAAS_ADMIN_ORIGIN` о�
   и captcha.
 
 Private smoke использует существующий доверенный Markiro TLS transport и проверяет private
-routing/content, release identity, заголовки, HTML-маршруты, redirect, 404 и disabled contact
-contract. Его успешный результат не доказывает публичный DNS, TLS v-b.tech или публичную
+routing/content, release identity, заголовки, HTML-маршруты, redirect, 404 и выбранный contact
+contract (`disabled` или `enabled`). Его успешный результат не доказывает публичный DNS, TLS v-b.tech или публичную
 доступность.
 
 ### Последовательность оператора
@@ -90,15 +91,20 @@ network, allowlisted состояния `api`, `edge`, `vbtech-web` и resource 
 lowercase `sha256:` exact OCI digest образа `ghcr.io/thevladbog/vbtech-web`. Сверьте их с
 опубликованным attested artifact. Не подменяйте digest тегом.
 
-#### Фаза 5. Запустить Deploy v-b.tech private web с явным подтверждением
+#### Фаза 5. Запустить Deploy v-b.tech web с явным подтверждением
 
-Вручную запустите защищённый workflow **Deploy v-b.tech private web** и передайте ровно три inputs:
+Вручную запустите защищённый workflow **Deploy v-b.tech web** и передайте ровно пять inputs:
 
 - `vbtech_release_sha` — одобренный exact source SHA;
 - `vbtech_image_digest` — одобренный exact OCI digest;
+- `submission_state` — состояние `disabled` или `enabled`, совпадающее с attested image;
 - `confirm_private_deploy` — `true`, только после сверки двух значений выше.
+- `confirm_enable` — `true` только для отдельно одобренного `enabled`; для `disabled` оставьте
+  `false`.
 
-Workflow повторно валидирует input shape и attestation. До удалённой мутации он сохраняет before
+Workflow повторно валидирует input shape, attestation, фактическое состояние HTML внутри image и
+ACTIVE consent `VBT-PD-02/2026.08/01`. Для `enabled` executor принимает только точный reviewed
+function path `/d4egihdqfci0mhota3ac`; произвольный upstream отклоняется. До удалённой мутации он сохраняет before
 snapshot — strict runtime diagnostics version 3, а после успешной выкладки — after snapshot —
 strict runtime diagnostics version 3. Перед мутацией он также требует активный executor contract.
 Не используйте ручные SSH-команды как замену этому workflow.
@@ -134,11 +140,12 @@ route/content и сверьте after identity с одобренными SHA и 
 threshold, не рекомендует resize и не доказывает длительную нагрузочную устойчивость. Private smoke
 не заменяет public DNS, v-b TLS или public reachability acceptance.
 
-#### Фаза 7. Остановиться до DNS, сертификата v-b.tech, backend и contact activation
+#### Фаза 7. Передать управление public acceptance v-b.tech
 
-После сохранения evidence остановитесь. Не создавайте DNS records, не запускайте выпуск или
-активацию сертификата v-b.tech, не публикуйте сайт наружу, не подключайте backend/contact form,
-email или captcha. Каждая такая операция находится за отдельным reviewed approval boundary.
+После сохранения evidence не выполняйте из этого workflow DNS, Cloud Functions, IAM, database,
+email или captcha mutation. Public TLS/routes, ACTIVE legal identity и controlled contact delivery
+проверяются отдельным v-b.tech acceptance-контуром. При любой ошибке enabled acceptance сначала
+разверните через этот же executor точный verified disabled image, затем отдельно отключайте backend.
 
 ### Интерпретация rollback
 

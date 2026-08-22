@@ -235,7 +235,13 @@ test("v-b deploy is a protected manual digest-bound private executor", async () 
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), [
     "vbtech_release_sha",
     "vbtech_image_digest",
+    "submission_state",
     "confirm_private_deploy",
+    "confirm_enable",
+  ]);
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.submission_state.options, [
+    "disabled",
+    "enabled",
   ]);
   assert.equal(workflow.on.workflow_dispatch.inputs.confirm_private_deploy.required, true);
   assert.equal(workflow.on.workflow_dispatch.inputs.confirm_private_deploy.type, "boolean");
@@ -280,7 +286,9 @@ test("v-b deploy is a protected manual digest-bound private executor", async () 
   assert.match(source, /ghcr[.]io\/thevladbog\/vbtech-web/);
   assert.match(source, /thevladbog\/v-b\/.github\/workflows\/publish[.]yml/);
   assert.match(source, /refs\/heads\/main/);
-  assert.match(source, /submission_state=disabled/);
+  assert.match(source, /VBTECH_SUBMISSION_STATE:\s*\$\{\{ inputs\.submission_state \}\}/);
+  assert.match(source, /identity\.consentId !== "VBT-PD-02\/2026\.08\/01"/);
+  assert.match(source, /CONFIRM_ENABLE[\s\S]*== "true"/);
   assert.match(source, /if:\s*always\(\)/);
   assert.doesNotMatch(
     source,
