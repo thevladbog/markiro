@@ -31,6 +31,27 @@ function stepByName(job, name) {
   return step;
 }
 
+function normalizedShellCommands(run) {
+  assert.equal(typeof run, "string");
+  const commands = [];
+  let command = "";
+
+  for (const sourceLine of run.split("\n")) {
+    const line = sourceLine.trim();
+    if (!line) continue;
+    const continued = line.endsWith("\\");
+    const fragment = continued ? line.slice(0, -1).trimEnd() : line;
+    command = command ? `${command} ${fragment}` : fragment;
+    if (!continued) {
+      commands.push(command);
+      command = "";
+    }
+  }
+
+  assert.equal(command, "", "shell command must not end with a continuation");
+  return commands;
+}
+
 function assertDirectDeployWorkflow(source) {
   const workflow = parseWorkflow(source);
   assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
@@ -303,19 +324,15 @@ async function assertPrivateVbtechDeployWorkflow(source, { executePrograms = tru
     deploy.if === "${{ inputs.confirm_private_deploy == true }}" ||
       /\[\[ "\$CONFIRM_PRIVATE_DEPLOY" == "true" \]\]/.test(preflight.run),
   );
-  assert.match(preflight.run, /\[\[ "\$CONFIRM_PRIVATE_DEPLOY" == "true" \]\]/);
-  assert.match(preflight.run, /\[\[ "\$VBTECH_RELEASE_SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
-  assert.match(preflight.run, /\[\[ "\$VBTECH_IMAGE_DIGEST" =~ \^sha256:\[0-9a-f\]\{64\}\$ \]\]/);
+  const preflightCommands = normalizedShellCommands(preflight.run);
+  assert.deepEqual(preflightCommands, [
+    "set -euo pipefail",
+    '[[ "$CONFIRM_PRIVATE_DEPLOY" == "true" ]]',
+    '[[ "$VBTECH_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]',
+    '[[ "$VBTECH_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]',
+  ]);
 
   const verification = stepByName(deploy, "Verify exact attested v-b image");
-  const verificationIndex = deploy.steps.indexOf(verification);
-  assert.doesNotMatch(
-    deploy.steps
-      .slice(0, verificationIndex)
-      .map((step) => step.run ?? "")
-      .join("\n"),
-    /YC_APP_DEPLOY_SSH_PRIVATE_KEY|vbtech-deploy-key|chmod\s+600/,
-  );
   assert.deepEqual(verification.env, {
     DOCKER_CONFIG: "${{ runner.temp }}/vbtech-docker-config",
     GH_TOKEN: "${{ github.token }}",
@@ -328,21 +345,53 @@ async function assertPrivateVbtechDeployWorkflow(source, { executePrograms = tru
     verification.run,
     /image_ref="ghcr[.]io\/thevladbog\/vbtech-web@\$VBTECH_IMAGE_DIGEST"/,
   );
-  assert.match(verification.run, /gh attestation verify "oci:\/\/\$image_ref"/);
-  assert.match(verification.run, /--repo thevladbog\/v-b/);
-  assert.match(
-    verification.run,
-    /--signer-workflow thevladbog\/v-b\/.github\/workflows\/publish[.]yml/,
+  const verificationCommands = normalizedShellCommands(verification.run);
+  const attestationCommands = verificationCommands.filter((command) =>
+    command.startsWith("gh attestation verify "),
   );
-  assert.match(verification.run, /--source-digest "\$VBTECH_RELEASE_SHA"/);
-  assert.match(verification.run, /--source-ref refs\/heads\/main/);
-  assert.match(verification.run, /docker manifest inspect "\$image_ref" > \/dev\/null/);
+  const manifestCommands = verificationCommands.filter((command) =>
+    command.startsWith("docker manifest inspect "),
+  );
+  assert.equal(attestationCommands.length, 1, "exactly one attestation command is required");
+  assert.equal(manifestCommands.length, 1, "exactly one manifest command is required");
+  const [attestationCommand] = attestationCommands;
+  const [manifestCommand] = manifestCommands;
+  for (const flag of ["--repo", "--signer-workflow", "--source-digest", "--source-ref"]) {
+    assert.equal(
+      [...attestationCommand.matchAll(new RegExp(`(?:^|\\s)${flag}(?=\\s|$)`, "g"))].length,
+      1,
+      `${flag} must occur exactly once`,
+    );
+  }
+  assert.match(
+    attestationCommand,
+    /(?:^|\s)--signer-workflow thevladbog\/v-b\/\.github\/workflows\/publish\.yml(?=\s|$)/,
+  );
+  assert.equal(
+    attestationCommand,
+    'gh attestation verify "oci://$image_ref" --repo thevladbog/v-b --signer-workflow thevladbog/v-b/.github/workflows/publish.yml --source-digest "$VBTECH_RELEASE_SHA" --source-ref refs/heads/main > /dev/null',
+  );
+  assert.equal(manifestCommand, 'docker manifest inspect "$image_ref" > /dev/null');
+  assert.doesNotMatch(
+    [...preflightCommands.slice(1), attestationCommand, manifestCommand].join("\n"),
+    /\|\||&&|;/,
+    "security gates must not contain fail-open operators",
+  );
   assert.ok(
-    verification.run.indexOf('gh attestation verify "oci://$image_ref"') <
-      verification.run.indexOf('docker manifest inspect "$image_ref"'),
+    verificationCommands.indexOf(attestationCommand) <
+      verificationCommands.indexOf(manifestCommand),
   );
 
   const keyCreation = stepByName(deploy, "Create protected SSH identity");
+  const keyCreationIndex = deploy.steps.indexOf(keyCreation);
+  assert.doesNotMatch(
+    deploy.steps
+      .slice(0, keyCreationIndex)
+      .map((step) => step.run ?? "")
+      .join("\n"),
+    /YC_APP_DEPLOY_SSH_PRIVATE_KEY|vbtech-deploy-key|chmod\s+600/,
+    "SSH key material must not be used before attestation and manifest verification succeed",
+  );
   assert.deepEqual(keyCreation.env, {
     YC_APP_DEPLOY_SSH_PRIVATE_KEY: "${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}",
   });
@@ -534,6 +583,14 @@ test("private v-b deploy rejects trust, evidence, and mutation-boundary regressi
       (value) => value.replace("^sha256:[0-9a-f]{64}$", "^sha256:[0-9A-Fa-f]{64}$"),
     ],
     [
+      "digest validation fail-open",
+      (value) =>
+        value.replace(
+          '[[ "$VBTECH_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]',
+          '[[ "$VBTECH_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || true',
+        ),
+    ],
+    [
       "foreign image",
       (value) => value.replace("ghcr.io/thevladbog/vbtech-web", "ghcr.io/attacker/vbtech-web"),
     ],
@@ -546,6 +603,14 @@ test("private v-b deploy rejects trust, evidence, and mutation-boundary regressi
         ),
     ],
     [
+      "signer suffix",
+      (value) =>
+        value.replace(
+          "thevladbog/v-b/.github/workflows/publish.yml",
+          "thevladbog/v-b/.github/workflows/publish.yml.evil",
+        ),
+    ],
+    [
       "unbound source digest",
       (value) =>
         value.replace('--source-digest "$VBTECH_RELEASE_SHA"', '--source-digest "$GITHUB_SHA"'),
@@ -554,10 +619,26 @@ test("private v-b deploy rejects trust, evidence, and mutation-boundary regressi
       "unbound source ref",
       (value) => value.replace("--source-ref refs/heads/main", "--source-ref refs/heads/dev"),
     ],
+    [
+      "attestation verification fail-open",
+      (value) =>
+        value.replace(
+          "--source-ref refs/heads/main > /dev/null",
+          "--source-ref refs/heads/main > /dev/null || true",
+        ),
+    ],
     ["non-OCI subject", (value) => value.replace('"oci://$image_ref"', '"$image_ref"')],
     [
       "tag-style availability",
       (value) => value.replace("docker manifest inspect", "docker image inspect"),
+    ],
+    [
+      "manifest availability fail-open",
+      (value) =>
+        value.replace(
+          'docker manifest inspect "$image_ref" > /dev/null',
+          'docker manifest inspect "$image_ref" > /dev/null || true',
+        ),
     ],
     [
       "early SSH key",
@@ -565,6 +646,14 @@ test("private v-b deploy rejects trust, evidence, and mutation-boundary regressi
         value.replace(
           "      - name: Verify exact attested v-b image",
           '      - name: Create early SSH identity\n        run: printf x > "$RUNNER_TEMP/vbtech-deploy-key"\n\n      - name: Verify exact attested v-b image',
+        ),
+    ],
+    [
+      "SSH key inside verification",
+      (value) =>
+        value.replace(
+          '          docker manifest inspect "$image_ref" > /dev/null',
+          '          printf x > "$RUNNER_TEMP/vbtech-deploy-key"\n          docker manifest inspect "$image_ref" > /dev/null',
         ),
     ],
     [
