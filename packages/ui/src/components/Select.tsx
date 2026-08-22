@@ -288,6 +288,10 @@ export function Select<TValue extends string = string>({
                   ref={searchRef}
                   type="search"
                   autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-bwignore
+                  data-form-type="other"
                   aria-label={searchLabel ?? "Search"}
                   placeholder={searchPlaceholder}
                   value={search}
