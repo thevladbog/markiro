@@ -309,6 +309,30 @@ export const CURRENT_SAAS_ROUTES = [
     platformCommercialContracts.billingAccounts.tenant.archive.response,
     { body: platformCommercialContracts.billingAccounts.tenant.archive.body },
   ),
+  route(
+    "get",
+    "/platform/suggestions/organizations",
+    "200",
+    platformCommercialContracts.dadata.organizations.response,
+  ),
+  route(
+    "get",
+    "/platform/suggestions/addresses",
+    "200",
+    platformCommercialContracts.dadata.addresses.response,
+  ),
+  route(
+    "get",
+    "/platform/suggestions/banks",
+    "200",
+    platformCommercialContracts.dadata.banks.response,
+  ),
+  route(
+    "get",
+    "/platform/suggestions/status",
+    "200",
+    platformCommercialContracts.dadata.status.response,
+  ),
 ] as const satisfies readonly PlatformRouteContract[];
 
 export const CURRENT_SAAS_ROUTE_KEYS = CURRENT_SAAS_ROUTES.map(

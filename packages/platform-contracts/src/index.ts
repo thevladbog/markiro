@@ -119,6 +119,7 @@ export {
   dadataOrganizationResultSchema,
   dadataOrganizationSuggestionSchema,
   dadataStatusResponseSchema,
+  dadataSuggestionQuerySchema,
   dadataSuggestionStatusSchema,
   invoiceActivationPolicySchema,
   invoiceApplicationEventSchema,

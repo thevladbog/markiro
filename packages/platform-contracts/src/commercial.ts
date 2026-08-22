@@ -248,6 +248,15 @@ export const dadataBankResultSchema = dadataResultSchema(dadataBankSuggestionSch
 export const dadataStatusResponseSchema = z
   .object({ status: dadataSuggestionStatusSchema })
   .strict();
+export const dadataSuggestionQuerySchema = z
+  .object({
+    q: z
+      .string()
+      .trim()
+      .transform((value) => value.replace(/\s+/g, " "))
+      .pipe(z.string().min(3).max(300)),
+  })
+  .strict();
 export const bankAccountArchiveSchema = z
   .object({
     replacementAccountId: platformUuidSchema.optional(),
@@ -1050,6 +1059,18 @@ export const platformCommercialContracts = {
         response: tenantBillingProfileSchema,
       },
     },
+  },
+  dadata: {
+    organizations: {
+      query: dadataSuggestionQuerySchema,
+      response: dadataOrganizationResultSchema,
+    },
+    addresses: {
+      query: dadataSuggestionQuerySchema,
+      response: dadataAddressResultSchema,
+    },
+    banks: { query: dadataSuggestionQuerySchema, response: dadataBankResultSchema },
+    status: { response: dadataStatusResponseSchema },
   },
   billingAccounts: {
     operator: {

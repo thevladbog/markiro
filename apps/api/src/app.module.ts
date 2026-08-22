@@ -48,6 +48,7 @@ import { BillingProfilesModule } from "./modules/billing-profiles/billing-profil
 import { BillingAccountsModule } from "./modules/billing-accounts/billing-accounts.module";
 import { BillingModule } from "./modules/billing/billing.module";
 import { BillingPaymentsModule } from "./modules/billing-payments/billing-payments.module";
+import { PlatformDadataModule } from "./modules/platform-dadata/platform-dadata.module";
 import type { PlatformAuth } from "@markiro/db";
 import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
 import { ShiftExportsModule } from "./modules/shift-exports/shift-exports.module";
@@ -91,6 +92,7 @@ export class AppModule {
               BillingAccountsModule,
               BillingModule,
               BillingPaymentsModule,
+              PlatformDadataModule.forRoot(env),
             ]
           : []),
         AuthorizationModule,

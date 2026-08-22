@@ -4,6 +4,8 @@ import {
   dadataBankSuggestionSchema,
   dadataOrganizationSuggestionSchema,
   dadataSuggestionStatusSchema,
+  dadataSuggestionQuerySchema,
+  platformCommercialContracts,
 } from "../src/index.js";
 
 describe("DaData platform contracts", () => {
@@ -63,5 +65,20 @@ describe("DaData platform contracts", () => {
         rawProviderData: { token: "must-not-survive" },
       }).success,
     ).toBe(false);
+  });
+
+  it("publishes bounded suggestion queries and exact endpoint contracts", () => {
+    expect(dadataSuggestionQuerySchema.safeParse({ q: "  абв  " })).toMatchObject({
+      success: true,
+      data: { q: "абв" },
+    });
+    expect(dadataSuggestionQuerySchema.safeParse({ q: "аб" }).success).toBe(false);
+    expect(dadataSuggestionQuerySchema.safeParse({ q: "а".repeat(301) }).success).toBe(false);
+    expect(Object.keys(platformCommercialContracts.dadata).sort()).toEqual([
+      "addresses",
+      "banks",
+      "organizations",
+      "status",
+    ]);
   });
 });
