@@ -92,6 +92,12 @@ export interface WorkScreenProps {
   /** Scans still queued on this device, shown before the operator walks away. */
   pendingSync: number;
   /**
+   * The station's window-mode control, surfaced inside the exception flow's
+   * header so leaving fullscreen never requires abandoning a half-done
+   * exception to reach the status bar's expanded controls.
+   */
+  exceptionWindowControl?: React.ReactNode;
+  /**
    * This device's 9-digit GS1 issuer prefix for box SSCCs
    * (`StationBundle.sscc.issuerPrefix`), or null for a validation-mode
    * shift, or when the server could not resolve one for this device. Null
@@ -164,6 +170,7 @@ export function WorkScreen({
   onExit,
   onCloseShift,
   pendingSync,
+  exceptionWindowControl,
   issuerPrefix,
   boxCapacity,
   bundleRevision = 0,
@@ -1559,6 +1566,7 @@ export function WorkScreen({
             onBack={() => setShowExceptions(false)}
             onPendingChange={setBoxActionPending}
             scanSource={source}
+            windowControl={exceptionWindowControl}
           />
         ) : (
           <div className="work-screen__instruments">

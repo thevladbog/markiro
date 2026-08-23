@@ -1203,8 +1203,11 @@ function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLoc
     if (!root) return;
     const t = i18n.getFixedT(locale);
     const clickByText = (text: string): void => {
+      // Action cards carry a hint line inside the button, so their textContent
+      // is label+hint; the aria-label pins the accessible name to the label.
       const button = Array.from(root.querySelectorAll("button")).find(
-        (candidate) => candidate.textContent?.trim() === text,
+        (candidate) =>
+          candidate.getAttribute("aria-label") === text || candidate.textContent?.trim() === text,
       );
       button?.click();
     };
@@ -1248,6 +1251,15 @@ function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLoc
         onBack={() => undefined}
         onPendingChange={() => undefined}
         scanSource={galleryExceptionScanSource()}
+        windowControl={
+          <WindowModeControl
+            snapshot={{ mode: "locked", pending: false, error: null }}
+            activeShift
+            onEnter={() => undefined}
+            onExit={() => undefined}
+            onDismissError={() => undefined}
+          />
+        }
       />
     </div>
   );
