@@ -19,6 +19,7 @@ const edgeImageRef = `ghcr.io/thevladbog/markiro-edge@${edgeImageDigest}`;
 const candidateSha = "c".repeat(40);
 const candidateImageDigest = `sha256:${"d".repeat(64)}`;
 const candidateImageRef = `ghcr.io/thevladbog/vbtech-web@${candidateImageDigest}`;
+const enabledFunctionPath = "/d4egihdqfci0mhota3ac";
 const previousSha = "e".repeat(40);
 const previousImageDigest = `sha256:${"f".repeat(64)}`;
 const previousImageRef = `ghcr.io/thevladbog/vbtech-web@${previousImageDigest}`;
@@ -48,6 +49,7 @@ function environment(overrides = {}) {
     VBTECH_IMAGE_REF: candidateImageRef,
     VBTECH_DOMAIN: "v-b.tech",
     VBTECH_WWW_DOMAIN: "www.v-b.tech",
+    VBTECH_FUNCTION_PATH: "",
     VBTECH_SUBMISSION_STATE: "disabled",
     DOCKER_CONFIG: "/run/markiro-registry-auth/session-test",
     DATABASE_URL: "postgres://private:password@database/markiro",
@@ -71,6 +73,7 @@ function markiroRecord(overrides = {}) {
 function lifecycleRecord({
   releaseSha = previousSha,
   imageDigest = previousImageDigest,
+  submissionState = "disabled",
   state = "healthy",
   timestamp = "2026-08-21T10:20:29.000Z",
 } = {}) {
@@ -78,7 +81,7 @@ function lifecycleRecord({
     releaseSha,
     imageRef: `ghcr.io/thevladbog/vbtech-web@${imageDigest}`,
     imageDigest,
-    submissionState: "disabled",
+    submissionState,
     createdAt: timestamp,
     state,
   };
@@ -265,6 +268,7 @@ async function fixture(t, options = {}) {
       const pending = lifecycleRecord({
         releaseSha: selector.releaseSha,
         imageDigest: selector.imageDigest,
+        submissionState: selector.submissionState,
         state: "pending",
         timestamp: createdAt,
       });
@@ -349,7 +353,7 @@ test("deploys the disabled digest candidate in the exact lifecycle order", async
 
   const healthy = await deployVbtechRelease({ environment: environment() }, context.dependencies);
 
-  assert.equal(VBTECH_EXECUTOR_CONTRACT_VERSION, 1);
+  assert.equal(VBTECH_EXECUTOR_CONTRACT_VERSION, 2);
   assert.deepEqual(context.events, [
     "validate",
     "read-active-markiro",
@@ -374,6 +378,7 @@ test("deploys the disabled digest candidate in the exact lifecycle order", async
     {
       transportOrigin: "https://app.markiro.example",
       expectedVbtechReleaseSha: candidateSha,
+      vbtechSubmissionState: "disabled",
     },
   ]);
 
@@ -386,7 +391,9 @@ test("deploys the disabled digest candidate in the exact lifecycle order", async
       ["docker", [...compose(environment()), "up", "-d", "--no-deps", "--force-recreate", "edge"]],
     ],
   );
-  for (const call of context.calls) {
+  const routedCalls = context.calls.filter(isComposeMutation);
+  assert.ok(routedCalls.length > 0);
+  for (const call of routedCalls) {
     assert.equal(Number.isSafeInteger(call.timeoutMs) && call.timeoutMs > 0, true);
     assert.equal(call.commandOptions.maxOutputBytes, 64 * 1024);
     assert.equal(call.commandOptions.cwd, context.activeRelease);
@@ -405,6 +412,34 @@ test("deploys the disabled digest candidate in the exact lifecycle order", async
     ),
     false,
   );
+});
+
+test("deploys an enabled candidate only with the reviewed function and verifies enabled routing", async (t) => {
+  const context = await fixture(t);
+  const enabledEnvironment = environment({
+    VBTECH_FUNCTION_PATH: enabledFunctionPath,
+    VBTECH_SUBMISSION_STATE: "enabled",
+  });
+
+  const healthy = await deployVbtechRelease(
+    { environment: enabledEnvironment },
+    context.dependencies,
+  );
+
+  assert.equal(healthy.submissionState, "enabled");
+  assert.deepEqual(context.smokeCalls, [
+    {
+      transportOrigin: "https://app.markiro.example",
+      expectedVbtechReleaseSha: candidateSha,
+      vbtechSubmissionState: "enabled",
+    },
+  ]);
+  const enabledMutations = context.calls.filter(isComposeMutation);
+  assert.ok(enabledMutations.length > 0);
+  for (const call of enabledMutations) {
+    assert.equal(call.environment.VBTECH_FUNCTION_PATH, enabledFunctionPath);
+    assert.equal(call.environment.VBTECH_SUBMISSION_STATE, "enabled");
+  }
 });
 
 test("accepts a finite state-transition deadline without changing normal state order", async (t) => {
@@ -559,7 +594,8 @@ for (const [name, overrides] of [
   ["source SHA", { VBTECH_RELEASE_SHA: "C".repeat(40) }],
   ["digest", { VBTECH_IMAGE_DIGEST: `sha256:${"D".repeat(64)}` }],
   ["image reference", { VBTECH_IMAGE_REF: `${candidateImageRef}:latest` }],
-  ["submission state", { VBTECH_SUBMISSION_STATE: "enabled" }],
+  ["submission state", { VBTECH_SUBMISSION_STATE: "unknown" }],
+  ["enabled function path", { VBTECH_SUBMISSION_STATE: "enabled", VBTECH_FUNCTION_PATH: "/wrong" }],
   ["v-b apex domain", { VBTECH_DOMAIN: "preview.v-b.tech" }],
   ["v-b www domain", { VBTECH_WWW_DOMAIN: "v-b.tech" }],
   ["Compose project", { MARKIRO_COMPOSE_PROJECT: "foreign-project" }],
@@ -848,6 +884,7 @@ test("replacement failure restores the exact prior selector, health, edge, readi
   assert.deepEqual(context.smokeCalls.at(-1), {
     transportOrigin: "https://app.markiro.example",
     expectedVbtechReleaseSha: previousSha,
+    vbtechSubmissionState: "disabled",
   });
   assert.equal(context.readinessCalls.length, 2);
   assert.deepEqual(
@@ -957,7 +994,7 @@ test("contract-version prints the exact version and performs no deployment mutat
   });
 
   assert.equal(exitCode, 0);
-  assert.deepEqual(stdout, ["MARKIRO_VBTECH_EXECUTOR 1\n"]);
+  assert.deepEqual(stdout, ["MARKIRO_VBTECH_EXECUTOR 2\n"]);
   assert.deepEqual(stderr, []);
   assert.equal(deployments, 0);
 });

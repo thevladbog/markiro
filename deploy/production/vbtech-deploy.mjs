@@ -18,7 +18,7 @@ import {
   writePendingVbtechRelease,
 } from "./vbtech-release-state.mjs";
 
-export const VBTECH_EXECUTOR_CONTRACT_VERSION = 1;
+export const VBTECH_EXECUTOR_CONTRACT_VERSION = 2;
 
 const DEFAULT_PATHS = Object.freeze({
   activeReleaseLink: "/opt/markiro/active-release",
@@ -31,6 +31,7 @@ const EDGE_REPOSITORY = "ghcr.io/thevladbog/markiro-edge";
 const VBTECH_REPOSITORY = "ghcr.io/thevladbog/vbtech-web";
 const VBTECH_APEX_DOMAIN = "v-b.tech";
 const VBTECH_WWW_DOMAIN = "www.v-b.tech";
+const ENABLED_FUNCTION_PATH = "/d4egihdqfci0mhota3ac";
 const FIXED_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const IMAGE_ID_PATTERN = /^sha256:[0-9a-f]{64}$/;
@@ -512,11 +513,12 @@ function validatedInput(options, paths) {
     environment.MARKIRO_ENV_FILE !== paths.environmentFile ||
     environment.VBTECH_DOMAIN !== VBTECH_APEX_DOMAIN ||
     environment.VBTECH_WWW_DOMAIN !== VBTECH_WWW_DOMAIN ||
-    environment.VBTECH_SUBMISSION_STATE !== "disabled" ||
+    !["disabled", "enabled"].includes(environment.VBTECH_SUBMISSION_STATE) ||
     environment.VBTECH_IMAGE_DIGEST === undefined ||
     environment.VBTECH_IMAGE_TAG !== undefined ||
     environment.VBTECH_FUNCTION_ORIGIN !== undefined ||
-    (environment.VBTECH_FUNCTION_PATH !== undefined && environment.VBTECH_FUNCTION_PATH !== "") ||
+    environment.VBTECH_FUNCTION_PATH !==
+      (environment.VBTECH_SUBMISSION_STATE === "enabled" ? ENABLED_FUNCTION_PATH : "") ||
     environment.MARKIRO_IMAGE_TAG !== undefined ||
     environment.MARKIRO_API_IMAGE_DIGEST !== undefined ||
     environment.MARKIRO_EDGE_IMAGE_DIGEST !== undefined
@@ -553,7 +555,7 @@ function validatedInput(options, paths) {
     imageRef: environment.VBTECH_IMAGE_REF,
     imageDigest: environment.VBTECH_IMAGE_DIGEST,
     releaseSha: environment.VBTECH_RELEASE_SHA,
-    functionPath: "",
+    functionPath: environment.VBTECH_FUNCTION_PATH,
     submissionState: environment.VBTECH_SUBMISSION_STATE,
   });
   return {
@@ -842,8 +844,8 @@ function commandEnvironment(input, active, vbtech) {
     VBTECH_RELEASE_SHA: vbtech.releaseSha,
     VBTECH_DOMAIN: VBTECH_APEX_DOMAIN,
     VBTECH_WWW_DOMAIN: VBTECH_WWW_DOMAIN,
-    VBTECH_FUNCTION_PATH: "",
-    VBTECH_SUBMISSION_STATE: "disabled",
+    VBTECH_FUNCTION_PATH: vbtech.functionPath,
+    VBTECH_SUBMISSION_STATE: vbtech.submissionState,
   };
 }
 
@@ -986,7 +988,7 @@ function selectorFromHealthyRecord(value) {
     imageRef: value.imageRef,
     imageDigest: value.imageDigest,
     releaseSha: value.releaseSha,
-    functionPath: "",
+    functionPath: value.submissionState === "enabled" ? ENABLED_FUNCTION_PATH : "",
     submissionState: value.submissionState,
   });
 }
@@ -1281,6 +1283,7 @@ async function rollbackCandidate(system, input, active, previous) {
         system.runPrivateVbtechSmoke({
           transportOrigin: input.transportOrigin,
           expectedVbtechReleaseSha: selector.releaseSha,
+          vbtechSubmissionState: selector.submissionState,
         }),
         input.settings.privateSmokeTimeoutMs,
       ),
@@ -1358,6 +1361,7 @@ export async function deployVbtechRelease(options, supplied = {}) {
         system.runPrivateVbtechSmoke({
           transportOrigin: input.transportOrigin,
           expectedVbtechReleaseSha: input.selector.releaseSha,
+          vbtechSubmissionState: input.selector.submissionState,
         }),
       input.settings.privateSmokeTimeoutMs,
     );

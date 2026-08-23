@@ -27,6 +27,7 @@ import {
 const repository = "ghcr.io/thevladbog/vbtech-web";
 const firstSha = "a".repeat(40);
 const firstDigest = `sha256:${"b".repeat(64)}`;
+const enabledFunctionPath = "/d4egihdqfci0mhota3ac";
 
 function selector({ releaseSha = firstSha, imageDigest = firstDigest, ...overrides } = {}) {
   return {
@@ -92,6 +93,14 @@ test("accepts an exact disabled digest selector", () => {
   assert.doesNotThrow(() => validateVbtechSelector(selector()));
 });
 
+test("accepts enabled submission only for the reviewed contact function path", () => {
+  assert.doesNotThrow(() =>
+    validateVbtechSelector(
+      selector({ submissionState: "enabled", functionPath: enabledFunctionPath }),
+    ),
+  );
+});
+
 for (const [name, value] of [
   ["an additional key", selector({ extra: "not allowed" })],
   ["an uppercase source SHA", selector({ releaseSha: "A".repeat(40) })],
@@ -108,7 +117,10 @@ for (const [name, value] of [
       imageDigest: `sha256:${"c".repeat(64)}`,
     }),
   ],
-  ["enabled submission", selector({ submissionState: "enabled", functionPath: "/function" })],
+  [
+    "an unreviewed enabled function",
+    selector({ submissionState: "enabled", functionPath: "/function" }),
+  ],
   ["a non-empty disabled function path", selector({ functionPath: "/function" })],
 ]) {
   test(`rejects ${name} without disclosing its value`, () => {

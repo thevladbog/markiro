@@ -18,11 +18,12 @@ import {
 
 const ACTIVE_RELEASE_DIRECTORY = "/opt/markiro/active-release";
 const ACTIVE_EXECUTOR = `${ACTIVE_RELEASE_DIRECTORY}/deploy/production/vbtech-deploy.mjs`;
-const EXECUTOR_CONTRACT = "MARKIRO_VBTECH_EXECUTOR 1\n";
+const EXECUTOR_CONTRACT = "MARKIRO_VBTECH_EXECUTOR 2\n";
 const HEALTHY_RESULT = "MARKIRO_VBTECH_DEPLOY_HEALTHY\n";
 const VBTECH_REPOSITORY = "ghcr.io/thevladbog/vbtech-web";
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const IMAGE_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const ENABLED_FUNCTION_PATH = "/d4egihdqfci0mhota3ac";
 const MAX_HOST_KEYS_BYTES = 16 * 1024;
 const VBTECH_DEPLOYMENT_STAGES = new Set([
   "configuration",
@@ -50,6 +51,7 @@ const ALLOWED_VBTECH_INPUTS = new Set([
   "VBTECH_IMAGE_DIGEST",
   "VBTECH_IMAGE_REF",
   "VBTECH_RELEASE_SHA",
+  "VBTECH_SUBMISSION_STATE",
 ]);
 const ALLOWED_MARKIRO_INPUTS = new Set([
   "MARKIRO_DOMAIN",
@@ -130,6 +132,8 @@ function validateHostedInput(environment) {
     const imageRef = `${VBTECH_REPOSITORY}@${imageDigest}`;
     if (Object.hasOwn(environment, "VBTECH_IMAGE_REF") && environment.VBTECH_IMAGE_REF !== imageRef)
       throw configurationError();
+    const submissionState = requiredEnvironment("VBTECH_SUBMISSION_STATE", environment);
+    if (submissionState !== "disabled" && submissionState !== "enabled") throw configurationError();
 
     const { domain, saasAdminDomain, kioskDomain, landingDomain } = validateProductionDomains(
       requiredEnvironment("MARKIRO_DOMAIN", environment),
@@ -179,6 +183,7 @@ function validateHostedInput(environment) {
       registryInput,
       releaseSha,
       saasAdminDomain,
+      submissionState,
     };
   } catch {
     throw configurationError();
@@ -227,7 +232,8 @@ function executorEnvironmentArguments(input) {
     `VBTECH_IMAGE_REF=${input.imageRef}`,
     "VBTECH_DOMAIN=v-b.tech",
     "VBTECH_WWW_DOMAIN=www.v-b.tech",
-    "VBTECH_SUBMISSION_STATE=disabled",
+    `VBTECH_FUNCTION_PATH=${input.submissionState === "enabled" ? ENABLED_FUNCTION_PATH : ""}`,
+    `VBTECH_SUBMISSION_STATE=${input.submissionState}`,
   ];
 }
 

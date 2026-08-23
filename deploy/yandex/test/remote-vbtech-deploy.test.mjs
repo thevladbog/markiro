@@ -35,6 +35,7 @@ function environment(overrides = {}) {
     ACME_EMAIL: "ops@markiro.example",
     VBTECH_RELEASE_SHA: RELEASE_SHA,
     VBTECH_IMAGE_DIGEST: IMAGE_DIGEST,
+    VBTECH_SUBMISSION_STATE: "disabled",
     ...overrides,
   };
 }
@@ -56,7 +57,7 @@ function systemFixture(overrides = {}) {
     run: async (command, args, options = {}) => {
       commands.push({ command, args, options });
       return args.includes("contract-version")
-        ? "MARKIRO_VBTECH_EXECUTOR 1\n"
+        ? "MARKIRO_VBTECH_EXECUTOR 2\n"
         : "MARKIRO_VBTECH_DEPLOY_HEALTHY\n";
     },
     ...overrides,
@@ -149,6 +150,7 @@ test("hosted wrapper uses the active executor, fixed SSH trust, and an exact rem
     `VBTECH_IMAGE_REF=${IMAGE_REF}`,
     "VBTECH_DOMAIN=v-b.tech",
     "VBTECH_WWW_DOMAIN=www.v-b.tech",
+    "VBTECH_FUNCTION_PATH=",
     "VBTECH_SUBMISSION_STATE=disabled",
   ]);
   assert.deepEqual(deployment.args.slice(sshPrefix.length), [
@@ -180,6 +182,7 @@ test("hosted wrapper uses the active executor, fixed SSH trust, and an exact rem
     `VBTECH_IMAGE_REF=${IMAGE_REF}`,
     "VBTECH_DOMAIN=v-b.tech",
     "VBTECH_WWW_DOMAIN=www.v-b.tech",
+    "VBTECH_FUNCTION_PATH=",
     "VBTECH_SUBMISSION_STATE=disabled",
     "/usr/bin/node",
     "/usr/local/lib/markiro/registry-auth.mjs",
@@ -214,7 +217,7 @@ test("hosted wrapper uses the active executor, fixed SSH trust, and an exact rem
   assert.equal(deployment.args.includes("DOCKER_CONFIG"), false);
   assert.equal(deployment.args.includes("VBTECH_IMAGE_TAG"), false);
   assert.equal(deployment.args.includes("VBTECH_FUNCTION_ORIGIN"), false);
-  assert.equal(deployment.args.includes("VBTECH_FUNCTION_PATH"), false);
+  assert.equal(deployment.args.includes("VBTECH_FUNCTION_PATH="), true);
   assert.equal(
     deployment.args.some((argument) => argument.startsWith("--unit=")),
     false,
@@ -251,6 +254,17 @@ test("hosted wrapper disables the global known-host store for contract and deplo
   }
 });
 
+test("hosted wrapper binds enabled routing to the reviewed contact function path", async () => {
+  const fixture = systemFixture();
+
+  await runHostedVbtechDeploy(environment({ VBTECH_SUBMISSION_STATE: "enabled" }), fixture.system);
+
+  const deployment = fixture.commands[1];
+  const remoteEnvironment = commandEnvironmentArguments(deployment.args);
+  assert.ok(remoteEnvironment.includes("VBTECH_SUBMISSION_STATE=enabled"));
+  assert.ok(remoteEnvironment.includes("VBTECH_FUNCTION_PATH=/d4egihdqfci0mhota3ac"));
+});
+
 test("hosted wrapper accepts only a matching optional image reference", async () => {
   const matching = systemFixture();
   await runHostedVbtechDeploy(environment({ VBTECH_IMAGE_REF: IMAGE_REF }), matching.system);
@@ -279,7 +293,7 @@ test("hosted wrapper rejects malformed, legacy, and caller-controlled fixed inpu
     ["uppercase digest", { VBTECH_IMAGE_DIGEST: IMAGE_DIGEST.toUpperCase() }],
     ["digest without algorithm", { VBTECH_IMAGE_DIGEST: "d".repeat(64) }],
     ["legacy image tag", { VBTECH_IMAGE_TAG: RELEASE_SHA }],
-    ["submission override", { VBTECH_SUBMISSION_STATE: "disabled" }],
+    ["submission state", { VBTECH_SUBMISSION_STATE: "unknown" }],
     ["function origin", { VBTECH_FUNCTION_ORIGIN: "https://functions.example/private" }],
     ["function path", { VBTECH_FUNCTION_PATH: "" }],
     ["v-b apex override", { VBTECH_DOMAIN: "v-b.tech" }],
@@ -346,7 +360,7 @@ test("hosted wrapper validates the dedicated login, address, host keys, and priv
 test("hosted wrapper requires the exact active executor contract before deployment", async () => {
   for (const contractOutput of [
     "",
-    "MARKIRO_VBTECH_EXECUTOR 2\n",
+    "MARKIRO_VBTECH_EXECUTOR 1\n",
     "MARKIRO_VBTECH_EXECUTOR 1\nextra\n",
     "private bootstrap failure detail\n",
   ]) {
@@ -396,7 +410,7 @@ test("hosted wrapper accepts only the exact healthy executor marker", async () =
       run: async (command, args, options = {}) => {
         fixture.commands.push({ command, args, options });
         call += 1;
-        return call === 1 ? "MARKIRO_VBTECH_EXECUTOR 1\n" : deploymentOutput;
+        return call === 1 ? "MARKIRO_VBTECH_EXECUTOR 2\n" : deploymentOutput;
       },
     });
     await assert.rejects(
@@ -415,7 +429,7 @@ test("hosted CLI exposes only the exact allowlisted executor failure stage", asy
       fixture.commands.push({ command, args, options });
       call += 1;
       return call === 1
-        ? "MARKIRO_VBTECH_EXECUTOR 1\n"
+        ? "MARKIRO_VBTECH_EXECUTOR 2\n"
         : "MARKIRO_VBTECH_DEPLOY_FAILURE private-smoke ROLLBACK rollback-edge\n";
     },
   });
@@ -445,7 +459,7 @@ test("hosted wrapper cleans temporary trust material and preserves the primary f
     run: async (command, args, options = {}) => {
       fixture.commands.push({ command, args, options });
       call += 1;
-      if (call === 1) return "MARKIRO_VBTECH_EXECUTOR 1\n";
+      if (call === 1) return "MARKIRO_VBTECH_EXECUTOR 2\n";
       throw primary;
     },
     rm: async (path, options) => {
