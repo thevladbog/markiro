@@ -88,6 +88,92 @@ describe("WorkstationSetup", () => {
     expect(selector.querySelectorAll("option")).toHaveLength(13);
   });
 
+  it("verifies a scan against the on-screen code and rejects any other code", async () => {
+    let emit: (raw: string) => void = () => {};
+    const hw = hardware({
+      onScan: async (listener) => {
+        emit = listener;
+        return () => {};
+      },
+    });
+    render(
+      <WorkstationSetup
+        hw={hw}
+        exec={noopExec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+    await waitFor(() => expect(emit).toBeTypeOf("function"));
+    const code = screen.getByTestId("scanner-test-code").textContent ?? "";
+    expect(code).toMatch(/^MKR-[34789ACDEFHKMNPRTWXY]{6}$/);
+
+    act(() => emit("something-else"));
+    const mismatch = screen.getByTestId("scanner-check-result");
+    expect(mismatch.getAttribute("data-tone")).toBe("error");
+    expect(mismatch.textContent).toContain("something-else");
+
+    act(() => emit(code));
+    expect(screen.getByTestId("scanner-check-result").getAttribute("data-tone")).toBe("ok");
+    expect(screen.getByTestId("scanner-check-result").textContent).toContain(
+      "the scanner works correctly",
+    );
+
+    // A new code invalidates the old verdict AND the old code.
+    fireEvent.click(screen.getByRole("button", { name: "New code" }));
+    expect(screen.queryByTestId("scanner-check-result")).toBeNull();
+    const next = screen.getByTestId("scanner-test-code").textContent ?? "";
+    act(() => emit(code === next ? "stale" : code));
+    expect(screen.getByTestId("scanner-check-result").getAttribute("data-tone")).toBe("error");
+  });
+
+  it("prints a barcode test label and verifies the scanned label against it", async () => {
+    let emit: (raw: string) => void = () => {};
+    const printed: Uint8Array[] = [];
+    const hw = hardware({
+      onScan: async (listener) => {
+        emit = listener;
+        return () => {};
+      },
+      print: async (_target, bytes) => {
+        printed.push(bytes);
+      },
+    });
+    render(
+      <WorkstationSetup
+        hw={hw}
+        exec={noopExec}
+        sound={{ muted: false, volume: 1 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />,
+    );
+    await screen.findByText("COM3");
+    await waitFor(() => expect(emit).toBeTypeOf("function"));
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "Serial (COM port)" }));
+    fireEvent.change(screen.getByLabelText("Printer port"), { target: { value: "COM9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Test print" }));
+    await waitFor(() => expect(printed).toHaveLength(1));
+
+    // The label preview names the printed code, and the ZPL bytes carry it.
+    const label = await screen.findByTestId("printer-test-label");
+    const code = label.querySelector("code")?.textContent ?? "";
+    expect(code).toMatch(/^MKR-/);
+    expect(new TextDecoder().decode(printed[0])).toContain(code);
+
+    // A wrong scan fails the check; scanning the printed code passes it.
+    act(() => emit("not-that-label"));
+    expect(screen.getByTestId("printer-check-result").getAttribute("data-tone")).toBe("error");
+    act(() => emit(code));
+    const verdict = screen.getByTestId("printer-check-result");
+    expect(verdict.getAttribute("data-tone")).toBe("ok");
+    expect(verdict.textContent).toContain("the printer works");
+  });
+
   it("shows a scan received during the test", async () => {
     let emit: (raw: string) => void = () => {};
     const hw = hardware({

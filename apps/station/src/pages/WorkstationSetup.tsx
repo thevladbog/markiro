@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, FullScreenDialog } from "@markiro/ui";
 import { sampleLabelData, type LabelTemplateSpec } from "@markiro/domain";
@@ -17,6 +17,7 @@ import { PrinterSetupPanel } from "../ui/setup/PrinterSetupPanel.js";
 import { ScannerSetupPanel } from "../ui/setup/ScannerSetupPanel.js";
 import { SetupTabs, type SetupTabId } from "../ui/setup/SetupTabs.js";
 import { SoundSetupPanel } from "../ui/setup/SoundSetupPanel.js";
+import { makeSetupTestCode, type SetupCheckResult } from "../ui/setup/test-code.js";
 
 export interface WorkstationSetupProps {
   hw: HardwareContract;
@@ -65,11 +66,23 @@ export function WorkstationSetup({
 }: WorkstationSetupProps) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<SetupTabId>("scanner");
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
   const [ports, setPorts] = useState<string[]>([]);
   const [port, setPort] = useState("");
   const [storedPort, setStoredPort] = useState("");
   const [baud, setBaud] = useState(String(DEFAULT_BAUD));
-  const [lastScan, setLastScan] = useState<string | null>(null);
+  // The check codes and their verdicts. Refs mirror the pieces the mount-only
+  // scan subscription needs, so a scan is always judged against the code that
+  // is on screen (or on the last printed label) at the moment it arrives.
+  const [scannerTestCode, setScannerTestCode] = useState(() => makeSetupTestCode());
+  const [scannerCheck, setScannerCheck] = useState<SetupCheckResult | null>(null);
+  const [printedTestCode, setPrintedTestCode] = useState<string | null>(null);
+  const [printerCheck, setPrinterCheck] = useState<SetupCheckResult | null>(null);
+  const scannerCodeRef = useRef(scannerTestCode);
+  scannerCodeRef.current = scannerTestCode;
+  const printedCodeRef = useRef(printedTestCode);
+  printedCodeRef.current = printedTestCode;
   const [printerHost, setPrinterHost] = useState("");
   const [printerTcpPort, setPrinterTcpPort] = useState(String(DEFAULT_PRINTER_PORT));
   const [printerPort, setPrinterPort] = useState("");
@@ -140,11 +153,15 @@ export function WorkstationSetup({
     let stopped = false;
     void hw
       .onScan((raw) => {
-        setLastScan(raw);
-        setTestResult({
-          tab: "scanner",
-          text: `${t("setup.scanReceived")} ${t("setup.lastScan")}: ${raw}`,
-        });
+        // A scan on the printer tab with a test label outstanding judges the
+        // PRINTED code; anywhere else it judges the on-screen code. Both are
+        // exact comparisons — a stale or foreign code must read as a failure,
+        // never as «works correctly».
+        if (activeTabRef.current === "printer" && printedCodeRef.current !== null) {
+          setPrinterCheck({ ok: raw === printedCodeRef.current, received: raw });
+        } else {
+          setScannerCheck({ ok: raw === scannerCodeRef.current, received: raw });
+        }
       })
       .then((stop) => {
         if (stopped) stop();
@@ -239,12 +256,32 @@ export function WorkstationSetup({
     setTestResult(null);
     try {
       if (!result.config.printer) throw new Error(t("setup.failed"));
+      // A fresh code per print: scanning yesterday's test label must fail the
+      // check, because the check certifies THIS print run, not the printer's
+      // biography. The barcode makes the check end-to-end — transport,
+      // language, print quality, and the scanner all vouch for each other.
+      const code = makeSetupTestCode();
       const spec: LabelTemplateSpec = {
         widthMm: 58,
         heightMm: 40,
         dpi: 203,
         language: result.config.printerLanguage,
-        elements: [{ id: "t", kind: "text", text: "Markiro", xMm: 4, yMm: 4, fontSizePt: 12 }],
+        elements: [
+          // Plain ASCII on purpose: non-ASCII text switches the ZPL emitter to
+          // its rasterized branch, which needs a 2D canvas the test print must
+          // not depend on.
+          { id: "t", kind: "text", text: "MARKIRO TEST", xMm: 4, yMm: 4, fontSizePt: 10 },
+          {
+            id: "b",
+            kind: "barcode",
+            format: "code128",
+            data: { literal: code },
+            xMm: 4,
+            yMm: 11,
+            sizeMm: 16,
+          },
+          { id: "c", kind: "text", text: code, xMm: 4, yMm: 30, fontSizePt: 10 },
+        ],
       };
       const bytes = await renderLabelBytes(
         spec,
@@ -253,6 +290,8 @@ export function WorkstationSetup({
         rasterizeText,
       );
       await hw.print(result.config.printer, bytes);
+      setPrintedTestCode(code);
+      setPrinterCheck(null);
       setTestResult({ tab: "printer", text: t("setup.testPrintSent") });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("setup.failed"));
@@ -330,9 +369,15 @@ export function WorkstationSetup({
           baud={baud}
           disabled={loading}
           busy={busy}
+          testCode={scannerTestCode}
+          check={scannerCheck}
           onPortChange={setPort}
           onBaudChange={setBaud}
           onConnect={() => void openScanner()}
+          onNewCode={() => {
+            setScannerTestCode(makeSetupTestCode());
+            setScannerCheck(null);
+          }}
         />
       ),
     },
@@ -341,6 +386,8 @@ export function WorkstationSetup({
       label: t("setup.printer"),
       panel: (
         <PrinterSetupPanel
+          printedCode={printedTestCode}
+          check={printerCheck}
           transport={printerTransport}
           host={printerHost}
           tcpPort={printerTcpPort}
@@ -391,17 +438,15 @@ export function WorkstationSetup({
       : (activeResult ??
         (credentialResetBlockedReason
           ? credentialResetBlockedReason
-          : activeTab === "scanner"
-            ? lastScan
-              ? `${t("setup.lastScan")}: ${lastScan}`
-              : t("setup.testScanHint")
-            : activeTab === "printer"
-              ? t("setup.testPrintHint")
-              : soundTestUnavailable
-                ? t("setup.soundTestUnavailable")
-                : onResetCredential
-                  ? t("setup.repairHint")
-                  : t("setup.soundHint")));
+          : activeTab === "printer"
+            ? t("setup.testPrintHint")
+            : activeTab === "sound" && soundTestUnavailable
+              ? t("setup.soundTestUnavailable")
+              : onResetCredential
+                ? t("setup.repairHint")
+                : activeTab === "sound"
+                  ? t("setup.soundHint")
+                  : t("setup.testScanHint")));
 
   return (
     <main className="workstation-setup" aria-labelledby="workstation-setup-title">
