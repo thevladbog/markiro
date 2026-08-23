@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { formatCreatedAt, formatDate } from "../src/lib/datetime.js";
@@ -26,7 +27,9 @@ function renderPage() {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <BoxesPage />
+      <MemoryRouter>
+        <BoxesPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }

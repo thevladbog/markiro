@@ -971,6 +971,29 @@
         "status": "Status"
       }
     },
+    "boxSell": {
+      "title": "Sell box",
+      "ssccLabel": "Box SSCC",
+      "find": "Find box",
+      "prev": "Back",
+      "next": "Next",
+      "done_one": "All {{count}} code shown",
+      "done_few": "All {{count}} codes shown",
+      "done_many": "All {{count}} codes shown",
+      "done_other": "All {{count}} codes shown",
+      "nextBox": "Next box",
+      "openScanner": "Scan label",
+      "closeScanner": "Close camera",
+      "errors": {
+        "invalidSscc": "Invalid SSCC — check the 18-digit code",
+        "boxNotFound": "Box not found",
+        "boxDisassembled": "Box already disassembled — codes unavailable",
+        "boxEmpty": "This box has no active codes",
+        "boxNotClosed": "Box is not closed on the line yet",
+        "loadFailed": "Failed to load the box — check your connection and try again",
+        "cameraFailed": "Camera unavailable — enter the SSCC manually"
+      }
+    },
     "codeSearch": {
       "title": "Code search",
       "backAction": "← Code search",

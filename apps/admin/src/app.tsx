@@ -12,6 +12,7 @@ import { RegisterPage } from "./pages/auth/Register.js";
 import { ResetPasswordPage } from "./pages/auth/ResetPassword.js";
 import { SelectOrgPage } from "./pages/auth/SelectOrg.js";
 import { BoxesPage } from "./pages/boxes/index.js";
+import { SellBoxPage } from "./pages/boxes/SellBoxPage.js";
 import { CatalogPage } from "./pages/catalog/index.js";
 import { ProductPanelRoute } from "./pages/catalog/ProductPanelRoute.js";
 import { ConflictsPage } from "./pages/conflicts/index.js";
@@ -160,6 +161,14 @@ function appRouteElements() {
           element={
             <RequireCapability capability={C.OPERATIONS_READ}>
               <BoxesPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="boxes/sell"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <SellBoxPage />
             </RequireCapability>
           }
         />
