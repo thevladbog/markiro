@@ -355,7 +355,8 @@ describe("ShiftsPage", () => {
 
     expect((await screen.findAllByText(PLANNED_SHIFT.productName)).length).toBe(2);
     expect(screen.getByText(ACTIVE_TOLLING_SHIFT.productName)).toBeDefined();
-    expect(screen.getByText("25.07.2026")).toBeDefined();
+    // Planned-date column + production-date column (fallback to plannedDate).
+    expect(screen.getAllByText("25.07.2026").length).toBe(2);
     expect(screen.queryByRole("button", { name: "Добавить смену" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();

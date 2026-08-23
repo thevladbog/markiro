@@ -151,6 +151,14 @@ export class ShiftsService {
     }
     if (query.from) conditions.push(gte(schema.shifts.plannedDate, query.from));
     if (query.to) conditions.push(lte(schema.shifts.plannedDate, query.to));
+    // The effective production day -- same fallback the shift exports use
+    // (`shift-export-source.service.ts`): explicit productionDate, else
+    // plannedDate. A shift with neither simply never matches.
+    const effectiveProductionDate = sql`coalesce(${schema.shifts.productionDate}, ${schema.shifts.plannedDate})`;
+    if (query.productionFrom)
+      conditions.push(sql`${effectiveProductionDate} >= ${query.productionFrom}`);
+    if (query.productionTo)
+      conditions.push(sql`${effectiveProductionDate} <= ${query.productionTo}`);
 
     const rows = await this.db
       .select(this.joinedSelection())

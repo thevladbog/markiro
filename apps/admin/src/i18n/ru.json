@@ -794,6 +794,8 @@
         "statusLabel": "Статус",
         "fromLabel": "С даты",
         "toLabel": "По дату",
+        "productionFromLabel": "Производство с",
+        "productionToLabel": "Производство по",
         "status": {
           "all": "Все статусы",
           "planned": "Запланирована",
@@ -804,6 +806,7 @@
       "table": {
         "number": "Номер",
         "plannedDate": "Дата",
+        "productionDate": "Дата производства",
         "product": "Продукт",
         "line": "Линия",
         "mode": "Режим",
@@ -1012,6 +1015,8 @@
       "filters": {
         "fromLabel": "С даты",
         "toLabel": "По дату",
+        "productionFromLabel": "Производство с",
+        "productionToLabel": "Производство по",
         "productLabel": "Товар",
         "productSearchPlaceholder": "Поиск товара",
         "productEmpty": "Товары не найдены",
@@ -1028,7 +1033,8 @@
         "product": "Товар",
         "status": "Статус",
         "box": "Короб",
-        "scannedAt": "Отсканирован"
+        "scannedAt": "Отсканирован",
+        "productionDate": "Дата производства"
       },
       "codeCard": {
         "title": "Карточка кода",
@@ -1036,6 +1042,7 @@
         "gtinLabel": "GTIN",
         "serialLabel": "Серийный номер",
         "statusLabel": "Статус",
+        "productionDateLabel": "Дата производства",
         "currentBoxLabel": "Текущий короб",
         "historyTitle": "История"
       },

@@ -794,6 +794,8 @@
         "statusLabel": "Status",
         "fromLabel": "From",
         "toLabel": "To",
+        "productionFromLabel": "Production from",
+        "productionToLabel": "Production to",
         "status": {
           "all": "All statuses",
           "planned": "Planned",
@@ -804,6 +806,7 @@
       "table": {
         "number": "Number",
         "plannedDate": "Date",
+        "productionDate": "Production date",
         "product": "Product",
         "line": "Line",
         "mode": "Mode",
@@ -1012,6 +1015,8 @@
       "filters": {
         "fromLabel": "From",
         "toLabel": "To",
+        "productionFromLabel": "Production from",
+        "productionToLabel": "Production to",
         "productLabel": "Product",
         "productSearchPlaceholder": "Search products",
         "productEmpty": "No products found",
@@ -1028,7 +1033,8 @@
         "product": "Product",
         "status": "Status",
         "box": "Box",
-        "scannedAt": "Scanned"
+        "scannedAt": "Scanned",
+        "productionDate": "Production date"
       },
       "codeCard": {
         "title": "Code card",
@@ -1036,6 +1042,7 @@
         "gtinLabel": "GTIN",
         "serialLabel": "Serial",
         "statusLabel": "Status",
+        "productionDateLabel": "Production date",
         "currentBoxLabel": "Current box",
         "historyTitle": "History"
       },

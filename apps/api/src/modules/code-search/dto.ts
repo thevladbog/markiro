@@ -28,10 +28,20 @@ export interface ClassifyNotFoundDto {
   code: "unrecognized" | "not_found";
 }
 
+/**
+ * Civil-day bound for the production-date filter: the shift's
+ * `coalesce(production_date, planned_date)` is a plain `date`, so both
+ * bounds stay date-only strings compared inclusively -- no `upperBoundCondition`
+ * next-day dance needed.
+ */
+const civilDateSchema = z.string().regex(DATE_ONLY_RE, "must be YYYY-MM-DD");
+
 export const listCodesQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   from: z.coerce.date().optional(),
   to: dateBoundSchema.optional(),
+  productionFrom: civilDateSchema.optional(),
+  productionTo: civilDateSchema.optional(),
   productId: z.string().uuid().optional(),
   shiftId: z.string().uuid().optional(),
   status: z.enum(["free", "aggregated", "written_off"]).optional(),
@@ -54,6 +64,8 @@ export interface CodeListItemDto {
   productName: string | null;
   status: CodeStatus;
   scannedAt: Date;
+  /** The owner shift's effective production day (`coalesce(production_date, planned_date)`), `YYYY-MM-DD`. */
+  productionDate: string | null;
   boxId: string | null;
   /** 20-значный код с GS1 AI "00" (Chestny ZNAK); в БД хранится голый 18-значный SSCC. */
   boxSscc: string | null;
@@ -110,6 +122,8 @@ export interface CodeCardDto {
   productId: string | null;
   productName: string | null;
   status: CodeStatus;
+  /** The owner shift's effective production day (`coalesce(production_date, planned_date)`), `YYYY-MM-DD`. */
+  productionDate: string | null;
   currentBox: { id: string; sscc: string | null } | null;
   /** Ascending by `at`. */
   history: CodeHistoryEvent[];

@@ -18,7 +18,7 @@ import {
 } from "@markiro/ui";
 import type { ComboboxOption, SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
 
-import { formatCreatedAt } from "../../lib/datetime.js";
+import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
 import { useProducts } from "../catalog/api.js";
 import { ApiRequestError, classifySearch, useCodes, type CodeListItemDto } from "./api.js";
 
@@ -56,6 +56,8 @@ export function CodeSearchPage() {
 
   const [from, setFrom] = useState<string | undefined>(undefined);
   const [to, setTo] = useState<string | undefined>(undefined);
+  const [productionFrom, setProductionFrom] = useState<string | undefined>(undefined);
+  const [productionTo, setProductionTo] = useState<string | undefined>(undefined);
   const [productId, setProductId] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
@@ -66,6 +68,8 @@ export function CodeSearchPage() {
     page,
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),
+    ...(productionFrom ? { productionFrom } : {}),
+    ...(productionTo ? { productionTo } : {}),
     ...(productId !== "all" ? { productId } : {}),
     ...(statusFilter !== "all" ? { status: statusFilter } : {}),
   });
@@ -126,6 +130,11 @@ export function CodeSearchPage() {
       key: "scannedAt",
       title: t("pages.codeSearch.table.scannedAt"),
       render: (row) => formatCreatedAt(row.scannedAt, i18n.language),
+    },
+    {
+      key: "productionDate",
+      title: t("pages.codeSearch.table.productionDate"),
+      render: (row) => (row.productionDate ? formatDate(row.productionDate, i18n.language) : "—"),
     },
   ];
 
@@ -215,6 +224,26 @@ export function CodeSearchPage() {
             {...(to !== undefined ? { value: to } : {})}
             onValueChange={(value) => {
               setTo(value);
+              setPage(1);
+            }}
+          />
+        </div>
+        <div style={{ width: 180 }}>
+          <DatePicker
+            label={t("pages.codeSearch.filters.productionFromLabel")}
+            {...(productionFrom !== undefined ? { value: productionFrom } : {})}
+            onValueChange={(value) => {
+              setProductionFrom(value);
+              setPage(1);
+            }}
+          />
+        </div>
+        <div style={{ width: 180 }}>
+          <DatePicker
+            label={t("pages.codeSearch.filters.productionToLabel")}
+            {...(productionTo !== undefined ? { value: productionTo } : {})}
+            onValueChange={(value) => {
+              setProductionTo(value);
               setPage(1);
             }}
           />
