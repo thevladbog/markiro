@@ -280,6 +280,21 @@ describe.skipIf(!ready)("code-search e2e", () => {
     await agent.get(`/code-search/boxes/${randomUUID()}`).expect(404);
   });
 
+  it("box report: print-ready HTML with the SSCC and a DataMatrix per code", async () => {
+    const box = (await agent.get(`/code-search?q=${SSCC1}`).expect(200)).body as { boxId: string };
+    const res = await agent
+      .get(`/code-search/boxes/${box.boxId}/report`)
+      .expect(200)
+      .expect("Content-Type", /text\/html/);
+    expect(res.text).toContain("Состав короба");
+    expect(res.text).toContain(`(00)${SSCC1}`);
+    expect(res.text.match(/class="dm-box"/g)).toHaveLength(2);
+  });
+
+  it("404s the box report for an unknown boxId", async () => {
+    await agent.get(`/code-search/boxes/${randomUUID()}/report`).expect(404);
+  });
+
   it("history shows disaggregation after a document applies", async () => {
     const reason = await agent.post("/disaggregation-reasons").send({ name: "Порча" }).expect(201);
     const reasonId = (reason.body as { id: string }).id;

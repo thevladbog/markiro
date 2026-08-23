@@ -6,9 +6,11 @@ import {
   ParseUUIDPipe,
   Query,
   Req,
+  Res,
   UseGuards,
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import type { Response } from "express";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
@@ -28,6 +30,7 @@ import {
   type ListCodesResponseDto,
 } from "./dto";
 import { CodeSearchService } from "./code-search.service";
+import { renderBoxReportHtml } from "./box-report";
 
 /**
  * Manager-only, entirely read-only module: classify a scanned/typed input
@@ -87,5 +90,22 @@ export class CodeSearchController {
     @Param("boxId", new ParseUUIDPipe()) boxId: string,
   ): Promise<BoxCardDto> {
     return this.codeSearchService.getBoxCard(req.tenantId!, boxId);
+  }
+
+  /**
+   * Print-ready A4 "Состав короба": the box row (SSCC + Code128) with each
+   * unit code indented underneath (DataMatrix). Same open-in-new-tab HTML
+   * contract as `GET /disaggregation/:id/report`.
+   */
+  @Get("boxes/:boxId/report")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  async boxReport(
+    @Req() req: RequestWithTenant,
+    @Param("boxId", new ParseUUIDPipe()) boxId: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const data = await this.codeSearchService.boxReportData(req.tenantId!, boxId);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return renderBoxReportHtml(data);
   }
 }

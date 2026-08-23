@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
+import { userEvent } from "@testing-library/user-event";
 import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -134,6 +135,17 @@ describe("BoxCardPage", () => {
     // The pickup order links to the order detail.
     const orderLink = screen.getByRole("link", { name: "PU-26-0001" });
     expect(orderLink.getAttribute("href")).toBe("/pickup/o1");
+  });
+
+  it("opens the print-ready box report in a new tab", async () => {
+    stubFetch();
+    const openMock = vi.fn();
+    vi.stubGlobal("open", openMock);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Распечатать" }));
+    expect(openMock).toHaveBeenCalledWith(`/api/code-search/boxes/${BOX_CARD.id}/report`);
   });
 
   it("offers a back link to the code registry", async () => {
