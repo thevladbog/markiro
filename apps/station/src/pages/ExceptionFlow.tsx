@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { parseScannedSscc } from "@markiro/domain";
 import { Alert, Button, FullScreenDialog } from "@markiro/ui";
 import type { ClosedBoxSummary } from "../lib/boxes.js";
 import type { ScanSource } from "../lib/scan-source.js";
+import { filterBoxesByTail } from "../lib/sscc-tail-filter.js";
 import { ShiftBoxesPanel } from "../ui/ShiftBoxesPanel.js";
 import { ExceptionActions, type BoxExceptionAction } from "../ui/exceptions/ExceptionActions.js";
 import { OtherReasonDialog } from "../ui/exceptions/OtherReasonDialog.js";
 import { ReasonPicker } from "../ui/exceptions/ReasonPicker.js";
+import { SsccSearchPad } from "../ui/exceptions/SsccSearchPad.js";
 
 export type ExceptionStage = "action" | "target" | "reason" | "confirm" | "applying" | "result";
 
@@ -23,6 +25,12 @@ export interface ExceptionFlowProps {
   onPendingChange?: (pending: boolean) => void;
   /** Lets the operator pick the target box by scanning its label instead of tapping the list. */
   scanSource?: ScanSource;
+  /**
+   * The station's window-mode control, rendered beside «Назад»: leaving
+   * fullscreen must not require abandoning a half-done exception to reach
+   * the status bar's expanded controls.
+   */
+  windowControl?: ReactNode;
 }
 
 export function ExceptionFlow({
@@ -36,6 +44,7 @@ export function ExceptionFlow({
   onBack,
   onPendingChange,
   scanSource,
+  windowControl,
 }: ExceptionFlowProps) {
   const { t } = useTranslation();
   const [stage, setStage] = useState<ExceptionStage>("action");
@@ -45,12 +54,22 @@ export function ExceptionFlow({
   const [otherOpen, setOtherOpen] = useState(false);
   const [succeeded, setSucceeded] = useState(false);
   const [scanFeedback, setScanFeedback] = useState<"notSscc" | "notFound" | null>(null);
+  // The typed SSCC tail. Scanning is deliberately NOT filtered by it: a scan
+  // names one exact box and always wins, whatever digits are on the pad.
+  const [searchTail, setSearchTail] = useState("");
   const applying = useRef(false);
   const selectedBox = boxes.find((box) => box.boxId === selectedBoxId) ?? null;
+  const tailFilter = filterBoxesByTail(boxes, searchTail);
 
   // While the target list is up, the work screen's own scan loop is paused
   // (WorkScreen unsubscribes for the whole exception flow), so this is the
   // only consumer: a box-label scan picks the target exactly like a tap.
+  // The pad's digits belong to one visit of the target list; a stale filter
+  // rediscovered minutes later would read as "boxes disappeared".
+  useEffect(() => {
+    if (stage !== "target") setSearchTail("");
+  }, [stage]);
+
   useEffect(() => {
     if (stage !== "target" || !scanSource) {
       setScanFeedback(null);
@@ -191,11 +210,30 @@ export function ExceptionFlow({
       </Button>
     );
 
+  // The title names the operation the operator is inside of, not the section
+  // of the app: mid-flow, «Расформировать короб» is the fact that matters.
+  const title =
+    stage === "action" || stage === "result" || action === null || action === "undo"
+      ? t("work.exceptions")
+      : action === "clear"
+        ? t("box.clear")
+        : action === "reprint"
+          ? t("box.reprintAction")
+          : t("box.disassembleAction");
+
   return (
     <section className="exception-flow" aria-labelledby="exception-flow-title">
       <header className="exception-flow__header">
-        <h2 id="exception-flow-title">{t("work.exceptions")}</h2>
-        {backButton}
+        <h2
+          id="exception-flow-title"
+          data-danger={action === "disassemble" && stage !== "action" ? "true" : undefined}
+        >
+          {title}
+        </h2>
+        <div className="exception-flow__controls">
+          {windowControl}
+          {backButton}
+        </div>
       </header>
       <div className="exception-flow__stage">
         {stage === "action" ? (
@@ -206,10 +244,13 @@ export function ExceptionFlow({
             <h3>{t("box.chooseAction")}</h3>
             {!canUndo && !hasOpenBox && boxes.length === 0 ? <p>{t("box.noActions")}</p> : null}
             <ExceptionActions
-              undoLabel={t("box.undoLastScan")}
-              clearLabel={t("box.clear")}
-              reprintLabel={t("box.reprintAction")}
-              disassembleLabel={t("box.disassembleAction")}
+              undo={{ label: t("box.undoLastScan"), hint: t("box.actionHints.undo") }}
+              clear={{ label: t("box.clear"), hint: t("box.actionHints.clear") }}
+              reprint={{ label: t("box.reprintAction"), hint: t("box.actionHints.reprint") }}
+              disassemble={{
+                label: t("box.disassembleAction"),
+                hint: t("box.actionHints.disassemble"),
+              }}
               canUndo={canUndo}
               hasOpenBox={hasOpenBox}
               hasClosedBoxes={boxes.length > 0}
@@ -219,18 +260,43 @@ export function ExceptionFlow({
         ) : null}
 
         {stage === "target" ? (
-          <div data-testid="exception-stage-target" className="exception-stage">
-            {scanSource ? <p className="exception-stage__hint">{t("box.scanTargetHint")}</p> : null}
-            {scanFeedback === "notSscc" ? (
-              <Alert tone="error">{t("box.printNotSscc")}</Alert>
-            ) : null}
-            {scanFeedback === "notFound" ? (
-              <Alert tone="error">{t("box.scanTargetNotFound")}</Alert>
-            ) : null}
+          <div
+            data-testid="exception-stage-target"
+            className="exception-stage exception-stage--target"
+            data-action={action ?? undefined}
+          >
+            <div className="exception-target__finder">
+              {scanSource ? (
+                <div className="exception-target__scan">
+                  <span aria-hidden="true" className="exception-target__scan-glyph">
+                    ⌖
+                  </span>
+                  <p className="exception-stage__hint">{t("box.scanTargetHint")}</p>
+                </div>
+              ) : null}
+              {scanFeedback === "notSscc" ? (
+                <Alert tone="error">{t("box.printNotSscc")}</Alert>
+              ) : null}
+              {scanFeedback === "notFound" ? (
+                <Alert tone="error">{t("box.scanTargetNotFound")}</Alert>
+              ) : null}
+              <SsccSearchPad
+                value={searchTail}
+                onChange={setSearchTail}
+                labels={{
+                  group: t("box.searchTailGroup"),
+                  placeholder: t("box.searchTailPlaceholder"),
+                  backspace: t("box.searchBackspace"),
+                  clear: t("box.searchClear"),
+                }}
+              />
+            </div>
             <ShiftBoxesPanel
-              boxes={boxes}
+              boxes={tailFilter.matched}
               selectedBoxId={selectedBoxId}
               onSelectionChange={selectBox}
+              highlightTail={searchTail}
+              hiddenCount={tailFilter.hiddenCount}
             />
           </div>
         ) : null}

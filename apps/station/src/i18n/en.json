@@ -482,6 +482,22 @@
       "retryRestore": "Retry recovery",
       "backToShifts": "Back to shifts"
     },
-    "invalidSerial": "Could not build a box number. Try closing the box again."
+    "invalidSerial": "Could not build a box number. Try closing the box again.",
+    "actionHints": {
+      "undo": "Removes the last bottle from the open box",
+      "clear": "Removes every item from the open box",
+      "reprint": "A new label for a closed box",
+      "disassemble": "Permanently voids the box SSCC"
+    },
+    "searchTailGroup": "Search by the last SSCC digits",
+    "searchTailPlaceholder": "Last SSCC digits",
+    "searchBackspace": "Delete digit",
+    "searchClear": "Clear search",
+    "foundOf": "Found {{matched}} of {{total}}",
+    "hiddenByFilter_one": "{{count}} more box is hidden by the filter — erase the digits to see all",
+    "hiddenByFilter_few": "{{count}} more boxes are hidden by the filter — erase the digits to see all",
+    "hiddenByFilter_many": "{{count}} more boxes are hidden by the filter — erase the digits to see all",
+    "hiddenByFilter_other": "{{count}} more boxes are hidden by the filter — erase the digits to see all",
+    "noTailMatches": "No boxes end with those digits"
   }
 }

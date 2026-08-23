@@ -1390,6 +1390,7 @@ export function App() {
             sound={sound}
             onScanRecorded={nudgeSync}
             onScanQueueRegister={registerFloorWorkBarrier}
+            exceptionWindowControl={windowModeControl}
             onExit={() => {
               // Both cleared together: `floorView` is separate state that
               // stays "new" when this shift was entered through NewShift, so
