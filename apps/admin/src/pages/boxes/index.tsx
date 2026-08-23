@@ -114,7 +114,13 @@ export function BoxesPage() {
       <PageHeader
         title={t("pages.boxes.title")}
         actions={
-          <Button type="button" variant="secondary" onClick={() => navigate("/boxes/sell")}>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              void navigate("/boxes/sell");
+            }}
+          >
             {t("pages.boxSell.title")}
           </Button>
         }

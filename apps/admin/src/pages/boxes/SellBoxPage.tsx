@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next";
 
 import { formatSsccHri, parseScannedSscc } from "@markiro/domain";
-import { Alert, Button, PageHeader, Spinner } from "@markiro/ui";
+import { Alert, Button, Input, PageHeader, Spinner } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { useBoxSellCodes } from "./sell-api.js";
@@ -114,12 +114,11 @@ export function SellBoxPage() {
             handleDetected(ssccInput);
           }}
         >
-          <label className="mk-sell-entry__label" htmlFor="sell-sscc">
-            {t("pages.boxSell.ssccLabel")}
-          </label>
-          <input
+          <Input
             id="sell-sscc"
-            className="mk-sell-entry__input"
+            label={t("pages.boxSell.ssccLabel")}
+            size="floor"
+            mono
             inputMode="numeric"
             autoComplete="off"
             placeholder="00123456789012345675"
