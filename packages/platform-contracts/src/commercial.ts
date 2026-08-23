@@ -88,14 +88,17 @@ export const billingActualAddressInputSchema = z.discriminatedUnion("sameAsLegal
   separateActualAddressSchema,
 ]);
 
-const billingProfileInputCommonFields = {
+const legacyBillingProfileInputCommonFields = {
   fullName: z.string().trim().min(1).max(500),
   displayName: z.string().trim().min(1).max(300),
   legalAddressRaw: z.string().trim().min(1).max(1_000),
   legalAddress: normalizedBillingAddressSchema.nullable().optional(),
-  actualAddress: billingActualAddressInputSchema,
   postalAddress: billingPostalAddressInputSchema,
   contact: billingContactSchema,
+};
+const billingProfileInputCommonFields = {
+  ...legacyBillingProfileInputCommonFields,
+  actualAddress: billingActualAddressInputSchema,
 };
 
 const individualBillingProfileInputSchema = z
@@ -134,13 +137,63 @@ const legalEntityBillingProfileInputSchema = z
   })
   .strict();
 
-export const billingProfileInputSchema = z.discriminatedUnion("kind", [
+export const currentBillingProfileInputSchema = z.discriminatedUnion("kind", [
   individualBillingProfileInputSchema,
   selfEmployedBillingProfileInputSchema,
   soleProprietorBillingProfileInputSchema,
   legalEntityBillingProfileInputSchema,
 ]);
-export const operatorBillingProfileInputSchema = billingProfileInputSchema;
+export const currentOperatorBillingProfileInputSchema = currentBillingProfileInputSchema;
+const legacyIndividualBillingProfileInputSchema = z
+  .object({
+    ...legacyBillingProfileInputCommonFields,
+    kind: z.literal("individual"),
+    inn: z
+      .string()
+      .regex(/^\d{12}$/)
+      .nullable()
+      .optional(),
+  })
+  .strict();
+const legacySelfEmployedBillingProfileInputSchema = z
+  .object({
+    ...legacyBillingProfileInputCommonFields,
+    kind: z.literal("self_employed"),
+    inn: z.string().regex(/^\d{12}$/),
+  })
+  .strict();
+const legacySoleProprietorBillingProfileInputSchema = z
+  .object({
+    ...legacyBillingProfileInputCommonFields,
+    kind: z.literal("sole_proprietor"),
+    inn: z.string().regex(/^\d{12}$/),
+    ogrnip: z.string().regex(/^\d{15}$/),
+  })
+  .strict();
+const legacyLegalEntityBillingProfileInputSchema = z
+  .object({
+    ...legacyBillingProfileInputCommonFields,
+    kind: z.literal("legal_entity"),
+    inn: z.string().regex(/^\d{10}$/),
+    kpp: z.string().regex(/^\d{9}$/),
+    ogrn: z.string().regex(/^\d{13}$/),
+  })
+  .strict();
+const legacyBillingProfileInputSchema = z.discriminatedUnion("kind", [
+  legacyIndividualBillingProfileInputSchema,
+  legacySelfEmployedBillingProfileInputSchema,
+  legacySoleProprietorBillingProfileInputSchema,
+  legacyLegalEntityBillingProfileInputSchema,
+]);
+
+export const billingProfileInputSchema = z.union([
+  currentBillingProfileInputSchema,
+  legacyBillingProfileInputSchema,
+]);
+export const operatorBillingProfileInputSchema = z.union([
+  currentBillingProfileInputSchema,
+  legacyLegalEntityBillingProfileInputSchema,
+]);
 
 export const billingProfileSchema = z.object({
   id: platformUuidSchema,
@@ -1318,8 +1371,12 @@ export type PaymentMatch = z.output<typeof paymentMatchSchema>;
 export type PaymentMatchServiceSource = z.input<typeof paymentMatchServiceSchema>;
 export type PaymentMatchResolveInput = z.input<typeof paymentMatchResolveSchema>;
 export type PaymentMatchResolveDto = z.output<typeof paymentMatchResolveSchema>;
-export type BillingProfileInput = z.output<typeof billingProfileInputSchema>;
-export type OperatorBillingProfileInput = z.output<typeof operatorBillingProfileInputSchema>;
+export type BillingProfileInput = z.output<typeof currentBillingProfileInputSchema>;
+export type OperatorBillingProfileInput = z.output<typeof currentOperatorBillingProfileInputSchema>;
+export type CompatibleBillingProfileInput = z.output<typeof billingProfileInputSchema>;
+export type CompatibleOperatorBillingProfileInput = z.output<
+  typeof operatorBillingProfileInputSchema
+>;
 export type BillingProfile = z.output<typeof billingProfileSchema>;
 export type OperatorBillingProfile = z.output<typeof operatorBillingProfileSchema>;
 export type TenantBillingProfile = z.output<typeof tenantBillingProfileSchema>;

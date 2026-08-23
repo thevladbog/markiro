@@ -168,6 +168,10 @@ No profile or bank-account edit rewrites an issued document.
 - Existing operator and tenant billing-profile endpoints keep their paths and permissions.
 - The broadened operator schemas and actual-address fields are added to the shared platform
   contracts and OpenAPI inventory.
+- For one N/N-1 transition, request schemas also accept the exact former bodies that omit
+  `actualAddress`: every former tenant kind and the former legal-entity-only seller body. Omission
+  preserves the current revision's actual-address equality/raw/normalized triple; only a first
+  profile defaults to actual-equals-legal. Current UI requests continue to send the field explicitly.
 - Tenant reads and writes remain tenant-scoped; operator singleton writes remain capability-gated.
 - Profile audit snapshots include kind and address equality state without storing raw DaData
   responses.
@@ -233,6 +237,9 @@ No profile or bank-account edit rewrites an issued document.
 5. Verify issue/publication with and without a known buyer account.
 6. Confirm existing issued documents still render from their frozen snapshots.
 
-Rollback of application images remains possible because the migration is additive. Older code
-ignores the new columns. The migration is not removed during rollback; saved new profile revisions
-remain available to the restored release once application code is re-deployed.
+The additive migration alone does not make every old application image safe. Rollback to an API
+image from before this feature is allowed only while no seller revision with a kind other than
+`legal_entity` and no profile revision with a separate actual address has been written. Once either
+write exists, the old API cannot faithfully read or preserve the profile and old-image rollback is
+prohibited. Forward recovery is to redeploy the current or a fixed API image. Migration `0065` is
+never removed or rolled back.

@@ -12,7 +12,14 @@ type OperatorBillingProfileRecord = typeof schema.operatorBillingProfiles.$infer
 type TenantBillingProfileRecord = typeof schema.tenantBillingProfiles.$inferSelect;
 type ExistingBillingProfile = Pick<
   OperatorBillingProfileRecord,
-  "actualSameAsLegal" | "bankDetails" | "displayName" | "isConfirmed" | "kind" | "revision"
+  | "actualAddress"
+  | "actualAddressRaw"
+  | "actualSameAsLegal"
+  | "bankDetails"
+  | "displayName"
+  | "isConfirmed"
+  | "kind"
+  | "revision"
 >;
 
 @Injectable()
@@ -149,9 +156,26 @@ function profileValues(
   actorPlatformUserId: string,
   current?: ExistingBillingProfile,
 ) {
-  const actual = input.actualAddress;
+  const actual = "actualAddress" in input ? input.actualAddress : undefined;
   const postal = input.postalAddress;
   const legalAddress = input.legalAddress ?? null;
+  const actualValues = actual
+    ? {
+        actualSameAsLegal: actual.sameAsLegal,
+        actualAddressRaw: actual.sameAsLegal ? null : actual.raw,
+        actualAddress: actual.sameAsLegal ? null : (actual.normalized ?? null),
+      }
+    : current
+      ? {
+          actualSameAsLegal: current.actualSameAsLegal,
+          actualAddressRaw: current.actualAddressRaw,
+          actualAddress: current.actualAddress,
+        }
+      : {
+          actualSameAsLegal: true,
+          actualAddressRaw: null,
+          actualAddress: null,
+        };
   return {
     kind: input.kind,
     fullName: input.fullName,
@@ -162,9 +186,7 @@ function profileValues(
     ogrnip: "ogrnip" in input ? input.ogrnip : null,
     legalAddressRaw: input.legalAddressRaw,
     legalAddress,
-    actualSameAsLegal: actual.sameAsLegal,
-    actualAddressRaw: actual.sameAsLegal ? null : actual.raw,
-    actualAddress: actual.sameAsLegal ? null : (actual.normalized ?? null),
+    ...actualValues,
     postalSameAsLegal: postal.sameAsLegal,
     postalAddressRaw: postal.sameAsLegal ? null : postal.raw,
     postalAddress: postal.sameAsLegal ? null : (postal.normalized ?? null),

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  billingProfileInputSchema,
-  operatorBillingProfileInputSchema,
+  currentBillingProfileInputSchema,
+  currentOperatorBillingProfileInputSchema,
   type BillingProfile,
   type BillingProfileInput,
   type DadataAddressSuggestion,
@@ -109,8 +109,8 @@ export function LegalProfileForm({
         const input = toInput(draft);
         const parsed =
           scope === "operator"
-            ? operatorBillingProfileInputSchema.safeParse(input)
-            : billingProfileInputSchema.safeParse(input);
+            ? currentOperatorBillingProfileInputSchema.safeParse(input)
+            : currentBillingProfileInputSchema.safeParse(input);
         if (!parsed.success) {
           setError(t("legal.validation.invalid"));
           return;

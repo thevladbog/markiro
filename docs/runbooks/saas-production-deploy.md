@@ -21,8 +21,8 @@ SHA. Workflow проверяет успешный release run и manifest, за�
 
 Удалённая последовательность неизменна: transfer, prepare, migrations, start,
 readiness, public smoke, finalize. При ошибке после prepare выполняется один
-bounded rollback к предыдущему healthy release. Миграции должны оставаться
-backward-compatible с предыдущим образом.
+bounded rollback к предыдущему healthy release только пока выполнены границы
+совместимости данных ниже.
 Если bounded rollback не завершился, используйте
 [`yandex-recovery.md`](./yandex-recovery.md).
 
@@ -33,6 +33,19 @@ device namespaces там закрыты. API не публикует отдел�
 env материализуется из runtime Lockbox; `SAAS_ADMIN_ORIGIN` обязан точно
 совпадать с `https://$MARKIRO_SAAS_ADMIN_DOMAIN`. Секреты не передаются в
 аргументах или release archive.
+
+### Граница rollback после миграции 0065
+
+До первого несовместимого профильного write migration `0065` остаётся additive для предыдущего
+API image. Несовместимым считается любой сохранённый seller с kind, отличным от `legal_entity`, или
+любой сохранённый профиль с `actualSameAsLegal=false` и отдельным фактическим адресом.
+
+После любого такого write rollback на API image до поддержки migration 0065 запрещён: старый API
+не может достоверно прочитать non-legal seller и при следующей записи заменит отдельный фактический
+адрес значением actual-equals-legal. Для forward recovery нужно повторно развернуть текущий или
+исправленный API image; никогда не удалять и не откатывать migration `0065`. До восстановления
+совместимого API остановите новые записи billing profiles, но не изменяйте исторические revisions
+вручную.
 
 ## Приватная выкладка v-b.tech
 

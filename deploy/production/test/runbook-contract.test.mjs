@@ -13,6 +13,13 @@ const privateVbtechSection = (runbook) => {
   const nextHeading = runbook.indexOf("\n## ", start + heading.length);
   return runbook.slice(start, nextHeading === -1 ? undefined : nextHeading);
 };
+const profileMigrationRollbackSection = (runbook) => {
+  const heading = "### Граница rollback после миграции 0065";
+  const start = runbook.indexOf(heading);
+  assert.notEqual(start, -1, "profile migration rollback section must exist");
+  const nextHeading = runbook.indexOf("\n## ", start + heading.length);
+  return runbook.slice(start, nextHeading === -1 ? undefined : nextHeading);
+};
 const privateVbtechInputNames = (section) => {
   const start = section.indexOf("#### Фаза 5.");
   const end = section.indexOf("#### Фаза 6.");
@@ -79,6 +86,20 @@ test("production deploy runbook describes one direct immutable Compose delivery"
     /transfer, prepare, migrations, start,[\s\S]*readiness, public smoke, finalize/,
   );
   assert.match(runbook, /один[\s\S]*rollback/);
+});
+
+test("production deploy runbook prohibits old-image rollback after incompatible profile writes", async () => {
+  const runbook = await read("docs/runbooks/saas-production-deploy.md");
+  const section = profileMigrationRollbackSection(runbook);
+
+  for (const required of [
+    "seller с kind, отличным от `legal_entity`",
+    "профиль с `actualSameAsLegal=false`",
+    "rollback на API image до поддержки migration 0065 запрещён",
+    "повторно развернуть текущий или исправленный API image",
+    "никогда не удалять и не откатывать migration `0065`",
+  ])
+    assert.match(section, proseRegExp(required));
 });
 
 test("production deploy runbook requires key-only pinned SSH and ephemeral GHCR auth", async () => {
