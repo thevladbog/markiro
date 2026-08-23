@@ -897,8 +897,11 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
   const plannedQty = mode === "validation" ? 10_000 : undefined;
   // A grouped, >100-capacity box (see BoxFillInstrument's own `grouped` rule)
   // exercises the same viewport-review case the standalone "box-empty"
-  // fixture already covers for the empty end of the range.
-  const boxCapacity = boxFull ? 120 : 20;
+  // fixture already covers for the empty end of the range. The ordinary
+  // aggregation fixture is a ten-place box — the production norm on the line —
+  // which exercises the large numbered-segment mode; the 11–100 rows-of-ten
+  // mode stays covered by "box-empty"'s 20-place panel.
+  const boxCapacity = boxFull ? 120 : 10;
   const boxItemCount = boxFull ? 120 : 2;
   return (
     <main className="work-screen" aria-label={ru ? "Тестовый товар А" : "Sample product A"}>
@@ -913,8 +916,10 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
               counterpartyName={ru ? "ООО «Тестовый производитель»" : "Sample Manufacturer Ltd"}
               plannedQty={plannedQty}
               planLabel={t("work.plan")}
+              gtin="04607000000042"
               operation={waiting ? null : (operations[0] ?? null)}
               labels={workLabels.status}
+              showVerdict={!aggregation}
             />
             {aggregation ? (
               <BoxFillInstrument
@@ -924,6 +929,14 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
                 capacity={boxCapacity}
                 canUndo
                 labels={workLabels.box}
+                lastAccepted={
+                  waiting
+                    ? null
+                    : operations[0]?.identity
+                      ? { serial: operations[0].identity.serial }
+                      : null
+                }
+                verdictLabels={{ ok: workLabels.status.ok, waiting: workLabels.status.waiting }}
                 onClose={() => undefined}
                 onUndo={() => undefined}
                 onClear={() => undefined}
@@ -1190,8 +1203,11 @@ function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLoc
     if (!root) return;
     const t = i18n.getFixedT(locale);
     const clickByText = (text: string): void => {
+      // Action cards carry a hint line inside the button, so their textContent
+      // is label+hint; the aria-label pins the accessible name to the label.
       const button = Array.from(root.querySelectorAll("button")).find(
-        (candidate) => candidate.textContent?.trim() === text,
+        (candidate) =>
+          candidate.getAttribute("aria-label") === text || candidate.textContent?.trim() === text,
       );
       button?.click();
     };
@@ -1235,6 +1251,15 @@ function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLoc
         onBack={() => undefined}
         onPendingChange={() => undefined}
         scanSource={galleryExceptionScanSource()}
+        windowControl={
+          <WindowModeControl
+            snapshot={{ mode: "locked", pending: false, error: null }}
+            activeShift
+            onEnter={() => undefined}
+            onExit={() => undefined}
+            onDismissError={() => undefined}
+          />
+        }
       />
     </div>
   );

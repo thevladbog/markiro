@@ -125,8 +125,17 @@ describe("fixed station viewport source contract", () => {
     expect(css).toMatch(
       /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-scan-result\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1\.35fr\) minmax\(150px, 0\.65fr\);[^}]*grid-template-rows:\s*minmax\(0, 1fr\);/s,
     );
+    // The side-by-side compact is for sharing the column with the box panel;
+    // a boxless scan result stacks hero-over-verdict instead of stretching
+    // the gradient into an empty tower.
     expect(css).toMatch(
-      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-scan-result__image\s*\{[^}]*width:\s*96px;[^}]*height:\s*96px;/s,
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-screen__primary\s*>\s*\.work-scan-result:only-child\s*\{[^}]*grid-template-columns:\s*none;[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\);/s,
+    );
+    // The photo shrinks at 1024 but keeps its 3:4 portrait (the base rule owns
+    // the aspect ratio) -- a bottle is never re-cropped into a square.
+    expect(css).toMatch(/\.work-scan-result__image\s*\{[^}]*aspect-ratio:\s*3 \/ 4;/s);
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-scan-result__image\s*\{[^}]*width:\s*96px;/s,
     );
     expect(css).toMatch(
       /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-box-fill__readout strong\s*\{[^}]*font:\s*var\(--floor-counter-sm\);/s,
@@ -157,23 +166,33 @@ describe("fixed station viewport source contract", () => {
     expect(statusBar.match(/<Button/g)).toHaveLength(2);
     expect(statusBar.match(/size="floor"/g)).toHaveLength(2);
     expect(statusBar.match(/variant="secondary"/g)).toHaveLength(2);
+    // The identity column is the ONLY flexible track: pills and actions size
+    // to content, so no fixed floor can starve the station/operator names the
+    // way the old minmax(960px, …) actions column did.
     expect(css).toMatch(
-      /\.station-status-actions\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
+      /\.station-status-actions\s*\{[^}]*display:\s*flex;[^}]*justify-content:\s*flex-end;/s,
     );
     expect(css).toMatch(
       /\.station-status-actions\s*>\s*\*\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*64px;/s,
     );
-    expect(css).toMatch(
-      /\.station-status-bar\s*\{[^}]*grid-template-columns:[^;}]*minmax\(960px, 2fr\);/s,
+    expect(css).not.toMatch(
+      /\.station-status-actions\s*>\s*\*\s*\{[^}]*(?<![a-z-])width:\s*100%;/s,
     );
     expect(css).toMatch(
-      /@media \(max-width: 1439px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 2\.6fr\) minmax\(0, 1fr\) minmax\(0, 1\.1fr\);[^}]*\}[\s\S]*?\.station-status-actions\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
+      /\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto auto;/s,
     );
+    expect(css).not.toMatch(/\.station-status-bar\s*\{[^}]*minmax\(960px/s);
+    // Below 1680 the healthy pills drop their caption and keep the tone dot.
     expect(css).toMatch(
-      /@media \(max-width: 1179px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\);/s,
+      /@media \(max-width: 1679px\)\s*\{[\s\S]*?\.station-status-pill\[data-value-shown="false"\] dt\s*\{[^}]*clip:\s*rect\(0 0 0 0\);/s,
     );
+    // Narrower still, the action rail drops to its own row.
     expect(css).toMatch(
-      /@media \(max-width: 1100px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1\.35fr\) minmax\(0, 1fr\) minmax\(0, 0\.9fr\);/s,
+      /@media \(max-width: 1599px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto;[\s\S]*?\.station-status-actions\s*\{[^}]*grid-column:\s*1 \/ -1;/s,
+    );
+    // A pill that has nothing to say paints no value text at any width.
+    expect(css).toMatch(
+      /\.station-status-pill\[data-value-shown="false"\] dd\s*\{[^}]*display:\s*none;/s,
     );
     expect(css).toMatch(
       /@media \(max-width: 1100px\)\s*\{[\s\S]*?\.shift-selection__grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[^}]*\}[\s\S]*?\.shift-card__body\s*\{[^}]*grid-template-columns:\s*minmax\(150px, 36%\) minmax\(0, 1fr\);/s,

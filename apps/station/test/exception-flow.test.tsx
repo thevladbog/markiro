@@ -188,6 +188,95 @@ describe("ExceptionFlow", () => {
     await waitFor(() => expect(onDisassemble).toHaveBeenCalledWith("b1", "Неверное количество"));
   });
 
+  it("selects the box by scan on the reprint path exactly like on disassembly", async () => {
+    const scanner = fakeScanSource();
+    const onReprint = vi.fn().mockResolvedValue(undefined);
+    renderFlow({ onReprint, scanSource: scanner.source });
+
+    fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку" }));
+    expect(scanner.subscribed).toBe(true);
+    scanner.emit("00123456789012345675");
+
+    expect(screen.getByTestId("exception-stage-reason")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Этикетка повреждена" }));
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить перепечатку" }));
+    await waitFor(() => expect(onReprint).toHaveBeenCalledWith("b1", "Этикетка повреждена"));
+  });
+
+  it("filters the target list by typed SSCC tail digits and keeps scans unfiltered", () => {
+    const scanner = fakeScanSource();
+    const boxes = [
+      { boxId: "b1", sscc: "123456789012345675", itemCount: 3, closedAt: "2026-07-30T00:00:00Z" },
+      { boxId: "b2", sscc: "123456789012340019", itemCount: 5, closedAt: "2026-07-30T01:00:00Z" },
+      { boxId: "b3", sscc: "123456789012345019", itemCount: 7, closedAt: "2026-07-30T02:00:00Z" },
+    ];
+    renderFlow({ boxes, scanSource: scanner.source });
+    fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+
+    for (const digit of ["0", "1", "9"]) {
+      fireEvent.click(screen.getByRole("button", { name: digit }));
+    }
+    expect(screen.getByTestId("sscc-search-value").textContent).toBe("…019");
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getByTestId("boxes-found").textContent).toBe("Найдено 2 из 3");
+    expect(screen.getByText(/Ещё 1 короб скрыт фильтром/)).toBeDefined();
+    // The typed tail is emphasized inside every matching row.
+    const marks = screen.getAllByText("019", { selector: "mark" });
+    expect(marks).toHaveLength(2);
+
+    // A scan names one exact box and wins regardless of the filter digits.
+    scanner.emit("00123456789012345675");
+    expect(screen.getByTestId("exception-stage-reason")).toBeDefined();
+
+    // Leaving the target stage forgets the tail: re-entering starts clean.
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByTestId("sscc-search-value").textContent).toBe("Последние цифры SSCC");
+  });
+
+  it("erases and clears the typed tail from the pad's own keys", () => {
+    renderFlow();
+    fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "9" }));
+    fireEvent.click(screen.getByRole("button", { name: "9" }));
+    expect(screen.getByTestId("sscc-search-value").textContent).toBe("…99");
+    expect(screen.getByText("Нет коробов с такими последними цифрами")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Стереть цифру" }));
+    expect(screen.getByTestId("sscc-search-value").textContent).toBe("…9");
+    fireEvent.click(screen.getByRole("button", { name: "Стереть цифру" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "7" }));
+    fireEvent.click(screen.getByRole("button", { name: "5" }));
+    expect(screen.getByTestId("sscc-search-value").textContent).toBe("…75");
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Очистить поиск" })[0]!);
+    expect(screen.getByTestId("sscc-search-value").textContent).toBe("Последние цифры SSCC");
+  });
+
+  it("titles the flow after the operation and marks disassembly as danger", () => {
+    renderFlow();
+    expect(screen.getByRole("heading", { name: "Исключения" })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Расформировать короб" }));
+    const heading = screen.getByRole("heading", { name: "Расформировать короб" });
+    expect(heading.getAttribute("data-danger")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку" }));
+    expect(
+      screen.getByRole("heading", { name: "Перепечатать этикетку" }).getAttribute("data-danger"),
+    ).toBeNull();
+  });
+
+  it("renders the provided window control beside the back button", () => {
+    renderFlow({ windowControl: <button type="button">Оконный режим</button> });
+    expect(screen.getByRole("button", { name: "Оконный режим" })).toBeDefined();
+  });
+
   it("stays on the target stage with feedback for unknown or non-SSCC scans", () => {
     const scanner = fakeScanSource();
     renderFlow({ scanSource: scanner.source });

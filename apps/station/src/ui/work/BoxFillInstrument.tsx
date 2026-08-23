@@ -20,6 +20,16 @@ export interface BoxFillInstrumentProps {
   canUndo: boolean;
   closeDisabled?: boolean;
   labels: BoxFillLabels;
+  /**
+   * The latest accepted scan, printed beside the readout as «✓ serial». The
+   * serial alone identifies the bottle to a worker mid-box; the full
+   * normalized code stays in the recent-operations list. When given (non-
+   * undefined), this instrument owns the screen's accepted-scan live region —
+   * the caller must pass `showVerdict={false}` to its ScanResultInstrument.
+   */
+  lastAccepted?: { serial: string } | null;
+  /** Labels for the accepted readout; required whenever lastAccepted is used. */
+  verdictLabels?: { ok: string; waiting: string };
   onClose: () => void;
   onUndo: () => void;
   onClear: () => void;
@@ -68,6 +78,8 @@ export function BoxFillInstrument({
   canUndo,
   closeDisabled = false,
   labels,
+  lastAccepted,
+  verdictLabels,
   onClose,
   onUndo,
   onClear,
@@ -76,6 +88,9 @@ export function BoxFillInstrument({
   const fill = box && usableCapacity ? Math.min(box.itemCount, usableCapacity) : 0;
   const cells = usableCapacity ? buildBoxCells(fill, usableCapacity) : [];
   const grouped = usableCapacity !== null && usableCapacity > 100;
+  // A box of ten or fewer gets one row of large numbered segments readable
+  // from across the line, instead of a strip of ten small squares.
+  const large = usableCapacity !== null && usableCapacity <= 10;
   const rowCount = Math.ceil(cells.length / 10);
   const persistentState = boxFillPersistentState(box, capacity);
   return (
@@ -93,13 +108,38 @@ export function BoxFillInstrument({
               {usableCapacity ? `${box.itemCount} / ${usableCapacity}` : box.itemCount}
             </strong>
             <span>{usableCapacity ? labels.count : labels.capacityUnknown}</span>
+            {verdictLabels ? (
+              <div
+                className="work-box-fill__last"
+                role="status"
+                data-tone={lastAccepted ? "ok" : "neutral"}
+                aria-label={
+                  lastAccepted ? `${verdictLabels.ok}: ${lastAccepted.serial}` : undefined
+                }
+              >
+                {lastAccepted ? (
+                  <>
+                    <span aria-hidden="true">✓</span>
+                    <code data-semantic="accepted-serial">{lastAccepted.serial}</code>
+                  </>
+                ) : (
+                  <span>{verdictLabels.waiting}</span>
+                )}
+              </div>
+            ) : null}
           </div>
           {usableCapacity ? (
             <div
               className="work-box-fill__grid"
               data-dense={cells.length > 20}
               data-grouped={grouped}
-              style={{ gridTemplateRows: `repeat(${rowCount}, minmax(0, 1fr))` }}
+              data-large={large ? "true" : undefined}
+              style={{
+                gridTemplateRows: `repeat(${rowCount}, minmax(0, 1fr))`,
+                ...(large
+                  ? { gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))` }
+                  : {}),
+              }}
               role="progressbar"
               aria-label={labels.title}
               aria-valuemin={0}
@@ -118,7 +158,9 @@ export function BoxFillInstrument({
                     data-latest={isLatest ? "true" : undefined}
                     aria-label={cell.from === cell.to ? `${cell.from}` : `${cell.from}–${cell.to}`}
                     aria-hidden="true"
-                  />
+                  >
+                    {large ? cell.from : null}
+                  </span>
                 );
               })}
             </div>

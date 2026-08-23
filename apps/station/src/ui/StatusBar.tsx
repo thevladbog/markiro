@@ -136,56 +136,86 @@ export function StatusBar({
       data-connectivity-state={connectivityState}
       data-collapsed={collapsed ? "true" : "false"}
     >
-      <dl className="station-status-group station-status-group--context">
-        {!collapsed ? (
-          <StatusValue label={t("shell.station")} value={stationName} testId="station-status" />
-        ) : null}
-        {lineName ? (
-          <StatusValue label={t("shell.line")} value={lineName} testId="line-status" />
-        ) : null}
-        {!collapsed ? (
-          <StatusValue label={t("shell.operator")} value={operatorName} testId="operator-status" />
-        ) : null}
-        {shiftLabel ? (
-          <StatusValue label={t("shell.shift")} value={shiftLabel} testId="shift-status" />
-        ) : null}
+      {/*
+        The identity deck: what/where on the strong first row, who/which shift
+        on the quieter second. Labels stay in the DOM for assistive tech but
+        are not painted -- «Станция упаковки готовой продукции 01» does not
+        need the word «Станция» in front of it, and the freed width is exactly
+        what let the values stop truncating to three letters on wide screens.
+      */}
+      <dl className="station-status-identity">
+        <div className="station-status-identity__row station-status-identity__row--primary">
+          {!collapsed ? (
+            <IdentityValue label={t("shell.station")} value={stationName} testId="station-status" />
+          ) : null}
+          {lineName ? (
+            <IdentityValue label={t("shell.line")} value={lineName} testId="line-status" />
+          ) : null}
+        </div>
+        <div className="station-status-identity__row station-status-identity__row--secondary">
+          {!collapsed ? (
+            <IdentityValue
+              label={t("shell.operator")}
+              value={operatorName}
+              testId="operator-status"
+            />
+          ) : null}
+          {shiftLabel ? (
+            <IdentityValue label={t("shell.shift")} value={shiftLabel} testId="shift-status" />
+          ) : null}
+        </div>
       </dl>
-      <dl className="station-status-group station-status-group--sync">
-        <StatusValue
+      {/*
+        Telemetry pills. Each carries a tone dot; the VALUE is painted only
+        when it says something a green dot cannot («7 — Не уходит», «Нет
+        сигнала») or when it is a number worth watching. Healthy states read
+        as colour in half a glance instead of five words of prose. Every value
+        stays in the DOM regardless -- screen readers and tests see the same
+        facts at every viewport.
+      */}
+      <dl className="station-status-pills">
+        <StatusPill
           label={t("shell.server")}
           value={serverLabel}
-          {...(serverReachability === "reachable"
-            ? { tone: "ok" as const }
-            : serverReachability === "unreachable"
-              ? { tone: "warn" as const }
-              : {})}
+          tone={
+            serverReachability === "reachable"
+              ? "ok"
+              : serverReachability === "unreachable"
+                ? "warn"
+                : "neutral"
+          }
+          valueShown={serverReachability !== "reachable"}
           testId="server-status"
           live="polite"
         />
-        <StatusValue
+        <StatusPill
           label={t("shell.sync")}
           shortLabel={t("shell.syncShort")}
           value={syncStuck ? `${syncPending} — ${t("shell.syncStuck")}` : String(syncPending)}
-          {...(syncStuck ? { tone: "warn" as const } : {})}
+          tone={syncStuck ? "warn" : "ok"}
+          valueShown
           testId="sync-status"
         />
-        <StatusValue
+        <StatusPill
           label={t("shell.conflicts")}
           shortLabel={t("shell.conflictsShort")}
           value={String(conflicts)}
+          tone="neutral"
+          valueShown
           testId="conflicts-status"
         />
-      </dl>
-      <dl className="station-status-group station-status-group--hardware">
-        <StatusValue
+        <StatusPill
           label={t("shell.scanner")}
           value={scannerLabel}
-          {...(scanner === "disconnected" ? { tone: "warn" as const } : {})}
+          tone={scanner === "connected" ? "ok" : scanner === "disconnected" ? "warn" : "neutral"}
+          valueShown={scanner !== "connected"}
           testId="scanner-status"
         />
-        <StatusValue
+        <StatusPill
           label={t("shell.printer")}
           value={printerConfigured ? printerConfiguredLabel : notConfigured}
+          tone={printerConfigured ? "ok" : "neutral"}
+          valueShown={!printerConfigured}
           testId="printer-status"
         />
       </dl>
@@ -203,18 +233,42 @@ export function StatusBar({
   );
 }
 
-interface StatusValueProps {
+interface IdentityValueProps {
+  label: string;
+  value: string;
+  testId: string;
+}
+
+function IdentityValue({ label, value, testId }: IdentityValueProps) {
+  return (
+    <div className="station-status-item">
+      <dt className="station-visually-hidden">{label}</dt>
+      <dd data-testid={testId} title={value}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+interface StatusPillProps {
   label: string;
   shortLabel?: string;
   value: string;
   testId: string;
-  tone?: "ok" | "warn";
+  tone: "ok" | "warn" | "neutral";
+  /** Paint the value next to the label; false leaves it to the dot (and AT). */
+  valueShown?: boolean;
   live?: "polite";
 }
 
-function StatusValue({ label, shortLabel, value, testId, tone, live }: StatusValueProps) {
+function StatusPill({ label, shortLabel, value, testId, tone, valueShown, live }: StatusPillProps) {
   return (
-    <div className="station-status-item" data-tone={tone}>
+    <div
+      className="station-status-item station-status-pill"
+      data-tone={tone}
+      data-value-shown={valueShown ? "true" : "false"}
+    >
+      <span aria-hidden="true" className="station-status-pill__dot" />
       <dt>
         <span className="station-status-label--long">{label}</span>
         {shortLabel ? <span className="station-status-label--short">{shortLabel}</span> : null}
