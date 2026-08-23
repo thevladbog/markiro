@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-24
 
-**Status:** design agreed in chat; awaiting written-spec review
+**Status:** approved for implementation planning
 
 **Scope:** Windows x64 beta and stable Station installers, Tauri update
 manifests and bundles, a primary Yandex-hosted release origin, a GitHub
