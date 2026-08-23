@@ -101,11 +101,18 @@ export const closeShiftSchema = z.object({
 });
 export type CloseShiftDto = z.infer<typeof closeShiftSchema>;
 
-/** GET /shifts query schema. `from`/`to` filter on `plannedDate`, inclusive. */
+/**
+ * GET /shifts query schema. `from`/`to` filter on `plannedDate`, inclusive;
+ * `productionFrom`/`productionTo` filter on the EFFECTIVE production date --
+ * `coalesce(productionDate, plannedDate)`, the same fallback reports use
+ * (see `shift-export-source.service.ts`) -- also inclusive.
+ */
 export const listShiftsQuerySchema = z.object({
   status: z.enum(SHIFT_STATUSES).optional(),
   from: plannedDateSchema.optional(),
   to: plannedDateSchema.optional(),
+  productionFrom: productionDateSchema.optional(),
+  productionTo: productionDateSchema.optional(),
   lineId: z.string().uuid().optional(),
 });
 export type ListShiftsQueryDto = z.infer<typeof listShiftsQuerySchema>;

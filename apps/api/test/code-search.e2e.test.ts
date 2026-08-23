@@ -193,6 +193,47 @@ describe.skipIf(!ready)("code-search e2e", () => {
     expect(card.history.map((h) => h.type)).toContain("box_added");
   });
 
+  it("surfaces the owner shift's effective production date and filters the registry by it", async () => {
+    // A shift with BOTH dates: the explicit productionDate must win over
+    // plannedDate (the same fallback shift exports apply).
+    const shift = await agent
+      .post("/shifts")
+      .send({
+        productId,
+        mode: "validation",
+        plannedDate: "2026-03-01",
+        productionDate: "2026-03-05",
+      })
+      .expect(201);
+    const shiftId = (shift.body as { id: string }).id;
+    await agent.post(`/shifts/${shiftId}/open`).expect(200);
+    await postBatch(stationKey, [scan(shiftId, "pp", "t1", "2026-07-03T10:00:00.000Z", null)]);
+
+    const filtered = await agent
+      .get(`/code-search/codes?productionFrom=2026-03-05&productionTo=2026-03-05`)
+      .expect(200);
+    const items = (filtered.body as { items: { codeHash: string; productionDate: string }[] })
+      .items;
+    expect(items.map((i) => i.codeHash)).toEqual([codeHashFor("pp")]);
+    expect(items[0]!.productionDate).toBe("2026-03-05");
+
+    // The planned date alone must NOT match -- productionDate overrides it.
+    const byPlanned = await agent
+      .get(`/code-search/codes?productionFrom=2026-03-01&productionTo=2026-03-01`)
+      .expect(200);
+    expect((byPlanned.body as { items: unknown[] }).items).toEqual([]);
+
+    const card = (await agent.get(`/code-search/codes/${codeHashFor("pp")}`).expect(200)).body as {
+      productionDate: string | null;
+    };
+    expect(card.productionDate).toBe("2026-03-05");
+
+    // The beforeAll fixture shift has neither date -> null.
+    const dateless = (await agent.get(`/code-search/codes/${codeHashFor("aa")}`).expect(200))
+      .body as { productionDate: string | null };
+    expect(dateless.productionDate).toBeNull();
+  });
+
   it("404s the code card for a malformed or unknown codeHash", async () => {
     await agent.get(`/code-search/codes/not-a-hash`).expect(404);
     await agent.get(`/code-search/codes/${"0".repeat(64)}`).expect(404);

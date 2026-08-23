@@ -27,6 +27,8 @@ export interface CodeListItemDto {
   productName: string | null;
   status: CodeStatus;
   scannedAt: string;
+  /** The owner shift's effective production day (`productionDate ?? plannedDate`), `YYYY-MM-DD`. */
+  productionDate: string | null;
   boxId: string | null;
   boxSscc: string | null;
 }
@@ -42,6 +44,9 @@ export interface ListCodesFilters {
   page: number;
   from?: string;
   to?: string;
+  /** Inclusive bounds on the owner shift's effective production date. */
+  productionFrom?: string;
+  productionTo?: string;
   productId?: string;
   status?: string;
 }
@@ -89,6 +94,8 @@ export interface CodeCardDto {
   productId: string | null;
   productName: string | null;
   status: CodeStatus;
+  /** The owner shift's effective production day (`productionDate ?? plannedDate`), `YYYY-MM-DD`. */
+  productionDate: string | null;
   currentBox: { id: string; sscc: string | null } | null;
   history: CodeHistoryEvent[];
 }
@@ -136,6 +143,8 @@ function buildListPath(filters: ListCodesFilters): string {
   query.set("page", String(filters.page));
   if (filters.from) query.set("from", filters.from);
   if (filters.to) query.set("to", filters.to);
+  if (filters.productionFrom) query.set("productionFrom", filters.productionFrom);
+  if (filters.productionTo) query.set("productionTo", filters.productionTo);
   if (filters.productId) query.set("productId", filters.productId);
   if (filters.status) query.set("status", filters.status);
   return `/code-search/codes?${query.toString()}`;

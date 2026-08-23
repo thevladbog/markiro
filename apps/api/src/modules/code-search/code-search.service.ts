@@ -37,6 +37,7 @@ interface CodeListRow {
   productName: string | null;
   status: "free" | "aggregated" | "written_off";
   scannedAt: Date;
+  productionDate: string | null;
   boxId: string | null;
   boxSscc: string | null;
 }
@@ -92,6 +93,18 @@ export class CodeSearchService {
       and bi.displaced_at is null and bi.removed_at is null
       and b.disassembled_at is null
     order by bi.added_at desc limit 1)`;
+
+  /**
+   * The owner shift's EFFECTIVE production day -- explicit
+   * `production_date`, else `planned_date`, the same fallback the shift
+   * exports apply (`shift-export-source.service.ts`). Requires `shifts` to
+   * be joined on `code_registry.shift_id`. Cast to text: a raw `date`
+   * expression bypasses the columns' string mode and node-postgres would
+   * otherwise hand back a timezone-shifted JS Date.
+   */
+  private readonly productionDateSql = sql<
+    string | null
+  >`coalesce(${schema.shifts.productionDate}, ${schema.shifts.plannedDate})::text`;
 
   private readonly currentBoxSsccSql = sql<string | null>`(
     select b.sscc from ${schema.boxItems} bi
@@ -176,8 +189,17 @@ export class CodeSearchService {
       query.shiftId ? eq(schema.codeRegistry.shiftId, query.shiftId) : undefined,
       query.from ? gte(schema.codeRegistry.scannedAt, query.from) : undefined,
       toCondition,
+      // Both bounds compare the shift's effective production DAY (a plain
+      // `date`), so they stay inclusive on both ends -- no next-day shift.
+      query.productionFrom ? sql`${this.productionDateSql} >= ${query.productionFrom}` : undefined,
+      query.productionTo ? sql`${this.productionDateSql} <= ${query.productionTo}` : undefined,
       query.productId ? eq(schema.products.id, query.productId) : undefined,
       query.status ? sql`(${statusSql}) = ${query.status}` : undefined,
+    );
+
+    const shiftsJoinCondition = and(
+      eq(schema.shifts.tenantId, schema.codeRegistry.tenantId),
+      eq(schema.shifts.id, schema.codeRegistry.shiftId),
     );
 
     const baseQuery = this.db
@@ -189,6 +211,7 @@ export class CodeSearchService {
         productName: schema.products.name,
         status: statusSql,
         scannedAt: schema.codeRegistry.scannedAt,
+        productionDate: this.productionDateSql,
         boxId: this.currentBoxIdSql,
         boxSscc: this.currentBoxSsccSql,
       })
@@ -208,6 +231,7 @@ export class CodeSearchService {
           eq(schema.products.gtin14, schema.codes.gtin14),
         ),
       )
+      .leftJoin(schema.shifts, shiftsJoinCondition)
       .where(where);
 
     // The count only needs `codes` (status derives from it) -- `products`
@@ -237,6 +261,11 @@ export class CodeSearchService {
           eq(schema.products.gtin14, schema.codes.gtin14),
         ),
       );
+    }
+    // Likewise `shifts` is only needed by the count when a production-date
+    // bound actually references it in the shared `where`.
+    if (query.productionFrom || query.productionTo) {
+      countQuery = countQuery.leftJoin(schema.shifts, shiftsJoinCondition);
     }
 
     const [rows, countRows] = await Promise.all([
@@ -276,6 +305,7 @@ export class CodeSearchService {
         productId: schema.products.id,
         productName: schema.products.name,
         status: statusSql,
+        productionDate: this.productionDateSql,
       })
       .from(schema.codeRegistry)
       .innerJoin(
@@ -291,6 +321,13 @@ export class CodeSearchService {
         and(
           eq(schema.products.tenantId, schema.codeRegistry.tenantId),
           eq(schema.products.gtin14, schema.codes.gtin14),
+        ),
+      )
+      .leftJoin(
+        schema.shifts,
+        and(
+          eq(schema.shifts.tenantId, schema.codeRegistry.tenantId),
+          eq(schema.shifts.id, schema.codeRegistry.shiftId),
         ),
       )
       .where(
@@ -311,6 +348,7 @@ export class CodeSearchService {
             productId: schema.products.id,
             productName: schema.products.name,
             status: sql<string>`case when ${this.writtenOffSql} then 'written_off' else 'free' end`,
+            productionDate: this.productionDateSql,
           })
           .from(schema.codes)
           .leftJoin(
@@ -318,6 +356,13 @@ export class CodeSearchService {
             and(
               eq(schema.products.tenantId, schema.codes.tenantId),
               eq(schema.products.gtin14, schema.codes.gtin14),
+            ),
+          )
+          .leftJoin(
+            schema.shifts,
+            and(
+              eq(schema.shifts.tenantId, schema.codes.tenantId),
+              eq(schema.shifts.id, schema.codes.shiftId),
             ),
           )
           .where(and(eq(schema.codes.tenantId, tenantId), eq(schema.codes.codeHash, codeHash)))
@@ -358,6 +403,7 @@ export class CodeSearchService {
       productId: row.productId,
       productName: row.productName,
       status: row.status as CodeStatus,
+      productionDate: row.productionDate,
       currentBox: currentBoxRow
         ? {
             id: currentBoxRow.boxId,
@@ -715,6 +761,7 @@ export class CodeSearchService {
       productName: row.productName,
       status: row.status,
       scannedAt: row.scannedAt,
+      productionDate: row.productionDate,
       boxId: row.boxId,
       boxSscc: row.boxSscc === null ? null : formatSsccWithAi(row.boxSscc),
     };

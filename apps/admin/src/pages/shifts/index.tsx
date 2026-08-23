@@ -249,11 +249,15 @@ export function ShiftsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [productionFromDate, setProductionFromDate] = useState("");
+  const [productionToDate, setProductionToDate] = useState("");
 
   const shiftsQuery = useShifts({
     ...(statusFilter !== "all" ? { status: statusFilter } : {}),
     ...(fromDate ? { from: fromDate } : {}),
     ...(toDate ? { to: toDate } : {}),
+    ...(productionFromDate ? { productionFrom: productionFromDate } : {}),
+    ...(productionToDate ? { productionTo: productionToDate } : {}),
   });
   const productsQuery = useProducts();
   const linesQuery = useLines();
@@ -266,7 +270,12 @@ export function ShiftsPage() {
   const lines = useMemo(() => linesQuery.data ?? [], [linesQuery.data]);
   const counterparties = useMemo(() => counterpartiesQuery.data ?? [], [counterpartiesQuery.data]);
   const labelTemplates = useMemo(() => labelTemplatesQuery.data ?? [], [labelTemplatesQuery.data]);
-  const filtersActive = statusFilter !== "all" || Boolean(fromDate) || Boolean(toDate);
+  const filtersActive =
+    statusFilter !== "all" ||
+    Boolean(fromDate) ||
+    Boolean(toDate) ||
+    Boolean(productionFromDate) ||
+    Boolean(productionToDate);
 
   const statusFilterOptions: SelectOption<StatusFilter>[] = [
     { value: "all", label: t("pages.shifts.filters.status.all") },
@@ -288,6 +297,16 @@ export function ShiftsPage() {
         title: t("pages.shifts.table.plannedDate"),
         render: (row) => {
           const date = row.plannedDate ?? localCalendarDate(row.openedAt);
+          return date ? formatDate(date, i18n.language) : "—";
+        },
+      },
+      {
+        key: "productionDate",
+        title: t("pages.shifts.table.productionDate"),
+        render: (row) => {
+          // The effective production day: the same `productionDate ??
+          // plannedDate` fallback labels and reports apply.
+          const date = row.productionDate ?? row.plannedDate;
           return date ? formatDate(date, i18n.language) : "—";
         },
       },
@@ -383,6 +402,8 @@ export function ShiftsPage() {
                 setStatusFilter("all");
                 setFromDate("");
                 setToDate("");
+                setProductionFromDate("");
+                setProductionToDate("");
               },
             }
           : {})}
@@ -419,6 +440,32 @@ export function ShiftsPage() {
             locale={i18n.language}
             {...(toDate ? { value: toDate } : {})}
             onValueChange={(value) => setToDate(value ?? "")}
+          />
+        </div>
+        <div className="mk-shifts-filter mk-shifts-filter--date">
+          <DatePicker
+            label={t("pages.shifts.filters.productionFromLabel")}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
+            {...(productionFromDate ? { value: productionFromDate } : {})}
+            onValueChange={(value) => setProductionFromDate(value ?? "")}
+          />
+        </div>
+        <div className="mk-shifts-filter mk-shifts-filter--date">
+          <DatePicker
+            label={t("pages.shifts.filters.productionToLabel")}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.language}
+            {...(productionToDate ? { value: productionToDate } : {})}
+            onValueChange={(value) => setProductionToDate(value ?? "")}
           />
         </div>
       </FilterBar>

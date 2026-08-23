@@ -74,6 +74,9 @@ export interface ListShiftsParams {
   status?: ShiftStatus;
   from?: string;
   to?: string;
+  /** Inclusive bounds on the EFFECTIVE production date (`productionDate ?? plannedDate`). */
+  productionFrom?: string;
+  productionTo?: string;
   lineId?: string;
 }
 
@@ -98,6 +101,8 @@ function buildListPath(params: ListShiftsParams): string {
   if (params.status) query.set("status", params.status);
   if (params.from) query.set("from", params.from);
   if (params.to) query.set("to", params.to);
+  if (params.productionFrom) query.set("productionFrom", params.productionFrom);
+  if (params.productionTo) query.set("productionTo", params.productionTo);
   if (params.lineId) query.set("lineId", params.lineId);
   const qs = query.toString();
   return qs ? `/shifts?${qs}` : "/shifts";
