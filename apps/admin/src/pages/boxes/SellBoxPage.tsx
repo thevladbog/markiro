@@ -32,11 +32,12 @@ export function SellBoxPage() {
   const [ssccInput, setSsccInput] = useState("");
   const [inputError, setInputError] = useState<string | null>(null);
   const [sscc, setSscc] = useState<string | undefined>(undefined);
+  const [attempt, setAttempt] = useState(0);
   const [index, setIndex] = useState(0);
   const [finished, setFinished] = useState(false);
   const touchStartX = useRef<number | null>(null);
 
-  const { data, isPending, error } = useBoxSellCodes(sscc);
+  const { data, isPending, error } = useBoxSellCodes(sscc, attempt);
 
   // Пока идёт показ кодов, экран телефона не должен гаснуть. Wake Lock
   // может быть недоступен (iOS < 16.4, http) -- тогда молча живём без него.
@@ -69,6 +70,11 @@ export function SellBoxPage() {
     setInputError(null);
     setIndex(0);
     setFinished(false);
+    // Bump `attempt` on every submit -- including a re-submit of the same
+    // SSCC after a failed fetch -- so `useBoxSellCodes`'s query key always
+    // changes and React Query actually refetches instead of serving the
+    // cached error back (see that hook's comment).
+    setAttempt((current) => current + 1);
     setSscc(parsed);
   }, []);
 
@@ -80,7 +86,7 @@ export function SellBoxPage() {
     setFinished(false);
   }, []);
 
-  if (sscc === undefined || (error !== null && sscc !== undefined)) {
+  if (sscc === undefined || error !== null) {
     const errorKey =
       error instanceof ApiRequestError
         ? error.code === "box_not_found"

@@ -17,6 +17,10 @@
   flex-direction: column;
   gap: 12px;
 }
+.mk-sell-entry__label {
+  font: var(--text-body-sm);
+  color: var(--fg-2);
+}
 .mk-sell-entry__input {
   font-family: var(--font-mono);
   font-size: 18px;

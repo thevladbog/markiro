@@ -121,4 +121,38 @@ describe("SellBoxPage", () => {
 
     expect(await screen.findByText("Короб не найден")).toBeTruthy();
   });
+
+  it("retries a transient failure when the cashier resubmits the same SSCC", async () => {
+    // First call fails with a transient 500 (no `code`, so it surfaces as
+    // "loadFailed"); the second call -- same SSCC -- succeeds. React Query
+    // must actually refetch instead of serving the cached error back.
+    let call = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).startsWith("/api/boxes/sell-codes?")) {
+        call += 1;
+        return call === 1
+          ? jsonResponse(500, { message: "boom" })
+          : jsonResponse(200, SELL_CODES);
+      }
+      return jsonResponse(404, { message: "not found" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("SSCC короба"), "123456789012345675");
+    await user.click(screen.getByRole("button", { name: "Найти короб" }));
+
+    expect(
+      await screen.findByText("Не удалось загрузить короб — проверьте связь и повторите"),
+    ).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Same SSCC still in the field -- resubmitting must trigger a real
+    // second fetch, not a no-op stuck on the cached error.
+    await user.click(screen.getByRole("button", { name: "Найти короб" }));
+
+    expect(await screen.findByText("1 / 2")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

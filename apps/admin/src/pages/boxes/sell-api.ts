@@ -24,9 +24,17 @@ export interface BoxSellCodesDto {
   items: BoxSellCodeItemDto[];
 }
 
-export function useBoxSellCodes(sscc: string | undefined): UseQueryResult<BoxSellCodesDto> {
+export function useBoxSellCodes(
+  sscc: string | undefined,
+  attempt = 0,
+): UseQueryResult<BoxSellCodesDto> {
   return useQuery({
-    queryKey: ["boxes", "sell-codes", sscc],
+    // `attempt` is in the key so a cashier re-submitting the SAME SSCC after
+    // a failed fetch (e.g. a transient network drop) forces a refetch --
+    // otherwise the key is unchanged, `staleTime: Infinity` means React
+    // Query considers the cached (errored) result still fresh, and
+    // `retry: false` means it never retries on its own either.
+    queryKey: ["boxes", "sell-codes", sscc, attempt],
     queryFn: () =>
       apiFetch<BoxSellCodesDto>(`/boxes/sell-codes?${new URLSearchParams({ sscc: sscc! })}`),
     enabled: Boolean(sscc),
