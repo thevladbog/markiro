@@ -347,7 +347,7 @@ function isVbtechRecord(value) {
   return (
     hasExactKeys(value, VBTECH_RECORD_KEYS) &&
     isVbtechImageIdentity(value) &&
-    value.submissionState === "disabled" &&
+    ["disabled", "enabled"].includes(value.submissionState) &&
     isCanonicalIsoDate(value.createdAt) &&
     ["pending", "healthy", "failed"].includes(value.state)
   );

@@ -21,6 +21,9 @@ const VBTECH_IMAGE_REF = `ghcr.io/thevladbog/vbtech-web@${VBTECH_IMAGE_DIGEST}`;
 const CURRENT = "a2ff20fd3847db6612a0d9ca3dd226cc3e971d90";
 const CANDIDATE = "ecdb3f1033237246e6b00e9fb34dd1ad61566c68";
 const VBTECH_RELEASE = "f3a640dcf5b85df3a0563ea1df0b1f05e52e5c23";
+const FAILED_ENABLED_VBTECH_RELEASE = "b".repeat(40);
+const FAILED_ENABLED_VBTECH_IMAGE_DIGEST = `sha256:${"f".repeat(64)}`;
+const FAILED_ENABLED_VBTECH_IMAGE_REF = `ghcr.io/thevladbog/vbtech-web@${FAILED_ENABLED_VBTECH_IMAGE_DIGEST}`;
 const COMPOSE_NETWORK = "markiro-production_default";
 const MARKIRO_RELEASE_DIRECTORY = "/var/lib/markiro/releases";
 const VBTECH_RELEASE_DIRECTORY = "/var/lib/markiro/vbtech/releases";
@@ -43,6 +46,18 @@ const VBTECH_PENDING = Object.freeze({
   state: "pending",
 });
 const VBTECH_HEALTHY = Object.freeze({ ...VBTECH_PENDING, state: "healthy" });
+const FAILED_ENABLED_VBTECH_PENDING = Object.freeze({
+  releaseSha: FAILED_ENABLED_VBTECH_RELEASE,
+  imageRef: FAILED_ENABLED_VBTECH_IMAGE_REF,
+  imageDigest: FAILED_ENABLED_VBTECH_IMAGE_DIGEST,
+  submissionState: "enabled",
+  createdAt: "2026-08-23T03:51:04.000Z",
+  state: "pending",
+});
+const FAILED_ENABLED_VBTECH_TERMINAL = Object.freeze({
+  ...FAILED_ENABLED_VBTECH_PENDING,
+  state: "failed",
+});
 
 function commandKey(command, args) {
   return `${command}\0${args.join("\0")}`;
@@ -65,8 +80,8 @@ function vbtechRecordFileName(record) {
   return `${record.createdAt.replace(/[:.]/g, "-")}-${record.releaseSha}-${record.imageDigest.slice(7)}.${record.state}.json`;
 }
 
-function vbtechClaimFileName(kind, generation) {
-  return `.vbtech-release-state.${VBTECH_RELEASE}-${VBTECH_IMAGE_DIGEST.slice(7)}.${kind}-${generation}.claim`;
+function vbtechClaimFileName(kind, generation, record = VBTECH_PENDING) {
+  return `.vbtech-release-state.${record.releaseSha}-${record.imageDigest.slice(7)}.${kind}-${generation}.claim`;
 }
 
 function fixtureDependencies(overrides = {}) {
@@ -568,6 +583,38 @@ test("private v-b state accepts authoritative terminal claims and rejects malfor
   const pendingPath = join(VBTECH_RELEASE_DIRECTORY, vbtechRecordFileName(VBTECH_PENDING));
   oversized.fileSizeOverrides.set(pendingPath, 16 * 1024 + 1);
   await assert.rejects(() => collectRuntimeSnapshot(oversized), /runtime diagnostics are invalid/);
+});
+
+test("private v-b state accepts failed enabled history while keeping the disabled release active", async () => {
+  const dependencies = fixtureDependencies();
+  const pendingFile = vbtechRecordFileName(FAILED_ENABLED_VBTECH_PENDING);
+  const failedFile = vbtechRecordFileName(FAILED_ENABLED_VBTECH_TERMINAL);
+  const pendingClaim = vbtechClaimFileName("pending", 1, FAILED_ENABLED_VBTECH_PENDING);
+  const terminalClaim = vbtechClaimFileName("terminal", 1, FAILED_ENABLED_VBTECH_PENDING);
+  dependencies.directoryEntries
+    .get(VBTECH_RELEASE_DIRECTORY)
+    .push(pendingFile, failedFile, pendingClaim, terminalClaim);
+  dependencies.fileContents.set(
+    join(VBTECH_RELEASE_DIRECTORY, pendingFile),
+    JSON.stringify(FAILED_ENABLED_VBTECH_PENDING),
+  );
+  dependencies.fileContents.set(
+    join(VBTECH_RELEASE_DIRECTORY, failedFile),
+    JSON.stringify(FAILED_ENABLED_VBTECH_TERMINAL),
+  );
+  dependencies.fileContents.set(
+    join(VBTECH_RELEASE_DIRECTORY, pendingClaim),
+    JSON.stringify({ kind: "pending", generation: 1, record: FAILED_ENABLED_VBTECH_PENDING }),
+  );
+  dependencies.fileContents.set(
+    join(VBTECH_RELEASE_DIRECTORY, terminalClaim),
+    JSON.stringify({ kind: "terminal", generation: 1, record: FAILED_ENABLED_VBTECH_TERMINAL }),
+  );
+
+  assert.deepEqual((await collectRuntimeSnapshot(dependencies)).activeVbtech, {
+    releaseSha: VBTECH_RELEASE,
+    imageDigest: VBTECH_IMAGE_DIGEST,
+  });
 });
 
 test("an absent private v-b state and service are explicit", async () => {
