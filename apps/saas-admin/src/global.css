@@ -2836,7 +2836,8 @@ textarea {
 }
 
 .suggest-field__menu button:hover,
-.suggest-field__menu button:focus-visible {
+.suggest-field__menu button:focus-visible,
+.suggest-field__menu button[data-active="true"] {
   background: var(--surface-panel);
 }
 

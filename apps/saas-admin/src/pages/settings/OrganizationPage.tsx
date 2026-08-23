@@ -1,10 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import type {
-  BankAccountInput,
-  BillingProfileInput,
-  OperatorBillingProfileInput,
-} from "@markiro/platform-contracts";
+import type { BankAccountInput } from "@markiro/platform-contracts";
 import { Alert, SectionHeader } from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
@@ -50,8 +46,7 @@ export function OrganizationPage() {
     ]);
   };
   const saveProfile = useMutation({
-    mutationFn: (input: BillingProfileInput | OperatorBillingProfileInput) =>
-      setOperatorBillingProfile(input as OperatorBillingProfileInput),
+    mutationFn: setOperatorBillingProfile,
     onSuccess: refresh,
   });
   const createAccount = useMutation({ mutationFn: createOperatorBankAccount, onSuccess: refresh });

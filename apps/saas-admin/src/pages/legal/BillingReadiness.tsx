@@ -2,22 +2,38 @@ import { useTranslation } from "react-i18next";
 import type { BankAccount, BillingProfile } from "@markiro/platform-contracts";
 
 export function BillingReadiness({
+  scope,
   profile,
   accounts,
 }: {
+  scope: "operator" | "tenant";
   profile: BillingProfile | null;
   accounts: BankAccount[];
 }) {
   const { t } = useTranslation();
-  const items = [
-    { ready: profile !== null, label: t("legal.readiness.profile") },
-    { ready: Boolean(profile?.legalAddressRaw), label: t("legal.readiness.address") },
-    {
-      ready: accounts.some((account) => account.status === "active" && account.isDefault),
-      label: t("legal.readiness.defaultAccount"),
-    },
+  const profileItem = {
+    ready: profile?.isConfirmed === true,
+    label: t("legal.readiness.profile"),
+  };
+  const legalAddressItem = {
+    ready: Boolean(profile?.legalAddressRaw),
+    label: t("legal.readiness.address"),
+  };
+  const defaultAccountItem = {
+    ready: accounts.some((account) => account.status === "active" && account.isDefault),
+    label: t(
+      scope === "operator"
+        ? "legal.readiness.defaultAccount"
+        : "legal.readiness.optionalBuyerAccount",
+    ),
+  };
+  const blockingItems = [
+    profileItem,
+    legalAddressItem,
+    ...(scope === "operator" ? [defaultAccountItem] : []),
   ];
-  const ready = items.every((item) => item.ready);
+  const items = [...blockingItems, ...(scope === "tenant" ? [defaultAccountItem] : [])];
+  const ready = blockingItems.every((item) => item.ready);
 
   return (
     <aside className="billing-readiness" aria-labelledby="billing-readiness-title">

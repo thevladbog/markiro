@@ -87,6 +87,29 @@ describe("tenant subscription detail", () => {
     ).toBeDefined();
   });
 
+  it("treats a tenant bank account as optional payment-matching data", async () => {
+    installTenantApi({ billingProfile: confirmedIndividualProfile, bankAccounts: [] });
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}?tab=legal` });
+
+    expect(await screen.findByText("Реквизиты готовы")).toBeDefined();
+    expect(
+      screen.getByText("Расчётный счёт покупателя — необязателен для сопоставления платежей"),
+    ).toBeDefined();
+  });
+
+  it("does not treat an unconfirmed tenant profile as document-ready", async () => {
+    installTenantApi({
+      billingProfile: { ...confirmedIndividualProfile, isConfirmed: false },
+      bankAccounts: [],
+    });
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}?tab=legal` });
+
+    expect(await screen.findByText("Нужно заполнить данные")).toBeDefined();
+    expect(
+      screen.getByText("Расчётный счёт покупателя — необязателен для сопоставления платежей"),
+    ).toBeDefined();
+  });
+
   it("accepts a production-like legacy tenant detail with PostgreSQL timestamps", async () => {
     const detail = {
       ...structuredClone(TENANT_DETAIL),
@@ -614,3 +637,31 @@ describe("tenant subscription detail", () => {
     ).toBe(false);
   });
 });
+
+const confirmedIndividualProfile = {
+  id: "11111111-1111-4111-8111-111111111111",
+  tenantId: TENANT_ID,
+  kind: "individual",
+  fullName: "Иванов Иван Иванович",
+  displayName: "Иванов И. И.",
+  inn: null,
+  kpp: null,
+  ogrn: null,
+  ogrnip: null,
+  legalAddressRaw: "Москва, Тверская, 1",
+  legalAddress: null,
+  actualSameAsLegal: true,
+  actualAddressRaw: null,
+  actualAddress: null,
+  postalSameAsLegal: true,
+  postalAddressRaw: null,
+  postalAddress: null,
+  contact: { name: null, email: null, phone: null },
+  revision: 1,
+  isCurrent: true,
+  isConfirmed: true,
+  confirmedByPlatformUserId: "user-1",
+  confirmedAt: "2026-08-23T08:00:00.000Z",
+  createdByPlatformUserId: "user-1",
+  createdAt: "2026-08-23T08:00:00.000Z",
+};

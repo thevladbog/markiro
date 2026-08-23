@@ -253,7 +253,7 @@ export class BillingService {
           sellerSnapshot: billingProfileSnapshot(seller),
           buyerSnapshot: billingProfileSnapshot(buyer),
           sellerBankAccountSnapshot: bankAccountSnapshot(sellerAccount),
-          buyerBankAccountSnapshot: bankAccountSnapshot(buyerAccount),
+          buyerBankAccountSnapshot: buyerAccount ? bankAccountSnapshot(buyerAccount) : null,
         })
         .where(and(eq(schema.invoices.id, id), eq(schema.invoices.status, "draft")))
         .returning();
@@ -273,8 +273,8 @@ export class BillingService {
           number: invoice.number,
           sellerAccountId: sellerAccount.id,
           sellerAccountLast4: bankAccountLast4(sellerAccount),
-          buyerAccountId: buyerAccount.id,
-          buyerAccountLast4: bankAccountLast4(buyerAccount),
+          buyerAccountId: buyerAccount?.id ?? null,
+          buyerAccountLast4: buyerAccount ? bankAccountLast4(buyerAccount) : null,
         },
         requestId: null,
       });

@@ -74,11 +74,12 @@ export async function resolveCommercialBillingDetails(
     )
     .for("update")
     .limit(1);
-  if (!buyerAccount) {
-    throw new ConflictException({ code: "billing_buyer_account_required" });
-  }
-
-  return { seller, buyer, sellerAccount: selectedSellerAccount, buyerAccount };
+  return {
+    seller,
+    buyer,
+    sellerAccount: selectedSellerAccount,
+    buyerAccount: buyerAccount ?? null,
+  };
 }
 
 export function billingProfileSnapshot(profile: OperatorProfile | TenantProfile) {
@@ -92,6 +93,9 @@ export function billingProfileSnapshot(profile: OperatorProfile | TenantProfile)
     ogrnip: profile.ogrnip,
     legalAddressRaw: profile.legalAddressRaw,
     legalAddress: profile.legalAddress,
+    actualSameAsLegal: profile.actualSameAsLegal,
+    actualAddressRaw: profile.actualAddressRaw,
+    actualAddress: profile.actualAddress,
     postalSameAsLegal: profile.postalSameAsLegal,
     postalAddressRaw: profile.postalAddressRaw,
     postalAddress: profile.postalAddress,

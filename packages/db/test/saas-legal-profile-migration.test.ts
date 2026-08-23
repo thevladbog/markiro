@@ -39,9 +39,11 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
     await rm(join(legacyMigrations, "0064_normalize_operator_billing_profile_kind.sql"), {
       force: true,
     });
+    await rm(join(legacyMigrations, "0065_saas_party_actual_addresses.sql"), { force: true });
     await rm(join(legacyMigrations, "meta", "0060_snapshot.json"), { force: true });
     await rm(join(legacyMigrations, "meta", "0061_snapshot.json"), { force: true });
     await rm(join(legacyMigrations, "meta", "0064_snapshot.json"), { force: true });
+    await rm(join(legacyMigrations, "meta", "0065_snapshot.json"), { force: true });
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -52,7 +54,8 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
         entry.tag !== "0061_saas_bank_accounts" &&
         entry.tag !== "0062_document_account_snapshots" &&
         entry.tag !== "0063_payment_account_evidence" &&
-        entry.tag !== "0064_normalize_operator_billing_profile_kind",
+        entry.tag !== "0064_normalize_operator_billing_profile_kind" &&
+        entry.tag !== "0065_saas_party_actual_addresses",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 
@@ -86,42 +89,46 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
   });
 
-  it("adds legal, postal, and confirmation columns and safely backfills legacy profiles", async () => {
+  it("adds legal, actual, postal, and confirmation columns and safely backfills legacy profiles", async () => {
     const columns = await pool.query<{ table_name: string; column_name: string }>(
       `SELECT table_name, column_name
        FROM information_schema.columns
        WHERE table_schema = 'public'
          AND table_name IN ('operator_billing_profiles', 'tenant_billing_profiles')
          AND column_name IN (
-           'full_name', 'legal_address_raw', 'legal_address', 'postal_same_as_legal',
+           'full_name', 'legal_address_raw', 'legal_address',
+           'actual_same_as_legal', 'actual_address_raw', 'actual_address', 'postal_same_as_legal',
            'postal_address_raw', 'postal_address', 'is_confirmed',
            'confirmed_by_platform_user_id', 'confirmed_at'
          )
        ORDER BY table_name, column_name`,
     );
-    expect(columns.rows).toHaveLength(18);
+    expect(columns.rows).toHaveLength(24);
 
     const operator = await pool.query(
-      `SELECT kind, full_name, legal_address_raw, legal_address, postal_same_as_legal,
+      `SELECT kind, full_name, legal_address_raw, legal_address,
+              actual_same_as_legal, actual_address_raw, actual_address, postal_same_as_legal,
               postal_address_raw, postal_address, is_confirmed,
               confirmed_by_platform_user_id, confirmed_at
        FROM operator_billing_profiles
        WHERE id = '00000000-0000-4000-8000-000000000601'`,
     );
-    expect(operator.rows).toEqual([
-      {
-        kind: "legal_entity",
-        full_name: "Маркиро",
-        legal_address_raw: "г Москва",
-        legal_address: { value: "г Москва", city: "Москва" },
-        postal_same_as_legal: false,
-        postal_address_raw: null,
-        postal_address: null,
-        is_confirmed: false,
-        confirmed_by_platform_user_id: null,
-        confirmed_at: null,
-      },
-    ]);
+    expect(operator.rows).toHaveLength(1);
+    expect(operator.rows[0]).toMatchObject({
+      kind: "legal_entity",
+      full_name: "Маркиро",
+      legal_address_raw: "г Москва",
+      legal_address: { value: "г Москва", city: "Москва" },
+      actual_same_as_legal: true,
+      actual_address_raw: null,
+      actual_address: null,
+      postal_same_as_legal: false,
+      postal_address_raw: null,
+      postal_address: null,
+      is_confirmed: false,
+      confirmed_by_platform_user_id: null,
+      confirmed_at: null,
+    });
     const constraints = await pool.query<{ constraint_name: string }>(
       `SELECT constraint_name
        FROM information_schema.table_constraints
@@ -129,8 +136,17 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
          AND table_name = 'operator_billing_profiles'
          AND constraint_name = 'operator_billing_profiles_legal_entity_check'`,
     );
-    expect(constraints.rows).toEqual([
-      { constraint_name: "operator_billing_profiles_legal_entity_check" },
-    ]);
+    expect(constraints.rows).toEqual([]);
+
+    await expect(
+      pool.query(
+        `INSERT INTO operator_billing_profiles
+           (id, revision, is_current, kind, full_name, display_name, address_raw,
+            legal_address_raw, actual_same_as_legal, actual_address_raw, created_by_platform_user_id)
+         VALUES
+           ('00000000-0000-4000-8000-000000000603', 2, false, 'individual', 'Иван Иванов',
+            'Иван Иванов', 'г Москва', 'г Москва', true, 'г Казань', 'legal-admin')`,
+      ),
+    ).rejects.toThrow("operator_billing_profiles_actual_same_check");
   });
 });

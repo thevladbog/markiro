@@ -9,6 +9,54 @@ afterEach(() => {
 });
 
 describe("organization settings", () => {
+  it("does not treat an unconfirmed seller profile as document-ready even with a default account", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+        if (url.endsWith("/api/platform/billing/operator-profile")) {
+          return jsonResponse(200, { ...confirmedIndividualProfile, isConfirmed: false });
+        }
+        if (url.endsWith("/api/platform/billing/operator/accounts")) {
+          return jsonResponse(200, [defaultAccount]);
+        }
+        if (url.endsWith("/api/platform/suggestions/status")) {
+          return jsonResponse(200, { status: "unconfigured" });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    renderSaasApp({ initialEntry: "/settings/organization" });
+
+    expect(await screen.findByText("Нужно заполнить данные")).toBeDefined();
+    expect(screen.getByText("Основной расчётный счёт")).toBeDefined();
+  });
+
+  it("requires a default seller account for operator document readiness", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+        if (url.endsWith("/api/platform/billing/operator-profile")) {
+          return jsonResponse(200, confirmedIndividualProfile);
+        }
+        if (url.endsWith("/api/platform/billing/operator/accounts")) return jsonResponse(200, []);
+        if (url.endsWith("/api/platform/suggestions/status")) {
+          return jsonResponse(200, { status: "unconfigured" });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    renderSaasApp({ initialEntry: "/settings/organization" });
+
+    expect(await screen.findByText("Нужно заполнить данные")).toBeDefined();
+    expect(screen.getByText("Основной расчётный счёт")).toBeDefined();
+  });
+
   it("loads our legal profile, multiple accounts, and DaData health independently", async () => {
     vi.stubGlobal(
       "fetch",
@@ -60,3 +108,48 @@ describe("organization settings", () => {
     ).toBeDefined();
   });
 });
+
+const confirmedIndividualProfile = {
+  id: "11111111-1111-4111-8111-111111111111",
+  kind: "individual",
+  fullName: "Иванов Иван Иванович",
+  displayName: "Иванов И. И.",
+  inn: null,
+  kpp: null,
+  ogrn: null,
+  ogrnip: null,
+  legalAddressRaw: "Москва, Тверская, 1",
+  legalAddress: null,
+  actualSameAsLegal: true,
+  actualAddressRaw: null,
+  actualAddress: null,
+  postalSameAsLegal: true,
+  postalAddressRaw: null,
+  postalAddress: null,
+  contact: { name: null, email: null, phone: null },
+  revision: 1,
+  isCurrent: true,
+  isConfirmed: true,
+  confirmedByPlatformUserId: "user-1",
+  confirmedAt: "2026-08-23T08:00:00.000Z",
+  createdByPlatformUserId: "user-1",
+  createdAt: "2026-08-23T08:00:00.000Z",
+};
+
+const defaultAccount = {
+  id: "21111111-1111-4111-8111-111111111111",
+  label: "Основной",
+  settlementAccount: "40702810900000000001",
+  bic: "044525225",
+  bankName: "ПАО Сбербанк",
+  correspondentAccount: "30101810400000000225",
+  currency: "RUB",
+  status: "active",
+  isDefault: true,
+  migrationSourceProfileId: null,
+  createdByPlatformUserId: "user-1",
+  archivedByPlatformUserId: null,
+  archivedAt: null,
+  createdAt: "2026-08-23T08:00:00.000Z",
+  updatedAt: "2026-08-23T08:00:00.000Z",
+};

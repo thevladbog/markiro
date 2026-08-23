@@ -5,4 +5,7 @@ export {
   operatorBillingProfileSchema as operatorBillingProfileResponseSchema,
   tenantBillingProfileSchema as tenantBillingProfileResponseSchema,
 } from "@markiro/platform-contracts";
-export type { BillingProfileInput, OperatorBillingProfileInput } from "@markiro/platform-contracts";
+export type {
+  CompatibleBillingProfileInput as BillingProfileInput,
+  CompatibleOperatorBillingProfileInput as OperatorBillingProfileInput,
+} from "@markiro/platform-contracts";

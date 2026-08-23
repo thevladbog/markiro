@@ -24,6 +24,11 @@ const input = {
   ogrn: "1027700000000",
   legalAddressRaw: "г Москва",
   legalAddress: { value: "г Москва", city: "Москва" },
+  actualAddress: {
+    sameAsLegal: false,
+    raw: "г Москва, ул Тверская, 2",
+    normalized: { value: "г Москва, ул Тверская, 2", city: "Москва" },
+  },
   postalAddress: { sameAsLegal: true },
   contact: { name: "Бухгалтер", email: "billing@example.invalid", phone: null },
 } as OperatorBillingProfileInput;
@@ -32,22 +37,52 @@ function jsonResponse(): Response {
   return { json: (body: unknown) => body } as unknown as Response;
 }
 
-function operatorHarness() {
-  const current = {
+interface OperatorCurrentFixture {
+  id: string;
+  revision: number;
+  kind: string;
+  displayName: string;
+  isConfirmed: boolean;
+  actualSameAsLegal: boolean;
+  actualAddressRaw: string | null;
+  actualAddress: Record<string, unknown> | null;
+  bankDetails: null;
+}
+
+function operatorHarness(
+  profileInput: OperatorBillingProfileInput = input,
+  currentProfile: OperatorCurrentFixture | null = {
     id: "00000000-0000-4000-8000-000000000611",
     revision: 2,
     kind: "legal_entity",
     displayName: "Старое имя",
     isConfirmed: true,
-  };
+    actualSameAsLegal: true,
+    actualAddressRaw: null,
+    actualAddress: null,
+    bankDetails: null,
+  },
+) {
+  const current = currentProfile;
   const insertedValues: Array<Record<string, unknown>> = [];
   const updatedValues: Array<Record<string, unknown>> = [];
   const createdAt = new Date("2026-08-22T04:00:00.000Z");
+  const actual =
+    "actualAddress" in profileInput
+      ? profileInput.actualAddress
+      : {
+          sameAsLegal: current?.actualSameAsLegal ?? true,
+          raw: current?.actualAddressRaw,
+          normalized: current?.actualAddress,
+        };
   const created = {
     id: "00000000-0000-4000-8000-000000000612",
     revision: 3,
     isCurrent: true,
-    ...input,
+    ...profileInput,
+    actualSameAsLegal: actual.sameAsLegal,
+    actualAddressRaw: actual.sameAsLegal ? null : actual.raw,
+    actualAddress: actual.sameAsLegal ? null : (actual.normalized ?? null),
     postalSameAsLegal: true,
     postalAddressRaw: null,
     postalAddress: null,
@@ -60,7 +95,7 @@ function operatorHarness() {
   const selectQuery = {
     from: vi.fn(() => selectQuery),
     where: vi.fn(() => selectQuery),
-    limit: vi.fn(async () => [current]),
+    limit: vi.fn(async () => (current ? [current] : [])),
   };
   const tx = {
     select: vi.fn(() => selectQuery),
@@ -108,6 +143,9 @@ describe("BillingProfilesService", () => {
         ogrnip: null,
         legalAddressRaw: "г Москва",
         legalAddress: null,
+        actualSameAsLegal: true,
+        actualAddressRaw: null,
+        actualAddress: null,
         postalSameAsLegal: true,
         postalAddressRaw: null,
         postalAddress: null,
@@ -137,6 +175,9 @@ describe("BillingProfilesService", () => {
         ogrnip: null,
         legalAddressRaw: "г Казань",
         legalAddress: null,
+        actualSameAsLegal: true,
+        actualAddressRaw: null,
+        actualAddress: null,
         postalSameAsLegal: true,
         postalAddressRaw: null,
         postalAddress: null,
@@ -181,6 +222,9 @@ describe("BillingProfilesService", () => {
         fullName: "ООО Маркиро",
         legalAddressRaw: "г Москва",
         legalAddress: { value: "г Москва", city: "Москва" },
+        actualSameAsLegal: false,
+        actualAddressRaw: "г Москва, ул Тверская, 2",
+        actualAddress: { value: "г Москва, ул Тверская, 2", city: "Москва" },
         postalSameAsLegal: true,
         postalAddressRaw: null,
         postalAddress: null,
@@ -205,19 +249,163 @@ describe("BillingProfilesService", () => {
         kind: "legal_entity",
         displayName: "Старое имя",
         confirmed: true,
+        actualSameAsLegal: true,
       },
       after: {
         revision: 3,
         kind: "legal_entity",
         displayName: "Маркиро",
         confirmed: true,
+        actualSameAsLegal: false,
       },
       requestId: null,
     });
     expect(result).toEqual(created);
   });
 
-  it("rejects an impossible non-legal-entity operator profile at the response boundary", async () => {
+  it("persists null actual-address data when it matches the legal address", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-08-22T04:00:00.000Z");
+    const sameActualInput: OperatorBillingProfileInput = {
+      ...input,
+      actualAddress: { sameAsLegal: true },
+    };
+    const { service, tx, audit, insertedValues, created } = operatorHarness(sameActualInput);
+
+    await service.setOperator(actor, sameActualInput);
+
+    expect(insertedValues).toEqual([
+      expect.objectContaining({
+        actualSameAsLegal: true,
+        actualAddressRaw: null,
+        actualAddress: null,
+      }),
+    ]);
+    expect(audit.record).toHaveBeenCalledWith(tx, {
+      actorPlatformUserId: actor.userId,
+      actorRole: "accountant",
+      action: "billing.operator_profile.revised",
+      outcome: "success",
+      tenantId: null,
+      targetType: "operator_billing_profile",
+      targetId: created.id,
+      reason: null,
+      before: {
+        revision: 2,
+        kind: "legal_entity",
+        displayName: "Старое имя",
+        confirmed: true,
+        actualSameAsLegal: true,
+      },
+      after: {
+        revision: 3,
+        kind: "legal_entity",
+        displayName: "Маркиро",
+        confirmed: true,
+        actualSameAsLegal: true,
+      },
+      requestId: null,
+    });
+  });
+
+  it("preserves a current separate actual address when an N-1 seller request omits the field", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-08-22T04:00:00.000Z");
+    const legacyInput: OperatorBillingProfileInput = {
+      kind: "legal_entity",
+      fullName: "ООО Маркиро",
+      displayName: "Маркиро",
+      inn: "7700000000",
+      kpp: "770001001",
+      ogrn: "1027700000000",
+      legalAddressRaw: "г Москва",
+      legalAddress: { value: "г Москва", city: "Москва" },
+      postalAddress: { sameAsLegal: true },
+      contact: { name: "Бухгалтер", email: "billing@example.invalid", phone: null },
+    };
+    const current = {
+      id: "00000000-0000-4000-8000-000000000611",
+      revision: 2,
+      kind: "legal_entity",
+      displayName: "Старое имя",
+      isConfirmed: true,
+      actualSameAsLegal: false,
+      actualAddressRaw: "г Москва, ул Садовая, 7",
+      actualAddress: { value: "г Москва, ул Садовая, 7", city: "Москва" },
+      bankDetails: null,
+    };
+    const { service, insertedValues } = operatorHarness(legacyInput, current);
+
+    await service.setOperator(actor, legacyInput);
+
+    expect(insertedValues).toEqual([
+      expect.objectContaining({
+        actualSameAsLegal: false,
+        actualAddressRaw: "г Москва, ул Садовая, 7",
+        actualAddress: { value: "г Москва, ул Садовая, 7", city: "Москва" },
+      }),
+    ]);
+  });
+
+  it("defaults the first tenant profile to actual-equals-legal for an N-1 request", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime("2026-08-22T04:00:00.000Z");
+    const legacyTenantInput = {
+      kind: "individual",
+      fullName: "Иванов Иван Иванович",
+      displayName: "Иванов И. И.",
+      legalAddressRaw: "г Казань",
+      postalAddress: { sameAsLegal: true },
+      contact: { name: null, email: null, phone: null },
+    } as const;
+    const insertedValues: Array<Record<string, unknown>> = [];
+    const organizationQuery = {
+      from: vi.fn(() => organizationQuery),
+      where: vi.fn(() => organizationQuery),
+      limit: vi.fn(async () => [{ id: "tenant-1" }]),
+    };
+    const currentQuery = {
+      from: vi.fn(() => currentQuery),
+      where: vi.fn(() => currentQuery),
+      orderBy: vi.fn(() => currentQuery),
+      limit: vi.fn(async () => []),
+    };
+    const tx = {
+      select: vi.fn(() => currentQuery),
+      update: vi.fn(),
+      insert: vi.fn(() => ({
+        values: vi.fn((values: Record<string, unknown>) => {
+          insertedValues.push(values);
+          return {
+            returning: vi.fn(async () => [
+              {
+                id: "00000000-0000-4000-8000-000000000623",
+                ...values,
+              },
+            ]),
+          };
+        }),
+      })),
+    };
+    const db = {
+      select: vi.fn(() => organizationQuery),
+      transaction: vi.fn(async (run: (executor: typeof tx) => Promise<unknown>) => run(tx)),
+    } as unknown as Db;
+    const audit = { record: vi.fn(async () => undefined) } as unknown as PlatformAuditService;
+    const service = new BillingProfilesService(db, audit);
+
+    await service.setTenant(actor, "tenant-1", legacyTenantInput);
+
+    expect(insertedValues).toEqual([
+      expect.objectContaining({
+        actualSameAsLegal: true,
+        actualAddressRaw: null,
+        actualAddress: null,
+      }),
+    ]);
+  });
+
+  it("returns an individual operator profile at the response boundary", async () => {
     const service = {
       getOperator: vi.fn(async () => ({
         id: "00000000-0000-4000-8000-000000000613",
@@ -230,6 +418,9 @@ describe("BillingProfilesService", () => {
         ogrnip: null,
         legalAddressRaw: "г Москва",
         legalAddress: null,
+        actualSameAsLegal: true,
+        actualAddressRaw: null,
+        actualAddress: null,
         postalSameAsLegal: true,
         postalAddressRaw: null,
         postalAddress: null,
@@ -245,6 +436,11 @@ describe("BillingProfilesService", () => {
     } as unknown as BillingProfilesService;
     const controller = new BillingProfilesController(service);
 
-    await expect(controller.getOperator(jsonResponse())).rejects.toThrow();
+    await expect(controller.getOperator(jsonResponse())).resolves.toMatchObject({
+      kind: "individual",
+      actualSameAsLegal: true,
+      actualAddressRaw: null,
+      actualAddress: null,
+    });
   });
 });

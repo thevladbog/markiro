@@ -93,6 +93,9 @@ const profileColumns = {
   address: jsonb("address"),
   legalAddressRaw: text("legal_address_raw").notNull(),
   legalAddress: jsonb("legal_address"),
+  actualSameAsLegal: boolean("actual_same_as_legal").notNull().default(true),
+  actualAddressRaw: text("actual_address_raw"),
+  actualAddress: jsonb("actual_address"),
   postalSameAsLegal: boolean("postal_same_as_legal").notNull().default(false),
   postalAddressRaw: text("postal_address_raw"),
   postalAddress: jsonb("postal_address"),
@@ -123,10 +126,13 @@ export const operatorBillingProfiles = pgTable(
       .on(table.isCurrent)
       .where(sql`${table.isCurrent} = true`),
     check("operator_billing_profiles_revision_positive", sql`${table.revision} > 0`),
-    check("operator_billing_profiles_legal_entity_check", sql`${table.kind} = 'legal_entity'`),
     check(
       "operator_billing_profiles_confirmation_check",
       sql`(${table.isConfirmed} = false and ${table.confirmedByPlatformUserId} is null and ${table.confirmedAt} is null) or (${table.isConfirmed} = true and ${table.confirmedByPlatformUserId} is not null and ${table.confirmedAt} is not null)`,
+    ),
+    check(
+      "operator_billing_profiles_actual_same_check",
+      sql`${table.actualSameAsLegal} = false or (${table.actualAddressRaw} is null and ${table.actualAddress} is null)`,
     ),
     check(
       "operator_billing_profiles_postal_same_check",
@@ -158,6 +164,10 @@ export const tenantBillingProfiles = pgTable(
     check(
       "tenant_billing_profiles_confirmation_check",
       sql`(${table.isConfirmed} = false and ${table.confirmedByPlatformUserId} is null and ${table.confirmedAt} is null) or (${table.isConfirmed} = true and ${table.confirmedByPlatformUserId} is not null and ${table.confirmedAt} is not null)`,
+    ),
+    check(
+      "tenant_billing_profiles_actual_same_check",
+      sql`${table.actualSameAsLegal} = false or (${table.actualAddressRaw} is null and ${table.actualAddress} is null)`,
     ),
     check(
       "tenant_billing_profiles_postal_same_check",

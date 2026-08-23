@@ -62,7 +62,16 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
       .values(profileValues(1, "ООО Маркиро", "7707083893", "773601001", "1027700132195"));
     await connection.db.insert(schema.tenantBillingProfiles).values({
       tenantId,
-      ...profileValues(1, "ООО Покупатель", "7812014560", "781201001", "1027800000000"),
+      ...profileValues(1, "ООО Покупатель", "7812014560", "781201001", "1027800000000", {
+        actualSameAsLegal: false,
+        actualAddressRaw: "г Казань, ул Баумана, 2",
+        actualAddress: {
+          value: "г Казань, ул Баумана, 2",
+          city: "Казань",
+          street: "ул Баумана",
+          house: "2",
+        },
+      }),
     });
     const [sellerAccount] = await connection.db
       .insert(schema.operatorBankAccounts)
@@ -73,12 +82,6 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
       })
       .returning();
     sellerAccountId = sellerAccount!.id;
-    await connection.db.insert(schema.tenantBankAccounts).values({
-      tenantId,
-      ...accountValues("Основной счёт покупателя", "0002"),
-      isDefault: true,
-      createdByPlatformUserId: actorId,
-    });
   });
 
   afterAll(async () => {
@@ -87,7 +90,83 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
     await maintenance.pool.end();
   });
 
+  it("publishes and issues without a buyer account while freezing the buyer actual address", async () => {
+    const draftInvoice = await billing.create(principal, invoiceInput());
+    const issuedInvoice = await billing.issue(principal, draftInvoice.id);
+    const draftOffer = await offers.create(principal, offerInput());
+    const publishedOffer = await offers.publish(principal, draftOffer.id);
+    const [offerSnapshot] = await connection.db
+      .select()
+      .from(schema.commercialOfferPrintSnapshots)
+      .where(eq(schema.commercialOfferPrintSnapshots.offerId, publishedOffer.id));
+
+    const buyerSnapshot = {
+      kind: "legal_entity",
+      fullName: "ООО Покупатель",
+      displayName: "ООО Покупатель",
+      inn: "7812014560",
+      kpp: "781201001",
+      ogrn: "1027800000000",
+      ogrnip: null,
+      legalAddressRaw: "Москва",
+      legalAddress: null,
+      actualSameAsLegal: false,
+      actualAddressRaw: "г Казань, ул Баумана, 2",
+      actualAddress: {
+        value: "г Казань, ул Баумана, 2",
+        city: "Казань",
+        street: "ул Баумана",
+        house: "2",
+      },
+      postalSameAsLegal: true,
+      postalAddressRaw: null,
+      postalAddress: null,
+      contact: null,
+      revision: 1,
+      confirmedAt: expect.any(String),
+    };
+    expect(issuedInvoice.buyerBankAccountSnapshot).toBeNull();
+    expect(issuedInvoice.buyerSnapshot).toEqual(buyerSnapshot);
+    expect(offerSnapshot).toMatchObject({
+      buyerBankAccountSnapshot: null,
+    });
+    expect(offerSnapshot!.buyerSnapshot).toEqual(buyerSnapshot);
+
+    const auditEvents = await connection.db
+      .select({
+        action: schema.platformAuditEvents.action,
+        after: schema.platformAuditEvents.after,
+      })
+      .from(schema.platformAuditEvents);
+    expect(auditEvents.find((event) => event.action === "billing.invoice.issued")?.after).toEqual({
+      status: "issued",
+      number: issuedInvoice.number,
+      sellerAccountId,
+      sellerAccountLast4: "0001",
+      buyerAccountId: null,
+      buyerAccountLast4: null,
+    });
+    expect(auditEvents.find((event) => event.action === "billing.offer.published")?.after).toEqual({
+      status: "published",
+      number: publishedOffer.number,
+      sellerAccountId,
+      sellerAccountLast4: "0001",
+      buyerAccountId: null,
+      buyerAccountLast4: null,
+    });
+  });
+
   it("keeps invoice and offer parties unchanged after current details are replaced", async () => {
+    const [buyerAccount] = await connection.db
+      .insert(schema.tenantBankAccounts)
+      .values({
+        tenantId,
+        ...accountValues("Основной счёт покупателя", "0002"),
+        isDefault: true,
+        createdByPlatformUserId: actorId,
+      })
+      .returning();
+    expect(buyerAccount).toBeDefined();
     const draftInvoice = await billing.create(principal, invoiceInput());
     const issuedInvoice = await billing.issue(principal, draftInvoice.id);
     const draftOffer = await offers.create(principal, offerInput());
@@ -138,14 +217,40 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
     });
 
     const auditEvents = await connection.db
-      .select({ after: schema.platformAuditEvents.after })
+      .select({
+        action: schema.platformAuditEvents.action,
+        tenantId: schema.platformAuditEvents.tenantId,
+        targetId: schema.platformAuditEvents.targetId,
+        after: schema.platformAuditEvents.after,
+      })
       .from(schema.platformAuditEvents)
       .where(eq(schema.platformAuditEvents.actorPlatformUserId, actorId));
-    const serializedAudit = JSON.stringify(auditEvents);
-    expect(serializedAudit).not.toContain("40702810900000000001");
-    expect(serializedAudit).not.toContain("40702810900000000002");
-    expect(serializedAudit).toContain("0001");
-    expect(serializedAudit).toContain("0002");
+    expect(auditEvents.find((event) => event.targetId === issuedInvoice.id)).toEqual({
+      action: "billing.invoice.issued",
+      tenantId,
+      targetId: issuedInvoice.id,
+      after: {
+        status: "issued",
+        number: issuedInvoice.number,
+        sellerAccountId,
+        sellerAccountLast4: "0001",
+        buyerAccountId: buyerAccount!.id,
+        buyerAccountLast4: "0002",
+      },
+    });
+    expect(auditEvents.find((event) => event.targetId === publishedOffer.id)).toEqual({
+      action: "billing.offer.published",
+      tenantId,
+      targetId: publishedOffer.id,
+      after: {
+        status: "published",
+        number: publishedOffer.number,
+        sellerAccountId,
+        sellerAccountLast4: "0001",
+        buyerAccountId: buyerAccount!.id,
+        buyerAccountLast4: "0002",
+      },
+    });
   });
 
   async function invoiceWithLines(id: string) {
@@ -261,6 +366,13 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
     inn: string,
     kpp: string,
     ogrn: string,
+    actualAddress: {
+      actualSameAsLegal: boolean;
+      actualAddressRaw?: string;
+      actualAddress?: Record<string, string>;
+    } = {
+      actualSameAsLegal: true,
+    },
   ) {
     return {
       revision,
@@ -272,6 +384,9 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
       ogrn,
       addressRaw: "Москва",
       legalAddressRaw: "Москва",
+      actualSameAsLegal: actualAddress.actualSameAsLegal,
+      actualAddressRaw: actualAddress.actualAddressRaw ?? null,
+      actualAddress: actualAddress.actualAddress ?? null,
       postalSameAsLegal: true,
       isConfirmed: true,
       confirmedByPlatformUserId: actorId,
