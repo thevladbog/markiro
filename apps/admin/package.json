@@ -19,6 +19,8 @@
     "@markiro/domain": "workspace:*",
     "@markiro/ui": "workspace:*",
     "@tanstack/react-query": "5.101.4",
+    "@zxing/browser": "0.2.1",
+    "@zxing/library": "0.23.0",
     "better-auth": "1.6.23",
     "i18next": "26.3.6",
     "opentype.js": "2.0.0",

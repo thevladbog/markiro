@@ -10,6 +10,7 @@ import { useBoxSellCodes } from "./sell-api.js";
 import "./sell.css";
 
 const SellCode = lazy(() => import("./SellCode.js"));
+const SsccScanner = lazy(() => import("./SsccScanner.js"));
 
 /** Minimal shape this module needs from the Wake Lock API -- `lib.dom`'s
  * `WakeLockSentinel`/`navigator.wakeLock` aren't in every TS lib target this
@@ -35,7 +36,9 @@ export function SellBoxPage() {
   const [attempt, setAttempt] = useState(0);
   const [index, setIndex] = useState(0);
   const [finished, setFinished] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const touchStartX = useRef<number | null>(null);
+  const cameraAvailable = typeof navigator !== "undefined" && Boolean(navigator.mediaDevices);
 
   const { data, isPending, error } = useBoxSellCodes(sscc, attempt);
 
@@ -126,6 +129,30 @@ export function SellBoxPage() {
           <Button type="submit" size="floor">
             {t("pages.boxSell.find")}
           </Button>
+          {cameraAvailable && !scanning && (
+            <Button type="button" size="floor" variant="secondary" onClick={() => setScanning(true)}>
+              {t("pages.boxSell.openScanner")}
+            </Button>
+          )}
+          {scanning && (
+            <div className="mk-sell-scanner">
+              <Suspense fallback={<Spinner />}>
+                <SsccScanner
+                  onDetected={(raw) => {
+                    setScanning(false);
+                    handleDetected(raw);
+                  }}
+                  onError={() => {
+                    setScanning(false);
+                    setInputError("cameraFailed");
+                  }}
+                />
+              </Suspense>
+              <Button type="button" size="floor" variant="secondary" onClick={() => setScanning(false)}>
+                {t("pages.boxSell.closeScanner")}
+              </Button>
+            </div>
+          )}
           {inputError !== null && (
             <Alert tone="error">{t(`pages.boxSell.errors.${inputError}`)}</Alert>
           )}

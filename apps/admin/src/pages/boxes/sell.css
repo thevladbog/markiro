@@ -104,3 +104,14 @@
   font-family: var(--font-mono);
   color: var(--fg-3);
 }
+.mk-sell-scanner {
+  display: grid;
+  gap: 8px;
+}
+.mk-sell-scanner__video {
+  width: 100%;
+  border-radius: 12px;
+  background: #000;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+}

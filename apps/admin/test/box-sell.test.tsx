@@ -155,4 +155,22 @@ describe("SellBoxPage", () => {
     expect(await screen.findByText("1 / 2")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("hides the camera button when mediaDevices is unavailable (jsdom)", () => {
+    stubFetch();
+    renderPage();
+    expect(screen.queryByRole("button", { name: "Сканировать этикетку" })).toBeNull();
+  });
+
+  it("shows the camera button when mediaDevices exists", () => {
+    vi.stubGlobal(
+      "navigator",
+      Object.assign(Object.create(Object.getPrototypeOf(navigator)), navigator, {
+        mediaDevices: { getUserMedia: vi.fn() },
+      }),
+    );
+    stubFetch();
+    renderPage();
+    expect(screen.getByRole("button", { name: "Сканировать этикетку" })).toBeTruthy();
+  });
 });
