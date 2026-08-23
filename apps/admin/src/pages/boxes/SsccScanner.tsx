@@ -42,6 +42,7 @@ export default function SsccScanner({
         }
         video!.srcObject = stream;
         await video!.play();
+        if (stopped) return;
 
         const DetectorCtor = (
           window as unknown as {
@@ -74,6 +75,10 @@ export default function SsccScanner({
           const controls = await reader.decodeFromVideoElement(video!, (result) => {
             if (result && !stopped) onDetectedRef.current(result.getText());
           });
+          if (stopped) {
+            controls.stop();
+            return;
+          }
           stopZxing = () => controls.stop();
         }
       } catch {
