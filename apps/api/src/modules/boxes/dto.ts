@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseScannedSscc } from "@markiro/domain";
 
 /**
  * GET /boxes query schema. A box list only ever makes sense scoped to one
@@ -47,4 +48,39 @@ export interface BoxDto {
 /** GET /boxes response. */
 export interface ListBoxesResponseDto {
   items: BoxDto[];
+}
+
+/**
+ * GET /boxes/sell-codes query. Accepts whatever the cashier's camera or
+ * keyboard produced -- `parseScannedSscc` strips the `]C1` AIM prefix,
+ * a printed `(00)` and the bare `00` AI, and validates the check digit --
+ * so the stored bare-18-digit form is what reaches the service.
+ */
+export const sellCodesQuerySchema = z.object({
+  sscc: z.string().transform((value, ctx) => {
+    const parsed = parseScannedSscc(value.trim());
+    if (parsed === null) {
+      ctx.addIssue({ code: "custom", message: "invalid_sscc" });
+      return z.NEVER;
+    }
+    return parsed;
+  }),
+});
+export type SellCodesQueryDto = z.infer<typeof sellCodesQuerySchema>;
+
+/** One live code of a sellable box; `rawKm` feeds `renderDataMatrixSvg` client-side. */
+export interface BoxSellCodeItemDto {
+  codeHash: string;
+  rawKm: string;
+  gtin14: string;
+  serial: string;
+}
+
+/** GET /boxes/sell-codes response. `sscc` is AI-00-prefixed (20 digits), as everywhere cabinet-facing. */
+export interface BoxSellCodesDto {
+  boxId: string;
+  sscc: string;
+  productName: string;
+  itemCount: number;
+  items: BoxSellCodeItemDto[];
 }

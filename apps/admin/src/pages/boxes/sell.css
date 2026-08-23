@@ -1,0 +1,119 @@
+/* Sell-at-register: телефон в руке кассира. Крупные тач-зоны, один код на
+   экран, чисто-белая сцена под DataMatrix для контраста со сканером. */
+.mk-sell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: calc(100dvh - 120px);
+  padding: 0 12px;
+}
+.mk-sell--center {
+  align-items: center;
+  justify-content: center;
+}
+.mk-sell-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mk-sell-head {
+  display: grid;
+  gap: 2px;
+  text-align: center;
+}
+.mk-sell-head__counter {
+  font: var(--text-h2);
+  color: var(--fg-1);
+}
+.mk-sell-head__product {
+  font: var(--text-body);
+  color: var(--fg-1);
+}
+.mk-sell-head__sscc {
+  font-family: var(--font-mono);
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+.mk-sell-progress {
+  height: 4px;
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.mk-sell-progress__bar {
+  height: 100%;
+  background: var(--accent);
+}
+.mk-sell-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #fff;
+  border-radius: var(--r-3);
+  padding: 16px;
+}
+.mk-sell-code {
+  width: min(78vw, 360px);
+  aspect-ratio: 1;
+  background: #fff;
+}
+.mk-sell-code svg {
+  width: 100%;
+  height: 100%;
+}
+.mk-sell-code--fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+}
+.mk-sell-stage__serial {
+  font-family: var(--font-mono);
+  font: var(--text-caption);
+  color: var(--fg-2);
+}
+.mk-sell-nav {
+  display: flex;
+  gap: 8px;
+}
+.mk-sell-done {
+  display: grid;
+  gap: 16px;
+  text-align: center;
+}
+.mk-sell-done__title {
+  font: var(--text-h3);
+  color: var(--fg-1);
+}
+.mk-sell-done__sscc {
+  font-family: var(--font-mono);
+  color: var(--fg-3);
+}
+.mk-sell-scanner {
+  display: grid;
+  gap: 8px;
+}
+.mk-sell-scanner__video {
+  width: 100%;
+  border-radius: 12px;
+  background: #000;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+}
+
+/* The app shell's fixed sidebar (AppShell.tsx's <Sidebar className="mk-app-
+   sidebar">) eats most of a phone-width screen and clips this page's content
+   (the DataMatrix in particular). Scoped to this page only via `:has(.mk-
+   sell)` -- other pages keep the sidebar on mobile. */
+@media (max-width: 767px) {
+  body:has(.mk-sell) .mk-app-sidebar {
+    /* !important: the ui-kit Sidebar sets display:flex inline, which would
+       otherwise beat any stylesheet rule. */
+    display: none !important;
+  }
+}

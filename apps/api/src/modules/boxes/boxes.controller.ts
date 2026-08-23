@@ -3,9 +3,17 @@ import { ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import { SecurityAuditService } from "../../authorization/security-audit.service";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
-import { listBoxesQuerySchema, type ListBoxesQueryDto, type ListBoxesResponseDto } from "./dto";
+import {
+  listBoxesQuerySchema,
+  sellCodesQuerySchema,
+  type BoxSellCodesDto,
+  type ListBoxesQueryDto,
+  type ListBoxesResponseDto,
+  type SellCodesQueryDto,
+} from "./dto";
 import { BoxesService } from "./boxes.service";
 
 /**
@@ -22,7 +30,10 @@ import { BoxesService } from "./boxes.service";
 @UseGuards(TenantGuard, AuthorizationGuard)
 @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
 export class BoxesController {
-  constructor(private readonly boxesService: BoxesService) {}
+  constructor(
+    private readonly boxesService: BoxesService,
+    private readonly audit: SecurityAuditService,
+  ) {}
 
   @Get()
   async listBoxes(
@@ -30,5 +41,24 @@ export class BoxesController {
     @Query(new ZodValidationPipe(listBoxesQuerySchema)) query: ListBoxesQueryDto,
   ): Promise<ListBoxesResponseDto> {
     return this.boxesService.listBoxes(req.tenantId!, query);
+  }
+
+  /**
+   * Sell-at-register: the ONLY cabinet read that returns raw KM payloads,
+   * so each successful call is audit-logged (who viewed which box's codes).
+   */
+  @Get("sell-codes")
+  async getSellCodes(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(sellCodesQuerySchema)) query: SellCodesQueryDto,
+  ): Promise<BoxSellCodesDto> {
+    const result = await this.boxesService.getSellCodes(req.tenantId!, query.sscc);
+    this.audit.sensitiveRead({
+      tenantId: req.tenantId!,
+      userId: req.userId ?? null,
+      action: "boxes.sell_codes.read",
+      resourceId: result.boxId,
+    });
+    return result;
   }
 }

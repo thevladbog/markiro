@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router";
 
 import { formatSsccHri } from "@markiro/domain";
-import { Alert, Badge, EmptyState, PageHeader, Select, Spinner, Table } from "@markiro/ui";
+import { Alert, Badge, Button, EmptyState, PageHeader, Select, Spinner, Table } from "@markiro/ui";
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
 import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
@@ -25,6 +26,7 @@ import { useBoxes, type BoxDto } from "./api.js";
  */
 export function BoxesPage() {
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
 
   const [shiftFilter, setShiftFilter] = useState<string>("");
 
@@ -109,7 +111,20 @@ export function BoxesPage() {
 
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
-      <PageHeader title={t("pages.boxes.title")} />
+      <PageHeader
+        title={t("pages.boxes.title")}
+        actions={
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              void navigate("/boxes/sell");
+            }}
+          >
+            {t("pages.boxSell.title")}
+          </Button>
+        }
+      />
 
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
         <div style={{ width: "min(100%, 440px)" }}>

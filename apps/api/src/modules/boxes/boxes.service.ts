@@ -1,9 +1,10 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { formatSsccWithAi } from "@markiro/domain";
+import { canonicalizeKm, formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
-import type { BoxDto, ListBoxesQueryDto, ListBoxesResponseDto } from "./dto";
+import { resolveBoxRegistryFacts, type BoxRegistryCandidate } from "../kiosk/box-registry.service";
+import type { BoxDto, BoxSellCodesDto, ListBoxesQueryDto, ListBoxesResponseDto } from "./dto";
 
 interface BoxRow {
   id: string;
@@ -113,6 +114,85 @@ export class BoxesService {
       .orderBy(sql`${schema.boxes.closedAt} desc nulls first`);
 
     return { items: rows.map((row) => this.toDto(row)) };
+  }
+
+  /**
+   * Sell-at-register view: one closed box's live codes WITH their raw KM
+   * payloads. This is deliberately the only cabinet endpoint that exposes
+   * `codes.canonicalRaw` (BoxCardItemDto stays hash+serial only); the
+   * membership/current-owner resolution is `resolveBoxRegistryFacts` -- the
+   * exact query pickup-orders' box-order-resolver already trusts for the
+   * same "which codes does this box really hold" question.
+   *
+   * `box_not_closed` is unreachable through this lookup today (`boxes.sscc`
+   * is only assigned by the closure ingest path), but the guard stays: the
+   * invariant this endpoint sells against is "closed and untouched", not
+   * "has an sscc".
+   */
+  async getSellCodes(tenantId: string, sscc: string): Promise<BoxSellCodesDto> {
+    const candidates = (await this.db
+      .select({
+        id: schema.boxes.id,
+        shiftId: schema.boxes.shiftId,
+        terminalId: schema.boxes.terminalId,
+        sscc: schema.boxes.sscc,
+        productId: schema.shifts.productId,
+        productGtin14: schema.products.gtin14,
+        productName: schema.products.name,
+        closedAt: schema.boxes.closedAt,
+        closureReceivedAt: schema.boxes.closureReceivedAt,
+        disassembledAt: schema.boxes.disassembledAt,
+        registryVersion: schema.boxes.registryVersion,
+        updatedAt: schema.boxes.updatedAt,
+      })
+      .from(schema.boxes)
+      .innerJoin(
+        schema.shifts,
+        and(
+          eq(schema.shifts.tenantId, schema.boxes.tenantId),
+          eq(schema.shifts.id, schema.boxes.shiftId),
+        ),
+      )
+      .innerJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.shifts.tenantId),
+          eq(schema.products.id, schema.shifts.productId),
+        ),
+      )
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.sscc, sscc)))
+      .limit(1)) as (BoxRegistryCandidate & { productName: string })[];
+
+    const candidate = candidates[0];
+    if (!candidate) throw new NotFoundException({ code: "box_not_found" });
+    if (candidate.closedAt === null) throw new ConflictException({ code: "box_not_closed" });
+    if (candidate.disassembledAt !== null)
+      throw new ConflictException({ code: "box_disassembled" });
+
+    const facts = await resolveBoxRegistryFacts(this.db, tenantId, [candidate]);
+    const items = (facts.get(candidate.id) ?? [])
+      .filter(
+        (fact) =>
+          fact.removedAt === null && fact.displacedAt === null && fact.canonicalRaw !== null,
+      )
+      .map((fact) => {
+        const parsed = canonicalizeKm(fact.canonicalRaw!);
+        return {
+          codeHash: fact.codeHash,
+          rawKm: fact.canonicalRaw!,
+          gtin14: parsed.gtin14,
+          serial: parsed.serial,
+        };
+      });
+    if (items.length === 0) throw new ConflictException({ code: "box_empty" });
+
+    return {
+      boxId: candidate.id,
+      sscc: formatSsccWithAi(sscc),
+      productName: candidate.productName,
+      itemCount: items.length,
+      items,
+    };
   }
 
   private toDto(row: BoxRow): BoxDto {
