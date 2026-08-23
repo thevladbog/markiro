@@ -112,6 +112,8 @@
    sell)` -- other pages keep the sidebar on mobile. */
 @media (max-width: 767px) {
   body:has(.mk-sell) .mk-app-sidebar {
-    display: none;
+    /* !important: the ui-kit Sidebar sets display:flex inline, which would
+       otherwise beat any stylesheet rule. */
+    display: none !important;
   }
 }
