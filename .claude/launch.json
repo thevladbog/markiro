@@ -14,15 +14,6 @@
       "port": 8734
     },
     {
-      "name": "api-smoke",
-      "runtimeExecutable": "sh",
-      "runtimeArgs": [
-        "-c",
-        "set -a; . /tmp/markiro-smoke.env; set +a; pnpm --filter @markiro/api dev"
-      ],
-      "port": 3000
-    },
-    {
       "name": "api",
       "runtimeExecutable": "sh",
       "runtimeArgs": ["-c", "set -a; . ./.env; set +a; pnpm --filter @markiro/api dev"],
