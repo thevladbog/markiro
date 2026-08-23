@@ -83,7 +83,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
   Readonly<Record<string, RouteAccessPolicy>>,
 ][] = [
   [DevicesController, { listDevices: readPolicy }],
-  [BoxesController, { listBoxes: readPolicy }],
+  [BoxesController, { listBoxes: readPolicy, getSellCodes: readPolicy }],
   [BoxExceptionsController, { listBoxExceptions: readPolicy }],
   [
     EmployeesController,
