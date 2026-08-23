@@ -171,6 +171,7 @@ export function AppShell() {
   return (
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
       <Sidebar
+        className="mk-app-sidebar"
         items={items}
         navLabel={t("shell.navLabel")}
         renderLink={(item, content) => (

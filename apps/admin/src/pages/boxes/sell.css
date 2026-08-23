@@ -7,6 +7,7 @@
   max-width: 480px;
   margin: 0 auto;
   min-height: calc(100dvh - 120px);
+  padding: 0 12px;
 }
 .mk-sell--center {
   align-items: center;
@@ -103,4 +104,14 @@
   background: #000;
   aspect-ratio: 3 / 4;
   object-fit: cover;
+}
+
+/* The app shell's fixed sidebar (AppShell.tsx's <Sidebar className="mk-app-
+   sidebar">) eats most of a phone-width screen and clips this page's content
+   (the DataMatrix in particular). Scoped to this page only via `:has(.mk-
+   sell)` -- other pages keep the sidebar on mobile. */
+@media (max-width: 767px) {
+  body:has(.mk-sell) .mk-app-sidebar {
+    display: none;
+  }
 }
