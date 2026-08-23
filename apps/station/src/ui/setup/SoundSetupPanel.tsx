@@ -19,7 +19,7 @@ export function SoundSetupPanel({
   const { t } = useTranslation();
   const testUnavailable = sound.muted || sound.volume <= 0;
   return (
-    <div className="setup-panel setup-panel--sound">
+    <div className="setup-panel setup-panel--sound setup-card">
       <label className="setup-touch-choice setup-touch-choice--checkbox">
         <input
           type="checkbox"
