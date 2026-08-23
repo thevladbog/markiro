@@ -130,7 +130,12 @@ export function SellBoxPage() {
             {t("pages.boxSell.find")}
           </Button>
           {cameraAvailable && !scanning && (
-            <Button type="button" size="floor" variant="secondary" onClick={() => setScanning(true)}>
+            <Button
+              type="button"
+              size="floor"
+              variant="secondary"
+              onClick={() => setScanning(true)}
+            >
               {t("pages.boxSell.openScanner")}
             </Button>
           )}
@@ -148,7 +153,12 @@ export function SellBoxPage() {
                   }}
                 />
               </Suspense>
-              <Button type="button" size="floor" variant="secondary" onClick={() => setScanning(false)}>
+              <Button
+                type="button"
+                size="floor"
+                variant="secondary"
+                onClick={() => setScanning(false)}
+              >
                 {t("pages.boxSell.closeScanner")}
               </Button>
             </div>

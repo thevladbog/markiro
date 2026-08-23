@@ -3,16 +3,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { canonicalizeKm, formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
-import {
-  resolveBoxRegistryFacts,
-  type BoxRegistryCandidate,
-} from "../kiosk/box-registry.service";
-import type {
-  BoxDto,
-  BoxSellCodesDto,
-  ListBoxesQueryDto,
-  ListBoxesResponseDto,
-} from "./dto";
+import { resolveBoxRegistryFacts, type BoxRegistryCandidate } from "../kiosk/box-registry.service";
+import type { BoxDto, BoxSellCodesDto, ListBoxesQueryDto, ListBoxesResponseDto } from "./dto";
 
 interface BoxRow {
   id: string;

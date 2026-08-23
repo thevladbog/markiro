@@ -282,9 +282,7 @@ describe.skipIf(!ready)("box-sell-codes e2e", () => {
     const audit = app!.get(SecurityAuditService);
     const spy = vi.spyOn(audit, "sensitiveRead");
     await agent.get("/boxes/sell-codes?sscc=123456789012345675").expect(200);
-    expect(spy).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "boxes.sell_codes.read" }),
-    );
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ action: "boxes.sell_codes.read" }));
     spy.mockRestore();
   });
 });

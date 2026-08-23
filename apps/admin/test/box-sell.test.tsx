@@ -21,8 +21,18 @@ const SELL_CODES = {
   productName: "Вода Кристальная 0,5",
   itemCount: 2,
   items: [
-    { codeHash: "a".repeat(64), rawKm: "0104006381333931" + "21S-aa", gtin14: "04006381333931", serial: "S-aa" },
-    { codeHash: "b".repeat(64), rawKm: "0104006381333931" + "21S-bb", gtin14: "04006381333931", serial: "S-bb" },
+    {
+      codeHash: "a".repeat(64),
+      rawKm: "0104006381333931" + "21S-aa",
+      gtin14: "04006381333931",
+      serial: "S-aa",
+    },
+    {
+      codeHash: "b".repeat(64),
+      rawKm: "0104006381333931" + "21S-bb",
+      gtin14: "04006381333931",
+      serial: "S-bb",
+    },
   ],
 };
 
@@ -130,9 +140,7 @@ describe("SellBoxPage", () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (String(url).startsWith("/api/boxes/sell-codes?")) {
         call += 1;
-        return call === 1
-          ? jsonResponse(500, { message: "boom" })
-          : jsonResponse(200, SELL_CODES);
+        return call === 1 ? jsonResponse(500, { message: "boom" }) : jsonResponse(200, SELL_CODES);
       }
       return jsonResponse(404, { message: "not found" });
     });
