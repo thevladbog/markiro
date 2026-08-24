@@ -11,6 +11,7 @@ import {
   renderToBuffer,
 } from "@react-pdf/renderer";
 import { renderCode128Svg, renderQrSvg } from "@markiro/domain";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import sanitizeHtml from "sanitize-html";
 import sharp from "sharp";
@@ -29,6 +30,8 @@ import {
 } from "./print-document-layout";
 import type { BillingProfileSnapshot, PrintDocumentModel, PrintLine } from "./print-document-model";
 
+const markiroLogo = readFileSync(join(__dirname, "assets/markiro-logo-on-light.svg"), "utf8");
+
 Font.register({
   family: "IBM Plex Sans",
   fonts: [
@@ -40,7 +43,6 @@ Font.register({
 const colors = {
   ink: "#181a18",
   green: "#2f6d50",
-  lime: "#8fbb62",
   muted: "#747a72",
   rule: "#c1c4bc",
   paperTint: "#fafaf8",
@@ -64,19 +66,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-start",
   },
-  brand: { flexDirection: "row", alignItems: "center", gap: 6 },
-  brandMark: {
-    width: 20,
-    height: 20,
-    padding: 3,
-    backgroundColor: colors.green,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 2,
-  },
-  brandPixel: { width: 6, height: 6, backgroundColor: "#ffffff" },
-  brandPixelAccent: { width: 6, height: 6, backgroundColor: colors.lime },
-  brandText: { fontSize: 17, fontWeight: 600, letterSpacing: -0.5 },
+  brandLogo: { width: 113.4, height: 25.9 },
   documentId: { alignItems: "flex-end", gap: 4 },
   documentKind: { fontSize: 7.5, fontWeight: 600, letterSpacing: 1, color: "#565b54" },
   mono: { fontFamily: "IBM Plex Sans", letterSpacing: 0.45 },
@@ -227,22 +217,16 @@ function Header({
   model,
   page,
   totalPages,
+  logo,
 }: {
   model: PrintDocumentModel;
   page: number;
   totalPages: number;
+  logo: string;
 }) {
   return (
     <View style={styles.header}>
-      <View style={styles.brand}>
-        <View style={styles.brandMark}>
-          <View style={styles.brandPixel} />
-          <View style={styles.brandPixel} />
-          <View style={styles.brandPixel} />
-          <View style={styles.brandPixelAccent} />
-        </View>
-        <Text style={styles.brandText}>markiro</Text>
-      </View>
+      <Image style={styles.brandLogo} src={logo} />
       <View style={styles.documentId}>
         <Text style={styles.documentKind}>{documentKindLabel(model)}</Text>
         <Text style={styles.mono}>
@@ -389,6 +373,7 @@ function Closing({ model }: { model: PrintDocumentModel }) {
 }
 
 export async function renderPrintPdf(model: PrintDocumentModel): Promise<Buffer> {
+  const logo = await svgDataUri(markiroLogo, 1120);
   const qrPayload = paymentQrPayload(model);
   const qr = qrPayload ? qrVector(renderQrSvg(qrPayload)) : null;
   const barcode = await svgDataUri(
@@ -405,7 +390,7 @@ export async function renderPrintPdf(model: PrintDocumentModel): Promise<Buffer>
         const last = index === pages.length - 1;
         return (
           <Page key={`${model.number}-${index + 1}`} size="A4" style={styles.page}>
-            <Header model={model} page={index + 1} totalPages={pages.length} />
+            <Header model={model} page={index + 1} totalPages={pages.length} logo={logo} />
             <View style={styles.body}>
               {first ? (
                 <>

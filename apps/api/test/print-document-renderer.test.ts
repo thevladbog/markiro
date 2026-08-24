@@ -95,6 +95,27 @@ describe("print document HTML renderer", () => {
     expect(count(html, "Сформировано системой Markiro")).toBe(1);
   });
 
+  it("renders the approved eight-module Markiro lockup in the print header", () => {
+    const html = renderPrintHtml(baseInvoice);
+    const logo = html.match(/<svg class="brand-logo brand-logo--markiro"[\s\S]*?<\/svg>/)?.[0];
+
+    expect(logo).toBeDefined();
+    expect(count(logo ?? "", "<rect ")).toBe(9);
+    expect(logo).toContain('fill="#3DDC7A"');
+    expect(logo).toContain(">маркиро</text>");
+    expect(logo).toContain('viewBox="0 0 280 64"');
+
+    const bundledLogo = readFileSync(
+      join(process.cwd(), "src/modules/billing/assets/markiro-logo-on-light.svg"),
+      "utf8",
+    );
+    const approvedLogo = readFileSync(
+      join(process.cwd(), "../admin/src/assets/markiro-logo-on-light.svg"),
+      "utf8",
+    );
+    expect(bundledLogo.trim()).toBe(approvedLogo.trim());
+  });
+
   it("renders offer cooperation terms and its non-invoice notice", () => {
     const html = renderPrintHtml({
       ...baseInvoice,
