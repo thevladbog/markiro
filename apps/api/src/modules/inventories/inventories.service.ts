@@ -177,7 +177,10 @@ export class InventoriesService {
         .for("update");
       if (!tenant) throw new NotFoundException();
 
-      const resolved = await this.resolveParameters(tx, tenantId, input);
+      const resolved = await this.resolveParameters(tx, tenantId, {
+        ...input,
+        boxLabelTemplateId: input.boxLabelTemplateId ?? null,
+      });
       const [sequence] = await tx
         .select({
           last: sql<number>`coalesce(max(case
@@ -255,12 +258,19 @@ export class InventoriesService {
       if (!current) throw new NotFoundException();
       this.assertMutable(current.status);
 
+      const desiredMode = patch.mode ?? current.mode;
       const desired = {
         productId: patch.productId ?? current.productId,
         lineId: patch.lineId ?? current.lineId,
-        mode: patch.mode ?? current.mode,
+        mode: desiredMode,
         productionDateFrom: patch.productionDateFrom ?? current.productionDateFrom,
         productionDateTo: patch.productionDateTo ?? current.productionDateTo,
+        boxLabelTemplateId:
+          patch.boxLabelTemplateId !== undefined
+            ? patch.boxLabelTemplateId
+            : desiredMode === "check"
+              ? null
+              : current.boxLabelTemplateId,
       };
       this.assertDateRange(desired.productionDateFrom, desired.productionDateTo);
       const resolved = await this.resolveParameters(tx, tenantId, desired);
@@ -528,6 +538,7 @@ export class InventoriesService {
       mode: InventoryMode;
       productionDateFrom: string;
       productionDateTo: string;
+      boxLabelTemplateId: string | null;
     },
   ) {
     const [product] = await tx
@@ -547,40 +558,39 @@ export class InventoriesService {
       .for("share");
     if (!line) throw new BadRequestException({ code: "INVENTORY_LINE_INVALID" });
 
-    let boxLabelTemplateId: string | null = null;
-    if (input.mode === "repack") {
-      const [config] = await tx
-        .select({ id: schema.orgProfiles.defaultBoxLabelTemplateId })
-        .from(schema.orgProfiles)
-        .where(eq(schema.orgProfiles.tenantId, tenantId))
-        .for("share");
-      if (config?.id === null || config?.id === undefined) {
-        throw new UnprocessableEntityException({
-          code: "INVENTORY_BOX_LABEL_TEMPLATE_REQUIRED",
-        });
-      }
+    if (input.mode === "check" && input.boxLabelTemplateId !== null) {
+      throw new UnprocessableEntityException({
+        code: "INVENTORY_BOX_LABEL_TEMPLATE_FORBIDDEN",
+      });
+    }
+
+    if (input.mode === "repack" && input.boxLabelTemplateId === null) {
+      throw new UnprocessableEntityException({
+        code: "INVENTORY_BOX_LABEL_TEMPLATE_REQUIRED",
+      });
+    }
+
+    if (input.boxLabelTemplateId !== null) {
       const [template] = await tx
         .select({ id: schema.labelTemplates.id })
         .from(schema.labelTemplates)
         .where(
           and(
             eq(schema.labelTemplates.tenantId, tenantId),
-            eq(schema.labelTemplates.id, config.id),
+            eq(schema.labelTemplates.id, input.boxLabelTemplateId),
           ),
         )
         .for("share");
       if (!template) {
         throw new UnprocessableEntityException({
-          code: "INVENTORY_BOX_LABEL_TEMPLATE_REQUIRED",
+          code: "INVENTORY_BOX_LABEL_TEMPLATE_INVALID",
         });
       }
-      boxLabelTemplateId = template.id;
     }
 
     return {
       ...input,
       gtin14: product.gtin14,
-      boxLabelTemplateId,
     };
   }
 

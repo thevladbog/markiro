@@ -147,7 +147,8 @@ tenant-scoped unique key for their public identifier.
 - identity and immutable human number;
 - `product_id`, `gtin14_snapshot`, `line_id`, `mode` (`check` or `repack`);
 - `production_date_from`, `production_date_to` as inclusive dates;
-- resolved `box_label_template_id` for repack mode;
+- explicit tenant-scoped `box_label_template_id` for repack mode; the admin UI preselects the
+  organization default but the user may replace it before the inventory starts;
 - lifecycle status, active snapshot id, result revision, actors and timestamps;
 - emergency-close reason/actor and completion acknowledgment.
 
@@ -281,8 +282,12 @@ between source and observed dates is visible in reconciliation.
 - Initial bundle download is manifest plus bounded code pages. Pages are written under the
   snapshot id; the active pointer is published only after row count and digest verification.
   A partial download can never replace a usable local snapshot.
-- The bundle includes product facts, mode, date range, parent SSCC membership, resolved box
-  label template, and a device SSCC block when repacking.
+- The bundle includes product facts, mode, date range, parent SSCC membership, the exact selected
+  box-label descriptor and spec, and a device SSCC block when repacking. Starting the inventory
+  freezes that template for all new boxes and later reprints even if the organization default or
+  source template changes.
+- The same required selector is reused by inventory repacking, standalone repacking, and future
+  scenarios that create a new box. It is hidden when no new box is created.
 
 ### Local tables
 

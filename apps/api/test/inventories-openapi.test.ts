@@ -221,14 +221,48 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
     ]?.schema;
     if (!createSchema) throw new Error("Missing create JSON schema");
     expect(Object.keys(createSchema.properties ?? {}).sort()).toEqual(
-      ["productId", "lineId", "mode", "productionDateFrom", "productionDateTo"].sort(),
+      [
+        "productId",
+        "lineId",
+        "mode",
+        "productionDateFrom",
+        "productionDateTo",
+        "boxLabelTemplateId",
+      ].sort(),
     );
     expect(createSchema.required?.sort()).toEqual(
       ["productId", "lineId", "mode", "productionDateFrom", "productionDateTo"].sort(),
     );
     expect(createSchema.properties).not.toHaveProperty("gtin14");
-    expect(createSchema.properties).not.toHaveProperty("boxLabelTemplateId");
+    expect(createSchema.properties?.boxLabelTemplateId).toEqual({
+      type: "string",
+      format: "uuid",
+      nullable: true,
+    });
     expect(createSchema.properties?.mode?.enum).toEqual(["check", "repack"]);
+
+    const update = operation(document, "/inventories/{id}", "patch").requestBody;
+    if (!update || "$ref" in update) throw new Error("Missing update request body");
+    const updateSchema = (update.content as Record<string, { schema?: JsonSchema }>)[
+      "application/json"
+    ]?.schema;
+    if (!updateSchema) throw new Error("Missing update JSON schema");
+    expect(Object.keys(updateSchema.properties ?? {}).sort()).toEqual(
+      [
+        "productId",
+        "lineId",
+        "mode",
+        "productionDateFrom",
+        "productionDateTo",
+        "boxLabelTemplateId",
+      ].sort(),
+    );
+    expect(updateSchema.required).toEqual([]);
+    expect(updateSchema.properties?.boxLabelTemplateId).toEqual({
+      type: "string",
+      format: "uuid",
+      nullable: true,
+    });
 
     const fields = [
       "id",

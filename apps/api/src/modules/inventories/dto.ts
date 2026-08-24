@@ -52,6 +52,7 @@ export const createInventorySchema = z.object({
   mode: z.enum(INVENTORY_MODES),
   productionDateFrom: productionDateFromSchema,
   productionDateTo: productionDateToSchema,
+  boxLabelTemplateId: z.string().uuid().nullable().optional(),
 });
 export type CreateInventoryDto = z.infer<typeof createInventorySchema>;
 
@@ -61,6 +62,7 @@ export const updateInventorySchema = z.object({
   mode: z.enum(INVENTORY_MODES).optional(),
   productionDateFrom: productionDateFromSchema.optional(),
   productionDateTo: productionDateToSchema.optional(),
+  boxLabelTemplateId: z.string().uuid().nullable().optional(),
 });
 export type UpdateInventoryDto = z.infer<typeof updateInventorySchema>;
 
@@ -182,6 +184,7 @@ export const createInventoryOpenApiSchema: SchemaObject = {
     mode: { type: "string", enum: [...INVENTORY_MODES] },
     productionDateFrom: dateSchema,
     productionDateTo: dateSchema,
+    boxLabelTemplateId: { ...uuidSchema, nullable: true },
   },
 };
 
@@ -195,6 +198,7 @@ export const updateInventoryOpenApiSchema: SchemaObject = {
     mode: { type: "string", enum: [...INVENTORY_MODES] },
     productionDateFrom: dateSchema,
     productionDateTo: dateSchema,
+    boxLabelTemplateId: { ...uuidSchema, nullable: true },
   },
 };
 

@@ -232,7 +232,7 @@ Stage the schema, generated migration, snapshot, journal, and tests explicitly.
 - [ ] **Step 1: Write failing authorization and lifecycle tests**
 
 Cover same-tenant success, cross-tenant 404/denial, read-only subscription behavior, one-product
-validation, date order, repack template resolution, editable states, upload idempotency, and
+validation, date order, explicit repack template selection, editable states, upload idempotency, and
 storage cleanup on transaction failure.
 
 - [ ] **Step 2: Run focused API tests and verify RED**
@@ -244,9 +244,11 @@ pnpm --filter @markiro/api exec vitest run test/inventories.e2e.test.ts test/inv
 
 - [ ] **Step 3: Implement DTO, controller, service, and module**
 
-Lock an inventory before mutable-state checks. Derive GTIN and resolved label template from
-tenant-scoped product/configuration rows, not request snapshots. Publish upload bytes with
-SHA-256 metadata and store append-only attempts.
+Lock an inventory before mutable-state checks. Derive GTIN from the tenant-scoped product and
+validate the explicitly selected repack template against tenant templates. The admin UI preselects
+the organization default, but the API persists the user's selection and does not silently replace it
+when that default changes. Publish upload bytes with SHA-256 metadata and store append-only
+attempts.
 
 - [ ] **Step 4: Add exact audit assertions**
 

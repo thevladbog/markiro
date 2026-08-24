@@ -164,6 +164,7 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
         mode,
         productionDateFrom: "2026-08-01",
         productionDateTo: "2026-08-31",
+        boxLabelTemplateId: templateId,
       })
       .expect(201);
     const inventoryId = created.body.id as string;

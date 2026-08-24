@@ -179,13 +179,19 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     return { tenantId, productId, lineId, templateId };
   }
 
-  function createBody(productId: string, lineId: string, mode: "check" | "repack" = "check") {
+  function createBody(
+    productId: string,
+    lineId: string,
+    mode: "check" | "repack" = "check",
+    boxLabelTemplateId?: string | null,
+  ) {
     return {
       productId,
       lineId,
       mode,
       productionDateFrom: "2026-08-01",
       productionDateTo: "2026-08-31",
+      ...(boxLabelTemplateId !== undefined ? { boxLabelTemplateId } : {}),
     };
   }
 
@@ -194,10 +200,11 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     productId: string,
     lineId: string,
     mode: "check" | "repack" = "check",
+    boxLabelTemplateId?: string | null,
   ): Promise<InventoryBody> {
     const response = await agent
       .post("/inventories")
-      .send(createBody(productId, lineId, mode))
+      .send(createBody(productId, lineId, mode, boxLabelTemplateId))
       .expect(201);
     return response.body as InventoryBody;
   }
@@ -358,7 +365,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     });
   });
 
-  it("validates active same-tenant product, assigned line, mode/date range, and current repack template", async () => {
+  it("validates active same-tenant product, assigned line, mode, and date range", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
     const activeProductId = await seedProduct(tenantId);
@@ -394,9 +401,27 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       .send(createBody(activeProductId, lineId, "repack"))
       .expect(422, { code: "INVENTORY_BOX_LABEL_TEMPLATE_REQUIRED" });
 
+    const check = await createInventory(agent, activeProductId, lineId, "check");
+    expect(check.boxLabelTemplateId).toBeNull();
+    expect(check.boxLabelTemplate).toBeNull();
+  });
+
+  it("requires an explicit tenant box template for repack and preserves it until changed", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const activeProductId = await seedProduct(tenantId);
+    const lineId = await seedLine(tenantId);
+
     const firstTemplateId = await seedTemplate(tenantId, "First template");
-    await setDefaultTemplate(tenantId, firstTemplateId);
-    const repack = await createInventory(agent, activeProductId, lineId, "repack");
+    const secondTemplateId = await seedTemplate(tenantId, "Second template");
+    await setDefaultTemplate(tenantId, secondTemplateId);
+
+    await agent
+      .post("/inventories")
+      .send(createBody(activeProductId, lineId, "repack"))
+      .expect(422, { code: "INVENTORY_BOX_LABEL_TEMPLATE_REQUIRED" });
+
+    const repack = await createInventory(agent, activeProductId, lineId, "repack", firstTemplateId);
     expect(repack.boxLabelTemplateId).toBe(firstTemplateId);
     expect(repack.boxLabelTemplate).toEqual({ id: firstTemplateId, name: "First template" });
     const repackDetail = await agent.get(`/inventories/${repack.id}`).expect(200);
@@ -409,11 +434,19 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       repackList.body.items.find((item: { id: string }) => item.id === repack.id).boxLabelTemplate,
     ).toEqual({ id: firstTemplateId, name: "First template" });
 
-    const secondTemplateId = await seedTemplate(tenantId, "Second template");
-    await setDefaultTemplate(tenantId, secondTemplateId);
-    const patched = await agent
+    const unchanged = await agent
       .patch(`/inventories/${repack.id}`)
       .send({ productionDateTo: "2026-09-01" })
+      .expect(200);
+    expect(unchanged.body.boxLabelTemplateId).toBe(firstTemplateId);
+    expect(unchanged.body.boxLabelTemplate).toEqual({
+      id: firstTemplateId,
+      name: "First template",
+    });
+
+    const patched = await agent
+      .patch(`/inventories/${repack.id}`)
+      .send({ boxLabelTemplateId: secondTemplateId })
       .expect(200);
     expect(patched.body.boxLabelTemplateId).toBe(secondTemplateId);
     expect(patched.body.boxLabelTemplate).toEqual({
@@ -429,9 +462,40 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       statusCode: 409,
     });
 
-    const check = await createInventory(agent, activeProductId, lineId, "check");
-    expect(check.boxLabelTemplateId).toBeNull();
-    expect(check.boxLabelTemplate).toBeNull();
+    await agent
+      .post("/inventories")
+      .send(createBody(activeProductId, lineId, "check", firstTemplateId))
+      .expect(422, { code: "INVENTORY_BOX_LABEL_TEMPLATE_FORBIDDEN" });
+
+    const foreignAgent = request.agent(app!.getHttpServer());
+    const foreignTenantId = await signUpAndActivate(foreignAgent);
+    const foreignTemplateId = await seedTemplate(foreignTenantId, "Foreign template");
+    await agent
+      .post("/inventories")
+      .send(createBody(activeProductId, lineId, "repack", foreignTemplateId))
+      .expect(422, { code: "INVENTORY_BOX_LABEL_TEMPLATE_INVALID" });
+
+    const cleared = await agent
+      .patch(`/inventories/${repack.id}`)
+      .send({ mode: "check" })
+      .expect(200);
+    expect(cleared.body.boxLabelTemplateId).toBeNull();
+    expect(cleared.body.boxLabelTemplate).toBeNull();
+
+    await agent
+      .patch(`/inventories/${repack.id}`)
+      .send({ mode: "repack" })
+      .expect(422, { code: "INVENTORY_BOX_LABEL_TEMPLATE_REQUIRED" });
+
+    const selectedAgain = await agent
+      .patch(`/inventories/${repack.id}`)
+      .send({ mode: "repack", boxLabelTemplateId: firstTemplateId })
+      .expect(200);
+    expect(selectedAgain.body.boxLabelTemplateId).toBe(firstTemplateId);
+    expect(selectedAgain.body.boxLabelTemplate).toEqual({
+      id: firstTemplateId,
+      name: "First template",
+    });
   });
 
   it("locks editable state, permits draft/preparing updates, and rejects ready inventory mutations", async () => {
