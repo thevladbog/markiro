@@ -1148,7 +1148,7 @@ test("dual-origin acceptance records distinct flows with complete blank evidence
   assertAcceptanceScenarioTable(acceptance);
 
   assert.deepEqual(
-    acceptance.split("\n").filter((line) => /Overall result:/.test(line)),
+    acceptance.split(/\r?\n/).filter((line) => /Overall result:/.test(line)),
     [
       "Bootstrap beta Overall result: `NOT_RUN`",
       "Validation/candidate beta Overall result: `NOT_RUN`",

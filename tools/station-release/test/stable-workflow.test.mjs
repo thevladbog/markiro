@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -169,10 +169,26 @@ test("stable dispatch validation rejects adversarial mode and rollback input com
   const workflow = load(await source());
   const validate = workflowStep(workflow, "build", "Validate stable dispatch inputs");
   const runnerTemp = await mkdtemp(join(tmpdir(), "markiro-stable-dispatch-"));
-  const mainSha = (
-    await execFile("git", ["rev-parse", "origin/main"], { cwd: fileURLToPath(root) })
-  ).stdout.trim();
   t.after(() => rm(runnerTemp, { recursive: true, force: true }));
+  const repository = join(runnerTemp, "repository");
+  await execFile("git", ["init", repository]);
+  await writeFile(join(repository, "fixture"), "stable dispatch fixture\n");
+  await execFile("git", ["add", "fixture"], { cwd: repository });
+  await execFile(
+    "git",
+    [
+      "-c",
+      "user.name=Station Release Tests",
+      "-c",
+      "user.email=station-release-tests@invalid.example",
+      "commit",
+      "-m",
+      "test fixture",
+    ],
+    { cwd: repository },
+  );
+  const mainSha = (await execFile("git", ["rev-parse", "HEAD"], { cwd: repository })).stdout.trim();
+  await execFile("git", ["update-ref", "refs/remotes/origin/main", mainSha], { cwd: repository });
   const run = ({
     mode,
     sourceBetaTag = "",
@@ -182,6 +198,7 @@ test("stable dispatch validation rejects adversarial mode and rollback input com
     seedEvidence = "",
   }) =>
     execFile("bash", ["-c", validate.run], {
+      cwd: repository,
       env: {
         ...process.env,
         GITHUB_REF: "refs/heads/main",

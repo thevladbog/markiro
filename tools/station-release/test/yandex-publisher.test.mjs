@@ -653,10 +653,12 @@ test("writes a complete private mutable backup with retained content types", asy
       },
     ],
   );
-  assert.equal(permissionBits(await stat(backupDirectory)), 0o700);
-  assert.equal(permissionBits(await stat(join(backupDirectory, "backup.json"))), 0o600);
-  for (const object of backup.objects) {
-    assert.equal(permissionBits(await stat(join(backupDirectory, object.backupPath))), 0o600);
+  if (process.platform !== "win32") {
+    assert.equal(permissionBits(await stat(backupDirectory)), 0o700);
+    assert.equal(permissionBits(await stat(join(backupDirectory, "backup.json"))), 0o600);
+    for (const object of backup.objects) {
+      assert.equal(permissionBits(await stat(join(backupDirectory, object.backupPath))), 0o600);
+    }
   }
 });
 
