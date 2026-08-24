@@ -2,6 +2,7 @@ mod commands;
 mod config;
 mod printer;
 mod scanner;
+mod updater;
 
 use tauri::Manager;
 
@@ -17,6 +18,7 @@ const STATION_ICON: tauri::image::Image<'_> = tauri::include_image!("./icons/128
 pub fn run() {
     tauri::Builder::default()
         .manage(commands::LockdownState::default())
+        .manage(updater::StationUpdaterState::default())
         .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -52,6 +54,8 @@ pub fn run() {
             scanner::close_scanner,
             printer::print_bytes,
             printer::list_usb_printers,
+            updater::station_update_check,
+            updater::station_update_download_and_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Markiro station");

@@ -3,11 +3,5 @@
   "identifier": "default",
   "description": "Station webview capabilities",
   "windows": ["main"],
-  "permissions": [
-    "core:default",
-    "sql:default",
-    "sql:allow-execute",
-    "updater:default",
-    "process:allow-restart"
-  ]
+  "permissions": ["core:default", "sql:default", "sql:allow-execute", "process:allow-restart"]
 }

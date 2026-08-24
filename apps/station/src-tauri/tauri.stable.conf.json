@@ -3,6 +3,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
+        "https://releases.markiro.app/station/stable/latest.json",
         "https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json"
       ]
     }
