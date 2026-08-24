@@ -10,6 +10,15 @@ import type { ObjectStorageService } from "../src/modules/storage/object-storage
 import type { PlatformPrincipal } from "../src/platform-auth/platform-access-policy";
 import type { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 
+function testDouble<T>() {
+  return <K extends keyof T>(value: Pick<T, K>): T => value as T;
+}
+
+const billingDouble = testDouble<BillingService>();
+const storageDouble = testDouble<ObjectStorageService>();
+const documentsDouble = testDouble<BillingDocumentsService>();
+const applicationDouble = testDouble<BillingApplicationService>();
+
 function resolvedQuery<T>(rows: T[]) {
   const promise = Promise.resolve(rows);
   const query = {
@@ -20,6 +29,13 @@ function resolvedQuery<T>(rows: T[]) {
     then: promise.then.bind(promise),
   };
   return query;
+}
+
+function dbDouble<TRow, TTransaction = never>(value: {
+  select: () => ReturnType<typeof resolvedQuery<TRow>>;
+  transaction?: (run: (executor: TTransaction) => Promise<unknown>) => Promise<unknown>;
+}): Db {
+  return Object.assign(Object.create(null), value) as Db;
 }
 
 describe("BillingService offer snapshots", () => {
@@ -52,10 +68,10 @@ describe("BillingService offer snapshots", () => {
         }),
       })),
     };
-    const db = {
+    const db = dbDouble({
       select: vi.fn(() => resolvedQuery([{ id: invoice.tenantId }])),
       transaction: vi.fn(async (run: (executor: typeof tx) => Promise<unknown>) => run(tx)),
-    } as unknown as Db;
+    });
     const principal: PlatformPrincipal = {
       userId: "11111111-1111-4111-8111-111111111111",
       role: "accountant",
@@ -151,10 +167,10 @@ describe("BillingService offer snapshots", () => {
         }),
       })),
     };
-    const db = {
+    const db = dbDouble({
       select: vi.fn(() => resolvedQuery([{ id: invoice.tenantId }])),
       transaction: vi.fn(async (run: (executor: typeof tx) => Promise<unknown>) => run(tx)),
-    } as unknown as Db;
+    });
     const principal: PlatformPrincipal = {
       userId: "11111111-1111-4111-8111-111111111111",
       role: "accountant",
@@ -191,10 +207,10 @@ describe("BillingService offer snapshots", () => {
 
 describe("platform invoice response boundary", () => {
   it("presigns invoice PDFs as attachments without exposing the object key", async () => {
-    const storage = {
+    const storage = storageDouble({
       presignRead: vi.fn(async () => "https://objects.example.invalid/signed-pdf"),
-    } as unknown as ObjectStorageService;
-    const db = {
+    });
+    const db = dbDouble({
       select: vi.fn(() =>
         resolvedQuery([
           {
@@ -207,8 +223,8 @@ describe("platform invoice response boundary", () => {
           },
         ]),
       ),
-    } as unknown as Db;
-    const documents = new BillingDocumentsService(db, {} as BillingService, storage);
+    });
+    const documents = new BillingDocumentsService(db, billingDouble({}), storage);
 
     await expect(
       documents.url("31111111-1111-4111-8111-111111111111", "51111111-1111-4111-8111-111111111111"),
@@ -221,39 +237,32 @@ describe("platform invoice response boundary", () => {
   });
 
   it("rejects a malformed successful invoice list returned by the service", async () => {
-    const billing = {
-      list: async () => ({
-        items: [
-          {
-            id: "31111111-1111-4111-8111-111111111111",
-            tenantId: "21111111-1111-4111-8111-111111111111",
-            number: "INV-000002",
-            status: "draft",
-            total: "99.00",
-          },
-        ],
-      }),
-    } as unknown as BillingService;
-    const controller = new BillingController(
-      billing,
-      {} as BillingDocumentsService,
-      {} as BillingApplicationService,
-    );
+    const billing = billingDouble({
+      list: async () =>
+        ({
+          items: [
+            {
+              id: "31111111-1111-4111-8111-111111111111",
+              tenantId: "21111111-1111-4111-8111-111111111111",
+              number: "INV-000002",
+              status: "draft",
+              total: "99.00",
+            },
+          ],
+        }) as Awaited<ReturnType<BillingService["list"]>>,
+    });
+    const controller = new BillingController(billing, documentsDouble({}), applicationDouble({}));
 
     await expect(controller.list()).rejects.toThrow();
   });
 
   it("rejects a malformed document id before the document service", async () => {
-    const documents = {
+    const documents = documentsDouble({
       url: vi.fn(async () => ({
         url: "https://objects.example.invalid/invoices/invoice.pdf?signature=redacted",
       })),
-    } as unknown as BillingDocumentsService;
-    const controller = new BillingController(
-      {} as BillingService,
-      documents,
-      {} as BillingApplicationService,
-    );
+    });
+    const controller = new BillingController(billingDouble({}), documents, applicationDouble({}));
 
     const failure = await controller
       .documentDownload("31111111-1111-4111-8111-111111111111", "not-a-uuid")

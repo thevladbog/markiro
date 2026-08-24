@@ -16,6 +16,9 @@ import {
 } from "./api.js";
 import { InvoiceFlowSteps, type FlowState } from "./InvoiceFlowSteps.js";
 
+const DOCUMENT_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
+const DOCUMENT_REFRESH_INTERVAL_MS = 2_000;
+
 function flowState(invoice: InvoiceDetail): FlowState {
   if (invoice.status === "draft") return "draft";
   if (!invoice.payment) return "waiting_payment";
@@ -87,19 +90,32 @@ export function InvoiceDetailPage() {
   });
 
   useEffect(() => {
+    const pendingDocuments =
+      detail.data?.documents.filter((item) => item.status === "pending") ?? [];
+    if (pendingDocuments.length === 0) return;
     const nextPendingExpiry = Math.min(
-      ...(detail.data?.documents
-        .filter((item) => item.status === "pending")
-        .map((item) => new Date(item.updatedAt).getTime() + 5 * 60 * 1000)
-        .filter((expiry) => expiry > documentsNow) ?? []),
+      ...pendingDocuments.map(
+        (item) => new Date(item.updatedAt).getTime() + DOCUMENT_PENDING_TIMEOUT_MS,
+      ),
     );
-    if (!Number.isFinite(nextPendingExpiry)) return;
-    const timer = window.setTimeout(
-      () => setDocumentsNow(Date.now()),
-      Math.max(0, nextPendingExpiry - Date.now()) + 1,
-    );
-    return () => window.clearTimeout(timer);
-  }, [detail.data?.documents, documentsNow]);
+    const untilExpiry = nextPendingExpiry - Date.now();
+    const delay =
+      untilExpiry > 0
+        ? Math.min(DOCUMENT_REFRESH_INTERVAL_MS, untilExpiry + 1)
+        : DOCUMENT_REFRESH_INTERVAL_MS;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void detail.refetch().then((refreshed) => {
+        if (!cancelled && refreshed.data?.documents.some((item) => item.status === "pending")) {
+          setDocumentsNow(Date.now());
+        }
+      });
+    }, delay);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [detail.data?.documents, detail.refetch, documentsNow]);
 
   const latestByLine = useMemo(
     () =>
@@ -160,7 +176,7 @@ export function InvoiceDetailPage() {
   const stalePending = currentDocuments.some(
     (item) =>
       item.status === "pending" &&
-      documentsNow - new Date(item.updatedAt).getTime() > 5 * 60 * 1000,
+      documentsNow - new Date(item.updatedAt).getTime() > DOCUMENT_PENDING_TIMEOUT_MS,
   );
   const documentsNeedRetry =
     !htmlDocument ||

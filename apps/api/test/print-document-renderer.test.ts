@@ -86,6 +86,15 @@ describe("print document HTML renderer", () => {
   });
 
   it("includes a line comment in the PDF output", async () => {
+    const baseLine = {
+      position: 1,
+      name: "Настройка линии",
+      unit: "услуга",
+      quantity: 1,
+      unitPrice: "100.00",
+      vatIncluded: true,
+      lineTotal: "100.00",
+    };
     const base = {
       kind: "invoice" as const,
       number: "INV-000003",
@@ -94,17 +103,7 @@ describe("print document HTML renderer", () => {
       dueOrExpiresAt: null,
       seller: { legalName: "ООО Оператор" },
       buyer: { legalName: "ООО Покупатель" },
-      lines: [
-        {
-          position: 1,
-          name: "Настройка линии",
-          unit: "услуга",
-          quantity: 1,
-          unitPrice: "100.00",
-          vatIncluded: true,
-          lineTotal: "100.00",
-        },
-      ],
+      lines: [baseLine],
       subtotal: "100.00",
       vatTotal: "0.00",
       total: "100.00",
@@ -115,7 +114,7 @@ describe("print document HTML renderer", () => {
       ...base,
       lines: [
         {
-          ...base.lines[0]!,
+          ...baseLine,
           description: "Включает выезд и первичную калибровку",
         },
       ],

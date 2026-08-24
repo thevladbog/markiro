@@ -115,15 +115,18 @@ function installApi({
   initialDocuments = readyDocuments,
   failRender = false,
   deferDownloads = false,
+  readyAfterDetailRequests,
 }: {
   initialDocuments?: readonly Record<string, unknown>[];
   failRender?: boolean;
   deferDownloads?: boolean;
+  readyAfterDetailRequests?: number;
 } = {}) {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
   let paymentAttempts = 0;
   let paid = false;
   let documents: readonly Record<string, unknown>[] = initialDocuments;
+  let detailRequests = 0;
   const downloadResolvers: Array<() => void> = [];
   vi.stubGlobal(
     "fetch",
@@ -142,6 +145,10 @@ function installApi({
         });
       }
       if (path.endsWith(`/api/platform/invoices/${INVOICE_ID}`) && method === "GET") {
+        detailRequests += 1;
+        if (readyAfterDetailRequests !== undefined && detailRequests > readyAfterDetailRequests) {
+          documents = readyDocuments;
+        }
         return jsonResponse(
           200,
           paid
@@ -431,6 +438,35 @@ describe("invoice commercial lifecycle", () => {
 
     expect((await screen.findAllByText("Формирование не завершено")).length).toBe(2);
     expect(screen.getByRole("button", { name: "Повторить формирование" })).toBeDefined();
+  });
+
+  it("refreshes a pending document revision until it becomes ready", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-08-21T10:00:01.000Z"));
+    installApi({
+      initialDocuments: (["html", "pdf"] as const).map((format, index) => ({
+        id:
+          index === 0
+            ? "9d111111-1111-4111-8111-111111111111"
+            : "9e111111-1111-4111-8111-111111111111",
+        revision: 4,
+        format,
+        status: "pending",
+        contentType: null,
+        byteSize: null,
+        sha256: null,
+        errorCode: null,
+        createdAt: CREATED_AT,
+        updatedAt: CREATED_AT,
+      })),
+      readyAfterDetailRequests: 1,
+    });
+    renderSaasApp({ initialEntry: `/invoices/${INVOICE_ID}` });
+
+    expect((await screen.findAllByText("Формируется")).length).toBe(2);
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(screen.getByRole("button", { name: "Открыть HTML" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Скачать PDF" })).toBeDefined();
   });
 
   it("marks an in-progress revision as recoverable when it becomes stale on an open page", async () => {
