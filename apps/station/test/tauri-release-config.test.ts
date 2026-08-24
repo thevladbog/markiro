@@ -48,6 +48,7 @@ describe("packaged station updater contract", () => {
     expect(updaterCommands).toEqual([
       "station_update_check",
       "station_update_download_and_install",
+      "station_update_close",
     ]);
     expect(
       capability.permissions.filter((permission: string) => permission.startsWith("updater:")),

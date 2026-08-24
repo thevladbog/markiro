@@ -2323,6 +2323,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-sql",
  "tauri-plugin-updater",
+ "tokio",
  "url",
  "uuid",
  "windows-sys 0.61.2",

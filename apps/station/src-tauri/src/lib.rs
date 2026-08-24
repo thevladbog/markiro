@@ -56,6 +56,7 @@ pub fn run() {
             printer::list_usb_printers,
             updater::station_update_check,
             updater::station_update_download_and_install,
+            updater::station_update_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Markiro station");

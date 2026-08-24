@@ -28,11 +28,13 @@ base64 = "0.22"
 futures-util = "=0.3.33"
 minisign-verify = "=0.2.5"
 reqwest = { version = "=0.13.4", default-features = false, features = ["json", "stream"] }
+tokio = { version = "=1.53.1", features = ["sync", "time"] }
 zeroize = "=1.9.0"
 
 [dev-dependencies]
 futures-core = "=0.3.33"
 http = "=1.4.2"
+tauri = { version = "=2.11.5", features = ["test"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
