@@ -160,11 +160,19 @@ restoration — отдельный жёсткий отказ; immutable release 
 удаляется и не перезаписывается.
 
 Если immutable release опубликован, но канал не обновился, запустите
-`mode=promote-existing`. Этот режим не пересобирает и не подписывает пакет, не
-создаёт версию и не загружает никакой immutable object. Он находит последнюю
-каноническую beta, скачивает обе уже существующие public immutable trees в
-новые каталоги, валидирует их и сравнивает common assets. Затем он требует три
-полные mutable backup и повторяет только описанную promotion transaction.
+`mode=promote-existing` и обязательно передайте точный canonical `repair_tag`
+вида `station-vX.Y.Z-beta.N`. Workflow не ищет newest/latest release: он
+запрашивает именно этот опубликованный non-draft prerelease, проверяет его
+target SHA и evidence, затем скачивает обе уже существующие public immutable
+trees в новые каталоги, валидирует их и сравнивает common assets. Пустой или
+неканонический `repair_tag` запрещён для `promote-existing`; непустой
+`repair_tag` запрещён для `publish` и `seed-baseline`.
+
+Режим `promote-existing` не пересобирает и не подписывает пакет, не создаёт
+версию и не загружает никакой immutable object. После validation он требует полные
+временные mutable backup и повторяет только описанную promotion transaction.
+Backup существует для compensation внутри run и не является долговечным
+workflow artifact после успешного завершения.
 
 ### Одноразовый beta baseline
 
@@ -276,11 +284,31 @@ hardware checklist. Headless CI не заменяет эту проверку Wi
 ## Откат и ротация ключа
 
 Если обе immutable trees валидны и совпадают, а сбой затронул только mutable
-targets, используйте `mode=promote-existing`; он повторяет backup/promotion без
-rebuild, signing или immutable upload. Transaction rollback идёт в точном
-обратном порядке: Yandex alias, Yandex manifest, GitHub manifest, с публичной
-проверкой каждого backup. При partial-origin mismatch `promote-existing`
-запрещён: сохраните evidence и выпускайте новую явно авторизованную beta.
+targets, используйте `mode=promote-existing` с exact `repair_tag`; он повторяет
+backup/promotion без rebuild, signing или immutable upload. Transaction rollback
+идёт в точном обратном порядке: Yandex alias, Yandex manifest, GitHub manifest,
+с публичной проверкой каждого временного backup. При partial-origin mismatch
+`promote-existing` запрещён: остановитесь, сохраните evidence и выпускайте новую
+явно авторизованную beta.
+
+Для отдельной post-success acceptance-проверки rollback выберите только
+предыдущую принятую beta из заполненного acceptance record и до dispatch
+повторно проверьте обе immutable trees и их hashes. Возьмите точный tag в
+`PREVIOUS_BETA_TAG` из записи, затем выполните:
+
+```bash
+gh workflow run station-beta-release.yml --ref main \
+  -f mode=promote-existing \
+  -f repair_tag="$PREVIOUS_BETA_TAG"
+```
+
+Protected run сначала создаёт полные временные backup текущих mutable targets,
+затем продвигает GitHub manifest, Yandex manifest и beta alias последним. После
+успеха публично скачайте оба channel manifest и
+`https://releases.markiro.app/station/beta/download`, сравните их с выбранной
+immutable beta и сохраните workflow URL/evidence hash. Не записывайте вымышленный
+durable backup path: успешный run очищает временный backup. При любом mismatch
+остановитесь; не overwrite/cross-copy immutable tree.
 
 Для client rollback вручную установите предыдущий совместимый immutable
 installer вне активной смены. Mutable channel является только указателем, а не

@@ -236,6 +236,46 @@ test("finds the latest published stable from one complete bounded release invent
   );
 });
 
+test("promote-existing resolves the exact published stable derived from its recorded beta", async () => {
+  const { resolveStableReleaseState } = await boundaryModule();
+  const releases = [
+    listedRelease({ tagName: "station-v1.0.0" }),
+    listedRelease({ tagName: "station-v1.0.0-beta.2", isPrerelease: true }),
+    listedRelease({ tagName: "station-v1.1.0" }),
+    listedRelease({ tagName: "station-v1.1.0-beta.1", isPrerelease: true }),
+    listedRelease({ tagName: "station-v1.2.0" }),
+  ];
+
+  assert.deepEqual(
+    resolveStableReleaseState({
+      mode: "promote-existing",
+      sourceBetaTag: "station-v1.1.0-beta.1",
+      releases,
+      repositoryTags: [],
+    }),
+    {
+      version: "1.1.0",
+      tag: "station-v1.1.0",
+      previousStableTag: "station-v1.0.0",
+      firstBetaTag: "station-v1.1.0-beta.1",
+    },
+  );
+
+  assert.throws(
+    () =>
+      resolveStableReleaseState({
+        mode: "promote-existing",
+        sourceBetaTag: "station-v1.3.0-beta.1",
+        releases: [
+          ...releases,
+          listedRelease({ tagName: "station-v1.3.0-beta.1", isPrerelease: true }),
+        ],
+        repositoryTags: [],
+      }),
+    /invalid station stable boundary/,
+  );
+});
+
 test("ignores draft stable candidates but never accepts draft boundary metadata", async () => {
   const { resolveStableChangelogBoundary, resolveStableReleaseState } = await boundaryModule();
   const graph = await releaseGraph();

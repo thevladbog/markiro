@@ -122,6 +122,10 @@ export function resolveStableReleaseState({ mode, sourceBetaTag, releases, repos
     .filter((record) => record.stable && !record.isDraft && !record.isPrerelease)
     .sort((left, right) => compareStable(left.stable, right.stable));
   const latestStable = stableReleases.at(-1) ?? null;
+  const targetStable = stableReleases.find((record) => record.tagName === tag) ?? null;
+  const previousStable = stableReleases
+    .filter((record) => compareStable(record.stable, target) < 0)
+    .at(-1);
 
   if (mode === "publish") {
     if (
@@ -131,7 +135,7 @@ export function resolveStableReleaseState({ mode, sourceBetaTag, releases, repos
     ) {
       invalid();
     }
-  } else if (!latestStable || latestStable.tagName !== tag) {
+  } else if (!targetStable) {
     invalid();
   }
 
@@ -154,9 +158,7 @@ export function resolveStableReleaseState({ mode, sourceBetaTag, releases, repos
     version,
     tag,
     previousStableTag:
-      mode === "publish"
-        ? (latestStable?.tagName ?? null)
-        : (stableReleases.at(-2)?.tagName ?? null),
+      mode === "publish" ? (latestStable?.tagName ?? null) : (previousStable?.tagName ?? null),
     firstBetaTag: firstBeta.tagName,
   };
 }

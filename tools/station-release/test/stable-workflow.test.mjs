@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFile as execFileCallback } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { load } from "js-yaml";
 
 const root = new URL("../../../", import.meta.url);
+const execFile = promisify(execFileCallback);
 const source = () =>
   readFile(new URL(".github/workflows/station-stable-release.yml", root), "utf8");
 
@@ -124,6 +130,78 @@ test("normal stable modes validate the exact beta at both origins before rebuild
   assert.match(prepare.run, /git checkout --detach "\$base_sha"/);
   assert.match(prepare.run, /git rev-parse HEAD\^/);
   assert.equal(build.if, "inputs.mode == 'publish'");
+});
+
+test("stable dispatch validation rejects adversarial mode and rollback input combinations", async (t) => {
+  const workflow = load(await source());
+  const validate = workflowStep(workflow, "build", "Validate stable dispatch inputs");
+  const runnerTemp = await mkdtemp(join(tmpdir(), "markiro-stable-dispatch-"));
+  const mainSha = (
+    await execFile("git", ["rev-parse", "origin/main"], { cwd: fileURLToPath(root) })
+  ).stdout.trim();
+  t.after(() => rm(runnerTemp, { recursive: true, force: true }));
+  const run = ({
+    mode,
+    sourceBetaTag = "",
+    acceptanceConfirmed = "false",
+    highlights = "",
+    seedStableTag = "",
+    seedEvidence = "",
+  }) =>
+    execFile("bash", ["-c", validate.run], {
+      env: {
+        ...process.env,
+        GITHUB_REF: "refs/heads/main",
+        GITHUB_SHA: mainSha,
+        MODE: mode,
+        SOURCE_BETA_TAG: sourceBetaTag,
+        ACCEPTANCE_CONFIRMED: acceptanceConfirmed,
+        HIGHLIGHTS: highlights,
+        SEED_STABLE_TAG: seedStableTag,
+        SEED_INFRASTRUCTURE_EVIDENCE: seedEvidence,
+        RUNNER_TEMP: runnerTemp,
+        GITHUB_ENV: join(runnerTemp, "github-env"),
+      },
+    });
+
+  const normal = {
+    sourceBetaTag: "station-v1.2.3-beta.4",
+    acceptanceConfirmed: "true",
+  };
+  await assert.doesNotReject(run({ mode: "publish", ...normal }));
+  await assert.doesNotReject(run({ mode: "promote-existing", ...normal }));
+  await assert.doesNotReject(
+    run({ mode: "seed-baseline", seedStableTag: "station-v1.2.3", seedEvidence: "{}" }),
+  );
+  for (const input of [
+    { mode: "publish", sourceBetaTag: normal.sourceBetaTag },
+    { mode: "publish", ...normal, sourceBetaTag: "station-v1.2.3" },
+    { mode: "publish", ...normal, seedStableTag: "station-v1.1.0" },
+    { mode: "promote-existing", sourceBetaTag: normal.sourceBetaTag },
+    {
+      mode: "seed-baseline",
+      sourceBetaTag: normal.sourceBetaTag,
+      seedStableTag: "station-v1.2.3",
+      seedEvidence: "{}",
+    },
+    {
+      mode: "seed-baseline",
+      acceptanceConfirmed: "true",
+      seedStableTag: "station-v1.2.3",
+      seedEvidence: "{}",
+    },
+    { mode: "seed-baseline", seedStableTag: "station-v1.2.3" },
+    { mode: "seed-baseline", seedStableTag: "station-v1.2.3-beta.1", seedEvidence: "{}" },
+    {
+      mode: "seed-baseline",
+      highlights: "not allowed",
+      seedStableTag: "station-v1.2.3",
+      seedEvidence: "{}",
+    },
+    { mode: "repair", ...normal },
+  ]) {
+    await assert.rejects(run(input), /Command failed/, JSON.stringify(input));
+  }
 });
 
 test("publish stages two stable trees from one build and keeps stable provenance identical", async () => {

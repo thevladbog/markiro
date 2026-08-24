@@ -15,6 +15,11 @@ on:
         type: choice
         default: next-beta
         options: [next-beta, next-patch-beta, next-minor-beta, next-major-beta]
+      repair_tag:
+        description: Exact published beta tag; promote-existing only
+        required: false
+        type: string
+        default: ""
       seed_infrastructure_evidence:
         description: Exact applied DNS-disabled infrastructure evidence JSON; seed-baseline only
         required: false
@@ -85,16 +90,22 @@ jobs:
       - name: Validate release mode
         env:
           MODE: ${{ inputs.mode }}
+          REPAIR_TAG: ${{ inputs.repair_tag }}
           SEED_INFRASTRUCTURE_EVIDENCE: ${{ inputs.seed_infrastructure_evidence }}
         shell: bash
         run: |
           set -euo pipefail
-          test "$MODE" = "publish" -o "$MODE" = "promote-existing" -o "$MODE" = "seed-baseline"
-          if [ "$MODE" = "seed-baseline" ]; then
-            test -n "$SEED_INFRASTRUCTURE_EVIDENCE"
-            test "$(printf '%s' "$SEED_INFRASTRUCTURE_EVIDENCE" | wc -c)" -le 262144
+          test "$MODE" = "publish" -o "$MODE" = "promote-existing" -o "$MODE" = "seed-baseline" || exit 1
+          if [ "$MODE" = "promote-existing" ]; then
+            [[ "$REPAIR_TAG" =~ ^station-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.([1-9][0-9]*)$ ]] || exit 1
+            test -z "$SEED_INFRASTRUCTURE_EVIDENCE" || exit 1
+          elif [ "$MODE" = "seed-baseline" ]; then
+            test -z "$REPAIR_TAG" || exit 1
+            test -n "$SEED_INFRASTRUCTURE_EVIDENCE" || exit 1
+            test "$(printf '%s' "$SEED_INFRASTRUCTURE_EVIDENCE" | wc -c)" -le 262144 || exit 1
           else
-            test -z "$SEED_INFRASTRUCTURE_EVIDENCE"
+            test -z "$REPAIR_TAG" || exit 1
+            test -z "$SEED_INFRASTRUCTURE_EVIDENCE" || exit 1
           fi
 
       - name: Prepare deterministic beta version
@@ -243,14 +254,19 @@ jobs:
       - name: Resolve release candidate
         env:
           GH_TOKEN: ${{ github.token }}
+          REPAIR_TAG: ${{ inputs.repair_tag }}
         shell: bash
         run: |
           set -euo pipefail
           if [ "${{ inputs.mode }}" = "promote-existing" ]; then
-            tag="$(gh release list --repo "$GITHUB_REPOSITORY" --prerelease --limit 100 --json tagName,isDraft --jq '[.[] | select(.isDraft == false) | select(.tagName | test("^station-v[0-9]+\\.[0-9]+\\.[0-9]+-beta\\.[0-9]+$"))] | sort_by(.tagName | capture("^station-v(?<major>[0-9]+)\\.(?<minor>[0-9]+)\\.(?<patch>[0-9]+)-beta\\.(?<beta>[0-9]+)$") | [.major|tonumber, .minor|tonumber, .patch|tonumber, .beta|tonumber]) | last | .tagName')"
-            test -n "$tag"
+            tag="$REPAIR_TAG"
             version="${tag#station-v}"
-            release_sha="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq .targetCommitish)"
+            release_json="$RUNNER_TEMP/station-beta-repair-release.json"
+            gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+              --json tagName,isDraft,isPrerelease,targetCommitish > "$release_json"
+            node -e 'const r=require(process.argv[1]);if(r.tagName!==process.argv[2]||r.isDraft||!r.isPrerelease||!/^[0-9a-f]{40}$/.test(r.targetCommitish))process.exit(1)' \
+              "$release_json" "$tag"
+            release_sha="$(node -e 'const r=require(process.argv[1]);process.stdout.write(r.targetCommitish)' "$release_json")"
           else
             state="$RUNNER_TEMP/station-candidate/release-state.txt"
             test -f "$state" -a ! -L "$state"
@@ -540,5 +556,6 @@ jobs:
             "$RUNNER_TEMP/station-github-rollback-verify" \
             "$RUNNER_TEMP/station-yandex-channel-backup" \
             "$RUNNER_TEMP/station-yandex-channel-verify" \
+            "$RUNNER_TEMP/station-beta-repair-release.json" \
             "$RUNNER_TEMP/station-seed-release.json" \
             "$RUNNER_TEMP/station-seed-infrastructure.json"

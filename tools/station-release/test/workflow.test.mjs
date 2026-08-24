@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { promisify } from "node:util";
 import { load } from "js-yaml";
 import { normalizeTauriSigningKey } from "../normalize-signing-key.mjs";
 
 const root = new URL("../../../", import.meta.url);
+const execFile = promisify(execFileCallback);
 const source = () => readFile(new URL(".github/workflows/station-beta-release.yml", root), "utf8");
 const packageSource = () => readFile(new URL("package.json", root), "utf8");
 
@@ -15,6 +18,7 @@ test("station beta build and dual-origin publication use separate exact protecte
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), [
     "mode",
     "bump",
+    "repair_tag",
     "seed_infrastructure_evidence",
   ]);
   assert.deepEqual(workflow.on.workflow_dispatch.inputs.mode.options, [
@@ -28,6 +32,7 @@ test("station beta build and dual-origin publication use separate exact protecte
     "next-minor-beta",
     "next-major-beta",
   ]);
+  assert.equal(workflow.on.workflow_dispatch.inputs.repair_tag.default, "");
   assert.equal(workflow.concurrency.group, "station-beta-release");
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
   assert.deepEqual(Object.keys(workflow.jobs), ["build", "release"]);
@@ -120,6 +125,65 @@ test("station beta build and dual-origin publication use separate exact protecte
   assert.doesNotMatch(text, /--access-key|--secret-access-key|--credentials/i);
   assert.doesNotMatch(text, /force|:latest\b|pull_request_target|self-hosted|id-token|curl .+\|/i);
   assert.doesNotMatch(text, /continue-on-error/i);
+});
+
+test("promote-existing requires one exact beta repair tag and never infers a release", async () => {
+  const workflow = load(await source());
+  const validate = workflow.jobs.build.steps.find((step) => step.name === "Validate release mode");
+  const resolve = workflow.jobs.release.steps.find(
+    (step) => step.name === "Resolve release candidate",
+  );
+
+  assert.equal(validate.env.REPAIR_TAG, "${{ inputs.repair_tag }}");
+  assert.match(validate.run, /if \[ "\$MODE" = "promote-existing" \]; then/);
+  assert.match(
+    validate.run,
+    /\[\[ "\$REPAIR_TAG" =~ \^station-v\(0\|\[1-9\]\[0-9\]\*\)\\\.\(0\|\[1-9\]\[0-9\]\*\)\\\.\(0\|\[1-9\]\[0-9\]\*\)-beta\\\.\(\[1-9\]\[0-9\]\*\)\$ \]\]/,
+  );
+  assert.match(validate.run, /test -z "\$REPAIR_TAG"/);
+  assert.match(validate.run, /test -z "\$SEED_INFRASTRUCTURE_EVIDENCE"/);
+  assert.match(validate.run, /test -n "\$SEED_INFRASTRUCTURE_EVIDENCE"/);
+
+  assert.equal(resolve.env.REPAIR_TAG, "${{ inputs.repair_tag }}");
+  assert.match(resolve.run, /tag="\$REPAIR_TAG"/);
+  assert.match(
+    resolve.run,
+    /gh release view "\$tag"[\s\S]*--json tagName,isDraft,isPrerelease,targetCommitish/,
+  );
+  assert.match(resolve.run, /r\.tagName!==process\.argv\[2\]\|\|r\.isDraft\|\|!r\.isPrerelease/);
+  assert.doesNotMatch(resolve.run, /gh release list|sort_by|\| last|latest/i);
+});
+
+test("beta dispatch validation rejects adversarial repair-tag and mode combinations", async () => {
+  const workflow = load(await source());
+  const validate = workflow.jobs.build.steps.find((step) => step.name === "Validate release mode");
+  const run = ({ mode, repairTag = "", seedEvidence = "" }) =>
+    execFile("bash", ["-c", validate.run], {
+      env: {
+        ...process.env,
+        MODE: mode,
+        REPAIR_TAG: repairTag,
+        SEED_INFRASTRUCTURE_EVIDENCE: seedEvidence,
+      },
+    });
+
+  await assert.doesNotReject(run({ mode: "promote-existing", repairTag: "station-v1.2.3-beta.4" }));
+  await assert.doesNotReject(run({ mode: "publish" }));
+  await assert.doesNotReject(run({ mode: "seed-baseline", seedEvidence: "{}" }));
+  for (const input of [
+    { mode: "promote-existing" },
+    { mode: "promote-existing", repairTag: "station-v1.2.3-beta.0" },
+    { mode: "promote-existing", repairTag: " station-v1.2.3-beta.4" },
+    { mode: "promote-existing", repairTag: "station-v1.2.3" },
+    { mode: "promote-existing", repairTag: "station-v1.2.3-beta.4; true" },
+    { mode: "publish", repairTag: "station-v1.2.3-beta.4" },
+    { mode: "publish", seedEvidence: "{}" },
+    { mode: "seed-baseline", repairTag: "station-v1.2.3-beta.4", seedEvidence: "{}" },
+    { mode: "seed-baseline" },
+    { mode: "repair", repairTag: "station-v1.2.3-beta.4" },
+  ]) {
+    await assert.rejects(run(input), /Command failed/, JSON.stringify(input));
+  }
 });
 
 test("publish and seed build once and stage two closed origin trees from one input", async () => {

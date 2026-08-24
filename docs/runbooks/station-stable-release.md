@@ -61,25 +61,29 @@ immutable keys. Повтор разрешён только с тем же exact 
 
 ## Публикация принятой beta как stable
 
-1. Откройте `Publish station stable` из `main`, выберите `mode=publish`.
-2. В `source_beta_tag` укажите точный immutable beta tag, например
+1. До публикации завершите transitional beta acceptance record: его Overall
+   result и все строки `BETA_SIGN_OFF` должны быть `PASS`. Stable-строки,
+   `PUBLISH-01` и stable rollback ещё остаются `NOT_RUN` и не блокируют саму
+   первую stable publication, потому что проверяются после неё.
+2. Откройте `Publish station stable` из `main`, выберите `mode=publish`.
+3. В `source_beta_tag` укажите точный immutable beta tag, например
    `station-v1.2.0-beta.1`, и установите `acceptance_confirmed=true`.
    `highlights` остаётся необязательным.
-3. Workflow скачивает GitHub и Yandex beta evidence и assets в разные чистые
+4. Workflow скачивает GitHub и Yandex beta evidence и assets в разные чистые
    каталоги, валидирует обе trees и сравнивает common assets. Только matching
    GitHub и Yandex beta evidence допускают дальнейшую работу. GitHub tag target
    обязан совпасть с `betaReleaseSha`, release-only diff ограничен stable
    overlay, а CI для verified `baseSha` обязан завершиться успешно.
-4. Только после этого workflow checkout-ит принятый `baseSha`, применяет
+5. Только после этого workflow checkout-ит принятый `baseSha`, применяет
    `tauri.stable.conf.json`, создаёт один release commit и ровно один раз
    собирает/подписывает Windows NSIS. Stable не строится из текущего более
    нового `main`.
-5. Changelog и release notes строятся детерминированно от предыдущего stable
+6. Changelog и release notes строятся детерминированно от предыдущего stable
    source; optional highlights не меняют provenance. Один общий installer,
    updater bundle, detached signature, notes и accepted-beta provenance
    оборачиваются в GitHub и Yandex stable trees. Различаться могут только
    origin URL, manifest/checksum/evidence digests и `distribution`.
-6. Immutable GitHub release `station-vX.Y.Z` создаётся без `--clobber`, затем
+7. Immutable GitHub release `station-vX.Y.Z` создаётся без `--clobber`, затем
    absent Yandex prefix `station/stable/releases/X.Y.Z/` публикуется общим
    publisher. Обе публичные trees повторно скачиваются, независимо валидируются
    и сравниваются до любой mutable backup.
@@ -109,6 +113,12 @@ Beta alias `station/beta/download` в stable transaction не используе
 accepted beta и обе уже опубликованные stable trees, не пересобирает и не
 подписывает package, не создаёт release commit и не загружает immutable object.
 После полных GitHub/Yandex backups он повторяет только mutable transaction.
+Для `promote-existing` exact stable выводится из переданного
+`source_beta_tag`; это может быть предыдущий опубликованный stable, а не только
+newest stable. Workflow требует, чтобы выбранная beta была опубликованным
+non-draft prerelease, а соответствующий stable — опубликованным non-draft
+normal release. Оба stable origin и записанный accepted-beta provenance должны
+совпасть.
 
 Единый trap восстанавливает изменённые targets в точном обратном порядке:
 Yandex alias, Yandex manifest, затем GitHub manifest. Каждый restored target
@@ -159,6 +169,30 @@ immutable trees повторите точные release inputs с `mode=promote-
 `station/download` alias, Yandex stable manifest, GitHub stable manifest. Каждый
 target публично сравнивается с сохранённым backup. Partial-origin incident не
 лечится `promote-existing`, overwrite или копированием surviving tree.
+
+Для отдельной post-success acceptance-проверки rollback выберите предыдущий
+принятый strict dual-origin stable. Возьмите его точный `source_beta_tag` из
+обоих совпадающих `release-evidence.json`, поместите в
+`PREVIOUS_STABLE_SOURCE_BETA_TAG` и до dispatch повторно проверьте обе immutable
+trees, stable tag/target и evidence hashes. Затем выполните:
+
+```bash
+gh workflow run station-stable-release.yml --ref main \
+  -f mode=promote-existing \
+  -f source_beta_tag="$PREVIOUS_STABLE_SOURCE_BETA_TAG" \
+  -f acceptance_confirmed=true
+```
+
+Protected run валидирует exact beta и derived stable, создаёт полные временные
+backup текущих mutables и продвигает GitHub manifest, Yandex manifest и default
+stable alias последним. После успеха публично скачайте оба stable channel
+manifest и `https://releases.markiro.app/station/download`, сравните с выбранной
+immutable stable и сохраните workflow URL/evidence hashes. Backup нужен для
+in-run compensation, очищается после успешного run и не является durable
+artifact. При любом mismatch остановитесь; не overwrite/cross-copy immutable
+tree. При ошибке mutation порядок compensation остаётся прежним: Yandex alias,
+Yandex manifest, GitHub manifest, с публичным сравнением каждого временного
+backup.
 
 Rollback channel pointer влияет только на ещё не обновившихся клиентов. Для уже
 обновлённой Station закройте активную смену, проверьте SQLite compatibility
