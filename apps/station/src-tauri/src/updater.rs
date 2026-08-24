@@ -4563,18 +4563,16 @@ mod tests {
 
     #[test]
     fn download_real_pinned_update_enforces_read_and_overall_timeouts() {
-        for (read_timeout, overall_timeout, expected_kind, exact_cleaned_allocations) in [
+        for (read_timeout, overall_timeout, expected_kind) in [
             (
                 Duration::from_millis(25),
-                Duration::from_millis(250),
+                Duration::from_secs(1),
                 PackageTimeoutKind::Read,
-                Some(1),
             ),
             (
-                Duration::from_millis(250),
-                Duration::from_millis(25),
+                Duration::from_secs(1),
+                Duration::from_millis(500),
                 PackageTimeoutKind::Overall,
-                None,
             ),
         ] {
             let Some(mut server) = spawn_local_update_server(LocalPackageResponse::Stalled {
@@ -4622,15 +4620,9 @@ mod tests {
                 package_fallback_reason(&error),
                 Some(StationPackageFallbackReason::Timeout)
             );
-            if let Some(expected) = exact_cleaned_allocations {
-                assert_eq!(probe.cleaned_allocations(), expected);
-            } else {
-                assert!(probe.cleaned_allocations() <= 1);
-            }
+            assert_eq!(probe.cleaned_allocations(), 1);
             assert!(probe.all_clean());
-            if exact_cleaned_allocations.is_some() {
-                assert!(server.stalled_body_is_open());
-            }
+            assert!(server.stalled_body_is_open());
 
             server.release_stalled_body();
             server.finish().expect("loopback timeout server");
