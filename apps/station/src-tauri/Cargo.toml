@@ -36,6 +36,8 @@ windows-sys = { version = "0.61", features = [
   # gated behind these two features in windows-sys 0.61, on top of
   # Win32_Graphics_Printing.
   "Win32_Security",
+  "Win32_System_Power",
+  "Win32_System_Threading",
 ] }
 
 [features]
