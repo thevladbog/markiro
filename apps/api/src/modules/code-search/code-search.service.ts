@@ -1,10 +1,11 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { upperBoundCondition } from "../../lib/date-range";
 import { classifySearchInput } from "./input-classifier";
+import type { BoxReportData } from "./box-report";
 import type {
   BoxCardDto,
   ClassifySearchResponseDto,
@@ -749,6 +750,110 @@ export class CodeSearchService {
       items,
       exceptions: exceptionRows,
       pickupOrders: pickupOrderRows,
+    };
+  }
+
+  /**
+   * Gathers everything the printed "Состав короба" form (`box-report.ts`)
+   * needs for one box. The code selection mirrors disaggregation's
+   * `reportData` contents query: displaced items are excluded, and removed
+   * items are kept only when their removal WAS the box's disassembly — so a
+   * disassembled box still prints the contents it had at disassembly time.
+   */
+  async boxReportData(tenantId: string, boxId: string): Promise<BoxReportData> {
+    const [box] = await this.db
+      .select({
+        sscc: schema.boxes.sscc,
+        openedAt: schema.boxes.openedAt,
+        closedAt: schema.boxes.closedAt,
+        disassembledAt: schema.boxes.disassembledAt,
+        productName: schema.products.name,
+      })
+      .from(schema.boxes)
+      .leftJoin(
+        schema.shifts,
+        and(
+          eq(schema.shifts.tenantId, schema.boxes.tenantId),
+          eq(schema.shifts.id, schema.boxes.shiftId),
+        ),
+      )
+      .leftJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.shifts.tenantId),
+          eq(schema.products.id, schema.shifts.productId),
+        ),
+      )
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.id, boxId)));
+
+    if (!box) throw new NotFoundException();
+
+    const [org] = await this.db
+      .select({
+        name: schema.organization.name,
+        inn: schema.orgProfiles.inn,
+        logo: schema.organization.logo,
+      })
+      .from(schema.organization)
+      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
+      .where(eq(schema.organization.id, tenantId));
+
+    // Join the hot code rows through the box item's own (codeHash, addedAt ==
+    // the owning scan's scannedAt), NOT through code_registry — see
+    // disaggregation.service.ts's reportData for why a registry join would
+    // silently drop the contents of a disassembled box.
+    const codeRows = await this.db
+      .select({
+        gtin14: schema.codes.gtin14,
+        serial: schema.codes.serial,
+        rawKm: schema.codes.canonicalRaw,
+      })
+      .from(schema.boxItems)
+      .innerJoin(
+        schema.boxes,
+        and(
+          eq(schema.boxes.tenantId, schema.boxItems.tenantId),
+          eq(schema.boxes.id, schema.boxItems.boxId),
+        ),
+      )
+      .innerJoin(
+        schema.codes,
+        and(
+          eq(schema.codes.tenantId, schema.boxItems.tenantId),
+          eq(schema.codes.codeHash, schema.boxItems.codeHash),
+          eq(schema.codes.scannedAt, schema.boxItems.addedAt),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.boxItems.tenantId, tenantId),
+          eq(schema.boxItems.boxId, boxId),
+          isNull(schema.boxItems.displacedAt),
+          or(
+            isNull(schema.boxItems.removedAt),
+            eq(schema.boxItems.removedAt, schema.boxes.disassembledAt),
+          ),
+        ),
+      )
+      .orderBy(schema.codes.gtin14, schema.codes.serial);
+
+    const status: BoxReportData["status"] = box.disassembledAt
+      ? "disassembled"
+      : box.closedAt
+        ? "closed"
+        : "open";
+
+    return {
+      // `boxes.sscc` stores the bare 18 digits; the renderer (like
+      // disaggregation's) expects the 20-character `00…` machine form.
+      sscc: box.sscc === null ? null : formatSsccWithAi(box.sscc),
+      status,
+      productName: box.productName,
+      org: org ? { name: org.name, inn: org.inn, logo: org.logo } : null,
+      openedAt: box.openedAt,
+      closedAt: box.closedAt,
+      disassembledAt: box.disassembledAt,
+      codes: codeRows,
     };
   }
 

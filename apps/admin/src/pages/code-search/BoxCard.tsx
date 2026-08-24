@@ -13,7 +13,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 
 import { formatSsccHri } from "@markiro/domain";
-import { Alert, Badge, Card, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
+import { Alert, Badge, Button, Card, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
 import type { StatusChipStatus, TableColumn } from "@markiro/ui";
 
 import { formatCreatedAt } from "../../lib/datetime.js";
@@ -130,10 +130,21 @@ export function BoxCardPage() {
       <PageHeader
         title={title}
         actions={
-          <StatusChip
-            status={STATUS_TO_CHIP[box.status]}
-            label={t(`pages.codeSearch.boxCard.status.${box.status}`)}
-          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                window.open(`/api/code-search/boxes/${box.id}/report`);
+              }}
+            >
+              {t("pages.codeSearch.boxCard.printAction")}
+            </Button>
+            <StatusChip
+              status={STATUS_TO_CHIP[box.status]}
+              label={t(`pages.codeSearch.boxCard.status.${box.status}`)}
+            />
+          </div>
         }
       />
 

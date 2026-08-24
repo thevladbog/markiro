@@ -1048,6 +1048,7 @@
       },
       "boxCard": {
         "noSscc": "Без SSCC",
+        "printAction": "Распечатать",
         "status": {
           "open": "Открыт",
           "closed": "Закрыт",
