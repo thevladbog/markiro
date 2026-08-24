@@ -35,6 +35,7 @@ const PROVENANCE_KEYS = [
   "githubBetaEvidenceSha256",
   "yandexBetaEvidenceSha256",
 ];
+const NORMAL_PROVENANCE_KEYS = ["version", ...PROVENANCE_KEYS];
 const STABLE_DIGEST_KEYS = [
   "githubManifestSha256",
   "yandexManifestSha256",
@@ -45,7 +46,7 @@ const STABLE_DIGEST_KEYS = [
   "signatureSha256",
 ];
 const DIGEST_KEYS = ["githubBetaEvidenceSha256", "yandexBetaEvidenceSha256", ...STABLE_DIGEST_KEYS];
-const DATA_KEYS = ["version", ...PROVENANCE_KEYS, ...STABLE_DIGEST_KEYS];
+const DATA_KEYS = [...NORMAL_PROVENANCE_KEYS, ...STABLE_DIGEST_KEYS];
 const STATE_KEYS = [
   "mode",
   "version",
@@ -72,7 +73,33 @@ function hasOnlyKeys(value, keys) {
   return isPlainObject(value) && Object.keys(value).every((key) => keys.includes(key));
 }
 
-function validateState(state) {
+function validateProvenanceLifecycle(state, allowEmptyNormalProvenance) {
+  if (state.mode === "seed-baseline") {
+    if (
+      state.sourceBetaTag !== null ||
+      state.baseSha !== null ||
+      state.githubBetaEvidenceSha256 !== null ||
+      state.yandexBetaEvidenceSha256 !== null ||
+      (state.version === null) !== (state.releaseSha === null)
+    ) {
+      invalid();
+    }
+    return;
+  }
+  const present = NORMAL_PROVENANCE_KEYS.filter((key) => state[key] !== null).length;
+  if (present === NORMAL_PROVENANCE_KEYS.length) return;
+  const pristine =
+    present === 0 &&
+    allowEmptyNormalProvenance &&
+    STABLE_DIGEST_KEYS.every((key) => state[key] === null) &&
+    state.immutableState === "not-started" &&
+    state.promotionState === "not-started" &&
+    state.rollbackState === "not-required" &&
+    state.outcome === "pending";
+  if (!pristine) invalid();
+}
+
+function validateState(state, { allowEmptyNormalProvenance = true } = {}) {
   const beta = state?.sourceBetaTag === null ? null : parseStationBetaTag(state?.sourceBetaTag);
   const stable =
     state?.version === null ? null : parseStationStableTag(`station-v${state?.version}`);
@@ -99,28 +126,7 @@ function validateState(state) {
   ) {
     invalid();
   }
-  if (state.mode === "seed-baseline") {
-    if (
-      state.sourceBetaTag !== null ||
-      state.baseSha !== null ||
-      state.githubBetaEvidenceSha256 !== null ||
-      state.yandexBetaEvidenceSha256 !== null ||
-      (state.version === null) !== (state.releaseSha === null)
-    ) {
-      invalid();
-    }
-  } else {
-    const provenance = [
-      state.version,
-      state.sourceBetaTag,
-      state.baseSha,
-      state.releaseSha,
-      state.githubBetaEvidenceSha256,
-      state.yandexBetaEvidenceSha256,
-    ];
-    const present = provenance.filter((value) => value !== null).length;
-    if (present !== 0 && present !== provenance.length) invalid();
-  }
+  validateProvenanceLifecycle(state, allowEmptyNormalProvenance);
   return state;
 }
 
@@ -145,7 +151,12 @@ export function updateReleaseSummary(state, patch) {
   if (!hasOnlyKeys(patch, DATA_KEYS) || Object.keys(patch).length === 0) {
     invalid();
   }
-  return validateState({ ...state, ...patch });
+  return validateState(
+    { ...state, ...patch },
+    {
+      allowEmptyNormalProvenance: !NORMAL_PROVENANCE_KEYS.some((key) => Object.hasOwn(patch, key)),
+    },
+  );
 }
 
 function immutableTransition(state, event, expectedState, nextState, mode = "publish") {

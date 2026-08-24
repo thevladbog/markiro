@@ -21,6 +21,15 @@ async function summaryModule() {
 
 const digest = (character) => character.repeat(64);
 
+const completeProvenance = () => ({
+  version: "1.2.3",
+  sourceBetaTag: "station-v1.2.3-beta.4",
+  baseSha: "1".repeat(40),
+  releaseSha: "2".repeat(40),
+  githubBetaEvidenceSha256: digest("3"),
+  yandexBetaEvidenceSha256: digest("4"),
+});
+
 async function runSummaryCli(args) {
   return execFile(process.execPath, [fileURLToPath(moduleUrl), ...args], {
     encoding: "utf8",
@@ -32,12 +41,7 @@ test("records bounded source provenance and stable publication hashes", async ()
   const { createReleaseSummaryState, renderReleaseSummary, updateReleaseSummary } =
     await summaryModule();
   const state = updateReleaseSummary(createReleaseSummaryState("publish"), {
-    version: "1.2.3",
-    sourceBetaTag: "station-v1.2.3-beta.4",
-    baseSha: "1".repeat(40),
-    releaseSha: "2".repeat(40),
-    githubBetaEvidenceSha256: digest("3"),
-    yandexBetaEvidenceSha256: digest("4"),
+    ...completeProvenance(),
     githubManifestSha256: digest("a"),
     yandexManifestSha256: digest("b"),
     githubEvidenceSha256: digest("c"),
@@ -59,9 +63,13 @@ test("records bounded source provenance and stable publication hashes", async ()
 });
 
 test("tracks actual immutable boundaries from attempted publication through promotion", async () => {
-  const { createReleaseSummaryState, renderReleaseSummary, transitionReleaseSummary } =
-    await summaryModule();
-  let state = createReleaseSummaryState("publish");
+  const {
+    createReleaseSummaryState,
+    renderReleaseSummary,
+    transitionReleaseSummary,
+    updateReleaseSummary,
+  } = await summaryModule();
+  let state = updateReleaseSummary(createReleaseSummaryState("publish"), completeProvenance());
   const expected = [
     ["github-publication-attempted", "github-publication-attempted", "partial-immutables"],
     ["github-draft-created", "github-draft-created", "partial-immutables"],
@@ -87,10 +95,14 @@ test("tracks actual immutable boundaries from attempted publication through prom
 });
 
 test("distinguishes existing-tree validation, restored transactions, and restoration failure", async () => {
-  const { createReleaseSummaryState, renderReleaseSummary, transitionReleaseSummary } =
-    await summaryModule();
+  const {
+    createReleaseSummaryState,
+    renderReleaseSummary,
+    transitionReleaseSummary,
+    updateReleaseSummary,
+  } = await summaryModule();
   let existing = transitionReleaseSummary(
-    createReleaseSummaryState("promote-existing"),
+    updateReleaseSummary(createReleaseSummaryState("promote-existing"), completeProvenance()),
     "existing-public-validation-started",
   );
   assert.match(renderReleaseSummary(existing), /Outcome: `existing-immutables-not-validated`/);
@@ -183,6 +195,9 @@ test("seed workflow passes explicit null provenance through the real summary CLI
   assert.equal(state.baseSha, null);
   assert.equal(state.githubBetaEvidenceSha256, null);
   assert.equal(state.yandexBetaEvidenceSha256, null);
+  await runSummaryCli(["transition", statePath, "seed-publication-attempted"]);
+  const transitioned = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(transitioned.immutableState, "seed-publication-attempted");
 });
 
 test("normal summary CLI rejects null accepted-beta provenance", async () => {
@@ -208,4 +223,38 @@ test("normal summary CLI rejects null accepted-beta provenance", async () => {
     ]),
     /invalid station release summary/,
   );
+});
+
+test("normal summary CLI rejects explicit all-null provenance before the first transition", async () => {
+  for (const [mode, firstTransition] of [
+    ["publish", "github-publication-attempted"],
+    ["promote-existing", "existing-public-validation-started"],
+  ]) {
+    const directory = await mkdtemp(join(tmpdir(), `markiro-${mode}-summary-cli-`));
+    const statePath = join(directory, "state.json");
+    await runSummaryCli(["init", mode, statePath]);
+    await assert.rejects(
+      runSummaryCli([
+        "update",
+        statePath,
+        "version",
+        "null",
+        "sourceBetaTag",
+        "null",
+        "baseSha",
+        "null",
+        "releaseSha",
+        "null",
+        "githubBetaEvidenceSha256",
+        "null",
+        "yandexBetaEvidenceSha256",
+        "null",
+      ]),
+      /invalid station release summary/,
+    );
+    await assert.rejects(
+      runSummaryCli(["transition", statePath, firstTransition]),
+      /invalid station release summary/,
+    );
+  }
 });
