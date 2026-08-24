@@ -7,8 +7,6 @@
 **Scope:** Tenant-admin preparation and reconciliation, multi-station offline execution,
 repacking, and downloadable result packages for one product per inventory
 
-**Product source:** `docs/design-briefs/inventory/README.md`
-
 ## Outcome
 
 Inventory is a separate tenant-scoped aggregate. It consumes an immutable snapshot built

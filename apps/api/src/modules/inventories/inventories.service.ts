@@ -377,8 +377,8 @@ export class InventoriesService {
           sha256,
         );
 
-        let parsedStatus: InventoryChzStatus | null = null;
-        let includedGtin14: string | null = null;
+        let parsedStatus: InventoryChzStatus | null;
+        let includedGtin14: string | null;
         let result: "succeeded" | "failed" = "succeeded";
         let rowCount = 0;
         let duplicateCount = 0;
@@ -397,15 +397,12 @@ export class InventoriesService {
           rowCount = parsed.rows.length;
           duplicateCount = rowCount - new Set(parsed.rows.map((row) => row.codeHash)).size;
         } catch (error) {
+          if (!(error instanceof ChzImportError)) throw error;
           result = "failed";
-          if (error instanceof ChzImportError) {
-            errorCode = error.code;
-            errorRowNumber = error.rowNumber;
-            parsedStatus = error.parsedStatus ?? null;
-            includedGtin14 = error.includedGtin14 ?? null;
-          } else {
-            errorCode = "CHZ_IMPORT_PARSE_FAILED";
-          }
+          errorCode = error.code;
+          errorRowNumber = error.rowNumber;
+          parsedStatus = error.parsedStatus ?? null;
+          includedGtin14 = error.includedGtin14 ?? null;
         }
 
         await tx.insert(schema.inventoryImports).values({

@@ -14,11 +14,28 @@ import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import type * as ChzImportParserModule from "../src/modules/inventories/chz-import-parser";
 import { InventoriesService } from "../src/modules/inventories/inventories.service";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { setOnlyOrganizationMemberRole, signUpAndActivate } from "./support/auth";
 import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
+
+const parseChzImportFault = vi.hoisted(() => ({ unexpectedFailuresRemaining: 0 }));
+
+vi.mock("../src/modules/inventories/chz-import-parser", async (importOriginal) => {
+  const actual = await importOriginal<typeof ChzImportParserModule>();
+  return {
+    ...actual,
+    parseChzImport(input: Parameters<typeof actual.parseChzImport>[0]) {
+      if (parseChzImportFault.unexpectedFailuresRemaining > 0) {
+        parseChzImportFault.unexpectedFailuresRemaining -= 1;
+        throw new Error("synthetic unexpected parser failure");
+      }
+      return actual.parseChzImport(input);
+    },
+  };
+});
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -93,6 +110,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
 
   beforeEach(() => {
     objects.clear();
+    parseChzImportFault.unexpectedFailuresRemaining = 0;
     vi.clearAllMocks();
   });
 
@@ -684,6 +702,76 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
         ),
       );
     expect(audit?.after).toMatchObject({ parsedStatus: null, includedGtin14: null });
+  });
+
+  it("rolls back an unexpected parser failure and permits a successful same-digest retry", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent);
+    const inventory = await createInventory(agent, productId, lineId);
+    const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/INTRODUCED/${INTRODUCED_DIGEST}.csv`;
+    parseChzImportFault.unexpectedFailuresRemaining = 1;
+
+    const failed = await upload(agent, inventory.id, "INTRODUCED").expect(500);
+    expect(failed.body).toEqual({ statusCode: 500, message: "Internal server error" });
+    expect(JSON.stringify(failed.body)).not.toMatch(/synthetic|CHZ_IMPORT_PARSE_FAILED|objectKey/i);
+    expect(storage.putVerified).toHaveBeenCalledTimes(1);
+    expect(storage.delete).toHaveBeenCalledTimes(1);
+    expect(storage.delete).toHaveBeenCalledWith(expectedKey);
+    expect(objects.size).toBe(0);
+
+    const importsAfterFailure = await db
+      .select({ id: schema.inventoryImports.id })
+      .from(schema.inventoryImports)
+      .where(
+        and(
+          eq(schema.inventoryImports.tenantId, tenantId),
+          eq(schema.inventoryImports.inventoryId, inventory.id),
+          eq(schema.inventoryImports.declaredStatus, "INTRODUCED"),
+          eq(schema.inventoryImports.sha256, INTRODUCED_DIGEST),
+        ),
+      );
+    expect(importsAfterFailure).toEqual([]);
+    const auditsAfterFailure = await db
+      .select({ id: schema.tenantAuditEvents.id })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "inventory.import.processed"),
+        ),
+      );
+    expect(auditsAfterFailure).toEqual([]);
+    const [inventoryAfterFailure] = await db
+      .select({ status: schema.inventories.status })
+      .from(schema.inventories)
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventory.id)),
+      );
+    expect(inventoryAfterFailure?.status).toBe("draft");
+
+    const retry = await upload(agent, inventory.id, "INTRODUCED").expect(201);
+    expect(retry.body).toMatchObject({
+      declaredStatus: "INTRODUCED",
+      parsedStatus: "INTRODUCED",
+      result: "succeeded",
+      sha256: INTRODUCED_DIGEST,
+    });
+    expect(storage.putVerified).toHaveBeenCalledTimes(2);
+    expect(storage.delete).toHaveBeenCalledTimes(1);
+    expect([...objects.keys()]).toEqual([expectedKey]);
+
+    const durableImports = await db
+      .select({ id: schema.inventoryImports.id })
+      .from(schema.inventoryImports)
+      .where(
+        and(
+          eq(schema.inventoryImports.tenantId, tenantId),
+          eq(schema.inventoryImports.inventoryId, inventory.id),
+          eq(schema.inventoryImports.declaredStatus, "INTRODUCED"),
+          eq(schema.inventoryImports.sha256, INTRODUCED_DIGEST),
+        ),
+      );
+    expect(durableImports).toEqual([{ id: retry.body.id }]);
   });
 
   it("deduplicates concurrent same-file requests only within tenant, inventory, and status", async () => {
