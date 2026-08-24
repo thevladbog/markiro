@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  classifyInventorySnapshotRow,
-  type InventoryChzStatus,
-} from "../src/index.js";
+import { classifyInventorySnapshotRow, type InventoryChzStatus } from "../src/index.js";
 
 const period = {
   productionDateFrom: "2025-09-01",

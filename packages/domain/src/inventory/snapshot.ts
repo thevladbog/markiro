@@ -1,8 +1,4 @@
-import {
-  canDisposeChzCode,
-  type InventoryChzStatus,
-  type InventoryCodeState,
-} from "./status.js";
+import { canDisposeChzCode, type InventoryChzStatus, type InventoryCodeState } from "./status.js";
 
 export interface InventorySnapshotSourceRow {
   /** Normalized upstream to the inventory's GTIN-14 contract. */
