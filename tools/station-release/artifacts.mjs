@@ -623,19 +623,33 @@ async function main() {
       pubDate,
       baseSha,
       releaseSha,
-      ...extra
+      ...channelArguments
     ] = args;
     if (
       !ORIGINS.has(origin) ||
-      channel !== "beta" ||
+      !CHANNELS.has(channel) ||
       !inputDirectory ||
       !outputDirectory ||
       !version ||
       !pubDate ||
       !baseSha ||
-      !releaseSha ||
-      extra.length > 0
+      !releaseSha
     ) {
+      invalid();
+    }
+    let notesPath;
+    let stableProvenance;
+    if (channel === "stable") {
+      const [stableNotesPath, provenanceJsonPath, ...extra] = channelArguments;
+      if (!stableNotesPath || !provenanceJsonPath || extra.length > 0) invalid();
+      await regularFile(provenanceJsonPath, MAX_TEXT_BYTES);
+      try {
+        stableProvenance = JSON.parse(await readFile(provenanceJsonPath, "utf8"));
+      } catch {
+        invalid();
+      }
+      notesPath = stableNotesPath;
+    } else if (channelArguments.length > 0) {
       invalid();
     }
     await stageStationRelease({
@@ -647,6 +661,8 @@ async function main() {
       pubDate,
       baseSha,
       releaseSha,
+      notesPath,
+      stableProvenance,
     });
     return;
   }

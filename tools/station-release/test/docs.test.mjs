@@ -69,6 +69,23 @@ test("station stable docs separate automated release proof from physical accepta
   assert.match(stableRunbook, /source_beta_tag/);
   assert.match(stableRunbook, /acceptance_confirmed/);
   assert.match(stableRunbook, /promote-existing/);
+  assert.match(stableRunbook, /Environment `station-release`/);
+  assert.match(stableRunbook, /mode=seed-baseline/);
+  assert.match(stableRunbook, /seed_stable_tag/);
+  assert.match(stableRunbook, /enableStationReleasePublicDns.*false/is);
+  assert.match(stableRunbook, /legacy.*stable.*rollback baseline/is);
+  assert.match(stableRunbook, /не retrofit|не.*retrofit/is);
+  assert.match(stableRunbook, /GitHub.*Yandex.*beta evidence/is);
+  assert.match(stableRunbook, /station\/stable\/latest\.json/);
+  assert.match(stableRunbook, /https:\/\/releases\.markiro\.app\/station\/download/);
+  assert.match(stableRunbook, /GitHub.*latest\.json.*Yandex.*latest\.json.*station\/download/is);
+  assert.match(stableRunbook, /обратн.*порядк.*alias.*manifest.*GitHub/is);
+  assert.match(
+    stableRunbook,
+    /promote-existing[\s\S]*не пересобирает[\s\S]*не загружает.*immutable/is,
+  );
+  assert.match(stableRunbook, /ограниченн.*сет|restricted network/is);
+  assert.match(stableRunbook, /install-over|поверх существующей установки/i);
   assert.match(stableRunbook, /station-stable-channel/);
   assert.match(stableRunbook, /SmartScreen|неизвестн.*издател/i);
   assert.match(stableRunbook, /beta.*stable/is);
@@ -78,6 +95,18 @@ test("station stable docs separate automated release proof from physical accepta
   assert.match(stableAcceptance, /NOT RUN/);
   assert.match(stableAcceptance, /beta.*stable/is);
   assert.match(stableAcceptance, /stable.*stable/is);
+  assert.match(stableAcceptance, /GitHub beta evidence SHA-256/);
+  assert.match(stableAcceptance, /Yandex beta evidence SHA-256/);
+  assert.match(stableAcceptance, /GitHub stable evidence SHA-256/);
+  assert.match(stableAcceptance, /Yandex stable evidence SHA-256/);
+  assert.match(stableAcceptance, /rollback/i);
+  assert.match(stableAcceptance, /application identity/i);
+  assert.match(stableAcceptance, /SQLite/i);
+  assert.match(stableAcceptance, /pairing/i);
+  assert.match(stableAcceptance, /settings/i);
+  assert.match(stableAcceptance, /journals/i);
+  assert.match(stableAcceptance, /exceptions/i);
+  assert.match(stableAcceptance, /outbox/i);
   assert.match(betaRunbook, /station-stable-release/);
   assert.match(readme, /Manual stable updates/);
   assert.match(checklist, /Station stable/);

@@ -612,6 +612,84 @@ test("CLI retains the GitHub default when staging stable artifacts", async () =>
   assert.equal(manifest.platforms["windows-x86_64"].url, stableBundleUrl);
 });
 
+test("CLI stages and compares explicit GitHub and Yandex stable trees", async () => {
+  const input = await mkdtemp(join(tmpdir(), "markiro-station-cli-stable-origin-input-"));
+  const githubOutput = join(input, "github");
+  const yandexOutput = join(input, "yandex");
+  const notesPath = join(input, "notes.md");
+  const provenancePath = join(input, "provenance.json");
+  for (const [name, content] of [
+    [stableNames.installer, "installer"],
+    [stableNames.bundle, "bundle"],
+    [stableNames.signature, "trusted-signature"],
+  ]) {
+    await writeFile(join(input, name), content);
+  }
+  await writeFile(notesPath, "Stable notes\n");
+  await writeFile(
+    provenancePath,
+    `${JSON.stringify({
+      sourceBetaTag: "station-v0.1.0-beta.19",
+      betaVersion: "0.1.0-beta.19",
+      betaReleaseSha: "b".repeat(40),
+      betaEvidenceSha256: "d".repeat(64),
+      acceptanceConfirmed: true,
+      previousStableTag: null,
+      previousStableBaseSha: null,
+      changelogFromSha: "e".repeat(40),
+      changelogToSha: "a".repeat(40),
+    })}\n`,
+  );
+
+  for (const [origin, output] of [
+    ["github", githubOutput],
+    ["yandex", yandexOutput],
+  ]) {
+    await execFile(process.execPath, [
+      "tools/station-release/artifacts.mjs",
+      "stage-origin",
+      origin,
+      "stable",
+      input,
+      output,
+      stableVersion,
+      "2026-08-20T10:00:00.000Z",
+      "a".repeat(40),
+      "c".repeat(40),
+      notesPath,
+      provenancePath,
+    ]);
+    await execFile(process.execPath, [
+      "tools/station-release/artifacts.mjs",
+      "validate-origin",
+      origin,
+      "stable",
+      output,
+      stableVersion,
+    ]);
+  }
+  await execFile(process.execPath, [
+    "tools/station-release/artifacts.mjs",
+    "compare-origins",
+    githubOutput,
+    yandexOutput,
+    "stable",
+    stableVersion,
+  ]);
+
+  const githubManifest = JSON.parse(
+    await readFile(join(githubOutput, stableNames.manifest), "utf8"),
+  );
+  const yandexManifest = JSON.parse(
+    await readFile(join(yandexOutput, stableNames.manifest), "utf8"),
+  );
+  assert.equal(githubManifest.platforms["windows-x86_64"].url, stableBundleUrl);
+  assert.equal(
+    yandexManifest.platforms["windows-x86_64"].url,
+    `https://releases.markiro.app/station/stable/releases/${stableVersion}/${stableNames.bundle}`,
+  );
+});
+
 test("accepts legacy GitHub beta evidence only through the seed-only validator", async () => {
   const input = await mkdtemp(join(tmpdir(), "markiro-station-legacy-beta-input-"));
   const output = await mkdtemp(join(tmpdir(), "markiro-station-legacy-beta-output-"));
