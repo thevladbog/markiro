@@ -13,6 +13,7 @@ const PUBLIC_BASE_URL = "https://releases.markiro.app";
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const MUTABLE_CACHE_CONTROL = "public, max-age=0, must-revalidate";
 const INSTALLER_CONTENT_TYPE = "application/vnd.microsoft.portable-executable";
+const SOURCE_KEY_METADATA = "station-source-key";
 const MAX_ARTIFACT_BYTES = 512 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES = 64 * 1024;
 const MAX_TEXT_BYTES = 256 * 1024;
@@ -104,6 +105,32 @@ function maxBytesForKey(key) {
     }
   }
   return MAX_TEXT_BYTES;
+}
+
+function immutableContentType(parsed) {
+  if (parsed.assetName === parsed.names.installer) return INSTALLER_CONTENT_TYPE;
+  if (parsed.assetName === parsed.names.bundle) return "application/zip";
+  if (parsed.assetName === parsed.names.manifest || parsed.assetName === parsed.names.evidence) {
+    return "application/json";
+  }
+  if (parsed.assetName === parsed.names.notes) return "text/markdown";
+  return "text/plain";
+}
+
+export async function validateStationImmutableObject({ key, file, contentType } = {}) {
+  const parsed = parseImmutableKey(key);
+  const maxBytes = maxBytesForKey(key);
+  ensureContentType(contentType);
+  if (contentType !== immutableContentType(parsed) || typeof file !== "string") invalid();
+  try {
+    const info = await lstat(file);
+    if (!info.isFile() || info.isSymbolicLink() || info.size <= 0 || info.size > maxBytes) {
+      invalid();
+    }
+  } catch (error) {
+    if (error?.message === "invalid station object storage request") throw error;
+    invalid();
+  }
 }
 
 function isMissing(error) {
@@ -211,14 +238,11 @@ export function createStationObjectStore({
 
     async putImmutable(key, file, contentType) {
       const maxBytes = maxBytesForKey(key);
-      parseImmutableKey(key);
-      ensureContentType(contentType);
-      let info;
+      await validateStationImmutableObject({ key, file, contentType });
       let bytes;
       try {
-        info = await lstat(file);
-        if (!info.isFile() || info.size <= 0 || info.size > maxBytes) invalid();
         bytes = await readFile(file);
+        ensureBytes(bytes, maxBytes);
       } catch (error) {
         if (error?.message === "invalid station object storage request") throw error;
         invalid();
@@ -251,9 +275,17 @@ export function createStationObjectStore({
       }
       try {
         ensureContentType(response.ContentType);
+        const sourceKey = response.Metadata?.[SOURCE_KEY_METADATA] ?? null;
+        if (
+          sourceKey !== null &&
+          (typeof sourceKey !== "string" || sourceKey.length === 0 || sourceKey.length > 1024)
+        ) {
+          throw storageFailure();
+        }
         return {
           bytes: await readBoundedBody(response.Body, response.ContentLength, maxBytes),
           contentType: response.ContentType,
+          sourceKey,
         };
       } catch {
         await closeBody(response?.Body);
@@ -302,6 +334,7 @@ export function createStationObjectStore({
             ContentType: INSTALLER_CONTENT_TYPE,
             ContentDisposition: `attachment; filename="${attachmentFilename}"`,
             CacheControl: MUTABLE_CACHE_CONTROL,
+            Metadata: { [SOURCE_KEY_METADATA]: immutableKey },
           }),
         );
       } catch {

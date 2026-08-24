@@ -92,6 +92,11 @@ test("conditionally uploads only bounded regular immutable files", async () => {
     /invalid station object storage request/,
   );
   assert.equal(client.commands.length, 1);
+  await assert.rejects(
+    createStore(client).putImmutable(immutableKey, file, "application/octet-stream"),
+    /invalid station object storage request/,
+  );
+  assert.equal(client.commands.length, 1);
 });
 
 test("retains mutable content types and bounds S3 response bodies", async () => {
@@ -107,6 +112,7 @@ test("retains mutable content types and bounds S3 response bodies", async () => 
   assert.deepEqual(object, {
     bytes: Buffer.from('{"version":"0.2.0-beta.7"}'),
     contentType: "application/json",
+    sourceKey: null,
   });
   assert.equal(getClient.commands[0].constructor.name, "GetObjectCommand");
 
@@ -136,6 +142,21 @@ test("retains mutable content types and bounds S3 response bodies", async () => 
   );
   assert.equal(consumed, false);
   assert.equal(destroyed, true);
+});
+
+test("returns the publisher-owned immutable source key for installer aliases", async () => {
+  const client = fakeClient(async () => ({
+    Body: Buffer.from("installer"),
+    ContentLength: 9,
+    ContentType: "application/vnd.microsoft.portable-executable",
+    Metadata: { "station-source-key": immutableKey },
+  }));
+
+  assert.deepEqual(await createStore(client).getMutable("station/beta/download"), {
+    bytes: Buffer.from("installer"),
+    contentType: "application/vnd.microsoft.portable-executable",
+    sourceKey: immutableKey,
+  });
 });
 
 test("writes mutable objects with revalidation metadata", async () => {
@@ -171,6 +192,7 @@ test("server-side copies the immutable installer to its matching alias", async (
     ContentType: "application/vnd.microsoft.portable-executable",
     ContentDisposition: `attachment; filename="markiro-station-${version}-windows-x86_64-setup.exe"`,
     CacheControl: "public, max-age=0, must-revalidate",
+    Metadata: { "station-source-key": immutableKey },
   });
 });
 

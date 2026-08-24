@@ -7,11 +7,19 @@ import test from "node:test";
 
 import { stageStationRelease, stationAssetNames } from "../artifacts.mjs";
 import { stationReleaseLocation } from "../origins.mjs";
-import { createYandexPublisher, runYandexPublisherCli } from "../yandex-publisher.mjs";
+import {
+  createYandexPublisher,
+  createYandexPublisherClientConfig,
+  runYandexPublisherCli,
+  runYandexPublisherMain,
+} from "../yandex-publisher.mjs";
 
 const channel = "beta";
 const version = "0.2.0-beta.7";
 const names = stationAssetNames(version);
+const previousVersion = "0.2.0-beta.6";
+const previousNames = stationAssetNames(previousVersion);
+const previousImmutableKey = `station/beta/releases/${previousVersion}/${previousNames.installer}`;
 
 async function stageTree(origin, outputDirectory) {
   const input = await mkdtemp(join(tmpdir(), `markiro-yandex-${origin}-input-`));
@@ -80,13 +88,14 @@ function fakeStore() {
     },
     async putMutable(key, bytes, contentType) {
       calls.push({ method: "putMutable", key, contentType });
-      mutable.set(key, { bytes: Buffer.from(bytes), contentType });
+      mutable.set(key, { bytes: Buffer.from(bytes), contentType, sourceKey: null });
     },
     async copyImmutableToAlias(input) {
       calls.push({ method: "copyImmutableToAlias", ...input });
       mutable.set(input.aliasKey, {
         bytes: Buffer.from(immutable.get(input.immutableKey)),
         contentType: "application/vnd.microsoft.portable-executable",
+        sourceKey: input.immutableKey,
       });
     },
     async readPublic(key) {
@@ -97,6 +106,20 @@ function fakeStore() {
       return Buffer.from(object.bytes);
     },
   };
+}
+
+function setPriorMutables(store) {
+  store.immutable.set(previousImmutableKey, Buffer.from("old installer"));
+  store.mutable.set("station/beta/latest.json", {
+    bytes: Buffer.from("old manifest"),
+    contentType: "application/json",
+    sourceKey: null,
+  });
+  store.mutable.set("station/beta/download", {
+    bytes: Buffer.from("old installer"),
+    contentType: "application/vnd.microsoft.portable-executable",
+    sourceKey: previousImmutableKey,
+  });
 }
 
 async function loadImmutableTree(store, tree) {
@@ -116,6 +139,22 @@ function permissionBits(info) {
 test("validates a staged tree before the first S3 request", async () => {
   const tree = await yandexTree();
   await writeFile(join(tree, "unexpected.txt"), "unexpected");
+  const store = fakeStore();
+
+  await assert.rejects(
+    createYandexPublisher({ store }).publishImmutable({ tree, channel, version }),
+    /invalid station release publication/,
+  );
+  assert.deepEqual(store.calls, []);
+});
+
+test("preflights exact object-store limits before the first immutable request", async () => {
+  const tree = await yandexTree();
+  const evidencePath = join(tree, names.evidence);
+  await writeFile(
+    evidencePath,
+    `${(await readFile(evidencePath, "utf8")).trim()}${" ".repeat(256 * 1024)}\n`,
+  );
   const store = fakeStore();
 
   await assert.rejects(
@@ -177,6 +216,7 @@ test("requires both current mutable objects before creating a backup", async () 
   store.mutable.set("station/beta/latest.json", {
     bytes: Buffer.from("old manifest"),
     contentType: "application/json",
+    sourceKey: null,
   });
 
   await assert.rejects(
@@ -190,14 +230,7 @@ test("writes a complete private mutable backup with retained content types", asy
   const directory = await mkdtemp(join(tmpdir(), "markiro-backup-parent-"));
   const backupDirectory = join(directory, "backup");
   const store = fakeStore();
-  store.mutable.set("station/beta/latest.json", {
-    bytes: Buffer.from("old manifest"),
-    contentType: "application/json",
-  });
-  store.mutable.set("station/beta/download", {
-    bytes: Buffer.from("old installer"),
-    contentType: "application/vnd.microsoft.portable-executable",
-  });
+  setPriorMutables(store);
 
   await createYandexPublisher({ store }).backupMutables({ channel, backupDirectory });
 
@@ -205,17 +238,24 @@ test("writes a complete private mutable backup with retained content types", asy
   assert.equal(backup.schemaVersion, 1);
   assert.equal(backup.channel, channel);
   assert.deepEqual(
-    backup.objects.map(({ key, contentType, sha256 }) => ({ key, contentType, sha256 })),
+    backup.objects.map(({ key, contentType, sha256, sourceKey }) => ({
+      key,
+      contentType,
+      sha256,
+      sourceKey,
+    })),
     [
       {
         key: "station/beta/latest.json",
         contentType: "application/json",
         sha256: digest(Buffer.from("old manifest")),
+        sourceKey: null,
       },
       {
         key: "station/beta/download",
         contentType: "application/vnd.microsoft.portable-executable",
         sha256: digest(Buffer.from("old installer")),
+        sourceKey: previousImmutableKey,
       },
     ],
   );
@@ -231,14 +271,7 @@ test("refuses an existing backup directory without removing its contents", async
   const marker = join(backupDirectory, "belongs-to-user.txt");
   await writeFile(marker, "preserve me");
   const store = fakeStore();
-  store.mutable.set("station/beta/latest.json", {
-    bytes: Buffer.from("old manifest"),
-    contentType: "application/json",
-  });
-  store.mutable.set("station/beta/download", {
-    bytes: Buffer.from("old installer"),
-    contentType: "application/vnd.microsoft.portable-executable",
-  });
+  setPriorMutables(store);
 
   await assert.rejects(
     createYandexPublisher({ store }).backupMutables({ channel, backupDirectory }),
@@ -287,20 +320,121 @@ test("seeds only a complete dual-origin tree after public immutable verification
   );
 });
 
+test("compensates a seed failure after manifest mutation with the complete baseline", async () => {
+  const tree = await dualTree();
+  const backupDirectory = join(
+    await mkdtemp(join(tmpdir(), "markiro-seed-manifest-failure-")),
+    "backup",
+  );
+  const store = fakeStore();
+  await loadImmutableTree(store, join(tree, "yandex"));
+  let manifestReads = 0;
+  store.setReadHook(async (key) => {
+    if (key === "station/beta/latest.json" && manifestReads++ === 0) {
+      throw new Error("injected first manifest verification failure");
+    }
+  });
+
+  await assert.rejects(
+    createYandexPublisher({ store }).seedBaseline({ tree, channel, backupDirectory }),
+    /station release publication failed/,
+  );
+
+  assert.deepEqual(
+    store.calls
+      .filter((call) => ["putMutable", "copyImmutableToAlias"].includes(call.method))
+      .map((call) => `${call.method}:${call.key ?? call.aliasKey}`),
+    [
+      "putMutable:station/beta/latest.json",
+      "putMutable:station/beta/latest.json",
+      "copyImmutableToAlias:station/beta/download",
+    ],
+  );
+  assert.deepEqual(
+    store.mutable.get("station/beta/latest.json").bytes,
+    await readFile(join(tree, "yandex", names.manifest)),
+  );
+  assert.deepEqual(
+    store.mutable.get("station/beta/download").bytes,
+    await readFile(join(tree, "yandex", names.installer)),
+  );
+});
+
+test("compensates a seed failure after alias mutation with the complete baseline", async () => {
+  const tree = await dualTree();
+  const backupDirectory = join(
+    await mkdtemp(join(tmpdir(), "markiro-seed-alias-failure-")),
+    "backup",
+  );
+  const store = fakeStore();
+  await loadImmutableTree(store, join(tree, "yandex"));
+  let aliasReads = 0;
+  store.setReadHook(async (key) => {
+    if (key === "station/beta/download" && aliasReads++ === 0) {
+      throw new Error("injected first alias verification failure");
+    }
+  });
+
+  await assert.rejects(
+    createYandexPublisher({ store }).seedBaseline({ tree, channel, backupDirectory }),
+    /station release publication failed/,
+  );
+
+  assert.deepEqual(
+    store.calls
+      .filter((call) => ["putMutable", "copyImmutableToAlias"].includes(call.method))
+      .map((call) => `${call.method}:${call.key ?? call.aliasKey}`),
+    [
+      "putMutable:station/beta/latest.json",
+      "copyImmutableToAlias:station/beta/download",
+      "putMutable:station/beta/latest.json",
+      "copyImmutableToAlias:station/beta/download",
+    ],
+  );
+  assert.deepEqual(
+    store.mutable.get("station/beta/latest.json").bytes,
+    await readFile(join(tree, "yandex", names.manifest)),
+  );
+  assert.deepEqual(
+    store.mutable.get("station/beta/download").bytes,
+    await readFile(join(tree, "yandex", names.installer)),
+  );
+});
+
+test("reports a distinct hard failure when seed compensation cannot restore the baseline", async () => {
+  const tree = await dualTree();
+  const backupDirectory = join(
+    await mkdtemp(join(tmpdir(), "markiro-seed-recovery-failure-")),
+    "backup",
+  );
+  const store = fakeStore();
+  await loadImmutableTree(store, join(tree, "yandex"));
+  let manifestReads = 0;
+  store.setReadHook(async (key) => {
+    if (key === "station/beta/latest.json" && manifestReads++ === 0) {
+      throw new Error("injected first manifest verification failure");
+    }
+  });
+  const putMutable = store.putMutable.bind(store);
+  let manifestPuts = 0;
+  store.putMutable = async (...args) => {
+    if (manifestPuts++ === 1) throw new Error("injected compensation write failure");
+    return putMutable(...args);
+  };
+
+  await assert.rejects(
+    createYandexPublisher({ store }).seedBaseline({ tree, channel, backupDirectory }),
+    /station release baseline recovery failed/,
+  );
+});
+
 test("promotes manifest then alias and restores both when public verification fails", async () => {
   const tree = await yandexTree();
   const parent = await mkdtemp(join(tmpdir(), "markiro-promote-parent-"));
   const backupDirectory = join(parent, "backup");
   const store = fakeStore();
   await loadImmutableTree(store, tree);
-  store.mutable.set("station/beta/latest.json", {
-    bytes: Buffer.from("old manifest"),
-    contentType: "application/json",
-  });
-  store.mutable.set("station/beta/download", {
-    bytes: Buffer.from("old installer"),
-    contentType: "application/vnd.microsoft.portable-executable",
-  });
+  setPriorMutables(store);
   const publisher = createYandexPublisher({ store });
   await publisher.backupMutables({ channel, backupDirectory });
   store.calls.length = 0;
@@ -324,7 +458,7 @@ test("promotes manifest then alias and restores both when public verification fa
     "putMutable:station/beta/latest.json",
     "copyImmutableToAlias:station/beta/download",
     "putMutable:station/beta/latest.json",
-    "putMutable:station/beta/download",
+    "copyImmutableToAlias:station/beta/download",
   ]);
   assert.deepEqual(
     store.mutable.get("station/beta/latest.json").bytes,
@@ -341,14 +475,7 @@ test("verifies backup hashes before rollback and only restores mutable keys", as
   const parent = await mkdtemp(join(tmpdir(), "markiro-rollback-parent-"));
   const backupDirectory = join(parent, "backup");
   const store = fakeStore();
-  store.mutable.set("station/beta/latest.json", {
-    bytes: Buffer.from("old manifest"),
-    contentType: "application/json",
-  });
-  store.mutable.set("station/beta/download", {
-    bytes: Buffer.from("old installer"),
-    contentType: "application/vnd.microsoft.portable-executable",
-  });
+  setPriorMutables(store);
   const publisher = createYandexPublisher({ store });
   await publisher.backupMutables({ channel, backupDirectory });
   const backup = JSON.parse(await readFile(join(backupDirectory, "backup.json"), "utf8"));
@@ -377,20 +504,35 @@ test("verifies backup hashes before rollback and only restores mutable keys", as
       .every((call) => !call.key.includes("/releases/")),
     true,
   );
+  assert.deepEqual(
+    store.calls
+      .filter((call) => call.method === "copyImmutableToAlias")
+      .map(({ immutableKey, aliasKey, attachmentFilename }) => ({
+        immutableKey,
+        aliasKey,
+        attachmentFilename,
+      })),
+    [
+      {
+        immutableKey: previousImmutableKey,
+        aliasKey: "station/beta/download",
+        attachmentFilename: previousNames.installer,
+      },
+    ],
+  );
+  assert.equal(
+    store.calls.some(
+      (call) => call.method === "putMutable" && call.key === "station/beta/download",
+    ),
+    false,
+  );
 });
 
 test("rejects a hash-valid oversized mutable backup before object storage", async () => {
   const parent = await mkdtemp(join(tmpdir(), "markiro-oversized-backup-parent-"));
   const backupDirectory = join(parent, "backup");
   const store = fakeStore();
-  store.mutable.set("station/beta/latest.json", {
-    bytes: Buffer.from("old manifest"),
-    contentType: "application/json",
-  });
-  store.mutable.set("station/beta/download", {
-    bytes: Buffer.from("old installer"),
-    contentType: "application/vnd.microsoft.portable-executable",
-  });
+  setPriorMutables(store);
   const publisher = createYandexPublisher({ store });
   await publisher.backupMutables({ channel, backupDirectory });
   const indexPath = join(backupDirectory, "backup.json");
@@ -406,6 +548,34 @@ test("rejects a hash-valid oversized mutable backup before object storage", asyn
     /invalid station release backup/,
   );
   assert.deepEqual(store.calls, []);
+});
+
+test("rejects an alias backup whose source is not the same-channel immutable installer", async () => {
+  const invalidSources = [
+    `station/beta/releases/${previousVersion}/${previousNames.signature}`,
+    "station/stable/releases/0.2.0/markiro-station-0.2.0-windows-x86_64-setup.exe",
+  ];
+  for (const sourceKey of invalidSources) {
+    const backupDirectory = join(
+      await mkdtemp(join(tmpdir(), "markiro-invalid-source-backup-")),
+      "backup",
+    );
+    const store = fakeStore();
+    setPriorMutables(store);
+    const publisher = createYandexPublisher({ store });
+    await publisher.backupMutables({ channel, backupDirectory });
+    const indexPath = join(backupDirectory, "backup.json");
+    const backup = JSON.parse(await readFile(indexPath, "utf8"));
+    backup.objects[1].sourceKey = sourceKey;
+    await writeFile(indexPath, `${JSON.stringify(backup)}\n`);
+    store.calls.length = 0;
+
+    await assert.rejects(
+      publisher.rollback({ channel, backupDirectory }),
+      /invalid station release backup/,
+    );
+    assert.deepEqual(store.calls, []);
+  }
 });
 
 test("CLI permits only the six bounded commands and no promote-existing or credential flags", async () => {
@@ -441,4 +611,64 @@ test("CLI permits only the six bounded commands and no promote-existing or crede
     /invalid station release publisher command/,
   );
   assert.equal(calls.length, 1);
+});
+
+test("constructs an explicit bounded environment-only AWS credential object", () => {
+  assert.deepEqual(
+    createYandexPublisherClientConfig({
+      YANDEX_STATION_RELEASE_ENDPOINT: "https://storage.yandexcloud.net",
+      YANDEX_STATION_RELEASE_BUCKET: "markiro-station-releases",
+      AWS_ACCESS_KEY_ID: "A".repeat(20),
+      AWS_SECRET_ACCESS_KEY: "s".repeat(40),
+      AWS_SESSION_TOKEN: "temporary-session-token",
+    }),
+    {
+      bucket: "markiro-station-releases",
+      client: {
+        endpoint: "https://storage.yandexcloud.net",
+        region: "ru-central1",
+        maxAttempts: 3,
+        credentials: {
+          accessKeyId: "A".repeat(20),
+          secretAccessKey: "s".repeat(40),
+          sessionToken: "temporary-session-token",
+        },
+      },
+    },
+  );
+});
+
+test("rejects missing or malformed environment credentials before client construction", async () => {
+  const base = {
+    YANDEX_STATION_RELEASE_ENDPOINT: "https://storage.yandexcloud.net",
+    YANDEX_STATION_RELEASE_BUCKET: "markiro-station-releases",
+    AWS_ACCESS_KEY_ID: "A".repeat(20),
+    AWS_SECRET_ACCESS_KEY: "s".repeat(40),
+  };
+  const environments = [
+    { ...base, AWS_ACCESS_KEY_ID: undefined },
+    { ...base, AWS_SECRET_ACCESS_KEY: undefined },
+    { ...base, AWS_ACCESS_KEY_ID: "short" },
+    { ...base, AWS_SECRET_ACCESS_KEY: "secret-value\nleak-sentinel" },
+    { ...base, AWS_SESSION_TOKEN: "x".repeat(4097) },
+  ];
+
+  for (const env of environments) {
+    let constructed = 0;
+    class InjectedClient {
+      constructor() {
+        constructed += 1;
+      }
+    }
+    await assert.rejects(
+      runYandexPublisherMain(["rollback", channel, "/tmp/backup"], {
+        env,
+        Client: InjectedClient,
+      }),
+      (error) =>
+        error.message === "invalid station release publisher environment" &&
+        !error.message.includes("leak-sentinel"),
+    );
+    assert.equal(constructed, 0);
+  }
 });
