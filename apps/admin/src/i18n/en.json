@@ -225,10 +225,9 @@
     "conflicts": "Conflicts",
     "counterparties": "Counterparties",
     "labels": "Labels",
-    "pickup": "Self-pickup",
+    "pickup": "Disposal",
     "disaggregation": "Disaggregation",
     "employees": "Operators and employees",
-    "kiosks": "Kiosks",
     "devices": "Devices",
     "integrations": "Integrations",
     "team": "Cabinet access",
@@ -1120,7 +1119,13 @@
       }
     },
     "pickup": {
-      "title": "Self-pickup",
+      "title": "Disposal",
+      "views": {
+        "label": "Disposal views",
+        "orders": "Orders",
+        "rejections": "Rejected scans",
+        "reasons": "Reasons"
+      },
       "emptyTitle": "No orders yet",
       "emptyHint": "Orders will appear here once employees start picking up items at the self-service kiosk.",
       "addAction": "Bulk export",
@@ -1697,10 +1702,6 @@
       }
     },
     "kiosks": {
-      "title": "Kiosks",
-      "emptyTitle": "No kiosks yet",
-      "emptyHint": "Add your first self-service kiosk for personal pickups.",
-      "addAction": "Add kiosk",
       "edit": "Edit",
       "archive": "Archive",
       "cancel": "Cancel",
@@ -1709,50 +1710,13 @@
       "archiveConfirmAction": "Archive",
       "archivePersistentError": "Could not archive the kiosk. Try again.",
       "retry": "Retry",
-      "views": {
-        "label": "Kiosk views",
-        "kiosks": "Kiosks",
-        "reasons": "Write-off reasons"
-      },
-      "resultCount_one": "{{count}} kiosk",
-      "resultCount_few": "{{count}} kiosks",
-      "resultCount_many": "{{count}} kiosks",
-      "resultCount_other": "{{count}} kiosks",
-      "lastActivity": "Last activity",
-      "lastActivityAccessible": "{{relative}}. Exact time: {{absolute}}.",
-      "neverActivity": "Never",
-      "filteredEmptyTitle": "No kiosks match this state",
-      "filteredEmptyHint": "Change or reset the state filter to see all kiosks.",
-      "filters": {
-        "label": "Kiosk filters",
-        "reset": "Reset",
-        "stateLabel": "State",
-        "state": {
-          "all": "All states"
-        }
-      },
       "states": {
         "archived": "Archived",
         "awaiting-pairing": "Awaiting pairing",
         "online": "Online",
         "offline": "Offline"
       },
-      "onlineStatus": {
-        "online": "Online",
-        "offline": "Offline"
-      },
-      "status": {
-        "active": "Active",
-        "archived": "Archived"
-      },
       "table": {
-        "name": "Name",
-        "location": "Location",
-        "online": "Status",
-        "state": "State",
-        "lastActivity": "Activity",
-        "dayLimit": "Limit/employee",
-        "showPrices": "Prices",
         "actions": "Actions"
       },
       "form": {
@@ -1804,7 +1768,6 @@
         "saveError": "Could not save the product list."
       },
       "pairing": {
-        "action": "Pairing code",
         "panelTitle": "Pair kiosk",
         "safeHint": "Prepare kiosk “{{name}}” for pairing. The code will be shown only once.",
         "invalidationWarning": "A new code invalidates any previously issued code that has not been used.",

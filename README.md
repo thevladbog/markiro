@@ -51,7 +51,7 @@ The platform is built for real production constraints: multiple terminals in one
   </tr>
   <tr>
     <td><strong>Admin panel.</strong> Products, shifts, label templates, integrations, teams, pickup orders, and operational audit.</td>
-    <td><strong>Pickup kiosk.</strong> Badge-based employee pickup with local limits, offline snapshots, queued orders, and recovery.</td>
+    <td><strong>Disposal kiosk.</strong> Badge-based employee pickup with local limits, offline snapshots, queued orders, and recovery.</td>
   </tr>
 </table>
 
@@ -65,7 +65,7 @@ The platform is built for real production constraints: multiple terminals in one
 | Production            | Shifts, multi-terminal scanning, offline journals, synchronization, conflicts, operator recovery actions |
 | Aggregation           | SSCC pools, boxes, box labels, disassembly/reprint audit, shared aggregation state                       |
 | Labels                | WYSIWYG templates, Cyrillic rasterization, ZPL/TSPL generation, product/shift bindings                   |
-| Pickup                | Paired kiosks, badge resolution, daily limits, offline queue/quarantine, cabinet reconciliation          |
+| Disposal              | Paired kiosks, badge resolution, daily limits, offline queue/quarantine, cabinet reconciliation          |
 | SaaS and integrations | Multi-tenant cabinet, roles/capabilities, CommerceML/1C exchange, mail delivery, private object storage  |
 
 ## Architecture
