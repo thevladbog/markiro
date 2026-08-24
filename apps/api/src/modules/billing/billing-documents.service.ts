@@ -107,7 +107,7 @@ export class BillingDocumentsService {
           revision,
           format,
           status: "pending" as const,
-          rendererVersion: "billing-print-v1",
+          rendererVersion: "billing-print-v2",
         })),
       )
       .onConflictDoNothing({
@@ -151,7 +151,7 @@ export class BillingDocumentsService {
           contentType,
           sha256: createHash("sha256").update(body).digest("hex"),
           byteSize: body.byteLength,
-          rendererVersion: "billing-print-v1",
+          rendererVersion: "billing-print-v2",
           updatedAt: new Date(),
           errorCode: null,
         })

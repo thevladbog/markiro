@@ -3,7 +3,56 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { renderPrintHtml } from "../src/modules/billing/print-document-html";
+import { documentBarcodeValue } from "../src/modules/billing/print-document-layout";
 import { renderPrintPdf } from "../src/modules/billing/print-document-pdf";
+import type { PrintDocumentModel, PrintLine } from "../src/modules/billing/print-document-model";
+
+const baseLine: PrintLine = {
+  position: 1,
+  name: "Лицензия Markiro — Производство",
+  description: "Доступ к платформе на один месяц",
+  unit: "месяц",
+  quantity: 1,
+  unitPrice: "12000.00",
+  vatIncluded: true,
+  lineTotal: "12000.00",
+};
+
+const baseInvoice: PrintDocumentModel = {
+  kind: "invoice",
+  number: "184",
+  status: "issued",
+  issuedOrPublishedAt: new Date("2026-08-24T14:40:00.000Z"),
+  dueOrExpiresAt: new Date("2026-08-31T20:59:59.000Z"),
+  seller: {
+    legalName: "ИП Богатырёв Владислав Сергеевич",
+    taxId: "000000000000",
+    registrationId: "000000000000000",
+    kpp: null,
+    address: "Москва, ул. Примерная, 1",
+    bankAccount: "40802810500001234567",
+    bankName: "Банк АО «Точка»",
+    bic: "044525104",
+    correspondentAccount: "30101810745374525104",
+    currency: "RUB",
+  },
+  buyer: {
+    legalName: "ООО Покупатель",
+    taxId: "7700000000",
+    kpp: "770001001",
+    registrationId: "1000000000000",
+    address: "Москва, ул. Тестовая, 2",
+  },
+  lines: [baseLine],
+  subtotal: "12000.00",
+  vatTotal: "0.00",
+  total: "12000.00",
+  termsHtml: null,
+};
+
+const count = (value: string, needle: string) => value.split(needle).length - 1;
+const countPdfPages = (pdf: Buffer) =>
+  (pdf.toString("latin1").match(/\/Type\s*\/Page\b/g) ?? []).length;
 
 describe("print document HTML renderer", () => {
   it("ships the bundled Cyrillic fonts used by PDF output", () => {
@@ -31,6 +80,40 @@ describe("print document HTML renderer", () => {
         termsHtml: null,
       }),
     ).toContain("ООО Оператор");
+  });
+
+  it("renders the approved invoice hierarchy without duplicate labels", () => {
+    const html = renderPrintHtml(baseInvoice);
+
+    expect(count(html, "СЧЁТ НА ОПЛАТУ")).toBe(1);
+    expect(html).toContain("№ 184 · 24.08.2026");
+    expect(html).toContain("Лицензия и услуги платформы Markiro");
+    expect(html).not.toContain("Основной расчётный счёт");
+    expect(html).not.toContain("Оплатить по QR");
+    expect(html).toContain('aria-label="QR-код для оплаты счёта"');
+    expect(html).toContain('aria-label="Штрихкод формы"');
+    expect(count(html, "Сформировано системой Markiro")).toBe(1);
+  });
+
+  it("renders offer cooperation terms and its non-invoice notice", () => {
+    const html = renderPrintHtml({
+      ...baseInvoice,
+      kind: "offer",
+      number: "КП-27",
+      status: "published",
+      termsHtml: "<p>Стоимость фиксируется на 30 календарных дней.</p>",
+    });
+
+    expect(count(html, "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ")).toBe(1);
+    expect(html).toContain("УСЛОВИЯ СОТРУДНИЧЕСТВА");
+    expect(html).toContain("Стоимость фиксируется на 30 календарных дней.");
+    expect(html).toContain("Не является счётом на оплату");
+  });
+
+  it("keeps the machine barcode ASCII-safe for Cyrillic offer numbers", () => {
+    expect(documentBarcodeValue({ ...baseInvoice, kind: "offer", number: "КП-27" })).toBe(
+      "OFR-0JrQny0yNw",
+    );
   });
 
   it("renders a line comment below the item name in HTML", () => {
@@ -121,5 +204,23 @@ describe("print document HTML renderer", () => {
     });
 
     expect(withComment.byteLength).not.toBe(withoutComment.byteLength);
+  });
+
+  it("lays out a long invoice as two explicitly numbered pages", async () => {
+    const lines = Array.from({ length: 15 }, (_, index) => ({
+      ...baseLine,
+      position: index + 1,
+      name: `Позиция ${index + 1}`,
+      description: `Комментарий к позиции ${index + 1}`,
+    }));
+
+    const model = { ...baseInvoice, lines };
+    const html = renderPrintHtml(model);
+    const pdf = await renderPrintPdf(model);
+
+    expect(countPdfPages(pdf)).toBe(2);
+    expect(html).toContain("Лист 1 из 2");
+    expect(html).toContain("Лист 2 из 2");
+    expect(count(html, "БАНКОВСКИЕ РЕКВИЗИТЫ")).toBe(1);
   });
 });
