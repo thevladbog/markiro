@@ -583,7 +583,7 @@ export function guardProductionPlan(plan) {
       rejected();
     if (safeProductionResources.has(resource.address)) {
       const allowed = directVmDnsAddresses.has(resource.address)
-        ? ["no-op", "update"]
+        ? ["no-op", "create", "update", "delete"]
         : resource.address.includes(".data.")
           ? ["no-op", "read"]
           : ["no-op"];

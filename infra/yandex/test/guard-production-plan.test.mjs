@@ -381,19 +381,24 @@ test("production plan guard classifies every safe production action exactly", as
     "update",
   ];
   reject(protectedUpdate);
+});
 
-  for (const actions of [["create"], ["delete"]]) {
-    const dns = copy(safe);
-    dns.resource_changes.push({
-      address: directVmDnsAddresses[0],
-      type: "yandex_dns_recordset",
-      change: {
-        actions,
-        before: actions[0] === "create" ? null : { name: "admin.markiro.app.", type: "A" },
-        after: actions[0] === "delete" ? null : { name: "admin.markiro.app.", type: "A" },
-      },
-    });
-    reject(dns);
+test("production plan guard permits direct-VM DNS flag enable and disable transitions", async () => {
+  const safe = await readFixture("safe");
+  for (const address of directVmDnsAddresses) {
+    for (const actions of [["create"], ["delete"]]) {
+      const dns = copy(safe);
+      dns.resource_changes.push({
+        address,
+        type: "yandex_dns_recordset",
+        change: {
+          actions,
+          before: actions[0] === "create" ? null : { name: "admin.markiro.app.", type: "A" },
+          after: actions[0] === "delete" ? null : { name: "admin.markiro.app.", type: "A" },
+        },
+      });
+      assert.doesNotThrow(() => guardProductionPlan(dns));
+    }
   }
 });
 

@@ -1639,7 +1639,7 @@ where
 
     let primary_origin = StationReleaseOrigin::Yandex;
     let mut monotonic_progress = MonotonicProgress::new(progress);
-    let selected = match recheck_exact_candidate(
+    let (selected_origin, selected) = match recheck_exact_candidate(
         discovery,
         channel,
         primary_origin,
@@ -1649,7 +1649,7 @@ where
     )
     .await
     {
-        Ok(candidate) => candidate,
+        Ok(candidate) => (primary_origin, candidate),
         Err(CandidateRecheckFailure::Discovery(DiscoveryFailure::Availability(
             reason,
             _detail,
@@ -1668,7 +1668,7 @@ where
             monotonic_progress
                 .fallback(primary_origin, peer_origin, reason)
                 .map_err(terminal_package_error)?;
-            peer
+            (peer_origin, peer)
         }
         Err(CandidateRecheckFailure::Discovery(DiscoveryFailure::MetadataInvalid(_detail))) => {
             let peer_origin = primary_origin.peer();
@@ -1689,7 +1689,7 @@ where
                     StationPackageFallbackReason::Metadata,
                 )
                 .map_err(terminal_package_error)?;
-            peer
+            (peer_origin, peer)
         }
         Err(failure) => return Err(failure.terminal()),
     };
@@ -1700,9 +1700,9 @@ where
     let (installer, package) = match selected_download {
         Ok(package) => (selected, package),
         Err(failure) => match package_fallback_reason(&failure) {
-            Some(reason) => {
+            Some(reason) if selected_origin == primary_origin => {
                 drop(selected);
-                let peer_origin = primary_origin.peer();
+                let peer_origin = selected_origin.peer();
                 let peer = recheck_exact_candidate(
                     discovery,
                     channel,
@@ -1714,7 +1714,7 @@ where
                 .await
                 .map_err(CandidateRecheckFailure::terminal)?;
                 monotonic_progress
-                    .fallback(primary_origin, peer_origin, reason)
+                    .fallback(selected_origin, peer_origin, reason)
                     .map_err(terminal_package_error)?;
                 let package = packages
                     .download(&peer, &mut monotonic_progress, transfer)
@@ -1722,7 +1722,7 @@ where
                     .map_err(terminal_package_error)?;
                 (peer, package)
             }
-            None => return Err(terminal_package_error(failure)),
+            Some(_) | None => return Err(terminal_package_error(failure)),
         },
     };
 
@@ -3575,6 +3575,70 @@ mod tests {
         assert!(error.retryable);
         assert!(packages.download_calls().is_empty());
         assert!(progress.events.is_empty());
+    }
+
+    #[test]
+    fn download_sustained_yandex_outage_does_not_retry_github_package_or_fallback_twice() {
+        let discovery = FakeTransport::new(vec![
+            (
+                StationReleaseOrigin::Yandex,
+                FakeOutcome::Failure(DiscoveryFailure::Availability(
+                    StationPackageFallbackReason::Timeout,
+                    "controlled primary timeout".into(),
+                )),
+            ),
+            (
+                StationReleaseOrigin::Github,
+                FakeOutcome::Update(candidate(StationReleaseOrigin::Github)),
+            ),
+            (
+                StationReleaseOrigin::Github,
+                FakeOutcome::Update(candidate(StationReleaseOrigin::Github)),
+            ),
+        ]);
+        let packages = FakePackageTransport::new(vec![
+            FakeDownload::failure(
+                None,
+                vec![],
+                PackageDownloadFailure::Plugin {
+                    source: tauri_plugin_updater::Error::Network("HTTP 503 fixture".into()),
+                    before_complete: true,
+                },
+            ),
+            FakeDownload::success(9, vec![9], b"must-not-be-retried"),
+        ]);
+        let mut progress = RecordingProgress::default();
+
+        let error = run_candidate_install(
+            accepted_candidate(StationReleaseOrigin::Github),
+            &discovery,
+            &packages,
+            &mut progress,
+        )
+        .expect_err("GitHub package failure after metadata fallback is terminal for this attempt");
+
+        assert_eq!(error.code, StationUpdateErrorCode::OriginsUnavailable);
+        assert!(error.retryable);
+        assert_eq!(
+            discovery.calls(),
+            vec![
+                (StationReleaseOrigin::Yandex, BETA_YANDEX_ENDPOINT),
+                (StationReleaseOrigin::Github, BETA_GITHUB_ENDPOINT),
+            ]
+        );
+        assert_eq!(
+            packages.download_calls(),
+            vec![candidate(StationReleaseOrigin::Github).0.download_url]
+        );
+        assert!(packages.install_calls().is_empty());
+        assert_eq!(
+            progress
+                .events
+                .iter()
+                .filter(|event| matches!(event, StationUpdateProgress::Fallback { .. }))
+                .count(),
+            1
+        );
     }
 
     #[test]
