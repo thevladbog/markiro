@@ -155,6 +155,210 @@ test("media and temporarily retained audit data are private, versioned, encrypte
   assert.doesNotMatch(storage, /audit_writer|audit_uploader|audit_service_account/);
 });
 
+test("Station releases use one protected versioned bucket and a prefix-limited publisher identity", async () => {
+  const [releases, variables, outputs] = await Promise.all([
+    source("infra/yandex/modules/station-releases/main.tf"),
+    source("infra/yandex/modules/station-releases/variables.tf"),
+    source("infra/yandex/modules/station-releases/outputs.tf"),
+  ]);
+
+  assert.match(
+    releases,
+    /required_providers\s*\{[\s\S]*source\s*=\s*"yandex-cloud\/yandex"[\s\S]*version\s*=\s*"= 0\.215\.0"/,
+  );
+  const bucket = block(releases, 'resource "yandex_storage_bucket" "releases"');
+  assert.match(bucket, /bucket\s*=\s*var\.bucket_name/);
+  assert.match(bucket, /folder_id\s*=\s*var\.folder_id/);
+  assert.match(bucket, /force_destroy\s*=\s*false/);
+  assert.match(
+    bucket,
+    /anonymous_access_flags\s*\{[\s\S]*read\s*=\s*true[\s\S]*list\s*=\s*false[\s\S]*config_read\s*=\s*false/,
+  );
+  assert.match(bucket, /versioning\s*\{[\s\S]*enabled\s*=\s*true/);
+  assert.match(bucket, /lifecycle\s*\{[\s\S]*prevent_destroy\s*=\s*true/);
+  assert.doesNotMatch(bucket, /lifecycle_rule|expiration|noncurrent_version_expiration/);
+
+  const publisher = block(
+    releases,
+    'resource "yandex_iam_service_account" "station_release_publisher"',
+  );
+  assert.match(publisher, /folder_id\s*=\s*var\.folder_id/);
+  const publisherKey = block(
+    releases,
+    'resource "yandex_iam_service_account_static_access_key" "publisher"',
+  );
+  assert.match(
+    publisherKey,
+    /service_account_id\s*=\s*yandex_iam_service_account\.station_release_publisher\.id/,
+  );
+  assert.match(publisherKey, /pgp_key\s*=\s*var\.publisher_pgp_key/);
+  assert.doesNotMatch(publisherKey, /\bsecret_key\s*=/);
+
+  const uploader = block(
+    releases,
+    'resource "yandex_storage_bucket_iam_binding" "publisher_uploader"',
+  );
+  assert.match(uploader, /bucket\s*=\s*yandex_storage_bucket\.releases\.bucket/);
+  assert.match(uploader, /role\s*=\s*"storage\.uploader"/);
+  assert.match(
+    uploader,
+    /members\s*=\s*\["serviceAccount:\$\{yandex_iam_service_account\.station_release_publisher\.id\}"\]/,
+  );
+
+  const policy = block(releases, 'resource "yandex_storage_bucket_policy" "releases"');
+  assert.match(policy, /AllowPublicStationReleaseObjects/);
+  assert.match(policy, /Principal\s*=\s*"\*"/);
+  assert.match(policy, /Action\s*=\s*\["s3:GetObject"\]/);
+  assert.match(
+    policy,
+    /AllowPublisherStationObjects[\s\S]*Action\s*=\s*\["s3:GetObject",\s*"s3:PutObject"\]/,
+  );
+  assert.match(
+    policy,
+    /AllowPublisherStationBucketPreflight[\s\S]*Action\s*=\s*\["s3:GetBucketLocation",\s*"s3:ListBucket"\]/,
+  );
+  assert.match(
+    policy,
+    /Condition\s*=\s*\{[\s\S]*StringLike\s*=\s*\{[\s\S]*"s3:prefix"\s*=\s*\["station\/\*"\]/,
+  );
+  assert.match(
+    policy,
+    /Resource\s*=\s*\["arn:aws:s3:::\$\{yandex_storage_bucket\.releases\.bucket\}\/station\/\*"\]/,
+  );
+  assert.match(
+    policy,
+    /AllowTerraformReleaseManagement[\s\S]*CanonicalUser\s*=\s*var\.terraform_service_account_id/,
+  );
+  assert.doesNotMatch(policy, /DeleteObject|DeleteObjectVersion|s3:Delete/);
+  assert.doesNotMatch(
+    releases,
+    /app_service_account|runtime_service_account|deploy_service_account|backup_service_account/,
+  );
+
+  const pgpVariable = block(variables, 'variable "publisher_pgp_key"');
+  assert.match(pgpVariable, /type\s*=\s*string/);
+  assert.match(pgpVariable, /sensitive\s*=\s*true/);
+  for (const outputName of ["publisher_access_key_id", "publisher_encrypted_secret_key"]) {
+    assert.match(block(outputs, `output "${outputName}"`), /sensitive\s*=\s*true/);
+  }
+  assert.match(
+    block(outputs, 'output "publisher_encrypted_secret_key"'),
+    /yandex_iam_service_account_static_access_key\.publisher\.encrypted_secret_key/,
+  );
+});
+
+test("Station release CDN uses HTTPS GET/HEAD and origin-owned cache metadata behind an issued certificate", async () => {
+  const releases = await source("infra/yandex/modules/station-releases/main.tf");
+
+  const originGroup = block(releases, 'resource "yandex_cdn_origin_group" "releases"');
+  assert.match(
+    originGroup,
+    /origin\s*\{[\s\S]*source\s*=\s*yandex_storage_bucket\.releases\.bucket_domain_name[\s\S]*enabled\s*=\s*true[\s\S]*backup\s*=\s*false/,
+  );
+  const certificate = block(releases, 'resource "yandex_cm_certificate" "releases"');
+  assert.match(certificate, /domains\s*=\s*\[var\.domain\]/);
+  assert.match(
+    certificate,
+    /managed\s*\{[\s\S]*challenge_type\s*=\s*"DNS_CNAME"[\s\S]*challenge_count\s*=\s*1/,
+  );
+  const validation = block(releases, 'resource "yandex_dns_recordset" "certificate_validation"');
+  assert.match(validation, /count\s*=\s*1/);
+  assert.doesNotMatch(validation, /public_dns_enabled/);
+  assert.match(validation, /yandex_cm_certificate\.releases\.challenges\[count\.index\]\.dns_name/);
+  assert.match(validation, /yandex_cm_certificate\.releases\.challenges\[count\.index\]\.dns_type/);
+  assert.match(
+    validation,
+    /yandex_cm_certificate\.releases\.challenges\[count\.index\]\.dns_value/,
+  );
+  assert.match(
+    releases,
+    /data\s+"yandex_cm_certificate"\s+"issued"\s*\{[\s\S]*certificate_id\s*=\s*yandex_cm_certificate\.releases\.id[\s\S]*wait_validation\s*=\s*true[\s\S]*depends_on\s*=\s*\[yandex_dns_recordset\.certificate_validation\]/,
+  );
+
+  const cdn = block(releases, 'resource "yandex_cdn_resource" "releases"');
+  assert.match(cdn, /cname\s*=\s*var\.domain/);
+  assert.match(cdn, /active\s*=\s*true/);
+  assert.match(cdn, /origin_protocol\s*=\s*"https"/);
+  assert.match(cdn, /origin_group_id\s*=\s*yandex_cdn_origin_group\.releases\.id/);
+  assert.match(cdn, /redirect_http_to_https\s*=\s*true/);
+  assert.match(cdn, /redirect_https_to_http\s*=\s*false/);
+  assert.match(cdn, /allowed_http_methods\s*=\s*\["GET",\s*"HEAD"\]/);
+  assert.match(cdn, /edge_cache_settings\s*=\s*0/);
+  assert.doesNotMatch(cdn, /browser_cache_settings|cache_http_headers/);
+  assert.match(
+    cdn,
+    /static_response_headers\s*=\s*\{[\s\S]*"x-content-type-options"\s*=\s*"nosniff"/,
+  );
+  assert.match(
+    cdn,
+    /static_response_headers\s*=\s*\{[\s\S]*"content-security-policy"\s*=\s*"default-src 'none'; frame-ancestors 'none'; sandbox"/,
+  );
+  assert.match(
+    cdn,
+    /ssl_certificate\s*\{[\s\S]*type\s*=\s*"certificate_manager"[\s\S]*certificate_manager_id\s*=\s*data\.yandex_cm_certificate\.issued\.id/,
+  );
+
+  const publicDns = block(releases, 'resource "yandex_dns_recordset" "public_release"');
+  assert.match(publicDns, /count\s*=\s*var\.public_dns_enabled\s*\?\s*1\s*:\s*0/);
+  assert.match(publicDns, /name\s*=\s*local\.release_dns_name/);
+  assert.match(publicDns, /type\s*=\s*"CNAME"/);
+  assert.match(
+    publicDns,
+    /data\s*=\s*\["\$\{trimsuffix\(yandex_cdn_resource\.releases\.provider_cname, "\."\)\}\."\]/,
+  );
+  assert.match(publicDns, /depends_on\s*=\s*\[data\.yandex_cm_certificate\.issued\]/);
+});
+
+test("production wires the fixed Station release origin behind a separate public DNS gate", async () => {
+  const [production, variables, outputs, tfvars] = await Promise.all([
+    source("infra/yandex/production/main.tf"),
+    source("infra/yandex/production/variables.tf"),
+    source("infra/yandex/production/outputs.tf"),
+    source("infra/yandex/production/terraform.tfvars.example"),
+  ]);
+
+  const releaseModule = block(production, 'module "station_releases"');
+  assert.match(releaseModule, /source\s*=\s*"\.\.\/modules\/station-releases"/);
+  assert.match(releaseModule, /bucket_name\s*=\s*var\.station_release_bucket_name/);
+  assert.match(releaseModule, /domain\s*=\s*var\.station_release_domain/);
+  assert.match(releaseModule, /publisher_pgp_key\s*=\s*var\.station_release_publisher_pgp_key/);
+  assert.match(releaseModule, /public_dns_enabled\s*=\s*var\.station_release_public_dns_enabled/);
+  assert.doesNotMatch(
+    releaseModule,
+    /app_service_account_id|runtime_secret_id|module\.compute|public_dns_enabled\s*=\s*var\.public_dns_enabled/,
+  );
+
+  for (const variableName of [
+    "station_release_bucket_name",
+    "station_release_domain",
+    "station_release_publisher_pgp_key",
+    "station_release_public_dns_enabled",
+  ]) {
+    assert.match(variables, new RegExp(`variable\\s+"${variableName}"\\s*\\{`));
+    assert.match(tfvars, new RegExp(`^${variableName}\\s*=`, "m"));
+  }
+  assert.match(
+    block(variables, 'variable "station_release_domain"'),
+    /var\.station_release_domain\s*==\s*"releases\.markiro\.app"/,
+  );
+  assert.match(
+    block(variables, 'variable "station_release_publisher_pgp_key"'),
+    /sensitive\s*=\s*true/,
+  );
+  assert.match(
+    block(variables, 'variable "station_release_public_dns_enabled"'),
+    /default\s*=\s*false/,
+  );
+  for (const outputName of [
+    "station_release_publisher_access_key_id",
+    "station_release_publisher_encrypted_secret_key",
+  ]) {
+    assert.match(block(outputs, `output "${outputName}"`), /sensitive\s*=\s*true/);
+  }
+  assert.match(outputs, /module\.station_releases\.cdn_provider_cname/);
+  assert.match(outputs, /module\.station_releases\.certificate_id/);
+});
+
 test("bootstrap retains only state, runtime and the three necessary service accounts", async () => {
   const bootstrap = await source("infra/yandex/bootstrap/main.tf");
   const iam = await source("infra/yandex/modules/iam/main.tf");
@@ -224,7 +428,7 @@ test("app cloud-init is key-only, fail-fast and writes completion last", async (
   );
 });
 
-test("active Terraform configuration contains no literal secret payloads or local credential backend", async () => {
+test("active Terraform contains no literal credentials and managed release edge resources stay allowlisted", async () => {
   const paths = [
     "infra/yandex/bootstrap/main.tf",
     "infra/yandex/bootstrap/providers.tf",
@@ -233,12 +437,20 @@ test("active Terraform configuration contains no literal secret payloads or loca
     "infra/yandex/modules/iam/main.tf",
     "infra/yandex/modules/compute/main.tf",
   ];
-  const active = (await Promise.all(paths.map(source))).join("\n");
+  const general = (await Promise.all(paths.map(source))).join("\n");
+  const releases = await source("infra/yandex/modules/station-releases/main.tf");
+  const active = `${general}\n${releases}`;
   assert.doesNotMatch(
     active,
     /access_key\s*=\s*"|secret_key\s*=\s*"|iam_token\s*=\s*"|token\s*=\s*"/i,
   );
-  assert.doesNotMatch(active, /static_access_key|hmac_key/);
+  assert.doesNotMatch(general, /static_access_key|hmac_key|yandex_cdn_|yandex_cm_certificate/);
+  assert.equal(
+    [...releases.matchAll(/resource\s+"yandex_iam_service_account_static_access_key"/g)].length,
+    1,
+  );
+  assert.equal([...releases.matchAll(/resource\s+"yandex_cdn_resource"/g)].length, 1);
+  assert.equal([...releases.matchAll(/resource\s+"yandex_cm_certificate"/g)].length, 1);
 });
 
 test("infrastructure workflow has one protected manual apply without legacy phases", async () => {

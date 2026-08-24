@@ -1,0 +1,240 @@
+{
+  "resource_changes": [
+    {
+      "address": "module.compute.yandex_vpc_address.app",
+      "type": "yandex_vpc_address",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "module.compute.yandex_compute_instance.app",
+      "type": "yandex_compute_instance",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "module.postgres.yandex_mdb_postgresql_cluster.production",
+      "type": "yandex_mdb_postgresql_cluster",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "module.postgres.yandex_mdb_postgresql_database.application",
+      "type": "yandex_mdb_postgresql_database",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "module.object_storage.yandex_storage_bucket.media",
+      "type": "yandex_storage_bucket",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "module.object_storage.yandex_storage_bucket.audit",
+      "type": "yandex_storage_bucket",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "module.station_releases.yandex_storage_bucket.releases",
+      "type": "yandex_storage_bucket",
+      "change": {
+        "actions": ["update"],
+        "before": {
+          "bucket": "markiro-station-releases",
+          "force_destroy": false,
+          "anonymous_access_flags": [{ "read": true, "list": false, "config_read": false }],
+          "versioning": [{ "enabled": true }]
+        },
+        "after": {
+          "bucket": "markiro-station-releases",
+          "force_destroy": false,
+          "anonymous_access_flags": [{ "read": true, "list": false, "config_read": false }],
+          "versioning": [{ "enabled": true }]
+        }
+      }
+    },
+    {
+      "address": "module.station_releases.yandex_storage_bucket_policy.releases",
+      "type": "yandex_storage_bucket_policy",
+      "change": {
+        "actions": ["update"],
+        "before": {
+          "bucket": "markiro-station-releases",
+          "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"AllowPublicStationReleaseObjects\",\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases/station/*\"]},{\"Sid\":\"AllowPublisherStationObjects\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"publisher-sa-id\"},\"Action\":[\"s3:GetObject\",\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases/station/*\"]},{\"Sid\":\"AllowPublisherStationBucketPreflight\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"publisher-sa-id\"},\"Action\":[\"s3:GetBucketLocation\",\"s3:ListBucket\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases\"],\"Condition\":{\"StringLike\":{\"s3:prefix\":[\"station/*\"]}}},{\"Sid\":\"AllowTerraformReleaseManagement\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"terraform-sa-id\"},\"Action\":[\"s3:*\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases\",\"arn:aws:s3:::markiro-station-releases/*\"]}]}"
+        },
+        "after": {
+          "bucket": "markiro-station-releases",
+          "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"AllowPublicStationReleaseObjects\",\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases/station/*\"]},{\"Sid\":\"AllowPublisherStationObjects\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"publisher-sa-id\"},\"Action\":[\"s3:GetObject\",\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases/station/*\"]},{\"Sid\":\"AllowPublisherStationBucketPreflight\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"publisher-sa-id\"},\"Action\":[\"s3:GetBucketLocation\",\"s3:ListBucket\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases\"],\"Condition\":{\"StringLike\":{\"s3:prefix\":[\"station/*\"]}}},{\"Sid\":\"AllowTerraformReleaseManagement\",\"Effect\":\"Allow\",\"Principal\":{\"CanonicalUser\":\"terraform-sa-id\"},\"Action\":[\"s3:*\"],\"Resource\":[\"arn:aws:s3:::markiro-station-releases\",\"arn:aws:s3:::markiro-station-releases/*\"]}]}"
+        }
+      }
+    },
+    {
+      "address": "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader",
+      "type": "yandex_storage_bucket_iam_binding",
+      "change": {
+        "actions": ["no-op"],
+        "before": {
+          "bucket": "markiro-station-releases",
+          "role": "storage.uploader",
+          "members": ["serviceAccount:publisher-sa-id"]
+        },
+        "after": {
+          "bucket": "markiro-station-releases",
+          "role": "storage.uploader",
+          "members": ["serviceAccount:publisher-sa-id"]
+        }
+      }
+    },
+    {
+      "address": "module.station_releases.yandex_iam_service_account.station_release_publisher",
+      "type": "yandex_iam_service_account",
+      "change": {
+        "actions": ["no-op"],
+        "before": { "id": "publisher-sa-id", "name": "markiro-station-release-publisher" },
+        "after": { "id": "publisher-sa-id", "name": "markiro-station-release-publisher" }
+      }
+    },
+    {
+      "address": "module.station_releases.yandex_iam_service_account_static_access_key.publisher",
+      "type": "yandex_iam_service_account_static_access_key",
+      "change": {
+        "actions": ["no-op"],
+        "before": {
+          "service_account_id": "publisher-sa-id",
+          "access_key": "masked-access-key",
+          "encrypted_secret_key": "encrypted-secret",
+          "pgp_key": "base64-pgp-public-key"
+        },
+        "after": {
+          "service_account_id": "publisher-sa-id",
+          "access_key": "masked-access-key",
+          "encrypted_secret_key": "encrypted-secret",
+          "pgp_key": "base64-pgp-public-key"
+        }
+      }
+    },
+    {
+      "address": "module.station_releases.yandex_cdn_origin_group.releases",
+      "type": "yandex_cdn_origin_group",
+      "change": {
+        "actions": ["no-op"],
+        "before": {
+          "name": "markiro-station-releases",
+          "use_next": false,
+          "origin": [
+            {
+              "source": "markiro-station-releases.storage.yandexcloud.net",
+              "enabled": true,
+              "backup": false
+            }
+          ]
+        },
+        "after": {
+          "name": "markiro-station-releases",
+          "use_next": false,
+          "origin": [
+            {
+              "source": "markiro-station-releases.storage.yandexcloud.net",
+              "enabled": true,
+              "backup": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "address": "module.station_releases.yandex_cm_certificate.releases",
+      "type": "yandex_cm_certificate",
+      "change": {
+        "actions": ["no-op"],
+        "before": {
+          "id": "certificate-id",
+          "domains": ["releases.markiro.app"],
+          "managed": [{ "challenge_type": "DNS_CNAME", "challenge_count": 1 }]
+        },
+        "after": {
+          "id": "certificate-id",
+          "domains": ["releases.markiro.app"],
+          "managed": [{ "challenge_type": "DNS_CNAME", "challenge_count": 1 }]
+        }
+      }
+    },
+    {
+      "address": "module.station_releases.yandex_dns_recordset.certificate_validation[0]",
+      "type": "yandex_dns_recordset",
+      "change": {
+        "actions": ["no-op"],
+        "before": {
+          "name": "_acme-challenge.releases.markiro.app.",
+          "type": "CNAME",
+          "data": ["validation.example.yandexcloud.net."]
+        },
+        "after": {
+          "name": "_acme-challenge.releases.markiro.app.",
+          "type": "CNAME",
+          "data": ["validation.example.yandexcloud.net."]
+        }
+      }
+    },
+    {
+      "address": "module.station_releases.yandex_cdn_resource.releases",
+      "type": "yandex_cdn_resource",
+      "change": {
+        "actions": ["update"],
+        "before": {
+          "cname": "releases.markiro.app",
+          "active": true,
+          "origin_protocol": "https",
+          "options": [
+            {
+              "allowed_http_methods": ["GET", "HEAD"],
+              "redirect_http_to_https": true,
+              "redirect_https_to_http": false,
+              "edge_cache_settings": 0,
+              "static_response_headers": {
+                "content-security-policy": "default-src 'none'; frame-ancestors 'none'; sandbox",
+                "x-content-type-options": "nosniff"
+              }
+            }
+          ],
+          "ssl_certificate": [
+            { "type": "certificate_manager", "certificate_manager_id": "certificate-id" }
+          ]
+        },
+        "after": {
+          "cname": "releases.markiro.app",
+          "active": true,
+          "origin_protocol": "https",
+          "options": [
+            {
+              "allowed_http_methods": ["GET", "HEAD"],
+              "redirect_http_to_https": true,
+              "redirect_https_to_http": false,
+              "edge_cache_settings": 0,
+              "static_response_headers": {
+                "content-security-policy": "default-src 'none'; frame-ancestors 'none'; sandbox",
+                "x-content-type-options": "nosniff"
+              }
+            }
+          ],
+          "ssl_certificate": [
+            { "type": "certificate_manager", "certificate_manager_id": "certificate-id" }
+          ]
+        }
+      }
+    },
+    {
+      "address": "module.station_releases.yandex_dns_recordset.public_release[0]",
+      "type": "yandex_dns_recordset",
+      "change": {
+        "actions": ["no-op"],
+        "before": {
+          "name": "releases.markiro.app.",
+          "type": "CNAME",
+          "data": ["cdn-provider.example.net."]
+        },
+        "after": {
+          "name": "releases.markiro.app.",
+          "type": "CNAME",
+          "data": ["cdn-provider.example.net."]
+        }
+      }
+    }
+  ]
+}

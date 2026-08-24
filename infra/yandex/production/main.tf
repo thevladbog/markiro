@@ -76,6 +76,18 @@ module "object_storage" {
   terraform_service_account_id = var.terraform_service_account_id
 }
 
+module "station_releases" {
+  source = "../modules/station-releases"
+
+  folder_id                    = var.folder_id
+  dns_zone_id                  = var.dns_zone_id
+  domain                       = var.station_release_domain
+  bucket_name                  = var.station_release_bucket_name
+  terraform_service_account_id = var.terraform_service_account_id
+  publisher_pgp_key            = var.station_release_publisher_pgp_key
+  public_dns_enabled           = var.station_release_public_dns_enabled
+}
+
 resource "yandex_dns_recordset" "application" {
   count = var.public_dns_enabled ? 1 : 0
 
