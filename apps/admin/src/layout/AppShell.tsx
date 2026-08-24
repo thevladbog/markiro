@@ -172,6 +172,10 @@ export function AppShell() {
     <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
       <Sidebar
         className="mk-app-sidebar"
+        // The footer link below carries its own 10px padding on every side;
+        // dropping the sidebar's own bottom padding makes the gap under the
+        // user card match the 10px above it (link padding over the divider).
+        style={{ paddingBottom: 0 }}
         items={items}
         navLabel={t("shell.navLabel")}
         renderLink={(item, content) => (
