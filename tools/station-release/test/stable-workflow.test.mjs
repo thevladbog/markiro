@@ -62,7 +62,7 @@ test("stable signing and dual-origin publication use separate protected environm
   const credentialSteps = workflow.jobs.release.steps.filter((step) =>
     JSON.stringify(step.env ?? {}).includes("YANDEX_STATION_RELEASE_ACCESS_KEY_ID"),
   );
-  assert.equal(credentialSteps.length, 3);
+  assert.equal(credentialSteps.length, 4);
   for (const step of credentialSteps) {
     assert.equal(step.env.AWS_ACCESS_KEY_ID, "${{ secrets.YANDEX_STATION_RELEASE_ACCESS_KEY_ID }}");
     assert.equal(
@@ -117,6 +117,7 @@ test("normal stable modes validate the exact beta at both origins before rebuild
   assert.match(accepted.run, /git merge-base --is-ancestor "\$base_sha" origin\/main/);
   assert.match(accepted.run, /--commit "\$base_sha"/);
   assert.match(accepted.run, /stable-boundary\.mjs resolve-state/);
+  assert.match(accepted.run, /gh release list[\s\S]*--limit 10001/);
   assert.match(accepted.run, /--json tagName,isDraft,isPrerelease,publishedAt > "\$releases_file"/);
   assert.doesNotMatch(accepted.run, /gh release list[^\n]*targetCommitish/);
   assert.equal(prepare.if, "inputs.mode == 'publish'");
@@ -168,6 +169,7 @@ test("both public stable trees are proven before the complete mutable transactio
     "Download and validate public immutable stable trees",
   );
   const promote = workflowStep(workflow, "release", "Promote stable mutable targets");
+  const resolve = workflowStep(workflow, "release", "Resolve stable publication candidate");
 
   assert.equal(github.if, "inputs.mode == 'publish'");
   assert.equal(yandex.if, "inputs.mode == 'publish'");
@@ -200,6 +202,20 @@ test("both public stable trees are proven before the complete mutable transactio
   assert.match(publicValidation.run, /artifacts\.mjs validate-origin github stable/);
   assert.match(publicValidation.run, /artifacts\.mjs validate-origin yandex stable/);
   assert.match(publicValidation.run, /artifacts\.mjs compare-origins/);
+  assert.match(
+    publicValidation.run,
+    /yandex-publisher\.mjs validate-public[\s\\]*"\$yandex_public" stable "\$version"/,
+  );
+  assert.ok(
+    steps.indexOf(publicValidation) < steps.indexOf(promote) &&
+      publicValidation.run.indexOf("yandex-publisher.mjs validate-public") >= 0 &&
+      promote.run.indexOf("yandex-publisher.mjs backup-mutables stable") >= 0,
+  );
+  assert.match(resolve.run, /sourceBetaTag "\$source_beta_tag"/);
+  assert.match(resolve.run, /baseSha "\$base_sha"/);
+  assert.match(resolve.run, /releaseSha "\$release_sha"/);
+  assert.match(resolve.run, /githubBetaEvidenceSha256 "\$github_beta_evidence_sha256"/);
+  assert.match(resolve.run, /yandexBetaEvidenceSha256 "\$yandex_beta_evidence_sha256"/);
   assert.doesNotMatch(publicValidation.run, /publish-immutable|tauri build/);
   assert.doesNotMatch(promote.run, /gh release create "\$tag"|publish-immutable|tauri build/);
 });
@@ -261,7 +277,8 @@ test("one-time stable seed uses the latest legacy stable only while release DNS 
   assert.match(validate.run, /SEED_STABLE_TAG/);
   assert.match(validate.run, /SEED_INFRASTRUCTURE_EVIDENCE/);
   assert.equal(seed.if, "inputs.mode == 'seed-baseline'");
-  assert.match(seed.run, /gh release list[\s\S]*parseStationStableTag/);
+  assert.match(seed.run, /gh release list[\s\S]*--limit 10001/);
+  assert.match(seed.run, /stable-boundary\.mjs resolve-latest-stable/);
   assert.match(seed.run, /test "\$seed_stable_tag" = "\$latest_stable_tag"/);
   assert.match(seed.run, /github-public\.mjs[\s\\]*download-release stable/);
   assert.doesNotMatch(seed.run, /gh release download "\$seed_stable_tag"/);
@@ -298,12 +315,31 @@ test("always emits a bounded publication and compensation summary", async () => 
   assert.equal(summary.if, "always()");
   assert.match(summary.run, /release-summary\.mjs render/);
   assert.doesNotMatch(summary.run, /\$\{\{ toJSON\(|error\.message|stderr|stdout/);
-  assert.match(github.run, /release-summary\.mjs update[\s\S]*immutableState/);
-  assert.match(yandex.run, /release-summary\.mjs update[\s\S]*immutableState/);
+  const githubAttempted = github.run.indexOf("github-publication-attempted");
+  const githubCreate = github.run.indexOf('gh release create "$tag"');
+  const githubCreated = github.run.indexOf("github-draft-created");
+  const githubUpload = github.run.indexOf('gh release upload "$tag"');
+  const githubAssetsValidated = github.run.indexOf("github-draft-assets-validated");
+  const githubUndraftAttempted = github.run.indexOf("github-undraft-attempted");
+  const githubUndraft = github.run.indexOf('gh release edit "$tag"');
+  const githubPublicValidated = github.run.indexOf("github-public-validated");
+  assert.ok(githubAttempted >= 0 && githubAttempted < githubCreate);
+  assert.ok(githubCreate < githubCreated && githubCreated < githubUpload);
+  assert.ok(githubUpload < githubAssetsValidated);
+  assert.ok(githubAssetsValidated < githubUndraftAttempted);
+  assert.ok(githubUndraftAttempted < githubUndraft && githubUndraft < githubPublicValidated);
+  const yandexAttempted = yandex.run.indexOf("yandex-publication-attempted");
+  const yandexPublish = yandex.run.indexOf("yandex-publisher.mjs publish-immutable");
+  const bothPublished = yandex.run.indexOf("both-origin-published");
+  assert.ok(yandexAttempted >= 0 && yandexAttempted < yandexPublish);
+  assert.ok(yandexPublish < bothPublished);
   assert.match(publicValidation.run, /githubManifestSha256/);
   assert.match(publicValidation.run, /yandexEvidenceSha256/);
   assert.match(publicValidation.run, /installerSha256/);
-  assert.match(promote.run, /promotionState/);
-  assert.match(promote.run, /rollbackState/);
-  assert.match(promote.run, /immutable-but-not-promoted|restored-after-failure/);
+  assert.match(publicValidation.run, /existing-public-validation-started/);
+  assert.match(publicValidation.run, /both-public-validated/);
+  assert.match(promote.run, /github-promoted/);
+  assert.match(promote.run, /all-promoted/);
+  assert.match(promote.run, /restored/);
+  assert.match(promote.run, /restoration-failed/);
 });

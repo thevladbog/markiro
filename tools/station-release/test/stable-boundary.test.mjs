@@ -207,6 +207,35 @@ test("derives stable monotonicity only from published releases and ignores tag-o
   );
 });
 
+test("finds the latest published stable from one complete bounded release inventory", async () => {
+  const { resolveLatestPublishedStableRelease, resolveStableReleaseState } = await boundaryModule();
+  const releases = [
+    listedRelease({ tagName: "station-v1.0.0" }),
+    listedRelease({ tagName: "station-v1.4.0", isDraft: true }),
+    listedRelease({ tagName: "station-v1.3.0-beta.2", isPrerelease: true }),
+    listedRelease({ tagName: "station-v1.2.0" }),
+  ];
+  assert.equal(resolveLatestPublishedStableRelease({ releases }), "station-v1.2.0");
+
+  const truncated = Array.from({ length: 10_001 }, (_, index) =>
+    listedRelease({ tagName: `unrelated-${index}` }),
+  );
+  assert.throws(
+    () => resolveLatestPublishedStableRelease({ releases: truncated }),
+    /invalid station stable boundary/,
+  );
+  assert.throws(
+    () =>
+      resolveStableReleaseState({
+        mode: "publish",
+        sourceBetaTag: "station-v2.0.0-beta.1",
+        releases: truncated,
+        repositoryTags: [],
+      }),
+    /invalid station stable boundary/,
+  );
+});
+
 test("ignores draft stable candidates but never accepts draft boundary metadata", async () => {
   const { resolveStableChangelogBoundary, resolveStableReleaseState } = await boundaryModule();
   const graph = await releaseGraph();

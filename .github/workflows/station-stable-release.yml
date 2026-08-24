@@ -213,7 +213,7 @@ jobs:
           tags_file="$RUNNER_TEMP/station-tags.txt"
           git tag --list 'station-v*' > "$tags_file"
           releases_file="$RUNNER_TEMP/station-releases.json"
-          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 \
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 10001 \
             --json tagName,isDraft,isPrerelease,publishedAt > "$releases_file"
           release_state="$RUNNER_TEMP/station-stable-state.txt"
           node tools/station-release/stable-boundary.mjs resolve-state \
@@ -543,7 +543,13 @@ jobs:
           test "$tag" = "station-v$version"
           [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
           node tools/station-release/release-summary.mjs update \
-            "$RUNNER_TEMP/station-stable-release-summary.json" version "$version"
+            "$RUNNER_TEMP/station-stable-release-summary.json" \
+            version "$version" \
+            sourceBetaTag "$source_beta_tag" \
+            baseSha "$base_sha" \
+            releaseSha "$release_sha" \
+            githubBetaEvidenceSha256 "$github_beta_evidence_sha256" \
+            yandexBetaEvidenceSha256 "$yandex_beta_evidence_sha256"
           printf 'source_beta_tag=%s\nbeta_version=%s\nbase_sha=%s\nbeta_release_sha=%s\ngithub_beta_evidence_sha256=%s\nyandex_beta_evidence_sha256=%s\nversion=%s\ntag=%s\nprevious_stable_tag=%s\nrelease_sha=%s\n' \
             "$source_beta_tag" "$beta_version" "$base_sha" "$beta_release_sha" \
             "$github_beta_evidence_sha256" "$yandex_beta_evidence_sha256" \
@@ -564,8 +570,12 @@ jobs:
           fi
           auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           git -c "http.extraheader=$auth_header" push origin "HEAD:refs/heads/$candidate_ref"
+          node tools/station-release/release-summary.mjs transition \
+            "$RUNNER_TEMP/station-stable-release-summary.json" github-publication-attempted
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --target "$release_sha" \
             --title "Markiro Station $version" --notes-file "$github_tree/release-notes.md"
+          node tools/station-release/release-summary.mjs transition \
+            "$RUNNER_TEMP/station-stable-release-summary.json" github-draft-created
           gh release upload "$tag" --repo "$GITHUB_REPOSITORY" "$github_tree"/*
           rm -rf "$RUNNER_TEMP/station-stable-github-public"
           mkdir "$RUNNER_TEMP/station-stable-github-public"
@@ -573,15 +583,18 @@ jobs:
             --dir "$RUNNER_TEMP/station-stable-github-public"
           node tools/station-release/artifacts.mjs validate-origin github stable \
             "$RUNNER_TEMP/station-stable-github-public" "$version"
+          node tools/station-release/release-summary.mjs transition \
+            "$RUNNER_TEMP/station-stable-release-summary.json" github-draft-assets-validated
+          node tools/station-release/release-summary.mjs transition \
+            "$RUNNER_TEMP/station-stable-release-summary.json" github-undraft-attempted
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
-          node tools/station-release/release-summary.mjs update \
-            "$RUNNER_TEMP/station-stable-release-summary.json" \
-            immutableState github-published
           rm -rf "$RUNNER_TEMP/station-stable-github-public"
           env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
             download-release stable "$version" "$RUNNER_TEMP/station-stable-github-public"
           node tools/station-release/artifacts.mjs validate-origin github stable \
             "$RUNNER_TEMP/station-stable-github-public" "$version"
+          node tools/station-release/release-summary.mjs transition \
+            "$RUNNER_TEMP/station-stable-release-summary.json" github-public-validated
 
       - name: Publish immutable Yandex stable
         if: inputs.mode == 'publish'
@@ -604,21 +617,38 @@ jobs:
           trap 'exit 130' INT
           trap 'exit 143' TERM
           unset AWS_SESSION_TOKEN
-          node tools/station-release/release-summary.mjs update \
+          node tools/station-release/release-summary.mjs transition \
             "$RUNNER_TEMP/station-stable-release-summary.json" \
-            immutableState yandex-publication-attempted
+            yandex-publication-attempted
           node tools/station-release/yandex-publisher.mjs publish-immutable \
             "$RUNNER_TEMP/station-stable-candidate/yandex" stable "$version"
-          node tools/station-release/release-summary.mjs update \
-            "$RUNNER_TEMP/station-stable-release-summary.json" immutableState both-published
+          node tools/station-release/release-summary.mjs transition \
+            "$RUNNER_TEMP/station-stable-release-summary.json" both-origin-published
 
       - name: Download and validate public immutable stable trees
         if: inputs.mode == 'publish' || inputs.mode == 'promote-existing'
         env:
           GH_TOKEN: ${{ github.token }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.YANDEX_STATION_RELEASE_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}
+          YANDEX_STATION_RELEASE_BUCKET: ${{ vars.YANDEX_STATION_RELEASE_BUCKET }}
+          YANDEX_STATION_RELEASE_ENDPOINT: ${{ vars.YANDEX_STATION_RELEASE_ENDPOINT }}
         shell: bash
         run: |
           set -euo pipefail
+          set +x
+          echo "::add-mask::$AWS_ACCESS_KEY_ID"
+          echo "::add-mask::$AWS_SECRET_ACCESS_KEY"
+          cleanup_credentials() {
+            unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+          }
+          trap cleanup_credentials EXIT
+          unset AWS_SESSION_TOKEN
+          if [ "${{ inputs.mode }}" = "promote-existing" ]; then
+            node tools/station-release/release-summary.mjs transition \
+              "$RUNNER_TEMP/station-stable-release-summary.json" \
+              existing-public-validation-started
+          fi
           github_public="$RUNNER_TEMP/station-stable-github-public"
           yandex_public="$RUNNER_TEMP/station-stable-yandex-public"
           rm -rf "$github_public" "$yandex_public"
@@ -649,6 +679,8 @@ jobs:
             "$yandex_public" "$version"
           node tools/station-release/artifacts.mjs compare-origins \
             "$github_public" "$yandex_public" stable "$version"
+          node tools/station-release/yandex-publisher.mjs validate-public \
+            "$yandex_public" stable "$version"
           for evidence_path in \
             "$github_public/release-evidence.json" \
             "$yandex_public/release-evidence.json"; do
@@ -671,8 +703,9 @@ jobs:
             yandexEvidenceSha256 "$(sha256_file "$yandex_public/release-evidence.json")" \
             installerSha256 "$(sha256_file "$github_public/${names_prefix}-setup.exe")" \
             bundleSha256 "$(sha256_file "$github_public/${names_prefix}.nsis.zip")" \
-            signatureSha256 "$(sha256_file "$github_public/${names_prefix}.nsis.zip.sig")" \
-            immutableState both-public-validated
+            signatureSha256 "$(sha256_file "$github_public/${names_prefix}.nsis.zip.sig")"
+          node tools/station-release/release-summary.mjs transition \
+            "$RUNNER_TEMP/station-stable-release-summary.json" both-public-validated
 
       - name: Seed legacy stable rollback baseline
         if: inputs.mode == 'seed-baseline'
@@ -700,26 +733,10 @@ jobs:
           unset AWS_SESSION_TOKEN
           stable_releases="$RUNNER_TEMP/station-stable-seed-releases.json"
           latest_stable_output="$RUNNER_TEMP/station-stable-seed-latest.txt"
-          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
-            --json tagName,isDraft,isPrerelease > "$stable_releases"
-          node --input-type=module - "$stable_releases" "$latest_stable_output" <<'NODE'
-          import { closeSync, openSync, readFileSync, writeFileSync } from "node:fs";
-          import { parseStationStableTag } from "./tools/station-release/version.mjs";
-          const [inputPath, outputPath] = process.argv.slice(2);
-          const releases = JSON.parse(readFileSync(inputPath, "utf8"))
-            .filter((release) => release.isDraft === false && release.isPrerelease === false)
-            .map((release) => ({ ...release, parsed: parseStationStableTag(release.tagName) }))
-            .filter((release) => release.parsed)
-            .sort((left, right) =>
-              ["major", "minor", "patch"].reduce(
-                (order, field) => order || left.parsed[field] - right.parsed[field],
-                0,
-              ),
-            );
-          if (releases.length === 0) throw new Error("missing legacy stable baseline");
-          const handle = openSync(outputPath, "wx", 0o600);
-          try { writeFileSync(handle, `${releases.at(-1).tagName}\n`); } finally { closeSync(handle); }
-          NODE
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 10001 \
+            --json tagName,isDraft,isPrerelease,publishedAt > "$stable_releases"
+          node tools/station-release/stable-boundary.mjs resolve-latest-stable \
+            "$stable_releases" "$latest_stable_output"
           seed_stable_tag="$SEED_STABLE_TAG"
           latest_stable_tag="$(tr -d '\r\n' < "$latest_stable_output")"
           test "$seed_stable_tag" = "$latest_stable_tag"
@@ -739,16 +756,16 @@ jobs:
           test -n "$SEED_INFRASTRUCTURE_EVIDENCE"
           printf '%s' "$SEED_INFRASTRUCTURE_EVIDENCE" > "$infrastructure_evidence"
           chmod 600 "$release_metadata" "$infrastructure_evidence"
-          node tools/station-release/release-summary.mjs update \
+          node tools/station-release/release-summary.mjs transition \
             "$RUNNER_TEMP/station-stable-release-summary.json" \
-            immutableState yandex-publication-attempted
+            seed-publication-attempted
           node tools/station-release/yandex-publisher.mjs seed-baseline \
             "$github_tree" "$seed_stable_tag" "$release_metadata" \
             "$infrastructure_evidence" stable "$seed_backup" "$bootstrap_record" \
             --confirm-empty-channel-bootstrap
-          node tools/station-release/release-summary.mjs update \
+          node tools/station-release/release-summary.mjs transition \
             "$RUNNER_TEMP/station-stable-release-summary.json" \
-            immutableState seeded-and-provider-verified outcome seeded
+            seeded-and-provider-verified
 
       - name: Preserve stable baseline recovery evidence
         if: always() && inputs.mode == 'seed-baseline'
@@ -812,16 +829,16 @@ jobs:
             fi
             unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
             if [ "$restoration_failed" = true ]; then
-              node tools/station-release/release-summary.mjs update \
+              node tools/station-release/release-summary.mjs transition \
                 "$RUNNER_TEMP/station-stable-release-summary.json" \
-                rollbackState restoration-failed outcome restoration-failed >/dev/null 2>&1 || true
+                restoration-failed >/dev/null 2>&1 || true
               echo "station release mutable restoration failed" >&2
               exit 86
             fi
             if [ "$github_may_have_changed" = true ] || [ "$yandex_may_have_changed" = true ]; then
-              node tools/station-release/release-summary.mjs update \
+              node tools/station-release/release-summary.mjs transition \
                 "$RUNNER_TEMP/station-stable-release-summary.json" \
-                rollbackState restored outcome restored-after-failure >/dev/null 2>&1 || true
+                restored >/dev/null 2>&1 || true
             fi
             exit "$status"
           }
@@ -856,8 +873,8 @@ jobs:
           env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
             download-channel stable "$RUNNER_TEMP/station-stable-github-channel-verify/latest.json"
           cmp "$RUNNER_TEMP/station-stable-github-channel-verify/latest.json" "$github_tree/latest.json"
-          node tools/station-release/release-summary.mjs update \
-            "$RUNNER_TEMP/station-stable-release-summary.json" promotionState github-promoted
+          node tools/station-release/release-summary.mjs transition \
+            "$RUNNER_TEMP/station-stable-release-summary.json" github-promoted
 
           yandex_may_have_changed=true
           node tools/station-release/yandex-publisher.mjs promote \
@@ -874,9 +891,8 @@ jobs:
             "$RUNNER_TEMP/station-stable-yandex-public/latest.json"
           cmp "$RUNNER_TEMP/station-stable-yandex-channel-verify/download" \
             "$RUNNER_TEMP/station-stable-yandex-public/markiro-station-${version}-windows-x86_64-setup.exe"
-          node tools/station-release/release-summary.mjs update \
-            "$RUNNER_TEMP/station-stable-release-summary.json" \
-            promotionState all-promoted outcome promoted
+          node tools/station-release/release-summary.mjs transition \
+            "$RUNNER_TEMP/station-stable-release-summary.json" all-promoted
 
       - name: Summarize stable release
         if: always()

@@ -74,6 +74,17 @@ function releaseMetadataRecord(value) {
   return { ...value, beta, stable };
 }
 
+export function resolveLatestPublishedStableRelease({ releases } = {}) {
+  if (!Array.isArray(releases) || releases.length > MAX_RELEASES) invalid();
+  const latest = releases
+    .map(listedReleaseRecord)
+    .filter((record) => record.stable && !record.isDraft && !record.isPrerelease)
+    .sort((left, right) => compareStable(left.stable, right.stable))
+    .at(-1);
+  if (!latest) invalid();
+  return latest.tagName;
+}
+
 export function resolveStableReleaseState({ mode, sourceBetaTag, releases, repositoryTags } = {}) {
   if (
     !MODES.has(mode) ||
@@ -350,6 +361,13 @@ async function parseJson(path) {
 
 async function main() {
   const [, , command, ...args] = process.argv;
+  if (command === "resolve-latest-stable") {
+    const [releasesPath, outputPath, ...extra] = args;
+    if (!releasesPath || !outputPath || extra.length > 0) invalid();
+    const tag = resolveLatestPublishedStableRelease({ releases: await parseJson(releasesPath) });
+    await writeExclusive(outputPath, `${tag}\n`);
+    return;
+  }
   if (command === "resolve-state") {
     const [mode, sourceBetaTag, releasesPath, tagsPath, outputPath, ...extra] = args;
     if (!mode || !sourceBetaTag || !releasesPath || !tagsPath || !outputPath || extra.length > 0) {
