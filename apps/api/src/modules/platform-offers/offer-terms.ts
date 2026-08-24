@@ -27,6 +27,21 @@ const allowedTags = [
   "td",
 ] as const;
 
+const offerTermsSanitizeOptions: sanitizeHtml.IOptions = {
+  allowedTags: [...allowedTags],
+  allowedAttributes: {
+    a: ["href", "title"],
+    th: ["colspan", "rowspan"],
+    td: ["colspan", "rowspan"],
+  },
+  allowedSchemes: ["http", "https", "mailto"],
+  allowProtocolRelative: false,
+};
+
+export function sanitizeOfferTermsHtml(value: string): string {
+  return sanitizeHtml(value, offerTermsSanitizeOptions);
+}
+
 function stripUnsupportedMarkdown(source: string): string {
   const withoutHtml = sanitizeHtml(source, {
     allowedTags: [],
@@ -48,15 +63,6 @@ export function normalizeOfferTerms(source: string | null | undefined): {
 
   const normalizedMarkdown = stripUnsupportedMarkdown(trimmed).trim();
   if (!normalizedMarkdown) return { markdown: null, html: null };
-  const html = sanitizeHtml(markdown.render(normalizedMarkdown), {
-    allowedTags: [...allowedTags],
-    allowedAttributes: {
-      a: ["href", "title"],
-      th: ["colspan", "rowspan"],
-      td: ["colspan", "rowspan"],
-    },
-    allowedSchemes: ["http", "https", "mailto"],
-    allowProtocolRelative: false,
-  });
+  const html = sanitizeOfferTermsHtml(markdown.render(normalizedMarkdown));
   return { markdown: normalizedMarkdown, html: html || null };
 }
