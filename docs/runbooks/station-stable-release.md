@@ -61,13 +61,16 @@ immutable keys. Повтор разрешён только с тем же exact 
 
 ## Публикация принятой beta как stable
 
-1. До публикации завершите transitional beta acceptance record: его Overall
-   result и все строки `BETA_SIGN_OFF` должны быть `PASS`. Stable-строки,
+1. До публикации завершите validation/candidate beta acceptance record: bootstrap
+   beta `BOOTSTRAP_READY` и candidate Overall должны быть `PASS`, а все строки
+   `BETA_SIGN_OFF` относятся именно к строго более новому candidate. Stable-строки,
    `PUBLISH-01` и stable rollback ещё остаются `NOT_RUN` и не блокируют саму
    первую stable publication, потому что проверяются после неё.
 2. Откройте `Publish station stable` из `main`, выберите `mode=publish`.
-3. В `source_beta_tag` укажите точный immutable beta tag, например
-   `station-v1.2.0-beta.1`, и установите `acceptance_confirmed=true`.
+3. В `source_beta_tag` укажите точный immutable validation/candidate beta tag из
+   принятой identity table и установите `acceptance_confirmed=true`. Он обязан
+   совпасть с записанным candidate tag, `baseSha`, `releaseSha` и двумя origin
+   evidence hashes; bootstrap beta или newest/latest inference запрещены.
    `highlights` остаётся необязательным.
 4. Workflow скачивает GitHub и Yandex beta evidence и assets в разные чистые
    каталоги, валидирует обе trees и сравнивает common assets. Только matching
@@ -156,7 +159,7 @@ Windows может показать SmartScreen или «неизвестный 
 оператора обходить предупреждение вслепую. Автоматизированные contracts не
 доказывают Windows install-over, WebView2, scanner, printer, sound, touch,
 сохранение данных или работу из реальной restricted network. Все такие строки
-остаются `NOT RUN` в
+остаются `NOT_RUN` в
 [`station-dual-origin-release.md`](../acceptance/station-dual-origin-release.md),
 пока не появятся оператор, UTC timestamp и evidence path/hash.
 
@@ -171,10 +174,11 @@ target публично сравнивается с сохранённым backu
 лечится `promote-existing`, overwrite или копированием surviving tree.
 
 Для отдельной post-success acceptance-проверки rollback выберите предыдущий
-принятый strict dual-origin stable. Возьмите его точный `source_beta_tag` из
-обоих совпадающих `release-evidence.json`, поместите в
-`PREVIOUS_STABLE_SOURCE_BETA_TAG` и до dispatch повторно проверьте обе immutable
-trees, stable tag/target и evidence hashes. Затем выполните:
+принятый strict dual-origin stable и текущий candidate stable. Возьмите точный
+`source_beta_tag` каждого из обоих совпадающих `release-evidence.json`, поместите
+их соответственно в `PREVIOUS_STABLE_SOURCE_BETA_TAG` и
+`CANDIDATE_STABLE_SOURCE_BETA_TAG`. До dispatch повторно проверьте обе immutable
+trees, stable tag/target и evidence hashes для обоих releases. Сначала выполните:
 
 ```bash
 gh workflow run station-stable-release.yml --ref main \
@@ -187,12 +191,29 @@ Protected run валидирует exact beta и derived stable, создаёт 
 backup текущих mutables и продвигает GitHub manifest, Yandex manifest и default
 stable alias последним. После успеха публично скачайте оба stable channel
 manifest и `https://releases.markiro.app/station/download`, сравните с выбранной
-immutable stable и сохраните workflow URL/evidence hashes. Backup нужен для
-in-run compensation, очищается после успешного run и не является durable
-artifact. При любом mismatch остановитесь; не overwrite/cross-copy immutable
-tree. При ошибке mutation порядок compensation остаётся прежним: Yandex alias,
-Yandex manifest, GitHub manifest, с публичным сравнением каждого временного
-backup.
+previous immutable stable и сохраните workflow URL/evidence hashes как
+`ROLLBACK-01`. Затем немедленно восстановите current candidate stable:
+
+```bash
+gh workflow run station-stable-release.yml --ref main \
+  -f mode=promote-existing \
+  -f source_beta_tag="$CANDIDATE_STABLE_SOURCE_BETA_TAG" \
+  -f acceptance_confirmed=true
+```
+
+После candidate restoration публично скачайте оба stable manifests и default
+alias, сравните их с current candidate immutable stable и сохраните отдельные
+workflow/evidence как `ROLLBACK-02`. Backup нужен для in-run compensation,
+очищается после каждого успешного run и не является durable artifact. При любом
+mismatch остановитесь; не overwrite/cross-copy immutable tree. При ошибке
+mutation порядок compensation остаётся прежним: Yandex alias, Yandex manifest,
+GitHub manifest, с публичным сравнением каждого временного backup.
+
+Если восстановление candidate или финальный read-back не прошли, установите
+stable Overall `FAIL`, остановитесь для incident recovery и не оставляйте channel
+в rollback, одновременно отмечая acceptance `PASS`. Overall может стать `PASS`
+только когда exact current candidate stable снова является подтверждённой целью
+обоих manifests и default alias.
 
 Rollback channel pointer влияет только на ещё не обновившихся клиентов. Для уже
 обновлённой Station закройте активную смену, проверьте SQLite compatibility

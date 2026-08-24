@@ -132,6 +132,21 @@ Windows.
 
 ## Публикация и повторное продвижение
 
+Phase 3 требует двух отдельных normal publications. Первый dispatch создаёт
+bootstrap beta — первый build с fixed dual-origin adapter. До него уже должен
+быть принят Phase 2 pre-transition rollback baseline. После bootstrap
+publication заполните bounded `BOOTSTRAP_READY`: оба migration path,
+application/SQLite/pairing/settings/journals/boxes/exceptions/outbox preservation
+и basic Windows/WebView2/scanner/printer operation. Только bootstrap Overall
+`PASS` разрешает второй dispatch.
+
+Второй dispatch создаёт validation/candidate beta, canonical version которой
+строго больше bootstrap beta. Именно этот exact candidate упражняет beta → beta
+primary/fallback/no-update/integrity/rollback сценарии `BETA_SIGN_OFF`; его tag,
+`baseSha`, `releaseSha` и оба origin evidence hashes после Overall `PASS`
+становятся единственным разрешённым source для первого stable. Не используйте
+bootstrap beta или более новый найденный release как замену.
+
 Для новой версии выберите `mode=publish` и `next-beta`, `next-patch-beta`,
 `next-minor-beta` или `next-major-beta`. Обычная публикация разрешена только при
 существующей полной паре Yandex mutable objects: `station/beta/latest.json` и
@@ -227,14 +242,17 @@ cookie, query или referrer и доступна только по явному
 `https://releases.markiro.app/station/beta/download`.
 
 Установленные старые GitHub-only клиенты не узнают новый origin от изменения на
-сервере. Если GitHub доступен, сначала доставьте им transitional beta с
-dual-origin adapter через старый updater. В ограниченной сети (restricted
-network), где GitHub уже заблокирован, скачайте проверенный beta installer по
-явному Yandex URL и выполните ручной install-over поверх существующей установки.
-Это два разных migration path: GitHub-reachable и GitHub-blocked; server-side
-изменение не обновляет endpoint уже установленного legacy client. GitHub channel
-assets поэтому сохраняются на поддерживаемый legacy-client horizon; дата их
-удаления этим rollout не назначается.
+сервере. Если GitHub доступен, сначала доставьте им bootstrap beta — первый
+dual-origin-adapter build — через existing GitHub updater. В ограниченной сети
+(restricted network), где GitHub уже заблокирован, скачайте проверенный
+bootstrap beta installer по явному Yandex URL и выполните ручной install-over
+поверх существующей установки. Это два разных migration path: GitHub-reachable
+и GitHub-blocked; server-side изменение не обновляет endpoint уже установленного
+legacy client. Для GitHub-only legacy clients именно bootstrap является первой
+transitional beta. GitHub channel assets поэтому сохраняются на поддерживаемый
+legacy-client horizon; дата их удаления этим rollout не назначается. Лишь после
+`BOOTSTRAP_READY` установите строго более новую validation/candidate beta через
+новый dual-origin adapter и выполните beta → beta acceptance.
 
 До и после install-over зафиксируйте application ID `app.markiro.station`,
 фактический абсолютный путь к SQLite и относительное имя
@@ -291,24 +309,41 @@ backup/promotion без rebuild, signing или immutable upload. Transaction ro
 `promote-existing` запрещён: остановитесь, сохраните evidence и выпускайте новую
 явно авторизованную beta.
 
-Для отдельной post-success acceptance-проверки rollback выберите только
-предыдущую принятую beta из заполненного acceptance record и до dispatch
-повторно проверьте обе immutable trees и их hashes. Возьмите точный tag в
-`PREVIOUS_BETA_TAG` из записи, затем выполните:
+Для отдельной post-success acceptance-проверки rollback возьмите точные
+`BOOTSTRAP_BETA_TAG` и `VALIDATION_BETA_TAG` из двух заполненных identity tables.
+До dispatch повторно проверьте обе immutable trees, target SHA и evidence hashes
+для обеих beta. Сначала верните channel на bootstrap predecessor:
 
 ```bash
 gh workflow run station-beta-release.yml --ref main \
   -f mode=promote-existing \
-  -f repair_tag="$PREVIOUS_BETA_TAG"
+  -f repair_tag="$BOOTSTRAP_BETA_TAG"
 ```
 
 Protected run сначала создаёт полные временные backup текущих mutable targets,
 затем продвигает GitHub manifest, Yandex manifest и beta alias последним. После
 успеха публично скачайте оба channel manifest и
 `https://releases.markiro.app/station/beta/download`, сравните их с выбранной
-immutable beta и сохраните workflow URL/evidence hash. Не записывайте вымышленный
-durable backup path: успешный run очищает временный backup. При любом mismatch
-остановитесь; не overwrite/cross-copy immutable tree.
+bootstrap immutable beta и сохраните workflow URL/evidence hash как
+`BETA-ROLLBACK-01`. Затем немедленно восстановите exact candidate:
+
+```bash
+gh workflow run station-beta-release.yml --ref main \
+  -f mode=promote-existing \
+  -f repair_tag="$VALIDATION_BETA_TAG"
+```
+
+После второго успешного run снова публично скачайте оба manifests и beta alias,
+сравните их с validation/candidate immutable trees и сохраните отдельные
+candidate-restoration workflow/evidence как `BETA-ROLLBACK-02`. Не записывайте
+вымышленный durable backup path: каждый успешный run очищает временный backup.
+При любом mismatch остановитесь; не overwrite/cross-copy immutable tree.
+
+Если восстановление candidate или финальный read-back не прошли, установите beta
+Overall `FAIL`, остановитесь для incident recovery и не оставляйте channel в
+rollback, одновременно отмечая acceptance `PASS`. Overall может стать `PASS`
+только когда exact validation/candidate beta снова подтверждена обоими channel
+manifest и alias.
 
 Для client rollback вручную установите предыдущий совместимый immutable
 installer вне активной смены. Mutable channel является только указателем, а не

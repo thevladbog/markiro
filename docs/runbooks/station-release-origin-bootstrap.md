@@ -30,16 +30,24 @@ Environment/secrets, release publication и customer-device acceptance треб�
    beta. Immutable historical releases must not be retrofitted or
    переупакованы задним числом. После provider-host proof DNS включается только
    отдельным plan/apply за STOP 3.
-3. **Phase 3 — transitional beta.** Только после integration Tasks 8–11
-   опубликовать новую beta с fixed dual-origin adapter. GitHub-reachable
-   GitHub-only установки получают её через старый updater; GitHub-blocked
-   установки требуют ручной install-over по explicit Yandex beta installer.
-   Завершить весь
+3. **Phase 3 — transitional beta.** Это явно двух-beta переход, а не один
+   release. Сначала публикуется **bootstrap beta**, first dual-origin-adapter
+   build. GitHub-reachable legacy clients получают bootstrap beta через existing
+   GitHub updater path; GitHub-blocked clients используют verified explicit
+   Yandex beta installer и manual install-over. Bounded gate
+   `BOOTSTRAP_READY` проверяет publication, preservation и basic operation этого
+   build и только после Overall `PASS` разрешает публиковать next beta. Затем
+   публикуется строго более новая **validation/candidate beta**. Только она
+   упражняет beta → beta Yandex primary, отдельные metadata/package fallback,
+   authoritative no-update, mismatch/signature denial и rollback к bootstrap с
+   обязательным возвратом candidate. Завершите обе отдельные записи в
    [dual-origin Windows/hardware acceptance record](../acceptance/station-dual-origin-release.md).
-4. **Phase 4 — first dual-origin stable.** Только явно принятая transitional
-   beta может быть точным `source_beta_tag`. Stable rebuild не берёт новый
-   `main`; обе immutable trees и три mutable targets проверяются до физического
-   допуска. CI/publication proof не является Windows/customer proof.
+4. **Phase 4 — first dual-origin stable.** Только явно принятая
+   validation/candidate beta может быть точным `source_beta_tag`; ее exact tag,
+   `baseSha`, `releaseSha` и оба evidence hash переносятся в stable provenance.
+   Bootstrap beta для этого не подходит. Stable rebuild не берёт новый `main`;
+   обе immutable trees и три mutable targets проверяются до физического допуска.
+   CI/publication proof не является Windows/customer proof.
 
 Канонические public installers:
 
@@ -331,11 +339,20 @@ Stable и beta — две независимые процедуры и два н
 precondition не подтверждён. Завершение кода не публикует release автоматически.
 
 **Integration checkpoint 2 — transitional runtime.** Только после merge Tasks
-8–11 опубликуйте новый transitional beta с dual-origin adapter. Beta alias
-переходит на этот transitional beta лишь после полной dual-origin publication и
-promotion transaction. Stable alias остаётся на принятом stable baseline, пока
-transitional beta не пройдёт отдельную Windows/hardware acceptance и не будет
-явно выбран для stable rebuild.
+8–11 опубликуйте bootstrap beta — first dual-origin-adapter build. Beta alias
+переходит на него лишь после полной dual-origin publication и promotion
+transaction. Доставьте его GitHub-reachable клиентам через existing GitHub path,
+а GitHub-blocked — manual install-over с Yandex. Не публикуйте следующую beta,
+пока `BASELINE-01` и весь bounded `BOOTSTRAP_READY` gate не имеют `PASS`, включая
+publication, preservation и basic operation.
+
+После bootstrap Overall `PASS` опубликуйте строго более новую
+validation/candidate beta. Выполните из bootstrap состояния все `BETA_SIGN_OFF`
+сценарии, затем в rollback drill сначала продвиньте точный bootstrap, а потом
+обязательно верните и повторно проверьте exact candidate. Stable alias остаётся
+на принятом stable baseline, пока candidate Overall не станет `PASS`; первый
+stable использует exact candidate tag как `source_beta_tag`, а не bootstrap и не
+более новый `main`.
 
 Проверьте отсутствие bucket listing, корректные cache/content-disposition
 metadata, точные hashes и оба фиксированных manifest keys

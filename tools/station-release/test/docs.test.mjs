@@ -163,37 +163,114 @@ test("dual-origin rollout docs preserve the phased migration and recovery contra
 });
 
 test("dual-origin acceptance uses non-circular phase gates", async () => {
-  const acceptance = await read("docs/acceptance/station-dual-origin-release.md");
+  const [bootstrap, acceptance] = await Promise.all([
+    read("docs/runbooks/station-release-origin-bootstrap.md"),
+    read("docs/acceptance/station-dual-origin-release.md"),
+  ]);
 
   assert.match(acceptance, /## Gate model/);
-  assert.match(acceptance, /## Transitional beta acceptance record/);
+  assert.match(acceptance, /## Bootstrap beta readiness record/);
+  assert.match(acceptance, /## Validation\/candidate beta acceptance record/);
   assert.match(acceptance, /## Stable acceptance record/);
   assert.match(
     acceptance,
-    /first stable publication requires[\s\S]*transitional beta[\s\S]*Overall result[\s\S]*`PASS`/i,
+    /`BASELINE-01`[\s\S]*`PASS`[\s\S]*permits[\s\S]*bootstrap beta publication/i,
   );
+  assert.match(
+    acceptance,
+    /every `BOOTSTRAP_READY` row[\s\S]*`PASS`[\s\S]*permits[\s\S]*validation\/candidate beta/i,
+  );
+  assert.match(acceptance, /validation\/candidate beta[\s\S]*strictly newer[\s\S]*bootstrap beta/i);
+  assert.match(acceptance, /`BETA_SIGN_OFF` applies only to[\s\S]*validation\/candidate beta/i);
+  assert.match(
+    acceptance,
+    /first stable publication requires[\s\S]*validation\/candidate beta[\s\S]*Overall result[\s\S]*`PASS`/i,
+  );
+  assert.match(acceptance, /stable `source_beta_tag`[\s\S]*exact validation\/candidate beta tag/i);
   assert.match(acceptance, /`PUBLISH-01`[\s\S]*does not block[\s\S]*first stable publication/i);
   assert.match(acceptance, /`NOT_RUN`[\s\S]*blocks[\s\S]*sign-off[\s\S]*Required for/i);
   assert.match(acceptance, /`SUBSEQUENT_STABLE_SIGN_OFF`[\s\S]*does not block[\s\S]*first stable/i);
+  assert.match(
+    bootstrap,
+    /Phase 3 — transitional beta[\s\S]*bootstrap beta[\s\S]*validation\/candidate beta/is,
+  );
+  assert.match(
+    bootstrap,
+    /bootstrap beta[\s\S]*first dual-origin-adapter\s+build[\s\S]*GitHub-reachable[\s\S]*existing\s+GitHub[\s\S]*GitHub-blocked[\s\S]*Yandex[\s\S]*manual install-over/is,
+  );
+  assert.match(
+    bootstrap,
+    /`BOOTSTRAP_READY`[\s\S]*publication[\s\S]*preservation[\s\S]*basic operation[\s\S]*next beta/is,
+  );
 });
 
 test("dual-origin acceptance records distinct flows with complete blank evidence fields", async () => {
   const acceptance = await read("docs/acceptance/station-dual-origin-release.md");
 
-  for (const field of [
-    "Exact release tag",
-    "baseSha",
-    "releaseSha",
+  const identityFields = (heading, nextMarker, expectedFields) => {
+    const start = acceptance.indexOf(heading);
+    const end = acceptance.indexOf(nextMarker, start);
+    assert.ok(start >= 0 && end > start, `missing identity section ${heading}`);
+    const rows = acceptance
+      .slice(start, end)
+      .split("\n")
+      .filter((line) => /^\| (?!-)(?!Field\s+\|)[^|]+\|/.test(line))
+      .map((line) =>
+        line
+          .split("|")
+          .slice(1, -1)
+          .map((cell) => cell.trim()),
+      );
+    assert.deepEqual(
+      rows.map(([field]) => field),
+      expectedFields,
+      `${heading} field inventory`,
+    );
+    for (const [field, value] of rows) {
+      assert.equal(value, "", `${heading} ${field} must start blank`);
+    }
+  };
+
+  const commonIdentity = [
+    "`baseSha`",
+    "`releaseSha`",
     "GitHub evidence SHA-256",
     "Yandex evidence SHA-256",
+    "Installer SHA-256",
+    "Updater bundle SHA-256",
     "GitHub immutable URL",
     "Yandex immutable URL",
     "GitHub channel URL",
     "Yandex channel URL",
     "Installer URL",
-  ]) {
-    assert.match(acceptance, new RegExp(field));
-  }
+    "Workflow URL",
+    "Transaction backup verification step",
+    "Previous installer SHA-256",
+    "SQLite compatibility window",
+  ];
+  identityFields("### Bootstrap beta identity", "| Scenario", [
+    "Exact bootstrap beta tag",
+    ...commonIdentity,
+    "Phase 2 pre-transition baseline tag",
+  ]);
+  identityFields("### Validation/candidate beta identity", "| Scenario", [
+    "Exact validation/candidate beta tag",
+    ...commonIdentity,
+    "Exact bootstrap predecessor tag",
+    "Strict ordering proof (`candidate > bootstrap`)",
+    "First-stable `source_beta_tag` (must equal candidate)",
+    "Rollback-to-bootstrap workflow/evidence",
+    "Candidate-restoration workflow/evidence",
+  ]);
+  identityFields("### Stable identity", "| Scenario", [
+    "Exact release tag",
+    "Exact `source_beta_tag`",
+    ...commonIdentity,
+    "Previous accepted stable tag",
+    "Previous stable `source_beta_tag`",
+    "Rollback-to-previous workflow/evidence",
+    "Candidate-restoration workflow/evidence",
+  ]);
 
   assert.match(
     acceptance,
@@ -205,34 +282,121 @@ test("dual-origin acceptance records distinct flows with complete blank evidence
   );
 
   const expected = [
-    ["BASELINE-01", "BETA_SIGN_OFF", /rollback baselines/i],
-    ["BETA-PUBLISH-01", "BETA_SIGN_OFF", /normal `mode=publish`/i],
-    ["BETA-RECOVERY-01", "BETA_SIGN_OFF", /exact `repair_tag`/i],
+    ["BASELINE-01", "BOOTSTRAP_READY", /DNS-disabled.*pre-transition.*rollback baseline/i],
+    [
+      "BOOTSTRAP-PUBLISH-01",
+      "BOOTSTRAP_READY",
+      /first dual-origin-adapter bootstrap beta.*normal `mode=publish`/i,
+    ],
+    [
+      "BOOTSTRAP-MIGRATION-01",
+      "BOOTSTRAP_READY",
+      /GitHub-reachable.*existing GitHub updater.*bootstrap beta/i,
+    ],
+    [
+      "BOOTSTRAP-MIGRATION-02",
+      "BOOTSTRAP_READY",
+      /GitHub-blocked.*Yandex beta installer.*manual install-over.*bootstrap beta/i,
+    ],
+    [
+      "BOOTSTRAP-PRESERVE-01",
+      "BOOTSTRAP_READY",
+      /application ID.*`app\.markiro\.station`.*bootstrap/i,
+    ],
+    [
+      "BOOTSTRAP-PRESERVE-02",
+      "BOOTSTRAP_READY",
+      /SQLite path.*`station-mirror\.db`.*unchanged.*readable/i,
+    ],
+    ["BOOTSTRAP-PRESERVE-03", "BOOTSTRAP_READY", /station identity.*pairing.*without re-pairing/i],
+    ["BOOTSTRAP-PRESERVE-04", "BOOTSTRAP_READY", /hardware.*operator settings.*remain/i],
+    ["BOOTSTRAP-PRESERVE-05", "BOOTSTRAP_READY", /scan.*print journals.*identifiers.*counts/i],
+    [
+      "BOOTSTRAP-PRESERVE-06",
+      "BOOTSTRAP_READY",
+      /open\/closed boxes.*pending print recovery.*SSCC/i,
+    ],
+    ["BOOTSTRAP-PRESERVE-07", "BOOTSTRAP_READY", /exceptions.*visible.*recoverable.*synchron/i],
+    [
+      "BOOTSTRAP-PRESERVE-08",
+      "BOOTSTRAP_READY",
+      /pending outbox.*survive.*restart.*without duplication.*deletion/i,
+    ],
+    ["BOOTSTRAP-BASIC-01", "BOOTSTRAP_READY", /starts.*Windows.*WebView2.*manual update check/i],
+    ["BOOTSTRAP-BASIC-02", "BOOTSTRAP_READY", /scanner.*production-like scan/i],
+    ["BOOTSTRAP-BASIC-03", "BOOTSTRAP_READY", /printer.*print.*failure.*retry/i],
+    [
+      "BETA-PUBLISH-01",
+      "BETA_SIGN_OFF",
+      /strictly newer validation\/candidate beta.*normal `mode=publish`/i,
+    ],
+    ["BETA-RECOVERY-01", "BETA_SIGN_OFF", /exact validation\/candidate `repair_tag`/i],
     ["BETA-RECOVERY-02", "BETA_SIGN_OFF", /partial.*origin|origin.*mismatch/i],
-    ["BETA-UPDATE-01", "BETA_SIGN_OFF", /beta.*beta.*Yandex primary/i],
-    ["BETA-METADATA-FALLBACK-01", "BETA_SIGN_OFF", /metadata.*GitHub fallback/i],
-    ["BETA-PACKAGE-FALLBACK-01", "BETA_SIGN_OFF", /package.*GitHub fallback/i],
-    ["BETA-NO-UPDATE-01", "BETA_SIGN_OFF", /no-update.*no GitHub/i],
+    ["BETA-UPDATE-01", "BETA_SIGN_OFF", /bootstrap beta.*validation.*Yandex primary/i],
+    [
+      "BETA-METADATA-FALLBACK-01",
+      "BETA_SIGN_OFF",
+      /validation.*metadata.*Yandex.*fails.*GitHub fallback/i,
+    ],
+    [
+      "BETA-PACKAGE-FALLBACK-01",
+      "BETA_SIGN_OFF",
+      /validation.*Yandex metadata.*package download fails.*GitHub fallback/i,
+    ],
+    ["BETA-NO-UPDATE-01", "BETA_SIGN_OFF", /validation.*Yandex.*no-update.*no GitHub/i],
     ["BETA-INTEGRITY-01", "BETA_SIGN_OFF", /version.*date.*target.*signature/i],
-    ["BETA-INTEGRITY-02", "BETA_SIGN_OFF", /bad updater signature/i],
-    ["MIGRATION-01", "BETA_SIGN_OFF", /GitHub-reachable/i],
-    ["MIGRATION-02", "BETA_SIGN_OFF", /GitHub-blocked/i],
-    ...Array.from({ length: 8 }, (_, index) => [
-      `BETA-PRESERVE-${String(index + 1).padStart(2, "0")}`,
+    ["BETA-INTEGRITY-02", "BETA_SIGN_OFF", /bad validation\/candidate updater signature/i],
+    [
+      "BETA-PRESERVE-01",
       "BETA_SIGN_OFF",
-      /./,
-    ]),
+      /application ID.*`app\.markiro\.station`.*bootstrap.*validation/i,
+    ],
+    [
+      "BETA-PRESERVE-02",
+      "BETA_SIGN_OFF",
+      /SQLite path.*`station-mirror\.db`.*unchanged.*readable/i,
+    ],
+    ["BETA-PRESERVE-03", "BETA_SIGN_OFF", /station identity.*pairing.*without re-pairing/i],
+    ["BETA-PRESERVE-04", "BETA_SIGN_OFF", /hardware.*operator settings.*remain/i],
+    ["BETA-PRESERVE-05", "BETA_SIGN_OFF", /scan.*print journals.*identifiers.*counts/i],
+    ["BETA-PRESERVE-06", "BETA_SIGN_OFF", /open\/closed boxes.*pending print recovery.*SSCC/i],
+    ["BETA-PRESERVE-07", "BETA_SIGN_OFF", /exceptions.*visible.*recoverable.*synchron/i],
+    [
+      "BETA-PRESERVE-08",
+      "BETA_SIGN_OFF",
+      /pending outbox.*survive.*restart.*without duplication.*deletion/i,
+    ],
     ["BETA-SHIFT-01", "BETA_SIGN_OFF", /active shift/i],
-    ["BETA-RECOVERY-03", "BETA_SIGN_OFF", /restart.*offline.*reconnect/i],
-    ...Array.from({ length: 4 }, (_, index) => [
-      `BETA-HARDWARE-${String(index + 1).padStart(2, "0")}`,
+    [
+      "BETA-RECOVERY-03",
       "BETA_SIGN_OFF",
-      /./,
-    ]),
-    ["BETA-WINDOWS-01", "BETA_SIGN_OFF", /Windows.*WebView2/i],
-    ["BETA-WINDOWS-02", "BETA_SIGN_OFF", /unsigned NSIS.*SmartScreen/i],
-    ["BETA-OFFLINE-01", "BETA_SIGN_OFF", /complete shift.*offline/i],
-    ["BETA-ROLLBACK-01", "BETA_SIGN_OFF", /previous accepted beta.*`repair_tag`/i],
+      /restart.*offline.*reconnect.*validation.*durable Station work/i,
+    ],
+    ["BETA-HARDWARE-01", "BETA_SIGN_OFF", /scanner serial.*keyboard-wedge.*scans/i],
+    ["BETA-HARDWARE-02", "BETA_SIGN_OFF", /printer.*failure.*retr.*scan-back.*pending box/i],
+    ["BETA-HARDWARE-03", "BETA_SIGN_OFF", /operator sounds.*audible.*mapped/i],
+    ["BETA-HARDWARE-04", "BETA_SIGN_OFF", /touch controls.*fullscreen.*viewport/i],
+    ["BETA-WINDOWS-01", "BETA_SIGN_OFF", /starts.*updates.*Windows.*WebView2/i],
+    [
+      "BETA-WINDOWS-02",
+      "BETA_SIGN_OFF",
+      /unsigned NSIS.*SmartScreen.*Tauri updater signature.*Authenticode/i,
+    ],
+    [
+      "BETA-OFFLINE-01",
+      "BETA_SIGN_OFF",
+      /complete shift.*offline.*scan.*journal.*box.*exception.*restart.*outbox reconnect/i,
+    ],
+    [
+      "BETA-ROLLBACK-01",
+      "BETA_SIGN_OFF",
+      /bootstrap predecessor.*exact `repair_tag`.*manifests.*beta alias/i,
+    ],
+    [
+      "BETA-ROLLBACK-02",
+      "BETA_SIGN_OFF",
+      /validation\/candidate beta.*re-promoted.*exact `repair_tag`.*manifests.*beta alias/i,
+    ],
     ["PUBLISH-01", "FIRST_STABLE_SIGN_OFF", /first dual-origin stable.*`mode=publish`/i],
     ["STABLE-RECOVERY-01", "FIRST_STABLE_SIGN_OFF", /mutable-only repair/i],
     ["STABLE-RECOVERY-02", "FIRST_STABLE_SIGN_OFF", /partial.*origin|origin.*mismatch/i],
@@ -243,22 +407,45 @@ test("dual-origin acceptance records distinct flows with complete blank evidence
     ["STABLE-PACKAGE-FALLBACK-01", "SUBSEQUENT_STABLE_SIGN_OFF", /package.*GitHub fallback/i],
     ["STABLE-INTEGRITY-01", "SUBSEQUENT_STABLE_SIGN_OFF", /origin.*mismatch/i],
     ["STABLE-INTEGRITY-02", "SUBSEQUENT_STABLE_SIGN_OFF", /bad updater signature/i],
-    ...Array.from({ length: 8 }, (_, index) => [
-      `PRESERVE-${String(index + 1).padStart(2, "0")}`,
+    ["PRESERVE-01", "EVERY_STABLE_SIGN_OFF", /application ID.*`app\.markiro\.station`/i],
+    ["PRESERVE-02", "EVERY_STABLE_SIGN_OFF", /SQLite path.*`station-mirror\.db`.*readable/i],
+    ["PRESERVE-03", "EVERY_STABLE_SIGN_OFF", /station identity.*pairing.*without re-pairing/i],
+    ["PRESERVE-04", "EVERY_STABLE_SIGN_OFF", /hardware.*operator settings.*remain/i],
+    ["PRESERVE-05", "EVERY_STABLE_SIGN_OFF", /scan.*print journals.*identifiers.*counts/i],
+    ["PRESERVE-06", "EVERY_STABLE_SIGN_OFF", /open\/closed boxes.*pending print.*SSCC/i],
+    ["PRESERVE-07", "EVERY_STABLE_SIGN_OFF", /exceptions.*visible.*recoverable.*synchron/i],
+    [
+      "PRESERVE-08",
       "EVERY_STABLE_SIGN_OFF",
-      /./,
-    ]),
+      /pending outbox.*survive.*restart.*without duplication.*deletion/i,
+    ],
     ["SHIFT-01", "EVERY_STABLE_SIGN_OFF", /active shift/i],
-    ["RECOVERY-03", "EVERY_STABLE_SIGN_OFF", /restart.*offline.*reconnect/i],
-    ...Array.from({ length: 4 }, (_, index) => [
-      `HARDWARE-${String(index + 1).padStart(2, "0")}`,
+    ["RECOVERY-03", "EVERY_STABLE_SIGN_OFF", /restart.*offline.*reconnect.*stable.*durable/i],
+    ["HARDWARE-01", "EVERY_STABLE_SIGN_OFF", /scanner serial.*keyboard-wedge.*scans/i],
+    ["HARDWARE-02", "EVERY_STABLE_SIGN_OFF", /printer.*failure.*retr.*scan-back.*pending box/i],
+    ["HARDWARE-03", "EVERY_STABLE_SIGN_OFF", /operator sounds.*audible.*mapped/i],
+    ["HARDWARE-04", "EVERY_STABLE_SIGN_OFF", /touch controls.*fullscreen.*viewport/i],
+    ["WINDOWS-01", "EVERY_STABLE_SIGN_OFF", /starts.*updates.*Windows.*WebView2/i],
+    [
+      "WINDOWS-02",
       "EVERY_STABLE_SIGN_OFF",
-      /./,
-    ]),
-    ["WINDOWS-01", "EVERY_STABLE_SIGN_OFF", /Windows.*WebView2/i],
-    ["WINDOWS-02", "EVERY_STABLE_SIGN_OFF", /unsigned NSIS.*SmartScreen/i],
-    ["OFFLINE-01", "EVERY_STABLE_SIGN_OFF", /complete shift.*offline/i],
-    ["ROLLBACK-01", "SUBSEQUENT_STABLE_SIGN_OFF", /previous accepted stable.*source_beta_tag/i],
+      /unsigned NSIS.*SmartScreen.*Tauri updater signature.*Authenticode/i,
+    ],
+    [
+      "OFFLINE-01",
+      "EVERY_STABLE_SIGN_OFF",
+      /complete shift.*offline.*scan.*journal.*box.*exception.*restart.*outbox reconnect/i,
+    ],
+    [
+      "ROLLBACK-01",
+      "SUBSEQUENT_STABLE_SIGN_OFF",
+      /previous accepted stable.*recorded `source_beta_tag`.*manifests.*default alias/i,
+    ],
+    [
+      "ROLLBACK-02",
+      "SUBSEQUENT_STABLE_SIGN_OFF",
+      /current candidate stable.*re-promoted.*recorded `source_beta_tag`.*manifests.*default alias/i,
+    ],
   ];
 
   const scenarioRows = acceptance
@@ -280,6 +467,15 @@ test("dual-origin acceptance records distinct flows with complete blank evidence
     assert.equal(row[3], "NOT_RUN", `${id} result`);
     assert.deepEqual(row.slice(4), ["", "", "", ""], `${id} evidence must start blank`);
   }
+
+  assert.deepEqual(
+    acceptance.split("\n").filter((line) => /Overall result:/.test(line)),
+    [
+      "Bootstrap beta Overall result: `NOT_RUN`",
+      "Validation/candidate beta Overall result: `NOT_RUN`",
+      "First/subsequent stable Overall result: `NOT_RUN`",
+    ],
+  );
 });
 
 test("beta and stable runbooks define exact post-success acceptance rollback inputs", async () => {
@@ -289,14 +485,17 @@ test("beta and stable runbooks define exact post-success acceptance rollback inp
     read("docs/acceptance/station-dual-origin-release.md"),
   ]);
 
-  assert.match(beta, /repair_tag/);
+  assert.match(beta, /BOOTSTRAP_BETA_TAG/);
+  assert.match(beta, /VALIDATION_BETA_TAG/);
   assert.match(
     beta,
-    /gh workflow run station-beta-release\.yml[\s\S]*mode=promote-existing[\s\S]*repair_tag=/i,
+    /gh workflow run station-beta-release\.yml[\s\S]*mode=promote-existing[\s\S]*repair_tag="\$BOOTSTRAP_BETA_TAG"[\s\S]*gh workflow run station-beta-release\.yml[\s\S]*mode=promote-existing[\s\S]*repair_tag="\$VALIDATION_BETA_TAG"/i,
   );
+  assert.match(stable, /PREVIOUS_STABLE_SOURCE_BETA_TAG/);
+  assert.match(stable, /CANDIDATE_STABLE_SOURCE_BETA_TAG/);
   assert.match(
     stable,
-    /gh workflow run station-stable-release\.yml[\s\S]*mode=promote-existing[\s\S]*source_beta_tag=[\s\S]*acceptance_confirmed=true/i,
+    /gh workflow run station-stable-release\.yml[\s\S]*source_beta_tag="\$PREVIOUS_STABLE_SOURCE_BETA_TAG"[\s\S]*acceptance_confirmed=true[\s\S]*gh workflow run station-stable-release\.yml[\s\S]*source_beta_tag="\$CANDIDATE_STABLE_SOURCE_BETA_TAG"[\s\S]*acceptance_confirmed=true/i,
   );
   for (const text of [beta, stable, acceptance]) {
     assert.match(text, /previous.*accepted|предыдущ.*принят/is);
@@ -311,6 +510,14 @@ test("beta and stable runbooks define exact post-success acceptance rollback inp
   assert.match(acceptance, /repair_tag/);
   assert.match(acceptance, /source_beta_tag/);
   assert.match(acceptance, /does not automatically downgrade|не делает.*автомат.*downgrade/is);
+  for (const text of [beta, stable, acceptance]) {
+    assert.match(text, /restore|восстанов.*candidate|верн.*candidate/is);
+    assert.match(
+      text,
+      /candidate restoration[\s\S]*Overall[\s\S]*`FAIL`|восстанов.*candidate[\s\S]*Overall[\s\S]*`FAIL`/is,
+    );
+    assert.match(text, /do not leave.*channel.*rolled back|не оставляйте.*channel.*rollback/is);
+  }
 });
 
 test("Station release origin bootstrap separates protected credentials and approval gates", async () => {
