@@ -56,6 +56,19 @@ function expectButtonDisabled(button: HTMLElement, disabled: boolean) {
   expect(button.disabled).toBe(disabled);
 }
 
+function entryLease(order: string[] = []) {
+  let current = true;
+  const release = vi.fn(() => {
+    if (!current) return;
+    current = false;
+    order.push("release");
+  });
+  return {
+    lease: { isCurrent: () => current, release },
+    release,
+  };
+}
+
 function submitGtin() {
   const input = screen.getByLabelText("Type or scan a GTIN");
   fireEvent.change(input, { target: { value: "4600000000015" } });
@@ -223,7 +236,9 @@ describe("NewShift", () => {
     expect(onBack).toHaveBeenCalledOnce();
   });
 
-  it("keeps Back disabled while shift start is pending", async () => {
+  it("keeps Back and the lease held through cancellation, create, and open", async () => {
+    const createShift = deferredResponse();
+    const openShift = deferredResponse();
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -239,28 +254,28 @@ describe("NewShift", () => {
           { status: 200 },
         ),
       )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ id: "s9", status: "planned", mode: "validation" }), {
-          status: 201,
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ id: "s9", status: "active", mode: "validation" }), {
-          status: 200,
-        }),
-      );
+      .mockImplementationOnce(() => createShift.promise)
+      .mockImplementationOnce(() => openShift.promise);
     const onBack = vi.fn();
     let releaseEntry!: () => void;
     const entryBarrier = new Promise<void>((resolve) => {
       releaseEntry = resolve;
     });
-    const beforeShiftEntry = vi.fn(() => entryBarrier);
-    const onStarted = vi.fn();
+    const order: string[] = [];
+    const owned = entryLease(order);
+    const acquireShiftEntry = vi.fn(async () => {
+      await entryBarrier;
+      return owned.lease;
+    });
+    const onStarted = vi.fn((_shift, lease) => {
+      expect(lease).toBe(owned.lease);
+      order.push("publish");
+    });
     render(
       <NewShift
         client={client}
         source={silentSource}
-        beforeShiftEntry={beforeShiftEntry}
+        acquireShiftEntry={acquireShiftEntry}
         onStarted={onStarted}
         onBack={onBack}
       />,
@@ -272,14 +287,120 @@ describe("NewShift", () => {
     await waitFor(() => expectButtonDisabled(pendingBack, true));
     fireEvent.click(pendingBack);
     expect(onBack).not.toHaveBeenCalled();
-    expect(beforeShiftEntry).toHaveBeenCalledOnce();
+    expect(acquireShiftEntry).toHaveBeenCalledOnce();
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(onStarted).not.toHaveBeenCalled();
     expectButtonDisabled(pendingBack, true);
     releaseEntry();
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+    expect(owned.release).not.toHaveBeenCalled();
+    expect(onStarted).not.toHaveBeenCalled();
+    expectButtonDisabled(pendingBack, true);
+
+    createShift.resolve(
+      new Response(JSON.stringify({ id: "s9", status: "planned", mode: "validation" }), {
+        status: 201,
+      }),
+    );
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(4));
+    expect(owned.release).not.toHaveBeenCalled();
+    expect(onStarted).not.toHaveBeenCalled();
+    expectButtonDisabled(pendingBack, true);
+
+    openShift.resolve(
+      new Response(JSON.stringify({ id: "s9", status: "active", mode: "validation" }), {
+        status: 200,
+      }),
+    );
     await waitFor(() => expect(onStarted).toHaveBeenCalledOnce());
+    expect(order).toEqual(["publish", "release"]);
+    expect(owned.release).toHaveBeenCalledOnce();
     fireEvent.click(pendingBack);
     expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it("does not open or publish after a pending create retires with the route", async () => {
+    const createShift = deferredResponse();
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
+      )
+      .mockImplementationOnce(() => createShift.promise)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "s9", status: "active", mode: "validation" }), {
+          status: 200,
+        }),
+      );
+    const owned = entryLease();
+    const onStarted = vi.fn();
+    const view = render(
+      <NewShift
+        client={client}
+        source={silentSource}
+        acquireShiftEntry={async () => owned.lease}
+        onStarted={onStarted}
+        onBack={() => {}}
+      />,
+    );
+    submitGtin();
+    fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(3));
+    view.unmount();
+
+    createShift.resolve(
+      new Response(JSON.stringify({ id: "s9", status: "planned", mode: "validation" }), {
+        status: 201,
+      }),
+    );
+    await waitFor(() => expect(owned.release).toHaveBeenCalledOnce());
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(onStarted).not.toHaveBeenCalled();
+  });
+
+  it("releases the lease once when the activation request is rejected", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "s9", status: "planned", mode: "validation" }), {
+          status: 201,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "Shift already active elsewhere" }), {
+          status: 409,
+        }),
+      );
+    const owned = entryLease();
+    const onStarted = vi.fn();
+    render(
+      <NewShift
+        client={client}
+        source={silentSource}
+        acquireShiftEntry={async () => owned.lease}
+        onStarted={onStarted}
+        onBack={() => {}}
+      />,
+    );
+    submitGtin();
+    fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+
+    await waitFor(() => expect(screen.getByText("Action failed. Please try again.")).toBeDefined());
+    expect(owned.release).toHaveBeenCalledOnce();
+    expect(onStarted).not.toHaveBeenCalled();
   });
 
   it("renders input, found, and missing as mutually exclusive fixed state panels", async () => {

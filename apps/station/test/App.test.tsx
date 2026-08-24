@@ -1017,6 +1017,140 @@ describe("station updater shift lifecycle", () => {
       consoleErrorSpy.mockRestore();
     }
   });
+
+  it("holds one lease from updater cancellation through planned activation and local publish", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      lockdownMock.snapshot = { mode: "locked", pending: false, error: null };
+      lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+      lockdownMock.subscribe.mockImplementation((listener) => {
+        lockdownMock.listeners.add(listener);
+        return () => lockdownMock.listeners.delete(listener);
+      });
+      lockdownMock.start.mockReturnValue(() => {});
+      const pinHash = await hashSecret(OPERATOR_PIN);
+      mockInvokeForFloor(pinHash, {
+        scanner: null,
+        printer: null,
+        printerLanguage: "zpl",
+        verifyPrintedLabel: false,
+      });
+      const baseInvoke = invokeMock.getMockImplementation();
+      if (!baseInvoke) throw new Error("floor invoke mock is unavailable");
+      const cancellation = deferred<unknown>();
+      invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
+        if (cmd === "station_update_check") {
+          return Promise.resolve({
+            candidateId: "candidate-before-shift",
+            currentVersion: "0.1.0-beta.1",
+            version: "0.1.0-beta.2",
+            publishedAt: "2026-08-11T00:00:00.000Z",
+            selectedOrigin: "yandex",
+            fallbackReason: null,
+          });
+        }
+        if (cmd === "station_update_close") return cancellation.promise;
+        if (cmd === "station_update_download_and_install") {
+          throw new Error("install must remain unreachable while entering a shift");
+        }
+        return baseInvoke(cmd, payload);
+      });
+      const openShift = deferred<Response>();
+      let openCalls = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) => {
+          const path = new URL(url).pathname;
+          if (path === "/shifts" && (init?.method ?? "GET") === "GET") {
+            return new Response(
+              JSON.stringify({
+                items: [
+                  {
+                    id: "shift-1",
+                    status: "planned",
+                    mode: "validation",
+                    productName: "Cola",
+                    plannedQty: null,
+                    productId: "product-1",
+                  },
+                ],
+              }),
+              { status: 200 },
+            );
+          }
+          if (path === "/shifts/shift-1/open" && init?.method === "POST") {
+            openCalls += 1;
+            return openShift.promise;
+          }
+          if (path === "/station/scans" && init?.method === "POST") {
+            return new Response(JSON.stringify({ applied: 0, alreadyApplied: false }), {
+              status: 200,
+            });
+          }
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }),
+      );
+
+      render(<App />);
+      await signInAsOperator();
+      await screen.findByRole("button", { name: /Update 0\.1\.0-beta\.2/ });
+      fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+
+      await waitFor(() =>
+        expect(
+          invokeMock.mock.calls.filter(([command]) => command === "station_update_close"),
+        ).toHaveLength(1),
+      );
+      expect(openCalls).toBe(0);
+      cancellation.resolve(null);
+      await waitFor(() => expect(openCalls).toBe(1));
+
+      const updateButton = screen.getByRole("button", {
+        name: /Update 0\.1\.0-beta\.2/,
+      }) as HTMLButtonElement;
+      const operatorButton = screen.getByRole("button", {
+        name: "Saving the current operation…",
+      }) as HTMLButtonElement;
+      const newShiftButton = screen.getByRole("button", { name: "New shift" }) as HTMLButtonElement;
+      expect(updateButton.disabled).toBe(true);
+      expect(operatorButton.disabled).toBe(true);
+      expect(newShiftButton.disabled).toBe(true);
+      fireEvent.click(updateButton);
+      fireEvent.click(operatorButton);
+      fireEvent.click(newShiftButton);
+      expect(screen.queryByText("Station updates")).toBeNull();
+      expect(screen.queryByTestId("new-shift-input")).toBeNull();
+      expect(
+        invokeMock.mock.calls.filter(([command]) => command === "station_update_check"),
+      ).toHaveLength(1);
+      expect(
+        invokeMock.mock.calls.filter(
+          ([command]) => command === "station_update_download_and_install",
+        ),
+      ).toHaveLength(0);
+
+      openShift.resolve(
+        new Response(JSON.stringify({ id: "shift-1", status: "active", mode: "validation" }), {
+          status: 200,
+        }),
+      );
+      await waitFor(() => expect(screen.getByText("Preparing the shift…")).toBeDefined());
+      const statusPanelToggle = screen.getByRole("button", { name: /status panel/ });
+      if (statusPanelToggle.getAttribute("aria-expanded") === "false") {
+        fireEvent.click(statusPanelToggle);
+      }
+      const releasedOperatorButton = screen.getByRole("button", {
+        name: "Change operator",
+      }) as HTMLButtonElement;
+      expect(releasedOperatorButton.disabled).toBe(false);
+      expect(openCalls).toBe(1);
+      expect(
+        invokeMock.mock.calls.filter(([command]) => command === "station_update_close"),
+      ).toHaveLength(1);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
 });
 
 describe("nextStationView", () => {

@@ -107,6 +107,8 @@ export interface UseStationUpdaterDeps {
   pendingOutbox: number;
   port: StationUpdaterPort;
   now?: () => number;
+  updateOperationBlocked?: () => boolean;
+  activeShiftGuard?: () => boolean;
 }
 
 function toIso(now: () => number): string {
@@ -160,6 +162,8 @@ export function useStationUpdater({
   pendingOutbox: _pendingOutbox,
   port,
   now = Date.now,
+  updateOperationBlocked,
+  activeShiftGuard,
 }: UseStationUpdaterDeps): StationUpdaterController {
   const [persisted, setPersisted] = useState<PersistedUpdateState | null>(null);
   const [phase, setPhase] = useState<StationUpdatePhase>("idle");
@@ -181,8 +185,12 @@ export function useStationUpdater({
   const updateCenterVisibleRef = useRef(updateCenterVisible);
   const previousActiveShift = useRef(activeShift);
   const previousUpdateCenterVisible = useRef(updateCenterVisible);
+  const updateOperationBlockedRef = useRef(updateOperationBlocked);
+  const activeShiftGuardRef = useRef(activeShiftGuard);
   activeShiftRef.current = activeShift;
   updateCenterVisibleRef.current = updateCenterVisible;
+  updateOperationBlockedRef.current = updateOperationBlocked;
+  activeShiftGuardRef.current = activeShiftGuard;
 
   const applyState = useCallback((next: PersistedUpdateState | null) => {
     persistedRef.current = next;
@@ -237,6 +245,7 @@ export function useStationUpdater({
 
   const runCheck = useCallback(
     async (force: boolean): Promise<void> => {
+      if (updateOperationBlockedRef.current?.()) return;
       if (checkInFlight.current) return checkInFlight.current;
       if (installInFlight.current) return installInFlight.current;
       const runGeneration = generation.current;
@@ -357,8 +366,11 @@ export function useStationUpdater({
   const checkNow = useCallback(() => runCheck(true), [runCheck]);
 
   const install = useCallback((): Promise<void> => {
+    if (updateOperationBlockedRef.current?.()) {
+      return Promise.reject(new Error("station update operation blocked"));
+    }
     if (installInFlight.current) return installInFlight.current;
-    if (activeShiftRef.current) {
+    if (activeShiftRef.current || activeShiftGuardRef.current?.()) {
       setError("active-shift");
       return cancel().then(() => {
         setError("active-shift");

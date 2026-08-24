@@ -5,6 +5,7 @@ import { classifyScan, DomainError, normalizeToGtin14 } from "@markiro/domain";
 import { StationApiError, type StationClient } from "../lib/api-client.js";
 import { paginate } from "../lib/pagination.js";
 import type { ScanSource } from "../lib/scan-source.js";
+import type { AcquireShiftEntry, ShiftEntryLease } from "../lib/shift-entry-lease.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { StationScreen } from "../ui/StationScreen.js";
 
@@ -30,8 +31,11 @@ const TEMPLATE_PAGE_SIZE = 4;
 export interface NewShiftProps {
   client: StationClient;
   source: ScanSource;
-  beforeShiftEntry?: () => void | Promise<void>;
-  onStarted: (shift: { id: string; status: string; mode: string }) => void | Promise<void>;
+  acquireShiftEntry?: AcquireShiftEntry;
+  onStarted: (
+    shift: { id: string; status: string; mode: string },
+    lease?: ShiftEntryLease,
+  ) => void | Promise<void>;
   onBack: () => void;
 }
 
@@ -46,7 +50,7 @@ function currentLocalDate(now = new Date()): string {
   ].join("-");
 }
 
-export function NewShift({ client, source, beforeShiftEntry, onStarted, onBack }: NewShiftProps) {
+export function NewShift({ client, source, acquireShiftEntry, onStarted, onBack }: NewShiftProps) {
   const { i18n, t } = useTranslation();
   const [raw, setRaw] = useState("");
   const [view, setView] = useState<NewShiftView>("input");
@@ -61,6 +65,16 @@ export function NewShift({ client, source, beforeShiftEntry, onStarted, onBack }
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [templatePage, setTemplatePage] = useState(1);
   const resolving = useRef(false);
+  const mounted = useRef(true);
+  const shiftEntryOperation = useRef(0);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      shiftEntryOperation.current += 1;
+    };
+  }, []);
 
   const resolveRaw = useCallback(
     async (nextRaw: string) => {
@@ -154,10 +168,17 @@ export function NewShift({ client, source, beforeShiftEntry, onStarted, onBack }
       return;
     }
     if (mode === "aggregation" && !selectedTemplateId) return;
+    const operation = ++shiftEntryOperation.current;
+    let lease: ShiftEntryLease | null = null;
+    const current = (): boolean =>
+      mounted.current && shiftEntryOperation.current === operation && (lease?.isCurrent() ?? true);
     setError(null);
     setBusy(true);
     try {
-      if (beforeShiftEntry) await beforeShiftEntry();
+      if (acquireShiftEntry) {
+        lease = await acquireShiftEntry();
+        if (!current()) return;
+      }
       const requestedProductionDate = productionDate || null;
       const created = await client.post<{
         id: string;
@@ -171,6 +192,7 @@ export function NewShift({ client, source, beforeShiftEntry, onStarted, onBack }
         // exactly the template the operator saw.
         ...(mode === "aggregation" ? { boxLabelTemplateId: selectedTemplateId } : {}),
       });
+      if (!current()) return;
       if (requestedProductionDate !== null && created.productionDate !== requestedProductionDate) {
         setError(t("shifts.productionDateNotConfirmed"));
         return;
@@ -178,15 +200,20 @@ export function NewShift({ client, source, beforeShiftEntry, onStarted, onBack }
       const opened = await client.post<{ id: string; status: string; mode: string }>(
         `/shifts/${created.id}/open`,
       );
-      await onStarted(opened);
+      if (!current()) return;
+      if (lease) await onStarted(opened, lease);
+      else await onStarted(opened);
+      if (!current()) return;
     } catch (err) {
+      if (!current()) return;
       setError(
         err instanceof StationApiError && err.code === "BOX_LABEL_TEMPLATE_REQUIRED"
           ? t("shifts.boxLabelTemplateRequired")
           : t("shifts.actionFailed"),
       );
     } finally {
-      setBusy(false);
+      lease?.release();
+      if (mounted.current && shiftEntryOperation.current === operation) setBusy(false);
     }
   }
 

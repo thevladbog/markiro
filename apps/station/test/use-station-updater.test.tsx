@@ -144,6 +144,58 @@ describe("useStationUpdater", () => {
     expect(port.relaunch).toHaveBeenCalledOnce();
   });
 
+  it("fails closed for direct check/install calls while an App shift lease is held", async () => {
+    const candidate = makeBeta2();
+    const { exec, port } = fixture(candidate);
+    const now = () => Date.parse("2026-08-11T00:00:00.000Z");
+    let leaseHeld = false;
+    let synchronouslyActive = false;
+    const { result } = renderHook(() =>
+      useStationUpdater({
+        enabled: true,
+        updateCenterVisible: true,
+        exec,
+        activeShift: false,
+        pendingOutbox: 0,
+        port,
+        now,
+        updateOperationBlocked: () => leaseHeld,
+        activeShiftGuard: () => synchronouslyActive,
+      }),
+    );
+    await waitFor(() => expect(result.current.persisted?.available).not.toBeNull());
+
+    leaseHeld = true;
+    await act(async () => result.current.checkNow());
+    let blockedInstall: unknown;
+    await act(async () => {
+      try {
+        await result.current.install();
+      } catch (caught) {
+        blockedInstall = caught;
+      }
+    });
+
+    expect(blockedInstall).toEqual(new Error("station update operation blocked"));
+    expect(port.check).toHaveBeenCalledOnce();
+    expect(candidate.downloadAndInstall).not.toHaveBeenCalled();
+
+    leaseHeld = false;
+    synchronouslyActive = true;
+    let activeInstall: unknown;
+    await act(async () => {
+      try {
+        await result.current.install();
+      } catch (caught) {
+        activeInstall = caught;
+      }
+    });
+
+    expect(activeInstall).toEqual(new Error("active shift"));
+    expect(port.check).toHaveBeenCalledOnce();
+    expect(candidate.downloadAndInstall).not.toHaveBeenCalled();
+  });
+
   it("bypasses the automatic throttle on a manual check and reports download progress", async () => {
     const handle = { ...makeBeta2(), downloadAndInstall: vi.fn() };
     handle.downloadAndInstall.mockImplementation(async (onProgress) => {

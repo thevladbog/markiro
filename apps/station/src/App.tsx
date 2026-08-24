@@ -68,6 +68,7 @@ import { useSyncEngine } from "./lib/use-sync-engine.js";
 import { closeShiftOffline } from "./lib/shift-close.js";
 import { tauriStationUpdater } from "./lib/tauri-updater.js";
 import { useStationUpdater } from "./lib/use-station-updater.js";
+import type { ShiftEntryLease } from "./lib/shift-entry-lease.js";
 import { ConflictList } from "./pages/ConflictList.js";
 import { Enrollment } from "./pages/Enrollment.js";
 import { OperatorLogin } from "./pages/OperatorLogin.js";
@@ -209,6 +210,10 @@ export function App() {
   const [floorView, setFloorView] = useState<"select" | "new">("select");
   const [shift, setShift] = useState<ActiveShift | null>(null);
   const activeShiftIdRef = useRef<string | null>(null);
+  const shiftEntryLeaseRef = useRef<ShiftEntryLease | null>(null);
+  const [shiftEntryPending, setShiftEntryPending] = useState(false);
+  const updateOperationBlocked = useCallback(() => shiftEntryLeaseRef.current !== null, []);
+  const activeShiftGuard = useCallback(() => activeShiftIdRef.current !== null, []);
   const shiftEntryGenerationRef = useRef(0);
   const [shiftBundleRevision, setShiftBundleRevision] = useState(0);
   const [browserOnline, setBrowserOnline] = useState(() => navigator.onLine);
@@ -793,7 +798,38 @@ export function App() {
     activeShift: shift !== null,
     pendingOutbox: syncState.pending,
     port: tauriStationUpdater,
+    updateOperationBlocked,
+    activeShiftGuard,
   });
+  const cancelUpdate = updater.cancel;
+
+  const acquireShiftEntry = useCallback(async (): Promise<ShiftEntryLease> => {
+    if (shiftEntryLeaseRef.current || activeShiftIdRef.current) {
+      throw new Error("shift entry is already active");
+    }
+    let released = false;
+    const lease: ShiftEntryLease = {
+      isCurrent: () => !released && shiftEntryLeaseRef.current === lease,
+      release: () => {
+        if (released) return;
+        released = true;
+        if (shiftEntryLeaseRef.current === lease) {
+          shiftEntryLeaseRef.current = null;
+          setShiftEntryPending(false);
+        }
+      },
+    };
+    shiftEntryLeaseRef.current = lease;
+    setShiftEntryPending(true);
+    try {
+      await cancelUpdate();
+      if (!lease.isCurrent()) throw new Error("shift entry lease retired");
+      return lease;
+    } catch (error) {
+      lease.release();
+      throw error;
+    }
+  }, [cancelUpdate]);
 
   // React runs effects only after committing the recovery render. This is
   // the ordering boundary that guarantees an operator can no longer act on
@@ -931,6 +967,7 @@ export function App() {
   }
 
   async function performOperatorSwitch(): Promise<void> {
+    if (shiftEntryLeaseRef.current) return;
     setOperatorSwitchState("settling");
     const retirement =
       operatorRetirement.current ?? beginFloorWorkRetirement(floorWorkRegistry.current());
@@ -953,7 +990,13 @@ export function App() {
   const floorRecoveryBlocked = printRecoveryBlocked || boxTemplateRecovery !== null;
 
   async function switchOperator(): Promise<void> {
-    if (floorRecoveryBlocked) return;
+    if (
+      floorRecoveryBlocked ||
+      shiftEntryLeaseRef.current ||
+      (activeShiftIdRef.current !== null && shift === null)
+    ) {
+      return;
+    }
     if (operatorSwitchAttempt.current) return operatorSwitchAttempt.current;
     const attempt = performOperatorSwitch();
     operatorSwitchAttempt.current = attempt;
@@ -970,7 +1013,7 @@ export function App() {
     <WindowModeControl
       snapshot={lockdownSnapshot}
       activeShift={shift !== null}
-      disabled={operatorSwitchState !== "idle" || floorRecoveryBlocked}
+      disabled={operatorSwitchState !== "idle" || floorRecoveryBlocked || shiftEntryPending}
       onEnter={enterLockdown}
       onExit={exitLockdown}
       onDismissError={clearLockdownError}
@@ -1172,7 +1215,7 @@ export function App() {
   const operatorControl = (
     <OperatorSwitchControl
       activeShift={shift !== null}
-      pending={operatorSwitchState === "settling" || floorRecoveryBlocked}
+      pending={operatorSwitchState === "settling" || floorRecoveryBlocked || shiftEntryPending}
       error={operatorSwitchState === "failed"}
       onSwitch={switchOperator}
       onDismissError={() => {
@@ -1185,7 +1228,8 @@ export function App() {
   // each page's updater-cancellation barrier has settled. Recovery classification
   // runs first; only its confirmed no-recovery branch starts the ordinary
   // allocating bundle mirror through the ref above.
-  function handleShiftEntered(entered: ActiveShift): void {
+  function handleShiftEntered(entered: ActiveShift, lease?: ShiftEntryLease): void {
+    if (!lease || shiftEntryLeaseRef.current !== lease || !lease.isCurrent()) return;
     if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
     shiftEntryGenerationRef.current += 1;
     activeShiftIdRef.current = entered.id;
@@ -1291,8 +1335,13 @@ export function App() {
       syncStuck={syncState.stuck}
       conflicts={syncState.conflicts}
       update={updateIndicator}
-      actionsDisabled={operatorSwitchState !== "idle" || floorRecoveryBlocked}
-      onOpenUpdates={() => setShowUpdates(true)}
+      actionsDisabled={operatorSwitchState !== "idle" || floorRecoveryBlocked || shiftEntryPending}
+      onOpenUpdates={() => {
+        if (shiftEntryLeaseRef.current || (activeShiftIdRef.current !== null && shift === null)) {
+          return;
+        }
+        setShowUpdates(true);
+      }}
       footer={legacyNotice}
       statusBarCollapsible={shift !== null}
     >
@@ -1447,22 +1496,34 @@ export function App() {
         <ShiftSelection
           client={activeClient}
           exec={tauriExecutor}
-          beforeShiftEntry={updater.cancel}
+          acquireShiftEntry={acquireShiftEntry}
           onSelected={handleShiftEntered}
           isCurrent={() =>
             floorGeneration ? credentialGenerationIsCurrent(floorGeneration) : false
           }
-          onNew={() => setFloorView("new")}
-          onSetup={() => setShowSetup(true)}
-          onConflicts={() => setShowConflicts(true)}
+          onNew={() => {
+            if (shiftEntryLeaseRef.current || activeShiftIdRef.current) return;
+            setFloorView("new");
+          }}
+          onSetup={() => {
+            if (shiftEntryLeaseRef.current || activeShiftIdRef.current) return;
+            setShowSetup(true);
+          }}
+          onConflicts={() => {
+            if (shiftEntryLeaseRef.current || activeShiftIdRef.current) return;
+            setShowConflicts(true);
+          }}
         />
       ) : (
         <NewShift
           client={activeClient}
           source={scanSource}
-          beforeShiftEntry={updater.cancel}
+          acquireShiftEntry={acquireShiftEntry}
           onStarted={handleShiftEntered}
-          onBack={() => setFloorView("select")}
+          onBack={() => {
+            if (shiftEntryLeaseRef.current || activeShiftIdRef.current) return;
+            setFloorView("select");
+          }}
         />
       )}
     </FloorShell>

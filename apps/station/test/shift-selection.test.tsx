@@ -19,6 +19,19 @@ const client = createStationClient({
   serverUrl: "http://localhost:3000",
 });
 
+function entryLease(order: string[] = []) {
+  let current = true;
+  const release = vi.fn(() => {
+    if (!current) return;
+    current = false;
+    order.push("release");
+  });
+  return {
+    lease: { isCurrent: () => current, release },
+    release,
+  };
+}
+
 describe("ShiftSelection", () => {
   it("hides a locally closed shift while the server still reports it active", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
@@ -469,10 +482,12 @@ describe("ShiftSelection", () => {
   });
 
   it("opens a planned shift and calls onSelected with the opened shift", async () => {
-    let releaseEntry!: () => void;
-    const entryBarrier = new Promise<void>((resolve) => {
-      releaseEntry = resolve;
+    let releaseCancellation!: () => void;
+    const cancellation = new Promise<void>((resolve) => {
+      releaseCancellation = resolve;
     });
+    const order: string[] = [];
+    const owned = entryLease(order);
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -497,27 +512,36 @@ describe("ShiftSelection", () => {
         }),
       );
 
-    const onSelected = vi.fn();
-    const beforeShiftEntry = vi.fn(() => entryBarrier);
+    const onSelected = vi.fn((_shift, lease) => {
+      expect(lease).toBe(owned.lease);
+      order.push("publish");
+    });
+    const acquireShiftEntry = vi.fn(async () => {
+      await cancellation;
+      return owned.lease;
+    });
     render(
       <ShiftSelection
         client={client}
-        beforeShiftEntry={beforeShiftEntry}
+        acquireShiftEntry={acquireShiftEntry}
         onSelected={onSelected}
         onNew={() => {}}
       />,
     );
     await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
-    await waitFor(() => expect(beforeShiftEntry).toHaveBeenCalledOnce());
+    await waitFor(() => expect(acquireShiftEntry).toHaveBeenCalledOnce());
     expect(fetchSpy).toHaveBeenCalledOnce();
     expect(onSelected).not.toHaveBeenCalled();
-    releaseEntry();
+    releaseCancellation();
     await waitFor(() =>
       expect(onSelected).toHaveBeenCalledWith(
         expect.objectContaining({ id: "s1", status: "active" }),
+        owned.lease,
       ),
     );
+    expect(order).toEqual(["publish", "release"]);
+    expect(owned.release).toHaveBeenCalledOnce();
   });
 
   it("rejoins an active shift without posting an open request", async () => {
@@ -570,12 +594,16 @@ describe("ShiftSelection", () => {
         { status: 200 },
       ),
     );
-    const beforeShiftEntry = vi.fn(() => entryBarrier);
+    const owned = entryLease();
+    const acquireShiftEntry = vi.fn(async () => {
+      await entryBarrier;
+      return owned.lease;
+    });
     const onSelected = vi.fn();
     render(
       <ShiftSelection
         client={client}
-        beforeShiftEntry={beforeShiftEntry}
+        acquireShiftEntry={acquireShiftEntry}
         onSelected={onSelected}
         onNew={() => {}}
         onConflicts={() => {}}
@@ -586,13 +614,58 @@ describe("ShiftSelection", () => {
     fireEvent.click(rejoin);
 
     await waitFor(() => expect((rejoin as HTMLButtonElement).disabled).toBe(true));
-    expect(beforeShiftEntry).toHaveBeenCalledOnce();
+    expect(acquireShiftEntry).toHaveBeenCalledOnce();
     expect(onSelected).not.toHaveBeenCalled();
     expect((screen.getByRole("button", { name: "Conflicts" }) as HTMLButtonElement).disabled).toBe(
       true,
     );
     releaseEntry();
-    await waitFor(() => expect(onSelected).toHaveBeenCalledOnce());
+    await waitFor(() => expect(onSelected).toHaveBeenCalledWith(expect.any(Object), owned.lease));
+    expect(owned.release).toHaveBeenCalledOnce();
+  });
+
+  it("retires a pending acquisition without opening or publishing after unmount", async () => {
+    let resolveAcquire!: () => void;
+    const pendingAcquire = new Promise<void>((resolve) => {
+      resolveAcquire = resolve;
+    });
+    const owned = entryLease();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "s1",
+              status: "planned",
+              mode: "validation",
+              productName: "Cola",
+              plannedQty: 100,
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const onSelected = vi.fn();
+    const view = render(
+      <ShiftSelection
+        client={client}
+        acquireShiftEntry={async () => {
+          await pendingAcquire;
+          return owned.lease;
+        }}
+        onSelected={onSelected}
+        onNew={() => {}}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    view.unmount();
+
+    resolveAcquire();
+    await waitFor(() => expect(owned.release).toHaveBeenCalledOnce());
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(onSelected).not.toHaveBeenCalled();
   });
 
   // Finding 3: while `open()` is in flight, the Conflicts button must not
@@ -649,6 +722,7 @@ describe("ShiftSelection", () => {
   });
 
   it("surfaces an error and does not call onSelected when opening a shift fails", async () => {
+    const owned = entryLease();
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
         new Response(
@@ -671,12 +745,20 @@ describe("ShiftSelection", () => {
       );
 
     const onSelected = vi.fn();
-    render(<ShiftSelection client={client} onSelected={onSelected} onNew={() => {}} />);
+    render(
+      <ShiftSelection
+        client={client}
+        acquireShiftEntry={async () => owned.lease}
+        onSelected={onSelected}
+        onNew={() => {}}
+      />,
+    );
     await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
     await waitFor(() => expect(screen.getByText("Shift already closed")).toBeDefined());
     expect(onSelected).not.toHaveBeenCalled();
+    expect(owned.release).toHaveBeenCalledOnce();
   });
 
   it("ignores an old open response after cleanup and a replacement floor mounts", async () => {
