@@ -357,7 +357,7 @@ describe.skipIf(!ready)("label-templates e2e", () => {
 
     const deleted = await agent.delete(`/label-templates/${id}`).expect(409);
     expect(deleted.body.message).toBe(
-      "Label template is referenced by an organization default, product, or shift",
+      "Label template is referenced by an organization default, product, shift, or inventory",
     );
   });
 

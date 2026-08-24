@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,8 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
@@ -26,26 +28,11 @@ describe.skipIf(!databaseUrl)("payment account evidence migration", () => {
     created = true;
     temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-payment-evidence-migration-"));
     const legacyMigrations = join(temporaryRoot, "migrations");
-    await cp(migrationsFolder, legacyMigrations, { recursive: true });
-    await rm(join(legacyMigrations, "0063_payment_account_evidence.sql"), { force: true });
-    await rm(join(legacyMigrations, "0064_normalize_operator_billing_profile_kind.sql"), {
-      force: true,
+    await copyMigrationsThroughIndex({
+      sourceFolder: migrationsFolder,
+      targetFolder: legacyMigrations,
+      lastIncludedIndex: 62,
     });
-    await rm(join(legacyMigrations, "0065_saas_party_actual_addresses.sql"), { force: true });
-    await rm(join(legacyMigrations, "meta", "0063_snapshot.json"), { force: true });
-    await rm(join(legacyMigrations, "meta", "0064_snapshot.json"), { force: true });
-    await rm(join(legacyMigrations, "meta", "0065_snapshot.json"), { force: true });
-    const journalPath = join(legacyMigrations, "meta", "_journal.json");
-    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
-      entries: Array<{ tag: string }>;
-    };
-    journal.entries = journal.entries.filter(
-      (entry) =>
-        entry.tag !== "0063_payment_account_evidence" &&
-        entry.tag !== "0064_normalize_operator_billing_profile_kind" &&
-        entry.tag !== "0065_saas_party_actual_addresses",
-    );
-    await writeFile(journalPath, JSON.stringify(journal));
 
     await migrate(drizzle(pool), { migrationsFolder: legacyMigrations });
     await pool.query(
