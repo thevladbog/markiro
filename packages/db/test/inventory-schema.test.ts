@@ -328,6 +328,113 @@ describe("inventory preparation schema", () => {
 
 const databaseUrl = process.env.DATABASE_URL;
 
+const inventoryTestTables = [
+  "inventories",
+  "inventory_imports",
+  "inventory_snapshots",
+  "inventory_snapshot_inputs",
+  "inventory_snapshot_codes",
+] as const;
+const inventoryTestEnums = [
+  "inventory_chz_status",
+  "inventory_lifecycle_status",
+  "inventory_mode",
+  "inventory_import_container_kind",
+  "inventory_import_parse_outcome",
+] as const;
+const inventoryCurrentConstraints = [
+  "inventories_started_fields_check",
+  "inventories_closed_fields_check",
+  "inventories_completed_fields_check",
+  "inventories_completed_lifecycle_check",
+  "inventory_imports_tenant_id_inventory_status_outcome_uq",
+  "inventory_snapshot_inputs_successful_import_check",
+] as const;
+type InventorySchemaSetupResult = "provisioned" | "existing";
+
+async function inspectInventoryTestSchema(client: pg.PoolClient): Promise<"absent" | "current"> {
+  const [tables, enums] = await Promise.all([
+    client.query<{ name: string }>(
+      `select relation.relname as name
+       from pg_class relation
+       join pg_namespace namespace on namespace.oid = relation.relnamespace
+       where namespace.nspname = current_schema()
+         and relation.relkind in ('r', 'p')
+         and relation.relname = any($1::text[])`,
+      [inventoryTestTables],
+    ),
+    client.query<{ name: string }>(
+      `select type.typname as name
+       from pg_type type
+       join pg_namespace namespace on namespace.oid = type.typnamespace
+       where namespace.nspname = current_schema()
+         and type.typtype = 'e'
+         and type.typname = any($1::text[])`,
+      [inventoryTestEnums],
+    ),
+  ]);
+
+  if (tables.rowCount === 0 && enums.rowCount === 0) return "absent";
+  if (
+    tables.rowCount !== inventoryTestTables.length ||
+    enums.rowCount !== inventoryTestEnums.length
+  ) {
+    throw new Error(
+      `Inventory test schema is partially present (${tables.rowCount}/${inventoryTestTables.length} tables, ${enums.rowCount}/${inventoryTestEnums.length} enums); refusing migration replay`,
+    );
+  }
+
+  const [outcomeColumn, constraints] = await Promise.all([
+    client.query<{ column_default: string | null; is_nullable: "YES" | "NO" }>(
+      `select is_nullable, column_default
+       from information_schema.columns
+       where table_schema = current_schema()
+         and table_name = 'inventory_snapshot_inputs'
+         and column_name = 'import_parse_outcome'`,
+    ),
+    client.query<{ name: string }>(
+      `select constraint_record.conname as name
+       from pg_constraint constraint_record
+       join pg_namespace namespace on namespace.oid = constraint_record.connamespace
+       where namespace.nspname = current_schema()
+         and constraint_record.conname = any($1::text[])`,
+      [inventoryCurrentConstraints],
+    ),
+  ]);
+  const column = outcomeColumn.rows[0];
+  const foundConstraints = new Set(constraints.rows.map((row) => row.name));
+  const missingInvariantCount =
+    (column?.is_nullable === "NO" && column.column_default?.includes("'succeeded'") === true
+      ? 0
+      : 1) + inventoryCurrentConstraints.filter((name) => !foundConstraints.has(name)).length;
+  if (missingInvariantCount !== 0) {
+    throw new Error(
+      `Inventory test schema is incompatible (${missingInvariantCount} current invariant(s) missing); refusing migration replay`,
+    );
+  }
+  return "current";
+}
+
+async function ensureInventoryTestSchema(
+  client: pg.PoolClient,
+): Promise<InventorySchemaSetupResult> {
+  if ((await inspectInventoryTestSchema(client)) === "current") return "existing";
+
+  for (const migrationName of ["0066_panoramic_hemingway.sql", "0067_flashy_outlaw_kid.sql"]) {
+    const migration = readFileSync(
+      new URL(`../migrations/${migrationName}`, import.meta.url),
+      "utf8",
+    );
+    for (const statement of migration.split("--> statement-breakpoint")) {
+      if (statement.trim() !== "") await client.query(statement);
+    }
+  }
+  if ((await inspectInventoryTestSchema(client)) !== "current") {
+    throw new Error("Inventory test schema provisioning did not produce the current schema");
+  }
+  return "provisioned";
+}
+
 describe.skipIf(!databaseUrl)("inventory preparation PostgreSQL invariants", () => {
   const pool = new pg.Pool({ connectionString: databaseUrl });
   let client: pg.PoolClient;
@@ -339,6 +446,7 @@ describe.skipIf(!databaseUrl)("inventory preparation PostgreSQL invariants", () 
   const snapshotId = randomUUID();
   const failedImportId = randomUUID();
   let savepointSequence = 0;
+  let schemaSetupResults: readonly [InventorySchemaSetupResult, InventorySchemaSetupResult];
 
   async function expectConstraintViolation(
     statement: string,
@@ -363,16 +471,10 @@ describe.skipIf(!databaseUrl)("inventory preparation PostgreSQL invariants", () 
   beforeAll(async () => {
     client = await pool.connect();
     await client.query("begin");
-    const migrationNames = ["0066_panoramic_hemingway.sql", "0067_flashy_outlaw_kid.sql"];
-    for (const migrationName of migrationNames) {
-      const migration = readFileSync(
-        new URL(`../migrations/${migrationName}`, import.meta.url),
-        "utf8",
-      );
-      for (const statement of migration.split("--> statement-breakpoint")) {
-        if (statement.trim() !== "") await client.query(statement);
-      }
-    }
+    schemaSetupResults = [
+      await ensureInventoryTestSchema(client),
+      await ensureInventoryTestSchema(client),
+    ];
     await client.query(
       `insert into organization (id, name, slug, created_at) values ($1, $2, $3, now())`,
       [tenantId, "Inventory review", `inventory-review-${randomUUID()}`],
@@ -423,6 +525,28 @@ describe.skipIf(!databaseUrl)("inventory preparation PostgreSQL invariants", () 
       client.release();
     }
     await pool.end();
+  });
+
+  it("reuses the current inventory schema instead of replaying migrations", () => {
+    expect(schemaSetupResults[0]).toMatch(/^(provisioned|existing)$/);
+    expect(schemaSetupResults[1]).toBe("existing");
+  });
+
+  it("rejects an incompatible existing inventory schema without replaying migrations", async () => {
+    const savepoint = "inventory_review_incompatible_schema";
+    await client.query(`savepoint ${savepoint}`);
+    try {
+      await client.query(
+        `alter table inventory_snapshot_inputs
+         drop constraint inventory_snapshot_inputs_successful_import_check`,
+      );
+      await expect(ensureInventoryTestSchema(client)).rejects.toThrow(
+        "Inventory test schema is incompatible (1 current invariant(s) missing); refusing migration replay",
+      );
+    } finally {
+      await client.query(`rollback to savepoint ${savepoint}`);
+      await client.query(`release savepoint ${savepoint}`);
+    }
   });
 
   it("rejects incomplete or contradictory import outcomes", async () => {
