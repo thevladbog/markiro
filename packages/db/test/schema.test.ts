@@ -24,6 +24,14 @@ import { codes } from "../src/schema/codes.js";
 import { orgProfiles } from "../src/schema/org-profile.js";
 
 describe("platform schema", () => {
+  it("exports inventory preparation persistence", () => {
+    expect(getTableName(schema.inventories)).toBe("inventories");
+    expect(getTableName(schema.inventoryImports)).toBe("inventory_imports");
+    expect(getTableName(schema.inventorySnapshots)).toBe("inventory_snapshots");
+    expect(getTableName(schema.inventorySnapshotInputs)).toBe("inventory_snapshot_inputs");
+    expect(getTableName(schema.inventorySnapshotCodes)).toBe("inventory_snapshot_codes");
+  });
+
   it("gives organization profiles a nullable tenant-scoped default box label template", () => {
     expect(orgProfiles.defaultBoxLabelTemplateId).toBeDefined();
     expect(orgProfiles.defaultBoxLabelTemplateId.notNull).toBe(false);

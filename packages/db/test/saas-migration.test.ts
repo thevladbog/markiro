@@ -72,6 +72,7 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "0063_payment_account_evidence.sql"));
     await rm(join(legacyMigrations, "0064_normalize_operator_billing_profile_kind.sql"));
     await rm(join(legacyMigrations, "0065_saas_party_actual_addresses.sql"));
+    await rm(join(legacyMigrations, "0066_panoramic_hemingway.sql"));
     await rm(join(legacyMigrations, "meta", "0030_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0031_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0032_snapshot.json"));
@@ -147,7 +148,8 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
         entry.tag !== "0062_document_account_snapshots" &&
         entry.tag !== "0063_payment_account_evidence" &&
         entry.tag !== "0064_normalize_operator_billing_profile_kind" &&
-        entry.tag !== "0065_saas_party_actual_addresses",
+        entry.tag !== "0065_saas_party_actual_addresses" &&
+        entry.tag !== "0066_panoramic_hemingway",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0029_loving_triathlon");
     await writeFile(journalPath, JSON.stringify(journal));

@@ -32,6 +32,7 @@ describe.skipIf(!databaseUrl)("payment account evidence migration", () => {
       force: true,
     });
     await rm(join(legacyMigrations, "0065_saas_party_actual_addresses.sql"), { force: true });
+    await rm(join(legacyMigrations, "0066_panoramic_hemingway.sql"), { force: true });
     await rm(join(legacyMigrations, "meta", "0063_snapshot.json"), { force: true });
     await rm(join(legacyMigrations, "meta", "0064_snapshot.json"), { force: true });
     await rm(join(legacyMigrations, "meta", "0065_snapshot.json"), { force: true });
@@ -43,7 +44,8 @@ describe.skipIf(!databaseUrl)("payment account evidence migration", () => {
       (entry) =>
         entry.tag !== "0063_payment_account_evidence" &&
         entry.tag !== "0064_normalize_operator_billing_profile_kind" &&
-        entry.tag !== "0065_saas_party_actual_addresses",
+        entry.tag !== "0065_saas_party_actual_addresses" &&
+        entry.tag !== "0066_panoramic_hemingway",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 
