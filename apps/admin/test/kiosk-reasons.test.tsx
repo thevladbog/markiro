@@ -128,21 +128,15 @@ afterEach(async () => {
   await i18n.changeLanguage("ru");
 });
 
-it("moves reasons to a route-backed sibling view", async () => {
-  const fetchMock = stubFetch({ kiosks: [ONLINE_KIOSK], reasons: [REASON_A] });
-  const { router } = renderKiosksRouter("/kiosks");
-  const user = userEvent.setup();
+it("redirects the retired kiosk reasons URL to the disposal view", async () => {
+  const fetchMock = stubFetch({ reasons: [REASON_A] });
+  const { router } = renderKiosksRouter("/kiosks/reasons");
 
-  await screen.findByRole("link", { name: "Причины списания" });
-  fetchMock.mockClear();
-  await user.click(await screen.findByRole("link", { name: "Причины списания" }));
-
+  expect(await screen.findByText(REASON_A.name)).toBeDefined();
   expect(router.state.location.pathname).toBe("/pickup/reasons");
   expect(
     (await screen.findByRole("link", { name: "Причины" })).getAttribute("aria-current"),
   ).toBe("page");
-  expect(await screen.findByText(REASON_A.name)).toBeDefined();
-  expect(screen.queryByText(ONLINE_KIOSK.name)).toBeNull();
   expect(fetchMock).not.toHaveBeenCalledWith("/api/kiosks", expect.anything());
 });
 
@@ -205,11 +199,11 @@ it("uses a table-shaped loading state for reasons", async () => {
   expect(loading.querySelector("table")).not.toBeNull();
 });
 
-it("does not fetch write-off reasons from the kiosk view", async () => {
+it("does not fetch write-off reasons from the devices registry", async () => {
   const fetchMock = stubFetch({ kiosks: [ONLINE_KIOSK] });
   renderKiosksRouter("/kiosks");
 
-  expect(await screen.findByText(ONLINE_KIOSK.name)).toBeDefined();
+  expect(await screen.findByRole("heading", { name: "Устройства" })).toBeDefined();
   expect(fetchMock.mock.calls.some(([path]) => String(path).includes("/api/pickup-reasons"))).toBe(
     false,
   );

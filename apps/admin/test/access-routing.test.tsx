@@ -168,7 +168,7 @@ it("keeps operational navigation for managers while hiding integrations and sett
   expect(await screen.findByRole("link", { name: "Обзор" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Каталог" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Устройства" })).toBeDefined();
-  expect(screen.getByRole("link", { name: "Киоски" })).toBeDefined();
+  expect(screen.queryByRole("link", { name: "Киоски" })).toBeNull();
   expect(screen.queryByRole("link", { name: "Интеграции" })).toBeNull();
   expect(screen.queryByRole("link", { name: "Настройки" })).toBeNull();
 });
@@ -199,12 +199,14 @@ it("allows operations readers to open production lines and forbids users without
   expect(await screen.findByTestId("forbidden-page")).toBeDefined();
 });
 
-it("keeps kiosk management separate from the unified devices page", async () => {
+it("redirects the retired kiosks section into the unified devices page", async () => {
   const { requests } = renderAccessRoute("/kiosks", MANAGER_ACCESS);
 
-  expect(await screen.findByRole("heading", { name: "Киоски" })).toBeDefined();
-  await expect.poll(() => requests).toContain("/api/kiosks");
-  expect(requests.some((request) => request.startsWith("/api/devices"))).toBe(false);
+  expect(await screen.findByRole("heading", { name: "Устройства" })).toBeDefined();
+  await expect.poll(() => requests.some((request) => request.startsWith("/api/devices"))).toBe(
+    true,
+  );
+  expect(requests).not.toContain("/api/kiosks");
 });
 
 it.each(["/catalog/new", "/catalog/p1/edit"])(

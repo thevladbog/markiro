@@ -6,14 +6,20 @@ import { afterEach, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
+import { ThemeProvider } from "@markiro/ui";
+
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider, RequireCapability } from "../src/access/context.js";
 import i18n from "../src/i18n/index.js";
 import type * as KiosksApiModule from "../src/pages/kiosks/api.js";
 import { KioskPairingPanelRoute } from "../src/pages/kiosks/KioskPairingPanelRoute.js";
 import { KioskCreatePanelRoute, KioskEditPanelRoute } from "../src/pages/kiosks/KioskPanelRoute.js";
-import { KiosksPage } from "../src/pages/kiosks/index.js";
+import { DevicesPage } from "../src/pages/devices/index.js";
 import { jsonResponse } from "./helpers/http.js";
+
+vi.mock("../src/layout/useActiveOrg.js", () => ({
+  useActiveOrg: () => ({ orgId: "org-1", orgName: "Factory" }),
+}));
 
 const { createHookMountSpy, updateHookMountSpy } = vi.hoisted(() => ({
   createHookMountSpy: vi.fn(),
@@ -114,6 +120,24 @@ function stubFetch(
     if (response) return response;
     if (String(url) === "/api/kiosks") return jsonResponse(200, { items: [] });
     if (String(url).startsWith("/api/products")) return jsonResponse(200, { items: [] });
+    if (String(url).startsWith("/api/devices"))
+      return jsonResponse(200, {
+        items: [
+          {
+            id: KIOSK.id,
+            type: "kiosk",
+            name: KIOSK.name,
+            place: { id: null, name: KIOSK.location },
+            status: "online",
+            lastSeenAt: null,
+            paired: false,
+          },
+        ],
+        page: 1,
+        pageSize: 8,
+        total: 1,
+      });
+    if (String(url) === "/api/lines") return jsonResponse(200, { items: [] });
     throw new Error(`Unexpected request: ${String(url)}`);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -122,7 +146,7 @@ function stubFetch(
 
 function renderKiosksRouter(
   initialEntries: Array<string | { pathname: string; state: { kiosksBackground: true } }> = [
-    "/kiosks",
+    "/devices",
   ],
   access: AccessDocument = WRITE_ACCESS,
   initialKiosks?: KiosksApiModule.KioskDto[],
@@ -134,15 +158,15 @@ function renderKiosksRouter(
   const router = createMemoryRouter(
     createRoutesFromElements(
       <Route
-        path="/kiosks"
+        path="/devices"
         element={
           <RequireCapability capability={CABINET_CAPABILITY.OPERATIONS_READ}>
-            <KiosksPage />
+            <DevicesPage />
           </RequireCapability>
         }
       >
         <Route
-          path="new"
+          path="kiosks/new"
           element={
             <RequireCapability capability={CABINET_CAPABILITY.OPERATIONS_WRITE}>
               <KioskCreatePanelRoute />
@@ -150,7 +174,7 @@ function renderKiosksRouter(
           }
         />
         <Route
-          path=":kioskId/edit"
+          path="kiosks/:kioskId/edit"
           element={
             <RequireCapability capability={CABINET_CAPABILITY.OPERATIONS_WRITE}>
               <KioskEditPanelRoute />
@@ -158,7 +182,7 @@ function renderKiosksRouter(
           }
         />
         <Route
-          path=":kioskId/pair"
+          path="kiosks/:kioskId/pair"
           element={
             <RequireCapability capability={CABINET_CAPABILITY.CREDENTIALS_MANAGE}>
               <KioskPairingPanelRoute />
@@ -171,9 +195,11 @@ function renderKiosksRouter(
   );
   render(
     <QueryClientProvider client={queryClient}>
-      <AccessProvider value={access}>
-        <RouterProvider router={router} />
-      </AccessProvider>
+      <ThemeProvider defaultTheme="light">
+        <AccessProvider value={access}>
+          <RouterProvider router={router} />
+        </AccessProvider>
+      </ThemeProvider>
     </QueryClientProvider>,
   );
   return { queryClient, router };
@@ -189,15 +215,12 @@ afterEach(async () => {
 
 it("opens kiosk creation at the nested panel route", async () => {
   stubFetch(() => undefined);
-  const { router } = renderKiosksRouter();
-  const user = userEvent.setup();
+  renderKiosksRouter(["/devices/kiosks/new"]);
 
-  await user.click(await screen.findByRole("button", { name: "Добавить киоск" }));
-
-  expect(router.state.location.pathname).toBe("/kiosks/new");
+  expect(await screen.findByRole("dialog", { name: "Новый киоск" })).toBeDefined();
 });
 
-it("creates through the nested panel with the exact normalized payload and returns focus", async () => {
+it("creates through the nested panel with the exact normalized payload", async () => {
   const created = {
     ...KIOSK,
     id: "k2",
@@ -215,14 +238,15 @@ it("creates through the nested panel with the exact normalized payload and retur
       return jsonResponse(200, { items: didCreate ? [KIOSK, created] : [KIOSK] });
     return undefined;
   });
-  const { router } = renderKiosksRouter();
+  const { router } = renderKiosksRouter([
+    "/devices",
+    { pathname: "/devices/kiosks/new", state: { kiosksBackground: true } },
+  ]);
   const user = userEvent.setup();
 
-  const addAction = await screen.findByRole("button", { name: "Добавить киоск" });
-  await user.click(addAction);
-  expect(router.state.location.pathname).toBe("/kiosks/new");
-  expect(screen.getByText(KIOSK.name)).toBeDefined();
+  await screen.findByLabelText("Название");
   const panel = screen.getByRole("dialog", { name: "Новый киоск" });
+  expect(await screen.findByText(KIOSK.name)).toBeDefined();
   await user.type(within(panel).getByLabelText("Название"), "  Киоск склада  ");
   await user.type(within(panel).getByLabelText("Расположение"), "  Цех 2  ");
   expect(within(panel).queryByLabelText("Лимит позиций на сотрудника в день")).toBeNull();
@@ -242,9 +266,7 @@ it("creates through the nested panel with the exact normalized payload and retur
       }),
     ),
   );
-  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
-  expect(document.activeElement).toBe(addAction);
-  expect(await screen.findByText("Киоск склада")).toBeDefined();
+  await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
 });
 
 it("keeps a credential manager in a post-create choice and prevents a second submit", async () => {
@@ -260,7 +282,7 @@ it("keeps a credential manager in a post-create choice and prevents a second sub
     }
     return undefined;
   });
-  const { router } = renderKiosksRouter(["/kiosks/new"], WRITE_AND_CREDENTIALS_ACCESS);
+  const { router } = renderKiosksRouter(["/devices/kiosks/new"], WRITE_AND_CREDENTIALS_ACCESS);
   const user = userEvent.setup();
 
   await user.type(await screen.findByLabelText("Название"), "Киоск склада");
@@ -271,7 +293,7 @@ it("keeps a credential manager in a post-create choice and prevents a second sub
   expect(within(panel).getByRole("button", { name: "Настроить привязку" })).toBeDefined();
   expect(within(panel).getByRole("button", { name: "Готово" })).toBeDefined();
   expect(within(panel).queryByRole("button", { name: "Создать" })).toBeNull();
-  expect(router.state.location.pathname).toBe("/kiosks/new");
+  expect(router.state.location.pathname).toBe("/devices/kiosks/new");
   expect(
     fetchMock.mock.calls.filter(
       ([url, init]) => String(url) === "/api/kiosks" && init?.method === "POST",
@@ -279,7 +301,7 @@ it("keeps a credential manager in a post-create choice and prevents a second sub
   ).toHaveLength(1);
 
   await user.click(within(panel).getByRole("button", { name: "Готово" }));
-  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
 });
 
 it("continues from create to safe pairing without automatically issuing a code", async () => {
@@ -296,7 +318,7 @@ it("continues from create to safe pairing without automatically issuing a code",
     return undefined;
   });
   const { router } = renderKiosksRouter(
-    ["/kiosks", { pathname: "/kiosks/new", state: { kiosksBackground: true } }],
+    ["/devices", { pathname: "/devices/kiosks/new", state: { kiosksBackground: true } }],
     WRITE_AND_CREDENTIALS_ACCESS,
   );
   const user = userEvent.setup();
@@ -305,7 +327,7 @@ it("continues from create to safe pairing without automatically issuing a code",
   await user.click(screen.getByRole("button", { name: "Создать" }));
   await user.click(await screen.findByRole("button", { name: "Настроить привязку" }));
 
-  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks/k2/pair"));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/devices/kiosks/k2/pair"));
   expect(router.state.location.state).toEqual({ kiosksBackground: true });
   expect(await screen.findByRole("button", { name: "Сформировать код" })).toBeDefined();
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/pairing-code"))).toBe(false);
@@ -326,7 +348,7 @@ it("continues from create to safe pairing when the kiosk refetch fails", async (
     }
     return undefined;
   });
-  const { router } = renderKiosksRouter(["/kiosks/new"], WRITE_AND_CREDENTIALS_ACCESS);
+  const { router } = renderKiosksRouter(["/devices/kiosks/new"], WRITE_AND_CREDENTIALS_ACCESS);
   const user = userEvent.setup();
 
   await user.type(await screen.findByLabelText("Название"), created.name);
@@ -335,7 +357,7 @@ it("continues from create to safe pairing when the kiosk refetch fails", async (
   await waitFor(() => expect(kioskListRequests).toBe(2));
   await user.click(screen.getByRole("button", { name: "Настроить привязку" }));
 
-  await waitFor(() => expect(router.state.location.pathname).toBe(`/kiosks/${created.id}/pair`));
+  await waitFor(() => expect(router.state.location.pathname).toBe(`/devices/kiosks/${created.id}/pair`));
   expect(await screen.findByRole("button", { name: "Сформировать код" })).toBeDefined();
   expect(
     fetchMock.mock.calls.some(
@@ -347,7 +369,7 @@ it("continues from create to safe pairing when the kiosk refetch fails", async (
 
 it("falls back to the kiosk list when a directly entered panel closes", async () => {
   stubFetch(() => undefined);
-  const { router } = renderKiosksRouter(["/kiosks/new"]);
+  const { router } = renderKiosksRouter(["/devices/kiosks/new"]);
   const user = userEvent.setup();
 
   await screen.findByLabelText("Название");
@@ -355,7 +377,7 @@ it("falls back to the kiosk list when a directly entered panel closes", async ()
   await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
 
   expect(screen.queryByRole("alertdialog")).toBeNull();
-  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
 });
 
 it("shows the panel load error and retries the kiosk request", async () => {
@@ -369,7 +391,7 @@ it("shows the panel load error and retries the kiosk request", async () => {
     }
     return undefined;
   });
-  renderKiosksRouter(["/kiosks/new"]);
+  renderKiosksRouter(["/devices/kiosks/new"]);
 
   const panel = await screen.findByRole("dialog", { name: "Новый киоск" });
   expect((await within(panel).findByRole("alert")).textContent).toContain(
@@ -384,18 +406,18 @@ it("shows the panel load error and retries the kiosk request", async () => {
 it("blocks dirty Back navigation until discarding the kiosk draft", async () => {
   stubFetch(() => undefined);
   const { router } = renderKiosksRouter([
-    "/kiosks",
-    { pathname: "/kiosks/new", state: { kiosksBackground: true } },
+    "/devices",
+    { pathname: "/devices/kiosks/new", state: { kiosksBackground: true } },
   ]);
   const user = userEvent.setup();
 
   await user.type(await screen.findByLabelText("Название"), "Киоск склада");
   await router.navigate(-1);
 
-  expect(router.state.location.pathname).toBe("/kiosks/new");
+  expect(router.state.location.pathname).toBe("/devices/kiosks/new");
   const confirmation = await screen.findByRole("alertdialog", { name: "Отменить изменения?" });
   await user.click(within(confirmation).getByRole("button", { name: "Не сохранять" }));
-  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
 });
 
 it("blocks every dismissal and duplicate submission while kiosk creation is pending", async () => {
@@ -407,8 +429,8 @@ it("blocks every dismissal and duplicate submission while kiosk creation is pend
     path === "/api/kiosks" && init?.method === "POST" ? createResponse : undefined,
   );
   const { router } = renderKiosksRouter([
-    "/kiosks",
-    { pathname: "/kiosks/new", state: { kiosksBackground: true } },
+    "/devices",
+    { pathname: "/devices/kiosks/new", state: { kiosksBackground: true } },
   ]);
   const user = userEvent.setup();
 
@@ -436,7 +458,7 @@ it("blocks every dismissal and duplicate submission while kiosk creation is pend
   fireEvent.mouseDown(requiredElement<HTMLElement>(".mk-side-panel__scrim"));
   await router.navigate(-1);
 
-  expect(router.state.location.pathname).toBe("/kiosks/new");
+  expect(router.state.location.pathname).toBe("/devices/kiosks/new");
   expect(screen.queryByRole("alertdialog")).toBeNull();
   expect(
     fetchMock.mock.calls.filter(
@@ -445,12 +467,12 @@ it("blocks every dismissal and duplicate submission while kiosk creation is pend
   ).toHaveLength(1);
 
   resolveCreate?.(jsonResponse(201, KIOSK));
-  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
 });
 
 it("keeps validation client-side when the kiosk name is empty", async () => {
   const fetchMock = stubFetch(() => undefined);
-  renderKiosksRouter(["/kiosks/new"]);
+  renderKiosksRouter(["/devices/kiosks/new"]);
   const user = userEvent.setup();
 
   await screen.findByLabelText("Название");
@@ -467,7 +489,7 @@ it("keeps the panel, draft values, and persistent API error after a failed kiosk
       ? jsonResponse(409, { message: "Kiosk already exists" })
       : undefined,
   );
-  const { router } = renderKiosksRouter(["/kiosks/new"]);
+  const { router } = renderKiosksRouter(["/devices/kiosks/new"]);
   const user = userEvent.setup();
 
   await user.type(await screen.findByLabelText("Название"), "Киоск склада");
@@ -476,26 +498,26 @@ it("keeps the panel, draft values, and persistent API error after a failed kiosk
   const panel = screen.getByRole("dialog", { name: "Новый киоск" });
   expect(await within(panel).findByText("Kiosk already exists")).toBeDefined();
   expect((within(panel).getByLabelText("Название") as HTMLInputElement).value).toBe("Киоск склада");
-  expect(router.state.location.pathname).toBe("/kiosks/new");
+  expect(router.state.location.pathname).toBe("/devices/kiosks/new");
 });
 
 it("denies a direct read-only URL before the privileged create hook mounts", async () => {
   stubFetch(() => undefined);
-  renderKiosksRouter(["/kiosks/new"], READ_ONLY_ACCESS);
+  renderKiosksRouter(["/devices/kiosks/new"], READ_ONLY_ACCESS);
 
   expect(await screen.findByTestId("forbidden-page")).toBeDefined();
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(createHookMountSpy).not.toHaveBeenCalled();
 });
 
-it("opens kiosk editing at the nested complex-panel route", async () => {
+it("opens kiosk editing at the nested complex-panel route from the device row", async () => {
   stubFetch((path) => (path === "/api/kiosks" ? jsonResponse(200, { items: [KIOSK] }) : undefined));
   const { router } = renderKiosksRouter();
   const user = userEvent.setup();
 
-  await user.click(await screen.findByRole("button", { name: "Изменить" }));
+  await user.click(await screen.findByRole("link", { name: "Настройки киоска" }));
 
-  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+  expect(router.state.location.pathname).toBe(`/devices/kiosks/${KIOSK.id}/edit`);
   const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
   expect(panel.textContent).toContain(KIOSK.name);
   expect(panel.textContent).toContain("Ожидает привязки");
@@ -504,14 +526,14 @@ it("opens kiosk editing at the nested complex-panel route", async () => {
 
 it("falls back to the kiosk list when a directly entered edit panel closes", async () => {
   stubFetch((path) => (path === "/api/kiosks" ? jsonResponse(200, { items: [KIOSK] }) : undefined));
-  const { router } = renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const { router } = renderKiosksRouter([`/devices/kiosks/${KIOSK.id}/edit`]);
   const user = userEvent.setup();
 
   await screen.findByLabelText("Название");
   const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
   await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
 
-  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
 });
 
 it("shows an edit-panel load error, retries, and then mounts both resources", async () => {
@@ -525,7 +547,7 @@ it("shows an edit-panel load error, retries, and then mounts both resources", as
     }
     return undefined;
   });
-  renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  renderKiosksRouter([`/devices/kiosks/${KIOSK.id}/edit`]);
 
   let panel = await screen.findByRole("dialog", { name: "Изменить киоск" });
   expect((await within(panel).findByRole("alert")).textContent).toContain(
@@ -544,14 +566,14 @@ it("shows a translated not-found edit panel without mounting product work", asyn
   const fetchMock = stubFetch((path) =>
     path === "/api/kiosks" ? jsonResponse(200, { items: [] }) : undefined,
   );
-  const { router } = renderKiosksRouter(["/kiosks/missing/edit"]);
+  const { router } = renderKiosksRouter(["/devices/kiosks/missing/edit"]);
   const user = userEvent.setup();
 
   expect((await screen.findByRole("alert")).textContent).toContain("Киоск не найден.");
   const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
   expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/products"))).toBe(false);
   await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
-  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
 });
 
 it("keeps archived kiosks inspectable without lifecycle actions in the edit panel", async () => {
@@ -560,7 +582,7 @@ it("keeps archived kiosks inspectable without lifecycle actions in the edit pane
     if (path === "/api/products?status=active") return jsonResponse(200, { items: [PRODUCT] });
     return undefined;
   });
-  renderKiosksRouter([`/kiosks/${ARCHIVED_KIOSK.id}/edit`]);
+  renderKiosksRouter([`/devices/kiosks/${ARCHIVED_KIOSK.id}/edit`]);
 
   await screen.findByLabelText("Название");
   const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
@@ -592,8 +614,8 @@ it("submits only the exact normalized profile PATCH and closes after success", a
     return undefined;
   });
   const { router } = renderKiosksRouter([
-    "/kiosks",
-    { pathname: `/kiosks/${KIOSK.id}/edit`, state: { kiosksBackground: true } },
+    "/devices",
+    { pathname: `/devices/kiosks/${KIOSK.id}/edit`, state: { kiosksBackground: true } },
   ]);
   const user = userEvent.setup();
 
@@ -621,7 +643,7 @@ it("submits only the exact normalized profile PATCH and closes after success", a
       }),
     ),
   );
-  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
 });
 
 it("initializes the employee QR checkbox from an enabled kiosk profile", async () => {
@@ -632,7 +654,7 @@ it("initializes the employee QR checkbox from an enabled kiosk profile", async (
     return undefined;
   });
   renderKiosksRouter(
-    ["/kiosks", { pathname: `/kiosks/${KIOSK.id}/edit`, state: { kiosksBackground: true } }],
+    ["/devices", { pathname: `/devices/kiosks/${KIOSK.id}/edit`, state: { kiosksBackground: true } }],
     WRITE_ACCESS,
     [kioskWithEmployeeQr],
   );
@@ -651,7 +673,7 @@ it("keeps product work independent when profile update fails", async () => {
     if (path === "/api/products?status=active") return jsonResponse(200, { items: [PRODUCT] });
     return undefined;
   });
-  const { router } = renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const { router } = renderKiosksRouter([`/devices/kiosks/${KIOSK.id}/edit`]);
   const user = userEvent.setup();
 
   await screen.findByLabelText("Название");
@@ -663,13 +685,13 @@ it("keeps product work independent when profile update fails", async () => {
   expect((await within(panel).findByRole("alert")).textContent).toContain("Name already exists");
   expect((within(panel).getByLabelText("Название") as HTMLInputElement).value).toBe("Новый склад");
   expect(within(panel).getByRole("region", { name: "Разрешённые товары" })).toBeDefined();
-  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+  expect(router.state.location.pathname).toBe(`/devices/kiosks/${KIOSK.id}/edit`);
 });
 
 it("retains a dirty kiosk editor when a background refetch omits the kiosk", async () => {
   let kiosks = [KIOSK];
   stubFetch((path) => (path === "/api/kiosks" ? jsonResponse(200, { items: kiosks }) : undefined));
-  const { queryClient, router } = renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const { queryClient, router } = renderKiosksRouter([`/devices/kiosks/${KIOSK.id}/edit`]);
   const user = userEvent.setup();
 
   const name = await screen.findByLabelText("Название");
@@ -686,7 +708,7 @@ it("retains a dirty kiosk editor when a background refetch omits the kiosk", asy
   expect((within(panel).getByLabelText("Название") as HTMLInputElement).value).toBe(
     `${KIOSK.name} draft`,
   );
-  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+  expect(router.state.location.pathname).toBe(`/devices/kiosks/${KIOSK.id}/edit`);
 
   await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
   const confirmation = await screen.findByRole("alertdialog", { name: "Отменить изменения?" });
@@ -703,7 +725,7 @@ it("retains a dirty kiosk editor when a background refetch omits the kiosk", asy
 it("applies deferred server profile values after a dirty form returns to clean", async () => {
   let kiosk = KIOSK;
   stubFetch((path) => (path === "/api/kiosks" ? jsonResponse(200, { items: [kiosk] }) : undefined));
-  const { queryClient } = renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const { queryClient } = renderKiosksRouter([`/devices/kiosks/${KIOSK.id}/edit`]);
   const user = userEvent.setup();
 
   const name = await screen.findByLabelText("Название");
@@ -726,7 +748,7 @@ it("keeps both sections mounted and activates a section by scrolling and focusin
     if (path === "/api/products?status=active") return jsonResponse(200, { items: [PRODUCT] });
     return undefined;
   });
-  renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  renderKiosksRouter([`/devices/kiosks/${KIOSK.id}/edit`]);
   const user = userEvent.setup();
 
   await screen.findByRole("region", { name: "Профиль" });
@@ -768,7 +790,7 @@ it("keeps product rail metadata synchronized with loading, errors, and the curre
     }
     return undefined;
   });
-  renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  renderKiosksRouter([`/devices/kiosks/${KIOSK.id}/edit`]);
   const user = userEvent.setup();
 
   await screen.findByRole("region", { name: "Профиль" });
@@ -805,7 +827,7 @@ it("marks Profile navigation for client validation errors and clears it after co
     if (path === "/api/products?status=active") return jsonResponse(200, { items: [] });
     return undefined;
   });
-  renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  renderKiosksRouter([`/devices/kiosks/${KIOSK.id}/edit`]);
   const user = userEvent.setup();
 
   const name = await screen.findByLabelText("Название");
@@ -826,18 +848,18 @@ it("marks Profile navigation for client validation errors and clears it after co
 it("blocks dirty Back navigation until the kiosk edit is discarded", async () => {
   stubFetch((path) => (path === "/api/kiosks" ? jsonResponse(200, { items: [KIOSK] }) : undefined));
   const { router } = renderKiosksRouter([
-    "/kiosks",
-    { pathname: `/kiosks/${KIOSK.id}/edit`, state: { kiosksBackground: true } },
+    "/devices",
+    { pathname: `/devices/kiosks/${KIOSK.id}/edit`, state: { kiosksBackground: true } },
   ]);
   const user = userEvent.setup();
 
   await user.type(await screen.findByLabelText("Название"), " draft");
   await router.navigate(-1);
 
-  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+  expect(router.state.location.pathname).toBe(`/devices/kiosks/${KIOSK.id}/edit`);
   const confirmation = await screen.findByRole("alertdialog", { name: "Отменить изменения?" });
   await user.click(within(confirmation).getByRole("button", { name: "Не сохранять" }));
-  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
 });
 
 it("blocks every dismissal while a product save is busy and keeps the panel open after success", async () => {
@@ -852,8 +874,8 @@ it("blocks every dismissal while a product save is busy and keeps the panel open
     return undefined;
   });
   const { router } = renderKiosksRouter([
-    "/kiosks",
-    { pathname: `/kiosks/${KIOSK.id}/edit`, state: { kiosksBackground: true } },
+    "/devices",
+    { pathname: `/devices/kiosks/${KIOSK.id}/edit`, state: { kiosksBackground: true } },
   ]);
   const user = userEvent.setup();
 
@@ -870,11 +892,11 @@ it("blocks every dismissal while a product save is busy and keeps the panel open
     (within(panel).getByRole("button", { name: "Отмена" }) as HTMLButtonElement).disabled,
   ).toBe(true);
   await router.navigate(-1);
-  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+  expect(router.state.location.pathname).toBe(`/devices/kiosks/${KIOSK.id}/edit`);
 
   resolveSave?.(jsonResponse(200, { ...KIOSK, productIds: [PRODUCT.id] }));
   await waitFor(() => expect(panel.hasAttribute("aria-busy")).toBe(false));
-  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+  expect(router.state.location.pathname).toBe(`/devices/kiosks/${KIOSK.id}/edit`);
 });
 
 it("does not start or finish a profile save while a product save is pending", async () => {
@@ -893,7 +915,7 @@ it("does not start or finish a profile save while a product save is pending", as
     }
     return undefined;
   });
-  const { router } = renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const { router } = renderKiosksRouter([`/devices/kiosks/${KIOSK.id}/edit`]);
   const user = userEvent.setup();
 
   const name = await screen.findByLabelText("Название");
@@ -918,7 +940,7 @@ it("does not start or finish a profile save while a product save is pending", as
       ([path, init]) => path === `/api/kiosks/${KIOSK.id}` && init?.method === "PATCH",
     ),
   ).toHaveLength(0);
-  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+  expect(router.state.location.pathname).toBe(`/devices/kiosks/${KIOSK.id}/edit`);
 
   resolveProductSave?.(jsonResponse(200, { ...KIOSK, productIds: [PRODUCT.id] }));
   await waitFor(() => expect(panel.hasAttribute("aria-busy")).toBe(false));
@@ -942,7 +964,7 @@ it("does not start a product save while a profile save is pending or discard its
     }
     return undefined;
   });
-  const { router } = renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`]);
+  const { router } = renderKiosksRouter([`/devices/kiosks/${KIOSK.id}/edit`]);
   const user = userEvent.setup();
 
   const name = await screen.findByLabelText("Название");
@@ -963,24 +985,24 @@ it("does not start a product save while a profile save is pending or discard its
       ([path, init]) => path === `/api/kiosks/${KIOSK.id}/products` && init?.method === "PUT",
     ),
   ).toHaveLength(0);
-  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+  expect(router.state.location.pathname).toBe(`/devices/kiosks/${KIOSK.id}/edit`);
 
   currentKiosk = { ...currentKiosk, name: `${KIOSK.name} draft` };
   resolveProfileSave?.(jsonResponse(200, currentKiosk));
   await waitFor(() => expect(panel.hasAttribute("aria-busy")).toBe(false));
-  expect(router.state.location.pathname).toBe(`/kiosks/${KIOSK.id}/edit`);
+  expect(router.state.location.pathname).toBe(`/devices/kiosks/${KIOSK.id}/edit`);
   expect(checkbox.getAttribute("aria-checked")).toBe("true");
 
   await user.click(productSave);
   await waitFor(() => expect(panel.hasAttribute("aria-busy")).toBe(false));
   await user.click(within(panel).getByRole("button", { name: "Закрыть" }));
-  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
   expect(screen.queryByRole("alertdialog", { name: "Отменить изменения?" })).toBeNull();
 });
 
 it("denies a direct read-only edit URL before the privileged update hook mounts", async () => {
   stubFetch(() => undefined);
-  renderKiosksRouter([`/kiosks/${KIOSK.id}/edit`], READ_ONLY_ACCESS);
+  renderKiosksRouter([`/devices/kiosks/${KIOSK.id}/edit`], READ_ONLY_ACCESS);
 
   expect(await screen.findByTestId("forbidden-page")).toBeDefined();
   expect(screen.queryByRole("dialog")).toBeNull();

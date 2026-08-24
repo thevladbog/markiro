@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -58,6 +58,7 @@ function stubFetch(): ReturnType<typeof vi.fn> {
       return jsonResponse(200, { items: [DEVICE_ROW], page: 1, pageSize: 8, total: 1 });
     if (url === "/api/lines") return jsonResponse(200, { items: [] });
     if (url === "/api/kiosks") return jsonResponse(200, { items: [KIOSK] });
+    if (url === "/api/kiosks/k1") return jsonResponse(204, undefined);
     if (url.startsWith("/api/products")) return jsonResponse(200, { items: [] });
     throw new Error(`Unexpected request: ${url}`);
   });
@@ -149,6 +150,28 @@ it("closes a directly entered panel back to the devices list", async () => {
   close.click();
   await screen.findByRole("table");
   expect(router.state.location.pathname).toBe("/devices");
+});
+
+it("archives an active kiosk from the edit panel via confirmation", async () => {
+  const fetchMock = stubFetch();
+  const { router } = renderDevicesRouter("/devices/kiosks/k1/edit");
+
+  await screen.findByLabelText("Название");
+  const panel = screen.getByRole("dialog", { name: "Изменить киоск" });
+  within(panel).getByRole("button", { name: "В архив" }).click();
+  const confirmation = await screen.findByRole("alertdialog", { name: "Отправить киоск в архив?" });
+  fireEvent.click(within(confirmation).getByRole("button", { name: "В архив" }));
+
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) =>
+          String(input) === "/api/kiosks/k1" &&
+          (init as RequestInit | undefined)?.method === "DELETE",
+      ),
+    ).toBe(true),
+  );
+  await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
 });
 
 it("does not fetch the kiosks list while no kiosk panel is open", async () => {

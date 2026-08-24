@@ -1,5 +1,13 @@
 import { useMemo } from "react";
-import { createBrowserRouter, createRoutesFromElements, Navigate, Route, RouterProvider } from "react-router";
+import {
+  createBrowserRouter,
+  createRoutesFromElements,
+  Navigate,
+  Route,
+  RouterProvider,
+  useLocation,
+  useParams,
+} from "react-router";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
@@ -34,7 +42,14 @@ import { CodeSearchPage } from "./pages/code-search/index.js";
 import { ChannelPage } from "./pages/integrations/ChannelPage.js";
 import { IntegrationsPage } from "./pages/integrations/index.js";
 import { InvitationPage } from "./pages/invitations/InvitationPage.js";
-import { KiosksPage } from "./pages/kiosks/index.js";
+/** Preserves deep links (and their panel-origin state) from the retired /kiosks section. */
+function KioskPathRedirect({ suffix }: { suffix?: "edit" | "pair" }) {
+  const { kioskId } = useParams();
+  const location = useLocation();
+  const state: unknown = location.state;
+  const to = suffix ? `/devices/kiosks/${kioskId}/${suffix}` : "/devices/kiosks/new";
+  return <Navigate to={to} replace state={state} />;
+}
 import { KioskPairingPanelRoute } from "./pages/kiosks/KioskPairingPanelRoute.js";
 import { KioskCreatePanelRoute, KioskEditPanelRoute } from "./pages/kiosks/KioskPanelRoute.js";
 import { ReasonsPage } from "./pages/pickup/ReasonsPage.js";
@@ -287,40 +302,12 @@ function appRouteElements() {
             }
           />
         </Route>
-        <Route
-          path="kiosks"
-          element={
-            <RequireCapability capability={C.OPERATIONS_READ}>
-              <KiosksPage />
-            </RequireCapability>
-          }
-        >
-          <Route
-            path="new"
-            element={
-              <RequireCapability capability={C.OPERATIONS_WRITE}>
-                <KioskCreatePanelRoute />
-              </RequireCapability>
-            }
-          />
-          <Route
-            path=":kioskId/edit"
-            element={
-              <RequireCapability capability={C.OPERATIONS_WRITE}>
-                <KioskEditPanelRoute />
-              </RequireCapability>
-            }
-          />
-          <Route
-            path=":kioskId/pair"
-            element={
-              <RequireCapability capability={C.CREDENTIALS_MANAGE}>
-                <KioskPairingPanelRoute />
-              </RequireCapability>
-            }
-          />
-        </Route>
-        <Route path="kiosks/reasons" element={<Navigate to="/pickup/reasons" replace />} />
+        <Route path="kiosks">
+          <Route index element={<Navigate to="/devices?type=kiosk" replace />} />
+          <Route path="reasons" element={<Navigate to="/pickup/reasons" replace />} />
+          <Route path="new" element={<KioskPathRedirect />} />
+          <Route path=":kioskId/edit" element={<KioskPathRedirect suffix="edit" />} />
+          <Route path=":kioskId/pair" element={<KioskPathRedirect suffix="pair" />} /></Route>
         <Route
           path="integrations"
           element={
