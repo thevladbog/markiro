@@ -121,10 +121,58 @@ describe("CodeSearchPage", () => {
     const { router, user } = renderPage();
 
     await screen.findByText("Поиск кодов");
-    const input = screen.getByPlaceholderText("Введите SSCC или код маркировки");
+    const input = screen.getByPlaceholderText(
+      "Введите SSCC (можно часть номера) или код маркировки",
+    );
     await user.type(input, "000000000000000001");
     await user.click(screen.getByRole("button", { name: "Найти" }));
 
+    await waitFor(() => expect(router.state.location.pathname).toBe("/codes/box/b1"));
+  });
+
+  it("shows a pick-one list when a partial SSCC matches several boxes", async () => {
+    stubFetch({
+      list: { items: [], page: 1, pageCount: 1, total: 0 },
+      classify: {
+        status: 200,
+        body: {
+          type: "boxes",
+          items: [
+            {
+              boxId: "b1",
+              sscc: "00123456789012345675",
+              productName: "Молоко 1л",
+              closedAt: "2026-08-20T08:30:00.000Z",
+            },
+            {
+              boxId: "b2",
+              sscc: "00123456789012345682",
+              productName: null,
+              closedAt: null,
+            },
+          ],
+        },
+      },
+    });
+    const { router, user } = renderPage();
+
+    await screen.findByText("Поиск кодов");
+    const input = screen.getByPlaceholderText(
+      "Введите SSCC (можно часть номера) или код маркировки",
+    );
+    await user.type(input, "3456");
+    await user.click(screen.getByRole("button", { name: "Найти" }));
+
+    expect(await screen.findByText("Найдено несколько коробов — выберите нужный:")).toBeTruthy();
+    const boxLink = screen.getByRole("link", { name: "(00)123456789012345675" });
+    expect(boxLink.getAttribute("href")).toBe("/codes/box/b1");
+    expect(screen.getByRole("link", { name: "(00)123456789012345682" }).getAttribute("href")).toBe(
+      "/codes/box/b2",
+    );
+    // No navigation happened -- the manager picks from the list.
+    expect(router.state.location.pathname).toBe("/codes");
+
+    await user.click(boxLink);
     await waitFor(() => expect(router.state.location.pathname).toBe("/codes/box/b1"));
   });
 
@@ -136,7 +184,9 @@ describe("CodeSearchPage", () => {
     const { user } = renderPage();
 
     await screen.findByText("Поиск кодов");
-    const input = screen.getByPlaceholderText("Введите SSCC или код маркировки");
+    const input = screen.getByPlaceholderText(
+      "Введите SSCC (можно часть номера) или код маркировки",
+    );
     await user.type(input, "not-a-code");
     await user.click(screen.getByRole("button", { name: "Найти" }));
 
@@ -151,7 +201,9 @@ describe("CodeSearchPage", () => {
     const { user } = renderPage();
 
     await screen.findByText("Поиск кодов");
-    const input = screen.getByPlaceholderText("Введите SSCC или код маркировки");
+    const input = screen.getByPlaceholderText(
+      "Введите SSCC (можно часть номера) или код маркировки",
+    );
     await user.type(input, "000000000000000001");
     await user.click(screen.getByRole("button", { name: "Найти" }));
 
@@ -166,7 +218,9 @@ describe("CodeSearchPage", () => {
     const { user } = renderPage();
 
     await screen.findByText("Поиск кодов");
-    const input = screen.getByPlaceholderText("Введите SSCC или код маркировки");
+    const input = screen.getByPlaceholderText(
+      "Введите SSCC (можно часть номера) или код маркировки",
+    );
     await user.type(input, "000000000000000001");
     await user.click(screen.getByRole("button", { name: "Найти" }));
 

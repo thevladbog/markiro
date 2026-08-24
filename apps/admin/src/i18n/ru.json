@@ -1000,8 +1000,9 @@
     "codeSearch": {
       "title": "Поиск кодов",
       "backAction": "← Поиск кодов",
-      "searchPlaceholder": "Введите SSCC или код маркировки",
+      "searchPlaceholder": "Введите SSCC (можно часть номера) или код маркировки",
       "searchButton": "Найти",
+      "multipleBoxes": "Найдено несколько коробов — выберите нужный:",
       "empty": "Коды не найдены",
       "errors": {
         "unrecognized": "Код не распознан",

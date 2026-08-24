@@ -40,6 +40,19 @@ function DetailField({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
+/**
+ * Full printed form of an item's code: the stored raw KM with each GS
+ * control character (U+001D, invisible in HTML) swapped for the visible
+ * ␝ symbol, so the crypto tail reads as the separate AI segments it is.
+ * Falls back to the `01…21…` identity prefix (pre-`rawKm` cached cards),
+ * then to the hash.
+ */
+function itemCodeLabel(item: BoxCardItemDto): string {
+  if (item.rawKm) return item.rawKm.replaceAll("\u001d", "␝");
+  if (item.gtin14 && item.serial) return `01${item.gtin14}21${item.serial}`;
+  return item.codeHash;
+}
+
 function itemState(item: BoxCardItemDto): "active" | "displaced" | "removed" {
   if (item.removedAt) return "removed";
   if (item.displacedAt) return "displaced";
@@ -84,11 +97,12 @@ export function BoxCardPage() {
               alignItems: "center",
               gap: 8,
               opacity: state === "active" ? 1 : 0.5,
+              // Полный КМ с криптохвостом длиннее любой колонки на телефоне --
+              // переносим внутри кода, а не обрезаем.
+              wordBreak: "break-all",
             }}
           >
-            <Link to={`/codes/km/${row.codeHash}`}>
-              {row.gtin14 && row.serial ? `01${row.gtin14}21${row.serial}` : row.codeHash}
-            </Link>
+            <Link to={`/codes/km/${row.codeHash}`}>{itemCodeLabel(row)}</Link>
           </div>
         );
       },

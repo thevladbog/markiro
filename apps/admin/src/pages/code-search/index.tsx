@@ -20,7 +20,13 @@ import type { ComboboxOption, SelectOption, StatusChipStatus, TableColumn } from
 
 import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
 import { useProducts } from "../catalog/api.js";
-import { ApiRequestError, classifySearch, useCodes, type CodeListItemDto } from "./api.js";
+import {
+  ApiRequestError,
+  classifySearch,
+  useCodes,
+  type ClassifyBoxMatchDto,
+  type CodeListItemDto,
+} from "./api.js";
 
 type StatusFilter = "all" | "free" | "aggregated" | "written_off";
 
@@ -53,6 +59,9 @@ export function CodeSearchPage() {
   const [query, setQuery] = useState("");
   const [searchError, setSearchError] = useState<SearchErrorCode | null>(null);
   const [searching, setSearching] = useState(false);
+  // Non-null only after a partial-SSCC search matched several boxes -- the
+  // manager picks the right one from this list instead of being navigated.
+  const [boxMatches, setBoxMatches] = useState<ClassifyBoxMatchDto[] | null>(null);
 
   const [from, setFrom] = useState<string | undefined>(undefined);
   const [to, setTo] = useState<string | undefined>(undefined);
@@ -144,13 +153,16 @@ export function CodeSearchPage() {
     if (!q) return;
 
     setSearchError(null);
+    setBoxMatches(null);
     setSearching(true);
     classifySearch(q)
       .then((result) => {
         if (result.type === "code") {
           void navigate(`/codes/km/${result.codeHash}`);
-        } else {
+        } else if (result.type === "box") {
           void navigate(`/codes/box/${result.boxId}`);
+        } else {
+          setBoxMatches(result.items);
         }
       })
       .catch((error: unknown) => {
@@ -205,6 +217,45 @@ export function CodeSearchPage() {
             ? t("common.loadError")
             : t(`pages.codeSearch.errors.${searchError}`)}
         </Alert>
+      )}
+
+      {boxMatches && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <span style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
+            {t("pages.codeSearch.multipleBoxes")}
+          </span>
+          <ul
+            style={{
+              margin: 0,
+              padding: 0,
+              listStyle: "none",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            {boxMatches.map((match) => (
+              <li
+                key={match.boxId}
+                style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}
+              >
+                <Link to={`/codes/box/${match.boxId}`} style={{ font: "var(--text-body)" }}>
+                  {formatSsccHri(match.sscc)}
+                </Link>
+                {match.productName && (
+                  <span style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
+                    {match.productName}
+                  </span>
+                )}
+                <span style={{ font: "var(--text-caption)", color: "var(--fg-3)" }}>
+                  {match.closedAt
+                    ? formatCreatedAt(match.closedAt, i18n.language)
+                    : t("pages.codeSearch.boxCard.status.open")}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
