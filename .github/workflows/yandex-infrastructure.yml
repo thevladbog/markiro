@@ -31,6 +31,11 @@ on:
         required: false
         default: ""
         type: string
+      plan_version_id:
+        description: Apply only - exact object VersionId emitted by the reviewed plan run
+        required: false
+        default: ""
+        type: string
       enable_station_release_public_dns:
         description: Publish releases.markiro.app only after the Station release baseline is verified
         required: true
@@ -110,6 +115,7 @@ jobs:
       ENABLE_STATION_RELEASE_PUBLIC_DNS: ${{ inputs.enable_station_release_public_dns }}
       PLAN_KEY_INPUT: ${{ inputs.plan_key }}
       PLAN_SHA256_INPUT: ${{ inputs.plan_sha256 }}
+      PLAN_VERSION_ID_INPUT: ${{ inputs.plan_version_id }}
       YC_CLOUD_ID: ${{ vars.YC_CLOUD_ID }}
       YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
       YC_OIDC_AUDIENCE: ${{ vars.YC_OIDC_AUDIENCE }}
@@ -174,10 +180,12 @@ jobs:
           [[ "$MODE" == "plan" ]]
           [[ -z "$PLAN_KEY_INPUT" ]]
           [[ -z "$PLAN_SHA256_INPUT" ]]
+          [[ -z "$PLAN_VERSION_ID_INPUT" ]]
           [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$GITHUB_REF" == "refs/heads/main" ]]
           [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
           [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           case "$ENABLE_PUBLIC_DNS" in true|false) ;; *) exit 1 ;; esac
           case "$ENABLE_STATION_RELEASE_PUBLIC_DNS" in true|false) ;; *) exit 1 ;; esac
           export TF_VAR_public_dns_enabled="$ENABLE_PUBLIC_DNS"
@@ -258,7 +266,7 @@ jobs:
           node infra/yandex/scripts/guard-production-plan.mjs "$plan_json"
           jq -c '[.resource_changes[]? | select(.change.actions != ["no-op"]) | {address, actions: .change.actions}]' "$plan_json"
 
-          plan_key="production/plans/${GITHUB_RUN_ID}/${TARGET_SHA}/${ENABLE_PUBLIC_DNS}-${ENABLE_STATION_RELEASE_PUBLIC_DNS}/production.tfplan"
+          plan_key="production/plans/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${TARGET_SHA}/${ENABLE_PUBLIC_DNS}-${ENABLE_STATION_RELEASE_PUBLIC_DNS}/production.tfplan"
           plan_sha256="$(sha256sum "$plan" | cut -d ' ' -f 1)"
           [[ "$plan_sha256" =~ ^[0-9a-f]{64}$ ]]
           aws s3api put-object \
@@ -267,12 +275,15 @@ jobs:
             --key "$plan_key" \
             --body "$plan" \
             --content-type application/octet-stream \
-            --metadata "target-sha=$TARGET_SHA,enable-public-dns=$ENABLE_PUBLIC_DNS,enable-station-release-public-dns=$ENABLE_STATION_RELEASE_PUBLIC_DNS,source-run-id=$GITHUB_RUN_ID" \
+            --metadata "target-sha=$TARGET_SHA,enable-public-dns=$ENABLE_PUBLIC_DNS,enable-station-release-public-dns=$ENABLE_STATION_RELEASE_PUBLIC_DNS,source-run-id=$GITHUB_RUN_ID,source-run-attempt=$GITHUB_RUN_ATTEMPT" \
             > "$put_response"
-          jq -e '.VersionId | type == "string" and length > 0 and length <= 256' "$put_response" > /dev/null
+          plan_version_id="$(jq -er '.VersionId' "$put_response")"
+          [[ "$plan_version_id" =~ ^[A-Za-z0-9._+/=-]{1,256}$ ]]
+          [[ "$plan_version_id" != "null" ]]
           printf 'plan_key=%s\n' "$plan_key" >> "$GITHUB_OUTPUT"
           printf 'plan_sha256=%s\n' "$plan_sha256" >> "$GITHUB_OUTPUT"
-          printf '::notice title=Terraform plan escrow::plan_key=%s plan_sha256=%s\n' "$plan_key" "$plan_sha256"
+          printf 'plan_version_id=%s\n' "$plan_version_id" >> "$GITHUB_OUTPUT"
+          printf '::notice title=Terraform plan escrow::plan_key=%s plan_sha256=%s plan_version_id=%s\n' "$plan_key" "$plan_sha256" "$plan_version_id"
 
   apply:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'apply'
@@ -289,6 +300,7 @@ jobs:
       ENABLE_STATION_RELEASE_PUBLIC_DNS: ${{ inputs.enable_station_release_public_dns }}
       PLAN_KEY: ${{ inputs.plan_key }}
       PLAN_SHA256: ${{ inputs.plan_sha256 }}
+      PLAN_VERSION_ID: ${{ inputs.plan_version_id }}
       YC_CLOUD_ID: ${{ vars.YC_CLOUD_ID }}
       YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
       YC_OIDC_AUDIENCE: ${{ vars.YC_OIDC_AUDIENCE }}
@@ -356,11 +368,14 @@ jobs:
           case "$ENABLE_PUBLIC_DNS" in true|false) ;; *) exit 1 ;; esac
           case "$ENABLE_STATION_RELEASE_PUBLIC_DNS" in true|false) ;; *) exit 1 ;; esac
           [[ "$PLAN_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$PLAN_KEY" =~ ^production\/plans\/([0-9]+)\/([0-9a-f]{40})\/(true|false)-(true|false)\/production\.tfplan$ ]]
+          [[ "$PLAN_VERSION_ID" =~ ^[A-Za-z0-9._+/=-]{1,256}$ ]]
+          [[ "$PLAN_VERSION_ID" != "null" ]]
+          [[ "$PLAN_KEY" =~ ^production\/plans\/([0-9]+)\/([1-9][0-9]*)\/([0-9a-f]{40})\/(true|false)-(true|false)\/production\.tfplan$ ]]
           source_run_id="${BASH_REMATCH[1]}"
-          [[ "${BASH_REMATCH[2]}" == "$TARGET_SHA" ]]
-          [[ "${BASH_REMATCH[3]}" == "$ENABLE_PUBLIC_DNS" ]]
-          [[ "${BASH_REMATCH[4]}" == "$ENABLE_STATION_RELEASE_PUBLIC_DNS" ]]
+          source_run_attempt="${BASH_REMATCH[2]}"
+          [[ "${BASH_REMATCH[3]}" == "$TARGET_SHA" ]]
+          [[ "${BASH_REMATCH[4]}" == "$ENABLE_PUBLIC_DNS" ]]
+          [[ "${BASH_REMATCH[5]}" == "$ENABLE_STATION_RELEASE_PUBLIC_DNS" ]]
           export TF_VAR_public_dns_enabled="$ENABLE_PUBLIC_DNS"
           export TF_VAR_station_release_public_dns_enabled="$ENABLE_STATION_RELEASE_PUBLIC_DNS"
 
@@ -436,28 +451,30 @@ jobs:
             --endpoint-url https://storage.yandexcloud.net \
             --bucket "$YC_STATE_BUCKET_NAME" \
             --key "$PLAN_KEY" \
+            --version-id "$PLAN_VERSION_ID" \
             > "$plan_head"
           jq -e \
             --arg target_sha "$TARGET_SHA" \
             --arg enable_public_dns "$ENABLE_PUBLIC_DNS" \
             --arg enable_station_release_public_dns "$ENABLE_STATION_RELEASE_PUBLIC_DNS" \
-            --arg source_run_id "$source_run_id" '
+            --arg source_run_id "$source_run_id" \
+            --arg source_run_attempt "$source_run_attempt" \
+            --arg plan_version_id "$PLAN_VERSION_ID" '
               (.ContentLength | type == "number" and . > 0 and . <= 268435456) and
               (.Metadata == {
                 "target-sha": $target_sha,
                 "enable-public-dns": $enable_public_dns,
                 "enable-station-release-public-dns": $enable_station_release_public_dns,
-                "source-run-id": $source_run_id
+                "source-run-id": $source_run_id,
+                "source-run-attempt": $source_run_attempt
               }) and
-              (.VersionId | type == "string" and length > 0 and length <= 256)
+              (.VersionId == $plan_version_id)
             ' "$plan_head" > /dev/null
-          plan_version_id="$(jq -er '.VersionId' "$plan_head")"
-          [[ "$plan_version_id" =~ ^[A-Za-z0-9._+/=-]{1,256}$ ]]
           aws s3api get-object \
             --endpoint-url https://storage.yandexcloud.net \
             --bucket "$YC_STATE_BUCKET_NAME" \
             --key "$PLAN_KEY" \
-            --version-id "$plan_version_id" \
+            --version-id "$PLAN_VERSION_ID" \
             "$plan" \
             > /dev/null
           printf '%s  %s\n' "$PLAN_SHA256" "$plan" | sha256sum --check --status
@@ -473,13 +490,13 @@ jobs:
             --endpoint-url https://storage.yandexcloud.net \
             --bucket "$YC_STATE_BUCKET_NAME" \
             --key "$PLAN_KEY" \
-            --version-id "$plan_version_id" \
+            --version-id "$PLAN_VERSION_ID" \
             > /dev/null
           if aws s3api head-object \
             --endpoint-url https://storage.yandexcloud.net \
             --bucket "$YC_STATE_BUCKET_NAME" \
             --key "$PLAN_KEY" \
-            --version-id "$plan_version_id" \
+            --version-id "$PLAN_VERSION_ID" \
             > /dev/null 2>&1; then
             printf '%s\n' '::error::Applied Terraform plan version still exists in escrow' >&2
             exit 1

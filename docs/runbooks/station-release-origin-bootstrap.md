@@ -14,10 +14,10 @@ environment variables, буфер обмена, логи, summaries, artifacts �
 ## 1. Подготовить защищённый план без release DNS
 
 На точном SHA текущего `main` запустите **Yandex infrastructure** со значениями
-`mode=plan`, `enable_station_release_public_dns=false` и пустыми `plan_key` и
-`plan_sha256`. Для `enable_public_dns` укажите его текущее отдельно одобренное
-значение: этот gate относится к прямому app VM и не должен измениться из-за
-Station release origin.
+`mode=plan`, `enable_station_release_public_dns=false` и пустыми `plan_key`,
+`plan_sha256` и `plan_version_id`. Для `enable_public_dns` укажите его текущее
+отдельно одобренное значение: этот gate относится к прямому app VM и не должен
+измениться из-за Station release origin.
 
 Просмотрите сохранённый plan. Допустимы только ожидаемые release bucket,
 publisher, certificate/challenge и CDN resources. Release CNAME должен
@@ -25,9 +25,10 @@ publisher, certificate/challenge и CDN resources. Release CNAME должен
 PostgreSQL или app VM, public list/config доступа к release bucket, delete права
 publisher и любые release permissions для app/runtime identity.
 
-Зафиксируйте выданные workflow non-secret `plan_key` и `plan_sha256`. Сам saved
-plan находится только в защищённом state bucket и не переносится в GitHub
-artifact, лог, summary или локальный файл оператора.
+Зафиксируйте все три выданных workflow non-secret значения: `plan_key`,
+`plan_sha256` и точный `plan_version_id`. Сам saved plan находится только в
+защищённом state bucket и не переносится в GitHub artifact, лог, summary или
+локальный файл оператора.
 
 ## 2. Остановиться перед первым apply
 
@@ -35,9 +36,9 @@ artifact, лог, summary или локальный файл оператора.
 автоматически. Получите явное подтверждение владельца инфраструктуры на
 применение именно проверенного saved plan. После подтверждения запустите
 отдельный dispatch `mode=apply` с теми же точными SHA и обоими DNS flags, а также
-выданными `plan_key` и `plan_sha256`. Одобренный reviewer вручную разрешает apply
-в отдельном GitHub Environment `production-infrastructure-apply`. Изменение кода
-не заменяет этот approval.
+выданными `plan_key`, `plan_sha256` и `plan_version_id`. Одобренный reviewer
+вручную разрешает apply в отдельном GitHub Environment
+`production-infrastructure-apply`. Изменение кода не заменяет этот approval.
 
 Workflow не печатает и не сохраняет Terraform outputs. Дождитесь успешного apply
 до локального доступа к защищённому state.
@@ -205,7 +206,7 @@ public-read проверок запросите отдельное подтве�
 
 Перед apply убедитесь, что plan меняет только release CNAME и не пересоздаёт
 bucket, access key, certificate, CDN, app VM или durable data. Затем запустите
-отдельный `mode=apply` с точными `plan_key` и `plan_sha256` и approve
-`production-infrastructure-apply`. После DNS
+отдельный `mode=apply` с точными `plan_key`, `plan_sha256` и `plan_version_id` и
+approve `production-infrastructure-apply`. После DNS
 propagation публичные проверки через `https://releases.markiro.app` и проверки
 из GitHub-restricted customer network являются отдельными внешними gates.

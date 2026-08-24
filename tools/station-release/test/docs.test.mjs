@@ -142,6 +142,9 @@ test("Station release origin bootstrap separates protected credentials and appro
   assert.match(infrastructure, /production\/plans\//);
   assert.match(infrastructure, /plan_key/);
   assert.match(infrastructure, /plan_sha256/);
+  assert.match(infrastructure, /plan_version_id/);
+  assert.match(infrastructure, /GITHUB_RUN_ATTEMPT/);
+  assert.match(infrastructure, /точн.*key.*VersionId|key.*точн.*VersionId/is);
   assert.match(infrastructure, /residual|остаточн/is);
   assert.match(infrastructure, /version-id|VersionId/);
   assert.ok(bootstrap.indexOf("STOP 1 — APPLY") < bootstrap.indexOf("вручную разрешает apply"));

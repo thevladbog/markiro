@@ -569,6 +569,7 @@ test("infrastructure workflow escrows one reviewed plan between separately prote
   );
   assert.match(workflow, /plan_key:[\s\S]*type:\s*string/);
   assert.match(workflow, /plan_sha256:[\s\S]*type:\s*string/);
+  assert.match(workflow, /plan_version_id:[\s\S]*type:\s*string/);
   const releaseDnsInput = workflow.match(
     /enable_station_release_public_dns:([\s\S]*?)\n\npermissions:/,
   )?.[1];
@@ -608,26 +609,57 @@ test("infrastructure workflow escrows one reviewed plan between separately prote
 
   assert.match(
     planJob,
-    /plan_key="production\/plans\/\$\{GITHUB_RUN_ID\}\/\$\{TARGET_SHA\}\/\$\{ENABLE_PUBLIC_DNS\}-\$\{ENABLE_STATION_RELEASE_PUBLIC_DNS\}\/production\.tfplan"/,
+    /plan_key="production\/plans\/\$\{GITHUB_RUN_ID\}\/\$\{GITHUB_RUN_ATTEMPT\}\/\$\{TARGET_SHA\}\/\$\{ENABLE_PUBLIC_DNS\}-\$\{ENABLE_STATION_RELEASE_PUBLIC_DNS\}\/production\.tfplan"/,
   );
+  assert.match(planJob, /\[\[ "\$GITHUB_RUN_ATTEMPT" =~ \^\[1-9\]\[0-9\]\*\$ \]\]/);
   assert.match(planJob, /plan_sha256=.*sha256sum "\$plan"/);
   assert.match(planJob, /aws s3api put-object[\s\S]*--bucket "\$YC_STATE_BUCKET_NAME"/);
   assert.match(planJob, /--key "\$plan_key"[\s\S]*--body "\$plan"/);
-  assert.match(planJob, /--metadata[\s\S]*target-sha=.*enable-public-dns=/);
+  assert.match(planJob, /--metadata[\s\S]*target-sha=.*enable-public-dns=.*source-run-attempt=/);
+  assert.match(planJob, /plan_version_id="\$\(jq -er '\.VersionId' "\$put_response"\)"/);
+  assert.match(planJob, /\[\[ "\$plan_version_id" =~ \^\[A-Za-z0-9\._\+\/=\-\]\{1,256\}\$ \]\]/);
+  assert.match(planJob, /\[\[ "\$plan_version_id" != "null" \]\]/);
+  assert.match(planJob, /printf 'plan_version_id=%s\\n' "\$plan_version_id" >> "\$GITHUB_OUTPUT"/);
+  assert.match(planJob, /Terraform plan escrow::plan_key=%s plan_sha256=%s plan_version_id=%s/);
 
   assert.match(applyJob, /PLAN_KEY:\s*\$\{\{ inputs\.plan_key \}\}/);
   assert.match(applyJob, /PLAN_SHA256:\s*\$\{\{ inputs\.plan_sha256 \}\}/);
+  assert.match(applyJob, /PLAN_VERSION_ID:\s*\$\{\{ inputs\.plan_version_id \}\}/);
   assert.match(applyJob, /\[\[ "\$PLAN_SHA256" =~ \^\[0-9a-f\]\{64\}\$ \]\]/);
   assert.match(applyJob, /\[\[ "\$PLAN_KEY" =~ \^production\\\/plans\\\//);
+  assert.match(applyJob, /\[\[ "\$PLAN_VERSION_ID" =~ \^\[A-Za-z0-9\._\+\/=\-\]\{1,256\}\$ \]\]/);
+  assert.match(applyJob, /\[\[ "\$PLAN_VERSION_ID" != "null" \]\]/);
+  assert.ok(
+    applyJob.indexOf('[[ "$PLAN_VERSION_ID" =~') < applyJob.indexOf('github_oidc_token="$(curl'),
+    "the reviewer-supplied VersionId must be validated before authentication",
+  );
   assert.match(applyJob, /aws s3api head-object[\s\S]*--key "\$PLAN_KEY"/);
   assert.match(applyJob, /aws s3api get-object[\s\S]*--key "\$PLAN_KEY"/);
-  assert.match(applyJob, /\.Metadata[\s\S]*target-sha[\s\S]*enable-public-dns/);
+  assert.match(
+    applyJob,
+    /--arg plan_version_id "\$PLAN_VERSION_ID"[\s\S]*\.VersionId == \$plan_version_id/,
+  );
+  assert.match(applyJob, /\.Metadata[\s\S]*target-sha[\s\S]*source-run-attempt/);
+  const objectCommands = [
+    ...applyJob.matchAll(
+      /aws s3api (head-object|get-object|delete-object) \\\n(?:[^\n]*\\\n)*[^\n]*/g,
+    ),
+  ];
+  assert.equal(objectCommands.length, 4);
+  assert.deepEqual(
+    objectCommands.map((match) => match[1]),
+    ["head-object", "get-object", "delete-object", "head-object"],
+  );
+  for (const command of objectCommands) {
+    assert.match(command[0], /--version-id "\$PLAN_VERSION_ID"/);
+  }
+  assert.doesNotMatch(applyJob, /plan_version_id="\$\(jq/);
   const hashGuard = applyJob.indexOf("sha256sum --check --status");
   const apply = applyJob.indexOf("terraform -chdir=infra/yandex/production apply");
   assert.ok(hashGuard > -1 && apply > hashGuard, "exact plan hash must be verified before apply");
   const deleteEscrow = applyJob.indexOf("aws s3api delete-object", apply);
   assert.ok(deleteEscrow > apply, "the exact escrowed plan version must be deleted after apply");
-  assert.match(applyJob, /--version-id "\$plan_version_id"/);
+  assert.equal([...applyJob.matchAll(/--version-id "\$PLAN_VERSION_ID"/g)].length, 4);
 
   assert.match(
     workflow,

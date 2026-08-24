@@ -30,13 +30,14 @@ enable_public_dns=true
 enable_station_release_public_dns=false
 plan_key=
 plan_sha256=
+plan_version_id=
 ```
 
 Approve Environment `production-infrastructure`. Workflow строит один saved
 Terraform plan, проверяет запрет замены app VM и удаления PostgreSQL, базы, media
 и временно сохранённого audit bucket, но ничего не применяет. Просмотрите
-санитаризированный список изменений и сохраните выданные non-secret `plan_key` и
-`plan_sha256`.
+санитаризированный список изменений и сохраните все три выданных non-secret
+значения: `plan_key`, `plan_sha256` и точный `plan_version_id`.
 
 Ожидаемые удаления: ALB, backend/target groups, ALB subnet/address/security
 group, Certificate Manager certificates, SWS/ARL, Audit Trails, облачные log
@@ -53,6 +54,7 @@ enable_public_dns=true
 enable_station_release_public_dns=false
 plan_key=<exact-key-from-reviewed-plan-run>
 plan_sha256=<exact-64-hex-from-reviewed-plan-run>
+plan_version_id=<exact-version-id-from-reviewed-plan-run>
 ```
 
 Approve отдельный Environment `production-infrastructure-apply` только после

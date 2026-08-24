@@ -99,6 +99,7 @@ test("active infrastructure runbooks require separate reviewed plan and apply ru
     assert.match(runbook, /production-infrastructure-apply/);
     assert.match(runbook, /plan_key/);
     assert.match(runbook, /plan_sha256/);
+    assert.match(runbook, /plan_version_id/);
   }
   assert.match(goLive, /enable_station_release_public_dns=false/);
   assert.match(bootstrap, /production-infrastructure/);

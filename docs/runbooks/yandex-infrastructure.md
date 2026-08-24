@@ -31,14 +31,15 @@ certificate и CDN выполняется с `enable_station_release_public_dns=
 1. Убедитесь, что `target_sha` — полный 40-символьный SHA текущего `main`.
 2. Зафиксируйте оба DNS input явно. Для первого release plan используйте
    `enable_station_release_public_dns=false`.
-3. Оставьте `plan_key` и `plan_sha256` пустыми, запустите `mode=plan` и approve
-   только Environment `production-infrastructure`.
+3. Оставьте `plan_key`, `plan_sha256` и `plan_version_id` пустыми, запустите
+   `mode=plan` и approve только Environment `production-infrastructure`.
 4. Проверьте выведенный санитаризированный список Terraform address/actions. В
    нём не должно быть замены app VM, удаления PostgreSQL, базы,
    state/media/audit/release bucket, ослабления release policy или выдачи
    release-доступа app identity.
-5. Сохраните два non-secret идентификатора из notice успешного run: точный
-   `plan_key` под `production/plans/` и `plan_sha256`. Не публикуйте сам plan.
+5. Сохраните все три non-secret идентификатора из notice успешного run: точный
+   `plan_key` под `production/plans/<GITHUB_RUN_ID>/<GITHUB_RUN_ATTEMPT>/`,
+   `plan_sha256` и `plan_version_id`. Не публикуйте сам plan.
 
 Plan run никогда не применяет изменения. Он загружает binary saved plan только
 в защищённый versioned Terraform state bucket. План не является GitHub artifact,
@@ -51,13 +52,14 @@ Plan run никогда не применяет изменения. Он заг�
 
 1. Запустите новый dispatch `mode=apply` с теми же точными `target_sha`,
    `enable_public_dns` и `enable_station_release_public_dns`.
-2. Введите без изменения полученные `plan_key` и 64-символьный
-   `plan_sha256`.
+2. Введите без изменения полученные `plan_key`, 64-символьный `plan_sha256` и
+   точный `plan_version_id`.
 3. Approve отдельный Environment `production-infrastructure-apply` только после
    того, как проверка плана завершена.
 
 Apply run повторно проверяет SHA/ref и оба boolean input, ограниченный формат и
-metadata object key, загружает точную версию plan, сверяет SHA-256, повторяет
+metadata object key, загружает только точную версию plan по переданному reviewer
+`plan_version_id`, сверяет SHA-256, повторяет
 `terraform show -json` и production guard, затем применяет этот же файл. После
 успешного apply workflow удаляет точный object `VersionId`; другие ключи и
 префиксы state bucket не затрагиваются.
@@ -66,12 +68,15 @@ metadata object key, загружает точную версию plan, свер
 
 Если apply, hash/metadata validation или guard завершился ошибкой, plan object
 намеренно остаётся в escrow для расследования. Не запускайте его повторно
-автоматически. Уполномоченный оператор сначала сверяет run, `target_sha`, оба
-DNS input, `plan_key`, `plan_sha256` и состояние инфраструктуры. Затем он либо
-запускает новый plan, либо после отдельного подтверждения удаляет только точный
-key `production/plans/<run-id>/<sha>/<flags>/production.tfplan` и его точный
-`version-id`/`VersionId`. Никогда не удаляйте `production/plans/` целиком и не
-расширяйте доступ state-backend identity на другой bucket или prefix.
+автоматически. Уполномоченный оператор сначала сверяет run, run attempt,
+`target_sha`, оба DNS input, `plan_key`, `plan_sha256`, `plan_version_id` и
+состояние инфраструктуры. Затем он либо запускает новый plan, либо после
+отдельного подтверждения удаляет только точный key
+`production/plans/<run-id>/<run-attempt>/<sha>/<flags>/production.tfplan` и
+точный reviewer-сохранённый VersionId (`plan_version_id`) через `--version-id`.
+Никогда не используйте unversioned/latest object lookup, не удаляйте
+`production/plans/` целиком и не расширяйте доступ state-backend identity на
+другой bucket или prefix.
 
 OIDC exchange и получение state-backend credentials из Lockbox остаются
 job-scoped. Publisher access key и secret key не добавляются в env этих jobs.
