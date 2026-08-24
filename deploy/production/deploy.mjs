@@ -26,6 +26,7 @@ const edgeRepository = "ghcr.io/thevladbog/markiro-edge";
 const defaultVbtechReleaseDirectory = "/var/lib/markiro/vbtech/releases";
 const trustedVbtechDomain = "v-b.tech";
 const trustedVbtechWwwDomain = "www.v-b.tech";
+const enabledVbtechFunctionPath = "/d4egihdqfci0mhota3ac";
 const vbtechInputKeys = [
   "VBTECH_IMAGE_REF",
   "VBTECH_IMAGE_TAG",
@@ -262,7 +263,7 @@ function vbtechReleaseFromLifecycle(value) {
       imageRef: value.imageRef,
       imageDigest: value.imageDigest,
       releaseSha: value.releaseSha,
-      functionPath: "",
+      functionPath: value.submissionState === "enabled" ? enabledVbtechFunctionPath : "",
       submissionState: value.submissionState,
     });
   } catch {
