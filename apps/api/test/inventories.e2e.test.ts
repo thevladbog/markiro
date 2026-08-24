@@ -14,6 +14,7 @@ import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { InventoriesService } from "../src/modules/inventories/inventories.service";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { setOnlyOrganizationMemberRole, signUpAndActivate } from "./support/auth";
@@ -46,12 +47,14 @@ type InventoryBody = {
   productionDateFrom: string;
   productionDateTo: string;
   boxLabelTemplateId: string | null;
+  boxLabelTemplate: { id: string; name: string } | null;
 };
 
 describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
   let db: Db;
+  let inventories: InventoriesService;
   const objects = new Map<string, Buffer>();
   const storage = {
     ensureBucket: vi.fn().mockResolvedValue(undefined),
@@ -76,6 +79,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       .compile();
 
     app = ref.createNestApplication({ bodyParser: false });
+    inventories = app.get(InventoriesService);
     const server = app.getHttpAdapter().getInstance();
     mountAuth(server, setup.auth);
     server.use(express.json());
@@ -180,11 +184,22 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     return response.body as InventoryBody;
   }
 
-  function upload(agent: Agent, inventoryId: string, status: string, bytes = INTRODUCED_BYTES) {
-    const filename = bytes === EMPTY_APPLIED_BYTES ? "applied.csv" : "introduced.csv";
+  function uploadNamed(
+    agent: Agent,
+    inventoryId: string,
+    status: string,
+    bytes: Buffer,
+    filename: string,
+    contentType = "text/csv",
+  ) {
     return agent
       .post(`/inventories/${inventoryId}/imports/${status}`)
-      .attach("file", bytes, { filename, contentType: "text/csv" });
+      .attach("file", bytes, { filename, contentType });
+  }
+
+  function upload(agent: Agent, inventoryId: string, status: string, bytes = INTRODUCED_BYTES) {
+    const filename = bytes === EMPTY_APPLIED_BYTES ? "applied.csv" : "introduced.csv";
+    return uploadNamed(agent, inventoryId, status, bytes, filename);
   }
 
   async function markReady(tenantId: string, inventoryId: string): Promise<void> {
@@ -249,6 +264,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       productionDateFrom: "2026-08-01",
       productionDateTo: "2026-08-31",
       boxLabelTemplateId: null,
+      boxLabelTemplate: null,
     });
     expect(first.body).not.toHaveProperty("tenantId");
 
@@ -364,6 +380,16 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     await setDefaultTemplate(tenantId, firstTemplateId);
     const repack = await createInventory(agent, activeProductId, lineId, "repack");
     expect(repack.boxLabelTemplateId).toBe(firstTemplateId);
+    expect(repack.boxLabelTemplate).toEqual({ id: firstTemplateId, name: "First template" });
+    const repackDetail = await agent.get(`/inventories/${repack.id}`).expect(200);
+    expect(repackDetail.body.boxLabelTemplate).toEqual({
+      id: firstTemplateId,
+      name: "First template",
+    });
+    const repackList = await agent.get("/inventories").expect(200);
+    expect(
+      repackList.body.items.find((item: { id: string }) => item.id === repack.id).boxLabelTemplate,
+    ).toEqual({ id: firstTemplateId, name: "First template" });
 
     const secondTemplateId = await seedTemplate(tenantId, "Second template");
     await setDefaultTemplate(tenantId, secondTemplateId);
@@ -372,9 +398,22 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       .send({ productionDateTo: "2026-09-01" })
       .expect(200);
     expect(patched.body.boxLabelTemplateId).toBe(secondTemplateId);
+    expect(patched.body.boxLabelTemplate).toEqual({
+      id: secondTemplateId,
+      name: "Second template",
+    });
+
+    await setDefaultTemplate(tenantId, null);
+    await agent.delete(`/label-templates/${secondTemplateId}`).expect(409, {
+      message:
+        "Label template is referenced by an organization default, product, shift, or inventory",
+      error: "Conflict",
+      statusCode: 409,
+    });
 
     const check = await createInventory(agent, activeProductId, lineId, "check");
     expect(check.boxLabelTemplateId).toBeNull();
+    expect(check.boxLabelTemplate).toBeNull();
   });
 
   it("locks editable state, permits draft/preparing updates, and rejects ready inventory mutations", async () => {
@@ -477,6 +516,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
         result: "succeeded",
         declaredStatus: "APPLIED",
         parsedStatus: "APPLIED",
+        includedGtin14: FIXTURE_GTIN,
         rowCount: 0,
         errorCount: 0,
         duplicateCount: 0,
@@ -495,7 +535,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     expect(statusMismatch.body).toEqual({
       id: expect.any(String),
       declaredStatus: "EMITTED",
-      parsedStatus: null,
+      parsedStatus: "INTRODUCED",
       result: "failed",
       rowCount: 0,
       errorCount: 1,
@@ -504,6 +544,23 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       diagnostics: [{ code: "CHZ_FILTER_STATUS_MISMATCH", rowNumber: 1 }],
     });
     expect(JSON.stringify(statusMismatch.body)).not.toMatch(/SYNTHETIC|objectKey|fileName|cause/i);
+
+    const [storedFailure] = await db
+      .select({
+        parsedStatus: schema.inventoryImports.parsedStatus,
+        includedGtin14: schema.inventoryImports.includedGtin14,
+      })
+      .from(schema.inventoryImports)
+      .where(
+        and(
+          eq(schema.inventoryImports.tenantId, tenantId),
+          eq(schema.inventoryImports.id, statusMismatch.body.id as string),
+        ),
+      );
+    expect(storedFailure).toEqual({
+      parsedStatus: "INTRODUCED",
+      includedGtin14: FIXTURE_GTIN,
+    });
 
     const [audit] = await db
       .select({
@@ -536,7 +593,8 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
         importId: statusMismatch.body.id,
         result: "failed",
         declaredStatus: "EMITTED",
-        parsedStatus: null,
+        parsedStatus: "INTRODUCED",
+        includedGtin14: FIXTURE_GTIN,
         rowCount: 0,
         errorCount: 1,
         duplicateCount: 0,
@@ -547,6 +605,33 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     });
     expect(JSON.stringify(audit)).not.toMatch(/SYNTHETIC|objectKey|fileName|credential|secret/i);
 
+    const repeatedFailure = await upload(agent, inventory.id, "EMITTED").expect(422);
+    expect(repeatedFailure.body).toEqual(statusMismatch.body);
+    expect(storage.putVerified).toHaveBeenCalledTimes(1);
+    const repeatedImports = await db
+      .select({ id: schema.inventoryImports.id })
+      .from(schema.inventoryImports)
+      .where(
+        and(
+          eq(schema.inventoryImports.tenantId, tenantId),
+          eq(schema.inventoryImports.inventoryId, inventory.id),
+          eq(schema.inventoryImports.declaredStatus, "EMITTED"),
+          eq(schema.inventoryImports.sha256, INTRODUCED_DIGEST),
+        ),
+      );
+    expect(repeatedImports).toHaveLength(1);
+    const repeatedAudits = await db
+      .select({ id: schema.tenantAuditEvents.id })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "inventory.import.processed"),
+          eq(schema.tenantAuditEvents.targetId, statusMismatch.body.id as string),
+        ),
+      );
+    expect(repeatedAudits).toHaveLength(1);
+
     const wrongProductId = await seedProduct(tenantId, {
       gtin14: "04680089900390",
       name: "Different GTIN",
@@ -556,6 +641,49 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     expect(gtinMismatch.body.diagnostics).toEqual([
       { code: "CHZ_FILTER_GTIN_MISMATCH", rowNumber: 1 },
     ]);
+  });
+
+  it("keeps filter facts null when parsing fails before the filter is decoded", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent);
+    const inventory = await createInventory(agent, productId, lineId);
+    const bytes = Buffer.from([0xff]);
+
+    const response = await uploadNamed(
+      agent,
+      inventory.id,
+      "INTRODUCED",
+      bytes,
+      "invalid.csv",
+    ).expect(422);
+    expect(response.body).toMatchObject({
+      parsedStatus: null,
+      result: "failed",
+      diagnostics: [{ code: "CHZ_INVALID_UTF8" }],
+    });
+    const [stored] = await db
+      .select({
+        parsedStatus: schema.inventoryImports.parsedStatus,
+        includedGtin14: schema.inventoryImports.includedGtin14,
+      })
+      .from(schema.inventoryImports)
+      .where(
+        and(
+          eq(schema.inventoryImports.tenantId, tenantId),
+          eq(schema.inventoryImports.id, response.body.id as string),
+        ),
+      );
+    expect(stored).toEqual({ parsedStatus: null, includedGtin14: null });
+    const [audit] = await db
+      .select({ after: schema.tenantAuditEvents.after })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.targetId, response.body.id as string),
+        ),
+      );
+    expect(audit?.after).toMatchObject({ parsedStatus: null, includedGtin14: null });
   });
 
   it("deduplicates concurrent same-file requests only within tenant, inventory, and status", async () => {
@@ -588,6 +716,64 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     expect(storage.putVerified).toHaveBeenCalledTimes(3);
   });
 
+  it("checks digest idempotency before retry filename classification but rejects a new unsupported container", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent);
+    const priorInventory = await createInventory(agent, productId, lineId);
+    const unsupportedInventory = await createInventory(agent, productId, lineId);
+    const prior = await upload(agent, priorInventory.id, "INTRODUCED").expect(201);
+
+    const retried = await uploadNamed(
+      agent,
+      priorInventory.id,
+      "INTRODUCED",
+      INTRODUCED_BYTES,
+      "retry.unsupported",
+      "application/octet-stream",
+    ).expect(201);
+    expect(retried.body).toEqual(prior.body);
+    expect(storage.putVerified).toHaveBeenCalledTimes(1);
+    const auditsBeforeUnsupported = await db
+      .select({ id: schema.tenantAuditEvents.id })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "inventory.import.processed"),
+        ),
+      );
+
+    await uploadNamed(
+      agent,
+      unsupportedInventory.id,
+      "INTRODUCED",
+      Buffer.from("new unsupported evidence"),
+      "new.unsupported",
+      "application/octet-stream",
+    ).expect(415, { code: "CHZ_UNSUPPORTED_CONTAINER" });
+    expect(storage.putVerified).toHaveBeenCalledTimes(1);
+    const unsupportedImports = await db
+      .select({ id: schema.inventoryImports.id })
+      .from(schema.inventoryImports)
+      .where(
+        and(
+          eq(schema.inventoryImports.tenantId, tenantId),
+          eq(schema.inventoryImports.inventoryId, unsupportedInventory.id),
+        ),
+      );
+    expect(unsupportedImports).toEqual([]);
+    const unsupportedAudits = await db
+      .select({ id: schema.tenantAuditEvents.id })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "inventory.import.processed"),
+        ),
+      );
+    expect(unsupportedAudits).toEqual(auditsBeforeUnsupported);
+  });
+
   it("rejects an oversized multipart file before storage or evidence persistence", async () => {
     const agent = request.agent(app!.getHttpServer());
     const { tenantId, productId, lineId } = await seedPreparation(agent);
@@ -609,6 +795,73 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
         ),
       );
     expect(attempts).toEqual([]);
+  });
+
+  it("rejects multipart fields and extra parts before storage or evidence persistence", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent);
+    const inventory = await createInventory(agent, productId, lineId);
+
+    await agent
+      .post(`/inventories/${inventory.id}/imports/INTRODUCED`)
+      .field("unexpected", "value")
+      .attach("file", INTRODUCED_BYTES, { filename: "introduced.csv", contentType: "text/csv" })
+      .expect(400);
+    await agent
+      .post(`/inventories/${inventory.id}/imports/INTRODUCED`)
+      .attach("file", INTRODUCED_BYTES, { filename: "one.csv", contentType: "text/csv" })
+      .attach("file", INTRODUCED_BYTES, { filename: "two.csv", contentType: "text/csv" })
+      .expect(400);
+    expect(storage.putVerified).not.toHaveBeenCalled();
+    const attempts = await db
+      .select({ id: schema.inventoryImports.id })
+      .from(schema.inventoryImports)
+      .where(
+        and(
+          eq(schema.inventoryImports.tenantId, tenantId),
+          eq(schema.inventoryImports.inventoryId, inventory.id),
+        ),
+      );
+    expect(attempts).toEqual([]);
+  });
+
+  it("reconciles a committed deterministic object when transaction acknowledgement is lost", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent);
+    const inventory = await createInventory(agent, productId, lineId);
+    const userId = await actorUserId(tenantId);
+    const realTransaction: Db["transaction"] = db.transaction.bind(db);
+    const commitThenThrow: Db["transaction"] = async (callback, config) => {
+      if (config === undefined) await realTransaction(callback);
+      else await realTransaction(callback, config);
+      throw new Error("simulated lost transaction acknowledgement");
+    };
+    const transactionSpy = vi.spyOn(db, "transaction").mockImplementationOnce(commitThenThrow);
+
+    try {
+      const result = await inventories.importEvidence(
+        tenantId,
+        userId,
+        inventory.id,
+        "INTRODUCED",
+        {
+          originalName: "introduced.csv",
+          mimeType: "text/csv",
+          bytes: INTRODUCED_BYTES,
+        },
+      );
+      expect(result).toMatchObject({ result: "succeeded", sha256: INTRODUCED_DIGEST });
+    } finally {
+      transactionSpy.mockRestore();
+    }
+
+    const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/INTRODUCED/${INTRODUCED_DIGEST}.csv`;
+    expect([...objects.keys()]).toEqual([expectedKey]);
+    expect(storage.delete).not.toHaveBeenCalled();
+    const retry = await upload(agent, inventory.id, "INTRODUCED").expect(201);
+    expect(retry.body.sha256).toBe(INTRODUCED_DIGEST);
+    expect(storage.putVerified).toHaveBeenCalledTimes(1);
+    expect([...objects.keys()]).toEqual([expectedKey]);
   });
 
   it("removes a newly published object when the database/audit transaction rolls back", async () => {

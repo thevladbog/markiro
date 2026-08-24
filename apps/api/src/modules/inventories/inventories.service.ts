@@ -45,6 +45,7 @@ interface InventoryJoinedRow {
   productionDateFrom: string;
   productionDateTo: string;
   boxLabelTemplateId: string | null;
+  boxLabelTemplateName: string | null;
   activeSnapshotId: string | null;
   resultRevision: number;
   createdAt: Date;
@@ -77,6 +78,7 @@ const INVENTORY_SELECTION = {
   productionDateFrom: schema.inventories.productionDateFrom,
   productionDateTo: schema.inventories.productionDateTo,
   boxLabelTemplateId: schema.inventories.boxLabelTemplateId,
+  boxLabelTemplateName: schema.labelTemplates.name,
   activeSnapshotId: schema.inventories.activeSnapshotId,
   resultRevision: schema.inventories.resultRevision,
   createdAt: schema.inventories.createdAt,
@@ -112,6 +114,13 @@ export class InventoriesService {
           eq(schema.lines.id, schema.inventories.lineId),
         ),
       )
+      .leftJoin(
+        schema.labelTemplates,
+        and(
+          eq(schema.labelTemplates.tenantId, schema.inventories.tenantId),
+          eq(schema.labelTemplates.id, schema.inventories.boxLabelTemplateId),
+        ),
+      )
       .where(eq(schema.inventories.tenantId, tenantId))
       .orderBy(desc(schema.inventories.createdAt), desc(schema.inventories.id));
     return { items: rows.map((row) => this.toInventoryDto(row)) };
@@ -133,6 +142,13 @@ export class InventoriesService {
         and(
           eq(schema.lines.tenantId, schema.inventories.tenantId),
           eq(schema.lines.id, schema.inventories.lineId),
+        ),
+      )
+      .leftJoin(
+        schema.labelTemplates,
+        and(
+          eq(schema.labelTemplates.tenantId, schema.inventories.tenantId),
+          eq(schema.labelTemplates.id, schema.inventories.boxLabelTemplateId),
         ),
       )
       .where(and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, id)))
@@ -298,7 +314,6 @@ export class InventoriesService {
     declaredStatus: InventoryChzStatus,
     file: InventoryImportFile,
   ): Promise<InventoryImportDto> {
-    const containerKind = this.containerKind(file.originalName);
     const sha256 = createHash("sha256").update(file.bytes).digest("hex");
     const importId = randomUUID();
     const publication: { current: PublishedAttempt | null } = { current: null };
@@ -327,6 +342,7 @@ export class InventoriesService {
           sha256,
         );
         if (existing) return this.importDtoWithStoredDiagnostic(tx, existing);
+        const containerKind = this.containerKind(file.originalName);
 
         const [product] = await tx
           .select({ gtin14: schema.products.gtin14, status: schema.products.status })
@@ -346,7 +362,6 @@ export class InventoriesService {
           tenantId,
           inventoryId,
           declaredStatus,
-          importId,
           sha256,
           containerKind,
         );
@@ -382,6 +397,8 @@ export class InventoriesService {
           if (error instanceof ChzImportError) {
             errorCode = error.code;
             errorRowNumber = error.rowNumber;
+            parsedStatus = error.parsedStatus ?? null;
+            includedGtin14 = error.includedGtin14 ?? null;
           } else {
             errorCode = "CHZ_IMPORT_PARSE_FAILED";
           }
@@ -433,6 +450,7 @@ export class InventoriesService {
             result,
             declaredStatus,
             parsedStatus,
+            includedGtin14,
             rowCount,
             errorCount: result === "failed" ? 1 : 0,
             duplicateCount,
@@ -583,11 +601,10 @@ export class InventoriesService {
     tenantId: string,
     inventoryId: string,
     status: InventoryChzStatus,
-    importId: string,
     sha256: string,
     containerKind: ChzContainerKind,
   ): string {
-    return `tenants/${tenantId}/inventories/${inventoryId}/imports/${status}/${importId}-${sha256}.${containerKind}`;
+    return `tenants/${tenantId}/inventories/${inventoryId}/imports/${status}/${sha256}.${containerKind}`;
   }
 
   private findImportRow(
@@ -698,6 +715,10 @@ export class InventoriesService {
       productionDateFrom: row.productionDateFrom,
       productionDateTo: row.productionDateTo,
       boxLabelTemplateId: row.boxLabelTemplateId,
+      boxLabelTemplate:
+        row.boxLabelTemplateId === null || row.boxLabelTemplateName === null
+          ? null
+          : { id: row.boxLabelTemplateId, name: row.boxLabelTemplateName },
       activeSnapshotId: row.activeSnapshotId,
       resultRevision: row.resultRevision,
       createdAt: row.createdAt.toISOString(),

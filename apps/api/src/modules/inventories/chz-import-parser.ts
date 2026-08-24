@@ -202,43 +202,55 @@ export function parseChzImport(input: ChzImportInput): ChzImportResult {
     throw new ChzImportError("CHZ_FILTER_INVALID", filterRecord?.rowNumber ?? 1);
   }
   const filter = parseChzFilter(filterRecord.cells[0]!);
-  if (filter.status !== input.expectedStatus) {
-    throw new ChzImportError("CHZ_FILTER_STATUS_MISMATCH", 1);
-  }
-  if (filter.includedGtin14 !== expectedGtin) {
-    throw new ChzImportError("CHZ_FILTER_GTIN_MISMATCH", 1);
-  }
-  assertHeader(document.records[1]);
-
-  if (isEmptyResult(document.records)) {
-    const marker = document.records[3];
-    if (
-      document.records.length !== 4 ||
-      marker === undefined ||
-      marker.cells.length !== 1 ||
-      !APPROVED_EMPTY_RESULT_MARKERS.has(marker.cells[0]!)
-    ) {
-      throw new ChzImportError("CHZ_EMPTY_RESULT_INVALID", marker?.rowNumber ?? 4);
+  try {
+    if (filter.status !== input.expectedStatus) {
+      throw new ChzImportError("CHZ_FILTER_STATUS_MISMATCH", 1);
     }
+    if (filter.includedGtin14 !== expectedGtin) {
+      throw new ChzImportError("CHZ_FILTER_GTIN_MISMATCH", 1);
+    }
+    assertHeader(document.records[1]);
+
+    if (isEmptyResult(document.records)) {
+      const marker = document.records[3];
+      if (
+        document.records.length !== 4 ||
+        marker === undefined ||
+        marker.cells.length !== 1 ||
+        !APPROVED_EMPTY_RESULT_MARKERS.has(marker.cells[0]!)
+      ) {
+        throw new ChzImportError("CHZ_EMPTY_RESULT_INVALID", marker?.rowNumber ?? 4);
+      }
+      return {
+        filter,
+        rows: [],
+        emptyResult: true,
+        diagnostics: [],
+        sha256: createHash("sha256").update(input.bytes).digest("hex"),
+      };
+    }
+    if (document.records.length === 2) {
+      throw new ChzImportError("CHZ_EMPTY_RESULT_INVALID", 3);
+    }
+    const rows = document.records
+      .slice(2)
+      .map((record) =>
+        parseDataRow(record, filter, expectedGtin, document.containerKind === "xlsx"),
+      );
     return {
       filter,
-      rows: [],
-      emptyResult: true,
+      rows,
+      emptyResult: false,
       diagnostics: [],
       sha256: createHash("sha256").update(input.bytes).digest("hex"),
     };
+  } catch (error) {
+    if (error instanceof ChzImportError) {
+      throw error.withFilterFacts({
+        parsedStatus: filter.status,
+        includedGtin14: filter.includedGtin14,
+      });
+    }
+    throw error;
   }
-  if (document.records.length === 2) {
-    throw new ChzImportError("CHZ_EMPTY_RESULT_INVALID", 3);
-  }
-  const rows = document.records
-    .slice(2)
-    .map((record) => parseDataRow(record, filter, expectedGtin, document.containerKind === "xlsx"));
-  return {
-    filter,
-    rows,
-    emptyResult: false,
-    diagnostics: [],
-    sha256: createHash("sha256").update(input.bytes).digest("hex"),
-  };
 }

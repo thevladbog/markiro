@@ -135,17 +135,18 @@ function expectImportError(
   code: string,
   rowNumber?: number,
   forbiddenRaw?: string,
-): void {
+): ChzImportError {
   try {
     action();
     throw new Error(`expected ${code}`);
   } catch (error) {
-    expect(error).toBeInstanceOf(ChzImportError);
+    if (!(error instanceof ChzImportError)) throw error;
     expect(error).toMatchObject({ code, rowNumber });
     if (forbiddenRaw !== undefined) {
       expect(JSON.stringify(error)).not.toContain(forbiddenRaw);
-      expect((error as Error).message).not.toContain(forbiddenRaw);
+      expect(error.message).not.toContain(forbiddenRaw);
     }
+    return error;
   }
 }
 
@@ -631,6 +632,22 @@ describe("Chestny ZNAK inventory import parser", () => {
       "CHZ_ROW_PACKAGING_MISMATCH",
       3,
     );
+  });
+
+  it("carries only decoded filter facts across later parser failures", () => {
+    const mismatch = expectImportError(
+      () => parse(csvBytes("INTRODUCED", [dataRow("INTRODUCED")]), { expectedStatus: "APPLIED" }),
+      "CHZ_FILTER_STATUS_MISMATCH",
+      1,
+    );
+    expect(mismatch.parsedStatus).toBe("INTRODUCED");
+    expect(mismatch.includedGtin14).toBe(GTIN);
+    expect(mismatch.message).toBe("CHZ_FILTER_STATUS_MISMATCH at row 1");
+
+    const beforeFilter = expectImportError(() => parse(new Uint8Array([0xff])), "CHZ_INVALID_UTF8");
+    expect(beforeFilter.parsedStatus).toBeUndefined();
+    expect(beforeFilter.includedGtin14).toBeUndefined();
+    expect(beforeFilter.message).toBe("CHZ_INVALID_UTF8");
   });
 
   it("rejects a KM GTIN mismatch when the row GTIN column remains correct", () => {

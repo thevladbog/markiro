@@ -115,7 +115,15 @@ export class InventoriesController {
   @UseInterceptors(
     FileInterceptor("file", {
       storage: memoryStorage(),
-      limits: { fileSize: CHZ_MAX_COMPRESSED_BYTES, files: 1 },
+      limits: {
+        fileSize: CHZ_MAX_COMPRESSED_BYTES,
+        files: 1,
+        fields: 0,
+        fieldSize: 0,
+        // Busboy emits `partsLimit` when its boundary counter reaches the
+        // configured value, so 2 admits the first actual part and rejects a second.
+        parts: 2,
+      },
     }),
   )
   @ApiConsumes("multipart/form-data")

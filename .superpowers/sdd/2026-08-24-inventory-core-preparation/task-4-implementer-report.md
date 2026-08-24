@@ -113,3 +113,79 @@ back and the newly published object is removed.
   objects back, but Task 5 snapshot fixation must select an appropriately bounded private-read path
   before relying on evidence larger than 5 MiB.
 - Snapshot fixation/start and all later inventory surfaces remain deliberately unimplemented.
+
+## Review fix round 1
+
+### Outcome and RED / GREEN evidence
+
+- Added focused regressions before production changes. Parser RED was **1 failed / 39** because a
+  status mismatch discarded already decoded filter facts. Fresh isolated-DB RED was **10 failed /
+  33** across inventory e2e, OpenAPI, and label-template e2e for the missing template projection,
+  partial audit facts, filename-before-idempotency ordering, multipart limits, and deterministic
+  evidence-key behavior.
+- Parser GREEN is **39/39**. A first DB-backed GREEN attempt exposed a real Busboy boundary detail:
+  `parts: 1` emits `partsLimit` for the closing boundary of a valid one-file request. The final
+  bounded configuration uses `files: 1`, `fields: 0`, `fieldSize: 0`, and `parts: 2`; focused
+  one-file, extra-field, extra-file, and oversized-file cases then passed.
+- A newly created temporary PostgreSQL database applied the complete migration journal and the
+  final inventory e2e, inventory OpenAPI, and label-template e2e suite passed **33/33**. Cleanup was
+  registered only after successful creation and the explicitly named temporary database was
+  dropped after the run. The shared drifted development database was not changed.
+
+### Parser, API, and template behavior
+
+- `ChzImportError` now carries typed optional `parsedStatus` and `includedGtin14` facts only after
+  the complete filter was decoded. Later status/GTIN/header/row failures retain those sanitized
+  facts in the durable import and exact audit metadata; failures before filter decoding retain
+  `null`. The public error remains code plus optional row and contains no raw value or cause.
+- List/detail/create/update now return `boxLabelTemplate: { id, name } | null` from a composite
+  tenant join. Check mode returns `null`; repack returns the referenced tenant template. OpenAPI
+  pins the exact child shape.
+- Deleting a template referenced by `inventories_tenant_box_label_template_fk` now translates to
+  the established 409 conflict and the DB-backed test pins the updated exact message. Product and
+  line services were not touched, so their conflict copy was left outside this review fix.
+
+### Publication, idempotency, cleanup, and audit ordering
+
+1. SHA-256 is computed first; the tenant-scoped inventory is locked and the existing attempt is
+   looked up by tenant + inventory + declared status + digest before filename classification.
+2. Therefore a retry of any recorded success or failure returns the same sanitized attempt even if
+   its retry filename is unsupported, without a second object publication, import, or audit.
+3. An unsupported filename with no prior scoped digest is an intentional 415 pre-publication
+   boundary. It is not persisted or audited because `inventory_import_container` deliberately
+   represents only CSV, ZIP, and XLSX; no `unknown` schema value or migration was added.
+4. New supported evidence uses the deterministic private key
+   `tenants/{tenant}/inventories/{inventory}/imports/{status}/{sha256}.{container}`. This supersedes
+   the random-import-id key described earlier in this report. Every segment is server-derived or a
+   validated enum/digest/container value.
+5. A proven rollback removes that new key. A committed transaction is reconciled to its exact
+   tenant/inventory/import/object tuple and returned without deletion; reconciliation-read failure
+   preserves possibly committed evidence. The injected commit-then-acknowledgement-error test pins
+   the deterministic key, no deletion, and retry without a second publication or orphan.
+- Exact repeated parser-failure assertions pin identical 422 response, one import, one audit, and
+  one publication. Success/failure audits include exact actor, tenant, action, target, outcome,
+  declared/parsed status, included GTIN, counts, and digest, while excluding filename, object key,
+  KM values, credentials, and raw causes.
+
+### Final verification and files
+
+- `@markiro/db` package-local build: **passed** before consumer tests.
+- Parser, authorization metadata/guard/service, subscription-route inventory, and object-storage
+  regressions: **95 passed, 0 skipped**.
+- Fresh isolated-DB inventory e2e/OpenAPI/label-template regressions: **33 passed, 0 skipped**.
+- API typecheck, full lint, and build: **passed**.
+- Scoped Prettier and `git diff --check`: **passed**.
+- Vite emitted the existing native-config compatibility warning. A setup-only test invocation
+  without two required local URL variables failed before assertions; the corrected final command
+  supplied the development values and passed. A sandboxed localhost attempt was denied before DB
+  creation; the approved isolated run above then passed and cleaned up safely. These are not
+  product-test skips.
+- Review-fix files: inventory parser/error boundary, DTO/OpenAPI/controller/service, label-template
+  conflict translation, and their four focused test files. No DB schema/migration, snapshot/start,
+  UI, station, CHZ external API, scan/execution, or document surface was added.
+
+### Remaining concerns
+
+- The pre-existing line schema still has no active flag, and the private object `get` helper still
+  has the previously reported 5 MiB cap versus the parser's 8 MiB compressed limit. Neither
+  concern is broadened or changed by this review fix.

@@ -62,6 +62,11 @@ export type UpdateInventoryDto = z.infer<typeof updateInventorySchema>;
 export const inventoryImportStatusSchema = z.enum(INVENTORY_CHZ_STATUSES);
 export const inventoryIdSchema = z.string().uuid();
 
+export interface InventoryLabelTemplateDto {
+  id: string;
+  name: string;
+}
+
 export interface InventoryDto {
   id: string;
   number: string;
@@ -75,6 +80,7 @@ export interface InventoryDto {
   productionDateFrom: string;
   productionDateTo: string;
   boxLabelTemplateId: string | null;
+  boxLabelTemplate: InventoryLabelTemplateDto | null;
   activeSnapshotId: string | null;
   resultRevision: number;
   createdAt: string;
@@ -148,6 +154,7 @@ export const inventoryOpenApiSchema: SchemaObject = {
     "productionDateFrom",
     "productionDateTo",
     "boxLabelTemplateId",
+    "boxLabelTemplate",
     "activeSnapshotId",
     "resultRevision",
     "createdAt",
@@ -166,6 +173,16 @@ export const inventoryOpenApiSchema: SchemaObject = {
     productionDateFrom: dateSchema,
     productionDateTo: dateSchema,
     boxLabelTemplateId: { ...uuidSchema, nullable: true },
+    boxLabelTemplate: {
+      type: "object",
+      nullable: true,
+      additionalProperties: false,
+      required: ["id", "name"],
+      properties: {
+        id: uuidSchema,
+        name: { type: "string" },
+      },
+    },
     activeSnapshotId: { ...uuidSchema, nullable: true },
     resultRevision: { type: "integer", minimum: 0 },
     createdAt: dateTimeSchema,

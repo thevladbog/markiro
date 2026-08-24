@@ -3,6 +3,8 @@ import { posix } from "node:path";
 import { unzipSync } from "fflate";
 import { XMLParser } from "fast-xml-parser";
 
+import type { InventoryChzStatus } from "@markiro/domain";
+
 export const CHZ_MAX_COMPRESSED_BYTES = 8 * 1024 * 1024;
 export const CHZ_MAX_UNCOMPRESSED_BYTES = 16 * 1024 * 1024;
 export const CHZ_MAX_WORKSHEET_BYTES = 12 * 1024 * 1024;
@@ -56,12 +58,27 @@ export type ChzImportErrorCode =
 export class ChzImportError extends Error {
   readonly code: ChzImportErrorCode;
   readonly rowNumber: number | undefined;
+  readonly parsedStatus: InventoryChzStatus | undefined;
+  readonly includedGtin14: string | undefined;
 
-  constructor(code: ChzImportErrorCode, rowNumber?: number) {
+  constructor(
+    code: ChzImportErrorCode,
+    rowNumber?: number,
+    filterFacts?: { parsedStatus: InventoryChzStatus; includedGtin14: string },
+  ) {
     super(rowNumber === undefined ? code : `${code} at row ${rowNumber}`);
     this.name = "ChzImportError";
     this.code = code;
     this.rowNumber = rowNumber;
+    this.parsedStatus = filterFacts?.parsedStatus;
+    this.includedGtin14 = filterFacts?.includedGtin14;
+  }
+
+  withFilterFacts(facts: {
+    parsedStatus: InventoryChzStatus;
+    includedGtin14: string;
+  }): ChzImportError {
+    return new ChzImportError(this.code, this.rowNumber, facts);
   }
 }
 

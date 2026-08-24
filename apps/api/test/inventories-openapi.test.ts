@@ -150,12 +150,18 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       "productionDateFrom",
       "productionDateTo",
       "boxLabelTemplateId",
+      "boxLabelTemplate",
       "activeSnapshotId",
       "resultRevision",
       "createdAt",
       "updatedAt",
     ] as const;
-    exactObject(responseSchema(document, "/inventories", "post", "201"), fields);
+    const createdInventory = responseSchema(document, "/inventories", "post", "201");
+    exactObject(createdInventory, fields);
+    const template = createdInventory.properties?.boxLabelTemplate;
+    if (!template) throw new Error("Missing boxLabelTemplate projection");
+    exactObject(template, ["id", "name"]);
+    expect(template.nullable).toBe(true);
     exactObject(responseSchema(document, "/inventories/{id}", "get", "200"), fields);
     exactObject(responseSchema(document, "/inventories/{id}", "patch", "200"), fields);
     const list = responseSchema(document, "/inventories", "get", "200");
