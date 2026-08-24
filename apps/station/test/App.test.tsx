@@ -1146,6 +1146,26 @@ describe("App", () => {
     }
   });
 
+  it("keeps Windows awake only while a production shift is active", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await renderActiveShiftForOperatorSwitch();
+
+      await waitFor(() =>
+        expect(invokeMock).toHaveBeenCalledWith("set_system_awake", { awake: true }),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+      await waitFor(() => expect(screen.getByText("Shifts")).toBeDefined());
+      expect(invokeMock.mock.calls.filter(([command]) => command === "set_system_awake")).toEqual([
+        ["set_system_awake", { awake: true }],
+        ["set_system_awake", { awake: false }],
+      ]);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   it("locks the operator after ten inactive minutes without clearing credentials or queued work", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {

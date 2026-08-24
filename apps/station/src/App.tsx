@@ -10,6 +10,7 @@ import {
 import { useTranslation } from "react-i18next";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import { Alert, Button, Card, FullScreenDialog } from "@markiro/ui";
+import { invoke } from "@tauri-apps/api/core";
 import {
   clearCredential,
   isEnrolled,
@@ -426,6 +427,18 @@ export function App() {
     () => createActivityAwareScanSource(selectedScanSource, () => operatorIdleLock.activity()),
     [operatorIdleLock, selectedScanSource],
   );
+
+  useEffect(() => {
+    if (!shift) return;
+    void invoke("set_system_awake", { awake: true }).catch((err: unknown) => {
+      console.error("station: enabling the active-shift power request failed", err);
+    });
+    return () => {
+      void invoke("set_system_awake", { awake: false }).catch((err: unknown) => {
+        console.error("station: clearing the active-shift power request failed", err);
+      });
+    };
+  }, [shift]);
 
   useEffect(() => {
     if (!operator || operatorSwitchState !== "idle") {
