@@ -217,6 +217,11 @@ function findEndOfCentralDirectory(bytes: Uint8Array): number {
   return fail("CHZ_ZIP_INVALID");
 }
 
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
+
 function inspectZip(bytes: Uint8Array): ZipEntryMetadata[] {
   if (bytes.length > CHZ_MAX_COMPRESSED_BYTES) fail("CHZ_INPUT_TOO_LARGE");
   if (bytes.length < 22) fail("CHZ_ZIP_INVALID");
@@ -249,6 +254,7 @@ function inspectZip(bytes: Uint8Array): ZipEntryMetadata[] {
     }
     const flags = view.getUint16(offset + 8, true);
     const method = view.getUint16(offset + 10, true);
+    const crc32 = view.getUint32(offset + 16, true);
     const compressedSize = view.getUint32(offset + 20, true);
     const uncompressedSize = view.getUint32(offset + 24, true);
     const nameLength = view.getUint16(offset + 28, true);
@@ -265,14 +271,86 @@ function inspectZip(bytes: Uint8Array): ZipEntryMetadata[] {
     }
     if ((flags & 1) !== 0) fail("CHZ_ZIP_ENCRYPTED");
     if (method !== 0 && method !== 8) fail("CHZ_ZIP_UNSUPPORTED_COMPRESSION");
-    if (localOffset + 30 > bytes.length || view.getUint32(localOffset, true) !== 0x04034b50) {
-      fail("CHZ_ZIP_INVALID");
-    }
-    if ((view.getUint16(localOffset + 6, true) & 1) !== 0) fail("CHZ_ZIP_ENCRYPTED");
     const nameBytes = bytes.subarray(offset + 46, offset + 46 + nameLength);
     const originalName = utf8(nameBytes, "CHZ_ZIP_INVALID");
     const canonicalName = canonicalArchiveName(originalName);
     if (names.has(canonicalName)) fail("CHZ_ZIP_INVALID");
+
+    if (localOffset + 30 > bytes.length || view.getUint32(localOffset, true) !== 0x04034b50) {
+      fail("CHZ_ZIP_INVALID");
+    }
+    const localFlags = view.getUint16(localOffset + 6, true);
+    const localMethod = view.getUint16(localOffset + 8, true);
+    const localCrc32 = view.getUint32(localOffset + 14, true);
+    const localCompressedSize = view.getUint32(localOffset + 18, true);
+    const localUncompressedSize = view.getUint32(localOffset + 22, true);
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const localHeaderEnd = localOffset + 30 + localNameLength + localExtraLength;
+    if ((localFlags & 1) !== 0) fail("CHZ_ZIP_ENCRYPTED");
+    if (localHeaderEnd > bytes.length) fail("CHZ_ZIP_INVALID");
+    const localNameBytes = bytes.subarray(localOffset + 30, localOffset + 30 + localNameLength);
+    const localName = utf8(localNameBytes, "CHZ_ZIP_INVALID");
+    canonicalArchiveName(localName);
+    if (
+      localFlags !== flags ||
+      localMethod !== method ||
+      localNameLength !== nameLength ||
+      localName !== originalName ||
+      !sameBytes(localNameBytes, nameBytes)
+    ) {
+      fail("CHZ_ZIP_INVALID");
+    }
+
+    const dataEnd = localHeaderEnd + compressedSize;
+    if (dataEnd > centralOffset) fail("CHZ_ZIP_INVALID");
+    if ((flags & 0x0008) === 0) {
+      if (
+        localCrc32 !== crc32 ||
+        localCompressedSize !== compressedSize ||
+        localUncompressedSize !== uncompressedSize
+      ) {
+        fail("CHZ_ZIP_INVALID");
+      }
+    } else {
+      if (localCrc32 !== 0 || localCompressedSize !== 0 || localUncompressedSize !== 0) {
+        fail("CHZ_ZIP_INVALID");
+      }
+      const descriptorEndsAtRecordBoundary = (descriptorEnd: number): boolean =>
+        descriptorEnd === centralOffset ||
+        (descriptorEnd + 4 <= centralOffset && view.getUint32(descriptorEnd, true) === 0x04034b50);
+      const descriptorMatches32 = (descriptorOffset: number): boolean => {
+        const descriptorEnd = descriptorOffset + 12;
+        return (
+          descriptorEnd <= centralOffset &&
+          descriptorEndsAtRecordBoundary(descriptorEnd) &&
+          view.getUint32(descriptorOffset, true) === crc32 &&
+          view.getUint32(descriptorOffset + 4, true) === compressedSize &&
+          view.getUint32(descriptorOffset + 8, true) === uncompressedSize
+        );
+      };
+      const descriptorMatches64 = (descriptorOffset: number): boolean => {
+        const descriptorEnd = descriptorOffset + 20;
+        return (
+          descriptorEnd <= centralOffset &&
+          descriptorEndsAtRecordBoundary(descriptorEnd) &&
+          view.getUint32(descriptorOffset, true) === crc32 &&
+          view.getBigUint64(descriptorOffset + 4, true) === BigInt(compressedSize) &&
+          view.getBigUint64(descriptorOffset + 12, true) === BigInt(uncompressedSize)
+        );
+      };
+      const hasDescriptorSignature =
+        dataEnd + 4 <= centralOffset && view.getUint32(dataEnd, true) === 0x08074b50;
+      const descriptorMatches =
+        descriptorMatches32(dataEnd) ||
+        descriptorMatches64(dataEnd) ||
+        (hasDescriptorSignature &&
+          (descriptorMatches32(dataEnd + 4) || descriptorMatches64(dataEnd + 4)));
+      if (!descriptorMatches) {
+        fail("CHZ_ZIP_INVALID");
+      }
+    }
+
     names.add(canonicalName);
     totalUncompressed += uncompressedSize;
     if (totalUncompressed > CHZ_MAX_UNCOMPRESSED_BYTES) fail("CHZ_ZIP_EXPANSION_LIMIT");
@@ -481,6 +559,7 @@ function xlsxCellValue(
   } else {
     return fail("CHZ_XLSX_UNSUPPORTED_CELL", rowNumber);
   }
+  if (hasFormula && value.length === 0) fail("CHZ_XLSX_FORMULA_ONLY", rowNumber);
   assertCellLimit(value, rowNumber);
   return value;
 }

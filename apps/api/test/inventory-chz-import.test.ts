@@ -178,7 +178,12 @@ function inlineRow(rowNumber: number, values: readonly string[]): string {
   return `<row r="${rowNumber}">${cells}</row>`;
 }
 
-function xlsxBytes(options: { formulaOnly?: boolean } = {}): Uint8Array {
+function xlsxBytes(
+  options: {
+    formulaCell?: "missing-cache" | "empty-v" | "empty-is";
+    sparseDataRow?: boolean;
+  } = {},
+): Uint8Array {
   const rawKm = `01${GTIN}21SYNTHETIC-XLSX${GS}93tail,"punctuation"`;
   const row = dataRow("INTRODUCED", {
     rawKm,
@@ -186,9 +191,19 @@ function xlsxBytes(options: { formulaOnly?: boolean } = {}): Uint8Array {
     productionDate: "2026-08-19T00:00:00Z",
   });
   const row3Cells = row
-    .map((value, index) => {
+    .map((value, index) => ({ value, index }))
+    .filter(({ value }) => !options.sparseDataRow || value !== "")
+    .map(({ value, index }) => {
       const ref = `${columnName(index)}3`;
-      if (index === 0 && options.formulaOnly) return `<c r="${ref}" t="str"><f>1+1</f></c>`;
+      if (index === 0 && options.formulaCell === "missing-cache") {
+        return `<c r="${ref}" t="str"><f>1+1</f></c>`;
+      }
+      if (index === 0 && options.formulaCell === "empty-v") {
+        return `<c r="${ref}" t="str"><f>1+1</f><v/></c>`;
+      }
+      if (index === 0 && options.formulaCell === "empty-is") {
+        return `<c r="${ref}" t="inlineStr"><f>1+1</f><is/></c>`;
+      }
       if (index === 0) return `<c r="${ref}" t="s"><v>0</v></c>`;
       return `<c r="${ref}" t="inlineStr"><is><t>${xml(value)}</t></is></c>`;
     })
@@ -243,6 +258,104 @@ function markZipEncrypted(bytes: Uint8Array): Uint8Array {
     if (signature === 0x02014b50)
       view.setUint16(offset + 8, view.getUint16(offset + 8, true) | 1, true);
   }
+  return result;
+}
+
+function findZipSignature(bytes: Uint8Array, signature: number, fromEnd = false): number {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (fromEnd) {
+    for (let offset = bytes.length - 4; offset >= 0; offset -= 1) {
+      if (view.getUint32(offset, true) === signature) return offset;
+    }
+  } else {
+    for (let offset = 0; offset <= bytes.length - 4; offset += 1) {
+      if (view.getUint32(offset, true) === signature) return offset;
+    }
+  }
+  throw new Error(`ZIP test fixture missing signature ${signature.toString(16)}`);
+}
+
+function mutateLocalName(bytes: Uint8Array, replacement: string): Uint8Array {
+  const result = bytes.slice();
+  const local = findZipSignature(result, 0x04034b50);
+  const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
+  const nameLength = view.getUint16(local + 26, true);
+  const replacementBytes = strToU8(replacement);
+  if (replacementBytes.length !== nameLength) throw new Error("replacement name must be same size");
+  result.set(replacementBytes, local + 30);
+  return result;
+}
+
+function mutateLocalUint16(
+  bytes: Uint8Array,
+  fieldOffset: number,
+  mutate: (value: number) => number,
+): Uint8Array {
+  const result = bytes.slice();
+  const local = findZipSignature(result, 0x04034b50);
+  const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
+  view.setUint16(local + fieldOffset, mutate(view.getUint16(local + fieldOffset, true)), true);
+  return result;
+}
+
+function mutateLocalUint32(bytes: Uint8Array, fieldOffset: number): Uint8Array {
+  const result = bytes.slice();
+  const local = findZipSignature(result, 0x04034b50);
+  const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
+  view.setUint32(local + fieldOffset, view.getUint32(local + fieldOffset, true) + 1, true);
+  return result;
+}
+
+function markUnsupportedCompression(bytes: Uint8Array): Uint8Array {
+  const result = bytes.slice();
+  const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
+  const local = findZipSignature(result, 0x04034b50);
+  const central = findZipSignature(result, 0x02014b50);
+  view.setUint16(local + 8, 99, true);
+  view.setUint16(central + 10, 99, true);
+  return result;
+}
+
+function withDataDescriptor(
+  bytes: Uint8Array,
+  options: { corrupt?: boolean; wideSizes?: boolean } = {},
+): Uint8Array {
+  const centralBefore = findZipSignature(bytes, 0x02014b50);
+  const eocdBefore = findZipSignature(bytes, 0x06054b50, true);
+  const sourceView = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const crc32 = sourceView.getUint32(centralBefore + 16, true);
+  const compressedSize = sourceView.getUint32(centralBefore + 20, true);
+  const uncompressedSize = sourceView.getUint32(centralBefore + 24, true);
+  const descriptor = new Uint8Array(options.wideSizes ? 24 : 16);
+  const descriptorView = new DataView(descriptor.buffer);
+  descriptorView.setUint32(0, 0x08074b50, true);
+  descriptorView.setUint32(4, crc32, true);
+  if (options.wideSizes) {
+    descriptorView.setBigUint64(
+      8,
+      BigInt(options.corrupt ? compressedSize + 1 : compressedSize),
+      true,
+    );
+    descriptorView.setBigUint64(16, BigInt(uncompressedSize), true);
+  } else {
+    descriptorView.setUint32(8, options.corrupt ? compressedSize + 1 : compressedSize, true);
+    descriptorView.setUint32(12, uncompressedSize, true);
+  }
+
+  const result = new Uint8Array(bytes.length + descriptor.length);
+  result.set(bytes.subarray(0, centralBefore), 0);
+  result.set(descriptor, centralBefore);
+  result.set(bytes.subarray(centralBefore), centralBefore + descriptor.length);
+  const view = new DataView(result.buffer);
+  const local = findZipSignature(result, 0x04034b50);
+  const central = centralBefore + descriptor.length;
+  const eocd = eocdBefore + descriptor.length;
+  view.setUint16(local + 6, view.getUint16(local + 6, true) | 0x0008, true);
+  view.setUint32(local + 14, 0, true);
+  view.setUint32(local + 18, 0, true);
+  view.setUint32(local + 22, 0, true);
+  view.setUint16(central + 8, view.getUint16(central + 8, true) | 0x0008, true);
+  view.setUint32(eocd + 16, central, true);
   return result;
 }
 
@@ -340,6 +453,78 @@ describe("Chestny ZNAK inventory import parser", () => {
     expect(result.rows).toHaveLength(1);
   });
 
+  it("rejects a ZIP whose sole non-directory member is not CSV", () => {
+    const zip = zipSync({ "status.txt": csvBytes("INTRODUCED", [dataRow("INTRODUCED")]) });
+    expectImportError(
+      () => parse(zip, { filename: "status.zip", mimeType: MIME_ZIP }),
+      "CHZ_ZIP_MEMBER_TYPE",
+    );
+  });
+
+  it("rejects an unsafe local ZIP name even when the central name is safe and same-length", () => {
+    const zip = zipSync({ "status.csv": csvBytes("INTRODUCED", [dataRow("INTRODUCED")]) });
+    expectImportError(
+      () =>
+        parse(mutateLocalName(zip, "../bad.csv"), { filename: "status.zip", mimeType: MIME_ZIP }),
+      "CHZ_ZIP_TRAVERSAL",
+    );
+  });
+
+  it.each([
+    ["flags", (zip: Uint8Array) => mutateLocalUint16(zip, 6, (value) => value ^ 0x0800)],
+    [
+      "compression method",
+      (zip: Uint8Array) => mutateLocalUint16(zip, 8, (value) => (value === 0 ? 8 : 0)),
+    ],
+    ["compressed size", (zip: Uint8Array) => mutateLocalUint32(zip, 18)],
+    ["uncompressed size", (zip: Uint8Array) => mutateLocalUint32(zip, 22)],
+  ] as const)("rejects a central/local ZIP %s mismatch", (_case, mutate) => {
+    const zip = zipSync({ "status.csv": csvBytes("INTRODUCED", [dataRow("INTRODUCED")]) });
+    expectImportError(
+      () => parse(mutate(zip), { filename: "status.zip", mimeType: MIME_ZIP }),
+      "CHZ_ZIP_INVALID",
+    );
+  });
+
+  it("supports a valid ZIP data descriptor and rejects descriptor sizes that disagree with central metadata", () => {
+    const zip = zipSync({ "status.csv": csvBytes("INTRODUCED", [dataRow("INTRODUCED")]) });
+    const result = parse(withDataDescriptor(zip), { filename: "status.zip", mimeType: MIME_ZIP });
+    expect(result.rows).toHaveLength(1);
+    expectImportError(
+      () =>
+        parse(withDataDescriptor(zip, { corrupt: true }), {
+          filename: "status.zip",
+          mimeType: MIME_ZIP,
+        }),
+      "CHZ_ZIP_INVALID",
+    );
+  });
+
+  it("supports a signed ZIP data descriptor with 64-bit sizes and rejects a mismatched size", () => {
+    const zip = zipSync({ "status.csv": csvBytes("INTRODUCED", [dataRow("INTRODUCED")]) });
+    const result = parse(withDataDescriptor(zip, { wideSizes: true }), {
+      filename: "status.zip",
+      mimeType: MIME_ZIP,
+    });
+    expect(result.rows).toHaveLength(1);
+    expectImportError(
+      () =>
+        parse(withDataDescriptor(zip, { corrupt: true, wideSizes: true }), {
+          filename: "status.zip",
+          mimeType: MIME_ZIP,
+        }),
+      "CHZ_ZIP_INVALID",
+    );
+  });
+
+  it("rejects a ZIP using an unsupported compression method", () => {
+    const zip = zipSync({ "status.csv": csvBytes("INTRODUCED", [dataRow("INTRODUCED")]) });
+    expectImportError(
+      () => parse(markUnsupportedCompression(zip), { filename: "status.zip", mimeType: MIME_ZIP }),
+      "CHZ_ZIP_UNSUPPORTED_COMPRESSION",
+    );
+  });
+
   it("rejects ZIP path traversal before extracting", () => {
     const zip = zipSync({ "../status.csv": csvBytes("INTRODUCED", [dataRow("INTRODUCED")]) });
     expectImportError(
@@ -366,9 +551,15 @@ describe("Chestny ZNAK inventory import parser", () => {
   });
 
   it("rejects a ZIP whose declared expansion exceeds the fixed limit", () => {
-    const zip = zipSync({ "status.csv": new Uint8Array(16 * 1024 * 1024 + 1) });
+    const atLimit = zipSync({ "status.csv": new Uint8Array(16 * 1024 * 1024) });
     expectImportError(
-      () => parse(zip, { filename: "status.zip", mimeType: MIME_ZIP }),
+      () => parse(atLimit, { filename: "status.zip", mimeType: MIME_ZIP }),
+      "CHZ_CELL_TOO_LARGE",
+      1,
+    );
+    const overLimit = zipSync({ "status.csv": new Uint8Array(16 * 1024 * 1024 + 1) });
+    expectImportError(
+      () => parse(overLimit, { filename: "status.zip", mimeType: MIME_ZIP }),
       "CHZ_ZIP_EXPANSION_LIMIT",
     );
   });
@@ -385,14 +576,29 @@ describe("Chestny ZNAK inventory import parser", () => {
     expect(result.rows[0]!.canonicalKm).toContain(GS);
   });
 
-  it("rejects formula-only XLSX cells with a sanitized row number", () => {
-    expectImportError(
-      () =>
-        parse(xlsxBytes({ formulaOnly: true }), { filename: "status.xlsx", mimeType: MIME_XLSX }),
-      "CHZ_XLSX_FORMULA_ONLY",
-      3,
-    );
+  it("reconstructs a genuinely sparse XLSX data row from cell references", () => {
+    const result = parse(xlsxBytes({ sparseDataRow: true }), {
+      filename: "status.xlsx",
+      mimeType: MIME_XLSX,
+    });
+    expect(result.rows[0]).toMatchObject({
+      gtin14: GTIN,
+      sourceStatus: "INTRODUCED",
+      sourceState: "MOVING_BY_UD",
+      sourceProductionDate: "2026-08-19",
+    });
   });
+
+  it.each(["missing-cache", "empty-v", "empty-is"] as const)(
+    "rejects a formula-only XLSX cell with %s and a sanitized row number",
+    (formulaCell) => {
+      expectImportError(
+        () => parse(xlsxBytes({ formulaCell }), { filename: "status.xlsx", mimeType: MIME_XLSX }),
+        "CHZ_XLSX_FORMULA_ONLY",
+        3,
+      );
+    },
+  );
 
   it("rejects slot/filter, filter/GTIN, row/status, row/GTIN, and packaging mismatches", () => {
     expectImportError(
@@ -423,6 +629,19 @@ describe("Chestny ZNAK inventory import parser", () => {
     expectImportError(
       () => parse(csvBytes("INTRODUCED", [dataRow("INTRODUCED", { packaging: "GROUP" })])),
       "CHZ_ROW_PACKAGING_MISMATCH",
+      3,
+    );
+  });
+
+  it("rejects a KM GTIN mismatch when the row GTIN column remains correct", () => {
+    expectImportError(
+      () =>
+        parse(
+          csvBytes("INTRODUCED", [
+            dataRow("INTRODUCED", { rawKm: `01${OTHER_GTIN}21SYNTHETIC-WRONG-KM-GTIN` }),
+          ]),
+        ),
+      "CHZ_ROW_GTIN_MISMATCH",
       3,
     );
   });
