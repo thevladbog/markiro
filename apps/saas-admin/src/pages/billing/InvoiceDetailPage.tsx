@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
-import { Alert, Button, SectionHeader, StatusChip } from "@markiro/ui";
+import { Alert, Button, ConfirmDialog, SectionHeader, StatusChip } from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import {
   applyInvoice,
+  getInvoiceDocumentDownload,
   getInvoice,
   issueInvoice,
   recordInvoicePayment,
@@ -51,6 +52,9 @@ export function InvoiceDetailPage() {
   const paymentPayload = useRef<RecordInvoicePaymentInput | null>(null);
   const [reason, setReason] = useState("");
   const [decisions, setDecisions] = useState<Record<string, "immediate" | "after_current">>({});
+  const [confirmDocumentRender, setConfirmDocumentRender] = useState(false);
+  const [downloadBlocked, setDownloadBlocked] = useState(false);
+  const [documentsNow, setDocumentsNow] = useState(() => Date.now());
 
   const refresh = async () => {
     await Promise.all([
@@ -71,7 +75,31 @@ export function InvoiceDetailPage() {
     onSuccess: refresh,
   });
   const issue = useMutation({ mutationFn: () => issueInvoice(invoiceId), onSuccess: refresh });
-  const document = useMutation({ mutationFn: () => renderInvoice(invoiceId), onSuccess: refresh });
+  const document = useMutation({
+    mutationFn: () => renderInvoice(invoiceId),
+    onSuccess: async () => {
+      await refresh();
+      setConfirmDocumentRender(false);
+    },
+  });
+  const downloadDocument = useMutation({
+    mutationFn: (documentId: string) => getInvoiceDocumentDownload(invoiceId, documentId),
+  });
+
+  useEffect(() => {
+    const nextPendingExpiry = Math.min(
+      ...(detail.data?.documents
+        .filter((item) => item.status === "pending")
+        .map((item) => new Date(item.updatedAt).getTime() + 5 * 60 * 1000)
+        .filter((expiry) => expiry > documentsNow) ?? []),
+    );
+    if (!Number.isFinite(nextPendingExpiry)) return;
+    const timer = window.setTimeout(
+      () => setDocumentsNow(Date.now()),
+      Math.max(0, nextPendingExpiry - Date.now()) + 1,
+    );
+    return () => window.clearTimeout(timer);
+  }, [detail.data?.documents, documentsNow]);
 
   const latestByLine = useMemo(
     () =>
@@ -122,6 +150,38 @@ export function InvoiceDetailPage() {
       line.activationPolicy === "manual" &&
       !decisions[line.id],
   );
+  const revisions = [...new Set(invoice.documents.map((item) => item.revision))].sort(
+    (left, right) => right - left,
+  );
+  const latestRevision = revisions[0] ?? 0;
+  const currentDocuments = invoice.documents.filter((item) => item.revision === latestRevision);
+  const htmlDocument = currentDocuments.find((item) => item.format === "html");
+  const pdfDocument = currentDocuments.find((item) => item.format === "pdf");
+  const stalePending = currentDocuments.some(
+    (item) =>
+      item.status === "pending" &&
+      documentsNow - new Date(item.updatedAt).getTime() > 5 * 60 * 1000,
+  );
+  const documentsNeedRetry =
+    !htmlDocument ||
+    !pdfDocument ||
+    htmlDocument.status === "failed" ||
+    pdfDocument.status === "failed" ||
+    stalePending;
+
+  const openDocument = (documentId: string) => {
+    setDownloadBlocked(false);
+    const target = window.open("about:blank", "_blank");
+    if (!target) {
+      setDownloadBlocked(true);
+      return;
+    }
+    target.opener = null;
+    void downloadDocument
+      .mutateAsync(documentId)
+      .then(({ url }) => target.location.replace(url))
+      .catch(() => target.close());
+  };
 
   return (
     <section className="invoice-detail-page">
@@ -198,6 +258,7 @@ export function InvoiceDetailPage() {
                     <td className="mono">{String(line.position).padStart(2, "0")}</td>
                     <td>
                       <strong>{line.nameRu}</strong>
+                      {line.descriptionRu ? <small>{line.descriptionRu}</small> : null}
                       <small>
                         {line.kind} · {line.quantity} {line.unit}
                       </small>
@@ -226,6 +287,104 @@ export function InvoiceDetailPage() {
         </div>
       </section>
 
+      <section
+        className="invoice-panel invoice-documents"
+        aria-labelledby="invoice-documents-title"
+      >
+        <header>
+          <div>
+            <span className="invoice-kicker">03 / DOCUMENTS</span>
+            <h2 id="invoice-documents-title">{t("billing.documents.title")}</h2>
+            <p>{t("billing.documents.description")}</p>
+          </div>
+        </header>
+        {document.isError && !confirmDocumentRender ? (
+          <Alert tone="error">{t("billing.documents.renderError")}</Alert>
+        ) : null}
+        {downloadDocument.isError || downloadBlocked ? (
+          <Alert tone="error">
+            {downloadBlocked
+              ? t("billing.documents.popupBlocked")
+              : t("billing.documents.downloadError")}
+          </Alert>
+        ) : null}
+        {invoice.status === "draft" ? (
+          <p className="invoice-documents__draft-note">{t("billing.documents.draftNote")}</p>
+        ) : (
+          <div className="invoice-documents__list">
+            {(revisions.length > 0 ? revisions : [0]).map((revision) => {
+              const revisionDocuments = invoice.documents.filter(
+                (item) => item.revision === revision,
+              );
+              return (
+                <section className="invoice-documents__revision" key={revision}>
+                  {revision > 0 ? <h3>{t("billing.documents.revision", { revision })}</h3> : null}
+                  {(["html", "pdf"] as const).map((format) => {
+                    const item = revisionDocuments.find((document) => document.format === format);
+                    const pendingIsStale =
+                      item?.status === "pending" &&
+                      documentsNow - new Date(item.updatedAt).getTime() > 5 * 60 * 1000;
+                    return (
+                      <div className="invoice-documents__row" key={format}>
+                        <div>
+                          <strong>{format.toUpperCase()}</strong>
+                          <span>
+                            {item?.status === "ready"
+                              ? t("billing.documents.ready")
+                              : item?.status === "pending"
+                                ? t(
+                                    pendingIsStale
+                                      ? "billing.documents.pendingStale"
+                                      : "billing.documents.pending",
+                                  )
+                                : t("billing.documents.failed", {
+                                    format: format.toUpperCase(),
+                                  })}
+                          </span>
+                        </div>
+                        {item?.status === "ready" ? (
+                          <Button
+                            variant="secondary"
+                            loading={
+                              downloadDocument.isPending && downloadDocument.variables === item.id
+                            }
+                            onClick={() => openDocument(item.id)}
+                          >
+                            {t(
+                              `billing.documents.${format === "html" ? "openHtml" : "downloadPdf"}`,
+                            )}
+                          </Button>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </section>
+              );
+            })}
+          </div>
+        )}
+        {invoice.status !== "draft" && documentsNeedRetry && canWrite ? (
+          <div className="invoice-documents__actions">
+            <Button loading={document.isPending} onClick={() => setConfirmDocumentRender(true)}>
+              {t("billing.documents.retry")}
+            </Button>
+          </div>
+        ) : null}
+      </section>
+
+      <ConfirmDialog
+        open={confirmDocumentRender}
+        title={t("billing.documents.confirmTitle")}
+        description={t("billing.documents.confirmDescription")}
+        entity={t("billing.documents.nextRevision", { revision: latestRevision + 1 })}
+        confirmLabel={t("billing.documents.confirm")}
+        cancelLabel={t("billing.documents.cancel")}
+        busy={document.isPending}
+        error={document.isError ? t("billing.documents.renderError") : undefined}
+        onCancel={() => setConfirmDocumentRender(false)}
+        onConfirm={() => document.mutate()}
+      />
+
       {invoice.status === "draft" && canWrite ? (
         <section className="invoice-action-panel">
           <h2>{t("billing.issue")}</h2>
@@ -238,7 +397,7 @@ export function InvoiceDetailPage() {
       {invoice.status === "issued" ? (
         <section className="invoice-action-panel" aria-labelledby="payment-title">
           <div>
-            <span className="invoice-kicker">03 / PAYMENT</span>
+            <span className="invoice-kicker">04 / PAYMENT</span>
             <h2 id="payment-title">{t("billing.paymentTitle")}</h2>
             <p>{t("billing.paymentDoesNotApply")}</p>
           </div>
@@ -272,7 +431,7 @@ export function InvoiceDetailPage() {
       {invoice.payment ? (
         <section className="invoice-action-panel" aria-labelledby="application-title">
           <div>
-            <span className="invoice-kicker">04 / APPLICATION</span>
+            <span className="invoice-kicker">05 / APPLICATION</span>
             <h2 id="application-title">{t("billing.applicationTitle")}</h2>
             <p>
               {state === "waiting_application"
@@ -337,14 +496,6 @@ export function InvoiceDetailPage() {
             <p>{t("billing.readOnly")}</p>
           ) : null}
         </section>
-      ) : null}
-
-      {canWrite ? (
-        <div className="invoice-document-action">
-          <Button loading={document.isPending} onClick={() => document.mutate()}>
-            {t("billing.document")}
-          </Button>
-        </div>
       ) : null}
     </section>
   );

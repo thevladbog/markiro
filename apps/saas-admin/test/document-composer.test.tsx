@@ -15,6 +15,7 @@ import {
 import i18n from "../src/i18n/index.js";
 import { NavigationGuardProvider } from "../src/layout/NavigationGuard.js";
 import { DocumentComposer } from "../src/pages/documents/DocumentComposer.js";
+import { createLineFromCatalog } from "../src/pages/documents/documentDraft.js";
 import type { TenantListItem } from "../src/pages/tenants/api.js";
 
 const globalCss = readFileSync("src/global.css", "utf8");
@@ -467,5 +468,39 @@ describe("DocumentComposer", () => {
     expect(action.classList.contains("document-line__action")).toBe(true);
     expect(globalCss).toMatch(/\.document-line__action\s*\{[^}]*width:\s*44px;/);
     expect(globalCss).toMatch(/\.document-line__action\s*\{[^}]*min-width:\s*44px;/);
+  });
+
+  it("normalizes the price on blur and submits the optional line comment", async () => {
+    await i18n.changeLanguage("ru");
+    const user = userEvent.setup();
+    const { props } = renderComposer({
+      initialDraft: {
+        tenantId: tenant.id,
+        applicationMode: "automatic",
+        date: "",
+        lines: [createLineFromCatalog(service, "commented-service")],
+      },
+    });
+    const price = screen.getByLabelText("Цена Запуск") as HTMLInputElement;
+
+    await user.clear(price);
+    await user.type(price, "125,5");
+    await user.type(screen.getByLabelText("Комментарий Запуск"), "Расширенная настройка линии");
+
+    expect(price.value).toBe("125.50");
+    expect(screen.queryByText("Цена Запуск")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
+
+    expect(props.onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lines: [
+          expect.objectContaining({
+            agreedUnitPrice: "125.50",
+            descriptionRu: "Расширенная настройка линии",
+          }),
+        ],
+      }),
+    );
   });
 });

@@ -28,6 +28,23 @@ const INVOICE_ACTIVATION_POLICIES = ["immediate", "after_current", "manual"] as 
 const OFFER_PLAN_ACTIVATION_POLICIES = ["immediate", "after_current"] as const;
 const OFFER_ADDON_ACTIVATION_POLICIES = ["immediate"] as const;
 
+export function normalizeMoneyInput(value: string): string {
+  const normalized = value.trim().replace(",", ".");
+  const match = /^(\d{1,12})(?:\.(\d{0,2}))?$/.exec(normalized);
+  if (!match) return value;
+  return `${match[1]}.${(match[2] ?? "").padEnd(2, "0")}`;
+}
+
+export function normalizeDocumentDraftPrices(draft: DocumentDraft): DocumentDraft {
+  return {
+    ...draft,
+    lines: draft.lines.map((line) => ({
+      ...line,
+      agreedUnitPrice: normalizeMoneyInput(line.agreedUnitPrice),
+    })),
+  };
+}
+
 export function getSupportedActivationPolicies(
   documentKind: DocumentKind,
   lineKind: DocumentLineDraft["kind"],
@@ -95,6 +112,11 @@ export function documentDraftReducer(
       return updateLineById(draft, action.id, (line) => ({
         ...line,
         agreedUnitPrice: action.price,
+      }));
+    case "line.descriptionChanged":
+      return updateLineById(draft, action.id, (line) => ({
+        ...line,
+        descriptionRu: action.description,
       }));
     case "line.priceOverrideReasonChanged":
       return updateLineById(draft, action.id, (line) => ({
@@ -258,15 +280,15 @@ function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
     catalogVersionId: line.catalogVersionId,
     nameRu: line.nameRu,
     nameEn: line.nameEn,
-    ...(line.kind === "custom" && line.descriptionRu !== undefined
-      ? { descriptionRu: line.descriptionRu }
+    ...(optionalDescription(line.descriptionRu) !== undefined
+      ? { descriptionRu: optionalDescription(line.descriptionRu) }
       : {}),
-    ...(line.kind === "custom" && line.descriptionEn !== undefined
-      ? { descriptionEn: line.descriptionEn }
+    ...(optionalDescription(line.descriptionEn) !== undefined
+      ? { descriptionEn: optionalDescription(line.descriptionEn) }
       : {}),
     quantity: line.quantity,
     unit: line.unit,
-    agreedUnitPrice: line.agreedUnitPrice,
+    agreedUnitPrice: normalizeMoneyInput(line.agreedUnitPrice),
     vatRateBps: line.vatRateBps,
     vatIncluded: line.vatIncluded,
     activationPolicy,
@@ -285,9 +307,15 @@ function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
       catalogVersionId: line.catalogVersionId,
       nameRu: line.nameRu,
       nameEn: line.nameEn,
+      ...(optionalDescription(line.descriptionRu) !== undefined
+        ? { descriptionRu: optionalDescription(line.descriptionRu) }
+        : {}),
+      ...(optionalDescription(line.descriptionEn) !== undefined
+        ? { descriptionEn: optionalDescription(line.descriptionEn) }
+        : {}),
       quantity: line.quantity,
       unit: line.unit,
-      agreedUnitPrice: line.agreedUnitPrice,
+      agreedUnitPrice: normalizeMoneyInput(line.agreedUnitPrice),
       priceOverrideReason: line.priceOverrideReason?.trim() || null,
       vatRateBps: line.vatRateBps,
       vatIncluded: line.vatIncluded,
@@ -300,9 +328,15 @@ function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
     catalogVersionId: line.catalogVersionId,
     nameRu: line.nameRu,
     nameEn: line.nameEn,
+    ...(optionalDescription(line.descriptionRu) !== undefined
+      ? { descriptionRu: optionalDescription(line.descriptionRu) }
+      : {}),
+    ...(optionalDescription(line.descriptionEn) !== undefined
+      ? { descriptionEn: optionalDescription(line.descriptionEn) }
+      : {}),
     quantity: line.quantity,
     unit: line.unit,
-    agreedUnitPrice: line.agreedUnitPrice,
+    agreedUnitPrice: normalizeMoneyInput(line.agreedUnitPrice),
     priceOverrideReason: line.priceOverrideReason?.trim() || null,
     vatRateBps: line.vatRateBps,
     vatIncluded: line.vatIncluded,
@@ -408,4 +442,9 @@ function formatMoney(value: bigint): string {
 
 function optionalDate(value: string): string | null {
   return value.trim() ? value : null;
+}
+
+function optionalDescription(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  return value?.trim() || null;
 }

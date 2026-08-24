@@ -8,6 +8,8 @@ import { useNavigationGuard } from "../../layout/NavigationGuard.js";
 import {
   calculateDocumentTotals,
   documentDraftReducer,
+  normalizeDocumentDraftPrices,
+  normalizeMoneyInput,
   validateDocumentDraft,
   type DocumentDraft,
 } from "./documentDraft.js";
@@ -85,11 +87,13 @@ export function DocumentComposer({
   };
 
   const submit = async () => {
-    const nextErrors = validateDocumentDraft(draft, kind);
+    const normalizedDraft = normalizeDocumentDraftPrices(draft);
+    if (snapshot(normalizedDraft) !== snapshot(draft)) setDraft(normalizedDraft);
+    const nextErrors = validateDocumentDraft(normalizedDraft, kind);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
     try {
-      await onSubmit(draft);
+      await onSubmit(normalizedDraft);
     } catch {
       return;
     }
@@ -160,6 +164,16 @@ export function DocumentComposer({
             }
             onPriceChange={(line, price) =>
               dispatch({ type: "line.priceChanged", id: line.id, price })
+            }
+            onPriceBlur={(line, price) =>
+              dispatch({
+                type: "line.priceChanged",
+                id: line.id,
+                price: normalizeMoneyInput(price),
+              })
+            }
+            onDescriptionChange={(line, description) =>
+              dispatch({ type: "line.descriptionChanged", id: line.id, description })
             }
             onPriceOverrideReasonChange={(line, reason) =>
               dispatch({ type: "line.priceOverrideReasonChanged", id: line.id, reason })

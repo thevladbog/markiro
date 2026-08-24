@@ -80,7 +80,13 @@ export class BillingDocumentsService {
     if (!document?.objectKey || document.status !== "ready") {
       throw new NotFoundException({ code: "invoice_document_not_ready" });
     }
-    return { url: await this.storage.presignRead(document.objectKey) };
+    return {
+      url: await this.storage.presignRead(
+        document.objectKey,
+        300,
+        document.format === "pdf" ? { downloadFilename: `invoice-${invoiceId}.pdf` } : undefined,
+      ),
+    };
   }
 
   private async nextRevision(invoiceId: string): Promise<number> {

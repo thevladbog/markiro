@@ -23,8 +23,6 @@ export function sourceOfferDraft(
       version.kind === line.kind &&
       version.nameRu === line.nameRu &&
       version.nameEn === line.nameEn &&
-      version.descriptionRu === (line.descriptionRu ?? null) &&
-      version.descriptionEn === (line.descriptionEn ?? null) &&
       version.unit === line.unit &&
       (version.unitPrice ?? null) === (line.catalogUnitPrice ?? null) &&
       (version.vatRateBps ?? null) === sourceVatRateBps &&

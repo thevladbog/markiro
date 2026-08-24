@@ -33,6 +33,39 @@ describe("print document HTML renderer", () => {
     ).toContain("ООО Оператор");
   });
 
+  it("renders a line comment below the item name in HTML", () => {
+    const html = renderPrintHtml({
+      kind: "invoice",
+      number: "INV-000002",
+      status: "issued",
+      issuedOrPublishedAt: new Date("2026-08-12T00:00:00.000Z"),
+      dueOrExpiresAt: null,
+      seller: { legalName: "ООО Оператор" },
+      buyer: { legalName: "ООО Покупатель" },
+      lines: [
+        {
+          position: 1,
+          name: "Настройка линии",
+          description: "Включает выезд и первичную калибровку",
+          unit: "услуга",
+          quantity: 1,
+          unitPrice: "100.00",
+          vatIncluded: true,
+          lineTotal: "100.00",
+        },
+      ],
+      subtotal: "100.00",
+      vatTotal: "0.00",
+      total: "100.00",
+      termsHtml: null,
+    });
+
+    expect(html).toContain(
+      "<strong>Настройка линии</strong><small>Включает выезд и первичную калибровку</small>",
+    );
+    expect(html).toContain("td small{display:block;color:#666");
+  });
+
   it("renders a valid PDF from the same model", async () => {
     const pdf = await renderPrintPdf({
       kind: "offer",
@@ -50,5 +83,44 @@ describe("print document HTML renderer", () => {
     });
     expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
     expect(pdf.byteLength).toBeLessThan(10 * 1024 * 1024);
+  });
+
+  it("includes a line comment in the PDF output", async () => {
+    const base = {
+      kind: "invoice" as const,
+      number: "INV-000003",
+      status: "issued",
+      issuedOrPublishedAt: new Date("2026-08-12T00:00:00.000Z"),
+      dueOrExpiresAt: null,
+      seller: { legalName: "ООО Оператор" },
+      buyer: { legalName: "ООО Покупатель" },
+      lines: [
+        {
+          position: 1,
+          name: "Настройка линии",
+          unit: "услуга",
+          quantity: 1,
+          unitPrice: "100.00",
+          vatIncluded: true,
+          lineTotal: "100.00",
+        },
+      ],
+      subtotal: "100.00",
+      vatTotal: "0.00",
+      total: "100.00",
+      termsHtml: null,
+    };
+    const withoutComment = await renderPrintPdf(base);
+    const withComment = await renderPrintPdf({
+      ...base,
+      lines: [
+        {
+          ...base.lines[0]!,
+          description: "Включает выезд и первичную калибровку",
+        },
+      ],
+    });
+
+    expect(withComment.byteLength).not.toBe(withoutComment.byteLength);
   });
 });

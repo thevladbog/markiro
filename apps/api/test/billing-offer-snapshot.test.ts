@@ -5,7 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import { BillingService } from "../src/modules/billing/billing.service";
 import type { BillingApplicationService } from "../src/modules/billing/billing-application.service";
 import { BillingController } from "../src/modules/billing/billing.controller";
-import type { BillingDocumentsService } from "../src/modules/billing/billing-documents.service";
+import { BillingDocumentsService } from "../src/modules/billing/billing-documents.service";
+import type { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import type { PlatformPrincipal } from "../src/platform-auth/platform-access-policy";
 import type { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 
@@ -103,9 +104,122 @@ describe("BillingService offer snapshots", () => {
       lineTotal: "99.00",
     });
   });
+
+  it("uses an operator comment instead of the catalog description for a catalog line", async () => {
+    const insertedValues: unknown[] = [];
+    const invoice = {
+      id: "31111111-1111-4111-8111-111111111111",
+      tenantId: "21111111-1111-4111-8111-111111111111",
+      number: "INV-000002",
+    };
+    const catalogVersion = {
+      id: "41111111-1111-4111-8111-111111111111",
+      kind: "plan",
+      nameRu: "Производство",
+      nameEn: "Production",
+      descriptionRu: "Описание из каталога",
+      descriptionEn: "Catalog description",
+      unit: "месяц",
+      unitPrice: "100.00",
+      vatRate: "20.00",
+    };
+    let transactionSelect = 0;
+    let insertCount = 0;
+    const tx = {
+      select: vi.fn(() => {
+        transactionSelect += 1;
+        return resolvedQuery<unknown>(
+          transactionSelect === 1
+            ? [{ number: "INV-000001" }]
+            : transactionSelect === 2
+              ? [catalogVersion]
+              : [],
+        );
+      }),
+      insert: vi.fn(() => ({
+        values: (values: unknown) => {
+          insertedValues.push(values);
+          insertCount += 1;
+          const rows = insertCount === 1 ? [invoice] : [];
+          const promise = Promise.resolve(rows);
+          return { returning: vi.fn(async () => rows), then: promise.then.bind(promise) };
+        },
+      })),
+      update: vi.fn(() => ({
+        set: () => ({
+          where: () => ({ returning: vi.fn(async () => [{ ...invoice, total: "100.00" }]) }),
+        }),
+      })),
+    };
+    const db = {
+      select: vi.fn(() => resolvedQuery([{ id: invoice.tenantId }])),
+      transaction: vi.fn(async (run: (executor: typeof tx) => Promise<unknown>) => run(tx)),
+    } as unknown as Db;
+    const principal: PlatformPrincipal = {
+      userId: "11111111-1111-4111-8111-111111111111",
+      role: "accountant",
+      capabilities: ["billing.write"],
+      twoFactorReady: true,
+    };
+
+    await new BillingService(db, {} as PlatformAuditService).create(principal, {
+      tenantId: invoice.tenantId,
+      dueDate: null,
+      applicationMode: "automatic",
+      lines: [
+        {
+          kind: "plan",
+          catalogVersionId: catalogVersion.id,
+          descriptionRu: "Комментарий оператора",
+          descriptionEn: null,
+          quantity: 1,
+          agreedUnitPrice: "100.00",
+          vatIncluded: true,
+          activationPolicy: "immediate",
+        },
+      ],
+    });
+
+    expect(insertedValues[1]).toMatchObject({
+      catalogVersionId: catalogVersion.id,
+      nameRu: catalogVersion.nameRu,
+      descriptionRu: "Комментарий оператора",
+      descriptionEn: null,
+    });
+  });
 });
 
 describe("platform invoice response boundary", () => {
+  it("presigns invoice PDFs as attachments without exposing the object key", async () => {
+    const storage = {
+      presignRead: vi.fn(async () => "https://objects.example.invalid/signed-pdf"),
+    } as unknown as ObjectStorageService;
+    const db = {
+      select: vi.fn(() =>
+        resolvedQuery([
+          {
+            id: "51111111-1111-4111-8111-111111111111",
+            invoiceId: "31111111-1111-4111-8111-111111111111",
+            revision: 1,
+            format: "pdf",
+            status: "ready",
+            objectKey: "tenants/redacted/invoices/redacted/r1.pdf",
+          },
+        ]),
+      ),
+    } as unknown as Db;
+    const documents = new BillingDocumentsService(db, {} as BillingService, storage);
+
+    await expect(
+      documents.url("31111111-1111-4111-8111-111111111111", "51111111-1111-4111-8111-111111111111"),
+    ).resolves.toEqual({ url: "https://objects.example.invalid/signed-pdf" });
+    expect(storage.presignRead).toHaveBeenCalledWith(
+      "tenants/redacted/invoices/redacted/r1.pdf",
+      300,
+      { downloadFilename: "invoice-31111111-1111-4111-8111-111111111111.pdf" },
+    );
+  });
+
   it("rejects a malformed successful invoice list returned by the service", async () => {
     const billing = {
       list: async () => ({

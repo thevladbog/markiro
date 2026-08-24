@@ -1414,7 +1414,55 @@ textarea {
   font: var(--text-body);
 }
 
-.invoice-document-action {
+.invoice-documents > .mk-alert,
+.invoice-documents__draft-note,
+.invoice-documents__actions {
+  margin: 16px 20px;
+}
+
+.invoice-documents__list {
+  border-top: 1px solid var(--line-strong);
+}
+
+.invoice-documents__revision h3 {
+  margin: 0;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-panel);
+  color: var(--fg-3);
+  font: var(--text-caption);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.invoice-documents__row {
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.invoice-documents__row div,
+.invoice-documents__row span {
+  display: grid;
+  gap: 2px;
+}
+
+.invoice-documents__row strong {
+  color: var(--fg-1);
+  font: 600 14px/20px var(--font-ui);
+}
+
+.invoice-documents__row span,
+.invoice-documents__draft-note {
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.invoice-documents__actions {
   display: flex;
   justify-content: flex-end;
 }
@@ -2566,7 +2614,7 @@ textarea {
 .document-lines-table td {
   padding: 12px 10px;
   border-bottom: 1px solid var(--line);
-  vertical-align: top;
+  vertical-align: middle;
   text-align: left;
 }
 
@@ -2603,6 +2651,20 @@ textarea {
 .document-lines-table__row:hover {
   background: color-mix(in srgb, var(--accent-module) 5%, transparent);
   box-shadow: inset 3px 0 var(--ok-solid);
+}
+
+.document-lines-table__comment-row td {
+  padding-top: 0;
+  background: color-mix(in srgb, var(--surface-panel) 52%, transparent);
+}
+
+.document-lines-table__comment-row .mk-field {
+  max-width: 100%;
+}
+
+.document-lines-table__comment-row .mk-textarea__control {
+  min-height: 64px;
+  resize: vertical;
 }
 
 .document-lines-table .mk-input,
