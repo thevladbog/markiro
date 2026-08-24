@@ -22,7 +22,7 @@ export const INVENTORY_LIFECYCLE_STATUSES = [
 ] as const;
 export type InventoryLifecycleStatus = (typeof INVENTORY_LIFECYCLE_STATUSES)[number];
 
-function civilDateSchema(field: "productionDateFrom" | "productionDateTo") {
+export function inventoryCivilDateSchema(field: "productionDateFrom" | "productionDateTo") {
   return z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, `${field} must be YYYY-MM-DD`)
@@ -43,8 +43,8 @@ function civilDateSchema(field: "productionDateFrom" | "productionDateTo") {
     }, `${field} must be a real calendar date`);
 }
 
-const productionDateFromSchema = civilDateSchema("productionDateFrom");
-const productionDateToSchema = civilDateSchema("productionDateTo");
+const productionDateFromSchema = inventoryCivilDateSchema("productionDateFrom");
+const productionDateToSchema = inventoryCivilDateSchema("productionDateTo");
 
 export const createInventorySchema = z.object({
   productId: z.string().uuid(),

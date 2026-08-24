@@ -15,6 +15,8 @@ type JsonSchema = {
   nullable?: boolean;
   minimum?: number;
   maximum?: number;
+  exclusiveMinimum?: boolean;
+  minLength?: number;
   pattern?: string;
   additionalProperties?: boolean;
   required?: string[];
@@ -47,6 +49,32 @@ function exactObject(schema: JsonSchema, fields: readonly string[]): void {
   expect(Object.keys(schema.properties ?? {}).sort()).toEqual([...fields].sort());
   expect([...(schema.required ?? [])].sort()).toEqual([...fields].sort());
 }
+
+function exactClosedObject(
+  schema: JsonSchema,
+  fields: readonly string[],
+  required: readonly string[],
+): void {
+  expect(schema.type).toBe("object");
+  expect(Object.keys(schema.properties ?? {}).sort()).toEqual([...fields].sort());
+  expect([...(schema.required ?? [])].sort()).toEqual([...required].sort());
+  expect(schema.additionalProperties).toBe(false);
+}
+
+const EXPECTED_LABEL_FIELDS = [
+  "product.name",
+  "product.printName",
+  "product.gtin",
+  "product.egais",
+  "km.code",
+  "sscc",
+  "shift.no",
+  "date",
+  "expiry",
+  "qty",
+  "operator",
+  "counterparty.name",
+] as const;
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -238,7 +266,7 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
     const start = operation(document, "/inventories/{id}/start", "post");
     expect(start.requestBody).toBeUndefined();
     const manifest = responseSchema(document, "/inventories/{id}/start", "post", "201");
-    exactObject(manifest, [
+    const manifestFields = [
       "inventoryId",
       "inventoryNumber",
       "snapshotId",
@@ -255,8 +283,9 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       "productionDateTo",
       "boxLabelTemplate",
       "limits",
-    ]);
-    expect(manifest.additionalProperties).toBe(false);
+    ] as const;
+    exactClosedObject(manifest, manifestFields, manifestFields);
+    expect(manifest.nullable).toBeUndefined();
     expect(manifest.properties).toMatchObject({
       inventoryId: { type: "string", format: "uuid" },
       inventoryNumber: { type: "string" },
@@ -275,8 +304,9 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
     });
 
     const limits = manifest.properties!.limits!;
-    exactObject(limits, ["codePageSize", "eventBatchSize", "progressPageSize"]);
-    expect(limits.additionalProperties).toBe(false);
+    const limitFields = ["codePageSize", "eventBatchSize", "progressPageSize"] as const;
+    exactClosedObject(limits, limitFields, limitFields);
+    expect(limits.nullable).toBeUndefined();
     expect(limits.properties).toEqual({
       codePageSize: { type: "integer", enum: [200] },
       eventBatchSize: { type: "integer", enum: [100] },
@@ -285,11 +315,11 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
 
     const template = manifest.properties!.boxLabelTemplate!;
     expect(template.nullable).toBe(true);
-    exactObject(template, ["id", "name", "spec"]);
-    expect(template.additionalProperties).toBe(false);
+    exactClosedObject(template, ["id", "name", "spec"], ["id", "name", "spec"]);
     const spec = template.properties!.spec!;
-    exactObject(spec, ["widthMm", "heightMm", "dpi", "language", "elements"]);
-    expect(spec.additionalProperties).toBe(false);
+    const specFields = ["widthMm", "heightMm", "dpi", "language", "elements"] as const;
+    exactClosedObject(spec, specFields, specFields);
+    expect(spec.nullable).toBeUndefined();
     expect(spec.properties).toMatchObject({
       widthMm: { type: "number", minimum: 10, maximum: 300 },
       heightMm: { type: "number", minimum: 10, maximum: 300 },
@@ -297,7 +327,117 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       language: { type: "string", enum: ["zpl", "tspl"] },
       elements: { type: "array" },
     });
-    expect(spec.properties!.elements!.items!.oneOf).toHaveLength(5);
+    const variants = spec.properties!.elements!.items!.oneOf;
+    expect(variants).toHaveLength(5);
+    const variantsByKind = new Map(
+      variants!.map((variant) => [variant.properties?.kind?.enum?.[0], variant]),
+    );
+    expect([...variantsByKind.keys()].sort()).toEqual(["barcode", "box", "field", "line", "text"]);
+
+    const text = variantsByKind.get("text")!;
+    exactClosedObject(
+      text,
+      ["id", "kind", "xMm", "yMm", "text", "fontSizePt", "bold", "align", "maxWidthMm", "maxLines"],
+      ["id", "kind", "xMm", "yMm", "text", "fontSizePt"],
+    );
+    expect(text.properties).toEqual({
+      id: { type: "string", minLength: 1 },
+      kind: { type: "string", enum: ["text"] },
+      xMm: { type: "number" },
+      yMm: { type: "number" },
+      text: { type: "string" },
+      fontSizePt: { type: "number", minimum: 4, maximum: 72 },
+      bold: { type: "boolean" },
+      align: { type: "string", enum: ["left", "center", "right"] },
+      maxWidthMm: { type: "number", minimum: 0, exclusiveMinimum: true },
+      maxLines: { type: "integer", minimum: 1, maximum: 16 },
+    });
+
+    const field = variantsByKind.get("field")!;
+    exactClosedObject(
+      field,
+      [
+        "id",
+        "kind",
+        "xMm",
+        "yMm",
+        "field",
+        "fontSizePt",
+        "bold",
+        "align",
+        "maxWidthMm",
+        "maxLines",
+      ],
+      ["id", "kind", "xMm", "yMm", "field", "fontSizePt"],
+    );
+    expect(field.properties).toEqual({
+      id: { type: "string", minLength: 1 },
+      kind: { type: "string", enum: ["field"] },
+      xMm: { type: "number" },
+      yMm: { type: "number" },
+      field: { type: "string", enum: [...EXPECTED_LABEL_FIELDS] },
+      fontSizePt: { type: "number", minimum: 4, maximum: 72 },
+      bold: { type: "boolean" },
+      align: { type: "string", enum: ["left", "center", "right"] },
+      maxWidthMm: { type: "number", minimum: 0, exclusiveMinimum: true },
+      maxLines: { type: "integer", minimum: 1, maximum: 16 },
+    });
+
+    const barcode = variantsByKind.get("barcode")!;
+    exactClosedObject(
+      barcode,
+      ["id", "kind", "xMm", "yMm", "format", "data", "sizeMm", "moduleWidthMm"],
+      ["id", "kind", "xMm", "yMm", "format", "data", "sizeMm"],
+    );
+    expect(barcode.properties).toMatchObject({
+      id: { type: "string", minLength: 1 },
+      kind: { type: "string", enum: ["barcode"] },
+      xMm: { type: "number" },
+      yMm: { type: "number" },
+      format: { type: "string", enum: ["datamatrix", "code128", "ean13", "qr"] },
+      sizeMm: { type: "number", minimum: 0, exclusiveMinimum: true },
+      moduleWidthMm: { type: "number", minimum: 0, exclusiveMinimum: true },
+    });
+    const barcodeData = barcode.properties!.data!;
+    expect(barcodeData.oneOf).toHaveLength(2);
+    expect(barcodeData.oneOf![0]).toEqual({
+      type: "string",
+      enum: [...EXPECTED_LABEL_FIELDS],
+    });
+    exactClosedObject(barcodeData.oneOf![1]!, ["literal"], ["literal"]);
+    expect(barcodeData.oneOf![1]!.properties).toEqual({ literal: { type: "string" } });
+
+    const line = variantsByKind.get("line")!;
+    exactClosedObject(
+      line,
+      ["id", "kind", "xMm", "yMm", "x2Mm", "y2Mm", "thicknessMm"],
+      ["id", "kind", "xMm", "yMm", "x2Mm", "y2Mm", "thicknessMm"],
+    );
+    expect(line.properties).toEqual({
+      id: { type: "string", minLength: 1 },
+      kind: { type: "string", enum: ["line"] },
+      xMm: { type: "number" },
+      yMm: { type: "number" },
+      x2Mm: { type: "number" },
+      y2Mm: { type: "number" },
+      thicknessMm: { type: "number", minimum: 0, exclusiveMinimum: true },
+    });
+
+    const box = variantsByKind.get("box")!;
+    exactClosedObject(
+      box,
+      ["id", "kind", "xMm", "yMm", "widthMm", "heightMm", "thicknessMm"],
+      ["id", "kind", "xMm", "yMm", "widthMm", "heightMm", "thicknessMm"],
+    );
+    expect(box.properties).toEqual({
+      id: { type: "string", minLength: 1 },
+      kind: { type: "string", enum: ["box"] },
+      xMm: { type: "number" },
+      yMm: { type: "number" },
+      widthMm: { type: "number", minimum: 0, exclusiveMinimum: true },
+      heightMm: { type: "number", minimum: 0, exclusiveMinimum: true },
+      thicknessMm: { type: "number", minimum: 0, exclusiveMinimum: true },
+    });
     expect(JSON.stringify(start)).not.toMatch(
       /startedBy|actorUser|objectKey|fileName|canonicalRaw|rawKm|credential|pinHash|badgeHash/i,
     );

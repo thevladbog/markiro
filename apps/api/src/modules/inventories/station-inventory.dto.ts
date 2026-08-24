@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { LABEL_FIELDS, parseLabelTemplate, type LabelTemplateSpec } from "@markiro/domain";
 
-import type { InventoryMode } from "./dto";
+import { inventoryCivilDateSchema, type InventoryMode } from "./dto";
 
 /** Frozen v1 page size for immutable inventory snapshot code pages. */
 export const STATION_INVENTORY_CODE_PAGE_SIZE = 200;
@@ -51,14 +51,80 @@ export interface StationInventoryManifest {
   readonly limits: typeof STATION_INVENTORY_LIMITS;
 }
 
-const storedLabelTemplateSpecSchema = z.unknown().transform((value, context) => {
-  try {
-    return parseLabelTemplate(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "invalid label template spec" });
-    return z.NEVER;
-  }
+const storedLabelElementBaseShape = {
+  id: z.string().min(1),
+  xMm: z.number(),
+  yMm: z.number(),
+};
+
+const storedLabelTextShape = {
+  fontSizePt: z.number().min(4).max(72),
+  bold: z.boolean().optional(),
+  align: z.enum(["left", "center", "right"]).optional(),
+  maxWidthMm: z.number().positive().optional(),
+  maxLines: z.number().int().min(1).max(16).optional(),
+};
+
+const storedLabelElementSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    ...storedLabelElementBaseShape,
+    kind: z.literal("text"),
+    text: z.string(),
+    ...storedLabelTextShape,
+  }),
+  z.strictObject({
+    ...storedLabelElementBaseShape,
+    kind: z.literal("field"),
+    field: z.enum(LABEL_FIELDS),
+    ...storedLabelTextShape,
+  }),
+  z.strictObject({
+    ...storedLabelElementBaseShape,
+    kind: z.literal("barcode"),
+    format: z.enum(["datamatrix", "code128", "ean13", "qr"]),
+    data: z.union([
+      z.enum(LABEL_FIELDS),
+      z.strictObject({
+        literal: z.string(),
+      }),
+    ]),
+    sizeMm: z.number().positive(),
+    moduleWidthMm: z.number().positive().optional(),
+  }),
+  z.strictObject({
+    ...storedLabelElementBaseShape,
+    kind: z.literal("line"),
+    x2Mm: z.number(),
+    y2Mm: z.number(),
+    thicknessMm: z.number().positive(),
+  }),
+  z.strictObject({
+    ...storedLabelElementBaseShape,
+    kind: z.literal("box"),
+    widthMm: z.number().positive(),
+    heightMm: z.number().positive(),
+    thicknessMm: z.number().positive(),
+  }),
+]);
+
+const closedStoredLabelTemplateSpecSchema = z.strictObject({
+  widthMm: z.number().min(10).max(300),
+  heightMm: z.number().min(10).max(300),
+  dpi: z.union([z.literal(203), z.literal(300)]),
+  language: z.enum(["zpl", "tspl"]),
+  elements: z.array(storedLabelElementSchema),
 });
+
+const storedLabelTemplateSpecSchema = closedStoredLabelTemplateSpecSchema.transform(
+  (value, context) => {
+    try {
+      return parseLabelTemplate(value);
+    } catch {
+      context.addIssue({ code: "custom", message: "invalid label template spec" });
+      return z.NEVER;
+    }
+  },
+);
 
 const storedStationInventoryManifestSchema = z
   .object({
@@ -74,8 +140,8 @@ const storedStationInventoryManifestSchema = z
     mode: z.enum(["check", "repack"]),
     lineId: z.uuid(),
     lineName: z.string(),
-    productionDateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    productionDateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    productionDateFrom: inventoryCivilDateSchema("productionDateFrom"),
+    productionDateTo: inventoryCivilDateSchema("productionDateTo"),
     boxLabelTemplate: z
       .object({
         id: z.uuid(),
@@ -94,6 +160,13 @@ const storedStationInventoryManifestSchema = z
   })
   .strict()
   .superRefine((manifest, context) => {
+    if (manifest.productionDateFrom > manifest.productionDateTo) {
+      context.addIssue({
+        code: "custom",
+        message: "production date range is inverted",
+        path: ["productionDateTo"],
+      });
+    }
     if (
       (manifest.mode === "check" && manifest.boxLabelTemplate !== null) ||
       (manifest.mode === "repack" && manifest.boxLabelTemplate === null)

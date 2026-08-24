@@ -60,6 +60,14 @@ interface ReadyInventoryFixture {
   templateId: string | null;
 }
 
+interface MutableStoredManifest {
+  productionDateFrom: string;
+  productionDateTo: string;
+  boxLabelTemplate: {
+    spec: { elements: Array<Record<string, unknown>> };
+  } | null;
+}
+
 const snapshotCounts = {
   emitted: 2,
   introduced: 3,
@@ -229,6 +237,28 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
     };
   }
 
+  async function overwriteStoredManifest(
+    fixture: ReadyInventoryFixture,
+    manifest: unknown,
+  ): Promise<void> {
+    await db.execute(sql`
+      update inventories
+      set station_manifest = ${JSON.stringify(manifest)}::jsonb
+      where tenant_id = ${fixture.tenantId} and id = ${fixture.inventoryId}
+    `);
+  }
+
+  async function expectStoredManifestRejected(
+    agent: Agent,
+    fixture: ReadyInventoryFixture,
+    manifest: unknown,
+  ): Promise<void> {
+    await overwriteStoredManifest(fixture, manifest);
+    const response = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(409);
+    expect(response.body).toEqual({ code: "INVENTORY_STORED_MANIFEST_INVALID" });
+    expect(JSON.stringify(response.body)).not.toContain("manifest-secret");
+  }
+
   it("transitions ready check inventory once and returns the frozen sanitized manifest with an exact durable audit", async () => {
     const agent = request.agent(app!.getHttpServer());
     const fixture = await seedReadyInventory(agent);
@@ -389,15 +419,64 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
     const fixture = await seedReadyInventory(agent);
     await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
 
-    await db.execute(sql`
-      update inventories
-      set station_manifest = ${JSON.stringify({ inventoryId: fixture.inventoryId })}::jsonb
-      where tenant_id = ${fixture.tenantId} and id = ${fixture.inventoryId}
-    `);
+    await expectStoredManifestRejected(agent, fixture, {
+      inventoryId: fixture.inventoryId,
+      privateDetail: "manifest-secret",
+    });
+  });
 
-    await agent
-      .post(`/inventories/${fixture.inventoryId}/start`)
-      .expect(409, { code: "INVENTORY_STORED_MANIFEST_INVALID" });
+  it("rejects an unknown field in the deepest stored label object without leaking it", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedReadyInventory(agent, "repack");
+    const started = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+    const manifest = structuredClone(started.body) as MutableStoredManifest;
+    const element = manifest.boxLabelTemplate!.spec.elements[0]!;
+    element.data = { literal: "safe", privateDetail: "manifest-secret" };
+
+    await expectStoredManifestRejected(agent, fixture, manifest);
+  });
+
+  it("rejects an impossible civil date in a stored manifest", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedReadyInventory(agent);
+    const started = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+    const manifest = structuredClone(started.body) as MutableStoredManifest;
+    manifest.productionDateFrom = "2026-02-30";
+
+    await expectStoredManifestRejected(agent, fixture, manifest);
+  });
+
+  it("rejects an inverted stored production date range", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedReadyInventory(agent);
+    const started = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+    const manifest = structuredClone(started.body) as MutableStoredManifest;
+    manifest.productionDateFrom = "2026-09-01";
+    manifest.productionDateTo = "2026-08-31";
+
+    await expectStoredManifestRejected(agent, fixture, manifest);
+  });
+
+  it("rejects invalid stored label variants and domain-invalid specs", async () => {
+    const invalidVariantAgent = request.agent(app!.getHttpServer());
+    const invalidVariantFixture = await seedReadyInventory(invalidVariantAgent, "repack");
+    const variantStart = await invalidVariantAgent
+      .post(`/inventories/${invalidVariantFixture.inventoryId}/start`)
+      .expect(201);
+    const invalidVariant = structuredClone(variantStart.body) as MutableStoredManifest;
+    invalidVariant.boxLabelTemplate!.spec.elements[0]!.kind = "circle";
+    await expectStoredManifestRejected(invalidVariantAgent, invalidVariantFixture, invalidVariant);
+
+    const invalidSpecAgent = request.agent(app!.getHttpServer());
+    const invalidSpecFixture = await seedReadyInventory(invalidSpecAgent, "repack");
+    const specStart = await invalidSpecAgent
+      .post(`/inventories/${invalidSpecFixture.inventoryId}/start`)
+      .expect(201);
+    const invalidSpec = structuredClone(specStart.body) as MutableStoredManifest;
+    invalidSpec.boxLabelTemplate!.spec.elements.push({
+      ...invalidSpec.boxLabelTemplate!.spec.elements[0]!,
+    });
+    await expectStoredManifestRejected(invalidSpecAgent, invalidSpecFixture, invalidSpec);
   });
 
   it("rolls back status, manifest, and start evidence when the success audit fails", async () => {
