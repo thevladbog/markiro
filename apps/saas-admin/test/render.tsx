@@ -444,6 +444,10 @@ const SCHEDULED_PLAN = {
   },
 } satisfies CatalogVersionDto;
 
+const TEST_SUBSCRIPTION_TRANSITION_AT = new Date(
+  Date.now() + 30 * 24 * 60 * 60 * 1_000,
+).toISOString();
+
 export const TENANT_LIST_ITEM = {
   id: TENANT_ID,
   name: "Первый завод",
@@ -454,7 +458,7 @@ export const TENANT_LIST_ITEM = {
     id: "b1111111-1111-4111-8111-111111111111",
     status: "trial",
     startsAt: "2026-08-08T08:00:00.000Z",
-    endsAt: "2026-08-24T08:00:00.000Z",
+    endsAt: TEST_SUBSCRIPTION_TRANSITION_AT,
     planVersion: {
       id: PUBLISHED_PLAN.id,
       version: 1,
@@ -489,7 +493,7 @@ export const TENANT_DETAIL = {
     planVersionId: PUBLISHED_PLAN.id,
     status: "trial",
     startsAt: "2026-08-08T08:00:00.000Z",
-    endsAt: "2026-08-24T08:00:00.000Z",
+    endsAt: TEST_SUBSCRIPTION_TRANSITION_AT,
     source: "demo",
     createdByPlatformUserId: null,
     createdAt: "2026-08-09T08:00:00.000Z",
@@ -528,7 +532,7 @@ export const TENANT_DETAIL = {
     tenantId: TENANT_ID,
     planVersionId: SCHEDULED_PLAN.id,
     status: "scheduled",
-    startsAt: "2026-08-24T08:00:00.000Z",
+    startsAt: TEST_SUBSCRIPTION_TRANSITION_AT,
     endsAt: null,
     source: "manual",
     createdByPlatformUserId: "user-1",
@@ -570,7 +574,7 @@ export const TENANT_DETAIL = {
       addonVersionId: ADDON.id,
       quantity: 1,
       startsAt: "2026-08-11T08:00:00.000Z",
-      endsAt: "2026-08-24T08:00:00.000Z",
+      endsAt: TEST_SUBSCRIPTION_TRANSITION_AT,
       status: "active",
       source: "manual",
       addonVersion: {
@@ -598,7 +602,7 @@ export const TENANT_DETAIL = {
       subscriptionId: "d1111111-1111-4111-8111-111111111111",
       addonVersionId: ADDON.id,
       quantity: 2,
-      startsAt: "2026-08-24T08:00:00.000Z",
+      startsAt: TEST_SUBSCRIPTION_TRANSITION_AT,
       endsAt: null,
       status: "scheduled",
       source: "manual",
@@ -627,7 +631,7 @@ export const TENANT_DETAIL = {
       id: "12111111-1111-4111-8111-111111111111",
       subscriptionId: "d1111111-1111-4111-8111-111111111111",
       eventKind: "plan.scheduled",
-      effectiveAt: "2026-08-24T08:00:00.000Z",
+      effectiveAt: TEST_SUBSCRIPTION_TRANSITION_AT,
       source: "platform_manual",
       reason: "Согласованный переход",
       before: { status: "trial" },
@@ -758,7 +762,7 @@ export function installTenantApi({
         }
         const startsAt =
           body.activationPolicy === "after_current"
-            ? "2026-08-24T08:00:00.000Z"
+            ? TEST_SUBSCRIPTION_TRANSITION_AT
             : "2026-08-12T08:00:00.000Z";
         if (url.endsWith("/subscription/plan")) {
           return jsonResponse(201, {

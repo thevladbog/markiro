@@ -220,15 +220,13 @@
     "catalog": "Каталог",
     "shifts": "Смены",
     "lines": "Линии",
-    "boxes": "Короба",
     "codes": "Поиск кодов",
     "conflicts": "Конфликты",
     "counterparties": "Контрагенты",
     "labels": "Этикетки",
-    "pickup": "Для себя",
+    "pickup": "Выбытие",
     "disaggregation": "Дезагрегация",
     "employees": "Операторы и сотрудники",
-    "kiosks": "Киоски",
     "devices": "Устройства",
     "integrations": "Интеграции",
     "team": "Доступ в кабинет",
@@ -794,6 +792,8 @@
         "statusLabel": "Статус",
         "fromLabel": "С даты",
         "toLabel": "По дату",
+        "productionFromLabel": "Производство с",
+        "productionToLabel": "Производство по",
         "status": {
           "all": "Все статусы",
           "planned": "Запланирована",
@@ -804,6 +804,7 @@
       "table": {
         "number": "Номер",
         "plannedDate": "Дата",
+        "productionDate": "Дата производства",
         "product": "Продукт",
         "line": "Линия",
         "mode": "Режим",
@@ -997,8 +998,14 @@
     "codeSearch": {
       "title": "Поиск кодов",
       "backAction": "← Поиск кодов",
-      "searchPlaceholder": "Введите SSCC или код маркировки",
+      "tabs": {
+        "label": "Разделы поиска кодов",
+        "codes": "Коды",
+        "boxes": "Короба"
+      },
+      "searchPlaceholder": "Введите SSCC (можно часть номера) или код маркировки",
       "searchButton": "Найти",
+      "multipleBoxes": "Найдено несколько коробов — выберите нужный:",
       "empty": "Коды не найдены",
       "errors": {
         "unrecognized": "Код не распознан",
@@ -1012,6 +1019,8 @@
       "filters": {
         "fromLabel": "С даты",
         "toLabel": "По дату",
+        "productionFromLabel": "Производство с",
+        "productionToLabel": "Производство по",
         "productLabel": "Товар",
         "productSearchPlaceholder": "Поиск товара",
         "productEmpty": "Товары не найдены",
@@ -1028,7 +1037,8 @@
         "product": "Товар",
         "status": "Статус",
         "box": "Короб",
-        "scannedAt": "Отсканирован"
+        "scannedAt": "Отсканирован",
+        "productionDate": "Дата производства"
       },
       "codeCard": {
         "title": "Карточка кода",
@@ -1036,11 +1046,13 @@
         "gtinLabel": "GTIN",
         "serialLabel": "Серийный номер",
         "statusLabel": "Статус",
+        "productionDateLabel": "Дата производства",
         "currentBoxLabel": "Текущий короб",
         "historyTitle": "История"
       },
       "boxCard": {
         "noSscc": "Без SSCC",
+        "printAction": "Распечатать",
         "status": {
           "open": "Открыт",
           "closed": "Закрыт",
@@ -1112,7 +1124,13 @@
       }
     },
     "pickup": {
-      "title": "Для себя",
+      "title": "Выбытие",
+      "views": {
+        "label": "Разделы выбытия",
+        "orders": "Заявки",
+        "rejections": "Отклонённые сканы",
+        "reasons": "Причины"
+      },
       "emptyTitle": "Заявок пока нет",
       "emptyHint": "Заявки появятся здесь, когда сотрудники начнут получать товары на киоске самообслуживания.",
       "addAction": "Массовая выгрузка",
@@ -1689,10 +1707,6 @@
       }
     },
     "kiosks": {
-      "title": "Киоски",
-      "emptyTitle": "Киоски не добавлены",
-      "emptyHint": "Добавьте первый киоск самообслуживания для выдачи товаров «для себя».",
-      "addAction": "Добавить киоск",
       "edit": "Изменить",
       "archive": "В архив",
       "cancel": "Отмена",
@@ -1701,50 +1715,13 @@
       "archiveConfirmAction": "В архив",
       "archivePersistentError": "Не удалось отправить киоск в архив. Попробуйте ещё раз.",
       "retry": "Повторить",
-      "views": {
-        "label": "Разделы киосков",
-        "kiosks": "Киоски",
-        "reasons": "Причины списания"
-      },
-      "resultCount_one": "{{count}} киоск",
-      "resultCount_few": "{{count}} киоска",
-      "resultCount_many": "{{count}} киосков",
-      "resultCount_other": "{{count}} киоска",
-      "lastActivity": "Последняя активность",
-      "lastActivityAccessible": "{{relative}}. Точное время: {{absolute}}.",
-      "neverActivity": "Никогда",
-      "filteredEmptyTitle": "Нет киосков в выбранном состоянии",
-      "filteredEmptyHint": "Измените фильтр состояния или сбросьте его, чтобы увидеть все киоски.",
-      "filters": {
-        "label": "Фильтры киосков",
-        "reset": "Сбросить",
-        "stateLabel": "Состояние",
-        "state": {
-          "all": "Все состояния"
-        }
-      },
       "states": {
         "archived": "В архиве",
         "awaiting-pairing": "Ожидает привязки",
         "online": "В сети",
         "offline": "Не в сети"
       },
-      "onlineStatus": {
-        "online": "В сети",
-        "offline": "Не в сети"
-      },
-      "status": {
-        "active": "Активен",
-        "archived": "В архиве"
-      },
       "table": {
-        "name": "Название",
-        "location": "Расположение",
-        "online": "Статус",
-        "state": "Состояние",
-        "lastActivity": "Активность",
-        "dayLimit": "Лимит/сотрудник",
-        "showPrices": "Цены",
         "actions": "Действия"
       },
       "form": {
@@ -1796,7 +1773,6 @@
         "saveError": "Не удалось сохранить список товаров."
       },
       "pairing": {
-        "action": "Код привязки",
         "panelTitle": "Привязка киоска",
         "safeHint": "Подготовьте киоск «{{name}}» к привязке. Код будет показан только один раз.",
         "invalidationWarning": "Новый код отменит любой ранее сформированный, но ещё не использованный код.",

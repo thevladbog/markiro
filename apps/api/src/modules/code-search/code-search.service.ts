@@ -1,10 +1,11 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { upperBoundCondition } from "../../lib/date-range";
 import { classifySearchInput } from "./input-classifier";
+import type { BoxReportData } from "./box-report";
 import type {
   BoxCardDto,
   ClassifySearchResponseDto,
@@ -37,6 +38,7 @@ interface CodeListRow {
   productName: string | null;
   status: "free" | "aggregated" | "written_off";
   scannedAt: Date;
+  productionDate: string | null;
   boxId: string | null;
   boxSscc: string | null;
 }
@@ -93,6 +95,18 @@ export class CodeSearchService {
       and b.disassembled_at is null
     order by bi.added_at desc limit 1)`;
 
+  /**
+   * The owner shift's EFFECTIVE production day -- explicit
+   * `production_date`, else `planned_date`, the same fallback the shift
+   * exports apply (`shift-export-source.service.ts`). Requires `shifts` to
+   * be joined on `code_registry.shift_id`. Cast to text: a raw `date`
+   * expression bypasses the columns' string mode and node-postgres would
+   * otherwise hand back a timezone-shifted JS Date.
+   */
+  private readonly productionDateSql = sql<
+    string | null
+  >`coalesce(${schema.shifts.productionDate}, ${schema.shifts.plannedDate})::text`;
+
   private readonly currentBoxSsccSql = sql<string | null>`(
     select b.sscc from ${schema.boxItems} bi
     join ${schema.boxes} b on b.tenant_id = bi.tenant_id and b.id = bi.box_id
@@ -121,6 +135,55 @@ export class CodeSearchService {
         .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.sscc, classified.sscc)));
       if (!box) throw new NotFoundException({ code: "not_found" });
       return { type: "box" as const, boxId: box.id };
+    }
+    if (classified.kind === "partial-sscc") {
+      // Digits-only fragment (`classifySearchInput` guarantees `^\d{4,18}$`,
+      // so no LIKE metacharacters to escape). Newest boxes first: a manager
+      // typing a tail off a label is almost always after a recent box.
+      // Capped at 20 -- past that a disambiguation list stops being usable
+      // and the manager should just type more digits.
+      const matches = await this.db
+        .select({
+          id: schema.boxes.id,
+          sscc: schema.boxes.sscc,
+          closedAt: schema.boxes.closedAt,
+          productName: schema.products.name,
+        })
+        .from(schema.boxes)
+        .leftJoin(
+          schema.shifts,
+          and(
+            eq(schema.shifts.tenantId, schema.boxes.tenantId),
+            eq(schema.shifts.id, schema.boxes.shiftId),
+          ),
+        )
+        .leftJoin(
+          schema.products,
+          and(
+            eq(schema.products.tenantId, schema.shifts.tenantId),
+            eq(schema.products.id, schema.shifts.productId),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.boxes.tenantId, tenantId),
+            isNotNull(schema.boxes.sscc),
+            like(schema.boxes.sscc, `%${classified.digits}%`),
+          ),
+        )
+        .orderBy(desc(schema.boxes.openedAt))
+        .limit(20);
+      if (matches.length === 0) throw new NotFoundException({ code: "not_found" });
+      if (matches.length === 1) return { type: "box" as const, boxId: matches[0]!.id };
+      return {
+        type: "boxes" as const,
+        items: matches.map((m) => ({
+          boxId: m.id,
+          sscc: formatSsccWithAi(m.sscc!),
+          productName: m.productName,
+          closedAt: m.closedAt,
+        })),
+      };
     }
     const [code] = await this.db
       .select({ codeHash: schema.codes.codeHash })
@@ -176,8 +239,17 @@ export class CodeSearchService {
       query.shiftId ? eq(schema.codeRegistry.shiftId, query.shiftId) : undefined,
       query.from ? gte(schema.codeRegistry.scannedAt, query.from) : undefined,
       toCondition,
+      // Both bounds compare the shift's effective production DAY (a plain
+      // `date`), so they stay inclusive on both ends -- no next-day shift.
+      query.productionFrom ? sql`${this.productionDateSql} >= ${query.productionFrom}` : undefined,
+      query.productionTo ? sql`${this.productionDateSql} <= ${query.productionTo}` : undefined,
       query.productId ? eq(schema.products.id, query.productId) : undefined,
       query.status ? sql`(${statusSql}) = ${query.status}` : undefined,
+    );
+
+    const shiftsJoinCondition = and(
+      eq(schema.shifts.tenantId, schema.codeRegistry.tenantId),
+      eq(schema.shifts.id, schema.codeRegistry.shiftId),
     );
 
     const baseQuery = this.db
@@ -189,6 +261,7 @@ export class CodeSearchService {
         productName: schema.products.name,
         status: statusSql,
         scannedAt: schema.codeRegistry.scannedAt,
+        productionDate: this.productionDateSql,
         boxId: this.currentBoxIdSql,
         boxSscc: this.currentBoxSsccSql,
       })
@@ -208,6 +281,7 @@ export class CodeSearchService {
           eq(schema.products.gtin14, schema.codes.gtin14),
         ),
       )
+      .leftJoin(schema.shifts, shiftsJoinCondition)
       .where(where);
 
     // The count only needs `codes` (status derives from it) -- `products`
@@ -237,6 +311,11 @@ export class CodeSearchService {
           eq(schema.products.gtin14, schema.codes.gtin14),
         ),
       );
+    }
+    // Likewise `shifts` is only needed by the count when a production-date
+    // bound actually references it in the shared `where`.
+    if (query.productionFrom || query.productionTo) {
+      countQuery = countQuery.leftJoin(schema.shifts, shiftsJoinCondition);
     }
 
     const [rows, countRows] = await Promise.all([
@@ -276,6 +355,7 @@ export class CodeSearchService {
         productId: schema.products.id,
         productName: schema.products.name,
         status: statusSql,
+        productionDate: this.productionDateSql,
       })
       .from(schema.codeRegistry)
       .innerJoin(
@@ -291,6 +371,13 @@ export class CodeSearchService {
         and(
           eq(schema.products.tenantId, schema.codeRegistry.tenantId),
           eq(schema.products.gtin14, schema.codes.gtin14),
+        ),
+      )
+      .leftJoin(
+        schema.shifts,
+        and(
+          eq(schema.shifts.tenantId, schema.codeRegistry.tenantId),
+          eq(schema.shifts.id, schema.codeRegistry.shiftId),
         ),
       )
       .where(
@@ -311,6 +398,7 @@ export class CodeSearchService {
             productId: schema.products.id,
             productName: schema.products.name,
             status: sql<string>`case when ${this.writtenOffSql} then 'written_off' else 'free' end`,
+            productionDate: this.productionDateSql,
           })
           .from(schema.codes)
           .leftJoin(
@@ -318,6 +406,13 @@ export class CodeSearchService {
             and(
               eq(schema.products.tenantId, schema.codes.tenantId),
               eq(schema.products.gtin14, schema.codes.gtin14),
+            ),
+          )
+          .leftJoin(
+            schema.shifts,
+            and(
+              eq(schema.shifts.tenantId, schema.codes.tenantId),
+              eq(schema.shifts.id, schema.codes.shiftId),
             ),
           )
           .where(and(eq(schema.codes.tenantId, tenantId), eq(schema.codes.codeHash, codeHash)))
@@ -358,6 +453,7 @@ export class CodeSearchService {
       productId: row.productId,
       productName: row.productName,
       status: row.status as CodeStatus,
+      productionDate: row.productionDate,
       currentBox: currentBoxRow
         ? {
             id: currentBoxRow.boxId,
@@ -613,19 +709,20 @@ export class CodeSearchService {
       .orderBy(desc(schema.boxItems.addedAt), schema.boxItems.codeHash);
 
     const codeHashes = [...new Set(itemRows.map((r) => r.codeHash))];
-    const codeDetailsByHash = new Map<string, { gtin14: string; serial: string }>();
+    const codeDetailsByHash = new Map<string, { gtin14: string; serial: string; rawKm: string }>();
     if (codeHashes.length > 0) {
       const codeRows = await this.db
         .selectDistinctOn([schema.codes.codeHash], {
           codeHash: schema.codes.codeHash,
           gtin14: schema.codes.gtin14,
           serial: schema.codes.serial,
+          rawKm: schema.codes.canonicalRaw,
         })
         .from(schema.codes)
         .where(and(eq(schema.codes.tenantId, tenantId), inArray(schema.codes.codeHash, codeHashes)))
         .orderBy(schema.codes.codeHash, desc(schema.codes.scannedAt));
       for (const r of codeRows)
-        codeDetailsByHash.set(r.codeHash, { gtin14: r.gtin14, serial: r.serial });
+        codeDetailsByHash.set(r.codeHash, { gtin14: r.gtin14, serial: r.serial, rawKm: r.rawKm });
     }
 
     const items = itemRows.map((r) => {
@@ -634,6 +731,7 @@ export class CodeSearchService {
         codeHash: r.codeHash,
         gtin14: detail?.gtin14 ?? null,
         serial: detail?.serial ?? null,
+        rawKm: detail?.rawKm ?? null,
         addedAt: r.addedAt,
         displacedAt: r.displacedAt,
         removedAt: r.removedAt,
@@ -706,6 +804,110 @@ export class CodeSearchService {
     };
   }
 
+  /**
+   * Gathers everything the printed "Состав короба" form (`box-report.ts`)
+   * needs for one box. The code selection mirrors disaggregation's
+   * `reportData` contents query: displaced items are excluded, and removed
+   * items are kept only when their removal WAS the box's disassembly — so a
+   * disassembled box still prints the contents it had at disassembly time.
+   */
+  async boxReportData(tenantId: string, boxId: string): Promise<BoxReportData> {
+    const [box] = await this.db
+      .select({
+        sscc: schema.boxes.sscc,
+        openedAt: schema.boxes.openedAt,
+        closedAt: schema.boxes.closedAt,
+        disassembledAt: schema.boxes.disassembledAt,
+        productName: schema.products.name,
+      })
+      .from(schema.boxes)
+      .leftJoin(
+        schema.shifts,
+        and(
+          eq(schema.shifts.tenantId, schema.boxes.tenantId),
+          eq(schema.shifts.id, schema.boxes.shiftId),
+        ),
+      )
+      .leftJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.shifts.tenantId),
+          eq(schema.products.id, schema.shifts.productId),
+        ),
+      )
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.id, boxId)));
+
+    if (!box) throw new NotFoundException();
+
+    const [org] = await this.db
+      .select({
+        name: schema.organization.name,
+        inn: schema.orgProfiles.inn,
+        logo: schema.organization.logo,
+      })
+      .from(schema.organization)
+      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
+      .where(eq(schema.organization.id, tenantId));
+
+    // Join the hot code rows through the box item's own (codeHash, addedAt ==
+    // the owning scan's scannedAt), NOT through code_registry — see
+    // disaggregation.service.ts's reportData for why a registry join would
+    // silently drop the contents of a disassembled box.
+    const codeRows = await this.db
+      .select({
+        gtin14: schema.codes.gtin14,
+        serial: schema.codes.serial,
+        rawKm: schema.codes.canonicalRaw,
+      })
+      .from(schema.boxItems)
+      .innerJoin(
+        schema.boxes,
+        and(
+          eq(schema.boxes.tenantId, schema.boxItems.tenantId),
+          eq(schema.boxes.id, schema.boxItems.boxId),
+        ),
+      )
+      .innerJoin(
+        schema.codes,
+        and(
+          eq(schema.codes.tenantId, schema.boxItems.tenantId),
+          eq(schema.codes.codeHash, schema.boxItems.codeHash),
+          eq(schema.codes.scannedAt, schema.boxItems.addedAt),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.boxItems.tenantId, tenantId),
+          eq(schema.boxItems.boxId, boxId),
+          isNull(schema.boxItems.displacedAt),
+          or(
+            isNull(schema.boxItems.removedAt),
+            eq(schema.boxItems.removedAt, schema.boxes.disassembledAt),
+          ),
+        ),
+      )
+      .orderBy(schema.codes.gtin14, schema.codes.serial);
+
+    const status: BoxReportData["status"] = box.disassembledAt
+      ? "disassembled"
+      : box.closedAt
+        ? "closed"
+        : "open";
+
+    return {
+      // `boxes.sscc` stores the bare 18 digits; the renderer (like
+      // disaggregation's) expects the 20-character `00…` machine form.
+      sscc: box.sscc === null ? null : formatSsccWithAi(box.sscc),
+      status,
+      productName: box.productName,
+      org: org ? { name: org.name, inn: org.inn, logo: org.logo } : null,
+      openedAt: box.openedAt,
+      closedAt: box.closedAt,
+      disassembledAt: box.disassembledAt,
+      codes: codeRows,
+    };
+  }
+
   private toDto(row: CodeListRow): CodeListItemDto {
     return {
       codeHash: row.codeHash,
@@ -715,6 +917,7 @@ export class CodeSearchService {
       productName: row.productName,
       status: row.status,
       scannedAt: row.scannedAt,
+      productionDate: row.productionDate,
       boxId: row.boxId,
       boxSscc: row.boxSscc === null ? null : formatSsccWithAi(row.boxSscc),
     };

@@ -15,6 +15,8 @@ const PREVIOUS_EDGE = `ghcr.io/thevladbog/markiro-edge@sha256:${"d".repeat(64)}`
 const VBTECH_SHA = "e".repeat(40);
 const VBTECH_DIGEST = `sha256:${"5".repeat(64)}`;
 const VBTECH_IMAGE_REF = `ghcr.io/thevladbog/vbtech-web@${VBTECH_DIGEST}`;
+const VBTECH_ENABLED_FUNCTION_PATH = "/d4egihdqfci0mhota3ac";
+const VBTECH_ENABLED_FUNCTION_ORIGIN = "https://functions.yandexcloud.net/d4egihdqfci0mhota3ac";
 const VBTECH_SELECTOR = {
   imageRef: VBTECH_IMAGE_REF,
   imageDigest: VBTECH_DIGEST,
@@ -29,6 +31,10 @@ const VBTECH_HEALTHY = {
   submissionState: "disabled",
   createdAt: "2026-08-03T08:00:00.000Z",
   state: "healthy",
+};
+const VBTECH_ENABLED_HEALTHY = {
+  ...VBTECH_HEALTHY,
+  submissionState: "enabled",
 };
 const PREVIOUS_VBTECH_SHA = "6".repeat(40);
 const PREVIOUS_VBTECH_DIGEST = `sha256:${"7".repeat(64)}`;
@@ -240,6 +246,33 @@ test("prepare preserves the latest healthy v-b selector through preflight and th
     assert.equal(call.environment.VBTECH_SUBMISSION_STATE, "disabled");
     assert.equal(Object.hasOwn(call.environment, "VBTECH_IMAGE_TAG"), false);
   }
+});
+
+test("prepare restores the function path for an enabled healthy v-b release", async () => {
+  const { dependencies, releaseDirectory } = await fixture();
+  const runPreflight = dependencies.runPreflight;
+  let preflightEnvironment;
+  dependencies.latestHealthyVbtechRelease = async () => VBTECH_ENABLED_HEALTHY;
+  dependencies.runPreflight = async (environment) => {
+    preflightEnvironment = environment;
+    return runPreflight(environment);
+  };
+
+  const candidate = await prepareRelease(
+    {
+      environment: ENVIRONMENT,
+      releaseDirectory,
+      vbtechReleaseDirectory: VBTECH_RELEASE_DIRECTORY,
+      readinessAttempts: 1,
+    },
+    dependencies,
+  );
+
+  assert.equal(preflightEnvironment.VBTECH_FUNCTION_ORIGIN, VBTECH_ENABLED_FUNCTION_ORIGIN);
+  assert.equal(preflightEnvironment.VBTECH_FUNCTION_PATH, VBTECH_ENABLED_FUNCTION_PATH);
+  assert.equal(preflightEnvironment.VBTECH_SUBMISSION_STATE, "enabled");
+  assert.equal(candidate.vbtech.functionPath, VBTECH_ENABLED_FUNCTION_PATH);
+  assert.equal(candidate.vbtech.submissionState, "enabled");
 });
 
 test("prepare remains Markiro-only when authoritative v-b state is absent", async () => {

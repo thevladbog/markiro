@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
+import { userEvent } from "@testing-library/user-event";
 import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -40,6 +41,8 @@ const BOX_CARD = {
       codeHash: "a".repeat(64),
       gtin14: "04630000000001",
       serial: "SN0001",
+      // Full wire form incl. the GS-separated (U+001D) crypto tail.
+      rawKm: "010463000000000121SN0001\u001d93dGVz",
       addedAt: "2026-08-20T08:05:00.000Z",
       displacedAt: null,
       removedAt: null,
@@ -48,6 +51,7 @@ const BOX_CARD = {
       codeHash: "b".repeat(64),
       gtin14: "04630000000001",
       serial: "SN0002",
+      rawKm: null,
       addedAt: "2026-08-20T08:06:00.000Z",
       displacedAt: null,
       removedAt: "2026-08-20T08:40:00.000Z",
@@ -118,8 +122,10 @@ describe("BoxCardPage", () => {
 
     expect(await screen.findByText("Молоко 1л")).toBeTruthy();
 
-    // Both code rows render, linking to their code cards.
-    const codeLink1 = screen.getByRole("link", { name: "010463000000000121SN0001" });
+    // Both code rows render, linking to their code cards. The first row has
+    // the full stored KM, so it shows the crypto tail with the GS control
+    // char made visible; the second (no rawKm) falls back to `01…21…`.
+    const codeLink1 = screen.getByRole("link", { name: "010463000000000121SN0001␝93dGVz" });
     expect(codeLink1.getAttribute("href")).toBe(`/codes/km/${BOX_CARD.items[0]!.codeHash}`);
     const codeLink2 = screen.getByRole("link", { name: "010463000000000121SN0002" });
     expect(codeLink2.getAttribute("href")).toBe(`/codes/km/${BOX_CARD.items[1]!.codeHash}`);
@@ -134,6 +140,17 @@ describe("BoxCardPage", () => {
     // The pickup order links to the order detail.
     const orderLink = screen.getByRole("link", { name: "PU-26-0001" });
     expect(orderLink.getAttribute("href")).toBe("/pickup/o1");
+  });
+
+  it("opens the print-ready box report in a new tab", async () => {
+    stubFetch();
+    const openMock = vi.fn();
+    vi.stubGlobal("open", openMock);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Распечатать" }));
+    expect(openMock).toHaveBeenCalledWith(`/api/code-search/boxes/${BOX_CARD.id}/report`);
   });
 
   it("offers a back link to the code registry", async () => {

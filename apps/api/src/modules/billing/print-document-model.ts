@@ -3,11 +3,14 @@ export type PrintDocumentKind = "invoice" | "offer";
 export interface BillingProfileSnapshot {
   legalName?: string | null;
   taxId?: string | null;
+  kpp?: string | null;
   registrationId?: string | null;
   address?: string | null;
   bankAccount?: string | null;
   bankName?: string | null;
+  bic?: string | null;
   correspondentAccount?: string | null;
+  currency?: string | null;
   phone?: string | null;
   email?: string | null;
   [key: string]: unknown;
@@ -87,11 +90,14 @@ const party = (profileValue: unknown, accountValue: unknown): BillingProfileSnap
     ...source,
     legalName: optionalText(source.legalName, source.fullName),
     taxId: optionalText(source.taxId, source.inn),
+    kpp: optionalText(source.kpp),
     registrationId: optionalText(source.registrationId, source.ogrn, source.ogrnip),
     address: optionalText(source.address, source.legalAddressRaw),
     bankAccount: optionalText(source.bankAccount, account.settlementAccount),
     bankName: optionalText(source.bankName, account.bankName),
+    bic: optionalText(source.bic, account.bic),
     correspondentAccount: optionalText(source.correspondentAccount, account.correspondentAccount),
+    currency: optionalText(source.currency, account.currency),
     phone: optionalText(source.phone, contact.phone),
     email: optionalText(source.email, contact.email),
   };

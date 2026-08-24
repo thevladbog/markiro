@@ -1398,7 +1398,13 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
 
     const shift1 = await agent
       .post("/shifts")
-      .send({ productId, mode: "validation", lineId, plannedDate: "2026-01-10" })
+      .send({
+        productId,
+        mode: "validation",
+        lineId,
+        plannedDate: "2026-01-10",
+        productionDate: "2026-02-01",
+      })
       .expect(201);
     const shift2 = await agent
       .post("/shifts")
@@ -1443,6 +1449,25 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     );
 
     expect(byRange.body.items.some((i: { id: string }) => i.id === shift3.body.id)).toBe(false);
+
+    // Production-date range filters on the EFFECTIVE production date:
+    // shift1's explicit productionDate (2026-02-01) overrides its
+    // plannedDate, while shift2/shift3 fall back to their plannedDate.
+    const byProductionRange = await agent
+      .get("/shifts")
+      .query({ productionFrom: "2026-01-14", productionTo: "2026-01-20" })
+      .expect(200);
+    expect(byProductionRange.body.items.map((i: { id: string }) => i.id).sort()).toEqual(
+      [shift2.body.id, shift3.body.id].sort(),
+    );
+
+    const byExplicitProduction = await agent
+      .get("/shifts")
+      .query({ productionFrom: "2026-02-01", productionTo: "2026-02-01" })
+      .expect(200);
+    expect(byExplicitProduction.body.items.map((i: { id: string }) => i.id)).toEqual([
+      shift1.body.id,
+    ]);
   });
 
   it("defaults a station shift list to its assigned line plus unassigned shifts without restricting explicit tenant filters", async () => {

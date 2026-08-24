@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, SectionHeader, Spinner } from "@markiro/ui";
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router";
 import { z } from "zod";
@@ -48,6 +49,7 @@ function InvoiceEditor() {
   const [search] = useSearchParams();
   const requestedTenant = tenantIdSchema.safeParse(search.get("tenantId")).data;
   const rawSourceOfferId = (location.state as { sourceOfferId?: unknown } | null)?.sourceOfferId;
+  const createdInvoiceId = useRef<string | null>(null);
   const sourceOfferId = z.uuid().safeParse(rawSourceOfferId).data;
   const sourceOffer = useQuery({
     queryKey: ["platform", "offers", sourceOfferId],
@@ -174,9 +176,13 @@ function InvoiceEditor() {
           }
         : {})}
       onSubmit={async (draft) => {
-        await create.mutateAsync(draft);
+        const invoice = await create.mutateAsync(draft);
+        createdInvoiceId.current = invoice.id;
       }}
-      onSuccess={() => void navigate("/invoices", { state: { createdDocument: "invoice" } })}
+      onSuccess={() => {
+        const invoiceId = createdInvoiceId.current;
+        if (invoiceId) void navigate(`/invoices/${invoiceId}`);
+      }}
       onCancel={() => void navigate("/invoices")}
     />
   );

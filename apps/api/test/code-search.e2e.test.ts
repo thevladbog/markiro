@@ -4,7 +4,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { canonicalizeKm, kmHash } from "@markiro/domain";
+import { canonicalizeKm, gs1CheckDigit, kmHash } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -193,6 +193,47 @@ describe.skipIf(!ready)("code-search e2e", () => {
     expect(card.history.map((h) => h.type)).toContain("box_added");
   });
 
+  it("surfaces the owner shift's effective production date and filters the registry by it", async () => {
+    // A shift with BOTH dates: the explicit productionDate must win over
+    // plannedDate (the same fallback shift exports apply).
+    const shift = await agent
+      .post("/shifts")
+      .send({
+        productId,
+        mode: "validation",
+        plannedDate: "2026-03-01",
+        productionDate: "2026-03-05",
+      })
+      .expect(201);
+    const shiftId = (shift.body as { id: string }).id;
+    await agent.post(`/shifts/${shiftId}/open`).expect(200);
+    await postBatch(stationKey, [scan(shiftId, "pp", "t1", "2026-07-03T10:00:00.000Z", null)]);
+
+    const filtered = await agent
+      .get(`/code-search/codes?productionFrom=2026-03-05&productionTo=2026-03-05`)
+      .expect(200);
+    const items = (filtered.body as { items: { codeHash: string; productionDate: string }[] })
+      .items;
+    expect(items.map((i) => i.codeHash)).toEqual([codeHashFor("pp")]);
+    expect(items[0]!.productionDate).toBe("2026-03-05");
+
+    // The planned date alone must NOT match -- productionDate overrides it.
+    const byPlanned = await agent
+      .get(`/code-search/codes?productionFrom=2026-03-01&productionTo=2026-03-01`)
+      .expect(200);
+    expect((byPlanned.body as { items: unknown[] }).items).toEqual([]);
+
+    const card = (await agent.get(`/code-search/codes/${codeHashFor("pp")}`).expect(200)).body as {
+      productionDate: string | null;
+    };
+    expect(card.productionDate).toBe("2026-03-05");
+
+    // The beforeAll fixture shift has neither date -> null.
+    const dateless = (await agent.get(`/code-search/codes/${codeHashFor("aa")}`).expect(200))
+      .body as { productionDate: string | null };
+    expect(dateless.productionDate).toBeNull();
+  });
+
   it("404s the code card for a malformed or unknown codeHash", async () => {
     await agent.get(`/code-search/codes/not-a-hash`).expect(404);
     await agent.get(`/code-search/codes/${"0".repeat(64)}`).expect(404);
@@ -237,6 +278,93 @@ describe.skipIf(!ready)("code-search e2e", () => {
 
   it("404s the box card for an unknown boxId", async () => {
     await agent.get(`/code-search/boxes/${randomUUID()}`).expect(404);
+  });
+
+  it("box report: print-ready HTML with the SSCC and a DataMatrix per code", async () => {
+    const box = (await agent.get(`/code-search?q=${SSCC1}`).expect(200)).body as { boxId: string };
+    const res = await agent
+      .get(`/code-search/boxes/${box.boxId}/report`)
+      .expect(200)
+      .expect("Content-Type", /text\/html/);
+    expect(res.text).toContain("Состав короба");
+    expect(res.text).toContain(`(00)${SSCC1}`);
+    expect(res.text.match(/class="dm-box"/g)).toHaveLength(2);
+  });
+
+  it("404s the box report for an unknown boxId", async () => {
+    await agent.get(`/code-search/boxes/${randomUUID()}/report`).expect(404);
+  });
+
+  it("box card items carry the full raw KM including the crypto tail", async () => {
+    const GS = "\u001d";
+    const raw = `01${VALID_GTIN14}21S-ct${GS}93dGVz`;
+    const km = canonicalizeKm(raw);
+    // Shares the "34567890123456" fragment with SSCC1 for the partial-search test below.
+    const sscc = `12345678901234568${gs1CheckDigit("12345678901234568")}`;
+    const shiftId = await openShiftForProduct(productId);
+    await postBatch(
+      stationKey,
+      [
+        {
+          shiftId,
+          terminalId: "t1",
+          raw,
+          verdict: "ok",
+          scannedAt: "2026-07-05T10:00:00.000Z",
+          code: { codeHash: kmHash(km), gtin14: km.gtin14, serial: km.serial },
+          boxId: "b-ct",
+          operatorId: null,
+        },
+      ],
+      [
+        {
+          boxId: "b-ct",
+          shiftId,
+          terminalId: "t1",
+          sscc,
+          closedAt: "2026-07-05T11:00:00.000Z",
+          operatorId: null,
+        },
+      ],
+    );
+
+    const found = (await agent.get(`/code-search?q=${sscc}`).expect(200)).body as {
+      boxId: string;
+    };
+    const card = (await agent.get(`/code-search/boxes/${found.boxId}`).expect(200)).body as {
+      items: { serial: string; rawKm: string | null }[];
+    };
+    expect(card.items).toHaveLength(1);
+    expect(card.items[0]!.rawKm).toBe(raw);
+  });
+
+  it("finds a box by a partial SSCC fragment and lists candidates when several match", async () => {
+    // "345675" (the tail of SSCC1) matches exactly one box -> plain `box`.
+    const single = (await agent.get(`/code-search?q=345675`).expect(200)).body as {
+      type: string;
+      boxId: string;
+    };
+    expect(single.type).toBe("box");
+    const exact = (await agent.get(`/code-search?q=${SSCC1}`).expect(200)).body as {
+      boxId: string;
+    };
+    expect(single.boxId).toBe(exact.boxId);
+
+    // "34567890123456" is shared between SSCC1 and the crypto-tail box's
+    // SSCC (created above) -> a disambiguation list.
+    const multi = (await agent.get(`/code-search?q=34567890123456`).expect(200)).body as {
+      type: string;
+      items: { boxId: string; sscc: string; productName: string | null }[];
+    };
+    expect(multi.type).toBe("boxes");
+    expect(multi.items.length).toBeGreaterThanOrEqual(2);
+    expect(multi.items.map((i) => i.sscc)).toContain(`00${SSCC1}`);
+    expect(multi.items.every((i) => i.sscc.includes("34567890123456"))).toBe(true);
+
+    // A fragment matching nothing is a well-formed miss, not "unrecognized".
+    expect(
+      ((await agent.get(`/code-search?q=999999999`).expect(404)).body as { code: string }).code,
+    ).toBe("not_found");
   });
 
   it("history shows disaggregation after a document applies", async () => {

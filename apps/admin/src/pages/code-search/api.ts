@@ -27,6 +27,8 @@ export interface CodeListItemDto {
   productName: string | null;
   status: CodeStatus;
   scannedAt: string;
+  /** The owner shift's effective production day (`productionDate ?? plannedDate`), `YYYY-MM-DD`. */
+  productionDate: string | null;
   boxId: string | null;
   boxSscc: string | null;
 }
@@ -42,13 +44,31 @@ export interface ListCodesFilters {
   page: number;
   from?: string;
   to?: string;
+  /** Inclusive bounds on the owner shift's effective production date. */
+  productionFrom?: string;
+  productionTo?: string;
   productId?: string;
   status?: string;
 }
 
-/** `GET /code-search` response: which entity the input resolved to. */
+/** Mirrors `apps/api/src/modules/code-search/dto.ts`'s `ClassifyBoxMatchDto`, `Date` fields as `string`. */
+export interface ClassifyBoxMatchDto {
+  boxId: string;
+  /** 20-значный код с GS1 AI "00", как везде в кабинете. */
+  sscc: string;
+  productName: string | null;
+  closedAt: string | null;
+}
+
+/**
+ * `GET /code-search` response: which entity the input resolved to. `boxes`
+ * only occurs for a partial-SSCC query matching MORE than one box -- a
+ * single match arrives as the plain `box` variant.
+ */
 export type ClassifySearchResult =
-  { type: "box"; boxId: string } | { type: "code"; codeHash: string };
+  | { type: "box"; boxId: string }
+  | { type: "code"; codeHash: string }
+  | { type: "boxes"; items: ClassifyBoxMatchDto[] };
 
 /** Mirrors `apps/api/src/modules/code-search/dto.ts`'s `CodeHistoryEvent`, `Date` fields as `string`. */
 export type CodeHistoryEvent =
@@ -89,6 +109,8 @@ export interface CodeCardDto {
   productId: string | null;
   productName: string | null;
   status: CodeStatus;
+  /** The owner shift's effective production day (`productionDate ?? plannedDate`), `YYYY-MM-DD`. */
+  productionDate: string | null;
   currentBox: { id: string; sscc: string | null } | null;
   history: CodeHistoryEvent[];
 }
@@ -98,6 +120,8 @@ export interface BoxCardItemDto {
   codeHash: string;
   gtin14: string | null;
   serial: string | null;
+  /** Full stored wire form incl. the GS-separated crypto tail (`codes.canonical_raw`). */
+  rawKm: string | null;
   addedAt: string;
   displacedAt: string | null;
   removedAt: string | null;
@@ -136,6 +160,8 @@ function buildListPath(filters: ListCodesFilters): string {
   query.set("page", String(filters.page));
   if (filters.from) query.set("from", filters.from);
   if (filters.to) query.set("to", filters.to);
+  if (filters.productionFrom) query.set("productionFrom", filters.productionFrom);
+  if (filters.productionTo) query.set("productionTo", filters.productionTo);
   if (filters.productId) query.set("productId", filters.productId);
   if (filters.status) query.set("status", filters.status);
   return `/code-search/codes?${query.toString()}`;

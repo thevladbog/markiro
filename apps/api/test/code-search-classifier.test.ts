@@ -24,8 +24,24 @@ describe("classifySearchInput", () => {
   it("classifies a KM to its hash", () => {
     expect(classifySearchInput(KM)).toEqual({ kind: "km", codeHash: kmHash(canonicalizeKm(KM)) });
   });
-  it("rejects garbage", () => {
+  it("classifies a digits-only fragment as a partial SSCC", () => {
+    expect(classifySearchInput("345675")).toEqual({ kind: "partial-sscc", digits: "345675" });
+    // Whitespace inside a typed fragment is stripped like it is for full SSCCs.
+    expect(classifySearchInput(" 3456 75 ")).toEqual({ kind: "partial-sscc", digits: "345675" });
+    // 18 digits with a WRONG check digit is not a full SSCC -- fall back to partial.
+    expect(classifySearchInput("123456789012345670")).toEqual({
+      kind: "partial-sscc",
+      digits: "123456789012345670",
+    });
+  });
+
+  it("keeps a full valid SSCC on the exact path, not the partial one", () => {
+    expect(classifySearchInput(SSCC)).toEqual({ kind: "sscc", sscc: SSCC });
+  });
+
+  it("rejects garbage and too-short fragments", () => {
     expect(classifySearchInput("hello")).toEqual({ kind: "unrecognized" });
     expect(classifySearchInput("")).toEqual({ kind: "unrecognized" });
+    expect(classifySearchInput("123")).toEqual({ kind: "unrecognized" });
   });
 });

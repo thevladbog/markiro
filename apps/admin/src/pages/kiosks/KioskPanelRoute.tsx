@@ -9,7 +9,7 @@ import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useRoutePanelGuard } from "../../lib/useRoutePanelGuard.js";
-import { useCreateKiosk, useUpdateKiosk, type KioskDto } from "./api.js";
+import { useArchiveKiosk, useCreateKiosk, useUpdateKiosk, type KioskDto } from "./api.js";
 import { KioskProductsSection, type KioskProductsSectionStatus } from "./KioskProductsSection.js";
 import {
   KIOSK_PROFILE_FORM_ID,
@@ -22,6 +22,7 @@ import {
   type KioskSectionNavItem,
 } from "./KioskSectionNav.js";
 import { getKioskOperationalState } from "./kioskState.js";
+import "./kiosks.css";
 
 export interface KiosksPanelContext {
   kiosks: KioskDto[];
@@ -40,11 +41,18 @@ type SectionFlags = { profile: boolean; products: boolean };
 const CLEAN_SECTIONS: SectionFlags = { profile: false, products: false };
 const SECTION_ORDER: KioskSectionId[] = ["profile", "products"];
 
+/** Base path of the kiosk panel routes for the surface the panel is mounted on. */
+export function kioskPanelBase(pathname: string): string {
+  return pathname.startsWith("/devices") ? "/devices/kiosks" : "/kiosks";
+}
+
 export function closeKioskPanel(location: Location, navigate: NavigateFunction) {
   if ((location.state as KiosksPanelLocationState | null)?.kiosksBackground === true) {
     void navigate(-1);
   } else {
-    void navigate("/kiosks", { replace: true });
+    void navigate(location.pathname.startsWith("/devices") ? "/devices" : "/kiosks", {
+      replace: true,
+    });
   }
 }
 
@@ -170,7 +178,7 @@ export function KioskCreatePanelRoute(): ReactElement {
               <Button
                 type="button"
                 onClick={() => {
-                  void navigate(`/kiosks/${created.id}/pair`, {
+                  void navigate(`${kioskPanelBase(location.pathname)}/${created.id}/pair`, {
                     replace: true,
                     state: (location.state as KiosksPanelLocationState | null)?.kiosksBackground
                       ? ({ kiosksBackground: true } satisfies KiosksPanelLocationState)
@@ -250,6 +258,9 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
   const { t } = useTranslation();
   const { context, close } = usePanelContext();
   const updateMutation = useUpdateKiosk();
+  const archiveMutation = useArchiveKiosk();
+  const [archiving, setArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [dirty, setDirty] = useState<SectionFlags>(CLEAN_SECTIONS);
   const [busy, setBusy] = useState<SectionFlags>(CLEAN_SECTIONS);
@@ -264,7 +275,7 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
   const productsHostRef = useRef<HTMLDivElement>(null);
   const productsBusyRef = useRef(false);
   const panelDirty = dirty.profile || dirty.products;
-  const panelBusy = updateMutation.isPending || busy.products;
+  const panelBusy = updateMutation.isPending || busy.products || archiveMutation.isPending;
   const resolvedKiosk = context.kiosks.find((item) => item.id === kioskId);
   const [retainedKiosk, setRetainedKiosk] = useState<KioskDto | null>(resolvedKiosk ?? null);
   const kioskMissingWhileDirty =
@@ -449,6 +460,19 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
         onClose={guard.requestClose}
         footer={
           <>
+            {kiosk.status === "active" ? (
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={panelBusy}
+                onClick={() => {
+                  setArchiveError(null);
+                  setArchiving(true);
+                }}
+              >
+                {t("pages.kiosks.archive")}
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="secondary"
@@ -507,6 +531,39 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
           </div>
         </div>
       </SidePanel>
+      <ConfirmDialog
+        open={archiving}
+        title={t("pages.kiosks.archiveConfirmTitle")}
+        description={t("pages.kiosks.archiveConfirmBody", { name: kiosk.name })}
+        entity={kiosk.name}
+        error={archiveError}
+        cancelLabel={t("pages.kiosks.cancel")}
+        confirmLabel={t("pages.kiosks.archiveConfirmAction")}
+        tone="destructive"
+        busy={archiveMutation.isPending}
+        onCancel={() => {
+          if (archiveMutation.isPending) return;
+          setArchiving(false);
+          setArchiveError(null);
+        }}
+        onConfirm={() => {
+          void (async () => {
+            try {
+              setArchiveError(null);
+              await archiveMutation.mutateAsync(kiosk.id);
+              toast("ok", t("pages.kiosks.toasts.archiveSuccess"));
+              setArchiving(false);
+              guard.finish();
+            } catch (error) {
+              setArchiveError(
+                error instanceof ApiRequestError
+                  ? error.message
+                  : t("pages.kiosks.archivePersistentError"),
+              );
+            }
+          })();
+        }}
+      />
       <DiscardDialog
         open={guard.confirmOpen}
         onCancel={guard.cancelDiscard}

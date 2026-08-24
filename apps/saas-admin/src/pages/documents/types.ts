@@ -42,6 +42,7 @@ export type DocumentDraftAction =
   | { type: "catalog.added"; version: CatalogVersion; separate?: boolean; id: string }
   | { type: "line.quantityChanged"; id: string; quantity: number }
   | { type: "line.priceChanged"; id: string; price: string }
+  | { type: "line.descriptionChanged"; id: string; description: string }
   | { type: "line.priceOverrideReasonChanged"; id: string; reason: string }
   | { type: "line.vatIncludedChanged"; id: string; included: boolean }
   | { type: "line.policyChanged"; id: string; policy: ActivationPolicy }

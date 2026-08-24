@@ -1,5 +1,6 @@
 mod commands;
 mod config;
+mod power;
 mod printer;
 mod scanner;
 mod updater;
@@ -19,6 +20,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(commands::LockdownState::default())
         .manage(updater::StationUpdaterState::default())
+        .manage(power::SystemAwakeState::default())
         .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -49,6 +51,7 @@ pub fn run() {
             commands::clear_credential,
             commands::enter_lockdown,
             commands::exit_lockdown,
+            power::set_system_awake,
             scanner::list_serial_ports,
             scanner::open_scanner,
             scanner::close_scanner,

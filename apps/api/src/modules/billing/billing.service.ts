@@ -123,8 +123,14 @@ export class BillingService {
           catalogKind: version?.kind ?? null,
           nameRu,
           nameEn,
-          descriptionRu: version?.descriptionRu ?? line.descriptionRu ?? null,
-          descriptionEn: version?.descriptionEn ?? line.descriptionEn ?? null,
+          descriptionRu:
+            line.descriptionRu !== undefined
+              ? line.descriptionRu
+              : (version?.descriptionRu ?? null),
+          descriptionEn:
+            line.descriptionEn !== undefined
+              ? line.descriptionEn
+              : (version?.descriptionEn ?? null),
           quantity: line.quantity,
           unit,
           catalogUnitPrice: version?.unitPrice ?? line.catalogUnitPrice ?? null,
@@ -170,7 +176,18 @@ export class BillingService {
       .where(eq(schema.invoiceLines.invoiceId, id))
       .orderBy(schema.invoiceLines.position);
     const documents = await this.db
-      .select()
+      .select({
+        id: schema.invoiceDocuments.id,
+        revision: schema.invoiceDocuments.revision,
+        format: schema.invoiceDocuments.format,
+        status: schema.invoiceDocuments.status,
+        contentType: schema.invoiceDocuments.contentType,
+        byteSize: schema.invoiceDocuments.byteSize,
+        sha256: schema.invoiceDocuments.sha256,
+        errorCode: schema.invoiceDocuments.errorCode,
+        createdAt: schema.invoiceDocuments.createdAt,
+        updatedAt: schema.invoiceDocuments.updatedAt,
+      })
       .from(schema.invoiceDocuments)
       .where(eq(schema.invoiceDocuments.invoiceId, id))
       .orderBy(desc(schema.invoiceDocuments.revision));

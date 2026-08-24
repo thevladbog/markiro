@@ -33,7 +33,13 @@ export function SubscriptionBanner() {
             : null;
   if (!message) return null;
   return (
-    <Alert tone={subscription.access === "read_only" ? "error" : "warn"}>
+    <Alert
+      tone={subscription.access === "read_only" ? "error" : "warn"}
+      // Rendered edge-to-edge at the top of <main>, before any page padding
+      // -- the margin keeps it off the header and viewport edges, with the
+      // horizontal inset matching the pages' own 32px gutters.
+      style={{ margin: "16px 32px 0" }}
+    >
       <span>{message}</span>{" "}
       <Link to="/settings/subscription">{t("subscription.banner.link")}</Link>
     </Alert>

@@ -132,6 +132,25 @@ function stubFetch({
     const override = await onRequest?.(path, init);
     if (override) return override;
     if (path === "/api/kiosks") return jsonResponse(200, { items: kiosks });
+    if (path.startsWith("/api/devices"))
+      return jsonResponse(200, {
+        items: kiosks.map((kiosk) => {
+          const row = kiosk as typeof ONLINE_KIOSK;
+          return {
+            id: row.id,
+            type: "kiosk",
+            name: row.name,
+            place: { id: null, name: row.location },
+            status: "online",
+            lastSeenAt: row.lastSeenAt,
+            paired: row.enrolled,
+          };
+        }),
+        page: 1,
+        pageSize: 8,
+        total: kiosks.length,
+      });
+    if (path === "/api/lines") return jsonResponse(200, { items: [] });
     throw new Error(`Unexpected request: ${path}`);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -201,25 +220,17 @@ describe("safe kiosk pairing route", () => {
           (init as RequestInit | undefined)?.method === "POST",
       ),
     ).toBe(false);
-    expect(router.state.location.pathname).toBe(`/kiosks/${ONLINE_KIOSK.id}/pair`);
+    expect(router.state.location.pathname).toBe(`/devices/kiosks/${ONLINE_KIOSK.id}/pair`);
   });
 
-  it("navigates from the list into safe entry without issuing a code", async () => {
+  it("redirects the retired list URL to the devices registry without issuing a code", async () => {
     const fetchMock = stubFetch();
     const { router } = renderKiosksRouter("/kiosks");
-    const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("button", { name: "Код привязки" }));
-
-    expect(await screen.findByRole("dialog", { name: "Привязка киоска" })).toBeDefined();
-    expect(router.state.location.pathname).toBe(`/kiosks/${ONLINE_KIOSK.id}/pair`);
-    expect(
-      fetchMock.mock.calls.some(
-        ([url, init]) =>
-          String(url) === `/api/kiosks/${ONLINE_KIOSK.id}/pairing-code` &&
-          (init as RequestInit | undefined)?.method === "POST",
-      ),
-    ).toBe(false);
+    expect(await screen.findByRole("heading", { name: "Устройства" })).toBeDefined();
+    expect(router.state.location.pathname).toBe("/devices");
+    expect(router.state.location.search).toBe("?type=kiosk");
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/pairing-code"))).toBe(false);
   });
 
   it.each([
@@ -278,7 +289,7 @@ describe("safe kiosk pairing route", () => {
     const panel = await screen.findByRole("dialog", { name: "Привязка киоска" });
     await user.click(within(panel).getByRole("button", { name: "Назад" }));
 
-    await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
   });
 
   it("uses Close as the direct-entry fallback", async () => {
@@ -289,7 +300,7 @@ describe("safe kiosk pairing route", () => {
     const panel = await screen.findByRole("dialog", { name: "Привязка киоска" });
     await user.click(within(panel).getAllByRole("button", { name: "Закрыть" }).at(-1)!);
 
-    await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
   });
 });
 
@@ -445,7 +456,7 @@ describe("one-time pairing reveal", () => {
     await user.click(await screen.findByRole("button", { name: "Сформировать код" }));
     expect(await screen.findByText("1234 5678")).toBeDefined();
     await user.click(screen.getByRole("button", { name: "Готово" }));
-    await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
     expect(screen.queryByText("1234 5678")).toBeNull();
 
     await router.navigate(`/kiosks/${ONLINE_KIOSK.id}/pair`);
@@ -473,7 +484,7 @@ describe("one-time pairing reveal", () => {
     await user.click(await screen.findByRole("button", { name: "Сформировать код" }));
     expect(await screen.findByText("1234 5678")).toBeDefined();
     await user.click(screen.getByRole("button", { name: "Закрыть" }));
-    await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
     expect(screen.queryByText("1234 5678")).toBeNull();
 
     await router.navigate(`/kiosks/${ONLINE_KIOSK.id}/pair`, {
@@ -482,7 +493,7 @@ describe("one-time pairing reveal", () => {
     await user.click(await screen.findByRole("button", { name: "Сформировать код" }));
     expect(await screen.findByText("8765 4321")).toBeDefined();
     await router.navigate(-1);
-    await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/devices"));
     await waitFor(() => expect(screen.queryByText("8765 4321")).toBeNull());
     expect(
       fetchMock.mock.calls.filter(([url]) => String(url).includes("/pairing-code")),
@@ -537,7 +548,7 @@ describe("one-time pairing reveal", () => {
     fireEvent.mouseDown(requiredElement<HTMLElement>(".mk-side-panel__scrim"));
     await router.navigate(-1);
 
-    expect(router.state.location.pathname).toBe(`/kiosks/${ONLINE_KIOSK.id}/pair`);
+    expect(router.state.location.pathname).toBe(`/devices/kiosks/${ONLINE_KIOSK.id}/pair`);
     expect(
       fetchMock.mock.calls.filter(([url]) => String(url).includes("/pairing-code")),
     ).toHaveLength(1);

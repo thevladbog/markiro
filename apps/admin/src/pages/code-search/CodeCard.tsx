@@ -15,7 +15,7 @@ import { formatSsccHri } from "@markiro/domain";
 import { Alert, Card, PageHeader, Spinner, StatusChip } from "@markiro/ui";
 import type { StatusChipStatus } from "@markiro/ui";
 
-import { formatCreatedAt } from "../../lib/datetime.js";
+import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
 import { useCodeCard, type CodeHistoryEvent, type CodeStatus } from "./api.js";
 
 // Mirrors `./index.tsx`'s `STATUS_TO_CHIP` -- see its doc comment for why
@@ -163,6 +163,10 @@ export function CodeCardPage() {
                 label={t(`pages.codeSearch.status.${card.status}`)}
               />
             }
+          />
+          <DetailField
+            label={t("pages.codeSearch.codeCard.productionDateLabel")}
+            value={card.productionDate ? formatDate(card.productionDate, i18n.language) : "—"}
           />
           <DetailField
             label={t("pages.codeSearch.codeCard.currentBoxLabel")}
