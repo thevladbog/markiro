@@ -1951,6 +1951,7 @@ mod tests {
     const BETA_YANDEX_ENDPOINT: &str = "https://releases.markiro.app/station/beta/latest.json";
     const BETA_GITHUB_ENDPOINT: &str =
         "https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json";
+    const LOOPBACK_FIXTURE_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(2);
     const MINISIGN_PUBLIC_KEY: &str = "untrusted comment: minisign public key E7620F1842B4E81F\nRWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
     const MINISIGN_SIGNATURE: &str = "untrusted comment: signature from minisign secret key\nRWQf6LRCGA9i59SLOFxz6NxvASXDJeRtuZykwQepbDEGt87ig1BNpWaVWuNrm73YiIiJbq71Wi+dP9eKL8OC351vwIasSSbXxwA=\ntrusted comment: timestamp:1555779966\tfile:test\nQtKMXWyYcwdpZAlPF7tE2ENJkRd1ujvKjlj1m9RtHTBnZPa5WKU5uWRs5GoP5M/VqE81QFuMKI5k/SfNQUaOAA==";
 
@@ -2366,12 +2367,75 @@ mod tests {
         Stalled {
             content_length: Option<u64>,
             prefix: Vec<u8>,
-            stalled_for: Duration,
+            release: mpsc::Receiver<()>,
+            open: Arc<AtomicBool>,
         },
         Truncated {
             content_length: u64,
             bytes: Vec<u8>,
         },
+    }
+
+    struct StalledBodyFixture {
+        release: Option<mpsc::Sender<()>>,
+        open: Arc<AtomicBool>,
+    }
+
+    impl StalledBodyFixture {
+        fn is_open(&self) -> bool {
+            self.open.load(Ordering::SeqCst)
+        }
+
+        fn release(&mut self) {
+            self.release
+                .take()
+                .expect("stalled package body is released once")
+                .send(())
+                .expect("release stalled package body");
+        }
+    }
+
+    impl Drop for StalledBodyFixture {
+        fn drop(&mut self) {
+            if let Some(release) = self.release.take() {
+                let _ = release.send(());
+            }
+        }
+    }
+
+    struct OpenStalledBody(Arc<AtomicBool>);
+
+    impl OpenStalledBody {
+        fn new(open: Arc<AtomicBool>) -> Self {
+            open.store(true, Ordering::SeqCst);
+            Self(open)
+        }
+    }
+
+    impl Drop for OpenStalledBody {
+        fn drop(&mut self) {
+            self.0.store(false, Ordering::SeqCst);
+        }
+    }
+
+    fn stalled_package_response(
+        content_length: Option<u64>,
+        prefix: Vec<u8>,
+    ) -> (LocalPackageResponse, StalledBodyFixture) {
+        let (release_tx, release_rx) = mpsc::channel();
+        let open = Arc::new(AtomicBool::new(false));
+        (
+            LocalPackageResponse::Stalled {
+                content_length,
+                prefix,
+                release: release_rx,
+                open: Arc::clone(&open),
+            },
+            StalledBodyFixture {
+                release: Some(release_tx),
+                open,
+            },
+        )
     }
 
     fn read_http_request(stream: &mut TcpStream) -> String {
@@ -2496,8 +2560,10 @@ mod tests {
                 LocalPackageResponse::Stalled {
                     content_length,
                     prefix,
-                    stalled_for,
+                    release,
+                    open,
                 } => {
+                    let _open = OpenStalledBody::new(open);
                     write_http_response_head(
                         &mut package_stream,
                         200,
@@ -2510,7 +2576,9 @@ mod tests {
                     package_stream
                         .flush()
                         .expect("flush stalled package prefix");
-                    std::thread::sleep(stalled_for);
+                    release
+                        .recv_timeout(LOOPBACK_FIXTURE_HANDSHAKE_TIMEOUT)
+                        .expect("release stalled package body before fixture timeout");
                 }
                 LocalPackageResponse::Truncated {
                     content_length,
@@ -3940,13 +4008,8 @@ mod tests {
                 PackageTimeoutKind::Overall,
             ),
         ] {
-            let Some((manifest_url, server)) =
-                spawn_local_update_server(LocalPackageResponse::Stalled {
-                    content_length: Some(4),
-                    prefix: b"te".to_vec(),
-                    stalled_for: Duration::from_millis(125),
-                })
-            else {
+            let (response, mut stalled_body) = stalled_package_response(Some(4), b"te".to_vec());
+            let Some((manifest_url, server)) = spawn_local_update_server(response) else {
                 return;
             };
             let probe = Arc::new(BufferCleanupProbe::default());
@@ -3975,7 +4038,6 @@ mod tests {
                     "stalled package times out",
                 )
             });
-            server.join().expect("loopback timeout server");
 
             assert!(matches!(
                 error,
@@ -3990,6 +4052,11 @@ mod tests {
             );
             assert_eq!(probe.cleaned_allocations(), 1);
             assert!(probe.all_clean());
+            assert!(stalled_body.is_open());
+
+            stalled_body.release();
+            server.join().expect("loopback timeout server");
+            assert!(!stalled_body.is_open());
         }
     }
 
@@ -4078,13 +4145,8 @@ mod tests {
     #[test]
     fn download_real_pinned_update_cancellation_interrupts_a_stalled_body_and_cleans() {
         let (first_progress_tx, first_progress_rx) = mpsc::channel();
-        let Some((manifest_url, server)) =
-            spawn_local_update_server(LocalPackageResponse::Stalled {
-                content_length: Some(4),
-                prefix: b"te".to_vec(),
-                stalled_for: Duration::from_millis(125),
-            })
-        else {
+        let (response, mut stalled_body) = stalled_package_response(Some(4), b"te".to_vec());
+        let Some((manifest_url, server)) = spawn_local_update_server(response) else {
             return;
         };
         let probe = Arc::new(BufferCleanupProbe::default());
@@ -4100,13 +4162,17 @@ mod tests {
             ..RecordingProgress::default()
         };
         let control = Arc::new(TransferControl::default());
+        let (cancelled_tx, cancelled_rx) = mpsc::channel();
         let canceller = {
             let control = Arc::clone(&control);
             std::thread::spawn(move || {
                 first_progress_rx
-                    .recv()
-                    .expect("partial package bytes were retained");
+                    .recv_timeout(LOOPBACK_FIXTURE_HANDSHAKE_TIMEOUT)
+                    .expect("first retained package progress before fixture timeout");
                 control.cancel();
+                cancelled_tx
+                    .send(())
+                    .expect("confirm package cancellation signal");
             })
         };
 
@@ -4125,13 +4191,23 @@ mod tests {
                 "close cancellation interrupts stalled body",
             )
         });
+        cancelled_rx
+            .recv_timeout(LOOPBACK_FIXTURE_HANDSHAKE_TIMEOUT)
+            .expect("cancellation was signalled before fixture timeout");
         canceller.join().expect("loopback canceller");
-        server.join().expect("loopback cancellation server");
 
         assert!(matches!(error, PackageDownloadFailure::Cancelled));
+        assert!(
+            stalled_body.is_open(),
+            "server body closed before cancellation interrupted the download"
+        );
         assert_eq!(package_fallback_reason(&error), None);
         assert_eq!(probe.cleaned_allocations(), 1);
         assert!(probe.all_clean());
+
+        stalled_body.release();
+        server.join().expect("loopback cancellation server");
+        assert!(!stalled_body.is_open());
     }
 
     #[test]
