@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Alert, Button, StatusChip } from "@markiro/ui";
 import { useTranslation } from "react-i18next";
 import type { StationUpdaterController } from "../lib/use-station-updater.js";
@@ -22,12 +22,20 @@ export function UpdateCenter({
   const sourceTitleId = useId();
   const [confirming, setConfirming] = useState(false);
   const available = controller.persisted?.available ?? null;
+  const cancel = controller.cancel;
   const busy = controller.phase !== "idle";
   const installDisabled = activeShift || busy || !available;
   const errorText = controller.error ? t(`updates.errors.${controller.error}`) : null;
   const discoveryFallbackText = controller.fallbackReason
     ? t(`updates.source.discoveryFallback.${controller.fallbackReason}`)
     : null;
+
+  useEffect(
+    () => () => {
+      void cancel();
+    },
+    [cancel],
+  );
 
   return (
     <StationScreen
@@ -39,7 +47,15 @@ export function UpdateCenter({
       }
       actions={
         <FloorFooter ariaLabel={t("updates.actions")}>
-          <Button type="button" size="floor" variant="secondary" onClick={onBack}>
+          <Button
+            type="button"
+            size="floor"
+            variant="secondary"
+            onClick={() => {
+              void cancel();
+              onBack();
+            }}
+          >
             {t("updates.back")}
           </Button>
           <Button

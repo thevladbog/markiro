@@ -249,13 +249,17 @@
       "restarting": "Restarting station…"
     },
     "errors": {
-      "check-failed": "Could not check for updates. Local work continues.",
-      "invalid-metadata": "The update metadata is invalid.",
+      "check-failed": "Could not reach either update source. Local work continues.",
+      "invalid-metadata": "The update response is invalid. Installation was stopped; Station work continues.",
       "state-write-failed": "The update reminder could not be saved.",
       "active-shift": "Leave the active shift before installing",
       "target-changed": "The available version changed. Check again.",
       "origin-mismatch": "The update sources do not match. Installation was stopped; Station work continues.",
       "integrity-failed": "Update integrity could not be verified. Installation was stopped; Station work continues.",
+      "policy-denied": "Update policy rejected this release. Installation was stopped; Station work continues.",
+      "check-superseded": "A newer update check replaced this one. Check again.",
+      "candidate-invalid": "This update request is no longer current. Check again.",
+      "internal-error": "The update service encountered an internal error. Station work continues.",
       "install-failed": "The update could not be installed. You can retry later; Station work continues."
     }
   },

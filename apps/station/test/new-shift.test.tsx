@@ -224,8 +224,8 @@ describe("NewShift", () => {
   });
 
   it("keeps Back disabled while shift start is pending", async () => {
-    const createShift = deferredResponse();
-    vi.spyOn(globalThis, "fetch")
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
           status: 200,
@@ -239,16 +239,31 @@ describe("NewShift", () => {
           { status: 200 },
         ),
       )
-      .mockImplementationOnce(() => createShift.promise)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "s9", status: "planned", mode: "validation" }), {
+          status: 201,
+        }),
+      )
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ id: "s9", status: "active", mode: "validation" }), {
           status: 200,
         }),
       );
     const onBack = vi.fn();
+    let releaseEntry!: () => void;
+    const entryBarrier = new Promise<void>((resolve) => {
+      releaseEntry = resolve;
+    });
+    const beforeShiftEntry = vi.fn(() => entryBarrier);
     const onStarted = vi.fn();
     render(
-      <NewShift client={client} source={silentSource} onStarted={onStarted} onBack={onBack} />,
+      <NewShift
+        client={client}
+        source={silentSource}
+        beforeShiftEntry={beforeShiftEntry}
+        onStarted={onStarted}
+        onBack={onBack}
+      />,
     );
     submitGtin();
     fireEvent.click(await screen.findByRole("button", { name: "Start" }));
@@ -257,16 +272,12 @@ describe("NewShift", () => {
     await waitFor(() => expectButtonDisabled(pendingBack, true));
     fireEvent.click(pendingBack);
     expect(onBack).not.toHaveBeenCalled();
-
-    await act(async () => {
-      createShift.resolve(
-        new Response(JSON.stringify({ id: "s9", status: "planned", mode: "validation" }), {
-          status: 201,
-        }),
-      );
-    });
+    expect(beforeShiftEntry).toHaveBeenCalledOnce();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(onStarted).not.toHaveBeenCalled();
+    expectButtonDisabled(pendingBack, true);
+    releaseEntry();
     await waitFor(() => expect(onStarted).toHaveBeenCalledOnce());
-    await waitFor(() => expectButtonDisabled(pendingBack, false));
     fireEvent.click(pendingBack);
     expect(onBack).toHaveBeenCalledOnce();
   });

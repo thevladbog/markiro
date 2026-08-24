@@ -26,6 +26,7 @@ function controllerFixture(version = "0.1.0-beta.2"): StationUpdaterController {
     totalBytes: null,
     checkNow: vi.fn().mockResolvedValue(undefined),
     install: vi.fn().mockResolvedValue(undefined),
+    cancel: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -121,5 +122,28 @@ describe("UpdateCenter", () => {
         "Update integrity could not be verified. Installation was stopped; Station work continues.",
       ),
     ).toBeDefined();
+  });
+
+  it("invalidates updater work before leaving and again on non-Back unmount", () => {
+    const controller = controllerFixture();
+    const onBack = vi.fn();
+    const view = render(
+      <UpdateCenter
+        controller={controller}
+        activeShift={false}
+        pendingOutbox={0}
+        onBack={onBack}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(controller.cancel).toHaveBeenCalledOnce();
+    expect(onBack).toHaveBeenCalledOnce();
+    expect(vi.mocked(controller.cancel).mock.invocationCallOrder[0]).toBeLessThan(
+      onBack.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
+
+    view.unmount();
+    expect(controller.cancel).toHaveBeenCalledTimes(2);
   });
 });

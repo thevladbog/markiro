@@ -1556,6 +1556,7 @@ function galleryUpdateController(
     totalBytes: null,
     checkNow: () => Promise.resolve(),
     install: () => Promise.resolve(),
+    cancel: () => Promise.resolve(),
   };
 }
 

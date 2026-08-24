@@ -32,6 +32,21 @@ const candidate = {
   fallbackReason: "primary-unavailable",
 };
 
+type FakeProgressChannel = { onmessage(payload: unknown): void };
+
+function mockProgressStream(events: unknown[], result: unknown = null): void {
+  invokeMock.mockImplementation(async (command, payload) => {
+    if (command === "station_update_check") return candidate;
+    if (command === "station_update_download_and_install") {
+      const progress = payload?.progress as FakeProgressChannel;
+      for (const event of events) progress.onmessage(event);
+      return result;
+    }
+    if (command === "station_update_close") return null;
+    throw new Error(`unexpected command: ${command}`);
+  });
+}
+
 describe("tauri station updater adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -157,6 +172,164 @@ describe("tauri station updater adapter", () => {
     expect(invokeMock).toHaveBeenCalledWith("station_update_close", {
       request: { candidateId: "candidate-opaque-1" },
     });
+  });
+
+  it.each([
+    {
+      name: "fallback before the first started event",
+      events: [
+        {
+          event: "Fallback",
+          data: { from: "yandex", to: "github", reason: "network" },
+        },
+        { event: "Started", data: { contentLength: 10 } },
+        { event: "Progress", data: { chunkLength: 10 } },
+        { event: "Finished" },
+      ],
+    },
+    {
+      name: "fallback after partial primary progress and a peer start",
+      events: [
+        { event: "Started", data: { contentLength: 10 } },
+        { event: "Progress", data: { chunkLength: 4 } },
+        {
+          event: "Fallback",
+          data: { from: "yandex", to: "github", reason: "http" },
+        },
+        { event: "Started", data: { contentLength: 10 } },
+        { event: "Progress", data: { chunkLength: 6 } },
+        { event: "Finished" },
+      ],
+    },
+  ])("accepts the real Rust $name sequence", async ({ events }) => {
+    mockProgressStream(events);
+    const update = await tauriStationUpdater.check();
+    const forwarded: unknown[] = [];
+
+    await update?.downloadAndInstall((event) => forwarded.push(event));
+
+    expect(forwarded).toHaveLength(events.length);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "station_update_close")).toEqual(
+      [],
+    );
+  });
+
+  it.each([
+    {
+      name: "progress before start",
+      events: [{ event: "Progress", data: { chunkLength: 1 } }],
+      forwarded: 0,
+    },
+    {
+      name: "zero announced length",
+      events: [{ event: "Started", data: { contentLength: 0 } }],
+      forwarded: 0,
+    },
+    {
+      name: "oversized announced length",
+      events: [{ event: "Started", data: { contentLength: 512 * 1024 * 1024 + 1 } }],
+      forwarded: 0,
+    },
+    {
+      name: "duplicate start in one attempt",
+      events: [
+        { event: "Started", data: { contentLength: 10 } },
+        { event: "Started", data: { contentLength: 10 } },
+      ],
+      forwarded: 1,
+    },
+    {
+      name: "duplicate fallback",
+      events: [
+        {
+          event: "Fallback",
+          data: { from: "yandex", to: "github", reason: "network" },
+        },
+        {
+          event: "Fallback",
+          data: { from: "yandex", to: "github", reason: "timeout" },
+        },
+      ],
+      forwarded: 1,
+    },
+    {
+      name: "fallback after the announced package is complete",
+      events: [
+        { event: "Started", data: { contentLength: 5 } },
+        { event: "Progress", data: { chunkLength: 5 } },
+        {
+          event: "Fallback",
+          data: { from: "yandex", to: "github", reason: "network" },
+        },
+      ],
+      forwarded: 2,
+    },
+    {
+      name: "peer start after peer progress",
+      events: [
+        { event: "Started", data: { contentLength: 10 } },
+        { event: "Progress", data: { chunkLength: 4 } },
+        {
+          event: "Fallback",
+          data: { from: "yandex", to: "github", reason: "network" },
+        },
+        { event: "Progress", data: { chunkLength: 1 } },
+        { event: "Started", data: { contentLength: 10 } },
+      ],
+      forwarded: 4,
+    },
+    { name: "finish before start", events: [{ event: "Finished" }], forwarded: 0 },
+    {
+      name: "bytes beyond the announced package length",
+      events: [
+        { event: "Started", data: { contentLength: 5 } },
+        { event: "Progress", data: { chunkLength: 6 } },
+      ],
+      forwarded: 1,
+    },
+    {
+      name: "duplicate finish",
+      events: [
+        { event: "Started", data: { contentLength: 1 } },
+        { event: "Progress", data: { chunkLength: 1 } },
+        { event: "Finished" },
+        { event: "Finished" },
+      ],
+      forwarded: 3,
+    },
+  ])("rejects the invalid stream: $name", async ({ events, forwarded }) => {
+    mockProgressStream([
+      ...events,
+      { event: "Started", data: { contentLength: 1 } },
+      { event: "Progress", data: { chunkLength: 1 } },
+      { event: "Finished" },
+    ]);
+    const update = await tauriStationUpdater.check();
+    const callbacks: unknown[] = [];
+
+    await expect(update?.downloadAndInstall((event) => callbacks.push(event))).rejects.toThrow(
+      /invalid station update progress/,
+    );
+
+    expect(callbacks).toHaveLength(forwarded);
+    expect(
+      invokeMock.mock.calls.filter(([command]) => command === "station_update_close"),
+    ).toHaveLength(1);
+  });
+
+  it("rejects a resolved Rust command whose stream never finished", async () => {
+    mockProgressStream([
+      { event: "Started", data: { contentLength: 10 } },
+      { event: "Progress", data: { chunkLength: 10 } },
+    ]);
+    const update = await tauriStationUpdater.check();
+
+    await expect(update?.downloadAndInstall(() => undefined)).rejects.toThrow(
+      /invalid station update progress/,
+    );
+    expect(
+      invokeMock.mock.calls.filter(([command]) => command === "station_update_close"),
+    ).toHaveLength(1);
   });
 
   it("decodes only the closed Rust error shape", async () => {

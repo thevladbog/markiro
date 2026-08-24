@@ -56,7 +56,8 @@ async function excludeLocallyClosedShifts(
 export interface ShiftSelectionProps {
   client: StationClient;
   exec?: SqlExecutor;
-  onSelected: (shift: { id: string; status: string; mode: string }) => void;
+  beforeShiftEntry?: () => void | Promise<void>;
+  onSelected: (shift: { id: string; status: string; mode: string }) => void | Promise<void>;
   onNew: () => void;
   /** Opens the workstation setup screen; omitted where there is no way in. */
   onSetup?: () => void;
@@ -84,6 +85,7 @@ export function shiftSelectionPersistentState(input: {
 export function ShiftSelection({
   client,
   exec,
+  beforeShiftEntry,
   onSelected,
   onNew,
   onSetup,
@@ -213,11 +215,15 @@ export function ShiftSelection({
     setError(null);
     setBusy(true);
     try {
+      if (beforeShiftEntry) {
+        await beforeShiftEntry();
+        if (!mounted.current || isCurrent?.() === false) return;
+      }
       const opened = await client.post<{ id: string; status: string; mode: string }>(
         `/shifts/${shift.id}/open`,
       );
       if (!mounted.current || isCurrent?.() === false) return;
-      onSelected(opened);
+      await onSelected(opened);
     } catch (err) {
       if (!mounted.current || isCurrent?.() === false) return;
       setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
@@ -226,9 +232,21 @@ export function ShiftSelection({
     }
   }
 
-  function rejoin(shift: ShiftListItem) {
+  async function rejoin(shift: ShiftListItem) {
     if (busy || isCurrent?.() === false) return;
-    onSelected(shift);
+    setError(null);
+    setBusy(true);
+    try {
+      if (beforeShiftEntry) {
+        await beforeShiftEntry();
+        if (!mounted.current || isCurrent?.() === false) return;
+      }
+      await onSelected(shift);
+    } catch {
+      if (mounted.current && isCurrent?.() !== false) setError(t("shifts.actionFailed"));
+    } finally {
+      if (mounted.current && isCurrent?.() !== false) setBusy(false);
+    }
   }
 
   const message = error ? <Alert tone="error">{error}</Alert> : <span aria-hidden="true" />;
@@ -316,7 +334,9 @@ export function ShiftSelection({
                   actionLabel={shift.status === "active" ? t("shifts.rejoin") : t("shifts.open")}
                   active={shift.status === "active"}
                   disabled={busy}
-                  onSelect={() => (shift.status === "active" ? rejoin(shift) : void open(shift))}
+                  onSelect={() =>
+                    shift.status === "active" ? void rejoin(shift) : void open(shift)
+                  }
                   exec={exec}
                   productId={shift.productId}
                   image={shift.image}

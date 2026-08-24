@@ -13,6 +13,7 @@ import {
 import { compareStationVersions, parseStationVersion } from "./station-version.js";
 
 const MAX_CANDIDATE_ID_BYTES = 128;
+const MAX_PACKAGE_BYTES = 512 * 1024 * 1024;
 const FUTURE_DATE_TOLERANCE_MS = 5 * 60_000;
 
 const COMMAND_ERROR_RETRYABLE: Record<StationUpdaterCommandErrorCode, boolean> = {
@@ -149,8 +150,13 @@ function decodeCommandError(value: unknown): StationUpdaterCommandError {
   return new StationUpdaterCommandError(code, record.retryable);
 }
 
-function safeInteger(value: unknown, allowZero: boolean): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < (allowZero ? 0 : 1)) {
+function boundedPositiveInteger(value: unknown): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 1 ||
+    value > MAX_PACKAGE_BYTES
+  ) {
     invalid("progress");
   }
   return value;
@@ -166,12 +172,13 @@ function decodeProgress(value: unknown): StationUpdateDownloadEvent {
     const data = exactRecord(outer.data, ["contentLength"], "progress");
     return {
       event: "Started",
-      contentLength: data.contentLength === null ? null : safeInteger(data.contentLength, true),
+      contentLength:
+        data.contentLength === null ? null : boundedPositiveInteger(data.contentLength),
     };
   }
   if (outer.event === "Progress") {
     const data = exactRecord(outer.data, ["chunkLength"], "progress");
-    return { event: "Progress", chunkLength: safeInteger(data.chunkLength, false) };
+    return { event: "Progress", chunkLength: boundedPositiveInteger(data.chunkLength) };
   }
   if (outer.event === "Fallback") {
     const data = exactRecord(outer.data, ["from", "to", "reason"], "progress");
@@ -196,6 +203,67 @@ function expectVoid(value: unknown): void {
   if (value !== null) invalid("result");
 }
 
+interface ProgressStreamState {
+  failed: boolean;
+  fallback: boolean;
+  finished: boolean;
+  primaryStarted: boolean;
+  peerStarted: boolean;
+  peerProgressSeen: boolean;
+  reportedBytes: number;
+  contentLength: number | null;
+}
+
+function advanceProgressStream(
+  state: ProgressStreamState,
+  event: StationUpdateDownloadEvent,
+): void {
+  if (state.finished) invalid("progress");
+  if (event.event === "Started") {
+    const peerAttempt = state.fallback;
+    if (peerAttempt ? state.peerStarted || state.peerProgressSeen : state.primaryStarted) {
+      invalid("progress");
+    }
+    if (peerAttempt) state.peerStarted = true;
+    else state.primaryStarted = true;
+    if (event.contentLength !== null) {
+      if (state.contentLength !== null && state.contentLength !== event.contentLength) {
+        invalid("progress");
+      }
+      if (state.reportedBytes > event.contentLength) invalid("progress");
+      state.contentLength = event.contentLength;
+    }
+    return;
+  }
+  if (event.event === "Fallback") {
+    if (
+      state.fallback ||
+      (state.contentLength !== null && state.reportedBytes >= state.contentLength)
+    ) {
+      invalid("progress");
+    }
+    state.fallback = true;
+    return;
+  }
+  if (event.event === "Progress") {
+    if (!state.primaryStarted && !state.peerStarted) invalid("progress");
+    const next = state.reportedBytes + event.chunkLength;
+    if (!Number.isSafeInteger(next) || next > MAX_PACKAGE_BYTES) invalid("progress");
+    if (state.contentLength !== null && next > state.contentLength) invalid("progress");
+    state.reportedBytes = next;
+    if (state.fallback) state.peerProgressSeen = true;
+    return;
+  }
+  if (
+    (!state.primaryStarted && !state.peerStarted) ||
+    state.reportedBytes === 0 ||
+    (state.contentLength !== null && state.reportedBytes !== state.contentLength)
+  ) {
+    invalid("progress");
+  }
+  state.finished = true;
+}
+
 function toHandle(update: DecodedStationUpdate): StationUpdateHandle {
   let closePromise: Promise<void> | null = null;
   const close = (): Promise<void> => {
@@ -212,18 +280,35 @@ function toHandle(update: DecodedStationUpdate): StationUpdateHandle {
     origin: update.origin,
     fallbackReason: update.fallbackReason,
     async downloadAndInstall(onProgress) {
+      const stream: ProgressStreamState = {
+        failed: false,
+        fallback: false,
+        finished: false,
+        primaryStarted: false,
+        peerStarted: false,
+        peerProgressSeen: false,
+        reportedBytes: 0,
+        contentLength: null,
+      };
       const progressFailure: { error: Error | null; close: Promise<void> | null } = {
         error: null,
         close: null,
       };
+      const failProgress = (error: unknown): void => {
+        if (stream.failed) return;
+        stream.failed = true;
+        progressFailure.error =
+          error instanceof Error ? error : new Error("invalid station update progress");
+        progressFailure.close = close().catch(() => undefined);
+      };
       const progress = new Channel<unknown>((payload) => {
+        if (stream.failed) return;
         let decoded: StationUpdateDownloadEvent;
         try {
           decoded = decodeProgress(payload);
+          advanceProgressStream(stream, decoded);
         } catch (error) {
-          progressFailure.error =
-            error instanceof Error ? error : new Error("invalid station update progress");
-          progressFailure.close = close().catch(() => undefined);
+          failProgress(error);
           return;
         }
         onProgress(decoded);
@@ -239,9 +324,14 @@ function toHandle(update: DecodedStationUpdate): StationUpdateHandle {
         if (progressFailure.error) throw progressFailure.error;
         throw error instanceof Error ? error : new Error("station update request failed");
       }
+      try {
+        expectVoid(result);
+        if (!stream.finished) invalid("progress");
+      } catch (error) {
+        failProgress(error);
+      }
       if (progressFailure.close) await progressFailure.close;
       if (progressFailure.error) throw progressFailure.error;
-      expectVoid(result);
     },
     close,
   };

@@ -30,7 +30,8 @@ const TEMPLATE_PAGE_SIZE = 4;
 export interface NewShiftProps {
   client: StationClient;
   source: ScanSource;
-  onStarted: (shift: { id: string; status: string; mode: string }) => void;
+  beforeShiftEntry?: () => void | Promise<void>;
+  onStarted: (shift: { id: string; status: string; mode: string }) => void | Promise<void>;
   onBack: () => void;
 }
 
@@ -45,7 +46,7 @@ function currentLocalDate(now = new Date()): string {
   ].join("-");
 }
 
-export function NewShift({ client, source, onStarted, onBack }: NewShiftProps) {
+export function NewShift({ client, source, beforeShiftEntry, onStarted, onBack }: NewShiftProps) {
   const { i18n, t } = useTranslation();
   const [raw, setRaw] = useState("");
   const [view, setView] = useState<NewShiftView>("input");
@@ -156,6 +157,7 @@ export function NewShift({ client, source, onStarted, onBack }: NewShiftProps) {
     setError(null);
     setBusy(true);
     try {
+      if (beforeShiftEntry) await beforeShiftEntry();
       const requestedProductionDate = productionDate || null;
       const created = await client.post<{
         id: string;
@@ -176,7 +178,7 @@ export function NewShift({ client, source, onStarted, onBack }: NewShiftProps) {
       const opened = await client.post<{ id: string; status: string; mode: string }>(
         `/shifts/${created.id}/open`,
       );
-      onStarted(opened);
+      await onStarted(opened);
     } catch (err) {
       setError(
         err instanceof StationApiError && err.code === "BOX_LABEL_TEMPLATE_REQUIRED"

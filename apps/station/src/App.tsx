@@ -788,6 +788,7 @@ export function App() {
   // the active shift or sync engine.
   const updater = useStationUpdater({
     enabled: config !== null,
+    updateCenterVisible: showUpdates,
     exec: tauriExecutor,
     activeShift: shift !== null,
     pendingOutbox: syncState.pending,
@@ -1180,11 +1181,11 @@ export function App() {
     />
   );
 
-  // Shared by ShiftSelection's `onSelected` and NewShift's `onStarted`: the
-  // shift is entered immediately (never blocked on the network). Recovery
-  // classification runs first; only its confirmed no-recovery branch starts
-  // the ordinary allocating bundle mirror through the ref above.
-  function handleShiftEntered(entered: ActiveShift) {
+  // Shared by ShiftSelection's `onSelected` and NewShift's `onStarted`, after
+  // each page's updater-cancellation barrier has settled. Recovery classification
+  // runs first; only its confirmed no-recovery branch starts the ordinary
+  // allocating bundle mirror through the ref above.
+  function handleShiftEntered(entered: ActiveShift): void {
     if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
     shiftEntryGenerationRef.current += 1;
     activeShiftIdRef.current = entered.id;
@@ -1312,7 +1313,10 @@ export function App() {
           controller={updater}
           activeShift={shift !== null}
           pendingOutbox={syncState.pending}
-          onBack={() => setShowUpdates(false)}
+          onBack={() => {
+            void updater.cancel();
+            setShowUpdates(false);
+          }}
         />
       ) : showSetup ? (
         <WorkstationSetup
@@ -1443,6 +1447,7 @@ export function App() {
         <ShiftSelection
           client={activeClient}
           exec={tauriExecutor}
+          beforeShiftEntry={updater.cancel}
           onSelected={handleShiftEntered}
           isCurrent={() =>
             floorGeneration ? credentialGenerationIsCurrent(floorGeneration) : false
@@ -1455,6 +1460,7 @@ export function App() {
         <NewShift
           client={activeClient}
           source={scanSource}
+          beforeShiftEntry={updater.cancel}
           onStarted={handleShiftEntered}
           onBack={() => setFloorView("select")}
         />

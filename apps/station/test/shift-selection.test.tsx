@@ -469,7 +469,12 @@ describe("ShiftSelection", () => {
   });
 
   it("opens a planned shift and calls onSelected with the opened shift", async () => {
-    vi.spyOn(globalThis, "fetch")
+    let releaseEntry!: () => void;
+    const entryBarrier = new Promise<void>((resolve) => {
+      releaseEntry = resolve;
+    });
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
@@ -493,9 +498,21 @@ describe("ShiftSelection", () => {
       );
 
     const onSelected = vi.fn();
-    render(<ShiftSelection client={client} onSelected={onSelected} onNew={() => {}} />);
+    const beforeShiftEntry = vi.fn(() => entryBarrier);
+    render(
+      <ShiftSelection
+        client={client}
+        beforeShiftEntry={beforeShiftEntry}
+        onSelected={onSelected}
+        onNew={() => {}}
+      />,
+    );
     await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await waitFor(() => expect(beforeShiftEntry).toHaveBeenCalledOnce());
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(onSelected).not.toHaveBeenCalled();
+    releaseEntry();
     await waitFor(() =>
       expect(onSelected).toHaveBeenCalledWith(
         expect.objectContaining({ id: "s1", status: "active" }),
@@ -530,6 +547,52 @@ describe("ShiftSelection", () => {
       expect.objectContaining({ id: "s1", status: "active", mode: "aggregation" }),
     );
     expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("keeps shift entry blocked while the shared updater cancellation barrier is pending", async () => {
+    let releaseEntry!: () => void;
+    const entryBarrier = new Promise<void>((resolve) => {
+      releaseEntry = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "s1",
+              status: "active",
+              mode: "aggregation",
+              productName: "Cola",
+              plannedQty: null,
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const beforeShiftEntry = vi.fn(() => entryBarrier);
+    const onSelected = vi.fn();
+    render(
+      <ShiftSelection
+        client={client}
+        beforeShiftEntry={beforeShiftEntry}
+        onSelected={onSelected}
+        onNew={() => {}}
+        onConflicts={() => {}}
+      />,
+    );
+    const rejoin = await screen.findByRole("button", { name: "Rejoin" });
+
+    fireEvent.click(rejoin);
+
+    await waitFor(() => expect((rejoin as HTMLButtonElement).disabled).toBe(true));
+    expect(beforeShiftEntry).toHaveBeenCalledOnce();
+    expect(onSelected).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: "Conflicts" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    releaseEntry();
+    await waitFor(() => expect(onSelected).toHaveBeenCalledOnce());
   });
 
   // Finding 3: while `open()` is in flight, the Conflicts button must not
