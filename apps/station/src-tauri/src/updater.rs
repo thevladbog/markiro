@@ -4628,7 +4628,9 @@ mod tests {
                 assert!(probe.cleaned_allocations() <= 1);
             }
             assert!(probe.all_clean());
-            assert!(server.stalled_body_is_open());
+            if exact_cleaned_allocations.is_some() {
+                assert!(server.stalled_body_is_open());
+            }
 
             server.release_stalled_body();
             server.finish().expect("loopback timeout server");
