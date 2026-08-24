@@ -119,6 +119,19 @@ export {
 export type { ShiftCloseReasonCode } from "./shift-close.js";
 export { formatShiftNumber, shiftMonthKey } from "./shift-number.js";
 export {
+  canDisposeChzCode,
+  classifyInventorySnapshotRow,
+  INVENTORY_CHZ_STATUSES,
+} from "./inventory/index.js";
+export type {
+  InventoryChzCodeDispositionInput,
+  InventoryChzStatus,
+  InventoryCodeState,
+  InventoryProductionDateRange,
+  InventorySnapshotClassification,
+  InventorySnapshotSourceRow,
+} from "./inventory/index.js";
+export {
   CABINET_CAPABILITY,
   hasCabinetCapabilities,
   resolveCabinetAccess,

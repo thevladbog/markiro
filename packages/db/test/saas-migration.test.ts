@@ -72,6 +72,10 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "0063_payment_account_evidence.sql"));
     await rm(join(legacyMigrations, "0064_normalize_operator_billing_profile_kind.sql"));
     await rm(join(legacyMigrations, "0065_saas_party_actual_addresses.sql"));
+    await rm(join(legacyMigrations, "0066_panoramic_hemingway.sql"));
+    await rm(join(legacyMigrations, "0067_flashy_outlaw_kid.sql"));
+    await rm(join(legacyMigrations, "0068_inventory_protected_date_precedence.sql"));
+    await rm(join(legacyMigrations, "0069_inventory_station_manifest.sql"));
     await rm(join(legacyMigrations, "meta", "0030_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0031_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0032_snapshot.json"));
@@ -106,6 +110,7 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "meta", "0061_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0064_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0065_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0069_snapshot.json"));
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -147,7 +152,11 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
         entry.tag !== "0062_document_account_snapshots" &&
         entry.tag !== "0063_payment_account_evidence" &&
         entry.tag !== "0064_normalize_operator_billing_profile_kind" &&
-        entry.tag !== "0065_saas_party_actual_addresses",
+        entry.tag !== "0065_saas_party_actual_addresses" &&
+        entry.tag !== "0066_panoramic_hemingway" &&
+        entry.tag !== "0067_flashy_outlaw_kid" &&
+        entry.tag !== "0068_inventory_protected_date_precedence" &&
+        entry.tag !== "0069_inventory_station_manifest",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0029_loving_triathlon");
     await writeFile(journalPath, JSON.stringify(journal));

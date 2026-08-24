@@ -125,8 +125,13 @@ export class ObjectStorageService implements OnModuleDestroy {
     await this.#client.send(new DeleteObjectCommand({ Bucket: this.#bucket, Key: key }));
   }
 
-  async get(key: string): Promise<{ body: Buffer; contentType: string | null }> {
+  async get(
+    key: string,
+    options: { maxBytes?: number } = {},
+  ): Promise<{ body: Buffer; contentType: string | null }> {
     assertSafeKey(key);
+    const maxBytes = options.maxBytes ?? MAX_PRIVATE_OBJECT_BYTES;
+    assertPrivateReadLimit(maxBytes);
     const response = (await this.#client.send(
       new GetObjectCommand({ Bucket: this.#bucket, Key: key }),
     )) as {
@@ -134,15 +139,12 @@ export class ObjectStorageService implements OnModuleDestroy {
       ContentLength?: number;
       ContentType?: string;
     };
-    if (
-      typeof response.ContentLength === "number" &&
-      response.ContentLength > MAX_PRIVATE_OBJECT_BYTES
-    ) {
+    if (typeof response.ContentLength === "number" && response.ContentLength > maxBytes) {
       await closeObjectBody(response.Body);
-      throw new Error("Private object exceeds 5 MiB response limit");
+      throw privateReadLimitError(maxBytes);
     }
     return {
-      body: await readBoundedBody(response.Body),
+      body: await readBoundedBody(response.Body, maxBytes),
       contentType: response.ContentType ?? null,
     };
   }
@@ -192,10 +194,10 @@ async function closeObjectBody(body: unknown): Promise<void> {
   }
 }
 
-async function readBoundedBody(body: unknown): Promise<Buffer> {
+async function readBoundedBody(body: unknown, maxBytes: number): Promise<Buffer> {
   if (body instanceof Uint8Array) {
-    if (body.byteLength > MAX_PRIVATE_OBJECT_BYTES) {
-      throw new Error("Private object exceeds 5 MiB response limit");
+    if (body.byteLength > maxBytes) {
+      throw privateReadLimitError(maxBytes);
     }
     return Buffer.from(body);
   }
@@ -207,12 +209,23 @@ async function readBoundedBody(body: unknown): Promise<Buffer> {
   for await (const chunk of body as AsyncIterable<Uint8Array>) {
     const bytes = Buffer.from(chunk);
     total += bytes.byteLength;
-    if (total > MAX_PRIVATE_OBJECT_BYTES) {
-      throw new Error("Private object exceeds 5 MiB response limit");
+    if (total > maxBytes) {
+      throw privateReadLimitError(maxBytes);
     }
     chunks.push(bytes);
   }
   return Buffer.concat(chunks, total);
+}
+
+function assertPrivateReadLimit(maxBytes: number): void {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    throw new Error("Private object response limit must be a positive safe integer");
+  }
+}
+
+function privateReadLimitError(maxBytes: number): Error {
+  const mebibytes = maxBytes / (1024 * 1024);
+  return new Error(`Private object exceeds ${mebibytes} MiB response limit`);
 }
 
 export function isMissingObjectError(error: unknown): boolean {

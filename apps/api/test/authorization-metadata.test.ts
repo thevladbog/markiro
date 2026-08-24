@@ -19,6 +19,7 @@ import {
   ProductExternalLinkController,
 } from "../src/modules/integrations/integrations.controller";
 import { KiosksController } from "../src/modules/kiosks/kiosks.controller";
+import { InventoriesController } from "../src/modules/inventories/inventories.controller";
 import { OperatorsController } from "../src/modules/operators/operators.controller";
 import { OrgProfileController } from "../src/modules/org-profile/org-profile.controller";
 import { StationOperatorsController } from "../src/modules/operators/station-operators.controller";
@@ -143,6 +144,18 @@ const OPERATIONAL_CONTROLLERS: readonly [
     },
   ],
   [ConflictsController, { listConflicts: readPolicy, reviewConflict: writePolicy }],
+  [
+    InventoriesController,
+    {
+      list: readPolicy,
+      create: writePolicy,
+      get: readPolicy,
+      update: writePolicy,
+      importEvidence: writePolicy,
+      fixSnapshot: writePolicy,
+      start: writePolicy,
+    },
+  ],
   [
     OperatorsController,
     {
