@@ -8,7 +8,9 @@ Bootstrap уже выполнен. Повторять его для обычно
 - Lockbox `markiro-production-runtime`;
 - Lockbox `markiro-production-state-backend`;
 - service accounts `terraform`, `state` и `app`;
-- GitHub OIDC credential только для `production-infrastructure`;
+- два точных GitHub OIDC credential: для plan Environment
+  `production-infrastructure` и отдельно для apply Environment
+  `production-infrastructure-apply`;
 - KMS grants, необходимые Terraform и app.
 
 Registry secret, runner registration secret, audit identity/log group и

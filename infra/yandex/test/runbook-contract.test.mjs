@@ -84,3 +84,24 @@ test("active runbooks do not instruct operators to use retired release phases", 
     /deployment_phase=|rollback_rehearsal=|observability_phase=|postgres_provisioning_phase=|dns_apply_run_id=|dns_verifier_run_id=/,
   );
 });
+
+test("active infrastructure runbooks require separate reviewed plan and apply runs", async () => {
+  const [goLive, infrastructure, bootstrap] = await Promise.all([
+    read("docs/runbooks/yandex-first-go-live.md"),
+    read("docs/runbooks/yandex-infrastructure-apply.md"),
+    read("docs/runbooks/yandex-bootstrap.md"),
+  ]);
+
+  for (const runbook of [goLive, infrastructure]) {
+    assert.match(runbook, /mode=plan/);
+    assert.match(runbook, /mode=apply/);
+    assert.match(runbook, /production-infrastructure/);
+    assert.match(runbook, /production-infrastructure-apply/);
+    assert.match(runbook, /plan_key/);
+    assert.match(runbook, /plan_sha256/);
+  }
+  assert.match(goLive, /enable_station_release_public_dns=false/);
+  assert.match(bootstrap, /production-infrastructure/);
+  assert.match(bootstrap, /production-infrastructure-apply/);
+  assert.match(bootstrap, /два.*OIDC|OIDC.*два/is);
+});

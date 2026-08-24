@@ -119,6 +119,11 @@ test("Station release origin bootstrap separates protected credentials and appro
   assert.match(bootstrap, /trap cleanup/);
   assert.match(
     bootstrap,
+    /gpg --batch --quiet --decrypt "\$encrypted_packet_file" > "\$secret_key_file"/,
+  );
+  assert.doesNotMatch(bootstrap, /gpg[^\n]*--output "\$secret_key_file"/);
+  assert.match(
+    bootstrap,
     /gh secret set YANDEX_STATION_RELEASE_ACCESS_KEY_ID --env station-release < "\$access_key_file"/,
   );
   assert.match(
@@ -131,6 +136,14 @@ test("Station release origin bootstrap separates protected credentials and appro
   assert.match(bootstrap, /ISSUED/);
   assert.match(bootstrap, /baseline/is);
   assert.match(bootstrap, /отдельн.*одобрен.*apply/is);
+  assert.match(infrastructure, /mode=plan/);
+  assert.match(infrastructure, /mode=apply/);
+  assert.match(infrastructure, /production-infrastructure-apply/);
+  assert.match(infrastructure, /production\/plans\//);
+  assert.match(infrastructure, /plan_key/);
+  assert.match(infrastructure, /plan_sha256/);
+  assert.match(infrastructure, /residual|остаточн/is);
+  assert.match(infrastructure, /version-id|VersionId/);
   assert.ok(bootstrap.indexOf("STOP 1 — APPLY") < bootstrap.indexOf("вручную разрешает apply"));
   assert.ok(
     bootstrap.indexOf("STOP 2 — SECRETS") <

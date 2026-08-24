@@ -374,8 +374,13 @@ test("production wires the fixed Station release origin behind a separate public
 });
 
 test("bootstrap retains only state, runtime and the three necessary service accounts", async () => {
-  const bootstrap = await source("infra/yandex/bootstrap/main.tf");
-  const iam = await source("infra/yandex/modules/iam/main.tf");
+  const [bootstrap, bootstrapVariables, bootstrapTfvars, iam, iamVariables] = await Promise.all([
+    source("infra/yandex/bootstrap/main.tf"),
+    source("infra/yandex/bootstrap/variables.tf"),
+    source("infra/yandex/bootstrap/terraform.tfvars.example"),
+    source("infra/yandex/modules/iam/main.tf"),
+    source("infra/yandex/modules/iam/variables.tf"),
+  ]);
   const active = `${bootstrap}\n${iam}`;
   for (const retained of [
     'resource "yandex_storage_bucket" "state"',
@@ -385,9 +390,48 @@ test("bootstrap retains only state, runtime and the three necessary service acco
     'resource "yandex_iam_service_account" "state"',
     'resource "yandex_iam_service_account" "app"',
     'resource "yandex_iam_workload_identity_federated_credential" "github_infrastructure"',
+    'resource "yandex_iam_workload_identity_federated_credential" "github_infrastructure_apply"',
   ])
     assert.match(active, new RegExp(retained.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.equal([...iam.matchAll(/resource\s+"yandex_iam_service_account"/g)].length, 3);
+  assert.equal(
+    [...iam.matchAll(/resource\s+"yandex_iam_workload_identity_federated_credential"/g)].length,
+    2,
+  );
+  assert.match(
+    block(
+      iam,
+      'resource "yandex_iam_workload_identity_federated_credential" "github_infrastructure"',
+    ),
+    /external_subject_id\s*=\s*local\.github_infrastructure_subject/,
+  );
+  assert.match(
+    block(
+      iam,
+      'resource "yandex_iam_workload_identity_federated_credential" "github_infrastructure_apply"',
+    ),
+    /external_subject_id\s*=\s*local\.github_infrastructure_apply_subject/,
+  );
+  for (const [variables, name, exact] of [
+    [iamVariables, "github_infrastructure_environment", "production-infrastructure"],
+    [iamVariables, "github_infrastructure_apply_environment", "production-infrastructure-apply"],
+    [bootstrapVariables, "github_infrastructure_environment", "production-infrastructure"],
+    [
+      bootstrapVariables,
+      "github_infrastructure_apply_environment",
+      "production-infrastructure-apply",
+    ],
+  ]) {
+    assert.match(block(variables, `variable "${name}"`), new RegExp(`== "${exact}"`));
+  }
+  assert.match(
+    bootstrap,
+    /github_infrastructure_apply_environment\s*=\s*var\.github_infrastructure_apply_environment/,
+  );
+  assert.match(
+    bootstrapTfvars,
+    /^github_infrastructure_apply_environment\s*=\s*"production-infrastructure-apply"$/m,
+  );
   assert.doesNotMatch(
     active,
     /deployment_controller|github_deploy|runner_registration|registry_secret|yandex_lockbox_secret"\s+"registry|yandex_logging_group|audit_trails|smart-web-security|certificate-manager|monitoring\./,
@@ -467,7 +511,7 @@ test("active Terraform contains no literal credentials and managed release edge 
   assert.equal([...releases.matchAll(/resource\s+"yandex_cm_certificate"/g)].length, 1);
 });
 
-test("infrastructure workflow has one protected manual apply without legacy phases", async () => {
+test("infrastructure workflow protects validation, plan and apply without legacy phases", async () => {
   const workflow = await source(".github/workflows/yandex-infrastructure.yml");
   assert.match(workflow, /workflow_dispatch:[\s\S]*target_sha:[\s\S]*enable_public_dns:/);
   assert.match(workflow, /environment:\s*production-infrastructure/);
@@ -476,8 +520,8 @@ test("infrastructure workflow has one protected manual apply without legacy phas
   assert.match(workflow, /terraform[^\n]+plan[^\n]+-out="\$plan"/);
   assert.equal(
     [...workflow.matchAll(/name:\s*Configure provider mirror/g)].length,
-    2,
-    "both validation and apply must use the Yandex provider mirror",
+    3,
+    "validation, plan and apply must use the Yandex provider mirror",
   );
   const payloadFilter = workflow.match(/jq -e '([\s\S]*?)' <<<"\$payload" > \/dev\/null/)?.[1];
   assert.ok(payloadFilter, "workflow must validate the Lockbox payload before exporting it");
@@ -516,13 +560,15 @@ test("infrastructure workflow has one protected manual apply without legacy phas
   );
 });
 
-test("infrastructure workflow keeps Station release inputs and DNS approval isolated from publisher credentials", async () => {
+test("infrastructure workflow escrows one reviewed plan between separately protected runs", async () => {
   const workflow = await source(".github/workflows/yandex-infrastructure.yml");
 
   assert.match(
     workflow,
-    /workflow_dispatch:[\s\S]*enable_public_dns:[\s\S]*enable_station_release_public_dns:/,
+    /workflow_dispatch:[\s\S]*mode:[\s\S]*options:[\s\S]*- plan[\s\S]*- apply/,
   );
+  assert.match(workflow, /plan_key:[\s\S]*type:\s*string/);
+  assert.match(workflow, /plan_sha256:[\s\S]*type:\s*string/);
   const releaseDnsInput = workflow.match(
     /enable_station_release_public_dns:([\s\S]*?)\n\npermissions:/,
   )?.[1];
@@ -530,6 +576,59 @@ test("infrastructure workflow keeps Station release inputs and DNS approval isol
   assert.match(releaseDnsInput, /required:\s*true/);
   assert.match(releaseDnsInput, /default:\s*false/);
   assert.match(releaseDnsInput, /type:\s*boolean/);
+
+  const planStart = workflow.indexOf("  plan:\n");
+  const applyStart = workflow.indexOf("  apply:\n");
+  assert.ok(planStart > -1 && applyStart > planStart);
+  const planJob = workflow.slice(planStart, applyStart);
+  const applyJob = workflow.slice(applyStart);
+
+  assert.match(planJob, /if:.*inputs\.mode == 'plan'/);
+  assert.match(planJob, /environment:\s*production-infrastructure/);
+  assert.match(applyJob, /if:.*inputs\.mode == 'apply'/);
+  assert.match(applyJob, /environment:\s*production-infrastructure-apply/);
+
+  assert.match(planJob, /terraform[^\n]+plan[^\n]+-out="\$plan"/);
+  assert.doesNotMatch(planJob, /terraform[^\n]+\sapply(?:\s|$)/);
+  assert.match(applyJob, /terraform[^\n]+apply[^\n]+"\$plan"/);
+  assert.doesNotMatch(applyJob, /terraform[^\n]+\splan(?:\s|$)/);
+
+  for (const job of [planJob, applyJob]) {
+    assert.match(job, /\[\[ "\$TARGET_SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+    assert.match(job, /\[\[ "\$GITHUB_REF" == "refs\/heads\/main" \]\]/);
+    assert.match(job, /\[\[ "\$\(git rev-parse HEAD\)" == "\$TARGET_SHA" \]\]/);
+    assert.match(job, /case "\$ENABLE_PUBLIC_DNS" in true\|false\)/);
+    assert.match(job, /case "\$ENABLE_STATION_RELEASE_PUBLIC_DNS" in true\|false\)/);
+    assert.match(
+      job,
+      /export TF_VAR_public_dns_enabled="\$ENABLE_PUBLIC_DNS"[\s\S]*export TF_VAR_station_release_public_dns_enabled="\$ENABLE_STATION_RELEASE_PUBLIC_DNS"/,
+    );
+    assert.match(job, /node infra\/yandex\/scripts\/guard-production-plan\.mjs "\$plan_json"/);
+  }
+
+  assert.match(
+    planJob,
+    /plan_key="production\/plans\/\$\{GITHUB_RUN_ID\}\/\$\{TARGET_SHA\}\/\$\{ENABLE_PUBLIC_DNS\}-\$\{ENABLE_STATION_RELEASE_PUBLIC_DNS\}\/production\.tfplan"/,
+  );
+  assert.match(planJob, /plan_sha256=.*sha256sum "\$plan"/);
+  assert.match(planJob, /aws s3api put-object[\s\S]*--bucket "\$YC_STATE_BUCKET_NAME"/);
+  assert.match(planJob, /--key "\$plan_key"[\s\S]*--body "\$plan"/);
+  assert.match(planJob, /--metadata[\s\S]*target-sha=.*enable-public-dns=/);
+
+  assert.match(applyJob, /PLAN_KEY:\s*\$\{\{ inputs\.plan_key \}\}/);
+  assert.match(applyJob, /PLAN_SHA256:\s*\$\{\{ inputs\.plan_sha256 \}\}/);
+  assert.match(applyJob, /\[\[ "\$PLAN_SHA256" =~ \^\[0-9a-f\]\{64\}\$ \]\]/);
+  assert.match(applyJob, /\[\[ "\$PLAN_KEY" =~ \^production\\\/plans\\\//);
+  assert.match(applyJob, /aws s3api head-object[\s\S]*--key "\$PLAN_KEY"/);
+  assert.match(applyJob, /aws s3api get-object[\s\S]*--key "\$PLAN_KEY"/);
+  assert.match(applyJob, /\.Metadata[\s\S]*target-sha[\s\S]*enable-public-dns/);
+  const hashGuard = applyJob.indexOf("sha256sum --check --status");
+  const apply = applyJob.indexOf("terraform -chdir=infra/yandex/production apply");
+  assert.ok(hashGuard > -1 && apply > hashGuard, "exact plan hash must be verified before apply");
+  const deleteEscrow = applyJob.indexOf("aws s3api delete-object", apply);
+  assert.ok(deleteEscrow > apply, "the exact escrowed plan version must be deleted after apply");
+  assert.match(applyJob, /--version-id "\$plan_version_id"/);
+
   assert.match(
     workflow,
     /ENABLE_STATION_RELEASE_PUBLIC_DNS:\s*\$\{\{ inputs\.enable_station_release_public_dns \}\}/,
@@ -546,21 +645,10 @@ test("infrastructure workflow keeps Station release inputs and DNS approval isol
     workflow,
     /TF_VAR_station_release_publisher_pgp_key:\s*\$\{\{ vars\.YC_STATION_RELEASE_PUBLISHER_PGP_KEY \}\}/,
   );
-  assert.match(
-    workflow,
-    /case "\$ENABLE_PUBLIC_DNS" in true\|false\)[\s\S]*case "\$ENABLE_STATION_RELEASE_PUBLIC_DNS" in true\|false\)/,
-  );
-  assert.match(
-    workflow,
-    /export TF_VAR_public_dns_enabled="\$ENABLE_PUBLIC_DNS"[\s\S]*export TF_VAR_station_release_public_dns_enabled="\$ENABLE_STATION_RELEASE_PUBLIC_DNS"/,
-  );
-  assert.match(workflow, /\[\[ "\$TARGET_SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
-  assert.match(workflow, /\[\[ "\$GITHUB_REF" == "refs\/heads\/main" \]\]/);
-  assert.match(workflow, /\[\[ "\$\(git rev-parse HEAD\)" == "\$TARGET_SHA" \]\]/);
-
   assert.doesNotMatch(workflow, /YANDEX_STATION_RELEASE_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY)/);
   assert.doesNotMatch(workflow, /terraform[^\n]*\soutput(?:\s|$)/);
   assert.doesNotMatch(workflow, /actions\/upload-artifact/);
+  assert.doesNotMatch(workflow, /GITHUB_STEP_SUMMARY/);
   assert.doesNotMatch(
     workflow,
     /(?:--access-key|--secret-key|access_key\s*=\s*\$\{\{|secret_key\s*=\s*\$\{\{)/i,

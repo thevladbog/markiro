@@ -4,11 +4,14 @@
 Environment `station-release`, не записывают GitHub secrets и не меняют правила
 защиты Environment.
 
-## GitHub Environment `production-infrastructure`
+## GitHub Environments для plan и apply
 
-Environment должен разрешать deployment только из `main` и требовать approval
-авторизованного владельца инфраструктуры. В нём находятся только следующие
-GitHub variables:
+Environment `production-infrastructure` используется только запуском
+`mode=plan`. Отдельный Environment `production-infrastructure-apply`
+используется только запуском `mode=apply`, чтобы его approval происходил после
+проверки точного сохранённого плана. Оба Environment должны разрешать deployment
+только из `main`, требовать approval авторизованного владельца инфраструктуры и
+содержать один и тот же утверждённый набор GitHub variables:
 
 - `YC_CLOUD_ID`
 - `YC_FOLDER_ID`
@@ -39,6 +42,13 @@ GitHub variables:
 PGP private key остаётся только у утверждённого оператора и никогда не попадает
 в GitHub, Terraform, репозиторий, логи или artifacts. State-backend access/secret
 keys остаются в Lockbox; не переносите их в GitHub variables или secrets.
+
+До первого apply разделённого workflow отдельным одобренным bootstrap apply
+создайте точный workload-identity subject для Environment
+`production-infrastructure-apply`. Существующий subject
+`production-infrastructure` сохраняется для plan. Не используйте wildcard
+subject и не переносите state-backend credentials в GitHub. Эта настройка и
+создание самих Environment выполняются оператором, а не этим runbook/test task.
 
 ## GitHub Environment `station-release`
 

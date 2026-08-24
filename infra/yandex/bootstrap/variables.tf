@@ -65,13 +65,24 @@ variable "github_repository_id" {
 }
 
 variable "github_infrastructure_environment" {
-  description = "Exact protected GitHub environment permitted to exchange infrastructure automation tokens."
+  description = "Exact protected GitHub environment permitted to exchange infrastructure plan tokens."
   type        = string
   nullable    = false
 
   validation {
     condition     = var.github_infrastructure_environment == "production-infrastructure"
     error_message = "github_infrastructure_environment must be exactly production-infrastructure."
+  }
+}
+
+variable "github_infrastructure_apply_environment" {
+  description = "Exact separately protected GitHub environment permitted to exchange infrastructure apply tokens."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = var.github_infrastructure_apply_environment == "production-infrastructure-apply"
+    error_message = "github_infrastructure_apply_environment must be exactly production-infrastructure-apply."
   }
 }
 

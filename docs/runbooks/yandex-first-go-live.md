@@ -20,21 +20,44 @@ bucket, state bucket и KMS не должны удаляться или заме
 
 ## 3. Применить упрощение инфраструктуры
 
-Запустите вручную **Yandex infrastructure** на текущем `main`:
+Сначала запустите вручную **Yandex infrastructure** на текущем `main` в режиме
+планирования:
 
 ```text
+mode=plan
 target_sha=<current-main-40-character-sha>
 enable_public_dns=true
+enable_station_release_public_dns=false
+plan_key=
+plan_sha256=
 ```
 
-Approve environment `production-infrastructure`. Workflow строит один saved
-Terraform plan, запрещает замену app VM и удаление PostgreSQL, базы, media и
-временно сохранённого audit bucket, затем применяет ровно этот plan.
+Approve Environment `production-infrastructure`. Workflow строит один saved
+Terraform plan, проверяет запрет замены app VM и удаления PostgreSQL, базы, media
+и временно сохранённого audit bucket, но ничего не применяет. Просмотрите
+санитаризированный список изменений и сохраните выданные non-secret `plan_key` и
+`plan_sha256`.
 
 Ожидаемые удаления: ALB, backend/target groups, ALB subnet/address/security
 group, Certificate Manager certificates, SWS/ARL, Audit Trails, облачные log
 groups и deployment-controller/runner ресурсы. Ожидаемые сохранения: app VM и
 её reserved IP, PostgreSQL, media, state, KMS, DNS zone и runtime secrets.
+
+После явного подтверждения владельца инфраструктуры запустите новый dispatch с
+теми же SHA и DNS flags:
+
+```text
+mode=apply
+target_sha=<current-main-40-character-sha>
+enable_public_dns=true
+enable_station_release_public_dns=false
+plan_key=<exact-key-from-reviewed-plan-run>
+plan_sha256=<exact-64-hex-from-reviewed-plan-run>
+```
+
+Approve отдельный Environment `production-infrastructure-apply` только после
+review. Workflow повторно проверит binding и SHA-256, применит точный escrowed
+plan и удалит его точную версию после успеха.
 
 ## 4. Проверить прямой DNS
 

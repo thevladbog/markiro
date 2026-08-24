@@ -5,8 +5,15 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      mode:
+        description: Create a reviewable plan or apply one exact escrowed plan
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
       target_sha:
-        description: Exact current main commit to apply
+        description: Exact current main commit to plan or apply
         required: true
         type: string
       enable_public_dns:
@@ -14,6 +21,16 @@ on:
         required: true
         default: false
         type: boolean
+      plan_key:
+        description: Apply only - exact state-bucket key emitted by the reviewed plan run
+        required: false
+        default: ""
+        type: string
+      plan_sha256:
+        description: Apply only - exact SHA-256 emitted by the reviewed plan run
+        required: false
+        default: ""
+        type: string
       enable_station_release_public_dns:
         description: Publish releases.markiro.app only after the Station release baseline is verified
         required: true
@@ -78,8 +95,8 @@ jobs:
           pnpm test:yandex-infra:contract
           node --test deploy/yandex/test/remote-deploy.test.mjs deploy/yandex/test/hosted-deploy-workflow.test.mjs
 
-  apply:
-    if: github.event_name == 'workflow_dispatch'
+  plan:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'plan'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     environment: production-infrastructure
@@ -87,9 +104,12 @@ jobs:
       contents: read
       id-token: write
     env:
+      MODE: ${{ inputs.mode }}
       TARGET_SHA: ${{ inputs.target_sha }}
       ENABLE_PUBLIC_DNS: ${{ inputs.enable_public_dns }}
       ENABLE_STATION_RELEASE_PUBLIC_DNS: ${{ inputs.enable_station_release_public_dns }}
+      PLAN_KEY_INPUT: ${{ inputs.plan_key }}
+      PLAN_SHA256_INPUT: ${{ inputs.plan_sha256 }}
       YC_CLOUD_ID: ${{ vars.YC_CLOUD_ID }}
       YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
       YC_OIDC_AUDIENCE: ${{ vars.YC_OIDC_AUDIENCE }}
@@ -146,13 +166,18 @@ jobs:
             '}' > "$config"
           chmod 600 "$config"
           printf 'TF_CLI_CONFIG_FILE=%s\n' "$config" >> "$GITHUB_ENV"
-      - name: Authenticate, guard protected data and apply one saved plan
+      - name: Authenticate, guard and escrow one saved plan
+        id: escrow
         run: |
           set -euo pipefail
           umask 077
+          [[ "$MODE" == "plan" ]]
+          [[ -z "$PLAN_KEY_INPUT" ]]
+          [[ -z "$PLAN_SHA256_INPUT" ]]
           [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$GITHUB_REF" == "refs/heads/main" ]]
           [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
           case "$ENABLE_PUBLIC_DNS" in true|false) ;; *) exit 1 ;; esac
           case "$ENABLE_STATION_RELEASE_PUBLIC_DNS" in true|false) ;; *) exit 1 ;; esac
           export TF_VAR_public_dns_enabled="$ENABLE_PUBLIC_DNS"
@@ -204,10 +229,11 @@ jobs:
           backend="$RUNNER_TEMP/backend.hcl"
           plan="$RUNNER_TEMP/production.tfplan"
           plan_json="$RUNNER_TEMP/production-plan.json"
+          put_response="$RUNNER_TEMP/production-plan-put.json"
           tf_data="$RUNNER_TEMP/terraform-data"
           cleanup() {
             unset github_oidc_token iam_token payload YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
-            rm -f -- "$backend" "$plan" "$plan_json"
+            rm -f -- "$backend" "$plan" "$plan_json" "$put_response"
             rm -rf -- "$tf_data"
           }
           trap cleanup EXIT
@@ -231,4 +257,230 @@ jobs:
           terraform -chdir=infra/yandex/production show -json "$plan" > "$plan_json"
           node infra/yandex/scripts/guard-production-plan.mjs "$plan_json"
           jq -c '[.resource_changes[]? | select(.change.actions != ["no-op"]) | {address, actions: .change.actions}]' "$plan_json"
+
+          plan_key="production/plans/${GITHUB_RUN_ID}/${TARGET_SHA}/${ENABLE_PUBLIC_DNS}-${ENABLE_STATION_RELEASE_PUBLIC_DNS}/production.tfplan"
+          plan_sha256="$(sha256sum "$plan" | cut -d ' ' -f 1)"
+          [[ "$plan_sha256" =~ ^[0-9a-f]{64}$ ]]
+          aws s3api put-object \
+            --endpoint-url https://storage.yandexcloud.net \
+            --bucket "$YC_STATE_BUCKET_NAME" \
+            --key "$plan_key" \
+            --body "$plan" \
+            --content-type application/octet-stream \
+            --metadata "target-sha=$TARGET_SHA,enable-public-dns=$ENABLE_PUBLIC_DNS,enable-station-release-public-dns=$ENABLE_STATION_RELEASE_PUBLIC_DNS,source-run-id=$GITHUB_RUN_ID" \
+            > "$put_response"
+          jq -e '.VersionId | type == "string" and length > 0 and length <= 256' "$put_response" > /dev/null
+          printf 'plan_key=%s\n' "$plan_key" >> "$GITHUB_OUTPUT"
+          printf 'plan_sha256=%s\n' "$plan_sha256" >> "$GITHUB_OUTPUT"
+          printf '::notice title=Terraform plan escrow::plan_key=%s plan_sha256=%s\n' "$plan_key" "$plan_sha256"
+
+  apply:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'apply'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: production-infrastructure-apply
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MODE: ${{ inputs.mode }}
+      TARGET_SHA: ${{ inputs.target_sha }}
+      ENABLE_PUBLIC_DNS: ${{ inputs.enable_public_dns }}
+      ENABLE_STATION_RELEASE_PUBLIC_DNS: ${{ inputs.enable_station_release_public_dns }}
+      PLAN_KEY: ${{ inputs.plan_key }}
+      PLAN_SHA256: ${{ inputs.plan_sha256 }}
+      YC_CLOUD_ID: ${{ vars.YC_CLOUD_ID }}
+      YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
+      YC_OIDC_AUDIENCE: ${{ vars.YC_OIDC_AUDIENCE }}
+      YC_TERRAFORM_SERVICE_ACCOUNT_ID: ${{ vars.YC_TERRAFORM_SERVICE_ACCOUNT_ID }}
+      YC_STATE_BACKEND_SECRET_ID: ${{ vars.YC_STATE_BACKEND_SECRET_ID }}
+      YC_STATE_BUCKET_NAME: ${{ vars.YC_STATE_BUCKET_NAME }}
+      TF_VAR_cloud_id: ${{ vars.YC_CLOUD_ID }}
+      TF_VAR_folder_id: ${{ vars.YC_FOLDER_ID }}
+      TF_VAR_zone: ${{ vars.YC_ZONE }}
+      TF_VAR_app_subnet_cidr: ${{ vars.YC_APP_SUBNET_CIDR }}
+      TF_VAR_data_subnet_cidr: ${{ vars.YC_DATA_SUBNET_CIDR }}
+      TF_VAR_app_deploy_ssh_public_key: ${{ vars.YC_APP_DEPLOY_SSH_PUBLIC_KEY }}
+      TF_VAR_ubuntu_lts_image_family: ubuntu-2404-lts
+      TF_VAR_kms_key_id: ${{ vars.YC_KMS_KEY_ID }}
+      TF_VAR_terraform_service_account_id: ${{ vars.YC_TERRAFORM_SERVICE_ACCOUNT_ID }}
+      TF_VAR_app_service_account_id: ${{ vars.YC_APP_SERVICE_ACCOUNT_ID }}
+      TF_VAR_runtime_secret_id: ${{ vars.YC_RUNTIME_SECRET_ID }}
+      TF_VAR_database_name: ${{ vars.YC_DATABASE_NAME }}
+      TF_VAR_database_disk_size_gb: ${{ vars.YC_DATABASE_DISK_SIZE_GB }}
+      TF_VAR_state_bucket_name: ${{ vars.YC_STATE_BUCKET_NAME }}
+      TF_VAR_media_bucket_name: ${{ vars.YC_MEDIA_BUCKET_NAME }}
+      TF_VAR_audit_bucket_name: ${{ vars.YC_AUDIT_BUCKET_NAME }}
+      TF_VAR_station_release_bucket_name: ${{ vars.YC_STATION_RELEASE_BUCKET_NAME }}
+      TF_VAR_domain: ${{ vars.MARKIRO_DOMAIN }}
+      TF_VAR_saas_admin_domain: ${{ vars.MARKIRO_SAAS_ADMIN_DOMAIN }}
+      TF_VAR_kiosk_domain: ${{ vars.MARKIRO_KIOSK_DOMAIN }}
+      TF_VAR_landing_domain: ${{ vars.MARKIRO_LANDING_DOMAIN }}
+      TF_VAR_station_release_domain: ${{ vars.MARKIRO_STATION_RELEASE_DOMAIN }}
+      TF_VAR_station_release_publisher_pgp_key: ${{ vars.YC_STATION_RELEASE_PUBLISHER_PGP_KEY }}
+      TF_VAR_dns_zone_id: ${{ vars.YC_DNS_ZONE_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.target_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - name: Configure provider mirror
+        run: |
+          set -euo pipefail
+          config="$RUNNER_TEMP/terraform.tfrc"
+          printf '%s\n' \
+            'provider_installation {' \
+            '  network_mirror {' \
+            '    url     = "https://terraform-mirror.yandexcloud.net/"' \
+            '    include = ["registry.terraform.io/yandex-cloud/yandex"]' \
+            '  }' \
+            '  direct {' \
+            '    exclude = ["registry.terraform.io/yandex-cloud/yandex"]' \
+            '  }' \
+            '}' > "$config"
+          chmod 600 "$config"
+          printf 'TF_CLI_CONFIG_FILE=%s\n' "$config" >> "$GITHUB_ENV"
+      - name: Authenticate, revalidate and apply the exact escrowed plan
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$MODE" == "apply" ]]
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+          case "$ENABLE_PUBLIC_DNS" in true|false) ;; *) exit 1 ;; esac
+          case "$ENABLE_STATION_RELEASE_PUBLIC_DNS" in true|false) ;; *) exit 1 ;; esac
+          [[ "$PLAN_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PLAN_KEY" =~ ^production\/plans\/([0-9]+)\/([0-9a-f]{40})\/(true|false)-(true|false)\/production\.tfplan$ ]]
+          source_run_id="${BASH_REMATCH[1]}"
+          [[ "${BASH_REMATCH[2]}" == "$TARGET_SHA" ]]
+          [[ "${BASH_REMATCH[3]}" == "$ENABLE_PUBLIC_DNS" ]]
+          [[ "${BASH_REMATCH[4]}" == "$ENABLE_STATION_RELEASE_PUBLIC_DNS" ]]
+          export TF_VAR_public_dns_enabled="$ENABLE_PUBLIC_DNS"
+          export TF_VAR_station_release_public_dns_enabled="$ENABLE_STATION_RELEASE_PUBLIC_DNS"
+
+          if ! github_oidc_token="$(curl --fail --silent --show-error --max-time 30 --get \
+            --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            --data-urlencode "audience=$YC_OIDC_AUDIENCE" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -er '.value | select(type == "string" and length > 0)')"; then
+            printf '%s\n' '::error::GitHub OIDC token request failed' >&2
+            exit 1
+          fi
+          echo "::add-mask::$github_oidc_token"
+          if ! iam_token="$(curl --fail --silent --show-error --max-time 30 \
+            --request POST \
+            --header "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=$YC_TERRAFORM_SERVICE_ACCOUNT_ID" \
+            --data-urlencode "subject_token=$github_oidc_token" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
+            https://auth.yandex.cloud/oauth/token | jq -er '.access_token | select(type == "string" and length > 0)')"; then
+            printf '%s\n' '::error::Yandex token exchange failed' >&2
+            exit 1
+          fi
+          echo "::add-mask::$iam_token"
+          export YC_TOKEN="$iam_token"
+
+          payload="$(curl --fail --silent --show-error --max-time 30 \
+            --header "Authorization: Bearer $iam_token" \
+            "https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets/$YC_STATE_BACKEND_SECRET_ID/payload")"
+          jq -e '
+            (type == "object") and
+            ((keys | sort) == ["entries", "versionId"]) and
+            (.versionId | type == "string" and length > 0) and
+            (.entries | type == "array" and length == 2) and
+            ([.entries[].key] | sort) == ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] and
+            all(.entries[];
+              (type == "object") and
+              ((keys | sort) == ["key", "textValue"]) and
+              (.textValue | type == "string") and
+              (.textValue | length > 0))
+          ' <<<"$payload" > /dev/null
+          export AWS_ACCESS_KEY_ID="$(jq -er '.entries[] | select(.key == "AWS_ACCESS_KEY_ID") | .textValue' <<<"$payload")"
+          export AWS_SECRET_ACCESS_KEY="$(jq -er '.entries[] | select(.key == "AWS_SECRET_ACCESS_KEY") | .textValue' <<<"$payload")"
+          echo "::add-mask::$AWS_ACCESS_KEY_ID"
+          echo "::add-mask::$AWS_SECRET_ACCESS_KEY"
+
+          backend="$RUNNER_TEMP/backend.hcl"
+          plan="$RUNNER_TEMP/production.tfplan"
+          plan_json="$RUNNER_TEMP/production-plan.json"
+          plan_head="$RUNNER_TEMP/production-plan-head.json"
+          tf_data="$RUNNER_TEMP/terraform-data"
+          cleanup() {
+            unset github_oidc_token iam_token payload YC_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+            rm -f -- "$backend" "$plan" "$plan_json" "$plan_head"
+            rm -rf -- "$tf_data"
+          }
+          trap cleanup EXIT
+          install -d -m 700 "$tf_data"
+          export TF_DATA_DIR="$tf_data"
+          printf '%s\n' \
+            'endpoints = { s3 = "https://storage.yandexcloud.net" }' \
+            "bucket = \"$YC_STATE_BUCKET_NAME\"" \
+            'region = "ru-central1"' \
+            'key = "production/terraform.tfstate"' \
+            'skip_region_validation = true' \
+            'skip_credentials_validation = true' \
+            'skip_requesting_account_id = true' \
+            'skip_s3_checksum = true' \
+            'use_path_style = true' > "$backend"
+          chmod 600 "$backend"
+
+          aws s3api head-object \
+            --endpoint-url https://storage.yandexcloud.net \
+            --bucket "$YC_STATE_BUCKET_NAME" \
+            --key "$PLAN_KEY" \
+            > "$plan_head"
+          jq -e \
+            --arg target_sha "$TARGET_SHA" \
+            --arg enable_public_dns "$ENABLE_PUBLIC_DNS" \
+            --arg enable_station_release_public_dns "$ENABLE_STATION_RELEASE_PUBLIC_DNS" \
+            --arg source_run_id "$source_run_id" '
+              (.ContentLength | type == "number" and . > 0 and . <= 268435456) and
+              (.Metadata == {
+                "target-sha": $target_sha,
+                "enable-public-dns": $enable_public_dns,
+                "enable-station-release-public-dns": $enable_station_release_public_dns,
+                "source-run-id": $source_run_id
+              }) and
+              (.VersionId | type == "string" and length > 0 and length <= 256)
+            ' "$plan_head" > /dev/null
+          plan_version_id="$(jq -er '.VersionId' "$plan_head")"
+          [[ "$plan_version_id" =~ ^[A-Za-z0-9._+/=-]{1,256}$ ]]
+          aws s3api get-object \
+            --endpoint-url https://storage.yandexcloud.net \
+            --bucket "$YC_STATE_BUCKET_NAME" \
+            --key "$PLAN_KEY" \
+            --version-id "$plan_version_id" \
+            "$plan" \
+            > /dev/null
+          printf '%s  %s\n' "$PLAN_SHA256" "$plan" | sha256sum --check --status
+
+          terraform -chdir=infra/yandex/production init -input=false -lockfile=readonly -backend-config="$backend"
+          terraform -chdir=infra/yandex/production validate
+          terraform -chdir=infra/yandex/production show -json "$plan" > "$plan_json"
+          node infra/yandex/scripts/guard-production-plan.mjs "$plan_json"
+          jq -c '[.resource_changes[]? | select(.change.actions != ["no-op"]) | {address, actions: .change.actions}]' "$plan_json"
           terraform -chdir=infra/yandex/production apply -input=false -auto-approve "$plan"
+
+          aws s3api delete-object \
+            --endpoint-url https://storage.yandexcloud.net \
+            --bucket "$YC_STATE_BUCKET_NAME" \
+            --key "$PLAN_KEY" \
+            --version-id "$plan_version_id" \
+            > /dev/null
+          if aws s3api head-object \
+            --endpoint-url https://storage.yandexcloud.net \
+            --bucket "$YC_STATE_BUCKET_NAME" \
+            --key "$PLAN_KEY" \
+            --version-id "$plan_version_id" \
+            > /dev/null 2>&1; then
+            printf '%s\n' '::error::Applied Terraform plan version still exists in escrow' >&2
+            exit 1
+          fi
