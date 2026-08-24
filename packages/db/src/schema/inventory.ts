@@ -15,12 +15,14 @@ import {
   timestamp,
   type AnyPgColumn,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
 import { organization, user } from "./auth.js";
 import { labelTemplates } from "./labels.js";
-import { lines, products } from "./platform.js";
+import { employees } from "./pickup.js";
+import { lines, products, stationDevices } from "./platform.js";
 
 export const INVENTORY_CHZ_STATUSES = [
   "EMITTED",
@@ -51,6 +53,49 @@ export type InventoryImportContainerKind = (typeof INVENTORY_IMPORT_CONTAINER_KI
 export const INVENTORY_IMPORT_PARSE_OUTCOMES = ["succeeded", "failed"] as const;
 export type InventoryImportParseOutcome = (typeof INVENTORY_IMPORT_PARSE_OUTCOMES)[number];
 
+export const INVENTORY_PARTICIPANT_JOIN_METHODS = ["assigned_line", "task_barcode"] as const;
+export type InventoryParticipantJoinMethod = (typeof INVENTORY_PARTICIPANT_JOIN_METHODS)[number];
+
+export const INVENTORY_SCAN_BATCH_OUTCOMES = ["applied", "rejected", "quarantined"] as const;
+export type InventoryScanBatchOutcome = (typeof INVENTORY_SCAN_BATCH_OUTCOMES)[number];
+
+export const INVENTORY_SCAN_EVENT_KINDS = ["item", "known_box", "old_box"] as const;
+export type InventoryScanEventKind = (typeof INVENTORY_SCAN_EVENT_KINDS)[number];
+
+export const INVENTORY_CODE_CLASSIFICATIONS = [
+  "expected",
+  "protected",
+  "ineligible",
+  "unknown",
+  "voided",
+] as const;
+export type InventoryCodeClassification = (typeof INVENTORY_CODE_CLASSIFICATIONS)[number];
+
+export const INVENTORY_REPACK_BOX_STATES = ["open", "closed", "invalidated"] as const;
+export type InventoryRepackBoxState = (typeof INVENTORY_REPACK_BOX_STATES)[number];
+
+export const INVENTORY_REPACK_PRINT_STATES = [
+  "not_ready",
+  "pending",
+  "printing",
+  "printed",
+  "failed",
+] as const;
+export type InventoryRepackPrintState = (typeof INVENTORY_REPACK_PRINT_STATES)[number];
+
+export const INVENTORY_CORRECTION_ACTIONS = [
+  "void_scan",
+  "restore_scan",
+  "change_date",
+  "remove_item",
+  "invalidate_box",
+  "reprint",
+] as const;
+export type InventoryCorrectionAction = (typeof INVENTORY_CORRECTION_ACTIONS)[number];
+
+export const INVENTORY_LATE_EVENT_RESOLUTIONS = ["pending", "replayed", "discarded"] as const;
+export type InventoryLateEventResolution = (typeof INVENTORY_LATE_EVENT_RESOLUTIONS)[number];
+
 export const inventoryChzStatusEnum = pgEnum("inventory_chz_status", INVENTORY_CHZ_STATUSES);
 export const inventoryLifecycleStatusEnum = pgEnum(
   "inventory_lifecycle_status",
@@ -64,6 +109,38 @@ export const inventoryImportContainerKindEnum = pgEnum(
 export const inventoryImportParseOutcomeEnum = pgEnum(
   "inventory_import_parse_outcome",
   INVENTORY_IMPORT_PARSE_OUTCOMES,
+);
+export const inventoryParticipantJoinMethodEnum = pgEnum(
+  "inventory_participant_join_method",
+  INVENTORY_PARTICIPANT_JOIN_METHODS,
+);
+export const inventoryScanBatchOutcomeEnum = pgEnum(
+  "inventory_scan_batch_outcome",
+  INVENTORY_SCAN_BATCH_OUTCOMES,
+);
+export const inventoryScanEventKindEnum = pgEnum(
+  "inventory_scan_event_kind",
+  INVENTORY_SCAN_EVENT_KINDS,
+);
+export const inventoryCodeClassificationEnum = pgEnum(
+  "inventory_code_classification",
+  INVENTORY_CODE_CLASSIFICATIONS,
+);
+export const inventoryRepackBoxStateEnum = pgEnum(
+  "inventory_repack_box_state",
+  INVENTORY_REPACK_BOX_STATES,
+);
+export const inventoryRepackPrintStateEnum = pgEnum(
+  "inventory_repack_print_state",
+  INVENTORY_REPACK_PRINT_STATES,
+);
+export const inventoryCorrectionActionEnum = pgEnum(
+  "inventory_correction_action",
+  INVENTORY_CORRECTION_ACTIONS,
+);
+export const inventoryLateEventResolutionEnum = pgEnum(
+  "inventory_late_event_resolution",
+  INVENTORY_LATE_EVENT_RESOLUTIONS,
 );
 
 const tenantId = () =>
@@ -480,6 +557,599 @@ export const inventorySnapshotCodes = pgTable(
   ],
 );
 
+/** One station device's participation and close-blocker counters for an inventory. */
+export const inventoryDeviceParticipants = pgTable(
+  "inventory_device_participants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    inventoryId: uuid("inventory_id").notNull(),
+    deviceId: uuid("device_id").notNull(),
+    operatorId: uuid("operator_id").notNull(),
+    configuredLineId: uuid("configured_line_id").notNull(),
+    joinMethod: inventoryParticipantJoinMethodEnum("join_method").notNull(),
+    differentLineConfirmed: boolean("different_line_confirmed").notNull().default(false),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+    leftAt: timestamp("left_at", { withTimezone: true }),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }).notNull().defaultNow(),
+    pendingEventCount: integer("pending_event_count").notNull().default(0),
+    openBoxCount: integer("open_box_count").notNull().default(0),
+  },
+  (table) => [
+    unique("inventory_device_participants_tenant_id_uq").on(table.tenantId, table.id),
+    unique("inventory_device_participants_tenant_inventory_device_uq").on(
+      table.tenantId,
+      table.inventoryId,
+      table.deviceId,
+    ),
+    foreignKey({
+      name: "inventory_device_participants_tenant_inventory_fk",
+      columns: [table.tenantId, table.inventoryId],
+      foreignColumns: [inventories.tenantId, inventories.id],
+    }),
+    foreignKey({
+      name: "inventory_device_participants_tenant_device_fk",
+      columns: [table.tenantId, table.deviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
+    }),
+    foreignKey({
+      name: "inventory_device_participants_tenant_operator_fk",
+      columns: [table.tenantId, table.operatorId],
+      foreignColumns: [employees.tenantId, employees.id],
+    }),
+    foreignKey({
+      name: "inventory_device_participants_tenant_line_fk",
+      columns: [table.tenantId, table.configuredLineId],
+      foreignColumns: [lines.tenantId, lines.id],
+    }),
+    index("inventory_device_participants_close_blockers_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.leftAt,
+      table.pendingEventCount,
+      table.openBoxCount,
+    ),
+    check(
+      "inventory_device_participants_counts_check",
+      sql`${table.pendingEventCount} >= 0 and ${table.openBoxCount} >= 0`,
+    ),
+    check(
+      "inventory_device_participants_timestamps_check",
+      sql`${table.leftAt} is null or ${table.leftAt} >= ${table.joinedAt}`,
+    ),
+  ],
+);
+
+/** Device-scoped idempotency ledger for a bounded inventory event batch. */
+export const inventoryScanBatches = pgTable(
+  "inventory_scan_batches",
+  {
+    tenantId: tenantId(),
+    inventoryId: uuid("inventory_id").notNull(),
+    deviceId: uuid("device_id").notNull(),
+    batchId: text("batch_id").notNull(),
+    payloadDigest: char("payload_digest", { length: 64 }).notNull(),
+    sequenceCeiling: bigint("sequence_ceiling", { mode: "bigint" }).notNull(),
+    outcome: inventoryScanBatchOutcomeEnum("outcome").notNull(),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("inventory_scan_batches_scope_batch_uq").on(
+      table.tenantId,
+      table.inventoryId,
+      table.deviceId,
+      table.batchId,
+    ),
+    unique("inventory_scan_batches_scope_digest_uq").on(
+      table.tenantId,
+      table.inventoryId,
+      table.deviceId,
+      table.payloadDigest,
+    ),
+    foreignKey({
+      name: "inventory_scan_batches_tenant_inventory_fk",
+      columns: [table.tenantId, table.inventoryId],
+      foreignColumns: [inventories.tenantId, inventories.id],
+    }),
+    foreignKey({
+      name: "inventory_scan_batches_tenant_device_fk",
+      columns: [table.tenantId, table.deviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
+    }),
+    index("inventory_scan_batches_replay_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.deviceId,
+      table.receivedAt,
+    ),
+    check(
+      "inventory_scan_batches_batch_id_check",
+      sql`octet_length(${table.batchId}) between 1 and 128`,
+    ),
+    check(
+      "inventory_scan_batches_payload_digest_check",
+      sql`${table.payloadDigest} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check("inventory_scan_batches_sequence_check", sql`${table.sequenceCeiling} >= 0`),
+  ],
+);
+
+/** Immutable client scan facts. Projections may change, but these rows do not. */
+export const inventoryScanEvents = pgTable(
+  "inventory_scan_events",
+  {
+    eventId: uuid("event_id").primaryKey(),
+    tenantId: tenantId(),
+    inventoryId: uuid("inventory_id").notNull(),
+    batchId: text("batch_id").notNull(),
+    deviceId: uuid("device_id").notNull(),
+    deviceSequence: bigint("device_sequence", { mode: "bigint" }).notNull(),
+    operatorId: uuid("operator_id").notNull(),
+    scannedAt: timestamp("scanned_at", { withTimezone: true }).notNull(),
+    kind: inventoryScanEventKindEnum("kind").notNull(),
+    normalizedIdentity: text("normalized_identity").notNull(),
+    codeHash: char("code_hash", { length: 64 }),
+    rawPayload: text("raw_payload"),
+    activeProductionDate: date("active_production_date"),
+    snapshotRevision: integer("snapshot_revision").notNull(),
+    localVerdict: text("local_verdict").notNull(),
+    authoritativeVerdict: text("authoritative_verdict").notNull(),
+    firstWinningEventId: uuid("first_winning_event_id"),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("inventory_scan_events_tenant_inventory_event_uq").on(
+      table.tenantId,
+      table.inventoryId,
+      table.eventId,
+    ),
+    unique("inventory_scan_events_tenant_inventory_device_sequence_uq").on(
+      table.tenantId,
+      table.inventoryId,
+      table.deviceId,
+      table.deviceSequence,
+    ),
+    foreignKey({
+      name: "inventory_scan_events_tenant_batch_fk",
+      columns: [table.tenantId, table.inventoryId, table.deviceId, table.batchId],
+      foreignColumns: [
+        inventoryScanBatches.tenantId,
+        inventoryScanBatches.inventoryId,
+        inventoryScanBatches.deviceId,
+        inventoryScanBatches.batchId,
+      ],
+    }),
+    foreignKey({
+      name: "inventory_scan_events_tenant_operator_fk",
+      columns: [table.tenantId, table.operatorId],
+      foreignColumns: [employees.tenantId, employees.id],
+    }),
+    foreignKey({
+      name: "inventory_scan_events_tenant_first_winner_fk",
+      columns: [table.tenantId, table.inventoryId, table.firstWinningEventId],
+      foreignColumns: [table.tenantId, table.inventoryId, table.eventId],
+    }),
+    index("inventory_scan_events_progress_cursor_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.recordedAt,
+      table.eventId,
+    ),
+    index("inventory_scan_events_batch_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.deviceId,
+      table.batchId,
+    ),
+    check("inventory_scan_events_sequence_check", sql`${table.deviceSequence} >= 0`),
+    check("inventory_scan_events_snapshot_revision_check", sql`${table.snapshotRevision} > 0`),
+    check(
+      "inventory_scan_events_normalized_identity_check",
+      sql`octet_length(${table.normalizedIdentity}) between 1 and 1024`,
+    ),
+    check(
+      "inventory_scan_events_code_hash_check",
+      sql`${table.codeHash} is null or ${table.codeHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "inventory_scan_events_raw_payload_check",
+      sql`${table.rawPayload} is null or octet_length(${table.rawPayload}) between 1 and 2048`,
+    ),
+    check(
+      "inventory_scan_events_verdicts_check",
+      sql`octet_length(${table.localVerdict}) between 1 and 64
+        and octet_length(${table.authoritativeVerdict}) between 1 and 64`,
+    ),
+  ],
+);
+
+/** One authoritative current projection for every physically found code. */
+export const inventoryCodeResults = pgTable(
+  "inventory_code_results",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    inventoryId: uuid("inventory_id").notNull(),
+    codeHash: char("code_hash", { length: 64 }).notNull(),
+    snapshotId: uuid("snapshot_id"),
+    firstAcceptedEventId: uuid("first_accepted_event_id").notNull(),
+    winningDeviceId: uuid("winning_device_id").notNull(),
+    winningScannedAt: timestamp("winning_scanned_at", { withTimezone: true }).notNull(),
+    observedProductionDate: date("observed_production_date"),
+    classification: inventoryCodeClassificationEnum("classification").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("inventory_code_results_tenant_id_inventory_uq").on(
+      table.tenantId,
+      table.id,
+      table.inventoryId,
+    ),
+    unique("inventory_code_results_current_claim_uq").on(
+      table.tenantId,
+      table.inventoryId,
+      table.codeHash,
+    ),
+    foreignKey({
+      name: "inventory_code_results_tenant_inventory_fk",
+      columns: [table.tenantId, table.inventoryId],
+      foreignColumns: [inventories.tenantId, inventories.id],
+    }),
+    foreignKey({
+      name: "inventory_code_results_tenant_snapshot_inventory_fk",
+      columns: [table.tenantId, table.snapshotId, table.inventoryId],
+      foreignColumns: [
+        inventorySnapshots.tenantId,
+        inventorySnapshots.id,
+        inventorySnapshots.inventoryId,
+      ],
+    }),
+    foreignKey({
+      name: "inventory_code_results_tenant_snapshot_code_fk",
+      columns: [table.tenantId, table.snapshotId, table.codeHash],
+      foreignColumns: [
+        inventorySnapshotCodes.tenantId,
+        inventorySnapshotCodes.snapshotId,
+        inventorySnapshotCodes.codeHash,
+      ],
+    }),
+    foreignKey({
+      name: "inventory_code_results_tenant_first_event_fk",
+      columns: [table.tenantId, table.inventoryId, table.firstAcceptedEventId],
+      foreignColumns: [
+        inventoryScanEvents.tenantId,
+        inventoryScanEvents.inventoryId,
+        inventoryScanEvents.eventId,
+      ],
+    }),
+    foreignKey({
+      name: "inventory_code_results_tenant_winning_device_fk",
+      columns: [table.tenantId, table.winningDeviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
+    }),
+    index("inventory_code_results_progress_cursor_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.updatedAt,
+      table.id,
+    ),
+    check("inventory_code_results_hash_check", sql`${table.codeHash} ~ '^[0-9a-f]{64}$'`),
+  ],
+);
+
+/** Durable repack box ownership, date, lifecycle and print work. */
+export const inventoryRepackBoxes = pgTable(
+  "inventory_repack_boxes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    inventoryId: uuid("inventory_id").notNull(),
+    oldSsccContext: char("old_sscc_context", { length: 18 }),
+    newSscc: char("new_sscc", { length: 18 }).notNull(),
+    ownerDeviceId: uuid("owner_device_id").notNull(),
+    capacity: integer("capacity").notNull(),
+    productionDate: date("production_date").notNull(),
+    state: inventoryRepackBoxStateEnum("state").notNull().default("open"),
+    printState: inventoryRepackPrintStateEnum("print_state").notNull().default("not_ready"),
+    printAttemptCount: integer("print_attempt_count").notNull().default(0),
+    printErrorCode: text("print_error_code"),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    invalidatedAt: timestamp("invalidated_at", { withTimezone: true }),
+    printedAt: timestamp("printed_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("inventory_repack_boxes_tenant_id_inventory_uq").on(
+      table.tenantId,
+      table.id,
+      table.inventoryId,
+    ),
+    unique("inventory_repack_boxes_tenant_id_inventory_date_uq").on(
+      table.tenantId,
+      table.id,
+      table.inventoryId,
+      table.productionDate,
+    ),
+    unique("inventory_repack_boxes_tenant_sscc_uq").on(table.tenantId, table.newSscc),
+    foreignKey({
+      name: "inventory_repack_boxes_tenant_inventory_fk",
+      columns: [table.tenantId, table.inventoryId],
+      foreignColumns: [inventories.tenantId, inventories.id],
+    }),
+    foreignKey({
+      name: "inventory_repack_boxes_tenant_owner_device_fk",
+      columns: [table.tenantId, table.ownerDeviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
+    }),
+    index("inventory_repack_boxes_owner_open_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.ownerDeviceId,
+      table.state,
+    ),
+    index("inventory_repack_boxes_close_blockers_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.state,
+      table.printState,
+    ),
+    check("inventory_repack_boxes_capacity_check", sql`${table.capacity} > 0`),
+    check(
+      "inventory_repack_boxes_sscc_check",
+      sql`${table.newSscc} ~ '^[0-9]{18}$'
+        and (${table.oldSsccContext} is null or ${table.oldSsccContext} ~ '^[0-9]{18}$')`,
+    ),
+    check(
+      "inventory_repack_boxes_lifecycle_check",
+      sql`(${table.state} = 'open' and ${table.closedAt} is null and ${table.invalidatedAt} is null)
+        or (${table.state} = 'closed' and ${table.closedAt} is not null and ${table.invalidatedAt} is null)
+        or (${table.state} = 'invalidated' and ${table.invalidatedAt} is not null)`,
+    ),
+    check(
+      "inventory_repack_boxes_print_state_check",
+      sql`(${table.printState} = 'failed' and ${table.printErrorCode} is not null)
+        or (${table.printState} <> 'failed' and ${table.printErrorCode} is null)`,
+    ),
+    check(
+      "inventory_repack_boxes_print_error_code_check",
+      sql`${table.printErrorCode} is null or ${table.printErrorCode} ~ '^[A-Z][A-Z0-9_]{0,127}$'`,
+    ),
+    check("inventory_repack_boxes_print_attempt_count_check", sql`${table.printAttemptCount} >= 0`),
+    check(
+      "inventory_repack_boxes_printed_at_check",
+      sql`(${table.printState} = 'printed' and ${table.printedAt} is not null)
+        or (${table.printState} <> 'printed' and ${table.printedAt} is null)`,
+    ),
+  ],
+);
+
+/** Append-only membership evidence; removed rows permit a later corrected assignment. */
+export const inventoryRepackItems = pgTable(
+  "inventory_repack_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    inventoryId: uuid("inventory_id").notNull(),
+    boxId: uuid("box_id").notNull(),
+    resultId: uuid("result_id").notNull(),
+    productionDate: date("production_date").notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("inventory_repack_items_tenant_id_inventory_uq").on(
+      table.tenantId,
+      table.id,
+      table.inventoryId,
+    ),
+    unique("inventory_repack_items_tenant_box_result_uq").on(
+      table.tenantId,
+      table.boxId,
+      table.resultId,
+    ),
+    uniqueIndex("inventory_repack_items_active_result_uq")
+      .on(table.tenantId, table.inventoryId, table.resultId)
+      .where(sql`${table.removedAt} is null`),
+    foreignKey({
+      name: "inventory_repack_items_tenant_box_date_fk",
+      columns: [table.tenantId, table.boxId, table.inventoryId, table.productionDate],
+      foreignColumns: [
+        inventoryRepackBoxes.tenantId,
+        inventoryRepackBoxes.id,
+        inventoryRepackBoxes.inventoryId,
+        inventoryRepackBoxes.productionDate,
+      ],
+    }),
+    foreignKey({
+      name: "inventory_repack_items_tenant_result_fk",
+      columns: [table.tenantId, table.resultId, table.inventoryId],
+      foreignColumns: [
+        inventoryCodeResults.tenantId,
+        inventoryCodeResults.id,
+        inventoryCodeResults.inventoryId,
+      ],
+    }),
+    index("inventory_repack_items_box_active_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.boxId,
+      table.removedAt,
+    ),
+    check(
+      "inventory_repack_items_removed_at_check",
+      sql`${table.removedAt} is null or ${table.removedAt} >= ${table.addedAt}`,
+    ),
+  ],
+);
+
+/** Append-only projection correction with exact actor, target and revision evidence. */
+export const inventoryCorrections = pgTable(
+  "inventory_corrections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    inventoryId: uuid("inventory_id").notNull(),
+    action: inventoryCorrectionActionEnum("action").notNull(),
+    reason: text("reason").notNull(),
+    actorUserId: text("actor_user_id").references(() => user.id),
+    actorOperatorId: uuid("actor_operator_id"),
+    targetEventId: uuid("target_event_id"),
+    targetCodeResultId: uuid("target_code_result_id"),
+    targetRepackBoxId: uuid("target_repack_box_id"),
+    beforeProjectionDigest: char("before_projection_digest", { length: 64 }).notNull(),
+    afterProjectionDigest: char("after_projection_digest", { length: 64 }).notNull(),
+    resultRevision: integer("result_revision").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("inventory_corrections_tenant_id_inventory_uq").on(
+      table.tenantId,
+      table.id,
+      table.inventoryId,
+    ),
+    foreignKey({
+      name: "inventory_corrections_tenant_inventory_fk",
+      columns: [table.tenantId, table.inventoryId],
+      foreignColumns: [inventories.tenantId, inventories.id],
+    }),
+    foreignKey({
+      name: "inventory_corrections_tenant_operator_fk",
+      columns: [table.tenantId, table.actorOperatorId],
+      foreignColumns: [employees.tenantId, employees.id],
+    }),
+    foreignKey({
+      name: "inventory_corrections_tenant_event_fk",
+      columns: [table.tenantId, table.inventoryId, table.targetEventId],
+      foreignColumns: [
+        inventoryScanEvents.tenantId,
+        inventoryScanEvents.inventoryId,
+        inventoryScanEvents.eventId,
+      ],
+    }),
+    foreignKey({
+      name: "inventory_corrections_tenant_result_fk",
+      columns: [table.tenantId, table.targetCodeResultId, table.inventoryId],
+      foreignColumns: [
+        inventoryCodeResults.tenantId,
+        inventoryCodeResults.id,
+        inventoryCodeResults.inventoryId,
+      ],
+    }),
+    foreignKey({
+      name: "inventory_corrections_tenant_box_fk",
+      columns: [table.tenantId, table.targetRepackBoxId, table.inventoryId],
+      foreignColumns: [
+        inventoryRepackBoxes.tenantId,
+        inventoryRepackBoxes.id,
+        inventoryRepackBoxes.inventoryId,
+      ],
+    }),
+    index("inventory_corrections_progress_cursor_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.resultRevision,
+      table.createdAt,
+      table.id,
+    ),
+    check(
+      "inventory_corrections_actor_check",
+      sql`(${table.actorUserId} is null) <> (${table.actorOperatorId} is null)`,
+    ),
+    check(
+      "inventory_corrections_target_check",
+      sql`${table.targetEventId} is not null
+        or ${table.targetCodeResultId} is not null
+        or ${table.targetRepackBoxId} is not null`,
+    ),
+    check(
+      "inventory_corrections_reason_check",
+      sql`octet_length(btrim(${table.reason})) between 1 and 1024`,
+    ),
+    check(
+      "inventory_corrections_digests_check",
+      sql`${table.beforeProjectionDigest} ~ '^[0-9a-f]{64}$'
+        and ${table.afterProjectionDigest} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check("inventory_corrections_revision_check", sql`${table.resultRevision} > 0`),
+  ],
+);
+
+/** Canonical quarantined batch payload received after an inventory result froze. */
+export const inventoryLateEvents = pgTable(
+  "inventory_late_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    inventoryId: uuid("inventory_id").notNull(),
+    deviceId: uuid("device_id").notNull(),
+    batchId: text("batch_id").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    payloadDigest: char("payload_digest", { length: 64 }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    closedRevision: integer("closed_revision").notNull(),
+    reason: text("reason").notNull(),
+    resolution: inventoryLateEventResolutionEnum("resolution").notNull().default("pending"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedByUserId: text("resolved_by_user_id").references(() => user.id),
+  },
+  (table) => [
+    unique("inventory_late_events_tenant_id_inventory_uq").on(
+      table.tenantId,
+      table.id,
+      table.inventoryId,
+    ),
+    unique("inventory_late_events_scope_batch_uq").on(
+      table.tenantId,
+      table.inventoryId,
+      table.deviceId,
+      table.batchId,
+    ),
+    unique("inventory_late_events_scope_digest_uq").on(
+      table.tenantId,
+      table.inventoryId,
+      table.deviceId,
+      table.payloadDigest,
+    ),
+    foreignKey({
+      name: "inventory_late_events_tenant_inventory_fk",
+      columns: [table.tenantId, table.inventoryId],
+      foreignColumns: [inventories.tenantId, inventories.id],
+    }),
+    foreignKey({
+      name: "inventory_late_events_tenant_device_fk",
+      columns: [table.tenantId, table.deviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
+    }),
+    index("inventory_late_events_resolution_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.resolution,
+      table.receivedAt,
+    ),
+    check(
+      "inventory_late_events_batch_id_check",
+      sql`octet_length(${table.batchId}) between 1 and 128`,
+    ),
+    check(
+      "inventory_late_events_payload_digest_check",
+      sql`${table.payloadDigest} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check("inventory_late_events_revision_check", sql`${table.closedRevision} >= 0`),
+    check("inventory_late_events_reason_check", sql`${table.reason} ~ '^[A-Z][A-Z0-9_]{0,127}$'`),
+    check(
+      "inventory_late_events_resolution_check",
+      sql`(${table.resolution} = 'pending'
+          and ${table.resolvedAt} is null
+          and ${table.resolvedByUserId} is null)
+        or (${table.resolution} in ('replayed', 'discarded')
+          and ${table.resolvedAt} is not null
+          and ${table.resolvedByUserId} is not null)`,
+    ),
+  ],
+);
+
 export type Inventory = typeof inventories.$inferSelect;
 export type NewInventory = typeof inventories.$inferInsert;
 export type InventoryImport = typeof inventoryImports.$inferSelect;
@@ -490,3 +1160,19 @@ export type InventorySnapshotInput = typeof inventorySnapshotInputs.$inferSelect
 export type NewInventorySnapshotInput = typeof inventorySnapshotInputs.$inferInsert;
 export type InventorySnapshotCode = typeof inventorySnapshotCodes.$inferSelect;
 export type NewInventorySnapshotCode = typeof inventorySnapshotCodes.$inferInsert;
+export type InventoryDeviceParticipant = typeof inventoryDeviceParticipants.$inferSelect;
+export type NewInventoryDeviceParticipant = typeof inventoryDeviceParticipants.$inferInsert;
+export type InventoryScanBatch = typeof inventoryScanBatches.$inferSelect;
+export type NewInventoryScanBatch = typeof inventoryScanBatches.$inferInsert;
+export type InventoryScanEvent = typeof inventoryScanEvents.$inferSelect;
+export type NewInventoryScanEvent = typeof inventoryScanEvents.$inferInsert;
+export type InventoryCodeResult = typeof inventoryCodeResults.$inferSelect;
+export type NewInventoryCodeResult = typeof inventoryCodeResults.$inferInsert;
+export type InventoryRepackBox = typeof inventoryRepackBoxes.$inferSelect;
+export type NewInventoryRepackBox = typeof inventoryRepackBoxes.$inferInsert;
+export type InventoryRepackItem = typeof inventoryRepackItems.$inferSelect;
+export type NewInventoryRepackItem = typeof inventoryRepackItems.$inferInsert;
+export type InventoryCorrection = typeof inventoryCorrections.$inferSelect;
+export type NewInventoryCorrection = typeof inventoryCorrections.$inferInsert;
+export type InventoryLateEvent = typeof inventoryLateEvents.$inferSelect;
+export type NewInventoryLateEvent = typeof inventoryLateEvents.$inferInsert;
