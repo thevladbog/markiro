@@ -21,6 +21,7 @@ import type { ComboboxOption, SelectOption, StatusChipStatus, TableColumn } from
 import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
 import { useProducts } from "../catalog/api.js";
 import { ApiRequestError, classifySearch, useCodes, type CodeListItemDto } from "./api.js";
+import { RegistryTabs } from "./RegistryTabs.js";
 
 type StatusFilter = "all" | "free" | "aggregated" | "written_off";
 
@@ -182,6 +183,8 @@ export function CodeSearchPage() {
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <PageHeader title={t("pages.codeSearch.title")} />
+
+      <RegistryTabs active="codes" />
 
       <form onSubmit={handleSearch} style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
         <div style={{ flex: 1, maxWidth: 480 }}>
