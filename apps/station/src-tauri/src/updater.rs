@@ -2367,8 +2367,6 @@ mod tests {
         Stalled {
             content_length: Option<u64>,
             prefix: Vec<u8>,
-            release: mpsc::Receiver<()>,
-            open: Arc<AtomicBool>,
         },
         Truncated {
             content_length: u64,
@@ -2376,29 +2374,67 @@ mod tests {
         },
     }
 
-    struct StalledBodyFixture {
-        release: Option<mpsc::Sender<()>>,
-        open: Arc<AtomicBool>,
+    struct LocalUpdateServerFixture {
+        manifest_url: Url,
+        server: Option<std::thread::JoinHandle<Result<(), String>>>,
+        stalled_release: Option<mpsc::Sender<()>>,
+        stalled_open: Option<Arc<AtomicBool>>,
+        server_completed: Arc<AtomicBool>,
     }
 
-    impl StalledBodyFixture {
-        fn is_open(&self) -> bool {
-            self.open.load(Ordering::SeqCst)
+    impl LocalUpdateServerFixture {
+        fn manifest_url(&self) -> &Url {
+            &self.manifest_url
         }
 
-        fn release(&mut self) {
-            self.release
+        fn completion_probe(&self) -> Arc<AtomicBool> {
+            Arc::clone(&self.server_completed)
+        }
+
+        fn stalled_body_is_open(&self) -> bool {
+            self.stalled_open
+                .as_ref()
+                .expect("fixture has a stalled package body")
+                .load(Ordering::SeqCst)
+        }
+
+        fn release_stalled_body(&mut self) {
+            self.stalled_release
                 .take()
                 .expect("stalled package body is released once")
                 .send(())
                 .expect("release stalled package body");
         }
+
+        fn release_stalled_body_for_cleanup(&mut self) {
+            if let Some(release) = self.stalled_release.take() {
+                let _ = release.send(());
+            }
+        }
+
+        fn join_server(&mut self) -> Result<(), String> {
+            let Some(server) = self.server.take() else {
+                return Ok(());
+            };
+            match server.join() {
+                Ok(result) => result,
+                Err(_) => Err("loopback update server panicked".into()),
+            }
+        }
+
+        fn finish(&mut self) -> Result<(), String> {
+            self.release_stalled_body_for_cleanup();
+            self.join_server()
+        }
     }
 
-    impl Drop for StalledBodyFixture {
+    impl Drop for LocalUpdateServerFixture {
         fn drop(&mut self) {
-            if let Some(release) = self.release.take() {
-                let _ = release.send(());
+            self.release_stalled_body_for_cleanup();
+            if let Err(error) = self.join_server() {
+                if !std::thread::panicking() {
+                    panic!("loopback update server fixture failed: {error}");
+                }
             }
         }
     }
@@ -2418,24 +2454,12 @@ mod tests {
         }
     }
 
-    fn stalled_package_response(
-        content_length: Option<u64>,
-        prefix: Vec<u8>,
-    ) -> (LocalPackageResponse, StalledBodyFixture) {
-        let (release_tx, release_rx) = mpsc::channel();
-        let open = Arc::new(AtomicBool::new(false));
-        (
-            LocalPackageResponse::Stalled {
-                content_length,
-                prefix,
-                release: release_rx,
-                open: Arc::clone(&open),
-            },
-            StalledBodyFixture {
-                release: Some(release_tx),
-                open,
-            },
-        )
+    struct CompletedLoopbackServer(Arc<AtomicBool>);
+
+    impl Drop for CompletedLoopbackServer {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
     }
 
     fn read_http_request(stream: &mut TcpStream) -> String {
@@ -2480,9 +2504,46 @@ mod tests {
         stream.flush().expect("flush loopback response headers");
     }
 
+    fn accept_loopback_request(
+        listener: &TcpListener,
+        accept_timeout: Duration,
+        request_name: &str,
+    ) -> Result<TcpStream, String> {
+        let deadline = Instant::now()
+            .checked_add(accept_timeout)
+            .expect("loopback accept deadline");
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream
+                        .set_nonblocking(false)
+                        .map_err(|error| format!("make {request_name} blocking: {error}"))?;
+                    return Ok(stream);
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        return Err(format!(
+                            "accept {request_name} before loopback fixture timeout"
+                        ));
+                    }
+                    std::thread::park_timeout(remaining.min(Duration::from_millis(5)));
+                }
+                Err(error) => return Err(format!("accept {request_name}: {error}")),
+            }
+        }
+    }
+
     fn spawn_local_update_server(
         response: LocalPackageResponse,
-    ) -> Option<(Url, std::thread::JoinHandle<()>)> {
+    ) -> Option<LocalUpdateServerFixture> {
+        spawn_local_update_server_with_accept_timeout(response, LOOPBACK_FIXTURE_HANDSHAKE_TIMEOUT)
+    }
+
+    fn spawn_local_update_server_with_accept_timeout(
+        response: LocalPackageResponse,
+        accept_timeout: Duration,
+    ) -> Option<LocalUpdateServerFixture> {
         let listener = match TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)) {
             Ok(listener) => listener,
             Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
@@ -2493,6 +2554,9 @@ mod tests {
             }
             Err(error) => panic!("bind loopback update fixture: {error}"),
         };
+        listener
+            .set_nonblocking(true)
+            .expect("make loopback update listener nonblocking");
         let address = listener.local_addr().expect("loopback fixture address");
         let manifest_url =
             Url::parse(&format!("http://{address}/latest.json")).expect("loopback manifest URL");
@@ -2511,8 +2575,22 @@ mod tests {
         })
         .to_string();
 
-        let server = std::thread::spawn(move || {
-            let (mut manifest_stream, _) = listener.accept().expect("accept manifest request");
+        let is_stalled = matches!(&response, LocalPackageResponse::Stalled { .. });
+        let (stalled_release, stalled_receiver) = if is_stalled {
+            let (release, receiver) = mpsc::channel();
+            (Some(release), Some(receiver))
+        } else {
+            (None, None)
+        };
+        let stalled_open = is_stalled.then(|| Arc::new(AtomicBool::new(false)));
+        let server_stalled_open = stalled_open.clone();
+        let server_completed = Arc::new(AtomicBool::new(false));
+        let server_completion = Arc::clone(&server_completed);
+
+        let server = std::thread::spawn(move || -> Result<(), String> {
+            let _completion = CompletedLoopbackServer(server_completion);
+            let mut manifest_stream =
+                accept_loopback_request(&listener, accept_timeout, "manifest request")?;
             let manifest_request = read_http_request(&mut manifest_stream);
             assert!(manifest_request.starts_with("GET /latest.json HTTP/1.1\r\n"));
             write_http_response_head(
@@ -2527,7 +2605,8 @@ mod tests {
             manifest_stream.flush().expect("flush manifest fixture");
             drop(manifest_stream);
 
-            let (mut package_stream, _) = listener.accept().expect("accept package request");
+            let mut package_stream =
+                accept_loopback_request(&listener, accept_timeout, "package request")?;
             let package_request = read_http_request(&mut package_stream);
             assert!(package_request.starts_with("GET /package.zip HTTP/1.1\r\n"));
             match response {
@@ -2560,10 +2639,9 @@ mod tests {
                 LocalPackageResponse::Stalled {
                     content_length,
                     prefix,
-                    release,
-                    open,
                 } => {
-                    let _open = OpenStalledBody::new(open);
+                    let _open =
+                        OpenStalledBody::new(server_stalled_open.expect("stalled body open state"));
                     write_http_response_head(
                         &mut package_stream,
                         200,
@@ -2576,7 +2654,8 @@ mod tests {
                     package_stream
                         .flush()
                         .expect("flush stalled package prefix");
-                    release
+                    stalled_receiver
+                        .expect("stalled body release receiver")
                         .recv_timeout(LOOPBACK_FIXTURE_HANDSHAKE_TIMEOUT)
                         .expect("release stalled package body before fixture timeout");
                 }
@@ -2596,9 +2675,16 @@ mod tests {
                     package_stream.flush().expect("flush truncated package");
                 }
             }
+            Ok(())
         });
 
-        Some((manifest_url, server))
+        Some(LocalUpdateServerFixture {
+            manifest_url,
+            server: Some(server),
+            stalled_release,
+            stalled_open,
+            server_completed,
+        })
     }
 
     async fn pinned_update_from_loopback(
@@ -3881,16 +3967,116 @@ mod tests {
     }
 
     #[test]
+    fn loopback_update_server_bounds_a_missing_manifest_request() {
+        let accept_timeout = Duration::from_millis(25);
+        let Some(mut server) = spawn_local_update_server_with_accept_timeout(
+            LocalPackageResponse::Status(503),
+            accept_timeout,
+        ) else {
+            return;
+        };
+        let started = Instant::now();
+
+        let error = server
+            .finish()
+            .expect_err("missing manifest request must stop the loopback fixture");
+
+        assert!(
+            error.contains("accept manifest request before loopback fixture timeout"),
+            "unexpected loopback fixture failure: {error}"
+        );
+        assert!(
+            started.elapsed() < LOOPBACK_FIXTURE_HANDSHAKE_TIMEOUT,
+            "missing manifest request exceeded the outer fixture bound"
+        );
+    }
+
+    #[test]
+    fn loopback_update_server_bounds_a_missing_package_request() {
+        let accept_timeout = Duration::from_millis(25);
+        let Some(mut server) = spawn_local_update_server_with_accept_timeout(
+            LocalPackageResponse::Status(503),
+            accept_timeout,
+        ) else {
+            return;
+        };
+        let manifest_url = server.manifest_url().clone();
+        let port = manifest_url.port().expect("loopback manifest port");
+        let mut manifest_stream = TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port))
+            .expect("connect manifest-only fixture request");
+        manifest_stream
+            .set_read_timeout(Some(LOOPBACK_FIXTURE_HANDSHAKE_TIMEOUT))
+            .expect("set manifest-only response timeout");
+        manifest_stream
+            .write_all(
+                format!(
+                    "GET /latest.json HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .expect("write manifest-only fixture request");
+        let mut manifest_response = Vec::new();
+        manifest_stream
+            .read_to_end(&mut manifest_response)
+            .expect("read manifest-only fixture response");
+        assert!(manifest_response.starts_with(b"HTTP/1.1 200 OK\r\n"));
+        let started = Instant::now();
+
+        let error = server
+            .finish()
+            .expect_err("missing package request must stop the loopback fixture");
+
+        assert!(
+            error.contains("accept package request before loopback fixture timeout"),
+            "unexpected loopback fixture failure: {error}"
+        );
+        assert!(
+            started.elapsed() < LOOPBACK_FIXTURE_HANDSHAKE_TIMEOUT,
+            "missing package request exceeded the outer fixture bound"
+        );
+    }
+
+    #[test]
+    fn loopback_update_server_drop_joins_without_double_panic_during_unwind() {
+        let Some(server) = spawn_local_update_server_with_accept_timeout(
+            LocalPackageResponse::Status(503),
+            Duration::from_millis(100),
+        ) else {
+            return;
+        };
+        let completed = server.completion_probe();
+        let started = Instant::now();
+
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _server = server;
+            panic!("simulated fixture setup failure");
+        }))
+        .expect_err("simulated setup failure must unwind");
+
+        assert_eq!(
+            panic.downcast_ref::<&str>(),
+            Some(&"simulated fixture setup failure")
+        );
+        assert!(
+            completed.load(Ordering::SeqCst),
+            "fixture drop returned before its server thread completed"
+        );
+        assert!(
+            started.elapsed() < LOOPBACK_FIXTURE_HANDSHAKE_TIMEOUT,
+            "fixture drop exceeded the outer unwind bound"
+        );
+    }
+
+    #[test]
     fn download_real_pinned_update_verifies_known_and_unknown_length_loopback_bodies() {
         for content_length in [Some(4), None] {
-            let Some((manifest_url, server)) =
-                spawn_local_update_server(LocalPackageResponse::Complete {
-                    content_length,
-                    chunks: vec![b"te".to_vec(), b"st".to_vec()],
-                })
-            else {
+            let Some(mut server) = spawn_local_update_server(LocalPackageResponse::Complete {
+                content_length,
+                chunks: vec![b"te".to_vec(), b"st".to_vec()],
+            }) else {
                 return;
             };
+            let manifest_url = server.manifest_url().clone();
             let probe = Arc::new(BufferCleanupProbe::default());
             let policy = PackageDownloadPolicy::fixture(
                 Duration::from_millis(200),
@@ -3924,7 +4110,7 @@ mod tests {
                 }
                 .expect("verified loopback package")
             });
-            server.join().expect("loopback success server");
+            server.finish().expect("loopback success server");
 
             assert_eq!(package.as_ref(), b"test");
             assert_eq!(
@@ -3953,11 +4139,10 @@ mod tests {
 
     #[test]
     fn download_real_pinned_update_classifies_http_status_before_any_bytes() {
-        let Some((manifest_url, server)) =
-            spawn_local_update_server(LocalPackageResponse::Status(503))
-        else {
+        let Some(mut server) = spawn_local_update_server(LocalPackageResponse::Status(503)) else {
             return;
         };
+        let manifest_url = server.manifest_url().clone();
         let probe = Arc::new(BufferCleanupProbe::default());
         let policy = PackageDownloadPolicy::fixture(
             Duration::from_millis(200),
@@ -3984,7 +4169,7 @@ mod tests {
                 "HTTP status is unavailable",
             )
         });
-        server.join().expect("loopback status server");
+        server.finish().expect("loopback status server");
 
         assert_eq!(
             package_fallback_reason(&error),
@@ -4008,10 +4193,13 @@ mod tests {
                 PackageTimeoutKind::Overall,
             ),
         ] {
-            let (response, mut stalled_body) = stalled_package_response(Some(4), b"te".to_vec());
-            let Some((manifest_url, server)) = spawn_local_update_server(response) else {
+            let Some(mut server) = spawn_local_update_server(LocalPackageResponse::Stalled {
+                content_length: Some(4),
+                prefix: b"te".to_vec(),
+            }) else {
                 return;
             };
+            let manifest_url = server.manifest_url().clone();
             let probe = Arc::new(BufferCleanupProbe::default());
             let policy = PackageDownloadPolicy::fixture(
                 Duration::from_millis(100),
@@ -4052,24 +4240,23 @@ mod tests {
             );
             assert_eq!(probe.cleaned_allocations(), 1);
             assert!(probe.all_clean());
-            assert!(stalled_body.is_open());
+            assert!(server.stalled_body_is_open());
 
-            stalled_body.release();
-            server.join().expect("loopback timeout server");
-            assert!(!stalled_body.is_open());
+            server.release_stalled_body();
+            server.finish().expect("loopback timeout server");
+            assert!(!server.stalled_body_is_open());
         }
     }
 
     #[test]
     fn download_real_pinned_update_rejects_truncated_and_oversized_lengths() {
-        let Some((manifest_url, server)) =
-            spawn_local_update_server(LocalPackageResponse::Truncated {
-                content_length: 4,
-                bytes: b"te".to_vec(),
-            })
-        else {
+        let Some(mut server) = spawn_local_update_server(LocalPackageResponse::Truncated {
+            content_length: 4,
+            bytes: b"te".to_vec(),
+        }) else {
             return;
         };
+        let manifest_url = server.manifest_url().clone();
         let truncated_probe = Arc::new(BufferCleanupProbe::default());
         let truncated_policy = PackageDownloadPolicy::fixture(
             Duration::from_millis(200),
@@ -4095,7 +4282,7 @@ mod tests {
                 "truncated package denied",
             )
         });
-        server.join().expect("loopback truncated server");
+        server.finish().expect("loopback truncated server");
         assert_eq!(
             package_fallback_reason(&truncated),
             Some(StationPackageFallbackReason::Network)
@@ -4103,14 +4290,13 @@ mod tests {
         assert_eq!(truncated_probe.cleaned_allocations(), 1);
         assert!(truncated_probe.all_clean());
 
-        let Some((manifest_url, server)) =
-            spawn_local_update_server(LocalPackageResponse::Complete {
-                content_length: Some(4),
-                chunks: vec![b"test".to_vec()],
-            })
-        else {
+        let Some(mut server) = spawn_local_update_server(LocalPackageResponse::Complete {
+            content_length: Some(4),
+            chunks: vec![b"test".to_vec()],
+        }) else {
             return;
         };
+        let manifest_url = server.manifest_url().clone();
         let oversized_probe = Arc::new(BufferCleanupProbe::default());
         let oversized_policy = PackageDownloadPolicy::fixture(
             Duration::from_millis(200),
@@ -4136,7 +4322,7 @@ mod tests {
                 "oversized declared package denied",
             )
         });
-        server.join().expect("loopback oversized server");
+        server.finish().expect("loopback oversized server");
         assert!(matches!(oversized, PackageDownloadFailure::PackageTooLarge));
         assert_eq!(package_fallback_reason(&oversized), None);
         assert_eq!(oversized_probe.cleaned_allocations(), 0);
@@ -4145,10 +4331,13 @@ mod tests {
     #[test]
     fn download_real_pinned_update_cancellation_interrupts_a_stalled_body_and_cleans() {
         let (first_progress_tx, first_progress_rx) = mpsc::channel();
-        let (response, mut stalled_body) = stalled_package_response(Some(4), b"te".to_vec());
-        let Some((manifest_url, server)) = spawn_local_update_server(response) else {
+        let Some(mut server) = spawn_local_update_server(LocalPackageResponse::Stalled {
+            content_length: Some(4),
+            prefix: b"te".to_vec(),
+        }) else {
             return;
         };
+        let manifest_url = server.manifest_url().clone();
         let probe = Arc::new(BufferCleanupProbe::default());
         let policy = PackageDownloadPolicy::fixture(
             Duration::from_millis(200),
@@ -4198,16 +4387,16 @@ mod tests {
 
         assert!(matches!(error, PackageDownloadFailure::Cancelled));
         assert!(
-            stalled_body.is_open(),
+            server.stalled_body_is_open(),
             "server body closed before cancellation interrupted the download"
         );
         assert_eq!(package_fallback_reason(&error), None);
         assert_eq!(probe.cleaned_allocations(), 1);
         assert!(probe.all_clean());
 
-        stalled_body.release();
-        server.join().expect("loopback cancellation server");
-        assert!(!stalled_body.is_open());
+        server.release_stalled_body();
+        server.finish().expect("loopback cancellation server");
+        assert!(!server.stalled_body_is_open());
     }
 
     #[test]
