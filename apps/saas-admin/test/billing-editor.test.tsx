@@ -16,6 +16,7 @@ import {
 } from "./render.js";
 
 const OFFER_ID = "81111111-1111-4111-8111-111111111111";
+const CREATED_INVOICE_ID = "91111111-1111-4111-8111-111111111111";
 const CREATED_AT = "2026-08-21T10:00:00.000Z";
 function publishedOffer(overrides: Record<string, unknown> = {}) {
   return {
@@ -95,7 +96,7 @@ function installInvoiceEditorApi({
           return jsonResponse(400, { code: "invoice_catalog_version_invalid" });
         }
         return jsonResponse(201, {
-          id: "91111111-1111-4111-8111-111111111111",
+          id: CREATED_INVOICE_ID,
           number: "INV-000001",
           tenantId: TENANT_ID,
           status: "draft",
@@ -116,6 +117,34 @@ function installInvoiceEditorApi({
           createdAt: CREATED_AT,
           updatedAt: CREATED_AT,
           lines: body.lines.length,
+        });
+      }
+      if (url.endsWith(`/api/platform/invoices/${CREATED_INVOICE_ID}`) && method === "GET") {
+        return jsonResponse(200, {
+          id: CREATED_INVOICE_ID,
+          number: "INV-000001",
+          tenantId: TENANT_ID,
+          status: "draft",
+          issueDate: null,
+          dueDate: "2026-09-01T00:00:00.000Z",
+          currency: "RUB",
+          sellerSnapshot: null,
+          buyerSnapshot: null,
+          subtotal: "25000.00",
+          vatTotal: "5000.00",
+          total: "30000.00",
+          applicationMode: "automatic",
+          createdByPlatformUserId: "platform-accountant",
+          issuedByPlatformUserId: null,
+          issuedAt: null,
+          paidAt: null,
+          cancelledAt: null,
+          createdAt: CREATED_AT,
+          updatedAt: CREATED_AT,
+          lines: [],
+          documents: [],
+          payment: null,
+          application: { status: "not_paid", latestByLine: [], attempts: [] },
         });
       }
       throw new Error(`Unexpected request: ${method} ${url}`);
@@ -181,6 +210,8 @@ describe("invoice editor route", () => {
               catalogVersionId: PUBLISHED_PLAN.id,
               nameRu: "Базовый",
               nameEn: "Basic",
+              descriptionRu: "Для одной площадки",
+              descriptionEn: "For one site",
               quantity: 1,
               unit: "month",
               agreedUnitPrice: "15000.00",
@@ -193,6 +224,8 @@ describe("invoice editor route", () => {
               catalogVersionId: ADDON.id,
               nameRu: "Дополнительная станция",
               nameEn: "Extra station",
+              descriptionRu: null,
+              descriptionEn: null,
               quantity: 1,
               unit: "station",
               agreedUnitPrice: "2500.00",
@@ -205,6 +238,8 @@ describe("invoice editor route", () => {
               catalogVersionId: SERVICE.id,
               nameRu: "Внедрение",
               nameEn: "Implementation",
+              descriptionRu: null,
+              descriptionEn: null,
               quantity: 1,
               unit: "project",
               agreedUnitPrice: "50000.00",
@@ -216,7 +251,7 @@ describe("invoice editor route", () => {
         },
       },
     ]);
-    expect((await screen.findByRole("alert")).textContent).toContain("Счёт создан");
+    expect(await screen.findByRole("heading", { name: "Счёт INV-000001" })).toBeDefined();
   });
 
   it("refreshes the catalog and keeps the invoice draft after the API rejects a retired version", async () => {

@@ -1024,7 +1024,7 @@ const invoiceApplicationServiceStateSchema = z
   .strict();
 const invoiceDetailRelationFields = {
   lines: z.array(invoiceLineSchema),
-  documents: z.array(invoiceDocumentRecordSchema),
+  documents: z.array(commercialDocumentListItemSchema),
 };
 const unpaidInvoiceDetailFields = {
   ...invoiceDetailRelationFields,
@@ -1053,7 +1053,7 @@ export const invoiceDetailSchema = z.discriminatedUnion("status", [
 export const invoiceServiceDetailSchema = invoiceServiceRecordSchema
   .extend({
     lines: z.array(invoiceServiceLineSchema),
-    documents: z.array(invoiceDocumentRecordServiceSchema),
+    documents: z.array(commercialDocumentListItemServiceSchema),
     payment: billingPaymentServiceSchema.nullable(),
     application: invoiceApplicationServiceStateSchema,
   })

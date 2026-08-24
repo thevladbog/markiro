@@ -380,6 +380,32 @@ describe("document draft validation and request adapters", () => {
     ]);
   });
 
+  it("preserves an operator line comment in invoice and offer create payloads", () => {
+    const commented = {
+      ...createLineFromCatalog(service, "line-commented"),
+      descriptionRu: "Включает выезд, настройку оборудования и обучение операторов",
+    };
+
+    expect(toInvoiceCreateInput(draft([commented])).lines[0]).toMatchObject({
+      descriptionRu: "Включает выезд, настройку оборудования и обучение операторов",
+    });
+    expect(toOfferCreateInput(draft([commented])).lines[0]).toMatchObject({
+      descriptionRu: "Включает выезд, настройку оборудования и обучение операторов",
+    });
+  });
+
+  it.each([
+    ["120", "120.00"],
+    ["120.", "120.00"],
+    ["120,5", "120.50"],
+    ["120.5", "120.50"],
+    ["120,50", "120.50"],
+  ])("normalizes an entered price %s before creating a request", (entered, expected) => {
+    const line = { ...createLineFromCatalog(service, "line-price"), agreedUnitPrice: entered };
+
+    expect(toInvoiceCreateInput(draft([line])).lines[0]?.agreedUnitPrice).toBe(expected);
+  });
+
   it("blocks missing tenant, empty or oversized lines, invalid money, and missing plan or add-on policy", () => {
     const invalidPlan = {
       ...createLineFromCatalog(plan, "line-plan"),

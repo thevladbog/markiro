@@ -23,6 +23,8 @@ const styles = StyleSheet.create({
   cell: { padding: 5, borderRightWidth: 1, borderColor: "#aaa" },
   number: { width: 25 },
   position: { flex: 1 },
+  positionName: { fontWeight: 600 },
+  positionDescription: { marginTop: 2, color: "#666", fontSize: 7.5, lineHeight: 1.25 },
   unit: { width: 60 },
   quantity: { width: 45 },
   price: { width: 70 },
@@ -73,7 +75,12 @@ export async function renderPrintPdf(model: PrintDocumentModel): Promise<Buffer>
           {model.lines.map((line) => (
             <View style={styles.row} key={`${line.position}-${line.name}`}>
               <Text style={[styles.cell, styles.number]}>{line.position}</Text>
-              <Text style={[styles.cell, styles.position]}>{line.name}</Text>
+              <View style={[styles.cell, styles.position]}>
+                <Text style={styles.positionName}>{line.name}</Text>
+                {line.description ? (
+                  <Text style={styles.positionDescription}>{line.description}</Text>
+                ) : null}
+              </View>
               <Text style={[styles.cell, styles.unit]}>{line.unit}</Text>
               <Text style={[styles.cell, styles.quantity]}>{line.quantity}</Text>
               <Text style={[styles.cell, styles.price]}>{line.unitPrice}</Text>

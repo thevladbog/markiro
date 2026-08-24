@@ -458,10 +458,6 @@ describe("platform commercial contracts", () => {
       documents: [
         {
           ...readyDocument,
-          tenantId: TENANT_ID,
-          invoiceId: INVOICE_ID,
-          objectKey: "tenants/redacted/invoices/redacted/r1.pdf",
-          rendererVersion: "billing-print-v1",
           createdAt: CREATED_AT,
           updatedAt: CREATED_AT,
         },
@@ -479,6 +475,17 @@ describe("platform commercial contracts", () => {
       "after_current",
     ]);
     expect(detail.application.attempts[0]?.status).toBe("skipped");
+    expect(
+      platformCommercialContracts.invoices.detail.response.safeParse({
+        ...detail,
+        documents: [
+          {
+            ...detail.documents[0],
+            objectKey: "tenants/redacted/invoices/redacted/r1.pdf",
+          },
+        ],
+      }).success,
+    ).toBe(false);
 
     expect(
       platformCommercialContracts.invoices.create.response.parse({

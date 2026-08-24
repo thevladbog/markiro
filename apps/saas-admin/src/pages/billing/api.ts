@@ -72,10 +72,23 @@ export function applyInvoice(
 }
 
 export function renderInvoice(id: string) {
-  const validatedId = platformCommercialContracts.invoices.document.params.parse(id);
-  return platformApiFetch(`/invoices/${validatedId}/document`, {
-    responseSchema: platformCommercialContracts.invoices.document.response,
+  const validatedId = platformCommercialContracts.invoices.documents.render.params.parse(id);
+  return platformApiFetch(`/invoices/${validatedId}/documents`, {
+    responseSchema: platformCommercialContracts.invoices.documents.render.response,
     method: "POST",
     body: "{}",
   });
+}
+
+export function getInvoiceDocumentDownload(invoiceId: string, documentId: string) {
+  const validated = platformCommercialContracts.invoices.documents.download.params.parse({
+    invoiceId,
+    documentId,
+  });
+  return platformApiFetch(
+    `/invoices/${validated.invoiceId}/documents/${validated.documentId}/download`,
+    {
+      responseSchema: platformCommercialContracts.invoices.documents.download.response,
+    },
+  );
 }
