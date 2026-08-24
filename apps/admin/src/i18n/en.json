@@ -225,7 +225,7 @@
     "conflicts": "Conflicts",
     "counterparties": "Counterparties",
     "labels": "Labels",
-    "pickup": "Self-pickup",
+    "pickup": "Disposal",
     "disaggregation": "Disaggregation",
     "employees": "Operators and employees",
     "kiosks": "Kiosks",
@@ -1120,7 +1120,7 @@
       }
     },
     "pickup": {
-      "title": "Self-pickup",
+      "title": "Disposal",
       "emptyTitle": "No orders yet",
       "emptyHint": "Orders will appear here once employees start picking up items at the self-service kiosk.",
       "addAction": "Bulk export",

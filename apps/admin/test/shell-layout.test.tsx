@@ -148,7 +148,7 @@ describe("app shell layout", () => {
       ["Контрагенты", "/counterparties"],
       ["Операторы и сотрудники", "/employees"],
       ["Этикетки", "/labels"],
-      ["Для себя", "/pickup"],
+      ["Выбытие", "/pickup"],
     ];
     for (const [label, href] of expectedLinks) {
       const link = await screen.findByRole("link", { name: label });
