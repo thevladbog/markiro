@@ -225,6 +225,16 @@
     "pending_few": "{{count}} operations are still waiting to sync",
     "pending_many": "{{count}} operations are still waiting to sync",
     "pending_other": "{{count}} operations are still waiting to sync",
+    "source": {
+      "label": "Update source",
+      "primary": "Source: Markiro (Yandex)",
+      "backup": "GitHub backup source used",
+      "discoveryFallback": {
+        "primary-unavailable": "Checked through the GitHub backup because the primary source was unavailable.",
+        "primary-metadata-invalid": "Checked through the GitHub backup because the primary metadata could not be read."
+      },
+      "packageFallback": "The update package was downloaded through the GitHub backup."
+    },
     "age": {
       "none": "No update available",
       "info": "Released recently",
@@ -244,7 +254,9 @@
       "state-write-failed": "The update reminder could not be saved.",
       "active-shift": "Leave the active shift before installing",
       "target-changed": "The available version changed. Check again.",
-      "install-failed": "Installation failed. You can retry later."
+      "origin-mismatch": "The update sources do not match. Installation was stopped; Station work continues.",
+      "integrity-failed": "Update integrity could not be verified. Installation was stopped; Station work continues.",
+      "install-failed": "The update could not be installed. You can retry later; Station work continues."
     }
   },
   "signal": {

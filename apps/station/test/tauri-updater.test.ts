@@ -1,56 +1,177 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { checkMock, relaunchMock } = vi.hoisted(() => ({
-  checkMock: vi.fn(),
-  relaunchMock: vi.fn(),
+const { invokeMock, relaunchMock } = vi.hoisted(() => ({
+  invokeMock: vi.fn<(command: string, payload?: Record<string, unknown>) => Promise<unknown>>(),
+  relaunchMock: vi.fn<() => Promise<void>>(),
 }));
 
-vi.mock("@tauri-apps/plugin-updater", () => ({ check: checkMock }));
+vi.mock("@tauri-apps/api/core", () => {
+  class FakeChannel {
+    onmessage: (payload: unknown) => void;
+
+    constructor(onmessage: (payload: unknown) => void = () => undefined) {
+      this.onmessage = onmessage;
+    }
+  }
+
+  return {
+    Channel: FakeChannel,
+    invoke: (command: string, payload?: Record<string, unknown>) => invokeMock(command, payload),
+  };
+});
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: relaunchMock }));
 
 import { tauriStationUpdater } from "../src/lib/tauri-updater.js";
+
+const candidate = {
+  candidateId: "candidate-opaque-1",
+  currentVersion: "0.1.0-beta.1",
+  version: "0.1.0-beta.2",
+  publishedAt: "2026-08-11T00:00:00.000Z",
+  selectedOrigin: "github",
+  fallbackReason: "primary-unavailable",
+};
 
 describe("tauri station updater adapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("maps Tauri date and closes resources without enabling downgrades", async () => {
-    const close = vi.fn().mockResolvedValue(undefined);
-    checkMock.mockResolvedValue({
-      currentVersion: "0.1.0-beta.1",
-      version: "0.1.0-beta.2",
-      date: "2026-08-11T00:00:00.000Z",
-      downloadAndInstall: vi.fn(),
-      close,
+  it("uses only the three semantic Rust commands and decodes closed progress events", async () => {
+    invokeMock.mockImplementation(async (command, payload) => {
+      if (command === "station_update_check") return candidate;
+      if (command === "station_update_download_and_install") {
+        const progress = payload?.progress as { onmessage(payload: unknown): void };
+        progress.onmessage({ event: "Started", data: { contentLength: 10 } });
+        progress.onmessage({ event: "Progress", data: { chunkLength: 4 } });
+        progress.onmessage({
+          event: "Fallback",
+          data: { from: "yandex", to: "github", reason: "timeout" },
+        });
+        progress.onmessage({ event: "Progress", data: { chunkLength: 6 } });
+        progress.onmessage({ event: "Finished" });
+        return null;
+      }
+      if (command === "station_update_close") return null;
+      throw new Error(`unexpected command: ${command}`);
     });
+
     const update = await tauriStationUpdater.check();
-    expect(checkMock).toHaveBeenCalledWith({ timeout: 15_000, allowDowngrades: false });
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "station_update_check", undefined);
     expect(update).toMatchObject({
       currentVersion: "0.1.0-beta.1",
       version: "0.1.0-beta.2",
       publishedAt: "2026-08-11T00:00:00.000Z",
+      origin: "github",
+      fallbackReason: "primary-unavailable",
     });
+
+    const events: unknown[] = [];
+    await update?.downloadAndInstall((event) => events.push(event));
+    expect(events).toEqual([
+      { event: "Started", contentLength: 10 },
+      { event: "Progress", chunkLength: 4 },
+      { event: "Fallback", from: "yandex", to: "github", reason: "timeout" },
+      { event: "Progress", chunkLength: 6 },
+      { event: "Finished" },
+    ]);
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "station_update_download_and_install", {
+      request: { candidateId: "candidate-opaque-1" },
+      progress: expect.objectContaining({ onmessage: expect.any(Function) }),
+    });
+
     await update?.close();
-    expect(close).toHaveBeenCalledOnce();
+    expect(invokeMock).toHaveBeenNthCalledWith(3, "station_update_close", {
+      request: { candidateId: "candidate-opaque-1" },
+    });
+    expect(JSON.stringify(invokeMock.mock.calls)).not.toContain("http");
+  });
+
+  it("accepts canonical forward stable metadata and primary provenance", async () => {
+    invokeMock.mockResolvedValueOnce({
+      ...candidate,
+      currentVersion: "1.0.0",
+      version: "1.1.0",
+      selectedOrigin: "yandex",
+      fallbackReason: null,
+    });
+
+    await expect(tauriStationUpdater.check()).resolves.toMatchObject({
+      currentVersion: "1.0.0",
+      version: "1.1.0",
+      origin: "yandex",
+      fallbackReason: null,
+    });
   });
 
   it("returns null when no update is available", async () => {
-    checkMock.mockResolvedValue(null);
+    invokeMock.mockResolvedValueOnce(null);
     await expect(tauriStationUpdater.check()).resolves.toBeNull();
   });
 
-  it("closes rejected resources for malformed or non-forward metadata", async () => {
-    for (const metadata of [
-      { currentVersion: "0.1.0-beta.1", version: "0.1.0-beta.2", date: undefined },
-      { currentVersion: "0.1.0-beta.1", version: "0.1.0", date: "2026-08-11T00:00:00.000Z" },
-      { currentVersion: "0.1.0-beta.2", version: "0.1.0-beta.1", date: "2026-08-11T00:00:00.000Z" },
-    ]) {
-      const close = vi.fn().mockResolvedValue(undefined);
-      checkMock.mockResolvedValue({ ...metadata, close });
-      await expect(tauriStationUpdater.check()).rejects.toThrow(/invalid station update state/);
-      expect(close).toHaveBeenCalledOnce();
+  it("strictly rejects malformed result shapes and closes a recoverable candidate", async () => {
+    const malformed = [
+      { ...candidate, extra: true },
+      { ...candidate, candidateId: "" },
+      { ...candidate, currentVersion: "0.1.0-beta.1+build" },
+      { ...candidate, version: "0.1.0-beta.0" },
+      { ...candidate, publishedAt: "2026-08-11T00:00:00Z" },
+      { ...candidate, selectedOrigin: "mirror" },
+      { ...candidate, selectedOrigin: "yandex", fallbackReason: "primary-unavailable" },
+      { ...candidate, selectedOrigin: "github", fallbackReason: null },
+    ];
+
+    for (const value of malformed) {
+      invokeMock.mockImplementation(async (command) => {
+        if (command === "station_update_check") return value;
+        if (command === "station_update_close") return null;
+        throw new Error(`unexpected command: ${command}`);
+      });
+      await expect(tauriStationUpdater.check()).rejects.toThrow(/invalid station update/);
     }
+
+    expect(
+      invokeMock.mock.calls.filter(([command]) => command === "station_update_close"),
+    ).toHaveLength(7);
+  });
+
+  it("rejects unknown progress shapes and cancels the opaque candidate", async () => {
+    invokeMock.mockImplementation(async (command, payload) => {
+      if (command === "station_update_check") return candidate;
+      if (command === "station_update_download_and_install") {
+        const progress = payload?.progress as { onmessage(payload: unknown): void };
+        progress.onmessage({
+          event: "Fallback",
+          data: { from: "yandex", to: "github", reason: "network", url: "forbidden" },
+        });
+        return null;
+      }
+      if (command === "station_update_close") return null;
+      throw new Error(`unexpected command: ${command}`);
+    });
+
+    const update = await tauriStationUpdater.check();
+    await expect(update?.downloadAndInstall(() => undefined)).rejects.toThrow(
+      /invalid station update progress/,
+    );
+    expect(invokeMock).toHaveBeenCalledWith("station_update_close", {
+      request: { candidateId: "candidate-opaque-1" },
+    });
+  });
+
+  it("decodes only the closed Rust error shape", async () => {
+    invokeMock.mockRejectedValueOnce({ code: "origin-mismatch", retryable: false });
+    await expect(tauriStationUpdater.check()).rejects.toMatchObject({
+      code: "origin-mismatch",
+      retryable: false,
+    });
+
+    invokeMock.mockRejectedValueOnce({
+      code: "origins-unavailable",
+      retryable: true,
+      detail: "https://forbidden.example",
+    });
+    await expect(tauriStationUpdater.check()).rejects.toThrow(/invalid station update error/);
   });
 
   it("delegates explicit relaunch", async () => {

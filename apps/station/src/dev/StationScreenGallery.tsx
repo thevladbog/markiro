@@ -1529,8 +1529,8 @@ const GALLERY_UPDATE_AGE_MS: Record<"info" | "warn" | "urgent", number> = {
 function galleryUpdateAvailable(age: "info" | "warn" | "urgent" | null): KnownStationUpdate | null {
   if (age === null) return null;
   return {
-    // `isStationBetaVersion` (station-version.ts) only accepts betas, so the
-    // demo version keeps the brief's "1.4.2" base with the required suffix.
+    // Keep the gallery on the beta channel so it mirrors the development
+    // build while the production state contract also accepts stable versions.
     version: "1.4.2-beta.1",
     publishedAt: new Date(Date.now() - GALLERY_UPDATE_AGE_MS[age]).toISOString(),
   };
@@ -1549,6 +1549,9 @@ function galleryUpdateController(
     persisted: { schemaVersion: 1, lastAttemptAt: null, lastSuccessfulCheckAt: null, available },
     severity: updateSeverity(Date.now(), available),
     error,
+    origin: available ? "yandex" : null,
+    fallbackReason: null,
+    packageFallbackReason: null,
     downloadedBytes: 0,
     totalBytes: null,
     checkNow: () => Promise.resolve(),
