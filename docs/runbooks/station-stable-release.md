@@ -32,6 +32,10 @@ dual-origin beta. Workflow не выбирает newest beta, не добавл�
 rollback baseline. Это не retrofit старой beta и не доказательство, будто у
 исторической beta существовали dual-origin evidence.
 
+Это first-run rollback baseline, а не обычная публикация. Его exact accepted
+stable tag и backup/record сохраняются до первого dual-origin stable; immutable
+historical releases не retrofit и не получают задним числом Yandex evidence.
+
 Передайте:
 
 - пустой `source_beta_tag`;
@@ -122,10 +126,18 @@ tree: сохраните evidence, расследуйте collision/audit и в�
 и stable → stable выполняется только вне активной смены; фоновой загрузки,
 автоматической установки или restart нет.
 
-До и после установки зафиксируйте неизменность application identity и пути
-Station SQLite, pairing, settings, journals, boxes, exceptions и pending outbox.
+До и после установки зафиксируйте application ID `app.markiro.station`,
+фактический абсолютный путь к базе и относительное имя
+`sqlite:station-mirror.db`, pairing, settings, journals, boxes, exceptions и
+pending outbox. Не выводите путь из предположения о Windows user profile:
+снимите его с установленной Station до и после install-over.
 Проверьте offline restart/reconnect и последующую синхронизацию outbox. Нельзя
 считать удаление SQLite или outbox допустимым rollback.
+
+Update остается manual-only: автоматической загрузки, установки, restart или
+forced downgrade нет. При active shift установка запрещена, но Station должна
+продолжать production work — сканирование, печать, локальные journals, boxes,
+exceptions и outbox.
 
 ## SmartScreen и границы доказательства
 
@@ -135,5 +147,21 @@ Windows может показать SmartScreen или «неизвестный 
 доказывают Windows install-over, WebView2, scanner, printer, sound, touch,
 сохранение данных или работу из реальной restricted network. Все такие строки
 остаются `NOT RUN` в
-[`station-stable-release.md`](../acceptance/station-stable-release.md), пока не
-появятся оператор, UTC timestamp и evidence path/hash.
+[`station-dual-origin-release.md`](../acceptance/station-dual-origin-release.md),
+пока не появятся оператор, UTC timestamp и evidence path/hash.
+
+## Exact rollback
+
+Для незавершённой mutable transaction при обеих валидных и совпадающих
+immutable trees повторите точные release inputs с `mode=promote-existing`.
+Режим не строит, не подписывает и не загружает immutable assets. При ошибке
+восстановите только изменённые targets в точном обратном порядке: Yandex
+`station/download` alias, Yandex stable manifest, GitHub stable manifest. Каждый
+target публично сравнивается с сохранённым backup. Partial-origin incident не
+лечится `promote-existing`, overwrite или копированием surviving tree.
+
+Rollback channel pointer влияет только на ещё не обновившихся клиентов. Для уже
+обновлённой Station закройте активную смену, проверьте SQLite compatibility
+window и SHA-256, затем вручную установите предыдущий accepted immutable stable.
+Application ID, SQLite path, pairing, settings, journals, boxes, exceptions и
+outbox сохраняются; удаление данных запрещено.

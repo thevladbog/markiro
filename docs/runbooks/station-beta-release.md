@@ -85,7 +85,8 @@ Windows.
    подпись, `latest.json` и commit digest. Лишь затем допускается скачивание
    пакета на станцию.
 5. Установите пакет вручную на целевую Windows-станцию и зафиксируйте результаты
-   из `docs/hardware-acceptance-checklist.md`: иконки, production pairing,
+   из [dual-origin acceptance record](../acceptance/station-dual-origin-release.md)
+   и `docs/hardware-acceptance-checklist.md`: иконки, production pairing,
    touch/keyboard/scanner input, viewport и fullscreen. Это отдельное
    acceptance; workflow не закрывает эти пункты.
    Для beta с агрегацией и восстановлением печати отдельно выполните
@@ -222,23 +223,36 @@ cookie, query или referrer и доступна только по явному
 dual-origin adapter через старый updater. В ограниченной сети (restricted
 network), где GitHub уже заблокирован, скачайте проверенный beta installer по
 явному Yandex URL и выполните ручной install-over поверх существующей установки.
-До и после install-over сохраните и проверьте Station identity, pairing,
-hardware settings, SQLite, журналы, короба, исключения и pending outbox; удаление
-данных не является recovery.
+Это два разных migration path: GitHub-reachable и GitHub-blocked; server-side
+изменение не обновляет endpoint уже установленного legacy client. GitHub channel
+assets поэтому сохраняются на поддерживаемый legacy-client horizon; дата их
+удаления этим rollout не назначается.
 
-Центр обновлений работает вручную. Он подсвечивает релиз старше 7 дней
+До и после install-over зафиксируйте application ID `app.markiro.station`,
+фактический абсолютный путь к SQLite и относительное имя
+`sqlite:station-mirror.db`, Station identity, pairing, hardware settings,
+журналы, короба, исключения и pending outbox. Путь берите из реально
+установленной Windows Station, не восстанавливайте его по предположению о
+профиле пользователя. Удаление или создание новой SQLite/outbox не является
+migration или recovery.
+
+Центр обновлений работает вручную (manual-only). Он подсвечивает релиз старше 7 дней
 (срочно — старше 30), но не начинает действие без подтверждения оператора.
 После подтверждения он скачивает подписанный пакет, устанавливает его и
 перезапускает приложение; в фоне этого не происходит. При активной смене
-установка заблокирована. Перед установкой убедитесь, что pending outbox синхронизирован либо
-зафиксирован по процедуре восстановления смены; обновление не удаляет очередь.
+установка заблокирована, но проверка обновлений и production work — сканирование,
+печать, журнал, короба, исключения и outbox — не должны блокироваться. Перед
+установкой убедитесь, что pending outbox синхронизирован либо зафиксирован по
+процедуре восстановления смены; обновление не удаляет очередь.
 
 Скачайте `*.exe` из immutable release и сравните его SHA-256 с записью в
 `SHA256SUMS`. Для updater bundle отдельно проверьте подпись и соответствие
 `latest.json`, затем запустите установщик вручную. SmartScreen может показать
 предупреждение для новой неподписанной или ещё не имеющей репутации сборки.
 Не обходите его вслепую: при расхождении отмените установку и сообщите release
-owner. Тихой автоматической установки нет.
+owner. NSIS не имеет Authenticode: Tauri signature защищает updater bundle, но
+не делает Windows installer Authenticode-signed. Тихой автоматической установки
+нет.
 
 До допуска beta к смене отметьте ручные результаты в hardware checklist: у
 installer, taskbar и окна — новые Markiro icons (без старого белого круга);
@@ -261,8 +275,17 @@ hardware checklist. Headless CI не заменяет эту проверку Wi
 
 ## Откат и ротация ключа
 
-Для отката вручную установите предыдущий immutable installer. Mutable channel
-является только указателем, а не архивом; старый `latest.json` восстанавливается
-через `promote-existing`/GitHub release upload. При ротации сначала выпустите
+Если обе immutable trees валидны и совпадают, а сбой затронул только mutable
+targets, используйте `mode=promote-existing`; он повторяет backup/promotion без
+rebuild, signing или immutable upload. Transaction rollback идёт в точном
+обратном порядке: Yandex alias, Yandex manifest, GitHub manifest, с публичной
+проверкой каждого backup. При partial-origin mismatch `promote-existing`
+запрещён: сохраните evidence и выпускайте новую явно авторизованную beta.
+
+Для client rollback вручную установите предыдущий совместимый immutable
+installer вне активной смены. Mutable channel является только указателем, а не
+архивом; возврат pointer не делает автоматический downgrade уже обновлённой
+Station. Не удаляйте SQLite, pairing/settings, журналы, короба, исключения или
+outbox. При ротации сначала выпустите
 bridge-релиз, подписанный старым ключом и принимающий новый публичный ключ, и
 только после горизонта старых очередей переключайте secret и Tauri public key.

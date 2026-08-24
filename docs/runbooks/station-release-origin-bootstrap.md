@@ -11,6 +11,50 @@ key, расшифрованный payload или чувствительные Te
 environment variables, буфер обмена, логи, summaries, artifacts или файлы
 репозитория.
 
+## Четыре фазы rollout
+
+Этот порядок нельзя сжимать в один запуск. Task 11 документирует и проверяет
+контракты, но **Task 12 is not authorized**: Terraform apply, DNS, GitHub
+Environment/secrets, release publication и customer-device acceptance требуют
+отдельных явных разрешений после merge.
+
+1. **Phase 1 — provision without DNS.** Подготовить и отдельно одобрить
+   инфраструктурный plan, применить его только после STOP 1, перенести
+   credentials только после STOP 2, проверить certificate/provider host, но
+   оставить `enable_station_release_public_dns=false`. Текущие GitHub-only
+   клиенты и publication не меняются.
+2. **Phase 2 — dual-publish tooling and seed.** Сначала интегрировать Tasks 1–7,
+   затем при выключенном release DNS создать независимые first-run rollback
+   baseline для stable и beta. Stable baseline использует точный принятый
+   legacy stable; beta baseline требует новую strict dual-origin pre-transition
+   beta. Immutable historical releases must not be retrofitted or
+   переупакованы задним числом. После provider-host proof DNS включается только
+   отдельным plan/apply за STOP 3.
+3. **Phase 3 — transitional beta.** Только после integration Tasks 8–11
+   опубликовать новую beta с fixed dual-origin adapter. GitHub-reachable
+   GitHub-only установки получают её через старый updater; GitHub-blocked
+   установки требуют ручной install-over по explicit Yandex beta installer.
+   Завершить весь
+   [dual-origin Windows/hardware acceptance record](../acceptance/station-dual-origin-release.md).
+4. **Phase 4 — first dual-origin stable.** Только явно принятая transitional
+   beta может быть точным `source_beta_tag`. Stable rebuild не берёт новый
+   `main`; обе immutable trees и три mutable targets проверяются до физического
+   допуска. CI/publication proof не является Windows/customer proof.
+
+Канонические public installers:
+
+- stable: `https://releases.markiro.app/station/download`;
+- explicit beta: `https://releases.markiro.app/station/beta/download`.
+
+Фиксированные public channels:
+
+- Yandex stable: `https://releases.markiro.app/station/stable/latest.json`;
+- Yandex beta: `https://releases.markiro.app/station/beta/latest.json`;
+- GitHub stable:
+  `https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json`;
+- GitHub beta:
+  `https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json`.
+
 ## 1. Подготовить защищённый план без release DNS
 
 На точном SHA текущего `main` запустите **Yandex infrastructure** со значениями

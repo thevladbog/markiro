@@ -112,6 +112,135 @@ test("station stable docs separate automated release proof from physical accepta
   assert.match(checklist, /Station stable/);
 });
 
+test("dual-origin rollout docs preserve the phased migration and recovery contract", async () => {
+  const [bootstrap, beta, stable, acceptance] = await Promise.all([
+    read("docs/runbooks/station-release-origin-bootstrap.md"),
+    read("docs/runbooks/station-beta-release.md"),
+    read("docs/runbooks/station-stable-release.md"),
+    read("docs/acceptance/station-dual-origin-release.md"),
+  ]);
+  const combined = `${bootstrap}\n${beta}\n${stable}\n${acceptance}`;
+
+  const phases = [
+    "Phase 1 — provision without DNS",
+    "Phase 2 — dual-publish tooling and seed",
+    "Phase 3 — transitional beta",
+    "Phase 4 — first dual-origin stable",
+  ];
+  let previous = -1;
+  for (const phase of phases) {
+    const index = bootstrap.indexOf(phase);
+    assert.ok(index > previous, `missing or unordered ${phase}`);
+    previous = index;
+  }
+
+  for (const url of [
+    "https://releases.markiro.app/station/download",
+    "https://releases.markiro.app/station/beta/download",
+    "https://releases.markiro.app/station/stable/latest.json",
+    "https://releases.markiro.app/station/beta/latest.json",
+    "https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json",
+    "https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json",
+  ]) {
+    assert.match(combined, new RegExp(url.replaceAll(".", "\\.")));
+  }
+
+  assert.match(bootstrap, /Task 12.*not authorized|Task 12.*не авторизован/is);
+  assert.match(
+    combined,
+    /immutable historical releases.*not.*retrofit|историческ.*immutable.*не.*retrofit/is,
+  );
+  assert.match(combined, /GitHub-reachable|GitHub доступен/i);
+  assert.match(combined, /GitHub-blocked|GitHub.*заблокирован/i);
+  assert.match(combined, /first-run rollback baseline|перв.*rollback baseline/i);
+  assert.match(combined, /mode=publish/);
+  assert.match(combined, /mode=promote-existing/);
+  assert.match(combined, /partial-origin/i);
+  assert.match(combined, /alias.*Yandex manifest.*GitHub manifest/is);
+  assert.match(combined, /manual-only|только вручную|работает вручную/i);
+  assert.match(combined, /active shift|активн.*смен/is);
+  assert.match(combined, /без Authenticode|no Authenticode|NSIS не имеет Authenticode/is);
+});
+
+test("dual-origin acceptance matrix retains every evidence field and required scenario", async () => {
+  const acceptance = await read("docs/acceptance/station-dual-origin-release.md");
+
+  for (const field of [
+    "Exact release tag",
+    "baseSha",
+    "releaseSha",
+    "GitHub evidence SHA-256",
+    "Yandex evidence SHA-256",
+    "GitHub immutable URL",
+    "Yandex immutable URL",
+    "GitHub channel URL",
+    "Yandex channel URL",
+    "Installer URL",
+  ]) {
+    assert.match(acceptance, new RegExp(field));
+  }
+
+  assert.match(
+    acceptance,
+    /\| Scenario\s*\| Evidence class\s*\| Result\s*\| Operator \| UTC timestamp \| Device \/ Windows identity \| Evidence path \/ SHA-256 \|/,
+  );
+  assert.match(
+    acceptance,
+    /Automated CI and host proof[\s\S]*Windows, hardware, and customer proof/i,
+  );
+
+  const scenarios = [
+    "BASELINE-01",
+    "PUBLISH-01",
+    "RECOVERY-01",
+    "RECOVERY-02",
+    "NETWORK-01",
+    "NETWORK-02",
+    "NETWORK-03",
+    "INTEGRITY-01",
+    "INTEGRITY-02",
+    "MIGRATION-01",
+    "MIGRATION-02",
+    "PRESERVE-01",
+    "PRESERVE-02",
+    "PRESERVE-03",
+    "PRESERVE-04",
+    "PRESERVE-05",
+    "PRESERVE-06",
+    "PRESERVE-07",
+    "PRESERVE-08",
+    "SHIFT-01",
+    "RECOVERY-03",
+    "HARDWARE-01",
+    "HARDWARE-02",
+    "HARDWARE-03",
+    "HARDWARE-04",
+    "WINDOWS-01",
+    "WINDOWS-02",
+    "OFFLINE-01",
+    "ROLLBACK-01",
+  ];
+  for (const scenario of scenarios) {
+    assert.equal(
+      [...acceptance.matchAll(new RegExp(`\\| ${scenario} `, "g"))].length,
+      1,
+      `${scenario} must have exactly one matrix row`,
+    );
+  }
+
+  const scenarioRows = acceptance
+    .split("\n")
+    .filter((line) =>
+      /^\| (?:BASELINE|PUBLISH|RECOVERY|NETWORK|INTEGRITY|MIGRATION|PRESERVE|SHIFT|HARDWARE|WINDOWS|OFFLINE|ROLLBACK)-\d{2} /.test(
+        line,
+      ),
+    );
+  assert.equal(scenarioRows.length, scenarios.length);
+  for (const row of scenarioRows) {
+    assert.match(row, /\| NOT_RUN \|\s*\|\s*\|\s*\|\s*\|$/);
+  }
+});
+
 test("Station release origin bootstrap separates protected credentials and approval gates", async () => {
   const [infrastructure, secrets, bootstrap] = await Promise.all([
     read("docs/runbooks/yandex-infrastructure.md"),
