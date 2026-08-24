@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
@@ -135,6 +135,55 @@ export class CodeSearchService {
         .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.sscc, classified.sscc)));
       if (!box) throw new NotFoundException({ code: "not_found" });
       return { type: "box" as const, boxId: box.id };
+    }
+    if (classified.kind === "partial-sscc") {
+      // Digits-only fragment (`classifySearchInput` guarantees `^\d{4,18}$`,
+      // so no LIKE metacharacters to escape). Newest boxes first: a manager
+      // typing a tail off a label is almost always after a recent box.
+      // Capped at 20 -- past that a disambiguation list stops being usable
+      // and the manager should just type more digits.
+      const matches = await this.db
+        .select({
+          id: schema.boxes.id,
+          sscc: schema.boxes.sscc,
+          closedAt: schema.boxes.closedAt,
+          productName: schema.products.name,
+        })
+        .from(schema.boxes)
+        .leftJoin(
+          schema.shifts,
+          and(
+            eq(schema.shifts.tenantId, schema.boxes.tenantId),
+            eq(schema.shifts.id, schema.boxes.shiftId),
+          ),
+        )
+        .leftJoin(
+          schema.products,
+          and(
+            eq(schema.products.tenantId, schema.shifts.tenantId),
+            eq(schema.products.id, schema.shifts.productId),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.boxes.tenantId, tenantId),
+            isNotNull(schema.boxes.sscc),
+            like(schema.boxes.sscc, `%${classified.digits}%`),
+          ),
+        )
+        .orderBy(desc(schema.boxes.openedAt))
+        .limit(20);
+      if (matches.length === 0) throw new NotFoundException({ code: "not_found" });
+      if (matches.length === 1) return { type: "box" as const, boxId: matches[0]!.id };
+      return {
+        type: "boxes" as const,
+        items: matches.map((m) => ({
+          boxId: m.id,
+          sscc: formatSsccWithAi(m.sscc!),
+          productName: m.productName,
+          closedAt: m.closedAt,
+        })),
+      };
     }
     const [code] = await this.db
       .select({ codeHash: schema.codes.codeHash })
@@ -660,19 +709,20 @@ export class CodeSearchService {
       .orderBy(desc(schema.boxItems.addedAt), schema.boxItems.codeHash);
 
     const codeHashes = [...new Set(itemRows.map((r) => r.codeHash))];
-    const codeDetailsByHash = new Map<string, { gtin14: string; serial: string }>();
+    const codeDetailsByHash = new Map<string, { gtin14: string; serial: string; rawKm: string }>();
     if (codeHashes.length > 0) {
       const codeRows = await this.db
         .selectDistinctOn([schema.codes.codeHash], {
           codeHash: schema.codes.codeHash,
           gtin14: schema.codes.gtin14,
           serial: schema.codes.serial,
+          rawKm: schema.codes.canonicalRaw,
         })
         .from(schema.codes)
         .where(and(eq(schema.codes.tenantId, tenantId), inArray(schema.codes.codeHash, codeHashes)))
         .orderBy(schema.codes.codeHash, desc(schema.codes.scannedAt));
       for (const r of codeRows)
-        codeDetailsByHash.set(r.codeHash, { gtin14: r.gtin14, serial: r.serial });
+        codeDetailsByHash.set(r.codeHash, { gtin14: r.gtin14, serial: r.serial, rawKm: r.rawKm });
     }
 
     const items = itemRows.map((r) => {
@@ -681,6 +731,7 @@ export class CodeSearchService {
         codeHash: r.codeHash,
         gtin14: detail?.gtin14 ?? null,
         serial: detail?.serial ?? null,
+        rawKm: detail?.rawKm ?? null,
         addedAt: r.addedAt,
         displacedAt: r.displacedAt,
         removedAt: r.removedAt,

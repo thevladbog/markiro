@@ -1003,8 +1003,9 @@
         "codes": "Codes",
         "boxes": "Boxes"
       },
-      "searchPlaceholder": "Enter an SSCC or marking code",
+      "searchPlaceholder": "Enter an SSCC (a partial number works) or a marking code",
       "searchButton": "Search",
+      "multipleBoxes": "Several boxes match — pick one:",
       "empty": "No codes found",
       "errors": {
         "unrecognized": "Code not recognized",

@@ -19,9 +19,25 @@ export const classifyQuerySchema = z.object({
 });
 export type ClassifyQueryDto = z.infer<typeof classifyQuerySchema>;
 
-/** `GET /code-search` response: which entity the input resolved to. */
+/** One box matched by a partial-SSCC search, enough for a disambiguation list. */
+export interface ClassifyBoxMatchDto {
+  boxId: string;
+  /** 20-значный код с GS1 AI "00", как везде в кабинете. */
+  sscc: string;
+  productName: string | null;
+  closedAt: Date | null;
+}
+
+/**
+ * `GET /code-search` response: which entity the input resolved to. `boxes`
+ * is the partial-SSCC case only, and only when MORE than one box matches --
+ * a single match collapses to the plain `box` variant so existing callers'
+ * happy path is unchanged.
+ */
 export type ClassifySearchResponseDto =
-  { type: "box"; boxId: string } | { type: "code"; codeHash: string };
+  | { type: "box"; boxId: string }
+  | { type: "code"; codeHash: string }
+  | { type: "boxes"; items: ClassifyBoxMatchDto[] };
 
 /** 404 body shape for `/code-search`: distinguishes "not a recognized SSCC/KM shape at all" from "well-formed, but nothing in this tenant matches". */
 export interface ClassifyNotFoundDto {
@@ -133,6 +149,12 @@ export interface BoxCardItemDto {
   codeHash: string;
   gtin14: string | null;
   serial: string | null;
+  /**
+   * The FULL stored wire form (`codes.canonical_raw`) including the
+   * GS-separated crypto tail -- the box card must show the code exactly as
+   * printed, not just the `01…21…` identity prefix.
+   */
+  rawKm: string | null;
   addedAt: Date;
   displacedAt: Date | null;
   removedAt: Date | null;

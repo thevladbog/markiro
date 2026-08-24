@@ -51,9 +51,24 @@ export interface ListCodesFilters {
   status?: string;
 }
 
-/** `GET /code-search` response: which entity the input resolved to. */
+/** Mirrors `apps/api/src/modules/code-search/dto.ts`'s `ClassifyBoxMatchDto`, `Date` fields as `string`. */
+export interface ClassifyBoxMatchDto {
+  boxId: string;
+  /** 20-значный код с GS1 AI "00", как везде в кабинете. */
+  sscc: string;
+  productName: string | null;
+  closedAt: string | null;
+}
+
+/**
+ * `GET /code-search` response: which entity the input resolved to. `boxes`
+ * only occurs for a partial-SSCC query matching MORE than one box -- a
+ * single match arrives as the plain `box` variant.
+ */
 export type ClassifySearchResult =
-  { type: "box"; boxId: string } | { type: "code"; codeHash: string };
+  | { type: "box"; boxId: string }
+  | { type: "code"; codeHash: string }
+  | { type: "boxes"; items: ClassifyBoxMatchDto[] };
 
 /** Mirrors `apps/api/src/modules/code-search/dto.ts`'s `CodeHistoryEvent`, `Date` fields as `string`. */
 export type CodeHistoryEvent =
@@ -105,6 +120,8 @@ export interface BoxCardItemDto {
   codeHash: string;
   gtin14: string | null;
   serial: string | null;
+  /** Full stored wire form incl. the GS-separated crypto tail (`codes.canonical_raw`). */
+  rawKm: string | null;
   addedAt: string;
   displacedAt: string | null;
   removedAt: string | null;

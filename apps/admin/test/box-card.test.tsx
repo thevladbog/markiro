@@ -41,6 +41,8 @@ const BOX_CARD = {
       codeHash: "a".repeat(64),
       gtin14: "04630000000001",
       serial: "SN0001",
+      // Full wire form incl. the GS-separated (U+001D) crypto tail.
+      rawKm: "010463000000000121SN0001\u001d93dGVz",
       addedAt: "2026-08-20T08:05:00.000Z",
       displacedAt: null,
       removedAt: null,
@@ -49,6 +51,7 @@ const BOX_CARD = {
       codeHash: "b".repeat(64),
       gtin14: "04630000000001",
       serial: "SN0002",
+      rawKm: null,
       addedAt: "2026-08-20T08:06:00.000Z",
       displacedAt: null,
       removedAt: "2026-08-20T08:40:00.000Z",
@@ -119,8 +122,10 @@ describe("BoxCardPage", () => {
 
     expect(await screen.findByText("Молоко 1л")).toBeTruthy();
 
-    // Both code rows render, linking to their code cards.
-    const codeLink1 = screen.getByRole("link", { name: "010463000000000121SN0001" });
+    // Both code rows render, linking to their code cards. The first row has
+    // the full stored KM, so it shows the crypto tail with the GS control
+    // char made visible; the second (no rawKm) falls back to `01…21…`.
+    const codeLink1 = screen.getByRole("link", { name: "010463000000000121SN0001␝93dGVz" });
     expect(codeLink1.getAttribute("href")).toBe(`/codes/km/${BOX_CARD.items[0]!.codeHash}`);
     const codeLink2 = screen.getByRole("link", { name: "010463000000000121SN0002" });
     expect(codeLink2.getAttribute("href")).toBe(`/codes/km/${BOX_CARD.items[1]!.codeHash}`);
