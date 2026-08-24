@@ -26,7 +26,8 @@ const edgeRepository = "ghcr.io/thevladbog/markiro-edge";
 const defaultVbtechReleaseDirectory = "/var/lib/markiro/vbtech/releases";
 const trustedVbtechDomain = "v-b.tech";
 const trustedVbtechWwwDomain = "www.v-b.tech";
-const enabledVbtechFunctionPath = "/d4egihdqfci0mhota3ac";
+const enabledVbtechFunctionOrigin = "https://functions.yandexcloud.net/d4egihdqfci0mhota3ac";
+const enabledVbtechFunctionPath = new URL(enabledVbtechFunctionOrigin).pathname;
 const vbtechInputKeys = [
   "VBTECH_IMAGE_REF",
   "VBTECH_IMAGE_TAG",
@@ -276,6 +277,9 @@ const vbtechEnvironmentEntries = (vbtech) => [
   ["VBTECH_RELEASE_SHA", vbtech.releaseSha],
   ["VBTECH_DOMAIN", trustedVbtechDomain],
   ["VBTECH_WWW_DOMAIN", trustedVbtechWwwDomain],
+  ...(vbtech.submissionState === "enabled"
+    ? [["VBTECH_FUNCTION_ORIGIN", enabledVbtechFunctionOrigin]]
+    : []),
   ["VBTECH_FUNCTION_PATH", vbtech.functionPath],
   ["VBTECH_SUBMISSION_STATE", vbtech.submissionState],
 ];
@@ -292,7 +296,9 @@ function environmentWithVbtech(environment, vbtech) {
   if (!vbtech) return environment;
   const entries = vbtechEnvironmentEntries(vbtech);
   if (
-    environment.VBTECH_FUNCTION_ORIGIN !== undefined ||
+    (environment.VBTECH_FUNCTION_ORIGIN !== undefined &&
+      environment.VBTECH_FUNCTION_ORIGIN !==
+        (vbtech.submissionState === "enabled" ? enabledVbtechFunctionOrigin : undefined)) ||
     entries.some(
       ([key, expected]) => environment[key] !== undefined && environment[key] !== expected,
     )
