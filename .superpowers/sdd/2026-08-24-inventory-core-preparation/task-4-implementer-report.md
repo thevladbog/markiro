@@ -189,3 +189,41 @@ back and the newly published object is removed.
 - The pre-existing line schema still has no active flag, and the private object `get` helper still
   has the previously reported 5 MiB cap versus the parser's 8 MiB compressed limit. Neither
   concern is broadened or changed by this review fix.
+
+## Review fix round 2
+
+### Focused reconciliation-read-failure coverage
+
+- Added one DB-backed e2e characterization for the explicit ambiguous-transaction plus unavailable
+  reconciliation-read branch. The one-shot boundary uses a real PostgreSQL transaction, runs the
+  complete production callback through publication/import/audit writes, then forces rollback and
+  an ambiguous error; only the following direct reconciliation `select` is made unavailable.
+- The first HTTP request publishes the exact deterministic tenant/inventory/status/SHA key, returns
+  the established sanitized 500 body, creates no durable import or audit after rollback, does not
+  call `delete`, and leaves exactly that one private object. Neither the response nor audit output
+  exposes the object key or filename.
+- After the injected failures are restored, a normal retry publishes to the same exact key rather
+  than a second key, succeeds, and leaves one tenant/inventory/status/SHA-scoped import plus one
+  `inventory.import.processed` audit. The test pins two puts to the same key, zero deletes, one
+  object-map key, one import, one audit, and the expected sanitized audit facts.
+- Current production behavior passed the new characterization immediately, so no production change
+  was made. Mutation proof temporarily added the unsafe `delete` call to the reconciliation-read
+  catch: the focused test failed exactly at the zero-delete/preserved-object assertion (**1 failed,
+  16 filtered**). The mutation was then fully removed and the complete inventory e2e file returned
+  to GREEN (**17/17**).
+
+### Verification and scope
+
+- Every characterization, mutation, and final run used a newly created, fully migrated, explicitly
+  named temporary PostgreSQL database. Cleanup was registered only after successful creation; all
+  four databases were dropped and the shared development database remained untouched.
+- `@markiro/db` build before the consumer test: **passed**.
+- Final inventory e2e: **17 passed, 0 skipped**.
+- API typecheck, full lint, build, scoped Prettier, and `git diff --check`: **passed**. An initial
+  typecheck exposed a `Promise<void>` inference in the new generic test transaction wrapper; the
+  helper now returns the real transaction promise without a cast, and the final check passed.
+- The expected Nest error logs for the injected ambiguous-reconciliation branch and the existing
+  rollback trigger were emitted while their HTTP responses remained sanitized. Vite also emitted
+  the existing native-config compatibility warning.
+- Scoped files: `apps/api/test/inventories.e2e.test.ts` and this report only. Snapshot/start/UI and
+  all other Task 4 boundaries remain unchanged; the previous concerns remain the same.

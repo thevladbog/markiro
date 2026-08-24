@@ -864,6 +864,144 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     expect([...objects.keys()]).toEqual([expectedKey]);
   });
 
+  it("preserves an ambiguous object when reconciliation is unavailable and safely reuses its key", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent);
+    const inventory = await createInventory(agent, productId, lineId);
+    const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/INTRODUCED/${INTRODUCED_DIGEST}.csv`;
+    const ambiguousError = new Error("simulated ambiguous transaction outcome");
+    const realTransaction: Db["transaction"] = db.transaction.bind(db);
+    const reconciliationSelectSpy = vi.spyOn(db, "select");
+    const rollbackThenLoseReconciliation: Db["transaction"] = async (callback, config) => {
+      try {
+        if (config === undefined) {
+          return await realTransaction(async (tx) => {
+            await callback(tx);
+            throw ambiguousError;
+          });
+        }
+        return await realTransaction(async (tx) => {
+          await callback(tx);
+          throw ambiguousError;
+        }, config);
+      } catch {
+        reconciliationSelectSpy.mockImplementationOnce(() => {
+          throw new Error("simulated reconciliation read unavailable");
+        });
+        throw ambiguousError;
+      }
+    };
+    const transactionSpy = vi
+      .spyOn(db, "transaction")
+      .mockImplementationOnce(rollbackThenLoseReconciliation);
+
+    try {
+      const first = await upload(agent, inventory.id, "INTRODUCED").expect(500);
+      expect(first.body).toEqual({ statusCode: 500, message: "Internal server error" });
+      expect(JSON.stringify(first.body)).not.toMatch(/objectKey|fileName|tenants\//i);
+    } finally {
+      transactionSpy.mockRestore();
+      reconciliationSelectSpy.mockRestore();
+    }
+
+    expect(storage.putVerified).toHaveBeenCalledTimes(1);
+    expect(storage.delete).not.toHaveBeenCalled();
+    expect([...objects.keys()]).toEqual([expectedKey]);
+    const importsBeforeRetry = await db
+      .select({ id: schema.inventoryImports.id })
+      .from(schema.inventoryImports)
+      .where(
+        and(
+          eq(schema.inventoryImports.tenantId, tenantId),
+          eq(schema.inventoryImports.inventoryId, inventory.id),
+          eq(schema.inventoryImports.declaredStatus, "INTRODUCED"),
+          eq(schema.inventoryImports.sha256, INTRODUCED_DIGEST),
+        ),
+      );
+    expect(importsBeforeRetry).toEqual([]);
+    const auditsBeforeRetry = await db
+      .select({ id: schema.tenantAuditEvents.id })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "inventory.import.processed"),
+        ),
+      );
+    expect(auditsBeforeRetry).toEqual([]);
+
+    const retry = await upload(agent, inventory.id, "INTRODUCED").expect(201);
+    expect(retry.body).toMatchObject({
+      declaredStatus: "INTRODUCED",
+      parsedStatus: "INTRODUCED",
+      result: "succeeded",
+      sha256: INTRODUCED_DIGEST,
+    });
+    expect(JSON.stringify(retry.body)).not.toMatch(/objectKey|fileName|tenants\//i);
+    expect(storage.putVerified).toHaveBeenCalledTimes(2);
+    expect(storage.putVerified.mock.calls.map(([key]) => key)).toEqual([expectedKey, expectedKey]);
+    expect(storage.delete).not.toHaveBeenCalled();
+    expect([...objects.keys()]).toEqual([expectedKey]);
+
+    const storedImports = await db
+      .select({
+        id: schema.inventoryImports.id,
+        tenantId: schema.inventoryImports.tenantId,
+        inventoryId: schema.inventoryImports.inventoryId,
+        declaredStatus: schema.inventoryImports.declaredStatus,
+        sha256: schema.inventoryImports.sha256,
+        objectKey: schema.inventoryImports.objectKey,
+      })
+      .from(schema.inventoryImports)
+      .where(
+        and(
+          eq(schema.inventoryImports.tenantId, tenantId),
+          eq(schema.inventoryImports.inventoryId, inventory.id),
+          eq(schema.inventoryImports.declaredStatus, "INTRODUCED"),
+          eq(schema.inventoryImports.sha256, INTRODUCED_DIGEST),
+        ),
+      );
+    expect(storedImports).toEqual([
+      {
+        id: retry.body.id,
+        tenantId,
+        inventoryId: inventory.id,
+        declaredStatus: "INTRODUCED",
+        sha256: INTRODUCED_DIGEST,
+        objectKey: expectedKey,
+      },
+    ]);
+    const audits = await db
+      .select({
+        targetId: schema.tenantAuditEvents.targetId,
+        after: schema.tenantAuditEvents.after,
+      })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "inventory.import.processed"),
+          eq(schema.tenantAuditEvents.targetId, retry.body.id as string),
+        ),
+      );
+    expect(audits).toEqual([
+      {
+        targetId: retry.body.id,
+        after: expect.objectContaining({
+          tenantId,
+          inventoryId: inventory.id,
+          importId: retry.body.id,
+          result: "succeeded",
+          declaredStatus: "INTRODUCED",
+          parsedStatus: "INTRODUCED",
+          includedGtin14: FIXTURE_GTIN,
+          sha256: INTRODUCED_DIGEST,
+        }),
+      },
+    ]);
+    expect(JSON.stringify(audits)).not.toMatch(/objectKey|fileName|tenants\//i);
+  });
+
   it("removes a newly published object when the database/audit transaction rolls back", async () => {
     const agent = request.agent(app!.getHttpServer());
     const { tenantId, productId, lineId } = await seedPreparation(agent);
