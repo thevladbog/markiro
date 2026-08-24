@@ -688,16 +688,17 @@ async function loadBackup(backupDirectory, channel) {
 
 async function restoreAndVerify(store, objects, channel) {
   const [manifest, installer] = objects;
-  await store.putMutable(manifest.key, manifest.bytes, manifest.contentType);
   const source = immutableInstallerSource(installer.sourceKey, channel);
   await store.copyImmutableToAlias({
     ...source,
     aliasKey: installer.key,
   });
-  for (const object of objects) {
-    if (!equalBytes(await store.readPublic(object.key), object.bytes)) {
-      throw new Error("station release rollback verification failed");
-    }
+  if (!equalBytes(await store.readPublic(installer.key), installer.bytes)) {
+    throw new Error("station release rollback verification failed");
+  }
+  await store.putMutable(manifest.key, manifest.bytes, manifest.contentType);
+  if (!equalBytes(await store.readPublic(manifest.key), manifest.bytes)) {
+    throw new Error("station release rollback verification failed");
   }
 }
 

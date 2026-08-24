@@ -1,33 +1,21 @@
 import { createHash } from "node:crypto";
-import { execFile as execFileCallback } from "node:child_process";
-import {
-  chmod,
-  copyFile,
-  lstat,
-  mkdir,
-  open,
-  readFile,
-  readdir,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 
 import { stationReleaseLocation } from "./origins.mjs";
 import { parseStationBetaTag, parseStationStableTag } from "./version.mjs";
 
-const execFile = promisify(execFileCallback);
 const MAX_ARTIFACT_BYTES = 512 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES = 64 * 1024;
 const MAX_TEXT_BYTES = 256 * 1024;
 const SECRET_TEXT = /ghp_|github_pat_|TAURI_SIGNING_PRIVATE_KEY|api[_ -]?key|pairing_code/i;
+// eslint-disable-next-line no-control-regex
 const UNSAFE_CONTROL_TEXT = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const CHANNELS = new Set(["beta", "stable"]);
+const ORIGINS = new Set(["github", "yandex"]);
 const LEGACY_CLI_ORIGIN = "github";
 const STABLE_PROVENANCE_KEYS = [
   "sourceBetaTag",
@@ -473,7 +461,7 @@ async function validateStationReleaseDirectoryInternal(
   for (const line of checksums) {
     const name = line.slice(66);
     if (
-      !/^[0-9a-f]{64}  [^\r\n]+$/.test(line) ||
+      !/^[0-9a-f]{64} {2}[^\r\n]+$/.test(line) ||
       !expectedChecksumNames.includes(name) ||
       seenChecksumNames.has(name)
     )
@@ -625,6 +613,76 @@ export async function checksumsForDirectory(directory, version) {
 
 async function main() {
   const [, , command, ...args] = process.argv;
+  if (command === "stage-origin") {
+    const [
+      origin,
+      channel,
+      inputDirectory,
+      outputDirectory,
+      version,
+      pubDate,
+      baseSha,
+      releaseSha,
+      ...extra
+    ] = args;
+    if (
+      !ORIGINS.has(origin) ||
+      channel !== "beta" ||
+      !inputDirectory ||
+      !outputDirectory ||
+      !version ||
+      !pubDate ||
+      !baseSha ||
+      !releaseSha ||
+      extra.length > 0
+    ) {
+      invalid();
+    }
+    await stageStationRelease({
+      channel,
+      origin,
+      inputDirectory,
+      outputDirectory,
+      version,
+      pubDate,
+      baseSha,
+      releaseSha,
+    });
+    return;
+  }
+  if (command === "validate-origin") {
+    const [origin, channel, directory, version, ...extra] = args;
+    if (
+      !ORIGINS.has(origin) ||
+      !CHANNELS.has(channel) ||
+      !directory ||
+      !version ||
+      extra.length > 0
+    ) {
+      invalid();
+    }
+    await validateStationReleaseDirectory(directory, { channel, origin, version });
+    return;
+  }
+  if (command === "compare-origins") {
+    const [githubDirectory, yandexDirectory, channel, version, ...extra] = args;
+    if (
+      !githubDirectory ||
+      !yandexDirectory ||
+      !CHANNELS.has(channel) ||
+      !version ||
+      extra.length > 0
+    ) {
+      invalid();
+    }
+    await compareStationReleaseOrigins({
+      githubDirectory,
+      yandexDirectory,
+      channel,
+      version,
+    });
+    return;
+  }
   if (command === "stage") {
     const hasChannel = CHANNELS.has(args[0]);
     const channel = hasChannel ? args.shift() : "beta";

@@ -115,6 +115,14 @@ Windows.
   коммитить или копировать на станцию. Значение private key храните в исходном
   base64-формате, который выдаёт `tauri signer generate`, байт-в-байт: не
   декодируйте, не перекодируйте и не нормализуйте его.
+- Отдельный защищённый Environment `station-release` разрешён только для ветки
+  `main`, требует approval release owner и содержит точный инвентарь:
+  secrets `YANDEX_STATION_RELEASE_ACCESS_KEY_ID` и
+  `YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY`, variables
+  `YANDEX_STATION_RELEASE_BUCKET` и `YANDEX_STATION_RELEASE_ENDPOINT` со
+  значением `https://storage.yandexcloud.net`. Не переносите signing secrets в
+  `station-release`, а publisher credentials — в `station-beta`, job-wide env,
+  аргументы, логи или artifacts.
 - `STATION_ORIGIN` — production runtime secret, а не signing secret environment:
   перед beta он обязан быть равен `http://tauri.localhost`. Значение
   `tauri://localhost` не является Windows origin для этой сборки.
@@ -124,17 +132,89 @@ Windows.
 ## Публикация и повторное продвижение
 
 Для новой версии выберите `mode=publish` и `next-beta`, `next-patch-beta`,
-`next-minor-beta` или `next-major-beta`. Workflow собирает подписанный NSIS-пакет, проверяет
-`latest.json`, SHA-256, подпись и commit digest, затем публикует immutable
-`station-v…-beta.N` и обновляет mutable `station-beta-channel/latest.json`.
+`next-minor-beta` или `next-major-beta`. Обычная публикация разрешена только при
+существующей полной паре Yandex mutable objects: `station/beta/latest.json` и
+`station/beta/download`. Если отсутствует один или оба объекта либо metadata
+alias не указывает на канонический immutable installer того же beta-канала,
+workflow отказывает до первой channel mutation. GitHub
+`station-beta-channel/latest.json` также обязан существовать и скачиваться в
+полную резервную копию; workflow больше не создаёт пустой channel автоматически.
+
+Workflow собирает и подписывает NSIS ровно один раз, затем из одного общего
+набора строит строгие GitHub и Yandex trees. Он локально валидирует обе trees и
+их common assets, публикует immutable GitHub release, затем только отсутствующий
+immutable Yandex prefix, скачивает оба публичных origin в новые каталоги и
+повторяет validation/comparison. Только после этого создаются все три backup и
+mutable targets продвигаются в строгом порядке:
+
+1. GitHub `station-beta-channel/latest.json`;
+2. Yandex `station/beta/latest.json`;
+3. Yandex `station/beta/download` — всегда последним, server-side copy из
+   проверенного immutable installer.
+
+Единый transaction trap при ошибке восстанавливает изменённые targets в
+обратном порядке: Yandex alias, Yandex manifest, затем GitHub manifest. Каждое
+восстановление читается публично и сравнивается с backup. Ошибка проверки
+restoration — отдельный жёсткий отказ; immutable release или object при этом не
+удаляется и не перезаписывается.
 
 Если immutable release опубликован, но канал не обновился, запустите
-`mode=promote-existing`. Этот режим не пересобирает пакет и не создаёт новую
-версию: скачивает опубликованные файлы, валидирует их и заменяет только
-указатель канала. При ошибке предыдущий `latest.json` восстанавливается, если
-он существовал.
+`mode=promote-existing`. Этот режим не пересобирает и не подписывает пакет, не
+создаёт версию и не загружает никакой immutable object. Он находит последнюю
+каноническую beta, скачивает обе уже существующие public immutable trees в
+новые каталоги, валидирует их и сравнивает common assets. Затем он требует три
+полные mutable backup и повторяет только описанную promotion transaction.
+
+### Одноразовый beta baseline
+
+`mode=seed-baseline` — отдельный защищённый одноразовый режим только для нового
+strict dual-origin pre-transition beta. Нельзя retrofit или переупаковать старую
+legacy beta с GitHub-only evidence: workflow обязан собрать и подписать новую
+версию, опубликовать её strict GitHub tree и передать скачанный public GitHub
+source в Task 5 `seed-baseline`. Оператор передаёт точный JSON evidence отдельно
+одобренного и применённого инфраструктурного plan, в котором
+`enableStationReleasePublicDns` равно `false`; значение `true`, лишнее поле или
+неверные SHA/VersionId останавливают команду. Workflow не включает DNS и не
+принимает boolean default вместо evidence.
+
+Protected publisher вызывает точный gate `--confirm-empty-channel-bootstrap`.
+GitHub channel уже должен иметь предыдущий manifest backup. На Yandex допустимы
+только полностью пустая mutable pair либо уже полная byte-identical known-good
+pair после безопасного повтора; частичная или чужая pair запрещена. Publisher
+публикует только отсутствующие immutable objects, читает их через
+`https://storage.yandexcloud.net`, создаёт Yandex manifest и beta alias и при
+первой ошибке повторно применяет и проверяет полную known-good pair. Bootstrap
+record и закрытый recovery backup сохраняются отдельным workflow artifact.
+Release DNS остаётся выключенным до отдельного STOP/plan/apply из
+[bootstrap runbook](station-release-origin-bootstrap.md).
+
+### Partial-origin recovery
+
+Если версия есть только в одном immutable origin, содержит несовпадающие bytes
+или один public origin не проходит validation, не запускайте
+`promote-existing`, не копируйте surviving tree поверх второго origin и не
+перезаписывайте существующий tag/key. Это partial-origin incident: сохраните
+immutable evidence, проверьте audit/versioning и выпустите новую явно
+авторизованную beta после исправления причины. `seed-baseline` применяется
+только для первоначального DNS-disabled baseline и не является общим repair
+режимом. Если обе immutable trees валидны, а сбой затронул только mutable
+targets, используйте `promote-existing`.
 
 ## Установка на станции
+
+Канонический URL обычной установки — stable alias
+`https://releases.markiro.app/station/download`. Beta никогда не выбирается по
+cookie, query или referrer и доступна только по явному URL
+`https://releases.markiro.app/station/beta/download`.
+
+Установленные старые GitHub-only клиенты не узнают новый origin от изменения на
+сервере. Если GitHub доступен, сначала доставьте им transitional beta с
+dual-origin adapter через старый updater. В ограниченной сети (restricted
+network), где GitHub уже заблокирован, скачайте проверенный beta installer по
+явному Yandex URL и выполните ручной install-over поверх существующей установки.
+До и после install-over сохраните и проверьте Station identity, pairing,
+hardware settings, SQLite, журналы, короба, исключения и pending outbox; удаление
+данных не является recovery.
 
 Центр обновлений работает вручную. Он подсвечивает релиз старше 7 дней
 (срочно — старше 30), но не начинает действие без подтверждения оператора.

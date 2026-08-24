@@ -389,7 +389,10 @@ test("stages and validates the canonical release tree", async () => {
   assert.equal(evidence.version, version);
   const validated = await validateStationReleaseDirectory(output, { origin: "github", version });
   assert.equal(validated.manifest.version, version);
-  assert.match(await readFile(join(output, names.checksums), "utf8"), /[0-9a-f]{64}  latest\.json/);
+  assert.match(
+    await readFile(join(output, names.checksums), "utf8"),
+    /[0-9a-f]{64} {2}latest\.json/,
+  );
 });
 
 test("rejects a detached signature file that differs from the updater manifest", async () => {
@@ -476,6 +479,86 @@ test("CLI retains the GitHub default when staging and validating beta artifacts"
   ]);
   const manifest = JSON.parse(await readFile(join(output, names.manifest), "utf8"));
   assert.equal(manifest.platforms["windows-x86_64"].url, bundleUrl);
+});
+
+test("CLI stages, validates and compares only explicit closed release origins", async () => {
+  const input = await mkdtemp(join(tmpdir(), "markiro-station-cli-origin-input-"));
+  const githubOutput = join(input, "github");
+  const yandexOutput = join(input, "yandex");
+  for (const [name, content] of [
+    [names.installer, "installer"],
+    [names.bundle, "bundle"],
+    [names.signature, "trusted-signature"],
+  ]) {
+    await writeFile(join(input, name), content);
+  }
+  const common = [
+    "beta",
+    input,
+    version,
+    "2026-08-11T10:00:00.000Z",
+    "a".repeat(40),
+    "b".repeat(40),
+  ];
+
+  await execFile(process.execPath, [
+    "tools/station-release/artifacts.mjs",
+    "stage-origin",
+    "github",
+    common[0],
+    common[1],
+    githubOutput,
+    ...common.slice(2),
+  ]);
+  await execFile(process.execPath, [
+    "tools/station-release/artifacts.mjs",
+    "stage-origin",
+    "yandex",
+    common[0],
+    common[1],
+    yandexOutput,
+    ...common.slice(2),
+  ]);
+  for (const [origin, directory] of [
+    ["github", githubOutput],
+    ["yandex", yandexOutput],
+  ]) {
+    await execFile(process.execPath, [
+      "tools/station-release/artifacts.mjs",
+      "validate-origin",
+      origin,
+      "beta",
+      directory,
+      version,
+    ]);
+  }
+  await execFile(process.execPath, [
+    "tools/station-release/artifacts.mjs",
+    "compare-origins",
+    githubOutput,
+    yandexOutput,
+    "beta",
+    version,
+  ]);
+
+  const githubManifest = JSON.parse(await readFile(join(githubOutput, names.manifest), "utf8"));
+  const yandexManifest = JSON.parse(await readFile(join(yandexOutput, names.manifest), "utf8"));
+  assert.equal(githubManifest.platforms["windows-x86_64"].url, bundleUrl);
+  assert.equal(
+    yandexManifest.platforms["windows-x86_64"].url,
+    `https://releases.markiro.app/station/beta/releases/${version}/${names.bundle}`,
+  );
+
+  await assert.rejects(
+    execFile(process.execPath, [
+      "tools/station-release/artifacts.mjs",
+      "validate-origin",
+      "https://evil.invalid",
+      "beta",
+      githubOutput,
+      version,
+    ]),
+  );
 });
 
 test("CLI retains the GitHub default when staging stable artifacts", async () => {

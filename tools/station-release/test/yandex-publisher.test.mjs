@@ -788,7 +788,7 @@ test("reports a distinct hard failure when seed compensation cannot restore the 
   });
 });
 
-test("promotes manifest then alias and restores both when public verification fails", async () => {
+test("promotes manifest then alias and restores alias then manifest on verification failure", async () => {
   const tree = await yandexTree();
   const parent = await mkdtemp(join(tmpdir(), "markiro-promote-parent-"));
   const backupDirectory = join(parent, "backup");
@@ -817,8 +817,8 @@ test("promotes manifest then alias and restores both when public verification fa
   assert.deepEqual(mutations, [
     "putMutable:station/beta/latest.json",
     "copyImmutableToAlias:station/beta/download",
-    "putMutable:station/beta/latest.json",
     "copyImmutableToAlias:station/beta/download",
+    "putMutable:station/beta/latest.json",
   ]);
   assert.deepEqual(
     store.mutable.get("station/beta/latest.json").bytes,
@@ -854,6 +854,17 @@ test("verifies backup hashes before rollback and only restores mutable keys", as
   await publisher.backupMutables({ channel, backupDirectory });
   store.calls.length = 0;
   await publisher.rollback({ channel, backupDirectory });
+  assert.deepEqual(
+    store.calls
+      .filter((call) => ["putMutable", "copyImmutableToAlias", "readPublic"].includes(call.method))
+      .map((call) => `${call.method}:${call.key ?? call.aliasKey}`),
+    [
+      "copyImmutableToAlias:station/beta/download",
+      "readPublic:station/beta/download",
+      "putMutable:station/beta/latest.json",
+      "readPublic:station/beta/latest.json",
+    ],
+  );
   assert.equal(
     store.calls.some((call) => call.method === "putImmutable"),
     false,

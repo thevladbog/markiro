@@ -29,6 +29,34 @@ test("station beta docs cover manual promotion and recovery", async () => {
   await access(new URL("docs/acceptance/station-beta-release.md", root));
 });
 
+test("station beta docs define dual-origin baseline, repair and restricted-network operations", async () => {
+  const runbook = await read("docs/runbooks/station-beta-release.md");
+  assert.match(runbook, /Environment `station-release`/);
+  for (const name of [
+    "YANDEX_STATION_RELEASE_ACCESS_KEY_ID",
+    "YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY",
+    "YANDEX_STATION_RELEASE_BUCKET",
+    "YANDEX_STATION_RELEASE_ENDPOINT",
+  ]) {
+    assert.match(runbook, new RegExp(name));
+  }
+  assert.match(runbook, /mode=seed-baseline/);
+  assert.match(runbook, /--confirm-empty-channel-bootstrap/);
+  assert.match(runbook, /enableStationReleasePublicDns.*false/is);
+  assert.match(runbook, /нов.*pre-transition beta|pre-transition beta.*нов/is);
+  assert.match(runbook, /legacy.*beta.*нельзя|нельзя.*legacy.*beta/is);
+  assert.match(runbook, /полной.*пар.*Yandex|Yandex.*полной.*пар/is);
+  assert.match(runbook, /station\/beta\/latest\.json/);
+  assert.match(runbook, /station\/beta\/download/);
+  assert.match(runbook, /promote-existing[\s\S]*не пересобирает[\s\S]*не загружает.*immutable/is);
+  assert.match(runbook, /частичн.*origin|partial-origin/is);
+  assert.match(runbook, /https:\/\/releases\.markiro\.app\/station\/download/);
+  assert.match(runbook, /https:\/\/releases\.markiro\.app\/station\/beta\/download/);
+  assert.match(runbook, /GitHub-only.*transitional beta|transitional beta.*GitHub-only/is);
+  assert.match(runbook, /install-over|поверх существующей установки/i);
+  assert.match(runbook, /ограниченн.*сет|restricted network/is);
+});
+
 test("station stable docs separate automated release proof from physical acceptance", async () => {
   const [stableRunbook, stableAcceptance, betaRunbook, readme, checklist] = await Promise.all([
     read("docs/runbooks/station-stable-release.md"),
