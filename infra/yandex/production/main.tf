@@ -25,6 +25,19 @@ check "workload_service_account_ids_are_distinct" {
   }
 }
 
+check "public_domains_are_distinct" {
+  assert {
+    condition = length(toset([
+      var.domain,
+      var.saas_admin_domain,
+      var.kiosk_domain,
+      var.landing_domain,
+      var.station_release_domain,
+    ])) == 5
+    error_message = "Direct-VM domains must be pairwise distinct and must not use the Station release domain."
+  }
+}
+
 module "network" {
   source = "../modules/network"
 

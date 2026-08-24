@@ -123,6 +123,18 @@ test("all public names are gated together and resolve only to the retained app a
   const variables = await source("infra/yandex/production/variables.tf");
   const publicDns = block(variables, 'variable "public_dns_enabled"');
   assert.match(publicDns, /default\s*=\s*false/);
+
+  const publicDomainIsolation = block(production, 'check "public_domains_are_distinct"');
+  assert.match(publicDomainIsolation, /length\(toset\(\[/);
+  for (const domain of [
+    "var.domain",
+    "var.saas_admin_domain",
+    "var.kiosk_domain",
+    "var.landing_domain",
+    "var.station_release_domain",
+  ])
+    assert.match(publicDomainIsolation, new RegExp(domain.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(publicDomainIsolation, /\]\)\)\s*==\s*5/);
 });
 
 test("PostgreSQL and application database remain private, encrypted, backed up and protected", async () => {
@@ -170,6 +182,8 @@ test("Station releases use one protected versioned bucket and a prefix-limited p
   assert.match(bucket, /bucket\s*=\s*var\.bucket_name/);
   assert.match(bucket, /folder_id\s*=\s*var\.folder_id/);
   assert.match(bucket, /force_destroy\s*=\s*false/);
+  assert.match(bucket, /acl\s*=\s*"private"/);
+  assert.doesNotMatch(bucket, /\bgrant\s*\{/);
   assert.match(
     bucket,
     /anonymous_access_flags\s*\{[\s\S]*read\s*=\s*true[\s\S]*list\s*=\s*false[\s\S]*config_read\s*=\s*false/,

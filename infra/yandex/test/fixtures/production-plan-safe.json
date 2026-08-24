@@ -37,12 +37,16 @@
         "actions": ["update"],
         "before": {
           "bucket": "markiro-station-releases",
+          "acl": "private",
+          "grant": [],
           "force_destroy": false,
           "anonymous_access_flags": [{ "read": true, "list": false, "config_read": false }],
           "versioning": [{ "enabled": true }]
         },
         "after": {
           "bucket": "markiro-station-releases",
+          "acl": "private",
+          "grant": [],
           "force_destroy": false,
           "anonymous_access_flags": [{ "read": true, "list": false, "config_read": false }],
           "versioning": [{ "enabled": true }]

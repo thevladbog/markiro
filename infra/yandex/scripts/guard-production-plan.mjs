@@ -9,6 +9,12 @@ const protectedAddresses = new Set([
   "module.object_storage.yandex_storage_bucket.media",
   "module.object_storage.yandex_storage_bucket.audit",
 ]);
+const directVmDnsAddresses = new Set([
+  "yandex_dns_recordset.application[0]",
+  "yandex_dns_recordset.saas_admin_application[0]",
+  "yandex_dns_recordset.kiosk_application[0]",
+  "yandex_dns_recordset.landing_application[0]",
+]);
 
 const releasePrefix = "module.station_releases.";
 const releaseAddresses = new Set([
@@ -188,6 +194,13 @@ function validateReleaseBucket(resource) {
   const value = after(resource);
   const bucketName = nonblank(value.bucket);
   if (value.force_destroy !== false) rejected();
+  if (value.acl !== null && value.acl !== undefined && value.acl !== "private") rejected();
+  if (
+    value.grant !== null &&
+    value.grant !== undefined &&
+    (!Array.isArray(value.grant) || value.grant.length > 0)
+  )
+    rejected();
   if (!Array.isArray(value.anonymous_access_flags) || value.anonymous_access_flags.length !== 1)
     rejected();
   const anonymous = value.anonymous_access_flags[0];
@@ -314,6 +327,14 @@ function validatePublicDns(resource) {
   if (data !== null && (!Array.isArray(data) || data.length !== 1)) rejected();
 }
 
+function validateDirectVmDns(resource) {
+  if (resource.type !== "yandex_dns_recordset") rejected();
+  if (resource.change?.after === null) return;
+  const value = after(resource);
+  const name = nonblank(value.name).replace(/\.+$/, "").toLowerCase();
+  if (name === expectedReleaseDomain) rejected();
+}
+
 export function guardProductionPlan(plan) {
   if (!plan || typeof plan !== "object" || !Array.isArray(plan.resource_changes)) rejected();
 
@@ -323,7 +344,9 @@ export function guardProductionPlan(plan) {
     if (!resource || typeof resource !== "object" || typeof resource.address !== "string")
       rejected();
     const guarded =
-      protectedAddresses.has(resource.address) || resource.address.startsWith(releasePrefix);
+      protectedAddresses.has(resource.address) ||
+      directVmDnsAddresses.has(resource.address) ||
+      resource.address.startsWith(releasePrefix);
     if (!guarded) continue;
     if (seen.has(resource.address)) rejected();
     if (resource.address.startsWith(releasePrefix) && !releaseAddresses.has(resource.address))
@@ -336,6 +359,10 @@ export function guardProductionPlan(plan) {
 
   for (const address of protectedAddresses) if (!seen.has(address)) rejected();
   for (const address of requiredReleaseAddresses) if (!seen.has(address)) rejected();
+  for (const address of directVmDnsAddresses) {
+    const resource = resources.get(address);
+    if (resource) validateDirectVmDns(resource);
+  }
 
   const bucket = resources.get("module.station_releases.yandex_storage_bucket.releases");
   const bucketName = validateReleaseBucket(bucket);

@@ -19,6 +19,12 @@ const retainedProtectedAddresses = [
   "module.object_storage.yandex_storage_bucket.media",
   "module.object_storage.yandex_storage_bucket.audit",
 ];
+const directVmDnsAddresses = [
+  "yandex_dns_recordset.application[0]",
+  "yandex_dns_recordset.saas_admin_application[0]",
+  "yandex_dns_recordset.kiosk_application[0]",
+  "yandex_dns_recordset.landing_application[0]",
+];
 
 async function readFixture(name) {
   return JSON.parse(await readFile(fixture(name), "utf8"));
@@ -138,6 +144,66 @@ test("production plan guard retains every pre-existing protected production addr
     resource(destructive, address).change.actions = ["delete"];
     resource(destructive, address).change.after = null;
     reject(destructive);
+  }
+});
+
+test("production plan guard allows direct-VM DNS updates except to the release hostname", async () => {
+  const safe = await readFixture("safe");
+  for (const address of directVmDnsAddresses) {
+    const legitimate = copy(safe);
+    legitimate.resource_changes.push({
+      address,
+      type: "yandex_dns_recordset",
+      change: {
+        actions: ["update"],
+        before: { name: "admin.markiro.app.", type: "A" },
+        after: { name: "office.markiro.app.", type: "A" },
+      },
+    });
+    assert.doesNotThrow(() => guardProductionPlan(legitimate));
+
+    const bypass = copy(legitimate);
+    resource(bypass, address).change.after.name = "releases.markiro.app.";
+    reject(bypass);
+    await withPlan(bypass, (planPath) =>
+      assert.throws(() =>
+        execFileSync(process.execPath, [script, planPath], { cwd: root, stdio: "pipe" }),
+      ),
+    );
+  }
+});
+
+test("production plan guard rejects public bucket ACLs and inline grants", async () => {
+  const safe = await readFixture("safe");
+  const bucketAddress = "module.station_releases.yandex_storage_bucket.releases";
+  const mutations = [
+    (plan) => {
+      resource(plan, bucketAddress).change.after.acl = "public-read";
+    },
+    (plan) => {
+      resource(plan, bucketAddress).change.after.acl = "public-read-write";
+    },
+    (plan) => {
+      resource(plan, bucketAddress).change.after.grant = [
+        {
+          id: null,
+          permissions: ["READ"],
+          type: "Group",
+          uri: "http://acs.amazonaws.com/groups/global/AllUsers",
+        },
+      ];
+    },
+  ];
+
+  for (const mutate of mutations) {
+    const plan = copy(safe);
+    mutate(plan);
+    reject(plan);
+    await withPlan(plan, (planPath) =>
+      assert.throws(() =>
+        execFileSync(process.execPath, [script, planPath], { cwd: root, stdio: "pipe" }),
+      ),
+    );
   }
 });
 

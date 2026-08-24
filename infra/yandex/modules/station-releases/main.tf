@@ -15,6 +15,7 @@ resource "yandex_storage_bucket" "releases" {
   bucket        = var.bucket_name
   folder_id     = var.folder_id
   force_destroy = false
+  acl           = "private"
 
   anonymous_access_flags {
     read        = true
