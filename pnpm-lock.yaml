@@ -208,6 +208,9 @@ importers:
       fast-xml-parser:
         specifier: 5.11.0
         version: 5.11.0
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
       markdown-it:
         specifier: 15.0.0
         version: 15.0.0
