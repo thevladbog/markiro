@@ -28,6 +28,7 @@ const UNSAFE_CONTROL_TEXT = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const SHA = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const CHANNELS = new Set(["beta", "stable"]);
+const LEGACY_CLI_ORIGIN = "github";
 const STABLE_PROVENANCE_KEYS = [
   "sourceBetaTag",
   "betaVersion",
@@ -454,6 +455,9 @@ async function validateStationReleaseDirectoryInternal(
       bundleUrl: releaseAssetUrl(location, names.bundle),
     },
   );
+  const detachedSignature = (await readFile(join(directory, names.signature), "utf8")).trim();
+  ensureSafeText(detachedSignature, MAX_SIGNATURE_BYTES);
+  if (manifest.platforms["windows-x86_64"].signature !== detachedSignature) invalid();
   const checksums = (await readFile(join(directory, names.checksums), "utf8"))
     .split("\n")
     .filter(Boolean);
@@ -485,6 +489,7 @@ async function validateStationReleaseDirectoryInternal(
   } catch {
     invalid();
   }
+  if (manifest.pub_date !== evidence.publishedAt) invalid();
   if (channel === "beta") {
     const isLegacy = hasExactKeys(evidence, [
       "assets",
@@ -629,6 +634,7 @@ async function main() {
     if (extra.length > 0) invalid();
     await stageStationRelease({
       channel,
+      origin: LEGACY_CLI_ORIGIN,
       inputDirectory,
       outputDirectory,
       version,
@@ -672,6 +678,7 @@ async function main() {
     }
     await stageStationRelease({
       channel: "stable",
+      origin: LEGACY_CLI_ORIGIN,
       inputDirectory,
       outputDirectory,
       version,
@@ -694,7 +701,11 @@ async function main() {
     const channel = hasChannel ? args.shift() : "beta";
     const [directory, version, ...extra] = args;
     if (!directory || !version || extra.length > 0) invalid();
-    await validateStationReleaseDirectory(directory, { channel, version });
+    await validateStationReleaseDirectory(directory, {
+      channel,
+      origin: LEGACY_CLI_ORIGIN,
+      version,
+    });
     return;
   }
   invalid();

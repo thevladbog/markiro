@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 
 import {
   createBetaUpdateManifest,
@@ -21,6 +24,46 @@ const bundleUrl = `https://github.com/thevladbog/markiro/releases/download/stati
 const stableVersion = "0.1.0";
 const stableNames = stationAssetNames(stableVersion);
 const stableBundleUrl = `https://github.com/thevladbog/markiro/releases/download/station-v${stableVersion}/${stableNames.bundle}`;
+const execFile = promisify(execFileCallback);
+
+async function updateAssetDigest(directory, name) {
+  const digest = createHash("sha256")
+    .update(await readFile(join(directory, name)))
+    .digest("hex");
+  const checksumsPath = join(directory, names.checksums);
+  const checksums = await readFile(checksumsPath, "utf8");
+  await writeFile(
+    checksumsPath,
+    checksums.replace(new RegExp(`^[0-9a-f]{64}  ${name}$`, "m"), `${digest}  ${name}`),
+  );
+  const evidencePath = join(directory, names.evidence);
+  const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
+  evidence.assets[name] = digest;
+  await writeFile(evidencePath, `${JSON.stringify(evidence)}\n`);
+}
+
+async function stageCanonicalBetaTree() {
+  const input = await mkdtemp(join(tmpdir(), "markiro-station-binding-input-"));
+  const output = await mkdtemp(join(tmpdir(), "markiro-station-binding-output-"));
+  await rm(output, { recursive: true });
+  for (const [name, content] of [
+    [names.installer, "installer"],
+    [names.bundle, "bundle"],
+    [names.signature, "trusted-signature"],
+  ]) {
+    await writeFile(join(input, name), content);
+  }
+  await stageStationRelease({
+    origin: "github",
+    inputDirectory: input,
+    outputDirectory: output,
+    version,
+    pubDate: "2026-08-11T10:00:00.000Z",
+    baseSha: "a".repeat(40),
+    releaseSha: "b".repeat(40),
+  });
+  return { input, output };
+}
 
 test("creates the exact one-platform Tauri beta manifest", () => {
   const manifest = createBetaUpdateManifest({
@@ -347,6 +390,143 @@ test("stages and validates the canonical release tree", async () => {
   const validated = await validateStationReleaseDirectory(output, { origin: "github", version });
   assert.equal(validated.manifest.version, version);
   assert.match(await readFile(join(output, names.checksums), "utf8"), /[0-9a-f]{64}  latest\.json/);
+});
+
+test("rejects a detached signature file that differs from the updater manifest", async () => {
+  const { output } = await stageCanonicalBetaTree();
+  await writeFile(join(output, names.signature), "different-signature\n");
+  await updateAssetDigest(output, names.signature);
+
+  await assert.rejects(
+    validateStationReleaseDirectory(output, { origin: "github", version }),
+    /invalid station release artifacts/,
+  );
+});
+
+test("rejects an updater manifest signature that differs from the detached signature", async () => {
+  const { output } = await stageCanonicalBetaTree();
+  const manifestPath = join(output, names.manifest);
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.platforms["windows-x86_64"].signature = "different-signature";
+  await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+  await updateAssetDigest(output, names.manifest);
+
+  await assert.rejects(
+    validateStationReleaseDirectory(output, { origin: "github", version }),
+    /invalid station release artifacts/,
+  );
+});
+
+test("rejects an updater manifest publication date that differs from evidence", async () => {
+  const { output } = await stageCanonicalBetaTree();
+  const manifestPath = join(output, names.manifest);
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.pub_date = "2026-08-12T10:00:00.000Z";
+  await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+  await updateAssetDigest(output, names.manifest);
+
+  await assert.rejects(
+    validateStationReleaseDirectory(output, { origin: "github", version }),
+    /invalid station release artifacts/,
+  );
+});
+
+test("rejects evidence publication date that differs from the updater manifest", async () => {
+  const { output } = await stageCanonicalBetaTree();
+  const evidencePath = join(output, names.evidence);
+  const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
+  evidence.publishedAt = "2026-08-12T10:00:00.000Z";
+  await writeFile(evidencePath, `${JSON.stringify(evidence)}\n`);
+
+  await assert.rejects(
+    validateStationReleaseDirectory(output, { origin: "github", version }),
+    /invalid station release artifacts/,
+  );
+});
+
+test("CLI retains the GitHub default when staging and validating beta artifacts", async () => {
+  const input = await mkdtemp(join(tmpdir(), "markiro-station-cli-beta-input-"));
+  const output = await mkdtemp(join(tmpdir(), "markiro-station-cli-beta-output-"));
+  await rm(output, { recursive: true });
+  for (const [name, content] of [
+    [names.installer, "installer"],
+    [names.bundle, "bundle"],
+    [names.signature, "trusted-signature"],
+  ]) {
+    await writeFile(join(input, name), content);
+  }
+  const argumentsForStage = [
+    "tools/station-release/artifacts.mjs",
+    "stage",
+    "beta",
+    input,
+    output,
+    version,
+    "2026-08-11T10:00:00.000Z",
+    "a".repeat(40),
+    "b".repeat(40),
+  ];
+  await execFile(process.execPath, argumentsForStage);
+  await execFile(process.execPath, [
+    "tools/station-release/artifacts.mjs",
+    "validate",
+    "beta",
+    output,
+    version,
+  ]);
+  const manifest = JSON.parse(await readFile(join(output, names.manifest), "utf8"));
+  assert.equal(manifest.platforms["windows-x86_64"].url, bundleUrl);
+});
+
+test("CLI retains the GitHub default when staging stable artifacts", async () => {
+  const input = await mkdtemp(join(tmpdir(), "markiro-station-cli-stable-input-"));
+  const output = await mkdtemp(join(tmpdir(), "markiro-station-cli-stable-output-"));
+  const notesPath = join(input, "notes.md");
+  const provenancePath = join(input, "provenance.json");
+  await rm(output, { recursive: true });
+  for (const [name, content] of [
+    [stableNames.installer, "installer"],
+    [stableNames.bundle, "bundle"],
+    [stableNames.signature, "trusted-signature"],
+  ]) {
+    await writeFile(join(input, name), content);
+  }
+  await writeFile(notesPath, "Stable notes\n");
+  await writeFile(
+    provenancePath,
+    `${JSON.stringify({
+      sourceBetaTag: "station-v0.1.0-beta.19",
+      betaVersion: "0.1.0-beta.19",
+      betaReleaseSha: "b".repeat(40),
+      betaEvidenceSha256: "d".repeat(64),
+      acceptanceConfirmed: true,
+      previousStableTag: null,
+      previousStableBaseSha: null,
+      changelogFromSha: "e".repeat(40),
+      changelogToSha: "a".repeat(40),
+    })}\n`,
+  );
+  await execFile(process.execPath, [
+    "tools/station-release/artifacts.mjs",
+    "stage-stable",
+    input,
+    output,
+    stableVersion,
+    "2026-08-20T10:00:00.000Z",
+    "a".repeat(40),
+    "c".repeat(40),
+    notesPath,
+    provenancePath,
+  ]);
+  await execFile(process.execPath, [
+    "tools/station-release/artifacts.mjs",
+    "validate",
+    "stable",
+    output,
+    stableVersion,
+  ]);
+  const manifest = JSON.parse(await readFile(join(output, stableNames.manifest), "utf8"));
+  assert.equal(manifest.platforms["windows-x86_64"].url, stableBundleUrl);
 });
 
 test("accepts legacy GitHub beta evidence only through the seed-only validator", async () => {
