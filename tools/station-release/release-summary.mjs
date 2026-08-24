@@ -99,6 +99,28 @@ function validateState(state) {
   ) {
     invalid();
   }
+  if (state.mode === "seed-baseline") {
+    if (
+      state.sourceBetaTag !== null ||
+      state.baseSha !== null ||
+      state.githubBetaEvidenceSha256 !== null ||
+      state.yandexBetaEvidenceSha256 !== null ||
+      (state.version === null) !== (state.releaseSha === null)
+    ) {
+      invalid();
+    }
+  } else {
+    const provenance = [
+      state.version,
+      state.sourceBetaTag,
+      state.baseSha,
+      state.releaseSha,
+      state.githubBetaEvidenceSha256,
+      state.yandexBetaEvidenceSha256,
+    ];
+    const present = provenance.filter((value) => value !== null).length;
+    if (present !== 0 && present !== provenance.length) invalid();
+  }
   return state;
 }
 

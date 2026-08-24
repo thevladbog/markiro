@@ -211,11 +211,15 @@ test("both public stable trees are proven before the complete mutable transactio
       publicValidation.run.indexOf("yandex-publisher.mjs validate-public") >= 0 &&
       promote.run.indexOf("yandex-publisher.mjs backup-mutables stable") >= 0,
   );
-  assert.match(resolve.run, /sourceBetaTag "\$source_beta_tag"/);
-  assert.match(resolve.run, /baseSha "\$base_sha"/);
+  assert.match(resolve.run, /summary_source_beta_tag="\$source_beta_tag"/);
+  assert.match(resolve.run, /summary_base_sha="\$base_sha"/);
+  assert.match(resolve.run, /summary_github_beta_evidence_sha256="\$github_beta_evidence_sha256"/);
+  assert.match(resolve.run, /summary_yandex_beta_evidence_sha256="\$yandex_beta_evidence_sha256"/);
+  assert.match(resolve.run, /sourceBetaTag "\$summary_source_beta_tag"/);
+  assert.match(resolve.run, /baseSha "\$summary_base_sha"/);
   assert.match(resolve.run, /releaseSha "\$release_sha"/);
-  assert.match(resolve.run, /githubBetaEvidenceSha256 "\$github_beta_evidence_sha256"/);
-  assert.match(resolve.run, /yandexBetaEvidenceSha256 "\$yandex_beta_evidence_sha256"/);
+  assert.match(resolve.run, /githubBetaEvidenceSha256 "\$summary_github_beta_evidence_sha256"/);
+  assert.match(resolve.run, /yandexBetaEvidenceSha256 "\$summary_yandex_beta_evidence_sha256"/);
   assert.doesNotMatch(publicValidation.run, /publish-immutable|tauri build/);
   assert.doesNotMatch(promote.run, /gh release create "\$tag"|publish-immutable|tauri build/);
 });

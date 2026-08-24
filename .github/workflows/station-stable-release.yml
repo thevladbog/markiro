@@ -517,6 +517,10 @@ jobs:
             node tools/station-release/artifacts.mjs compare-origins \
               "$RUNNER_TEMP/station-stable-candidate/github" \
               "$RUNNER_TEMP/station-stable-candidate/yandex" stable "$version"
+            summary_source_beta_tag="$source_beta_tag"
+            summary_base_sha="$base_sha"
+            summary_github_beta_evidence_sha256="$github_beta_evidence_sha256"
+            summary_yandex_beta_evidence_sha256="$yandex_beta_evidence_sha256"
           elif [ "$INPUT_MODE" = "promote-existing" ]; then
             beta_version="$BUILD_BETA_VERSION"
             base_sha="$BUILD_BASE_SHA"
@@ -527,6 +531,10 @@ jobs:
             tag="$BUILD_TAG"
             previous_stable_tag="$BUILD_PREVIOUS_STABLE_TAG"
             release_sha="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq .targetCommitish)"
+            summary_source_beta_tag="$source_beta_tag"
+            summary_base_sha="$base_sha"
+            summary_github_beta_evidence_sha256="$github_beta_evidence_sha256"
+            summary_yandex_beta_evidence_sha256="$yandex_beta_evidence_sha256"
           else
             beta_version=""
             base_sha=""
@@ -538,6 +546,10 @@ jobs:
             tag="$INPUT_SEED_STABLE_TAG"
             previous_stable_tag=""
             release_sha="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq .targetCommitish)"
+            summary_source_beta_tag="null"
+            summary_base_sha="null"
+            summary_github_beta_evidence_sha256="null"
+            summary_yandex_beta_evidence_sha256="null"
           fi
           [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           test "$tag" = "station-v$version"
@@ -545,11 +557,11 @@ jobs:
           node tools/station-release/release-summary.mjs update \
             "$RUNNER_TEMP/station-stable-release-summary.json" \
             version "$version" \
-            sourceBetaTag "$source_beta_tag" \
-            baseSha "$base_sha" \
+            sourceBetaTag "$summary_source_beta_tag" \
+            baseSha "$summary_base_sha" \
             releaseSha "$release_sha" \
-            githubBetaEvidenceSha256 "$github_beta_evidence_sha256" \
-            yandexBetaEvidenceSha256 "$yandex_beta_evidence_sha256"
+            githubBetaEvidenceSha256 "$summary_github_beta_evidence_sha256" \
+            yandexBetaEvidenceSha256 "$summary_yandex_beta_evidence_sha256"
           printf 'source_beta_tag=%s\nbeta_version=%s\nbase_sha=%s\nbeta_release_sha=%s\ngithub_beta_evidence_sha256=%s\nyandex_beta_evidence_sha256=%s\nversion=%s\ntag=%s\nprevious_stable_tag=%s\nrelease_sha=%s\n' \
             "$source_beta_tag" "$beta_version" "$base_sha" "$beta_release_sha" \
             "$github_beta_evidence_sha256" "$yandex_beta_evidence_sha256" \

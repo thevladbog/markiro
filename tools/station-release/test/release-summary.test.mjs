@@ -1,13 +1,32 @@
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { promisify } from "node:util";
+import { load } from "js-yaml";
 
 const moduleUrl = new URL("../release-summary.mjs", import.meta.url);
+const workflowUrl = new URL(
+  "../../../.github/workflows/station-stable-release.yml",
+  import.meta.url,
+);
+const execFile = promisify(execFileCallback);
 
 async function summaryModule() {
   return import(moduleUrl);
 }
 
 const digest = (character) => character.repeat(64);
+
+async function runSummaryCli(args) {
+  return execFile(process.execPath, [fileURLToPath(moduleUrl), ...args], {
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+  });
+}
 
 test("records bounded source provenance and stable publication hashes", async () => {
   const { createReleaseSummaryState, renderReleaseSummary, updateReleaseSummary } =
@@ -110,6 +129,83 @@ test("keeps early summaries safe and rejects malformed provenance or arbitrary s
   }
   assert.throws(
     () => renderReleaseSummary({ ...state, mode: "publish\nsecret" }),
+    /invalid station release summary/,
+  );
+});
+
+test("seed workflow passes explicit null provenance through the real summary CLI", async () => {
+  const workflow = load(await readFile(workflowUrl, "utf8"));
+  const run = workflow.jobs.release.steps.find(
+    (step) => step.name === "Resolve stable publication candidate",
+  )?.run;
+  assert.equal(typeof run, "string");
+  const seedStart = run.indexOf('else\n  beta_version=""');
+  const seedEnd = run.indexOf("\nfi", seedStart);
+  assert.ok(seedStart >= 0 && seedEnd > seedStart);
+  const seedBranch = run.slice(seedStart, seedEnd);
+  const sentinelNames = [
+    "summary_source_beta_tag",
+    "summary_base_sha",
+    "summary_github_beta_evidence_sha256",
+    "summary_yandex_beta_evidence_sha256",
+  ];
+  const sentinels = sentinelNames.map((name) => {
+    const match = new RegExp(`^  ${name}="([^"]*)"$`, "m").exec(seedBranch);
+    assert.ok(match, `missing seed summary sentinel: ${name}`);
+    return match[1];
+  });
+  assert.deepEqual(sentinels, ["null", "null", "null", "null"]);
+  for (const name of sentinelNames) assert.match(run, new RegExp(`"\\$${name}"`));
+
+  const directory = await mkdtemp(join(tmpdir(), "markiro-seed-summary-cli-"));
+  const statePath = join(directory, "state.json");
+  await runSummaryCli(["init", "seed-baseline", statePath]);
+  await runSummaryCli([
+    "update",
+    statePath,
+    "version",
+    "1.2.3",
+    "sourceBetaTag",
+    sentinels[0],
+    "baseSha",
+    sentinels[1],
+    "releaseSha",
+    "a".repeat(40),
+    "githubBetaEvidenceSha256",
+    sentinels[2],
+    "yandexBetaEvidenceSha256",
+    sentinels[3],
+  ]);
+  const state = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(state.version, "1.2.3");
+  assert.equal(state.releaseSha, "a".repeat(40));
+  assert.equal(state.sourceBetaTag, null);
+  assert.equal(state.baseSha, null);
+  assert.equal(state.githubBetaEvidenceSha256, null);
+  assert.equal(state.yandexBetaEvidenceSha256, null);
+});
+
+test("normal summary CLI rejects null accepted-beta provenance", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "markiro-normal-summary-cli-"));
+  const statePath = join(directory, "state.json");
+  await runSummaryCli(["init", "publish", statePath]);
+  await assert.rejects(
+    runSummaryCli([
+      "update",
+      statePath,
+      "version",
+      "1.2.3",
+      "sourceBetaTag",
+      "null",
+      "baseSha",
+      "null",
+      "releaseSha",
+      "a".repeat(40),
+      "githubBetaEvidenceSha256",
+      "null",
+      "yandexBetaEvidenceSha256",
+      "null",
+    ]),
     /invalid station release summary/,
   );
 });
