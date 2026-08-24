@@ -16,6 +16,7 @@ const VBTECH_SHA = "e".repeat(40);
 const VBTECH_DIGEST = `sha256:${"5".repeat(64)}`;
 const VBTECH_IMAGE_REF = `ghcr.io/thevladbog/vbtech-web@${VBTECH_DIGEST}`;
 const VBTECH_ENABLED_FUNCTION_PATH = "/d4egihdqfci0mhota3ac";
+const VBTECH_ENABLED_FUNCTION_ORIGIN = "https://functions.yandexcloud.net/d4egihdqfci0mhota3ac";
 const VBTECH_SELECTOR = {
   imageRef: VBTECH_IMAGE_REF,
   imageDigest: VBTECH_DIGEST,
@@ -267,6 +268,7 @@ test("prepare restores the function path for an enabled healthy v-b release", as
     dependencies,
   );
 
+  assert.equal(preflightEnvironment.VBTECH_FUNCTION_ORIGIN, VBTECH_ENABLED_FUNCTION_ORIGIN);
   assert.equal(preflightEnvironment.VBTECH_FUNCTION_PATH, VBTECH_ENABLED_FUNCTION_PATH);
   assert.equal(preflightEnvironment.VBTECH_SUBMISSION_STATE, "enabled");
   assert.equal(candidate.vbtech.functionPath, VBTECH_ENABLED_FUNCTION_PATH);
