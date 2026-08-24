@@ -184,17 +184,117 @@ state с `releases.markiro.app`, проверьте точные DNS challenge r
 
 ## 8. Засеять baseline и проверить provider host
 
-До DNS activation выполните отдельную процедуру seed-baseline из следующего
-этапа rollout. Она должна использовать явно выбранный accepted release,
-проверить immutable objects, создать начальные beta/stable mutable backups и
-затем выполнить публичный GET/HEAD read-back только через provider host
-`https://storage.yandexcloud.net/<bucket>/station/...`.
+До DNS activation выполните `seed-baseline` отдельно для `stable` и `beta`.
+Это единственный путь, которому разрешено прочитать старую GitHub-only evidence.
+Обычная beta/stable публикация и stable promotion принимают только строгие новые
+GitHub и Yandex schemas. Не передавайте команде URL или ожидаемые hashes: она
+выводит канонические URL/keys сама и пересчитывает hashes из проверенных файлов.
+
+Seed получает уже скачанный caller-provided acquisition directory. Создайте его
+в защищённом release job через `mktemp -d`, скачайте в него ровно семь
+канонических assets явно выбранного `source_tag`, а release metadata сохраните
+отдельным mode-`0600` regular JSON файлом через:
+
+```bash
+gh release view "$source_tag" \
+  --json tagName,isDraft,isPrerelease,targetCommitish > "$release_metadata_file"
+gh release download "$source_tag" --dir "$github_tree"
+chmod 600 "$release_metadata_file"
+```
+
+Этот download boundary остаётся в защищённом workflow; сам publisher не
+запускает `gh` и не принимает release URL. Каталог должен быть новым, не symlink,
+и содержать только канонические release assets. Release metadata и
+infrastructure evidence должны быть non-empty regular files не больше 256 KiB;
+symlink, extra JSON field или лишний asset останавливают процедуру.
+
+Infrastructure evidence формируется из отдельно одобренного и применённого
+DNS-disabled saved plan. У файла точная схема:
+
+```json
+{
+  "schemaVersion": 1,
+  "targetSha": "<40-hex applied main SHA>",
+  "planSha256": "<64-hex applied saved-plan SHA-256>",
+  "planVersionId": "<exact applied Object Storage VersionId>",
+  "enableStationReleasePublicDns": false
+}
+```
+
+Не заменяйте этот файл environment default и не меняйте boolean вручную после
+apply evidence review. Создайте новые абсолютные пути для backup и bootstrap
+record, но не создавайте сами targets. Затем выполните точную команду:
+
+```bash
+node tools/station-release/yandex-publisher.mjs seed-baseline \
+  "$github_tree" \
+  "$source_tag" \
+  "$release_metadata_file" \
+  "$infrastructure_evidence_file" \
+  "$channel" \
+  "$backup_directory" \
+  "$bootstrap_record_file" \
+  --confirm-empty-channel-bootstrap
+```
+
+`--confirm-empty-channel-bootstrap` — обязательный точный mode token. `true`,
+workflow variable или environment value его не заменяют. Команда отказывает,
+если release tag/channel/version/source SHA не совпадают, release является
+draft или имеет неверный prerelease status, release DNS уже включён, один из
+двух mutable keys отсутствует при наличии второго, существующая пара не равна
+known-good target или provider-host read-back не подтверждает exact bytes и
+metadata.
+
+Publisher строит из проверенного GitHub source две строгие metadata trees вокруг
+тех же installer, bundle, detached signature и notes. Он проверяет обе trees и
+их равенство, делает preflight всех immutable keys, загружает только отсутствующие
+Yandex objects и читает их обратно только через
+`https://storage.yandexcloud.net/<bucket>/station/...`. Затем он создаёт и
+проверяет пару mutable keys. Повтор после уже завершённой компенсации допустим
+только для полной пары, byte-for-byte совпадающей с target; immutable objects при
+этом не перезаписываются.
+
+Backup directory и `bootstrap_record_file` создаются эксклюзивно с закрытыми
+правами. Record связывает SHA-256 исходной GitHub evidence и release metadata,
+обе строгие origin evidence, common installer/bundle/signature/notes, channel,
+version, base/release SHA, infrastructure evidence, mutable backup и recovery
+result. В нём нет credentials, request/response headers или нового signing key.
+Protected workflow загружает record и backup как bounded artifact отдельным
+шагом, включая failed job через `if: always()`. Если первая mutable verification
+не прошла, но повторное применение complete known-good pair подтвердилось,
+команда всё равно завершается ошибкой, а record фиксирует успешную компенсацию.
+При `recovery: failed` не включайте DNS и не продолжайте обычную публикацию.
+
+### Порядок initial baselines
+
+Stable и beta — две независимые процедуры и два независимых backup precondition:
+
+- stable seed может зеркалировать текущий явно принятый GitHub-only stable только
+  для создания rollback baseline. После проверки `station/download` указывает на
+  installer именно этого accepted stable;
+- beta baseline нельзя делать retrofit старого immutable beta. В Phase 2 создайте
+  новый pre-transition beta через новое dual-publish tooling, оставив runtime
+  client GitHub-only, и используйте этот новый release для первичного baseline.
+  После seed `station/beta/download` указывает на этот pre-transition beta.
+
+**Integration checkpoint 1 — publication tooling.** Сначала отдельно merge и
+разверните Tasks 1–7, создайте оба baseline при release DNS disabled, сохраните
+оба protected backup/record artifacts и проверьте provider host. Обычный workflow
+конкретного channel остаётся disabled, пока его собственный complete backup
+precondition не подтверждён. Завершение кода не публикует release автоматически.
+
+**Integration checkpoint 2 — transitional runtime.** Только после merge Tasks
+8–11 опубликуйте новый transitional beta с dual-origin adapter. Beta alias
+переходит на этот transitional beta лишь после полной dual-origin publication и
+promotion transaction. Stable alias остаётся на принятом stable baseline, пока
+transitional beta не пройдёт отдельную Windows/hardware acceptance и не будет
+явно выбран для stable rebuild.
 
 Проверьте отсутствие bucket listing, корректные cache/content-disposition
-metadata, точные hashes и оба фиксированных ключа `station/beta/latest.json` и
-`station/stable/latest.json`. Остановитесь при любом mismatch. Не используйте
-`releases.markiro.app` до DNS activation и не считайте Terraform apply
-доказательством публичной доступности.
+metadata, точные hashes и оба фиксированных manifest keys
+`station/beta/latest.json` и `station/stable/latest.json`. Остановитесь при любом
+mismatch. Не используйте `releases.markiro.app` до DNS activation и не считайте
+Terraform apply доказательством публичной доступности.
 
 ## 9. Остановиться перед включением release DNS
 

@@ -1,6 +1,8 @@
 import { lstat, open, readFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
+import { compareStationReleaseOrigins, validateStationReleaseDirectory } from "./artifacts.mjs";
 import { parseStationBetaTag } from "./version.mjs";
 
 const MAX_INPUT_BYTES = 256 * 1024;
@@ -22,22 +24,32 @@ function hasExactKeys(value, keys) {
   return isPlainObject(value) && Object.keys(value).sort().join(",") === [...keys].sort().join(",");
 }
 
-function validDate(value) {
-  if (typeof value !== "string") return false;
-  const date = new Date(value);
-  return (
-    Number.isFinite(date.getTime()) && date.toISOString() === value && date.getTime() <= Date.now()
-  );
-}
-
-export function validateAcceptedBeta(input) {
-  if (!hasExactKeys(input, ["sourceBetaTag", "release", "evidence", "diffPaths"])) invalid();
-  if (!hasExactKeys(input.release, ["tagName", "isDraft", "isPrerelease", "targetCommitish"])) {
+async function ensureDirectory(path) {
+  if (typeof path !== "string" || path.length === 0) invalid();
+  try {
+    const info = await lstat(path);
+    if (!info.isDirectory() || info.isSymbolicLink()) invalid();
+  } catch (error) {
+    if (error?.message === "invalid accepted station beta") throw error;
     invalid();
   }
+}
+
+export async function validateAcceptedBeta(input) {
   if (
-    !hasExactKeys(input.evidence, ["version", "baseSha", "releaseSha", "publishedAt", "assets"])
+    !hasExactKeys(input, [
+      "sourceBetaTag",
+      "release",
+      "githubEvidence",
+      "yandexEvidence",
+      "githubTree",
+      "yandexTree",
+      "diffPaths",
+    ])
   ) {
+    invalid();
+  }
+  if (!hasExactKeys(input.release, ["tagName", "isDraft", "isPrerelease", "targetCommitish"])) {
     invalid();
   }
 
@@ -47,12 +59,6 @@ export function validateAcceptedBeta(input) {
     input.release.tagName !== input.sourceBetaTag ||
     input.release.isDraft !== false ||
     input.release.isPrerelease !== true ||
-    input.evidence.version !== beta.text ||
-    !SHA.test(input.evidence.baseSha) ||
-    !SHA.test(input.evidence.releaseSha) ||
-    input.release.targetCommitish !== input.evidence.releaseSha ||
-    !validDate(input.evidence.publishedAt) ||
-    !isPlainObject(input.evidence.assets) ||
     !Array.isArray(input.diffPaths) ||
     input.diffPaths.length !== ALLOWED_BETA_RELEASE_DIFF.length ||
     input.diffPaths.some((path, index) => path !== ALLOWED_BETA_RELEASE_DIFF[index])
@@ -60,11 +66,50 @@ export function validateAcceptedBeta(input) {
     invalid();
   }
 
+  await Promise.all([ensureDirectory(input.githubTree), ensureDirectory(input.yandexTree)]);
+  let github;
+  let yandex;
+  try {
+    [github, yandex] = await Promise.all([
+      validateStationReleaseDirectory(input.githubTree, {
+        channel: "beta",
+        origin: "github",
+        version: beta.text,
+      }),
+      validateStationReleaseDirectory(input.yandexTree, {
+        channel: "beta",
+        origin: "yandex",
+        version: beta.text,
+      }),
+    ]);
+    await compareStationReleaseOrigins({
+      githubDirectory: input.githubTree,
+      yandexDirectory: input.yandexTree,
+      channel: "beta",
+      version: beta.text,
+    });
+  } catch {
+    invalid();
+  }
+  if (
+    !isDeepStrictEqual(input.githubEvidence, github.evidence) ||
+    !isDeepStrictEqual(input.yandexEvidence, yandex.evidence) ||
+    github.evidence.version !== beta.text ||
+    yandex.evidence.version !== beta.text ||
+    !SHA.test(github.evidence.baseSha) ||
+    github.evidence.baseSha !== yandex.evidence.baseSha ||
+    !SHA.test(github.evidence.releaseSha) ||
+    github.evidence.releaseSha !== yandex.evidence.releaseSha ||
+    input.release.targetCommitish !== github.evidence.releaseSha
+  ) {
+    invalid();
+  }
+
   return {
     sourceBetaTag: input.sourceBetaTag,
     betaVersion: beta.text,
-    baseSha: input.evidence.baseSha,
-    betaReleaseSha: input.evidence.releaseSha,
+    baseSha: github.evidence.baseSha,
+    betaReleaseSha: github.evidence.releaseSha,
   };
 }
 
@@ -111,11 +156,26 @@ async function writeOutput(path, promotion) {
 }
 
 async function main() {
-  const [, , command, releasePath, evidencePath, diffPath, outputPath, ...extra] = process.argv;
+  const [
+    ,
+    ,
+    command,
+    releasePath,
+    githubEvidencePath,
+    yandexEvidencePath,
+    githubTree,
+    yandexTree,
+    diffPath,
+    outputPath,
+    ...extra
+  ] = process.argv;
   if (
     command !== "validate-beta" ||
     !releasePath ||
-    !evidencePath ||
+    !githubEvidencePath ||
+    !yandexEvidencePath ||
+    !githubTree ||
+    !yandexTree ||
     !diffPath ||
     !outputPath ||
     extra.length > 0
@@ -127,10 +187,13 @@ async function main() {
   const promotion = validateAcceptedBeta({
     sourceBetaTag: release.tagName,
     release,
-    evidence: await readJson(evidencePath),
+    githubEvidence: await readJson(githubEvidencePath),
+    yandexEvidence: await readJson(yandexEvidencePath),
+    githubTree,
+    yandexTree,
     diffPaths: diffText.split(/\r?\n/).filter(Boolean),
   });
-  await writeOutput(outputPath, promotion);
+  await writeOutput(outputPath, await promotion);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) await main();

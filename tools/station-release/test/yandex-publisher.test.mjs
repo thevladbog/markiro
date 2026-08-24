@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,6 +10,7 @@ import { stationReleaseLocation } from "../origins.mjs";
 import {
   createYandexPublisher,
   createYandexPublisherClientConfig,
+  createYandexProviderReader,
   runYandexPublisherCli,
   runYandexPublisherMain,
 } from "../yandex-publisher.mjs";
@@ -20,6 +21,37 @@ const names = stationAssetNames(version);
 const previousVersion = "0.2.0-beta.6";
 const previousNames = stationAssetNames(previousVersion);
 const previousImmutableKey = `station/beta/releases/${previousVersion}/${previousNames.installer}`;
+const bootstrapConfirmation = "--confirm-empty-channel-bootstrap";
+
+function releaseMetadata(releaseChannel = channel, releaseVersion = version) {
+  return {
+    tagName: `station-v${releaseVersion}`,
+    isDraft: false,
+    isPrerelease: releaseChannel === "beta",
+    targetCommitish: "b".repeat(40),
+  };
+}
+
+function infrastructureEvidence({ dnsEnabled = false } = {}) {
+  return {
+    schemaVersion: 1,
+    targetSha: "d".repeat(40),
+    planSha256: "e".repeat(64),
+    planVersionId: "version-123",
+    enableStationReleasePublicDns: dnsEnabled,
+  };
+}
+
+async function writeBootstrapInputs(
+  parent,
+  { release = releaseMetadata(), infrastructure = infrastructureEvidence() } = {},
+) {
+  const releaseMetadataPath = join(parent, "release.json");
+  const infrastructureEvidencePath = join(parent, "infrastructure.json");
+  await writeFile(releaseMetadataPath, `${JSON.stringify(release)}\n`);
+  await writeFile(infrastructureEvidencePath, `${JSON.stringify(infrastructure)}\n`);
+  return { releaseMetadataPath, infrastructureEvidencePath };
+}
 
 async function stageTree(origin, outputDirectory) {
   const input = await mkdtemp(join(tmpdir(), `markiro-yandex-${origin}-input-`));
@@ -49,11 +81,78 @@ async function yandexTree() {
   return tree;
 }
 
-async function dualTree() {
-  const root = await mkdtemp(join(tmpdir(), "markiro-dual-tree-"));
-  await stageTree("github", join(root, "github"));
-  await stageTree("yandex", join(root, "yandex"));
-  return root;
+async function legacyGithubBetaTree() {
+  const root = await mkdtemp(join(tmpdir(), "markiro-legacy-github-beta-"));
+  const tree = join(root, "github");
+  await stageTree("github", tree);
+  const evidencePath = join(tree, names.evidence);
+  const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify({
+      version: evidence.version,
+      baseSha: evidence.baseSha,
+      releaseSha: evidence.releaseSha,
+      publishedAt: evidence.publishedAt,
+      assets: evidence.assets,
+    })}\n`,
+  );
+  return tree;
+}
+
+async function legacyGithubStableTree() {
+  const stableVersion = "0.2.0";
+  const stableNames = stationAssetNames(stableVersion);
+  const input = await mkdtemp(join(tmpdir(), "markiro-legacy-github-stable-input-"));
+  const output = join(
+    await mkdtemp(join(tmpdir(), "markiro-legacy-github-stable-root-")),
+    "github",
+  );
+  const notesPath = join(input, "notes.md");
+  for (const [name, bytes] of [
+    [stableNames.installer, "stable-installer-bytes"],
+    [stableNames.bundle, "stable-bundle-bytes"],
+    [stableNames.signature, "trusted-stable-signature"],
+  ]) {
+    await writeFile(join(input, name), bytes);
+  }
+  await writeFile(notesPath, "# Accepted stable release\n");
+  await stageStationRelease({
+    channel: "stable",
+    origin: "github",
+    inputDirectory: input,
+    outputDirectory: output,
+    version: stableVersion,
+    pubDate: "2026-08-20T10:00:00.000Z",
+    baseSha: "a".repeat(40),
+    releaseSha: "b".repeat(40),
+    notesPath,
+    stableProvenance: {
+      sourceBetaTag: "station-v0.2.0-beta.7",
+      betaVersion: "0.2.0-beta.7",
+      betaReleaseSha: "c".repeat(40),
+      betaEvidenceSha256: "d".repeat(64),
+      acceptanceConfirmed: true,
+      previousStableTag: null,
+      previousStableBaseSha: null,
+      changelogFromSha: "e".repeat(40),
+      changelogToSha: "a".repeat(40),
+    },
+  });
+  const evidencePath = join(output, stableNames.evidence);
+  const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
+  const legacyEvidence = { ...evidence };
+  delete legacyEvidence.distribution;
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify({
+      ...legacyEvidence,
+      schemaVersion: 2,
+      channelUrl:
+        "https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json",
+    })}\n`,
+  );
+  return { tree: output, version: stableVersion };
 }
 
 function digest(bytes) {
@@ -76,7 +175,9 @@ function fakeStore() {
     },
     async assertAbsent(key) {
       calls.push({ method: "assertAbsent", key });
-      if (preExisting.has(key)) throw new Error("station release object already exists");
+      if (preExisting.has(key) || immutable.has(key)) {
+        throw new Error("station release object already exists");
+      }
     },
     async putImmutable(key, file, contentType) {
       calls.push({ method: "putImmutable", key, contentType });
@@ -105,6 +206,46 @@ function fakeStore() {
       if (!object) throw new Error("missing public object");
       return Buffer.from(object.bytes);
     },
+  };
+}
+
+function fakeProvider(store) {
+  const calls = [];
+  let readHook;
+  return {
+    calls,
+    setReadHook(hook) {
+      readHook = hook;
+    },
+    async readPublic(key) {
+      calls.push({ method: "providerReadPublic", key });
+      if (readHook) await readHook(key, { immutable: store.immutable, mutable: store.mutable });
+      const object = store.immutable.has(key)
+        ? { bytes: store.immutable.get(key) }
+        : store.mutable.get(key);
+      if (!object) throw new Error("missing provider object");
+      return Buffer.from(object.bytes);
+    },
+  };
+}
+
+function seedInput({
+  githubTree,
+  parent,
+  releaseChannel = channel,
+  releaseVersion = version,
+  releaseMetadataPath,
+  infrastructureEvidencePath,
+}) {
+  return {
+    githubTree,
+    sourceTag: `station-v${releaseVersion}`,
+    releaseMetadataPath,
+    infrastructureEvidencePath,
+    channel: releaseChannel,
+    backupDirectory: join(parent, "backup"),
+    recordPath: join(parent, "bootstrap-record.json"),
+    confirmation: bootstrapConfirmation,
   };
 }
 
@@ -209,6 +350,41 @@ test("rejects public immutable bytes that do not reproduce the staged tree", asy
   assert.equal(store.calls.filter((call) => call.method === "readPublic").length, 7);
 });
 
+test("provider reader uses only the fixed Yandex storage hostname and exact response metadata", async () => {
+  const calls = [];
+  const bytes = Buffer.from('{"version":"0.2.0-beta.7"}');
+  const reader = createYandexProviderReader({
+    bucket: "markiro-station-releases",
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return new Response(bytes, {
+        status: 200,
+        headers: {
+          "content-length": String(bytes.byteLength),
+          "content-type": "application/json",
+          "cache-control": "public, max-age=0, must-revalidate",
+        },
+      });
+    },
+  });
+
+  assert.deepEqual(
+    await reader.readPublic("station/beta/latest.json", {
+      maxBytes: 256 * 1024,
+      contentType: "application/json",
+      cacheControl: "public, max-age=0, must-revalidate",
+      contentDisposition: null,
+    }),
+    bytes,
+  );
+  assert.deepEqual(calls, [
+    {
+      url: "https://storage.yandexcloud.net/markiro-station-releases/station/beta/latest.json",
+      init: { redirect: "error", cache: "no-store" },
+    },
+  ]);
+});
+
 test("requires both current mutable objects before creating a backup", async () => {
   const directory = await mkdtemp(join(tmpdir(), "markiro-missing-backup-parent-"));
   const backupDirectory = join(directory, "backup");
@@ -280,63 +456,209 @@ test("refuses an existing backup directory without removing its contents", async
   assert.equal(await readFile(marker, "utf8"), "preserve me");
 });
 
-test("seeds only a complete dual-origin tree after public immutable verification", async () => {
-  const tree = await dualTree();
+test("seeds a legacy accepted beta through the provider host and writes bounded evidence", async () => {
+  const githubTree = await legacyGithubBetaTree();
   const parent = await mkdtemp(join(tmpdir(), "markiro-seed-parent-"));
-  const backupDirectory = join(parent, "backup");
+  const inputs = await writeBootstrapInputs(parent);
   const store = fakeStore();
-  await loadImmutableTree(store, join(tree, "yandex"));
+  const provider = fakeProvider(store);
+  const input = seedInput({ githubTree, parent, ...inputs });
 
-  await createYandexPublisher({ store }).seedBaseline({ tree, channel, backupDirectory });
+  await createYandexPublisher({ store, providerReader: provider }).seedBaseline(input);
 
+  assert.equal(store.calls.filter((call) => call.method === "putImmutable").length, 7);
   assert.deepEqual(
     store.calls
       .filter((call) => ["putMutable", "copyImmutableToAlias"].includes(call.method))
       .map((call) => call.method),
     ["putMutable", "copyImmutableToAlias"],
   );
+  assert.equal(provider.calls.length, 9);
   assert.equal(store.mutable.has("station/beta/latest.json"), true);
   assert.equal(store.mutable.has("station/beta/download"), true);
-  const backup = JSON.parse(await readFile(join(backupDirectory, "backup.json"), "utf8"));
+  const backup = JSON.parse(await readFile(join(input.backupDirectory, "backup.json"), "utf8"));
   assert.equal(backup.objects.length, 2);
 
-  const invalidTree = await dualTree();
-  await writeFile(join(invalidTree, "github", names.installer), "other installer");
-  const untouchedStore = fakeStore();
-  await loadImmutableTree(untouchedStore, join(invalidTree, "yandex"));
-  await assert.rejects(
-    createYandexPublisher({ store: untouchedStore }).seedBaseline({
-      tree: invalidTree,
-      channel,
-      backupDirectory: join(parent, "invalid-backup"),
-    }),
-    /invalid station release publication/,
-  );
-  assert.equal(
-    untouchedStore.calls.some((call) =>
-      ["putMutable", "copyImmutableToAlias"].includes(call.method),
-    ),
-    false,
+  const record = JSON.parse(await readFile(input.recordPath, "utf8"));
+  assert.deepEqual(Object.keys(record).sort(), [
+    "channel",
+    "commonAssets",
+    "infrastructure",
+    "mutableBackup",
+    "operation",
+    "origins",
+    "result",
+    "schemaVersion",
+    "source",
+    "version",
+  ]);
+  assert.equal(record.operation, "station-release-empty-channel-bootstrap");
+  assert.equal(record.channel, "beta");
+  assert.equal(record.version, version);
+  assert.equal(record.source.tagName, `station-v${version}`);
+  assert.equal(record.source.baseSha, "a".repeat(40));
+  assert.equal(record.source.releaseSha, "b".repeat(40));
+  assert.match(record.source.releaseMetadataSha256, /^[0-9a-f]{64}$/);
+  assert.match(record.source.evidenceSha256, /^[0-9a-f]{64}$/);
+  assert.equal(record.infrastructure.enableStationReleasePublicDns, false);
+  assert.match(record.infrastructure.evidenceSha256, /^[0-9a-f]{64}$/);
+  assert.equal(record.origins.github.origin, "github");
+  assert.equal(record.origins.yandex.origin, "yandex");
+  assert.match(record.origins.github.evidenceSha256, /^[0-9a-f]{64}$/);
+  assert.match(record.origins.yandex.evidenceSha256, /^[0-9a-f]{64}$/);
+  assert.match(record.commonAssets.signatureSha256, /^[0-9a-f]{64}$/);
+  assert.match(record.mutableBackup.indexSha256, /^[0-9a-f]{64}$/);
+  assert.deepEqual(record.result, {
+    immutables: "published-and-provider-verified",
+    channelBaseline: "created-and-provider-verified",
+    recovery: "not-required",
+  });
+  assert.doesNotMatch(
+    JSON.stringify(record),
+    /authorization|credential|secret|cookie|responseHeaders/i,
   );
 });
 
-test("compensates a seed failure after manifest mutation with the complete baseline", async () => {
-  const tree = await dualTree();
-  const backupDirectory = join(
-    await mkdtemp(join(tmpdir(), "markiro-seed-manifest-failure-")),
-    "backup",
-  );
+test("refuses DNS-enabled evidence and an incomplete mutable pair before immutable publication", async () => {
+  const githubTree = await legacyGithubBetaTree();
+  for (const setup of [
+    async (parent, _store) =>
+      writeBootstrapInputs(parent, {
+        infrastructure: infrastructureEvidence({ dnsEnabled: true }),
+      }),
+    async (parent, store) => {
+      store.mutable.set("station/beta/latest.json", {
+        bytes: Buffer.from("partial manifest"),
+        contentType: "application/json",
+        sourceKey: null,
+      });
+      return writeBootstrapInputs(parent);
+    },
+  ]) {
+    const parent = await mkdtemp(join(tmpdir(), "markiro-refused-seed-"));
+    const store = fakeStore();
+    const inputs = await setup(parent, store);
+    await assert.rejects(
+      createYandexPublisher({ store, providerReader: fakeProvider(store) }).seedBaseline(
+        seedInput({ githubTree, parent, ...inputs }),
+      ),
+      /invalid station release bootstrap|incomplete station release baseline/,
+    );
+    assert.equal(
+      store.calls.some((call) => call.method === "putImmutable"),
+      false,
+    );
+  }
+});
+
+test("rejects symlinked or oversized bootstrap evidence before object storage", async () => {
+  const githubTree = await legacyGithubBetaTree();
+  for (const prepareInvalidEvidence of [
+    async (parent) => {
+      const real = join(parent, "infrastructure-real.json");
+      const link = join(parent, "infrastructure.json");
+      await writeFile(real, `${JSON.stringify(infrastructureEvidence())}\n`);
+      await symlink(real, link);
+      return link;
+    },
+    async (parent) => {
+      const path = join(parent, "infrastructure.json");
+      await writeFile(path, "x".repeat(256 * 1024 + 1));
+      return path;
+    },
+  ]) {
+    const parent = await mkdtemp(join(tmpdir(), "markiro-invalid-seed-input-"));
+    const releaseMetadataPath = join(parent, "release.json");
+    await writeFile(releaseMetadataPath, `${JSON.stringify(releaseMetadata())}\n`);
+    const infrastructureEvidencePath = await prepareInvalidEvidence(parent);
+    const store = fakeStore();
+    await assert.rejects(
+      createYandexPublisher({ store, providerReader: fakeProvider(store) }).seedBaseline(
+        seedInput({
+          githubTree,
+          parent,
+          releaseMetadataPath,
+          infrastructureEvidencePath,
+        }),
+      ),
+      /invalid station release bootstrap/,
+    );
+    assert.deepEqual(store.calls, []);
+  }
+});
+
+test("accepts the complete matching pair on a retry without overwriting immutable keys", async () => {
+  const githubTree = await legacyGithubBetaTree();
   const store = fakeStore();
-  await loadImmutableTree(store, join(tree, "yandex"));
+  const provider = fakeProvider(store);
+  const publisher = createYandexPublisher({ store, providerReader: provider });
+  const firstParent = await mkdtemp(join(tmpdir(), "markiro-seed-first-"));
+  const firstInputs = await writeBootstrapInputs(firstParent);
+  await publisher.seedBaseline(seedInput({ githubTree, parent: firstParent, ...firstInputs }));
+  store.calls.length = 0;
+  provider.calls.length = 0;
+
+  const retryParent = await mkdtemp(join(tmpdir(), "markiro-seed-retry-"));
+  const retryInputs = await writeBootstrapInputs(retryParent);
+  const retry = seedInput({ githubTree, parent: retryParent, ...retryInputs });
+  await publisher.seedBaseline(retry);
+
+  assert.equal(
+    store.calls.some((call) => call.method === "putImmutable"),
+    false,
+  );
+  assert.equal(
+    store.calls.some((call) => ["putMutable", "copyImmutableToAlias"].includes(call.method)),
+    false,
+  );
+  const record = JSON.parse(await readFile(retry.recordPath, "utf8"));
+  assert.deepEqual(record.result, {
+    immutables: "existing-and-provider-verified",
+    channelBaseline: "already-complete-and-provider-verified",
+    recovery: "not-required",
+  });
+});
+
+test("accepts the explicitly confirmed legacy stable solely for baseline seeding", async () => {
+  const stable = await legacyGithubStableTree();
+  const parent = await mkdtemp(join(tmpdir(), "markiro-stable-seed-"));
+  const inputs = await writeBootstrapInputs(parent, {
+    release: releaseMetadata("stable", stable.version),
+  });
+  const store = fakeStore();
+  const input = seedInput({
+    githubTree: stable.tree,
+    parent,
+    releaseChannel: "stable",
+    releaseVersion: stable.version,
+    ...inputs,
+  });
+
+  await createYandexPublisher({ store, providerReader: fakeProvider(store) }).seedBaseline(input);
+
+  assert.equal(store.mutable.has("station/stable/latest.json"), true);
+  assert.equal(store.mutable.has("station/download"), true);
+  const record = JSON.parse(await readFile(input.recordPath, "utf8"));
+  assert.equal(record.channel, "stable");
+  assert.equal(record.version, stable.version);
+});
+
+test("compensates a seed failure after manifest mutation with the complete baseline", async () => {
+  const githubTree = await legacyGithubBetaTree();
+  const parent = await mkdtemp(join(tmpdir(), "markiro-seed-manifest-failure-"));
+  const inputs = await writeBootstrapInputs(parent);
+  const input = seedInput({ githubTree, parent, ...inputs });
+  const store = fakeStore();
+  const provider = fakeProvider(store);
   let manifestReads = 0;
-  store.setReadHook(async (key) => {
+  provider.setReadHook(async (key) => {
     if (key === "station/beta/latest.json" && manifestReads++ === 0) {
       throw new Error("injected first manifest verification failure");
     }
   });
 
   await assert.rejects(
-    createYandexPublisher({ store }).seedBaseline({ tree, channel, backupDirectory }),
+    createYandexPublisher({ store, providerReader: provider }).seedBaseline(input),
     /station release publication failed/,
   );
 
@@ -350,33 +672,35 @@ test("compensates a seed failure after manifest mutation with the complete basel
       "copyImmutableToAlias:station/beta/download",
     ],
   );
-  assert.deepEqual(
-    store.mutable.get("station/beta/latest.json").bytes,
-    await readFile(join(tree, "yandex", names.manifest)),
-  );
+  assert.equal(JSON.parse(store.mutable.get("station/beta/latest.json").bytes).version, version);
   assert.deepEqual(
     store.mutable.get("station/beta/download").bytes,
-    await readFile(join(tree, "yandex", names.installer)),
+    Buffer.from("installer-bytes"),
   );
+  const record = JSON.parse(await readFile(input.recordPath, "utf8"));
+  assert.deepEqual(record.result, {
+    immutables: "published-and-provider-verified",
+    channelBaseline: "created-after-compensation-and-provider-verified",
+    recovery: "complete-baseline-reapplied-and-provider-verified",
+  });
 });
 
 test("compensates a seed failure after alias mutation with the complete baseline", async () => {
-  const tree = await dualTree();
-  const backupDirectory = join(
-    await mkdtemp(join(tmpdir(), "markiro-seed-alias-failure-")),
-    "backup",
-  );
+  const githubTree = await legacyGithubBetaTree();
+  const parent = await mkdtemp(join(tmpdir(), "markiro-seed-alias-failure-"));
+  const inputs = await writeBootstrapInputs(parent);
+  const input = seedInput({ githubTree, parent, ...inputs });
   const store = fakeStore();
-  await loadImmutableTree(store, join(tree, "yandex"));
+  const provider = fakeProvider(store);
   let aliasReads = 0;
-  store.setReadHook(async (key) => {
+  provider.setReadHook(async (key) => {
     if (key === "station/beta/download" && aliasReads++ === 0) {
       throw new Error("injected first alias verification failure");
     }
   });
 
   await assert.rejects(
-    createYandexPublisher({ store }).seedBaseline({ tree, channel, backupDirectory }),
+    createYandexPublisher({ store, providerReader: provider }).seedBaseline(input),
     /station release publication failed/,
   );
 
@@ -391,26 +715,24 @@ test("compensates a seed failure after alias mutation with the complete baseline
       "copyImmutableToAlias:station/beta/download",
     ],
   );
-  assert.deepEqual(
-    store.mutable.get("station/beta/latest.json").bytes,
-    await readFile(join(tree, "yandex", names.manifest)),
-  );
+  assert.equal(JSON.parse(store.mutable.get("station/beta/latest.json").bytes).version, version);
   assert.deepEqual(
     store.mutable.get("station/beta/download").bytes,
-    await readFile(join(tree, "yandex", names.installer)),
+    Buffer.from("installer-bytes"),
   );
+  const record = JSON.parse(await readFile(input.recordPath, "utf8"));
+  assert.equal(record.result.recovery, "complete-baseline-reapplied-and-provider-verified");
 });
 
 test("reports a distinct hard failure when seed compensation cannot restore the baseline", async () => {
-  const tree = await dualTree();
-  const backupDirectory = join(
-    await mkdtemp(join(tmpdir(), "markiro-seed-recovery-failure-")),
-    "backup",
-  );
+  const githubTree = await legacyGithubBetaTree();
+  const parent = await mkdtemp(join(tmpdir(), "markiro-seed-recovery-failure-"));
+  const inputs = await writeBootstrapInputs(parent);
+  const input = seedInput({ githubTree, parent, ...inputs });
   const store = fakeStore();
-  await loadImmutableTree(store, join(tree, "yandex"));
+  const provider = fakeProvider(store);
   let manifestReads = 0;
-  store.setReadHook(async (key) => {
+  provider.setReadHook(async (key) => {
     if (key === "station/beta/latest.json" && manifestReads++ === 0) {
       throw new Error("injected first manifest verification failure");
     }
@@ -423,9 +745,15 @@ test("reports a distinct hard failure when seed compensation cannot restore the 
   };
 
   await assert.rejects(
-    createYandexPublisher({ store }).seedBaseline({ tree, channel, backupDirectory }),
+    createYandexPublisher({ store, providerReader: provider }).seedBaseline(input),
     /station release baseline recovery failed/,
   );
+  const record = JSON.parse(await readFile(input.recordPath, "utf8"));
+  assert.deepEqual(record.result, {
+    immutables: "published-and-provider-verified",
+    channelBaseline: "unknown-after-failed-compensation",
+    recovery: "failed",
+  });
 });
 
 test("promotes manifest then alias and restores both when public verification fails", async () => {
@@ -596,7 +924,11 @@ test("CLI permits only the six bounded commands and no promote-existing or crede
     ]),
   );
   const tree = await yandexTree();
-  const backupDirectory = join(await mkdtemp(join(tmpdir(), "markiro-cli-parent-")), "backup");
+  const githubTree = await legacyGithubBetaTree();
+  const parent = await mkdtemp(join(tmpdir(), "markiro-cli-parent-"));
+  const backupDirectory = join(parent, "backup");
+  const recordPath = join(parent, "bootstrap-record.json");
+  const inputs = await writeBootstrapInputs(parent);
 
   await runYandexPublisherCli(["publish-immutable", tree, channel, version], { publisher });
   assert.equal(calls[0].method, "publishImmutable");
@@ -610,7 +942,39 @@ test("CLI permits only the six bounded commands and no promote-existing or crede
     }),
     /invalid station release publisher command/,
   );
-  assert.equal(calls.length, 1);
+  const seedArgs = [
+    "seed-baseline",
+    githubTree,
+    `station-v${version}`,
+    inputs.releaseMetadataPath,
+    inputs.infrastructureEvidencePath,
+    channel,
+    backupDirectory,
+    recordPath,
+  ];
+  await assert.rejects(
+    runYandexPublisherCli(seedArgs, { publisher }),
+    /invalid station release publisher command/,
+  );
+  await assert.rejects(
+    runYandexPublisherCli([...seedArgs, "true"], { publisher }),
+    /invalid station release publisher command/,
+  );
+  await runYandexPublisherCli([...seedArgs, bootstrapConfirmation], { publisher });
+  assert.deepEqual(calls.at(-1), {
+    method: "seedBaseline",
+    input: {
+      githubTree,
+      sourceTag: `station-v${version}`,
+      releaseMetadataPath: inputs.releaseMetadataPath,
+      infrastructureEvidencePath: inputs.infrastructureEvidencePath,
+      channel,
+      backupDirectory,
+      recordPath,
+      confirmation: bootstrapConfirmation,
+    },
+  });
+  assert.equal(calls.length, 2);
 });
 
 test("constructs an explicit bounded environment-only AWS credential object", () => {

@@ -1,23 +1,43 @@
 import { S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
-import { lstat, mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
   compareStationReleaseOrigins,
+  stageStationRelease,
   stationAssetNames,
+  validateLegacyGithubStationReleaseDirectory,
   validateStationReleaseDirectory,
 } from "./artifacts.mjs";
 import { createStationObjectStore, validateStationImmutableObject } from "./object-storage.mjs";
 import { stationReleaseLocation } from "./origins.mjs";
+import { parseStationBetaTag, parseStationStableTag } from "./version.mjs";
 
 const PUBLIC_BASE_URL = "https://releases.markiro.app";
 const YANDEX_S3_ENDPOINT = "https://storage.yandexcloud.net";
 const MAX_BACKUP_INDEX_BYTES = 256 * 1024;
+const MAX_SIGNATURE_BYTES = 64 * 1024;
 const MAX_INSTALLER_BYTES = 512 * 1024 * 1024;
+const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
+const MUTABLE_CACHE_CONTROL = "public, max-age=0, must-revalidate";
+const BOOTSTRAP_CONFIRMATION = "--confirm-empty-channel-bootstrap";
+const SHA = /^[0-9a-f]{40}$/;
+const SHA256 = /^[0-9a-f]{64}$/;
 const CHANNELS = new Set(["beta", "stable"]);
+const STABLE_PROVENANCE_KEYS = [
+  "sourceBetaTag",
+  "betaVersion",
+  "betaReleaseSha",
+  "betaEvidenceSha256",
+  "acceptanceConfirmed",
+  "previousStableTag",
+  "previousStableBaseSha",
+  "changelogFromSha",
+  "changelogToSha",
+];
 const CONTENT_TYPES = Object.freeze({
   installer: "application/vnd.microsoft.portable-executable",
   bundle: "application/zip",
@@ -50,6 +70,134 @@ function commandInvalid() {
 
 function environmentInvalid() {
   throw new Error("invalid station release publisher environment");
+}
+
+function bootstrapInvalid() {
+  throw new Error("invalid station release bootstrap");
+}
+
+function incompleteBaseline() {
+  throw new Error("incomplete station release baseline");
+}
+
+function validBucket(bucket) {
+  return (
+    typeof bucket === "string" &&
+    bucket.length >= 3 &&
+    bucket.length <= 63 &&
+    /^[a-z0-9][a-z0-9.-]*[a-z0-9]$/.test(bucket) &&
+    !bucket.includes("..")
+  );
+}
+
+async function closePublicBody(body) {
+  if (!body || typeof body !== "object") return;
+  try {
+    if (typeof body.destroy === "function") await body.destroy();
+    else if (typeof body.cancel === "function") await body.cancel();
+  } catch {
+    // A cleanup failure must not expose a provider response.
+  }
+}
+
+async function readBoundedPublicBody(body, contentLength, maxBytes) {
+  if (
+    !Number.isSafeInteger(maxBytes) ||
+    maxBytes <= 0 ||
+    maxBytes > MAX_INSTALLER_BYTES ||
+    (contentLength !== undefined &&
+      (!Number.isSafeInteger(contentLength) || contentLength <= 0 || contentLength > maxBytes))
+  ) {
+    await closePublicBody(body);
+    bootstrapInvalid();
+  }
+  if (body instanceof Uint8Array) {
+    if (body.byteLength === 0 || body.byteLength > maxBytes) bootstrapInvalid();
+    return Buffer.from(body);
+  }
+  if (!body || typeof body !== "object") bootstrapInvalid();
+
+  let iterable = body;
+  if (!(Symbol.asyncIterator in iterable)) {
+    if (typeof body.getReader !== "function") bootstrapInvalid();
+    iterable = {
+      async *[Symbol.asyncIterator]() {
+        const reader = body.getReader();
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) return;
+            yield value;
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      },
+    };
+  }
+
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of iterable) {
+    if (!(chunk instanceof Uint8Array)) bootstrapInvalid();
+    const bytes = Buffer.from(chunk);
+    total += bytes.byteLength;
+    if (total > maxBytes) {
+      await closePublicBody(body);
+      bootstrapInvalid();
+    }
+    chunks.push(bytes);
+  }
+  if (total === 0) bootstrapInvalid();
+  return Buffer.concat(chunks, total);
+}
+
+export function createYandexProviderReader({ bucket, fetchImpl = fetch } = {}) {
+  if (!validBucket(bucket) || typeof fetchImpl !== "function") bootstrapInvalid();
+  return Object.freeze({
+    async readPublic(key, expected) {
+      if (
+        typeof key !== "string" ||
+        !/^station\/[a-z0-9./_-]+$/.test(key) ||
+        key.includes("..") ||
+        key.includes("//") ||
+        !hasExactKeys(expected, [
+          "contentType",
+          "cacheControl",
+          "contentDisposition",
+          "maxBytes",
+        ]) ||
+        typeof expected.contentType !== "string" ||
+        typeof expected.cacheControl !== "string" ||
+        (expected.contentDisposition !== null && typeof expected.contentDisposition !== "string")
+      ) {
+        bootstrapInvalid();
+      }
+      const url = `${YANDEX_S3_ENDPOINT}/${bucket}/${key}`;
+      let response;
+      try {
+        response = await fetchImpl(url, { redirect: "error", cache: "no-store" });
+        if (
+          !response?.ok ||
+          response.redirected === true ||
+          (typeof response.url === "string" && response.url.length > 0 && response.url !== url) ||
+          response.headers?.get?.("content-type") !== expected.contentType ||
+          response.headers?.get?.("cache-control") !== expected.cacheControl ||
+          response.headers?.get?.("content-disposition") !== expected.contentDisposition
+        ) {
+          bootstrapInvalid();
+        }
+        const lengthText = response.headers?.get?.("content-length");
+        const contentLength =
+          lengthText === null || lengthText === undefined ? undefined : Number(lengthText);
+        return await readBoundedPublicBody(response.body, contentLength, expected.maxBytes);
+      } catch (error) {
+        await closePublicBody(response?.body);
+        if (error?.message === "invalid station release bootstrap") throw error;
+        bootstrapInvalid();
+      }
+    },
+  });
 }
 
 function ensureChannel(channel) {
@@ -106,6 +254,14 @@ function descriptors(channel, version, tree) {
     key: `${location.immutablePrefix}${name}`,
     file: join(tree, name),
     contentType,
+    cacheControl: IMMUTABLE_CACHE_CONTROL,
+    contentDisposition: null,
+    maxBytes:
+      name === names.signature
+        ? MAX_SIGNATURE_BYTES
+        : name === names.installer || name === names.bundle
+          ? MAX_INSTALLER_BYTES
+          : MAX_BACKUP_INDEX_BYTES,
   }));
 }
 
@@ -113,12 +269,17 @@ function equalBytes(left, right) {
   return Buffer.from(left).equals(Buffer.from(right));
 }
 
-async function readPublicTree({ store, tree, channel, version }) {
+async function readPublicTree({ reader, tree, channel, version }) {
   const directory = await mkdtemp(join(tmpdir(), "markiro-station-public-"));
   try {
     const objects = descriptors(channel, version, tree);
     for (const object of objects) {
-      const bytes = await store.readPublic(object.key);
+      const bytes = await reader.readPublic(object.key, {
+        contentType: object.contentType,
+        cacheControl: object.cacheControl,
+        contentDisposition: object.contentDisposition,
+        maxBytes: object.maxBytes,
+      });
       await writeFile(join(directory, object.name), bytes, { flag: "wx", mode: 0o600 });
     }
     let local;
@@ -292,6 +453,169 @@ function hasExactKeys(value, keys) {
   return isPlainObject(value) && Object.keys(value).sort().join(",") === [...keys].sort().join(",");
 }
 
+async function readBootstrapJson(path) {
+  if (typeof path !== "string" || !isAbsolute(path) || resolve(path) !== path) bootstrapInvalid();
+  let bytes;
+  try {
+    const info = await lstat(path);
+    if (
+      !info.isFile() ||
+      info.isSymbolicLink() ||
+      info.size <= 0 ||
+      info.size > MAX_BACKUP_INDEX_BYTES
+    ) {
+      bootstrapInvalid();
+    }
+    bytes = await readFile(path);
+  } catch (error) {
+    if (error?.message === "invalid station release bootstrap") throw error;
+    bootstrapInvalid();
+  }
+  try {
+    return { value: JSON.parse(bytes.toString("utf8")), sha256: sha256(bytes) };
+  } catch {
+    bootstrapInvalid();
+  }
+}
+
+function validateInfrastructureEvidence(evidence) {
+  if (
+    !hasExactKeys(evidence, [
+      "schemaVersion",
+      "targetSha",
+      "planSha256",
+      "planVersionId",
+      "enableStationReleasePublicDns",
+    ]) ||
+    evidence.schemaVersion !== 1 ||
+    !SHA.test(evidence.targetSha) ||
+    !SHA256.test(evidence.planSha256) ||
+    typeof evidence.planVersionId !== "string" ||
+    evidence.planVersionId.length === 0 ||
+    evidence.planVersionId.length > 256 ||
+    !/^[A-Za-z0-9._:-]+$/.test(evidence.planVersionId) ||
+    evidence.enableStationReleasePublicDns !== false
+  ) {
+    bootstrapInvalid();
+  }
+  return evidence;
+}
+
+function parseSourceVersion(channel, sourceTag) {
+  const parsed =
+    channel === "beta" ? parseStationBetaTag(sourceTag) : parseStationStableTag(sourceTag);
+  if (!parsed || sourceTag !== `station-v${parsed.text}`) bootstrapInvalid();
+  return parsed.text;
+}
+
+function validateBootstrapRelease(release, channel, sourceTag, evidence) {
+  if (
+    !hasExactKeys(release, ["tagName", "isDraft", "isPrerelease", "targetCommitish"]) ||
+    release.tagName !== sourceTag ||
+    release.isDraft !== false ||
+    release.isPrerelease !== (channel === "beta") ||
+    !SHA.test(release.targetCommitish) ||
+    release.targetCommitish !== evidence.releaseSha
+  ) {
+    bootstrapInvalid();
+  }
+}
+
+async function ensureNewBootstrapOutput(path) {
+  if (typeof path !== "string" || !isAbsolute(path) || resolve(path) !== path) bootstrapInvalid();
+  try {
+    await canonicalExistingDirectory(dirname(path));
+    await lstat(path);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    bootstrapInvalid();
+  }
+  bootstrapInvalid();
+}
+
+function stableProvenanceFrom(evidence) {
+  return Object.fromEntries(STABLE_PROVENANCE_KEYS.map((key) => [key, evidence[key]]));
+}
+
+async function stageBootstrapTrees({ githubTree, channel, version, source }) {
+  const root = await mkdtemp(join(tmpdir(), "markiro-station-bootstrap-"));
+  const githubDirectory = join(root, "github");
+  const yandexDirectory = join(root, "yandex");
+  const common = {
+    channel,
+    inputDirectory: githubTree,
+    version,
+    pubDate: source.evidence.publishedAt,
+    baseSha: source.evidence.baseSha,
+    releaseSha: source.evidence.releaseSha,
+    ...(channel === "stable"
+      ? {
+          notesPath: join(githubTree, stationAssetNames(version).notes),
+          stableProvenance: stableProvenanceFrom(source.evidence),
+        }
+      : {}),
+  };
+  try {
+    await stageStationRelease({ ...common, origin: "github", outputDirectory: githubDirectory });
+    await stageStationRelease({ ...common, origin: "yandex", outputDirectory: yandexDirectory });
+    const [github, yandex] = await Promise.all([
+      validateStationReleaseDirectory(githubDirectory, {
+        channel,
+        origin: "github",
+        version,
+      }),
+      validateStationReleaseDirectory(yandexDirectory, {
+        channel,
+        origin: "yandex",
+        version,
+      }),
+    ]);
+    await compareStationReleaseOrigins({
+      githubDirectory,
+      yandexDirectory,
+      channel,
+      version,
+    });
+    const names = stationAssetNames(version);
+    for (const name of [names.installer, names.bundle, names.signature, names.notes]) {
+      if (source.assets[name] !== github.assets[name]) bootstrapInvalid();
+    }
+    return { root, githubDirectory, yandexDirectory, github, yandex, names };
+  } catch (error) {
+    await rm(root, { recursive: true, force: true });
+    if (error?.message === "invalid station release bootstrap") throw error;
+    bootstrapInvalid();
+  }
+}
+
+function mutableTargetObjects(targets) {
+  return [
+    {
+      key: targets.manifest.key,
+      bytes: targets.manifest.bytes,
+      contentType: targets.manifest.contentType,
+      sourceKey: null,
+    },
+    {
+      key: targets.installer.aliasKey,
+      bytes: targets.installer.bytes,
+      contentType: targets.installer.contentType,
+      sourceKey: targets.installer.immutableKey,
+    },
+  ];
+}
+
+function isCompleteTargetBaseline(current, targets) {
+  const targetObjects = mutableTargetObjects(targets);
+  return current.every(
+    (object, index) =>
+      object !== null &&
+      object.contentType === targetObjects[index].contentType &&
+      object.sourceKey === targetObjects[index].sourceKey &&
+      equalBytes(object.bytes, targetObjects[index].bytes),
+  );
+}
+
 async function loadBackup(backupDirectory, channel) {
   ensureChannel(channel);
   await canonicalExistingDirectory(backupDirectory).catch(() => invalidBackup());
@@ -387,6 +711,9 @@ function releaseTargets(channel, version, tree) {
       key: location.mutableManifestKey,
       bytesPath: join(tree, names.manifest),
       contentType: CONTENT_TYPES.manifest,
+      cacheControl: MUTABLE_CACHE_CONTROL,
+      contentDisposition: null,
+      maxBytes: MAX_BACKUP_INDEX_BYTES,
     },
     installer: {
       immutableKey: `${location.immutablePrefix}${names.installer}`,
@@ -394,6 +721,9 @@ function releaseTargets(channel, version, tree) {
       bytesPath: join(tree, names.installer),
       contentType: CONTENT_TYPES.installer,
       attachmentFilename: names.installer,
+      cacheControl: MUTABLE_CACHE_CONTROL,
+      contentDisposition: `attachment; filename="${names.installer}"`,
+      maxBytes: MAX_INSTALLER_BYTES,
     },
   };
 }
@@ -405,13 +735,52 @@ async function readTargets(targets) {
   };
 }
 
-async function promoteTargets(store, targets) {
+async function verifyTargets(reader, targets) {
+  if (
+    !equalBytes(
+      await reader.readPublic(targets.manifest.key, {
+        contentType: targets.manifest.contentType,
+        cacheControl: targets.manifest.cacheControl,
+        contentDisposition: targets.manifest.contentDisposition,
+        maxBytes: targets.manifest.maxBytes,
+      }),
+      targets.manifest.bytes,
+    )
+  ) {
+    throw new Error("manifest verification failed");
+  }
+  if (
+    !equalBytes(
+      await reader.readPublic(targets.installer.aliasKey, {
+        contentType: targets.installer.contentType,
+        cacheControl: targets.installer.cacheControl,
+        contentDisposition: targets.installer.contentDisposition,
+        maxBytes: targets.installer.maxBytes,
+      }),
+      targets.installer.bytes,
+    )
+  ) {
+    throw new Error("installer verification failed");
+  }
+}
+
+async function promoteTargets(store, targets, reader = store) {
   await store.putMutable(
     targets.manifest.key,
     targets.manifest.bytes,
     targets.manifest.contentType,
   );
-  if (!equalBytes(await store.readPublic(targets.manifest.key), targets.manifest.bytes)) {
+  if (
+    !equalBytes(
+      await reader.readPublic(targets.manifest.key, {
+        contentType: targets.manifest.contentType,
+        cacheControl: targets.manifest.cacheControl,
+        contentDisposition: targets.manifest.contentDisposition,
+        maxBytes: targets.manifest.maxBytes,
+      }),
+      targets.manifest.bytes,
+    )
+  ) {
     throw new Error("manifest verification failed");
   }
   await store.copyImmutableToAlias({
@@ -419,7 +788,17 @@ async function promoteTargets(store, targets) {
     aliasKey: targets.installer.aliasKey,
     attachmentFilename: targets.installer.attachmentFilename,
   });
-  if (!equalBytes(await store.readPublic(targets.installer.aliasKey), targets.installer.bytes)) {
+  if (
+    !equalBytes(
+      await reader.readPublic(targets.installer.aliasKey, {
+        contentType: targets.installer.contentType,
+        cacheControl: targets.installer.cacheControl,
+        contentDisposition: targets.installer.contentDisposition,
+        maxBytes: targets.installer.maxBytes,
+      }),
+      targets.installer.bytes,
+    )
+  ) {
     throw new Error("installer verification failed");
   }
 }
@@ -436,8 +815,108 @@ function ensureStore(store) {
   if (!store || methods.some((method) => typeof store[method] !== "function")) invalid();
 }
 
-export function createYandexPublisher({ store } = {}) {
+function ensureProviderReader(reader) {
+  if (!reader || typeof reader.readPublic !== "function") bootstrapInvalid();
+}
+
+async function publishBootstrapImmutables({ store, providerReader, tree, channel, version }) {
+  const objects = descriptors(channel, version, tree);
+  try {
+    await Promise.all(objects.map((object) => validateStationImmutableObject(object)));
+  } catch {
+    bootstrapInvalid();
+  }
+  const absent = [];
+  try {
+    for (const object of objects) {
+      try {
+        await store.assertAbsent(object.key);
+        absent.push(object);
+      } catch (error) {
+        if (error?.message !== "station release object already exists") throw error;
+      }
+    }
+    for (const object of absent) {
+      await store.putImmutable(object.key, object.file, object.contentType);
+    }
+    await readPublicTree({ reader: providerReader, tree, channel, version });
+  } catch (error) {
+    if (error?.message === "invalid station release bootstrap") throw error;
+    publicationFailed();
+  }
+  return absent.length === 0 ? "existing-and-provider-verified" : "published-and-provider-verified";
+}
+
+function originBootstrapEvidence(origin, validated, names) {
+  return {
+    origin,
+    evidenceSha256: validated.assets[names.evidence],
+    manifestSha256: validated.assets[names.manifest],
+    checksumsSha256: validated.assets[names.checksums],
+  };
+}
+
+async function writeBootstrapRecord({
+  path,
+  channel,
+  version,
+  sourceTag,
+  source,
+  releaseMetadataSha256,
+  infrastructure,
+  infrastructureEvidenceSha256,
+  trees,
+  backup,
+  backupDirectory,
+  result,
+}) {
+  const backupIndex = await readBootstrapJson(join(backupDirectory, "backup.json"));
+  const record = {
+    schemaVersion: 1,
+    operation: "station-release-empty-channel-bootstrap",
+    channel,
+    version,
+    source: {
+      tagName: sourceTag,
+      baseSha: source.evidence.baseSha,
+      releaseSha: source.evidence.releaseSha,
+      releaseMetadataSha256,
+      evidenceSha256: source.assets[trees.names.evidence],
+    },
+    infrastructure: {
+      targetSha: infrastructure.targetSha,
+      planSha256: infrastructure.planSha256,
+      planVersionId: infrastructure.planVersionId,
+      enableStationReleasePublicDns: false,
+      evidenceSha256: infrastructureEvidenceSha256,
+    },
+    origins: {
+      github: originBootstrapEvidence("github", trees.github, trees.names),
+      yandex: originBootstrapEvidence("yandex", trees.yandex, trees.names),
+    },
+    commonAssets: {
+      installerSha256: trees.github.assets[trees.names.installer],
+      bundleSha256: trees.github.assets[trees.names.bundle],
+      signatureSha256: trees.github.assets[trees.names.signature],
+      notesSha256: trees.github.assets[trees.names.notes],
+    },
+    mutableBackup: {
+      indexSha256: backupIndex.sha256,
+      manifestSha256: backup.objects[0].sha256,
+      installerSha256: backup.objects[1].sha256,
+    },
+    result,
+  };
+  try {
+    await writeExclusive(path, `${JSON.stringify(record, null, 2)}\n`);
+  } catch {
+    bootstrapInvalid();
+  }
+}
+
+export function createYandexPublisher({ store, providerReader } = {}) {
   ensureStore(store);
+  if (providerReader !== undefined) ensureProviderReader(providerReader);
   return Object.freeze({
     async publishImmutable({ tree, channel, version } = {}) {
       await validateLocalTree(tree, channel, version);
@@ -452,7 +931,7 @@ export function createYandexPublisher({ store } = {}) {
         for (const object of objects) {
           await store.putImmutable(object.key, object.file, object.contentType);
         }
-        await readPublicTree({ store, tree, channel, version });
+        await readPublicTree({ reader: store, tree, channel, version });
       } catch (error) {
         if (error?.message === "invalid station release publication") throw error;
         publicationFailed();
@@ -461,7 +940,7 @@ export function createYandexPublisher({ store } = {}) {
 
     async validatePublic({ tree, channel, version } = {}) {
       await validateLocalTree(tree, channel, version);
-      await readPublicTree({ store, tree, channel, version });
+      await readPublicTree({ reader: store, tree, channel, version });
     },
 
     async backupMutables({ channel, backupDirectory } = {}) {
@@ -495,74 +974,139 @@ export function createYandexPublisher({ store } = {}) {
       await writeBackup(backupDirectory, channel, objects);
     },
 
-    async seedBaseline({ tree, channel, backupDirectory } = {}) {
-      await canonicalExistingDirectory(tree);
-      let entries;
-      try {
-        entries = (await readdir(tree)).sort();
-      } catch {
-        invalid();
+    async seedBaseline(input = {}) {
+      if (
+        !hasExactKeys(input, [
+          "githubTree",
+          "sourceTag",
+          "releaseMetadataPath",
+          "infrastructureEvidencePath",
+          "channel",
+          "backupDirectory",
+          "recordPath",
+          "confirmation",
+        ]) ||
+        input.confirmation !== BOOTSTRAP_CONFIRMATION
+      ) {
+        bootstrapInvalid();
       }
-      if (entries.join(",") !== "github,yandex") invalid();
-      const githubTree = join(tree, "github");
-      const yandexTree = join(tree, "yandex");
+      ensureProviderReader(providerReader);
+      const { channel } = input;
+      ensureChannel(channel);
+      const version = parseSourceVersion(channel, input.sourceTag);
       await Promise.all([
-        canonicalExistingDirectory(githubTree),
-        canonicalExistingDirectory(yandexTree),
+        canonicalExistingDirectory(input.githubTree).catch(() => bootstrapInvalid()),
+        ensureNewBootstrapOutput(input.backupDirectory),
+        ensureNewBootstrapOutput(input.recordPath),
       ]);
-      const version = await inferVersion(yandexTree, channel);
+      const [releaseMetadata, infrastructureEvidence] = await Promise.all([
+        readBootstrapJson(input.releaseMetadataPath),
+        readBootstrapJson(input.infrastructureEvidencePath),
+      ]);
+      const infrastructure = validateInfrastructureEvidence(infrastructureEvidence.value);
+      let source;
       try {
-        await compareStationReleaseOrigins({
-          githubDirectory: githubTree,
-          yandexDirectory: yandexTree,
+        source = await validateLegacyGithubStationReleaseDirectory(input.githubTree, {
           channel,
           version,
         });
       } catch {
-        invalid();
+        bootstrapInvalid();
       }
-      await readPublicTree({ store, tree: yandexTree, channel, version });
-      const mutable = mutableDescriptors(channel);
-      let current;
+      validateBootstrapRelease(releaseMetadata.value, channel, input.sourceTag, source.evidence);
+
+      const trees = await stageBootstrapTrees({
+        githubTree: input.githubTree,
+        channel,
+        version,
+        source,
+      });
       try {
-        current = await Promise.all(mutable.map(({ key }) => store.getMutable(key)));
-      } catch {
-        publicationFailed();
-      }
-      if (current.some((object) => object !== null)) {
-        throw new Error("station release baseline already exists");
-      }
-      const targets = await readTargets(releaseTargets(channel, version, yandexTree));
-      await writeBackup(backupDirectory, channel, [
-        {
-          key: targets.manifest.key,
-          bytes: targets.manifest.bytes,
-          contentType: targets.manifest.contentType,
-          sourceKey: null,
-        },
-        {
-          key: targets.installer.aliasKey,
-          bytes: targets.installer.bytes,
-          contentType: targets.installer.contentType,
-          sourceKey: targets.installer.immutableKey,
-        },
-      ]);
-      try {
-        await promoteTargets(store, targets);
-      } catch {
+        const targets = await readTargets(releaseTargets(channel, version, trees.yandexDirectory));
+        const mutable = mutableDescriptors(channel);
+        let current;
         try {
-          await promoteTargets(store, targets);
+          current = await Promise.all(mutable.map(({ key }) => store.getMutable(key)));
         } catch {
-          baselineRecoveryFailed();
+          publicationFailed();
         }
-        publicationFailed();
+        const present = current.filter((object) => object !== null).length;
+        if (present === 1 || (present === 2 && !isCompleteTargetBaseline(current, targets))) {
+          incompleteBaseline();
+        }
+
+        const immutableResult = await publishBootstrapImmutables({
+          store,
+          providerReader,
+          tree: trees.yandexDirectory,
+          channel,
+          version,
+        });
+        const backup = await writeBackup(
+          input.backupDirectory,
+          channel,
+          mutableTargetObjects(targets),
+        );
+        const recordResult = (result) =>
+          writeBootstrapRecord({
+            path: input.recordPath,
+            channel,
+            version,
+            sourceTag: input.sourceTag,
+            source,
+            releaseMetadataSha256: releaseMetadata.sha256,
+            infrastructure,
+            infrastructureEvidenceSha256: infrastructureEvidence.sha256,
+            trees,
+            backup,
+            backupDirectory: input.backupDirectory,
+            result,
+          });
+        let channelBaseline;
+        if (present === 0) {
+          try {
+            await promoteTargets(store, targets, providerReader);
+          } catch {
+            try {
+              await promoteTargets(store, targets, providerReader);
+            } catch {
+              await recordResult({
+                immutables: immutableResult,
+                channelBaseline: "unknown-after-failed-compensation",
+                recovery: "failed",
+              }).catch(() => undefined);
+              baselineRecoveryFailed();
+            }
+            await recordResult({
+              immutables: immutableResult,
+              channelBaseline: "created-after-compensation-and-provider-verified",
+              recovery: "complete-baseline-reapplied-and-provider-verified",
+            });
+            publicationFailed();
+          }
+          channelBaseline = "created-and-provider-verified";
+        } else {
+          try {
+            await verifyTargets(providerReader, targets);
+          } catch {
+            publicationFailed();
+          }
+          channelBaseline = "already-complete-and-provider-verified";
+        }
+        await recordResult({
+          immutables: immutableResult,
+          channelBaseline,
+          recovery: "not-required",
+        });
+      } finally {
+        await rm(trees.root, { recursive: true, force: true });
       }
     },
 
     async promote({ tree, channel, backupDirectory } = {}) {
       const version = await inferVersion(tree, channel);
       const backup = await loadBackup(backupDirectory, channel);
-      await readPublicTree({ store, tree, channel, version });
+      await readPublicTree({ reader: store, tree, channel, version });
       const targets = await readTargets(releaseTargets(channel, version, tree));
       try {
         await promoteTargets(store, targets);
@@ -618,17 +1162,52 @@ export async function runYandexPublisherCli(args, { publisher } = {}) {
       version,
     });
   }
-  if (command === "seed-baseline" || command === "promote") {
+  if (command === "seed-baseline") {
+    if (values.length !== 8) commandInvalid();
+    const [
+      githubTree,
+      sourceTag,
+      releaseMetadataPath,
+      infrastructureEvidencePath,
+      channel,
+      backupDirectory,
+      recordPath,
+      confirmation,
+    ] = values;
+    for (const path of [
+      githubTree,
+      releaseMetadataPath,
+      infrastructureEvidencePath,
+      backupDirectory,
+      recordPath,
+    ]) {
+      ensureCliPath(path);
+    }
+    ensureCliChannel(channel);
+    try {
+      parseSourceVersion(channel, sourceTag);
+    } catch {
+      commandInvalid();
+    }
+    if (confirmation !== BOOTSTRAP_CONFIRMATION) commandInvalid();
+    return publisher.seedBaseline({
+      githubTree,
+      sourceTag,
+      releaseMetadataPath,
+      infrastructureEvidencePath,
+      channel,
+      backupDirectory,
+      recordPath,
+      confirmation,
+    });
+  }
+  if (command === "promote") {
     if (values.length !== 3) commandInvalid();
     const [tree, channel, backupDirectory] = values;
     ensureCliPath(tree);
     ensureCliChannel(channel);
     ensureCliPath(backupDirectory);
-    return publisher[command === "seed-baseline" ? "seedBaseline" : "promote"]({
-      tree,
-      channel,
-      backupDirectory,
-    });
+    return publisher.promote({ tree, channel, backupDirectory });
   }
   if (command === "backup-mutables" || command === "rollback") {
     if (values.length !== 2) commandInvalid();
@@ -660,11 +1239,7 @@ export function createYandexPublisherClientConfig(env) {
   const sessionToken = env?.AWS_SESSION_TOKEN;
   if (
     endpoint !== YANDEX_S3_ENDPOINT ||
-    typeof bucket !== "string" ||
-    bucket.length < 3 ||
-    bucket.length > 63 ||
-    !/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/.test(bucket) ||
-    bucket.includes("..") ||
+    !validBucket(bucket) ||
     typeof accessKeyId !== "string" ||
     !/^[A-Za-z0-9_-]{16,128}$/.test(accessKeyId) ||
     !boundedPrintable(secretAccessKey, 16, 256) ||
@@ -701,7 +1276,10 @@ export async function runYandexPublisherMain(
       fetchImpl,
     });
     await runYandexPublisherCli(args, {
-      publisher: createYandexPublisher({ store }),
+      publisher: createYandexPublisher({
+        store,
+        providerReader: createYandexProviderReader({ bucket: config.bucket, fetchImpl }),
+      }),
     });
   } finally {
     client.destroy?.();
