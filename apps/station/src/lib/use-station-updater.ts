@@ -15,7 +15,7 @@ import { compareStationVersions } from "./station-version.js";
 
 export type StationUpdateOrigin = "yandex" | "github";
 export type StationUpdateFallbackReason = "primary-unavailable" | "primary-metadata-invalid";
-export type StationUpdatePackageFallbackReason = "http" | "network" | "timeout";
+export type StationUpdatePackageFallbackReason = "http" | "metadata" | "network" | "timeout";
 
 export type StationUpdateDownloadEvent =
   | { event: "Started"; contentLength: number | null }
@@ -440,6 +440,7 @@ export function useStationUpdater({
           handleRef.current = null;
         }
         if (handle) await closeHandle(handle).catch(() => undefined);
+        if (!current()) throw caught;
         clearCandidateProvenance();
         setPhase("idle");
         if (caught instanceof StationUpdateOperationCancelled) throw caught;

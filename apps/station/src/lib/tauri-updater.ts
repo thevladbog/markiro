@@ -111,7 +111,9 @@ function decodeFallbackReason(value: unknown): StationUpdateFallbackReason | nul
 }
 
 function decodePackageFallbackReason(value: unknown): StationUpdatePackageFallbackReason {
-  if (value !== "http" && value !== "network" && value !== "timeout") invalid("progress");
+  if (value !== "http" && value !== "metadata" && value !== "network" && value !== "timeout") {
+    invalid("progress");
+  }
   return value;
 }
 

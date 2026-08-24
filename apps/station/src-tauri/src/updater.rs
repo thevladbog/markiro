@@ -148,6 +148,7 @@ pub(crate) enum StationFallbackReason {
 #[serde(rename_all = "lowercase")]
 pub(crate) enum StationPackageFallbackReason {
     Http,
+    Metadata,
     Network,
     Timeout,
 }
@@ -202,7 +203,7 @@ pub(crate) trait DiscoveryCandidate: Send {
 
 #[derive(Debug)]
 pub(crate) enum DiscoveryFailure {
-    Availability(String),
+    Availability(StationPackageFallbackReason, String),
     MetadataInvalid(String),
     Integrity(String),
     SecurityPolicy(String),
@@ -325,7 +326,7 @@ impl std::error::Error for StationUpdateError {}
 
 fn terminal_failure(error: DiscoveryFailure) -> StationUpdateError {
     match error {
-        DiscoveryFailure::Availability(_detail) | DiscoveryFailure::MetadataInvalid(_detail) => {
+        DiscoveryFailure::Availability(_, _) | DiscoveryFailure::MetadataInvalid(_) => {
             StationUpdateError::origins_unavailable()
         }
         DiscoveryFailure::Integrity(_detail) | DiscoveryFailure::SecurityPolicy(_detail) => {
@@ -336,7 +337,9 @@ fn terminal_failure(error: DiscoveryFailure) -> StationUpdateError {
 
 fn fallback_reason(error: DiscoveryFailure) -> Result<StationFallbackReason, StationUpdateError> {
     match error {
-        DiscoveryFailure::Availability(_detail) => Ok(StationFallbackReason::PrimaryUnavailable),
+        DiscoveryFailure::Availability(_reason, _detail) => {
+            Ok(StationFallbackReason::PrimaryUnavailable)
+        }
         DiscoveryFailure::MetadataInvalid(_detail) => {
             Ok(StationFallbackReason::PrimaryMetadataInvalid)
         }
@@ -628,15 +631,25 @@ fn has_io_source(error: &(dyn std::error::Error + 'static)) -> bool {
 
 fn classify_plugin_error(error: tauri_plugin_updater::Error) -> DiscoveryFailure {
     match error {
+        tauri_plugin_updater::Error::Reqwest(source) if source.is_timeout() => {
+            DiscoveryFailure::Availability(
+                StationPackageFallbackReason::Timeout,
+                source.to_string(),
+            )
+        }
+        tauri_plugin_updater::Error::Reqwest(source) if source.is_status() => {
+            DiscoveryFailure::Availability(StationPackageFallbackReason::Http, source.to_string())
+        }
         tauri_plugin_updater::Error::Reqwest(source)
-            if source.is_timeout()
-                || source.is_connect()
+            if source.is_connect()
                 || source.is_request()
                 || source.is_body()
-                || source.is_status()
                 || has_io_source(&source) =>
         {
-            DiscoveryFailure::Availability(source.to_string())
+            DiscoveryFailure::Availability(
+                StationPackageFallbackReason::Network,
+                source.to_string(),
+            )
         }
         tauri_plugin_updater::Error::Reqwest(source) if source.is_decode() => {
             DiscoveryFailure::MetadataInvalid(source.to_string())
@@ -647,9 +660,16 @@ fn classify_plugin_error(error: tauri_plugin_updater::Error) -> DiscoveryFailure
         tauri_plugin_updater::Error::Serialization(source) => {
             DiscoveryFailure::MetadataInvalid(source.to_string())
         }
-        tauri_plugin_updater::Error::ReleaseNotFound => {
-            DiscoveryFailure::Availability("release metadata unavailable".into())
+        tauri_plugin_updater::Error::TargetNotFound(source) => {
+            DiscoveryFailure::MetadataInvalid(source)
         }
+        tauri_plugin_updater::Error::TargetsNotFound(source) => {
+            DiscoveryFailure::MetadataInvalid(source.join(","))
+        }
+        tauri_plugin_updater::Error::ReleaseNotFound => DiscoveryFailure::Availability(
+            StationPackageFallbackReason::Http,
+            "release metadata unavailable".into(),
+        ),
         tauri_plugin_updater::Error::Minisign(source) => {
             DiscoveryFailure::Integrity(source.to_string())
         }
@@ -1346,10 +1366,26 @@ fn terminal_package_error(failure: PackageDownloadFailure) -> StationUpdateError
 
 fn recheck_failure(error: DiscoveryFailure) -> StationUpdateError {
     match error {
-        DiscoveryFailure::Availability(_detail) => StationUpdateError::origins_unavailable(),
+        DiscoveryFailure::Availability(_reason, _detail) => {
+            StationUpdateError::origins_unavailable()
+        }
         DiscoveryFailure::MetadataInvalid(_detail) => StationUpdateError::origin_mismatch(),
         DiscoveryFailure::Integrity(_detail) => StationUpdateError::integrity_failed(),
         DiscoveryFailure::SecurityPolicy(_detail) => StationUpdateError::policy_denied(),
+    }
+}
+
+enum CandidateRecheckFailure {
+    Discovery(DiscoveryFailure),
+    Terminal(StationUpdateError),
+}
+
+impl CandidateRecheckFailure {
+    fn terminal(self) -> StationUpdateError {
+        match self {
+            Self::Discovery(error) => recheck_failure(error),
+            Self::Terminal(error) => error,
+        }
     }
 }
 
@@ -1360,15 +1396,20 @@ async fn recheck_exact_candidate<T: DiscoveryTransport>(
     accepted: &AcceptedTarget,
     now_unix: i64,
     cancellation: &TransferControl,
-) -> Result<T::Candidate, StationUpdateError> {
+) -> Result<T::Candidate, CandidateRecheckFailure> {
     let candidate = wait_for_transfer(
         transport.check(origin, channel.endpoint(origin)),
         cancellation,
     )
     .await
-    .map_err(terminal_package_error)?
-    .map_err(recheck_failure)?
-    .ok_or_else(StationUpdateError::origin_mismatch)?;
+    .map_err(|failure| CandidateRecheckFailure::Terminal(terminal_package_error(failure)))?
+    .map_err(CandidateRecheckFailure::Discovery)?
+    .ok_or_else(|| CandidateRecheckFailure::Terminal(StationUpdateError::origin_mismatch()))?;
+    if !accepted.matches(candidate.metadata()) {
+        return Err(CandidateRecheckFailure::Terminal(
+            StationUpdateError::origin_mismatch(),
+        ));
+    }
     let candidate = validate_candidate(
         candidate,
         channel,
@@ -1377,10 +1418,7 @@ async fn recheck_exact_candidate<T: DiscoveryTransport>(
         now_unix,
         None,
     )
-    .map_err(|_error| StationUpdateError::origin_mismatch())?;
-    if !accepted.matches(&candidate.metadata) {
-        return Err(StationUpdateError::origin_mismatch());
-    }
+    .map_err(CandidateRecheckFailure::Terminal)?;
     Ok(candidate.candidate)
 }
 
@@ -1600,7 +1638,8 @@ where
     let accepted_target = metadata.into_accepted_target();
 
     let primary_origin = StationReleaseOrigin::Yandex;
-    let selected = recheck_exact_candidate(
+    let mut monotonic_progress = MonotonicProgress::new(progress);
+    let selected = match recheck_exact_candidate(
         discovery,
         channel,
         primary_origin,
@@ -1608,8 +1647,52 @@ where
         now_unix,
         transfer,
     )
-    .await?;
-    let mut monotonic_progress = MonotonicProgress::new(progress);
+    .await
+    {
+        Ok(candidate) => candidate,
+        Err(CandidateRecheckFailure::Discovery(DiscoveryFailure::Availability(
+            reason,
+            _detail,
+        ))) => {
+            let peer_origin = primary_origin.peer();
+            let peer = recheck_exact_candidate(
+                discovery,
+                channel,
+                peer_origin,
+                &accepted_target,
+                now_unix,
+                transfer,
+            )
+            .await
+            .map_err(CandidateRecheckFailure::terminal)?;
+            monotonic_progress
+                .fallback(primary_origin, peer_origin, reason)
+                .map_err(terminal_package_error)?;
+            peer
+        }
+        Err(CandidateRecheckFailure::Discovery(DiscoveryFailure::MetadataInvalid(_detail))) => {
+            let peer_origin = primary_origin.peer();
+            let peer = recheck_exact_candidate(
+                discovery,
+                channel,
+                peer_origin,
+                &accepted_target,
+                now_unix,
+                transfer,
+            )
+            .await
+            .map_err(CandidateRecheckFailure::terminal)?;
+            monotonic_progress
+                .fallback(
+                    primary_origin,
+                    peer_origin,
+                    StationPackageFallbackReason::Metadata,
+                )
+                .map_err(terminal_package_error)?;
+            peer
+        }
+        Err(failure) => return Err(failure.terminal()),
+    };
     let selected_download = packages
         .download(&selected, &mut monotonic_progress, transfer)
         .await;
@@ -1628,7 +1711,8 @@ where
                     now_unix,
                     transfer,
                 )
-                .await?;
+                .await
+                .map_err(CandidateRecheckFailure::terminal)?;
                 monotonic_progress
                     .fallback(primary_origin, peer_origin, reason)
                     .map_err(terminal_package_error)?;
@@ -2840,7 +2924,10 @@ mod tests {
         let transport = FakeTransport::new(vec![
             (
                 StationReleaseOrigin::Yandex,
-                FakeOutcome::Failure(DiscoveryFailure::Availability("timeout".into())),
+                FakeOutcome::Failure(DiscoveryFailure::Availability(
+                    StationPackageFallbackReason::Timeout,
+                    "timeout".into(),
+                )),
             ),
             (
                 StationReleaseOrigin::Github,
@@ -2902,7 +2989,10 @@ mod tests {
         let transport = FakeTransport::new(vec![
             (
                 StationReleaseOrigin::Yandex,
-                FakeOutcome::Failure(DiscoveryFailure::Availability("request timed out".into())),
+                FakeOutcome::Failure(DiscoveryFailure::Availability(
+                    StationPackageFallbackReason::Timeout,
+                    "request timed out".into(),
+                )),
             ),
             (StationReleaseOrigin::Github, FakeOutcome::NoUpdate),
         ]);
@@ -2977,6 +3067,12 @@ mod tests {
             tauri_plugin_updater::Error::ReleaseNotFound,
             StationFallbackReason::PrimaryUnavailable,
         );
+        for error in [
+            tauri_plugin_updater::Error::TargetNotFound("windows-x86_64".into()),
+            tauri_plugin_updater::Error::TargetsNotFound(vec!["windows-x86_64".into()]),
+        ] {
+            assert_plugin_error_falls_back(error, StationFallbackReason::PrimaryMetadataInvalid);
+        }
 
         let http_status = reqwest::Response::from(
             http::Response::builder()
@@ -2997,12 +3093,7 @@ mod tests {
             .expect_err("invalid signature fixture");
         assert_plugin_error_is_terminal(tauri_plugin_updater::Error::Base64(invalid_signature));
 
-        for error in [
-            tauri_plugin_updater::Error::InsecureTransportProtocol,
-            tauri_plugin_updater::Error::TargetNotFound("windows-x86_64".into()),
-        ] {
-            assert_plugin_error_is_terminal(error);
-        }
+        assert_plugin_error_is_terminal(tauri_plugin_updater::Error::InsecureTransportProtocol);
     }
 
     #[test]
@@ -3011,12 +3102,14 @@ mod tests {
             (
                 StationReleaseOrigin::Yandex,
                 FakeOutcome::Failure(DiscoveryFailure::Availability(
+                    StationPackageFallbackReason::Network,
                     "https://releases.markiro.app/?token=secret".into(),
                 )),
             ),
             (
                 StationReleaseOrigin::Github,
                 FakeOutcome::Failure(DiscoveryFailure::Availability(
+                    StationPackageFallbackReason::Network,
                     "https://github.com/private/path".into(),
                 )),
             ),
@@ -3347,6 +3440,231 @@ mod tests {
         assert_eq!(
             packages.install_calls(),
             vec![candidate(StationReleaseOrigin::Yandex).0.download_url]
+        );
+    }
+
+    #[test]
+    fn download_sustained_yandex_metadata_outage_uses_exact_github_target_once() {
+        for (accepted_origin, failure, reason) in [
+            (
+                StationReleaseOrigin::Yandex,
+                DiscoveryFailure::Availability(
+                    StationPackageFallbackReason::Timeout,
+                    "controlled timeout".into(),
+                ),
+                StationPackageFallbackReason::Timeout,
+            ),
+            (
+                StationReleaseOrigin::Github,
+                DiscoveryFailure::MetadataInvalid("controlled malformed metadata".into()),
+                StationPackageFallbackReason::Metadata,
+            ),
+        ] {
+            let discovery = FakeTransport::new(vec![
+                (StationReleaseOrigin::Yandex, FakeOutcome::Failure(failure)),
+                (
+                    StationReleaseOrigin::Github,
+                    FakeOutcome::Update(candidate(StationReleaseOrigin::Github)),
+                ),
+            ]);
+            let packages =
+                FakePackageTransport::new(vec![FakeDownload::success(9, vec![4, 9], b"package")]);
+            let mut progress = RecordingProgress::default();
+
+            run_candidate_install(
+                accepted_candidate(accepted_origin),
+                &discovery,
+                &packages,
+                &mut progress,
+            )
+            .expect("sustained primary metadata outage falls back");
+
+            assert_eq!(
+                discovery.calls(),
+                vec![
+                    (StationReleaseOrigin::Yandex, BETA_YANDEX_ENDPOINT),
+                    (StationReleaseOrigin::Github, BETA_GITHUB_ENDPOINT),
+                ]
+            );
+            assert_eq!(
+                packages.download_calls(),
+                vec![candidate(StationReleaseOrigin::Github).0.download_url]
+            );
+            assert_eq!(
+                packages.install_calls(),
+                vec![candidate(StationReleaseOrigin::Github).0.download_url]
+            );
+            assert_eq!(
+                progress
+                    .events
+                    .iter()
+                    .filter(|event| matches!(event, StationUpdateProgress::Fallback { .. }))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                progress.events,
+                vec![
+                    StationUpdateProgress::Fallback {
+                        from: StationReleaseOrigin::Yandex,
+                        to: StationReleaseOrigin::Github,
+                        reason,
+                    },
+                    StationUpdateProgress::Started {
+                        content_length: Some(9),
+                    },
+                    StationUpdateProgress::Progress { chunk_length: 4 },
+                    StationUpdateProgress::Progress { chunk_length: 5 },
+                    StationUpdateProgress::Finished,
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn download_sustained_yandex_outage_fails_closed_for_peer_failure_and_primary_policy() {
+        for primary in [
+            FakeOutcome::NoUpdate,
+            FakeOutcome::Failure(DiscoveryFailure::Integrity("bad signature".into())),
+            FakeOutcome::Failure(DiscoveryFailure::SecurityPolicy("insecure endpoint".into())),
+        ] {
+            let discovery = FakeTransport::new(vec![(StationReleaseOrigin::Yandex, primary)]);
+            let packages = FakePackageTransport::new(vec![]);
+            let mut progress = RecordingProgress::default();
+
+            let error = run_candidate_install(
+                accepted_candidate(StationReleaseOrigin::Yandex),
+                &discovery,
+                &packages,
+                &mut progress,
+            )
+            .expect_err("successful mismatch and policy failures remain terminal");
+
+            assert_ne!(error.code, StationUpdateErrorCode::OriginsUnavailable);
+            assert_eq!(discovery.calls().len(), 1);
+            assert!(packages.download_calls().is_empty());
+            assert!(progress.events.is_empty());
+        }
+
+        let discovery = FakeTransport::new(vec![
+            (
+                StationReleaseOrigin::Yandex,
+                FakeOutcome::Failure(DiscoveryFailure::Availability(
+                    StationPackageFallbackReason::Http,
+                    "HTTP 503".into(),
+                )),
+            ),
+            (
+                StationReleaseOrigin::Github,
+                FakeOutcome::Failure(DiscoveryFailure::Availability(
+                    StationPackageFallbackReason::Timeout,
+                    "peer timeout".into(),
+                )),
+            ),
+        ]);
+        let packages = FakePackageTransport::new(vec![]);
+        let mut progress = RecordingProgress::default();
+        let error = run_candidate_install(
+            accepted_candidate(StationReleaseOrigin::Yandex),
+            &discovery,
+            &packages,
+            &mut progress,
+        )
+        .expect_err("both metadata origins unavailable");
+        assert_eq!(error.code, StationUpdateErrorCode::OriginsUnavailable);
+        assert!(error.retryable);
+        assert!(packages.download_calls().is_empty());
+        assert!(progress.events.is_empty());
+    }
+
+    #[test]
+    fn download_sustained_yandex_fallback_cancellation_closes_without_duplicate_transition() {
+        let candidates = Arc::new(CandidateSlot::default());
+        let generation = candidates.begin_check().expect("begin cancellable check");
+        candidates
+            .replace(
+                generation,
+                "sustained-cancel".into(),
+                accepted_candidate(StationReleaseOrigin::Github),
+                Instant::now(),
+            )
+            .expect("store cancellable candidate");
+        let installs = Arc::new(InstallCoordinator::default());
+        let transfers = Arc::new(ActiveTransferRegistry::default());
+        let discovery = Arc::new(FakeTransport::new(vec![
+            (
+                StationReleaseOrigin::Yandex,
+                FakeOutcome::Failure(DiscoveryFailure::Availability(
+                    StationPackageFallbackReason::Timeout,
+                    "controlled timeout".into(),
+                )),
+            ),
+            (
+                StationReleaseOrigin::Github,
+                FakeOutcome::Update(candidate(StationReleaseOrigin::Github)),
+            ),
+        ]));
+        let (started_tx, started_rx) = mpsc::channel();
+        let cleaned = Arc::new(AtomicBool::new(false));
+        let packages = Arc::new(CancellationPackageTransport::new(
+            started_tx,
+            Arc::clone(&cleaned),
+        ));
+
+        let worker = {
+            let candidates = Arc::clone(&candidates);
+            let installs = Arc::clone(&installs);
+            let transfers = Arc::clone(&transfers);
+            let discovery = Arc::clone(&discovery);
+            let packages = Arc::clone(&packages);
+            std::thread::spawn(move || {
+                let mut progress = RecordingProgress::default();
+                let result = tauri::async_runtime::block_on(execute_install_request(
+                    candidates.as_ref(),
+                    installs.as_ref(),
+                    transfers.as_ref(),
+                    "sustained-cancel",
+                    discovery.as_ref(),
+                    packages.as_ref(),
+                    StationReleaseChannel::Beta,
+                    NOW_UNIX,
+                    &mut progress,
+                    Instant::now(),
+                ));
+                (result, progress.events)
+            })
+        };
+
+        started_rx
+            .recv()
+            .expect("GitHub fallback package reached cancellable wait");
+        close_candidate(&candidates, &transfers, "sustained-cancel")
+            .expect("cancel active fallback transfer");
+        let (result, events) = worker.join().expect("fallback cancellation worker");
+        let error = result.expect_err("cancelled fallback is terminal");
+
+        assert_eq!(error.code, StationUpdateErrorCode::InstallationFailed);
+        assert!(cleaned.load(Ordering::SeqCst));
+        assert!(!packages.install_calls.load(Ordering::SeqCst));
+        assert_eq!(
+            discovery.calls(),
+            vec![
+                (StationReleaseOrigin::Yandex, BETA_YANDEX_ENDPOINT),
+                (StationReleaseOrigin::Github, BETA_GITHUB_ENDPOINT),
+            ]
+        );
+        assert_eq!(
+            events,
+            vec![
+                StationUpdateProgress::Fallback {
+                    from: StationReleaseOrigin::Yandex,
+                    to: StationReleaseOrigin::Github,
+                    reason: StationPackageFallbackReason::Timeout,
+                },
+                StationUpdateProgress::Started {
+                    content_length: Some(9),
+                },
+            ]
         );
     }
 

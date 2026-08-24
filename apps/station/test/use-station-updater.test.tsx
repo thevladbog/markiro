@@ -449,6 +449,60 @@ describe("useStationUpdater", () => {
     expect(view.result.current.packageFallbackReason).toBeNull();
   });
 
+  it("does not let a cancelled stale install failure clear or overwrite a newer candidate", async () => {
+    const initial = makeBeta2();
+    const staleDownload = deferred<void>();
+    const stale = {
+      ...makeBeta2(),
+      downloadAndInstall: vi.fn(async () => staleDownload.promise),
+    };
+    const newer = {
+      ...makeBeta2(),
+      version: "0.1.0-beta.3",
+      publishedAt: "2026-08-11T00:00:00.000Z",
+    };
+    const { exec, port } = fixture(initial);
+    vi.mocked(port.check)
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(stale)
+      .mockResolvedValueOnce(newer);
+    const now = () => Date.parse("2026-08-12T00:00:00.000Z");
+    const view = renderHook(
+      ({ visible }) =>
+        useStationUpdater({
+          enabled: true,
+          updateCenterVisible: visible,
+          exec,
+          activeShift: false,
+          pendingOutbox: 0,
+          port,
+          now,
+        }),
+      { initialProps: { visible: true } },
+    );
+    await waitFor(() => expect(view.result.current.origin).toBe("yandex"));
+
+    let staleInstall!: Promise<void>;
+    act(() => {
+      staleInstall = view.result.current.install().catch(() => undefined);
+    });
+    await waitFor(() => expect(stale.downloadAndInstall).toHaveBeenCalledOnce());
+    view.rerender({ visible: false });
+    staleDownload.reject(new StationUpdaterCommandError("installation-failed", false));
+    await act(async () => staleInstall);
+
+    expect(stale.close).toHaveBeenCalledOnce();
+    expect(view.result.current.error).not.toBe("install-failed");
+    expect(view.result.current.origin).toBeNull();
+
+    view.rerender({ visible: true });
+    await act(async () => view.result.current.checkNow());
+    await waitFor(() =>
+      expect(view.result.current.persisted?.available?.version).toBe("0.1.0-beta.3"),
+    );
+    expect(view.result.current.origin).toBe("yandex");
+  });
+
   it("invalidates install recheck when a shift becomes active", async () => {
     const initial = makeBeta2();
     const stale = makeBeta2();

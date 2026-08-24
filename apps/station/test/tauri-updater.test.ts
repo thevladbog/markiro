@@ -176,11 +176,11 @@ describe("tauri station updater adapter", () => {
 
   it.each([
     {
-      name: "fallback before the first started event",
+      name: "metadata fallback before the first started event",
       events: [
         {
           event: "Fallback",
-          data: { from: "yandex", to: "github", reason: "network" },
+          data: { from: "yandex", to: "github", reason: "metadata" },
         },
         { event: "Started", data: { contentLength: 10 } },
         { event: "Progress", data: { chunkLength: 10 } },
