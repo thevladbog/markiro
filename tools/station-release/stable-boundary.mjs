@@ -240,11 +240,7 @@ async function validateTreeBoundary({
     }
   }
   const { evidence } = validated;
-  if (
-    evidence.releaseSha !== record.targetCommitish ||
-    !SHA.test(evidence.baseSha) ||
-    !SHA.test(evidence.releaseSha)
-  ) {
+  if (!SHA.test(evidence.baseSha) || !SHA.test(evidence.releaseSha)) {
     invalid();
   }
   await git(repository, ["cat-file", "-e", `${evidence.baseSha}^{commit}`]);

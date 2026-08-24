@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { stageStationRelease, stationAssetNames } from "../artifacts.mjs";
+import { checksumsForDirectory, stageStationRelease, stationAssetNames } from "../artifacts.mjs";
 import { stationReleaseLocation } from "../origins.mjs";
 import {
   createYandexPublisher,
@@ -28,7 +28,7 @@ function releaseMetadata(releaseChannel = channel, releaseVersion = version) {
     tagName: `station-v${releaseVersion}`,
     isDraft: false,
     isPrerelease: releaseChannel === "beta",
-    targetCommitish: "b".repeat(40),
+    targetCommitish: "c".repeat(40),
   };
 }
 
@@ -146,9 +146,22 @@ async function legacyGithubStableTree() {
       changelogToSha: "a".repeat(40),
     },
   });
+  const legacyReleaseBase = `https://github.com/thevladbog/markiro/releases/download/station-v${stableVersion}`;
+  const manifestPath = join(output, stableNames.manifest);
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.platforms["windows-x86_64"].url = `${legacyReleaseBase}/${stableNames.bundle}`;
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  const checksumsPath = join(output, stableNames.checksums);
+  await writeFile(checksumsPath, await checksumsForDirectory(output, stableVersion));
+  const assets = Object.fromEntries(
+    (await readFile(checksumsPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => [line.slice(66), line.slice(0, 64)]),
+  );
   const evidencePath = join(output, stableNames.evidence);
   const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
-  const legacyEvidence = { ...evidence };
+  const legacyEvidence = { ...evidence, assets };
   delete legacyEvidence.distribution;
   await writeFile(
     evidencePath,

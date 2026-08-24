@@ -2,7 +2,9 @@ import { parseStationBetaTag, parseStationStableTag } from "./version.mjs";
 
 const CHANNELS = new Set(["beta", "stable"]);
 const ORIGINS = new Set(["github", "yandex"]);
-const GITHUB_RELEASES = new URL("https://github.com/thevladbog/markiro/releases/download/");
+const GITHUB_RELEASES = new URL(
+  "https://github.com/thevladbog/markiro-station-releases/releases/download/",
+);
 const YANDEX_RELEASES = new URL("https://releases.markiro.app/");
 
 function invalid() {

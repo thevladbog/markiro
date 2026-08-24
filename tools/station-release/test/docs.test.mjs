@@ -74,7 +74,7 @@ const expectedBootstrapScenarios = [
   ],
   [
     "BOOTSTRAP-MIGRATION-01",
-    "a GitHub-reachable legacy GitHub-only client's existing GitHub updater path delivers the bootstrap beta",
+    "a GitHub-reachable legacy client uses the exact public binary-repository installer for a manual install-over to the bootstrap beta",
     "BOOTSTRAP_READY",
     "Windows migration",
     "NOT_RUN",
@@ -916,7 +916,7 @@ test("station beta docs define dual-origin baseline, repair and restricted-netwo
   assert.match(runbook, /частичн.*origin|partial-origin/is);
   assert.match(runbook, /https:\/\/releases\.markiro\.app\/station\/download/);
   assert.match(runbook, /https:\/\/releases\.markiro\.app\/station\/beta\/download/);
-  assert.match(runbook, /GitHub-only.*transitional beta|transitional beta.*GitHub-only/is);
+  assert.match(runbook, /private.*source repository|приватн.*source repository/is);
   assert.match(runbook, /install-over|поверх существующей установки/i);
   assert.match(runbook, /ограниченн.*сет|restricted network/is);
 });
@@ -1003,8 +1003,8 @@ test("dual-origin rollout docs preserve the phased migration and recovery contra
     "https://releases.markiro.app/station/beta/download",
     "https://releases.markiro.app/station/stable/latest.json",
     "https://releases.markiro.app/station/beta/latest.json",
-    "https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json",
-    "https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json",
+    "https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json",
+    "https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json",
   ]) {
     assert.match(combined, new RegExp(url.replaceAll(".", "\\.")));
   }
@@ -1060,7 +1060,7 @@ test("dual-origin acceptance uses non-circular phase gates", async () => {
   );
   assert.match(
     bootstrap,
-    /bootstrap beta[\s\S]*first dual-origin-adapter\s+build[\s\S]*GitHub-reachable[\s\S]*existing\s+GitHub[\s\S]*GitHub-blocked[\s\S]*Yandex[\s\S]*manual install-over/is,
+    /bootstrap beta[\s\S]*first dual-origin-adapter\s+build[\s\S]*GitHub-reachable[\s\S]*публичн.*binary-only repository[\s\S]*GitHub-blocked[\s\S]*Yandex[\s\S]*manual install-over/is,
   );
   assert.match(
     bootstrap,
@@ -1293,6 +1293,7 @@ test("Station release origin bootstrap separates protected credentials and appro
     "YC_STATION_RELEASE_BUCKET_NAME",
     "MARKIRO_STATION_RELEASE_DOMAIN",
     "YC_STATION_RELEASE_PUBLISHER_PGP_KEY",
+    "STATION_RELEASE_REPOSITORY_TOKEN",
     "YANDEX_STATION_RELEASE_ACCESS_KEY_ID",
     "YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY",
     "YANDEX_STATION_RELEASE_BUCKET",
@@ -1312,6 +1313,7 @@ test("Station release origin bootstrap separates protected credentials and appro
       (match) => match[1],
     ),
     [
+      "STATION_RELEASE_REPOSITORY_TOKEN",
       "YANDEX_STATION_RELEASE_ACCESS_KEY_ID",
       "YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY",
       "YANDEX_STATION_RELEASE_BUCKET",

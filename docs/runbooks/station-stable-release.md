@@ -14,7 +14,9 @@ dual-origin beta. Workflow не выбирает newest beta, не добавл�
    декодируйте, не перекодируйте и не нормализуйте его. Не печатайте значение и
    не переносите его в publisher job.
 2. Защищённый Environment `station-release` требует approval release owner и
-   содержит secrets `YANDEX_STATION_RELEASE_ACCESS_KEY_ID`,
+   содержит fine-grained secret `STATION_RELEASE_REPOSITORY_TOKEN` с Contents
+   read/write только для публичного binary-only repository
+   `thevladbog/markiro-station-releases`, secrets `YANDEX_STATION_RELEASE_ACCESS_KEY_ID`,
    `YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY`, variables
    `YANDEX_STATION_RELEASE_BUCKET`, `YANDEX_STATION_RELEASE_ENDPOINT`. Signing
    secrets туда не копируются; publisher credentials не попадают в build job,
@@ -74,9 +76,10 @@ immutable keys. Повтор разрешён только с тем же exact 
    `highlights` остаётся необязательным.
 4. Workflow скачивает GitHub и Yandex beta evidence и assets в разные чистые
    каталоги, валидирует обе trees и сравнивает common assets. Только matching
-   GitHub и Yandex beta evidence допускают дальнейшую работу. GitHub tag target
-   обязан совпасть с `betaReleaseSha`, release-only diff ограничен stable
-   overlay, а CI для verified `baseSha` обязан завершиться успешно.
+   GitHub и Yandex beta evidence допускают дальнейшую работу. Публичный GitHub
+   tag target обязан принадлежать binary-only repository; source `releaseSha`
+   берётся из совпадающих evidence и приватного source tag. Release-only diff
+   ограничен stable overlay, а CI для verified `baseSha` обязан завершиться успешно.
 5. Только после этого workflow checkout-ит принятый `baseSha`, применяет
    `tauri.stable.conf.json`, создаёт один release commit и ровно один раз
    собирает/подписывает Windows NSIS. Stable не строится из текущего более
@@ -98,10 +101,16 @@ Mutable transaction имеет ровно такой порядок:
 3. default stable alias `station/download` — server-side copy проверенного
    immutable installer и всегда последний target.
 
+Для первого strict stable в новом binary-only repository GitHub channel release
+ещё отсутствует. Workflow разрешает это только при пустом
+`previous_stable_tag`, создаёт `station-stable-channel` первым и при последующей
+ошибке удаляет только этот новый channel release. Для всех следующих stable
+channel обязан существовать и восстанавливается из полного read-back backup.
+
 Публичные URL:
 
 - GitHub channel:
-  `https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json`;
+  `https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json`;
 - Yandex channel: `https://releases.markiro.app/station/stable/latest.json`;
 - default installer: `https://releases.markiro.app/station/download`.
 

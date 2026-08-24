@@ -59,6 +59,7 @@ export async function validateAcceptedBeta(input) {
     input.release.tagName !== input.sourceBetaTag ||
     input.release.isDraft !== false ||
     input.release.isPrerelease !== true ||
+    !SHA.test(input.release.targetCommitish) ||
     !Array.isArray(input.diffPaths) ||
     input.diffPaths.length !== ALLOWED_BETA_RELEASE_DIFF.length ||
     input.diffPaths.some((path, index) => path !== ALLOWED_BETA_RELEASE_DIFF[index])
@@ -99,8 +100,7 @@ export async function validateAcceptedBeta(input) {
     !SHA.test(github.evidence.baseSha) ||
     github.evidence.baseSha !== yandex.evidence.baseSha ||
     !SHA.test(github.evidence.releaseSha) ||
-    github.evidence.releaseSha !== yandex.evidence.releaseSha ||
-    input.release.targetCommitish !== github.evidence.releaseSha
+    github.evidence.releaseSha !== yandex.evidence.releaseSha
   ) {
     invalid();
   }

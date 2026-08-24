@@ -34,7 +34,8 @@
 | Проверка                                                         | Результат | Evidence |
 | ---------------------------------------------------------------- | --------- | -------- |
 | Exact dual-origin accepted beta provenance and successful CI     | NOT RUN   | workflow |
-| GitHub beta tag target equals evidence `releaseSha`              | NOT RUN   | workflow |
+| Public beta tag target belongs to binary release repository      | NOT RUN   | workflow |
+| Private source tag resolves to evidence `releaseSha`             | NOT RUN   | workflow |
 | Stable version monotonicity and immutable collision denial       | NOT RUN   | workflow |
 | One stable build/sign supplies both immutable origin trees       | NOT RUN   | workflow |
 | GitHub and Yandex common stable assets are byte-identical        | NOT RUN   | hashes   |

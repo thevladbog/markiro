@@ -23,11 +23,11 @@ describe("packaged station updater contract", () => {
     expect(config.bundle.createUpdaterArtifacts).toBe(true);
     expect(config.plugins.updater.endpoints).toEqual([
       "https://releases.markiro.app/station/beta/latest.json",
-      "https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json",
+      "https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json",
     ]);
     expect(stableConfig.plugins.updater.endpoints).toEqual([
       "https://releases.markiro.app/station/stable/latest.json",
-      "https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json",
+      "https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json",
     ]);
     expect(config.plugins.updater.pubkey).toBe(publicKey);
     expect(stableConfig.plugins.updater).not.toHaveProperty("pubkey");

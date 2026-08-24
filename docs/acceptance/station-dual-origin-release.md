@@ -19,9 +19,9 @@ values, signed headers, or customer production data.
   `https://releases.markiro.app/station/stable/latest.json`
 - Yandex beta channel: `https://releases.markiro.app/station/beta/latest.json`
 - GitHub stable channel:
-  `https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json`
+  `https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json`
 - GitHub beta channel:
-  `https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json`
+  `https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json`
 
 These URLs are contracts, not evidence that DNS, TLS, Object Storage, GitHub,
 or a customer network served them in a particular run. Historical immutable
@@ -129,7 +129,7 @@ stable from this readiness record.
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- | ---------------------------- | ------- | -------- | ------------- | ------------------------- | ----------------------- |
 | BASELINE-01 — the strict DNS-disabled Phase 2 pre-transition beta rollback baseline is complete, publicly/provider-read verified, and no historical immutable release was retrofitted               | BOOTSTRAP_READY | Live cloud/publication       | NOT_RUN |          |               |                           |                         |
 | BOOTSTRAP-PUBLISH-01 — the first dual-origin-adapter bootstrap beta normal `mode=publish` produces and publicly revalidates both immutable trees before both manifests and the beta alias promotion | BOOTSTRAP_READY | Live publication             | NOT_RUN |          |               |                           |                         |
-| BOOTSTRAP-MIGRATION-01 — a GitHub-reachable legacy GitHub-only client's existing GitHub updater path delivers the bootstrap beta                                                                    | BOOTSTRAP_READY | Windows migration            | NOT_RUN |          |               |                           |                         |
+| BOOTSTRAP-MIGRATION-01 — a GitHub-reachable legacy client uses the exact public binary-repository installer for a manual install-over to the bootstrap beta                                         | BOOTSTRAP_READY | Windows migration            | NOT_RUN |          |               |                           |                         |
 | BOOTSTRAP-MIGRATION-02 — a GitHub-blocked legacy client uses the verified explicit Yandex beta installer for a manual install-over to the bootstrap beta                                            | BOOTSTRAP_READY | Restricted-network migration | NOT_RUN |          |               |                           |                         |
 | BOOTSTRAP-PRESERVE-01 — application ID `app.markiro.station` is unchanged across bootstrap install-over                                                                                             | BOOTSTRAP_READY | Windows data preservation    | NOT_RUN |          |               |                           |                         |
 | BOOTSTRAP-PRESERVE-02 — the resolved Station SQLite path and `station-mirror.db` remain unchanged, readable, and contain the prior data                                                             | BOOTSTRAP_READY | Windows data preservation    | NOT_RUN |          |               |                           |                         |

@@ -52,7 +52,7 @@ test("reads immutable and channel assets through exact unauthenticated GitHub pu
   );
   assert.deepEqual(calls, [
     {
-      url: `https://github.com/thevladbog/markiro/releases/download/station-v${version}/${names.evidence}`,
+      url: `https://github.com/thevladbog/markiro-station-releases/releases/download/station-v${version}/${names.evidence}`,
       init: { redirect: "manual", cache: "no-store" },
     },
     {
@@ -60,7 +60,7 @@ test("reads immutable and channel assets through exact unauthenticated GitHub pu
       init: { redirect: "error", cache: "no-store" },
     },
     {
-      url: "https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json",
+      url: "https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json",
       init: { redirect: "manual", cache: "no-store" },
     },
     {

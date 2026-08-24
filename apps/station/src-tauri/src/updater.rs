@@ -38,10 +38,10 @@ pub(crate) const CANDIDATE_TTL: Duration = Duration::from_secs(15 * 60);
 
 const BETA_YANDEX_ENDPOINT: &str = "https://releases.markiro.app/station/beta/latest.json";
 const BETA_GITHUB_ENDPOINT: &str =
-    "https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json";
+    "https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json";
 const STABLE_YANDEX_ENDPOINT: &str = "https://releases.markiro.app/station/stable/latest.json";
 const STABLE_GITHUB_ENDPOINT: &str =
-    "https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json";
+    "https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -131,7 +131,7 @@ impl StationReleaseChannel {
                 )
             }
             StationReleaseOrigin::Github => format!(
-                "https://github.com/thevladbog/markiro/releases/download/station-v{version}/{filename}"
+                "https://github.com/thevladbog/markiro-station-releases/releases/download/station-v{version}/{filename}"
             ),
         }
     }
@@ -2034,7 +2034,7 @@ mod tests {
     const NOW_UNIX: i64 = PUBLISHED_UNIX + 60;
     const BETA_YANDEX_ENDPOINT: &str = "https://releases.markiro.app/station/beta/latest.json";
     const BETA_GITHUB_ENDPOINT: &str =
-        "https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json";
+        "https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json";
     const LOOPBACK_FIXTURE_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(2);
     const MINISIGN_PUBLIC_KEY: &str = "untrusted comment: minisign public key E7620F1842B4E81F\nRWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
     const MINISIGN_SIGNATURE: &str = "untrusted comment: signature from minisign secret key\nRWQf6LRCGA9i59SLOFxz6NxvASXDJeRtuZykwQepbDEGt87ig1BNpWaVWuNrm73YiIiJbq71Wi+dP9eKL8OC351vwIasSSbXxwA=\ntrusted comment: timestamp:1555779966\tfile:test\nQtKMXWyYcwdpZAlPF7tE2ENJkRd1ujvKjlj1m9RtHTBnZPa5WKU5uWRs5GoP5M/VqE81QFuMKI5k/SfNQUaOAA==";
@@ -2411,7 +2411,7 @@ mod tests {
                 "https://releases.markiro.app/station/beta/releases/{UPDATE_VERSION}/markiro-station-{UPDATE_VERSION}-windows-x86_64.nsis.zip"
             ),
             StationReleaseOrigin::Github => format!(
-                "https://github.com/thevladbog/markiro/releases/download/station-v{UPDATE_VERSION}/markiro-station-{UPDATE_VERSION}-windows-x86_64.nsis.zip"
+                "https://github.com/thevladbog/markiro-station-releases/releases/download/station-v{UPDATE_VERSION}/markiro-station-{UPDATE_VERSION}-windows-x86_64.nsis.zip"
             ),
         };
         FakeCandidate(CandidateMetadata {
@@ -3221,7 +3221,7 @@ mod tests {
     fn compiled_channel_requires_the_exact_ordered_endpoint_pair() {
         let beta = [
             "https://releases.markiro.app/station/beta/latest.json",
-            "https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json",
+            "https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json",
         ];
         let reversed = [beta[1], beta[0]];
 

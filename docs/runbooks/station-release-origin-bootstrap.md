@@ -16,13 +16,18 @@ environment variables, буфер обмена, логи, summaries, artifacts �
 Этот порядок нельзя сжимать в один запуск. Task 11 документирует и проверяет
 контракты, но **Task 12 is not authorized**: Terraform apply, DNS, GitHub
 Environment/secrets, release publication и customer-device acceptance требуют
-отдельных явных разрешений после merge.
+отдельных явных разрешений после merge. По последующему отдельному разрешению
+создан только пустой публичный binary-only repository
+`thevladbog/markiro-station-releases`; это не разрешает перенос исторических
+releases, создание channel assets или запуск release workflow.
 
 1. **Phase 1 — provision without DNS.** Подготовить и отдельно одобрить
    инфраструктурный plan, применить его только после STOP 1, перенести
    credentials только после STOP 2, проверить certificate/provider host, но
-   оставить `enable_station_release_public_dns=false`. Текущие GitHub-only
-   клиенты и publication не меняются.
+   оставить `enable_station_release_public_dns=false`. Сам infrastructure apply
+   не переключает clients или publication. Legacy endpoint уже недоступен из-за
+   private source repository; ручной переход существующих установок выполняется
+   только в Phase 3.
 2. **Phase 2 — dual-publish tooling and seed.** Сначала интегрировать Tasks 1–7,
    затем при выключенном release DNS создать независимые first-run rollback
    baseline для stable и beta. Stable baseline использует точный принятый
@@ -32,9 +37,10 @@ Environment/secrets, release publication и customer-device acceptance треб�
    отдельным plan/apply за STOP 3.
 3. **Phase 3 — transitional beta.** Это явно двух-beta переход, а не один
    release. Сначала публикуется **bootstrap beta**, first dual-origin-adapter
-   build. GitHub-reachable legacy clients получают bootstrap beta через existing
-   GitHub updater path; GitHub-blocked clients используют verified explicit
-   Yandex beta installer и manual install-over. Bounded gate
+   build. Старый updater endpoint теперь находится в приватном source repository,
+   поэтому GitHub-reachable legacy clients используют manual install-over из
+   нового публичного binary-only repository, а GitHub-blocked clients — verified
+   explicit Yandex beta installer и manual install-over. Bounded gate
    `BOOTSTRAP_READY` проверяет publication, preservation и basic operation этого
    build и только после Overall `PASS` разрешает публиковать next beta. Затем
    публикуется строго более новая **validation/candidate beta**. Только она
@@ -59,9 +65,9 @@ Environment/secrets, release publication и customer-device acceptance треб�
 - Yandex stable: `https://releases.markiro.app/station/stable/latest.json`;
 - Yandex beta: `https://releases.markiro.app/station/beta/latest.json`;
 - GitHub stable:
-  `https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json`;
+  `https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json`;
 - GitHub beta:
-  `https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json`.
+  `https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json`.
 
 ## 1. Подготовить защищённый план без release DNS
 
@@ -170,6 +176,13 @@ test -s "$secret_key_file"
 Сначала вручную убедитесь, что GitHub Environment `station-release` уже создан,
 защищён approval и ограничен веткой `main`. Эта задача Environment и secrets не
 создаёт.
+
+До release dispatch отдельно создайте fine-grained token с Contents read/write
+только для публичного binary-only repository
+`thevladbog/markiro-station-releases` и сохраните его в Environment secret
+`STATION_RELEASE_REPOSITORY_TOKEN` через GitHub UI. Не выдавайте ему доступ к
+приватному `thevladbog/markiro`, не передавайте значение в workflow input и не
+используйте токен из локальной `gh auth` session как неявную замену.
 
 **STOP 2 — SECRETS.** Получите явное подтверждение release owner, затем введите
 маркер и передайте значения только через stdin:
@@ -343,8 +356,9 @@ precondition не подтверждён. Завершение кода не п�
 **Integration checkpoint 2 — transitional runtime.** Только после merge Tasks
 8–11 опубликуйте bootstrap beta — first dual-origin-adapter build. Beta alias
 переходит на него лишь после полной dual-origin publication и promotion
-transaction. Доставьте его GitHub-reachable клиентам через existing GitHub path,
-а GitHub-blocked — manual install-over с Yandex. Не публикуйте следующую beta,
+transaction. Доставьте его GitHub-reachable клиентам ручным install-over из
+public binary-only repository, а GitHub-blocked — manual install-over с Yandex.
+Не публикуйте следующую beta,
 пока `BASELINE-01` и весь bounded `BOOTSTRAP_READY` gate не имеют `PASS`, включая
 publication, preservation и basic operation.
 

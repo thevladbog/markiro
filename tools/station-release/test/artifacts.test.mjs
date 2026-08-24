@@ -10,20 +10,21 @@ import { promisify } from "node:util";
 import {
   createBetaUpdateManifest,
   createStationUpdateManifest,
+  checksumsForDirectory,
   parseBetaUpdateManifest,
   stageStationRelease,
   stationAssetNames,
   validateLegacyGithubStationReleaseDirectory,
   validateStationReleaseDirectory,
 } from "../artifacts.mjs";
-import { stationReleaseLocation } from "../origins.mjs";
 
 const version = "0.1.0-beta.1";
 const names = stationAssetNames(version);
-const bundleUrl = `https://github.com/thevladbog/markiro/releases/download/station-v${version}/${names.bundle}`;
+const bundleUrl = `https://github.com/thevladbog/markiro-station-releases/releases/download/station-v${version}/${names.bundle}`;
 const stableVersion = "0.1.0";
 const stableNames = stationAssetNames(stableVersion);
-const stableBundleUrl = `https://github.com/thevladbog/markiro/releases/download/station-v${stableVersion}/${stableNames.bundle}`;
+const stableBundleUrl = `https://github.com/thevladbog/markiro-station-releases/releases/download/station-v${stableVersion}/${stableNames.bundle}`;
+const legacyGithubReleases = "https://github.com/thevladbog/markiro/releases/download";
 const execFile = promisify(execFileCallback);
 
 async function updateAssetDigest(directory, name) {
@@ -63,6 +64,27 @@ async function stageCanonicalBetaTree() {
     releaseSha: "b".repeat(40),
   });
   return { input, output };
+}
+
+async function rewriteAsLegacyGithub(directory, channel, releaseVersion) {
+  const releaseNames = stationAssetNames(releaseVersion);
+  const manifestPath = join(directory, releaseNames.manifest);
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.platforms["windows-x86_64"].url =
+    `${legacyGithubReleases}/station-v${releaseVersion}/${releaseNames.bundle}`;
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  const checksumsPath = join(directory, releaseNames.checksums);
+  await writeFile(checksumsPath, await checksumsForDirectory(directory, releaseVersion));
+  const assets = Object.fromEntries(
+    (await readFile(checksumsPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => [line.slice(66), line.slice(0, 64)]),
+  );
+  const evidencePath = join(directory, releaseNames.evidence);
+  const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
+  evidence.assets = assets;
+  await writeFile(evidencePath, `${JSON.stringify(evidence)}\n`);
 }
 
 test("creates the exact one-platform Tauri beta manifest", () => {
@@ -710,6 +732,7 @@ test("accepts legacy GitHub beta evidence only through the seed-only validator",
     baseSha: "a".repeat(40),
     releaseSha: "b".repeat(40),
   });
+  await rewriteAsLegacyGithub(output, "beta", version);
   const evidencePath = join(output, names.evidence);
   const legacyEvidence = JSON.parse(await readFile(evidencePath, "utf8"));
   delete legacyEvidence.schemaVersion;
@@ -760,6 +783,7 @@ test("accepts legacy GitHub stable evidence only through the seed-only validator
       changelogToSha: "a".repeat(40),
     },
   });
+  await rewriteAsLegacyGithub(output, "stable", stableVersion);
   const evidencePath = join(output, stableNames.evidence);
   const legacyEvidence = JSON.parse(await readFile(evidencePath, "utf8"));
   delete legacyEvidence.distribution;
@@ -768,11 +792,7 @@ test("accepts legacy GitHub stable evidence only through the seed-only validator
     `${JSON.stringify({
       ...legacyEvidence,
       schemaVersion: 2,
-      channelUrl: stationReleaseLocation({
-        channel: "stable",
-        origin: "github",
-        version: stableVersion,
-      }).channelUrl,
+      channelUrl: `${legacyGithubReleases}/station-stable-channel/latest.json`,
     })}\n`,
   );
 
@@ -812,7 +832,8 @@ test("rejects checksum text that does not match the downloaded assets", async ()
   });
   const checksumPath = join(output, names.checksums);
   const checksums = await readFile(checksumPath, "utf8");
-  await writeFile(checksumPath, checksums.replace(/^./, "0"));
+  const wrongFirstCharacter = checksums.startsWith("0") ? "1" : "0";
+  await writeFile(checksumPath, `${wrongFirstCharacter}${checksums.slice(1)}`);
   await assert.rejects(
     validateStationReleaseDirectory(output, { origin: "github", version }),
     /invalid station release artifacts/,

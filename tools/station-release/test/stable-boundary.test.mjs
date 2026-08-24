@@ -6,8 +6,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 
-import { stageStationRelease, stationAssetNames } from "../artifacts.mjs";
-import { stationReleaseLocation } from "../origins.mjs";
+import { checksumsForDirectory, stageStationRelease, stationAssetNames } from "../artifacts.mjs";
 
 const execFile = promisify(execFileCallback);
 const moduleUrl = new URL("../stable-boundary.mjs", import.meta.url);
@@ -150,6 +149,19 @@ async function stagedTree({ channel, version, baseSha, releaseSha, legacy = fals
   }
   await stageStationRelease(options);
   if (legacy) {
+    const manifestPath = join(output, names.manifest);
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.platforms["windows-x86_64"].url =
+      `https://github.com/thevladbog/markiro/releases/download/station-v${version}/${names.bundle}`;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    const checksumsPath = join(output, names.checksums);
+    await writeFile(checksumsPath, await checksumsForDirectory(output, version));
+    const assets = Object.fromEntries(
+      (await readFile(checksumsPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => [line.slice(66), line.slice(0, 64)]),
+    );
     const evidencePath = join(output, names.evidence);
     const evidence = JSON.parse(await readFile(evidencePath, "utf8"));
     delete evidence.distribution;
@@ -157,8 +169,10 @@ async function stagedTree({ channel, version, baseSha, releaseSha, legacy = fals
       evidencePath,
       `${JSON.stringify({
         ...evidence,
+        assets,
         schemaVersion: 2,
-        channelUrl: stationReleaseLocation({ channel, origin: "github", version }).channelUrl,
+        channelUrl:
+          "https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json",
       })}\n`,
     );
   }
@@ -310,7 +324,7 @@ test("ignores draft stable candidates but never accepts draft boundary metadata"
       previous: {
         metadata: releaseMetadata({
           tagName: "station-v1.1.0",
-          targetCommitish: graph.releaseSha,
+          targetCommitish: "f".repeat(40),
           isDraft: true,
         }),
         tree,
@@ -340,7 +354,7 @@ test("resolves a published validated previous stable boundary and its legacy-onl
       previous: {
         metadata: releaseMetadata({
           tagName: "station-v1.1.0",
-          targetCommitish: graph.releaseSha,
+          targetCommitish: legacy ? graph.releaseSha : "f".repeat(40),
         }),
         tree,
         allowLegacy: legacy,
@@ -381,7 +395,7 @@ test("resolves first stable from the earliest published strict beta evidence", a
       firstBeta: {
         metadata: releaseMetadata({
           tagName: "station-v1.2.0-beta.1",
-          targetCommitish: graph.releaseSha,
+          targetCommitish: "f".repeat(40),
           isPrerelease: true,
         }),
         tree,
@@ -391,7 +405,7 @@ test("resolves first stable from the earliest published strict beta evidence", a
   );
 });
 
-test("rejects wrong targets, invalid evidence and boundaries outside current beta ancestry", async () => {
+test("rejects malformed distribution targets, invalid evidence and boundaries outside current beta ancestry", async () => {
   const { resolveStableChangelogBoundary } = await boundaryModule();
   const graph = await releaseGraph();
   const tree = await stagedTree({
@@ -422,7 +436,7 @@ test("rejects wrong targets, invalid evidence and boundaries outside current bet
         ...baseInput.previous,
         metadata: releaseMetadata({
           tagName: "station-v1.1.0",
-          targetCommitish: "f".repeat(40),
+          targetCommitish: "main",
         }),
       },
     }),

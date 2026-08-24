@@ -17,6 +17,7 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const CHANNELS = new Set(["beta", "stable"]);
 const ORIGINS = new Set(["github", "yandex"]);
 const LEGACY_CLI_ORIGIN = "github";
+const LEGACY_GITHUB_RELEASES = new URL("https://github.com/thevladbog/markiro/releases/download/");
 const STABLE_PROVENANCE_KEYS = [
   "sourceBetaTag",
   "betaVersion",
@@ -77,6 +78,14 @@ function releaseLocation(input) {
   } catch {
     invalid();
   }
+}
+
+function legacyGithubReleaseLocation(channel, version) {
+  return {
+    origin: "github",
+    channelUrl: new URL(`station-${channel}-channel/latest.json`, LEGACY_GITHUB_RELEASES).href,
+    releaseBaseUrl: new URL(`station-v${version}`, LEGACY_GITHUB_RELEASES).href,
+  };
 }
 
 function isPlainObject(value) {
@@ -414,8 +423,10 @@ async function validateStationReleaseDirectoryInternal(
   const channel = expected?.channel ?? "beta";
   ensureChannelVersion(channel, expected?.version);
   const origin = expected?.origin;
-  const location = releaseLocation({ channel, origin, version: expected.version });
   if (legacyGithubOnly && origin !== "github") invalid();
+  const location = legacyGithubOnly
+    ? legacyGithubReleaseLocation(channel, expected.version)
+    : releaseLocation({ channel, origin, version: expected.version });
   const names = stationAssetNames(expected.version);
   const entries = await readdir(directory);
   const allowed = new Set(Object.values(names));

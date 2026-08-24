@@ -80,8 +80,9 @@ test("maps canonical origins to their exact immutable and mutable locations", ()
     {
       origin: "github",
       channelUrl:
-        "https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json",
-      releaseBaseUrl: "https://github.com/thevladbog/markiro/releases/download/station-v0.2.0",
+        "https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json",
+      releaseBaseUrl:
+        "https://github.com/thevladbog/markiro-station-releases/releases/download/station-v0.2.0",
       immutablePrefix: null,
       mutableManifestKey: null,
       mutableInstallerKey: null,

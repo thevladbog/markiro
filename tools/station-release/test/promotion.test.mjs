@@ -17,6 +17,7 @@ const version = "0.1.0-beta.19";
 const sourceBetaTag = `station-v${version}`;
 const baseSha = "a".repeat(40);
 const releaseSha = "b".repeat(40);
+const distributionSha = "c".repeat(40);
 const publishedAt = "2026-08-20T10:00:00.000Z";
 const names = stationAssetNames(version);
 
@@ -52,7 +53,7 @@ async function validInput() {
       tagName: sourceBetaTag,
       isDraft: false,
       isPrerelease: true,
-      targetCommitish: releaseSha,
+      targetCommitish: distributionSha,
     },
     githubEvidence: github.evidence,
     yandexEvidence: yandex.evidence,
@@ -71,13 +72,13 @@ test("accepts one strict dual-origin beta with equal common artifacts", async ()
   });
 });
 
-test("rejects draft, non-prerelease, SHA mismatch and extra beta tree changes", async () => {
+test("rejects draft, non-prerelease, malformed distribution target and extra beta tree changes", async () => {
   const mutations = [
     (input) => ({ ...input, release: { ...input.release, isDraft: true } }),
     (input) => ({ ...input, release: { ...input.release, isPrerelease: false } }),
     (input) => ({
       ...input,
-      release: { ...input.release, targetCommitish: "c".repeat(40) },
+      release: { ...input.release, targetCommitish: "main" },
     }),
     (input) => ({ ...input, diffPaths: [...input.diffPaths, "apps/station/src/App.tsx"] }),
     (input) => ({ ...input, diffPaths: [...input.diffPaths].reverse() }),

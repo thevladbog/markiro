@@ -118,12 +118,16 @@ Windows.
   декодируйте, не перекодируйте и не нормализуйте его.
 - Отдельный защищённый Environment `station-release` разрешён только для ветки
   `main`, требует approval release owner и содержит точный инвентарь:
-  secrets `YANDEX_STATION_RELEASE_ACCESS_KEY_ID` и
+  secret `STATION_RELEASE_REPOSITORY_TOKEN`, ограниченный только публичным
+  binary-only репозиторием `thevladbog/markiro-station-releases` и правом
+  Contents read/write, secrets `YANDEX_STATION_RELEASE_ACCESS_KEY_ID` и
   `YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY`, variables
   `YANDEX_STATION_RELEASE_BUCKET` и `YANDEX_STATION_RELEASE_ENDPOINT` со
   значением `https://storage.yandexcloud.net`. Не переносите signing secrets в
   `station-release`, а publisher credentials — в `station-beta`, job-wide env,
-  аргументы, логи или artifacts.
+  аргументы, логи или artifacts. Обычный `${{ github.token }}` используется
+  только для CI и сохранения source tag в приватном `thevladbog/markiro`; он не
+  публикует бинарные releases.
 - `STATION_ORIGIN` — production runtime secret, а не signing secret environment:
   перед beta он обязан быть равен `http://tauri.localhost`. Значение
   `tauri://localhost` не является Windows origin для этой сборки.
@@ -177,8 +181,9 @@ restoration — отдельный жёсткий отказ; immutable release 
 Если immutable release опубликован, но канал не обновился, запустите
 `mode=promote-existing` и обязательно передайте точный canonical `repair_tag`
 вида `station-vX.Y.Z-beta.N`. Workflow не ищет newest/latest release: он
-запрашивает именно этот опубликованный non-draft prerelease, проверяет его
-target SHA и evidence, затем скачивает обе уже существующие public immutable
+запрашивает именно этот опубликованный non-draft prerelease, проверяет, что его
+target SHA принадлежит публичному binary-only repository, а source `releaseSha`
+берёт из evidence и приватного source tag, затем скачивает обе уже существующие public immutable
 trees в новые каталоги, валидирует их и сравнивает common assets. Пустой или
 неканонический `repair_tag` запрещён для `promote-existing`; непустой
 `repair_tag` запрещён для `publish` и `seed-baseline`.
@@ -209,15 +214,16 @@ Yandex tree в seed читается через фиксированный provi
 принимает boolean default вместо evidence.
 
 Protected publisher вызывает точный gate `--confirm-empty-channel-bootstrap`.
-Только после dual-origin immutable proof workflow сохраняет предыдущий GitHub
-manifest и read-only preflight проверяет, что Yandex mutable pair полностью
+Только после dual-origin immutable proof workflow подтверждает отсутствие
+`station-beta-channel` в новом публичном repository и read-only preflight
+проверяет, что Yandex mutable pair полностью
 пуста либо уже является полной byte-identical provider-verified pair безопасного
-повтора; частичная или чужая pair запрещена. Затем workflow продвигает GitHub
-manifest первым и передаёт скачанный public GitHub source в Task 5
+повтора; частичная или чужая pair запрещена. Затем workflow создаёт GitHub
+channel release с manifest первым и передаёт скачанный public GitHub source в Task 5
 `seed-baseline`, который повторяет preflight для защиты от race, создаёт Yandex
 manifest и beta alias и при первой ошибке повторно применяет и проверяет полную
-known-good pair. Общий trap восстанавливает и проверяет GitHub manifest, если
-Task 5 сообщает ошибку. Bootstrap record и закрытый recovery backup сохраняются
+known-good pair. Общий trap удаляет только что созданный GitHub channel release,
+если Task 5 сообщает ошибку. Bootstrap record и закрытый recovery backup сохраняются
 отдельным workflow artifact. Release DNS остаётся выключенным до отдельного
 STOP/plan/apply из
 [bootstrap runbook](station-release-origin-bootstrap.md).
@@ -242,15 +248,13 @@ cookie, query или referrer и доступна только по явному
 `https://releases.markiro.app/station/beta/download`.
 
 Установленные старые GitHub-only клиенты не узнают новый origin от изменения на
-сервере. Если GitHub доступен, сначала доставьте им bootstrap beta — первый
-dual-origin-adapter build — через existing GitHub updater. В ограниченной сети
-(restricted network), где GitHub уже заблокирован, скачайте проверенный
-bootstrap beta installer по явному Yandex URL и выполните ручной install-over
-поверх существующей установки. Это два разных migration path: GitHub-reachable
-и GitHub-blocked; server-side изменение не обновляет endpoint уже установленного
-legacy client. Для GitHub-only legacy clients именно bootstrap является первой
-transitional beta. GitHub channel assets поэтому сохраняются на поддерживаемый
-legacy-client horizon; дата их удаления этим rollout не назначается. Лишь после
+сервере, а их прежний endpoint находится в теперь приватном source repository.
+Поэтому автоматический переход через existing updater больше не считается
+доступным. Для GitHub-reachable станции скачайте точный bootstrap beta installer
+из публичного binary-only repository `thevladbog/markiro-station-releases`; в
+restricted network, где GitHub заблокирован, используйте проверенный явный
+Yandex beta URL. В обоих случаях выполните ручной install-over поверх
+существующей установки и отдельно зафиксируйте путь доставки. Лишь после
 `BOOTSTRAP_READY` установите строго более новую validation/candidate beta через
 новый dual-origin adapter и выполните beta → beta acceptance.
 

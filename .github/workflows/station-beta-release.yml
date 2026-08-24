@@ -44,6 +44,7 @@ jobs:
       contents: read
     env:
       VITE_STATION_API_URL: https://admin.markiro.app
+      STATION_RELEASE_REPOSITORY: thevladbog/markiro-station-releases
 
     steps:
       - name: Checkout the dispatch SHA
@@ -71,7 +72,7 @@ jobs:
           test "$GITHUB_SHA" = "$(git rev-parse origin/main)"
           ci_ok=false
           for attempt in {1..90}; do
-            ci_state="$(gh run list --workflow ci.yml --branch main --commit "$GITHUB_SHA" --limit 20 --json status,conclusion,headSha --jq '.[] | select(.headSha == "'"$GITHUB_SHA"'") | [.status, (.conclusion // "")] | @tsv' | head -n 1)"
+            ci_state="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --commit "$GITHUB_SHA" --limit 20 --json status,conclusion,headSha --jq '.[] | select(.headSha == "'"$GITHUB_SHA"'") | [.status, (.conclusion // "")] | @tsv' | head -n 1)"
             ci_status="${ci_state%%$'\t'*}"
             ci_conclusion="${ci_state#*$'\t'}"
             if [ "$ci_status" = "completed" ]; then
@@ -225,6 +226,7 @@ jobs:
       contents: write
     env:
       VITE_STATION_API_URL: https://admin.markiro.app
+      STATION_RELEASE_REPOSITORY: thevladbog/markiro-station-releases
 
     steps:
       - name: Checkout release tooling
@@ -262,7 +264,7 @@ jobs:
 
       - name: Resolve release candidate
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.STATION_RELEASE_REPOSITORY_TOKEN }}
           REPAIR_TAG: ${{ inputs.repair_tag }}
         shell: bash
         run: |
@@ -271,11 +273,19 @@ jobs:
             tag="$REPAIR_TAG"
             version="${tag#station-v}"
             release_json="$RUNNER_TEMP/station-beta-repair-release.json"
-            gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+            gh release view "$tag" --repo "$STATION_RELEASE_REPOSITORY" \
               --json tagName,isDraft,isPrerelease,targetCommitish > "$release_json"
             node -e 'const r=require(process.argv[1]);if(r.tagName!==process.argv[2]||r.isDraft||!r.isPrerelease||!/^[0-9a-f]{40}$/.test(r.targetCommitish))process.exit(1)' \
               "$release_json" "$tag"
-            release_sha="$(node -e 'const r=require(process.argv[1]);process.stdout.write(r.targetCommitish)' "$release_json")"
+            distribution_sha="$(node -e 'const r=require(process.argv[1]);process.stdout.write(r.targetCommitish)' "$release_json")"
+            gh api "repos/$STATION_RELEASE_REPOSITORY/commits/$distribution_sha" >/dev/null
+            rm -rf "$RUNNER_TEMP/station-github-public"
+            env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+              download-release beta "$version" "$RUNNER_TEMP/station-github-public"
+            node tools/station-release/artifacts.mjs validate-origin github beta \
+              "$RUNNER_TEMP/station-github-public" "$version"
+            release_sha="$(node -e 'const e=require(process.argv[1]);process.stdout.write(e.releaseSha)' \
+              "$RUNNER_TEMP/station-github-public/release-evidence.json")"
           else
             state="$RUNNER_TEMP/station-candidate/release-state.txt"
             test -f "$state" -a ! -L "$state"
@@ -296,6 +306,9 @@ jobs:
           [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.([1-9][0-9]*)$ ]]
           test "$tag" = "station-v$version"
           [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
+          if [ "${{ inputs.mode }}" = "promote-existing" ]; then
+            test "$(git rev-parse "$tag^{commit}")" = "$release_sha"
+          fi
           printf 'version=%s\ntag=%s\nrelease_sha=%s\n' \
             "$version" "$tag" "$release_sha" >> "$GITHUB_ENV"
 
@@ -312,31 +325,34 @@ jobs:
       - name: Publish immutable GitHub beta
         if: inputs.mode == 'publish' || inputs.mode == 'seed-baseline'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.STATION_RELEASE_REPOSITORY_TOKEN }}
+          SOURCE_REPOSITORY_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           github_tree="$RUNNER_TEMP/station-candidate/github"
           candidate_ref="station-release-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if gh release view "$tag" --repo "$STATION_RELEASE_REPOSITORY" >/dev/null 2>&1; then
             echo "immutable GitHub release already exists" >&2
             exit 1
           fi
           node tools/station-release/release-summary.mjs beta-transition \
             "$RUNNER_TEMP/station-beta-release-summary.json" github-publication-attempted
-          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          git -c "http.extraheader=$auth_header" push origin "HEAD:refs/heads/$candidate_ref"
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --prerelease \
-            --target "$release_sha" --title "Markiro Station $version" \
+          source_auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SOURCE_REPOSITORY_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=$source_auth_header" push origin "HEAD:refs/heads/$candidate_ref"
+          distribution_sha="$(gh api "repos/$STATION_RELEASE_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          [[ "$distribution_sha" =~ ^[0-9a-f]{40}$ ]]
+          gh release create "$tag" --repo "$STATION_RELEASE_REPOSITORY" --draft --prerelease \
+            --target "$distribution_sha" --title "Markiro Station $version" \
             --notes-file "$github_tree/release-notes.md"
           node tools/station-release/release-summary.mjs beta-transition \
             "$RUNNER_TEMP/station-beta-release-summary.json" github-draft-created
-          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" "$github_tree"/*
+          gh release upload "$tag" --repo "$STATION_RELEASE_REPOSITORY" "$github_tree"/*
           node tools/station-release/release-summary.mjs beta-transition \
             "$RUNNER_TEMP/station-beta-release-summary.json" github-assets-uploaded
           rm -rf "$RUNNER_TEMP/station-github-public"
           mkdir "$RUNNER_TEMP/station-github-public"
-          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+          gh release download "$tag" --repo "$STATION_RELEASE_REPOSITORY" \
             --dir "$RUNNER_TEMP/station-github-public"
           node tools/station-release/artifacts.mjs validate-origin github beta \
             "$RUNNER_TEMP/station-github-public" "$version"
@@ -344,12 +360,15 @@ jobs:
             "$RUNNER_TEMP/station-beta-release-summary.json" github-draft-assets-validated
           node tools/station-release/release-summary.mjs beta-transition \
             "$RUNNER_TEMP/station-beta-release-summary.json" github-undraft-attempted
-          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
+          gh release edit "$tag" --repo "$STATION_RELEASE_REPOSITORY" --draft=false
           rm -rf "$RUNNER_TEMP/station-github-public"
           env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
             download-release beta "$version" "$RUNNER_TEMP/station-github-public"
           node tools/station-release/artifacts.mjs validate-origin github beta \
             "$RUNNER_TEMP/station-github-public" "$version"
+          git tag "$tag" "$release_sha"
+          git -c "http.extraheader=$source_auth_header" push origin "refs/tags/$tag"
+          test "$(git rev-parse "$tag^{commit}")" = "$release_sha"
           node tools/station-release/release-summary.mjs beta-transition \
             "$RUNNER_TEMP/station-beta-release-summary.json" github-public-validated
 
@@ -389,7 +408,7 @@ jobs:
       - name: Download and validate public immutable trees
         if: inputs.mode == 'publish' || inputs.mode == 'promote-existing' || inputs.mode == 'seed-baseline'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.STATION_RELEASE_REPOSITORY_TOKEN }}
           YANDEX_STATION_RELEASE_BUCKET: ${{ vars.YANDEX_STATION_RELEASE_BUCKET }}
         shell: bash
         run: |
@@ -402,9 +421,12 @@ jobs:
             node tools/station-release/release-summary.mjs beta-transition \
               "$RUNNER_TEMP/station-beta-release-summary.json" existing-public-validation-started
           fi
-          test "$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+          distribution_sha="$(gh release view "$tag" --repo "$STATION_RELEASE_REPOSITORY" \
+            --json targetCommitish --jq .targetCommitish)"
+          gh api "repos/$STATION_RELEASE_REPOSITORY/commits/$distribution_sha" >/dev/null
+          test "$(gh release view "$tag" --repo "$STATION_RELEASE_REPOSITORY" \
             --json tagName,isDraft,isPrerelease,targetCommitish \
-            --jq 'select(.isDraft == false and .isPrerelease == true and .targetCommitish == "'"$release_sha"'") | .tagName')" = "$tag"
+            --jq 'select(.isDraft == false and .isPrerelease == true and .targetCommitish == "'"$distribution_sha"'") | .tagName')" = "$tag"
           env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
             download-release beta "$version" "$github_public"
           installer="markiro-station-${version}-windows-x86_64-setup.exe"
@@ -457,7 +479,7 @@ jobs:
 
       - name: Promote beta mutable targets
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.STATION_RELEASE_REPOSITORY_TOKEN }}
           AWS_ACCESS_KEY_ID: ${{ secrets.YANDEX_STATION_RELEASE_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}
           YANDEX_STATION_RELEASE_BUCKET: ${{ vars.YANDEX_STATION_RELEASE_BUCKET }}
@@ -471,6 +493,7 @@ jobs:
           echo "::add-mask::$AWS_SECRET_ACCESS_KEY"
           unset AWS_SESSION_TOKEN
           github_may_have_changed=false
+          github_channel_preexisting=false
           yandex_may_have_changed=false
           backup_complete=false
           restoration_failed=false
@@ -489,19 +512,26 @@ jobs:
               fi
             fi
             if [ "$github_may_have_changed" = true ]; then
-              if ! gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" \
-                "$RUNNER_TEMP/station-github-channel-backup/latest.json" --clobber; then
-                restoration_failed=true
+              if [ "$github_channel_preexisting" = false ]; then
+                if ! gh release delete station-beta-channel --repo "$STATION_RELEASE_REPOSITORY" \
+                  --cleanup-tag --yes; then
+                  restoration_failed=true
+                fi
               else
-                if ! rm -rf "$RUNNER_TEMP/station-github-rollback-verify" || \
-                  ! mkdir "$RUNNER_TEMP/station-github-rollback-verify"; then
+                if ! gh release upload station-beta-channel --repo "$STATION_RELEASE_REPOSITORY" \
+                  "$RUNNER_TEMP/station-github-channel-backup/latest.json" --clobber; then
                   restoration_failed=true
-                elif ! env -u GH_TOKEN -u GITHUB_TOKEN node \
-                  tools/station-release/github-public.mjs download-channel beta \
-                  "$RUNNER_TEMP/station-github-rollback-verify/latest.json" || \
-                  ! cmp "$RUNNER_TEMP/station-github-rollback-verify/latest.json" \
-                    "$RUNNER_TEMP/station-github-channel-backup/latest.json"; then
-                  restoration_failed=true
+                else
+                  if ! rm -rf "$RUNNER_TEMP/station-github-rollback-verify" || \
+                    ! mkdir "$RUNNER_TEMP/station-github-rollback-verify"; then
+                    restoration_failed=true
+                  elif ! env -u GH_TOKEN -u GITHUB_TOKEN node \
+                    tools/station-release/github-public.mjs download-channel beta \
+                    "$RUNNER_TEMP/station-github-rollback-verify/latest.json" || \
+                    ! cmp "$RUNNER_TEMP/station-github-rollback-verify/latest.json" \
+                      "$RUNNER_TEMP/station-github-channel-backup/latest.json"; then
+                    restoration_failed=true
+                  fi
                 fi
               fi
             fi
@@ -528,14 +558,23 @@ jobs:
 
           rm -rf "$RUNNER_TEMP/station-github-channel-backup"
           mkdir "$RUNNER_TEMP/station-github-channel-backup"
-          test "$(gh release view station-beta-channel --repo "$GITHUB_REPOSITORY" \
-            --json tagName,isDraft,isPrerelease \
-            --jq 'select(.isDraft == false and .isPrerelease == true) | .tagName')" = \
-            "station-beta-channel"
-          env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
-            download-channel beta \
-            "$RUNNER_TEMP/station-github-channel-backup/latest.json"
-          test -f "$RUNNER_TEMP/station-github-channel-backup/latest.json"
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            if gh release view station-beta-channel --repo "$STATION_RELEASE_REPOSITORY" \
+              >/dev/null 2>&1; then
+              echo "station beta channel already exists before baseline seed" >&2
+              exit 1
+            fi
+          else
+            test "$(gh release view station-beta-channel --repo "$STATION_RELEASE_REPOSITORY" \
+              --json tagName,isDraft,isPrerelease \
+              --jq 'select(.isDraft == false and .isPrerelease == true) | .tagName')" = \
+              "station-beta-channel"
+            github_channel_preexisting=true
+            env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+              download-channel beta \
+              "$RUNNER_TEMP/station-github-channel-backup/latest.json"
+            test -f "$RUNNER_TEMP/station-github-channel-backup/latest.json"
+          fi
 
           github_tree="$RUNNER_TEMP/station-github-public"
           test -d "$github_tree"
@@ -554,8 +593,16 @@ jobs:
           mkdir "$RUNNER_TEMP/station-github-channel-upload"
           cp "$github_tree/latest.json" "$RUNNER_TEMP/station-github-channel-upload/latest.json"
           github_may_have_changed=true
-          gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" \
-            "$RUNNER_TEMP/station-github-channel-upload/latest.json" --clobber
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            distribution_sha="$(gh release view "$tag" --repo "$STATION_RELEASE_REPOSITORY" \
+              --json targetCommitish --jq .targetCommitish)"
+            gh release create station-beta-channel --repo "$STATION_RELEASE_REPOSITORY" \
+              --prerelease --target "$distribution_sha" --title "Markiro Station beta channel" \
+              "$RUNNER_TEMP/station-github-channel-upload/latest.json"
+          else
+            gh release upload station-beta-channel --repo "$STATION_RELEASE_REPOSITORY" \
+              "$RUNNER_TEMP/station-github-channel-upload/latest.json" --clobber
+          fi
           rm -rf "$RUNNER_TEMP/station-github-channel-verify"
           mkdir "$RUNNER_TEMP/station-github-channel-verify"
           env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
@@ -572,7 +619,7 @@ jobs:
             test -n "$SEED_INFRASTRUCTURE_EVIDENCE"
             printf '%s' "$SEED_INFRASTRUCTURE_EVIDENCE" > "$infrastructure_evidence"
             chmod 600 "$infrastructure_evidence"
-            gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+            gh release view "$tag" --repo "$STATION_RELEASE_REPOSITORY" \
               --json tagName,isDraft,isPrerelease,targetCommitish > "$release_metadata"
             chmod 600 "$release_metadata"
             rm -rf "$seed_backup"
@@ -656,7 +703,12 @@ jobs:
           set +e
           if [ "${{ inputs.mode }}" != "promote-existing" ]; then
             candidate_ref="station-release-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$candidate_ref"
+            if [ -n "${tag:-}" ] && \
+              gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$candidate_ref"
+            else
+              echo "Preserving the private candidate ref until its source tag exists" >&2
+            fi
           fi
           unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
           rm -rf "$RUNNER_TEMP/station-candidate" \

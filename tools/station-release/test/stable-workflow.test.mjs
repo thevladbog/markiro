@@ -12,12 +12,37 @@ const root = new URL("../../../", import.meta.url);
 const execFile = promisify(execFileCallback);
 const source = () =>
   readFile(new URL(".github/workflows/station-stable-release.yml", root), "utf8");
+const distributionRepository = "thevladbog/markiro-station-releases";
 
 function workflowStep(workflow, job, name) {
   const step = workflow.jobs[job].steps.find((candidate) => candidate.name === name);
   assert.ok(step, `missing ${job} step: ${name}`);
   return step;
 }
+
+test("publishes stable GitHub release state only to the fixed public binary repository", async () => {
+  const text = await source();
+  const workflow = load(text);
+  assert.equal(workflow.jobs.build.env.STATION_RELEASE_REPOSITORY, distributionRepository);
+  assert.equal(workflow.jobs.release.env.STATION_RELEASE_REPOSITORY, distributionRepository);
+  const legacySeed = workflowStep(workflow, "release", "Seed legacy stable rollback baseline");
+  const normalReleaseState = workflow.jobs.build.steps
+    .concat(workflow.jobs.release.steps.filter((step) => step !== legacySeed))
+    .map((step) => step.run ?? "")
+    .join("\n");
+  assert.doesNotMatch(normalReleaseState, /gh release[^\n]*--repo "\$GITHUB_REPOSITORY"/);
+  assert.equal(legacySeed.env.GH_TOKEN, "${{ github.token }}");
+  assert.match(
+    legacySeed.run,
+    /gh release download "\$seed_stable_tag" --repo "\$GITHUB_REPOSITORY"/,
+  );
+  assert.match(text, /GH_TOKEN:\s*\$\{\{ secrets\.STATION_RELEASE_REPOSITORY_TOKEN \}\}/);
+  assert.match(text, /repos\/\$STATION_RELEASE_REPOSITORY\/git\/ref\/heads\/main/);
+  assert.match(text, /gh release create "\$tag"[\s\S]*--target "\$distribution_sha"/);
+  assert.match(text, /gh run list[\s\S]*--repo "\$GITHUB_REPOSITORY"/);
+  assert.match(text, /https:\/\/github\.com\/\$GITHUB_REPOSITORY\/compare/);
+  assert.match(text, /repos\/\$GITHUB_REPOSITORY\/git\/refs\/heads\/\$candidate_ref/);
+});
 
 test("stable signing and dual-origin publication use separate protected environments", async () => {
   const text = await source();
@@ -124,7 +149,10 @@ test("normal stable modes validate the exact beta at both origins before rebuild
     accepted.run,
     /promotion\.mjs validate-beta[\s\\]*"\$beta_release_json"[\s\\]*"\$github_evidence_path"[\s\\]*"\$yandex_evidence_path"/,
   );
-  assert.match(accepted.run, /test "\$beta_release_sha" = "\$beta_target_sha"/);
+  assert.match(
+    accepted.run,
+    /gh api "repos\/\$STATION_RELEASE_REPOSITORY\/commits\/\$beta_target_sha"/,
+  );
   assert.match(accepted.run, /git merge-base --is-ancestor "\$base_sha" origin\/main/);
   assert.match(accepted.run, /--commit "\$base_sha"/);
   assert.match(accepted.run, /stable-boundary\.mjs resolve-state/);
@@ -317,7 +345,7 @@ test("stable mutables promote GitHub, Yandex manifest, then the default stable a
   );
   const yandexBackup = run.indexOf("yandex-publisher.mjs backup-mutables stable");
   const githubPromotion = run.indexOf(
-    'gh release upload station-stable-channel --repo "$GITHUB_REPOSITORY"',
+    'gh release upload station-stable-channel --repo "$STATION_RELEASE_REPOSITORY"',
     githubBackup + 1,
   );
   const yandexPromotion = run.indexOf("yandex-publisher.mjs promote", yandexBackup + 1);
@@ -339,11 +367,19 @@ test("stable mutables promote GitHub, Yandex manifest, then the default stable a
   assert.match(rollback, /github-public\.mjs download-channel stable/);
   assert.doesNotMatch(rollback, /gh release download station-stable-channel/);
   assert.match(rollback, /station release mutable restoration failed/);
+  assert.match(
+    rollback,
+    /github_channel_preexisting[\s\S]*gh release delete station-stable-channel/,
+  );
   assert.match(run, /https:\/\/releases\.markiro\.app\/station\/stable\/latest\.json/);
   assert.match(run, /https:\/\/releases\.markiro\.app\/station\/download/);
   assert.match(run, /github-public\.mjs download-channel stable/);
   assert.doesNotMatch(run, /station\/beta\/download/);
-  assert.doesNotMatch(run, /gh release create station-stable-channel/);
+  assert.match(
+    run,
+    /if \[ "\$github_channel_preexisting" = false \]; then[\s\S]*gh release create station-stable-channel[\s\S]*else[\s\S]*gh release upload station-stable-channel/,
+  );
+  assert.match(run, /test -z "\$previous_stable_tag"/);
   assert.doesNotMatch(run, /delete-object|DeleteObject/);
 });
 
@@ -368,8 +404,10 @@ test("one-time stable seed uses the latest legacy stable only while release DNS 
   assert.match(seed.run, /gh release list[\s\S]*--limit 10001/);
   assert.match(seed.run, /stable-boundary\.mjs resolve-latest-stable/);
   assert.match(seed.run, /test "\$seed_stable_tag" = "\$latest_stable_tag"/);
-  assert.match(seed.run, /github-public\.mjs[\s\\]*download-release stable/);
-  assert.doesNotMatch(seed.run, /gh release download "\$seed_stable_tag"/);
+  assert.match(
+    seed.run,
+    /gh release download "\$seed_stable_tag"[\s\S]*--repo "\$GITHUB_REPOSITORY"/,
+  );
   assert.match(
     seed.run,
     /yandex-publisher\.mjs seed-baseline[\s\S]* stable[\s\\]*[\s\S]*--confirm-empty-channel-bootstrap/,

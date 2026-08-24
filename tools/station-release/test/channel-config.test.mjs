@@ -5,11 +5,11 @@ import test from "node:test";
 const root = new URL("../../../", import.meta.url);
 const betaUrls = [
   "https://releases.markiro.app/station/beta/latest.json",
-  "https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json",
+  "https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json",
 ];
 const stableUrls = [
   "https://releases.markiro.app/station/stable/latest.json",
-  "https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json",
+  "https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json",
 ];
 
 test("stable builds replace only the ordered channel endpoints and inherit the public key", async () => {

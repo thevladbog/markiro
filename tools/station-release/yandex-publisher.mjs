@@ -514,8 +514,7 @@ function validateBootstrapRelease(release, channel, sourceTag, evidence) {
     release.tagName !== sourceTag ||
     release.isDraft !== false ||
     release.isPrerelease !== (channel === "beta") ||
-    !SHA.test(release.targetCommitish) ||
-    release.targetCommitish !== evidence.releaseSha
+    !SHA.test(release.targetCommitish)
   ) {
     bootstrapInvalid();
   }

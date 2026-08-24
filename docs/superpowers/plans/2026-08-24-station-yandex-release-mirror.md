@@ -97,7 +97,7 @@ compareStationReleaseOrigins(input: {
 }): Promise<void>;
 ```
 
-- GitHub locations remain `https://github.com/thevladbog/markiro/releases/download/<tag>/<asset-name>` and mutable `station-<channel>-channel/latest.json`.
+- GitHub locations use the public binary-only repository at `https://github.com/thevladbog/markiro-station-releases/releases/download/<tag>/<asset-name>` and mutable `station-<channel>-channel/latest.json`; the product source repository remains private.
 - Yandex locations are exactly `https://releases.markiro.app/station/<channel>/releases/<version>/<asset-name>`; mutable keys are `station/<channel>/latest.json`, with `station/download` and `station/beta/download` installer aliases.
 - `stationReleaseLocation` accepts only canonical channel, origin, and version combinations and never accepts a base URL.
 
@@ -679,7 +679,7 @@ Assert ordered endpoints for beta and stable:
 ```json
 [
   "https://releases.markiro.app/station/beta/latest.json",
-  "https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json"
+  "https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json"
 ]
 ```
 

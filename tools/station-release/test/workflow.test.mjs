@@ -10,6 +10,20 @@ const root = new URL("../../../", import.meta.url);
 const execFile = promisify(execFileCallback);
 const source = () => readFile(new URL(".github/workflows/station-beta-release.yml", root), "utf8");
 const packageSource = () => readFile(new URL("package.json", root), "utf8");
+const distributionRepository = "thevladbog/markiro-station-releases";
+
+test("publishes GitHub release state only to the fixed public binary repository", async () => {
+  const text = await source();
+  const workflow = load(text);
+  assert.equal(workflow.jobs.build.env.STATION_RELEASE_REPOSITORY, distributionRepository);
+  assert.equal(workflow.jobs.release.env.STATION_RELEASE_REPOSITORY, distributionRepository);
+  assert.doesNotMatch(text, /gh release[^\n]*--repo "\$GITHUB_REPOSITORY"/);
+  assert.match(text, /GH_TOKEN:\s*\$\{\{ secrets\.STATION_RELEASE_REPOSITORY_TOKEN \}\}/);
+  assert.match(text, /repos\/\$STATION_RELEASE_REPOSITORY\/git\/ref\/heads\/main/);
+  assert.match(text, /gh release create "\$tag"[\s\S]*--target "\$distribution_sha"/);
+  assert.match(text, /gh run list[\s\S]*--repo "\$GITHUB_REPOSITORY"/);
+  assert.match(text, /repos\/\$GITHUB_REPOSITORY\/git\/refs\/heads\/\$candidate_ref/);
+});
 
 test("station beta build and dual-origin publication use separate exact protected environments", async () => {
   const text = await source();
@@ -308,7 +322,7 @@ test("one mutable transaction backs up completely, promotes in order and rolls b
   const yandexBackup = run.indexOf("yandex-publisher.mjs backup-mutables");
   const seedPreflight = run.indexOf("yandex-publisher.mjs preflight-seed-mutables");
   const githubPromotion = run.indexOf(
-    'gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY"',
+    'gh release upload station-beta-channel --repo "$STATION_RELEASE_REPOSITORY"',
     githubBackup + 1,
   );
   const yandexPromotion = run.indexOf("yandex-publisher.mjs promote");
@@ -342,6 +356,7 @@ test("one mutable transaction backs up completely, promotes in order and rolls b
     /if ! rm -rf "\$RUNNER_TEMP\/station-github-rollback-verify" \|\|[\s\S]*! mkdir "\$RUNNER_TEMP\/station-github-rollback-verify"/,
   );
   assert.match(rollback, /station release mutable restoration failed/);
+  assert.match(rollback, /github_channel_preexisting[\s\S]*gh release delete station-beta-channel/);
   assert.match(run, /yandex-publisher\.mjs seed-baseline[\s\S]*--confirm-empty-channel-bootstrap/);
   assert.match(run, /SEED_INFRASTRUCTURE_EVIDENCE/);
   assert.match(run, /station-bootstrap-record\.json/);
@@ -355,7 +370,10 @@ test("one mutable transaction backs up completely, promotes in order and rolls b
     run,
     /gh release upload station-beta-channel[\s\S]*station-beta-latest\.json/,
   );
-  assert.doesNotMatch(run, /gh release create station-beta-channel/);
+  assert.match(
+    run,
+    /if \[ "\$\{\{ inputs\.mode \}\}" = "seed-baseline" \]; then[\s\S]*gh release create station-beta-channel[\s\S]*else[\s\S]*gh release upload station-beta-channel/,
+  );
   assert.doesNotMatch(run, /delete-object|DeleteObject/);
   assert.equal((run.match(/download-channel beta/g) ?? []).length, 3);
   assert.doesNotMatch(run, /gh release download station-beta-channel/);
@@ -446,8 +464,9 @@ test("seed and normal modes use disjoint publisher branches under one compensati
     (candidate) => candidate.name === "Promote beta mutable targets",
   );
   const run = step.run;
-  const branchStart = run.indexOf('"seed-baseline" ]; then');
-  const branchElse = run.indexOf("else", branchStart);
+  const preflightIndex = run.indexOf("preflight-seed-mutables");
+  const branchStart = run.lastIndexOf('"seed-baseline" ]; then', preflightIndex);
+  const branchElse = run.indexOf("else", preflightIndex);
   const branchEnd = run.indexOf("fi", branchElse);
   const seedPreflightBranch = run.slice(branchStart, branchElse);
   const normalBackupBranch = run.slice(branchElse, branchEnd);

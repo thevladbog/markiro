@@ -55,13 +55,17 @@ subject и не переносите state-backend credentials в GitHub. Эта
 GitHub Environment `station-release` должен разрешать deployment только из
 `main` и быть защищён ручным approval release owner. Его точный инвентарь:
 
+- secret `STATION_RELEASE_REPOSITORY_TOKEN`: fine-grained token с Contents
+  read/write только для публичного binary-only repository
+  `thevladbog/markiro-station-releases`; доступ к приватному source repository
+  этому token не выдаётся;
 - secret `YANDEX_STATION_RELEASE_ACCESS_KEY_ID`;
 - secret `YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY`;
 - variable `YANDEX_STATION_RELEASE_BUCKET`;
 - variable `YANDEX_STATION_RELEASE_ENDPOINT` со значением
   `https://storage.yandexcloud.net`.
 
-Не дублируйте publisher credentials в repository/organization secrets,
+Не дублируйте release token или publisher credentials в repository/organization secrets,
 `production-infrastructure`, `station-beta`, `station-stable`, workflow env,
 Terraform variables или command arguments. Release workflow в последующих
 задачах получает их только под защитой `station-release`; значения должны
