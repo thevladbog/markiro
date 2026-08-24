@@ -1,6 +1,7 @@
 use std::{
     fmt,
     future::Future,
+    io,
     pin::Pin,
     sync::Mutex,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -156,6 +157,7 @@ pub(crate) struct DiscoveredCandidate<C> {
 pub(crate) enum StationUpdateErrorCode {
     OriginsUnavailable,
     PolicyDenied,
+    CheckSuperseded,
     CandidateInvalid,
     CandidateExpired,
     InstallationFailed,
@@ -180,6 +182,13 @@ impl StationUpdateError {
     fn policy_denied() -> Self {
         Self {
             code: StationUpdateErrorCode::PolicyDenied,
+            retryable: false,
+        }
+    }
+
+    fn check_superseded() -> Self {
+        Self {
+            code: StationUpdateErrorCode::CheckSuperseded,
             retryable: false,
         }
     }
@@ -327,38 +336,66 @@ struct StoredCandidate<C> {
     checked_at: Instant,
 }
 
+struct CandidateState<C> {
+    generation: u64,
+    candidate: Option<StoredCandidate<C>>,
+}
+
 pub(crate) struct CandidateSlot<C> {
-    candidate: Mutex<Option<StoredCandidate<C>>>,
+    state: Mutex<CandidateState<C>>,
 }
 
 impl<C> Default for CandidateSlot<C> {
     fn default() -> Self {
         Self {
-            candidate: Mutex::new(None),
+            state: Mutex::new(CandidateState {
+                generation: 0,
+                candidate: None,
+            }),
         }
     }
 }
 
 impl<C> CandidateSlot<C> {
-    fn clear(&self) -> Result<(), StationUpdateError> {
-        self.candidate
+    fn begin_check(&self) -> Result<u64, StationUpdateError> {
+        let mut state = self
+            .state
             .lock()
-            .map_err(|_error| StationUpdateError::internal())?
-            .take();
+            .map_err(|_error| StationUpdateError::internal())?;
+        state.candidate.take();
+        state.generation = state
+            .generation
+            .checked_add(1)
+            .ok_or_else(StationUpdateError::internal)?;
+        Ok(state.generation)
+    }
+
+    fn ensure_current(&self, generation: u64) -> Result<(), StationUpdateError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_error| StationUpdateError::internal())?;
+        if state.generation != generation {
+            return Err(StationUpdateError::check_superseded());
+        }
         Ok(())
     }
 
     fn replace(
         &self,
+        generation: u64,
         id: String,
         candidate: C,
         checked_at: Instant,
     ) -> Result<(), StationUpdateError> {
-        let mut slot = self
-            .candidate
+        let mut state = self
+            .state
             .lock()
             .map_err(|_error| StationUpdateError::internal())?;
-        *slot = Some(StoredCandidate {
+        if state.generation != generation {
+            return Err(StationUpdateError::check_superseded());
+        }
+        state.candidate = Some(StoredCandidate {
             id,
             candidate,
             checked_at,
@@ -367,23 +404,25 @@ impl<C> CandidateSlot<C> {
     }
 
     fn take(&self, id: &str, now: Instant) -> Result<C, StationUpdateError> {
-        let mut slot = self
-            .candidate
+        let mut state = self
+            .state
             .lock()
             .map_err(|_error| StationUpdateError::internal())?;
-        let stored = slot
+        let stored = state
+            .candidate
             .as_ref()
             .ok_or_else(StationUpdateError::candidate_invalid)?;
 
         if now.saturating_duration_since(stored.checked_at) > CANDIDATE_TTL {
-            slot.take();
+            state.candidate.take();
             return Err(StationUpdateError::candidate_expired());
         }
         if id.len() > 128 || stored.id != id {
             return Err(StationUpdateError::candidate_invalid());
         }
 
-        Ok(slot
+        Ok(state
+            .candidate
             .take()
             .ok_or_else(StationUpdateError::candidate_invalid)?
             .candidate)
@@ -460,13 +499,34 @@ impl<R: Runtime> DiscoveryTransport for PluginTransport<'_, R> {
     }
 }
 
+fn has_io_source(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut source = Some(error);
+    while let Some(error) = source {
+        if error.downcast_ref::<io::Error>().is_some() {
+            return true;
+        }
+        source = error.source();
+    }
+    false
+}
+
 fn classify_plugin_error(error: tauri_plugin_updater::Error) -> DiscoveryFailure {
     match error {
+        tauri_plugin_updater::Error::Reqwest(source)
+            if source.is_timeout()
+                || source.is_connect()
+                || source.is_request()
+                || source.is_body()
+                || source.is_status()
+                || has_io_source(&source) =>
+        {
+            DiscoveryFailure::Availability(source.to_string())
+        }
         tauri_plugin_updater::Error::Reqwest(source) if source.is_decode() => {
             DiscoveryFailure::MetadataInvalid(source.to_string())
         }
         tauri_plugin_updater::Error::Reqwest(source) => {
-            DiscoveryFailure::Availability(source.to_string())
+            DiscoveryFailure::SecurityPolicy(source.to_string())
         }
         tauri_plugin_updater::Error::Serialization(source) => {
             DiscoveryFailure::MetadataInvalid(source.to_string())
@@ -531,6 +591,49 @@ pub(crate) struct StationUpdate {
     fallback_reason: Option<StationFallbackReason>,
 }
 
+struct StartedUpdateCheck<'a> {
+    generation: u64,
+    channel: StationReleaseChannel,
+    current_version: &'a str,
+    now_unix: i64,
+    candidate_id: String,
+    checked_at: Instant,
+}
+
+async fn execute_update_check<T: DiscoveryTransport>(
+    candidates: &CandidateSlot<DiscoveredCandidate<T::Candidate>>,
+    transport: &T,
+    check: StartedUpdateCheck<'_>,
+) -> Result<Option<StationUpdate>, StationUpdateError> {
+    let discovery = discover_update(
+        transport,
+        check.channel,
+        check.current_version,
+        check.now_unix,
+    )
+    .await;
+    candidates.ensure_current(check.generation)?;
+    let Some(candidate) = discovery? else {
+        return Ok(None);
+    };
+
+    let update = StationUpdate {
+        candidate_id: check.candidate_id.clone(),
+        current_version: candidate.metadata.current_version.clone(),
+        version: candidate.metadata.version.clone(),
+        published_at: candidate.metadata.published_at.clone(),
+        selected_origin: candidate.origin,
+        fallback_reason: candidate.fallback_reason,
+    };
+    candidates.replace(
+        check.generation,
+        check.candidate_id,
+        candidate,
+        check.checked_at,
+    )?;
+    Ok(Some(update))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct StationUpdateInstallRequest {
@@ -556,29 +659,23 @@ pub(crate) async fn station_update_check(
     app: AppHandle,
     state: State<'_, StationUpdaterState>,
 ) -> Result<Option<StationUpdate>, StationUpdateError> {
-    state.candidates.clear()?;
+    let generation = state.candidates.begin_check()?;
     let channel = compiled_channel(&app)?;
     let current_version = app.package_info().version.to_string();
     let transport = PluginTransport { app: &app };
-    let Some(candidate) =
-        discover_update(&transport, channel, &current_version, now_unix()?).await?
-    else {
-        return Ok(None);
-    };
-
-    let candidate_id = uuid::Uuid::new_v4().to_string();
-    let update = StationUpdate {
-        candidate_id: candidate_id.clone(),
-        current_version: candidate.metadata.current_version.clone(),
-        version: candidate.metadata.version.clone(),
-        published_at: candidate.metadata.published_at.clone(),
-        selected_origin: candidate.origin,
-        fallback_reason: candidate.fallback_reason,
-    };
-    state
-        .candidates
-        .replace(candidate_id, candidate, Instant::now())?;
-    Ok(Some(update))
+    execute_update_check(
+        &state.candidates,
+        &transport,
+        StartedUpdateCheck {
+            generation,
+            channel,
+            current_version: &current_version,
+            now_unix: now_unix()?,
+            candidate_id: uuid::Uuid::new_v4().to_string(),
+            checked_at: Instant::now(),
+        },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -616,14 +713,20 @@ pub(crate) async fn station_update_download_and_install(
 mod tests {
     use std::{
         future::Future,
+        io,
         pin::Pin,
         sync::{Arc, Mutex},
+        task::{Context, Poll},
         time::{Duration, Instant},
     };
 
+    use base64::Engine as _;
+    use futures_core::Stream;
+
     use super::{
-        discover_update, CandidateMetadata, CandidateSlot, DiscoveryCandidate, DiscoveryFailure,
-        DiscoveryTransport, StationFallbackReason, StationReleaseChannel, StationReleaseOrigin,
+        classify_plugin_error, discover_update, execute_update_check, CandidateMetadata,
+        CandidateSlot, DiscoveryCandidate, DiscoveryFailure, DiscoveryTransport,
+        StartedUpdateCheck, StationFallbackReason, StationReleaseChannel, StationReleaseOrigin,
         StationUpdateErrorCode, CANDIDATE_TTL,
     };
 
@@ -632,6 +735,9 @@ mod tests {
     const PUBLISHED_AT: &str = "2026-08-24T10:00:00Z";
     const PUBLISHED_UNIX: i64 = 1_787_565_600;
     const NOW_UNIX: i64 = PUBLISHED_UNIX + 60;
+    const BETA_YANDEX_ENDPOINT: &str = "https://releases.markiro.app/station/beta/latest.json";
+    const BETA_GITHUB_ENDPOINT: &str =
+        "https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json";
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     struct FakeCandidate(CandidateMetadata);
@@ -651,7 +757,7 @@ mod tests {
 
     struct FakeTransport {
         outcomes: Mutex<Vec<(StationReleaseOrigin, FakeOutcome)>>,
-        calls: Arc<Mutex<Vec<StationReleaseOrigin>>>,
+        calls: Arc<Mutex<Vec<(StationReleaseOrigin, &'static str)>>>,
     }
 
     impl FakeTransport {
@@ -662,7 +768,7 @@ mod tests {
             }
         }
 
-        fn calls(&self) -> Vec<StationReleaseOrigin> {
+        fn calls(&self) -> Vec<(StationReleaseOrigin, &'static str)> {
             self.calls.lock().expect("calls lock").clone()
         }
     }
@@ -673,12 +779,15 @@ mod tests {
         fn check(
             &self,
             origin: StationReleaseOrigin,
-            _endpoint: &'static str,
+            endpoint: &'static str,
         ) -> Pin<
             Box<dyn Future<Output = Result<Option<Self::Candidate>, DiscoveryFailure>> + Send + '_>,
         > {
             Box::pin(async move {
-                self.calls.lock().expect("calls lock").push(origin);
+                self.calls
+                    .lock()
+                    .expect("calls lock")
+                    .push((origin, endpoint));
                 let (expected_origin, outcome) = self
                     .outcomes
                     .lock()
@@ -692,6 +801,68 @@ mod tests {
                     FakeOutcome::Failure(error) => Err(error),
                 }
             })
+        }
+    }
+
+    struct ScheduledCheck {
+        origin: StationReleaseOrigin,
+        endpoint: &'static str,
+        started: tauri::async_runtime::Sender<()>,
+        response: tauri::async_runtime::Receiver<FakeOutcome>,
+    }
+
+    struct ControlledTransport {
+        checks: Mutex<Vec<ScheduledCheck>>,
+    }
+
+    impl ControlledTransport {
+        fn new(checks: Vec<ScheduledCheck>) -> Self {
+            Self {
+                checks: Mutex::new(checks.into_iter().rev().collect()),
+            }
+        }
+    }
+
+    impl DiscoveryTransport for ControlledTransport {
+        type Candidate = FakeCandidate;
+
+        fn check(
+            &self,
+            origin: StationReleaseOrigin,
+            endpoint: &'static str,
+        ) -> Pin<
+            Box<dyn Future<Output = Result<Option<Self::Candidate>, DiscoveryFailure>> + Send + '_>,
+        > {
+            let mut check = self
+                .checks
+                .lock()
+                .expect("controlled checks lock")
+                .pop()
+                .expect("unexpected controlled transport call");
+            assert_eq!(origin, check.origin);
+            assert_eq!(endpoint, check.endpoint);
+
+            Box::pin(async move {
+                check.started.send(()).await.expect("signal check start");
+                match check.response.recv().await.expect("controlled response") {
+                    FakeOutcome::Update(candidate) => Ok(Some(candidate)),
+                    FakeOutcome::NoUpdate => Ok(None),
+                    FakeOutcome::Failure(error) => Err(error),
+                }
+            })
+        }
+    }
+
+    struct OneErrorStream(Option<io::Error>);
+
+    impl Stream for OneErrorStream {
+        type Item = Result<Vec<u8>, io::Error>;
+
+        fn poll_next(
+            mut self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+        ) -> Poll<Option<Self::Item>> {
+            Poll::Ready(self.0.take().map(Err))
         }
     }
 
@@ -726,6 +897,56 @@ mod tests {
         ))
     }
 
+    fn assert_plugin_error_falls_back(
+        error: tauri_plugin_updater::Error,
+        expected_reason: StationFallbackReason,
+    ) {
+        let transport = FakeTransport::new(vec![
+            (
+                StationReleaseOrigin::Yandex,
+                FakeOutcome::Failure(classify_plugin_error(error)),
+            ),
+            (
+                StationReleaseOrigin::Github,
+                FakeOutcome::Update(candidate(StationReleaseOrigin::Github)),
+            ),
+        ]);
+
+        let discovered = run(&transport)
+            .expect("plugin failure is fallback eligible")
+            .expect("GitHub fallback candidate");
+        assert_eq!(discovered.origin, StationReleaseOrigin::Github);
+        assert_eq!(discovered.fallback_reason, Some(expected_reason));
+        assert_eq!(
+            transport.calls(),
+            vec![
+                (StationReleaseOrigin::Yandex, BETA_YANDEX_ENDPOINT),
+                (StationReleaseOrigin::Github, BETA_GITHUB_ENDPOINT),
+            ]
+        );
+    }
+
+    fn assert_plugin_error_is_terminal(error: tauri_plugin_updater::Error) {
+        let transport = FakeTransport::new(vec![
+            (
+                StationReleaseOrigin::Yandex,
+                FakeOutcome::Failure(classify_plugin_error(error)),
+            ),
+            (
+                StationReleaseOrigin::Github,
+                FakeOutcome::Update(candidate(StationReleaseOrigin::Github)),
+            ),
+        ]);
+
+        let failure = run(&transport).expect_err("plugin failure is terminal");
+        assert_eq!(failure.code, StationUpdateErrorCode::PolicyDenied);
+        assert!(!failure.retryable);
+        assert_eq!(
+            transport.calls(),
+            vec![(StationReleaseOrigin::Yandex, BETA_YANDEX_ENDPOINT)]
+        );
+    }
+
     #[test]
     fn yandex_update_is_authoritative_without_github_request() {
         let transport = FakeTransport::new(vec![(
@@ -739,7 +960,10 @@ mod tests {
 
         assert_eq!(discovered.origin, StationReleaseOrigin::Yandex);
         assert_eq!(discovered.fallback_reason, None);
-        assert_eq!(transport.calls(), vec![StationReleaseOrigin::Yandex]);
+        assert_eq!(
+            transport.calls(),
+            vec![(StationReleaseOrigin::Yandex, BETA_YANDEX_ENDPOINT)]
+        );
     }
 
     #[test]
@@ -748,7 +972,10 @@ mod tests {
             FakeTransport::new(vec![(StationReleaseOrigin::Yandex, FakeOutcome::NoUpdate)]);
 
         assert!(run(&transport).expect("discovery succeeds").is_none());
-        assert_eq!(transport.calls(), vec![StationReleaseOrigin::Yandex]);
+        assert_eq!(
+            transport.calls(),
+            vec![(StationReleaseOrigin::Yandex, BETA_YANDEX_ENDPOINT)]
+        );
     }
 
     #[test]
@@ -775,7 +1002,10 @@ mod tests {
         );
         assert_eq!(
             transport.calls(),
-            vec![StationReleaseOrigin::Yandex, StationReleaseOrigin::Github]
+            vec![
+                (StationReleaseOrigin::Yandex, BETA_YANDEX_ENDPOINT),
+                (StationReleaseOrigin::Github, BETA_GITHUB_ENDPOINT),
+            ]
         );
     }
 
@@ -801,6 +1031,13 @@ mod tests {
             discovered.fallback_reason,
             Some(StationFallbackReason::PrimaryMetadataInvalid)
         );
+        assert_eq!(
+            transport.calls(),
+            vec![
+                (StationReleaseOrigin::Yandex, BETA_YANDEX_ENDPOINT),
+                (StationReleaseOrigin::Github, BETA_GITHUB_ENDPOINT),
+            ]
+        );
     }
 
     #[test]
@@ -816,8 +1053,99 @@ mod tests {
         assert!(run(&transport).expect("fallback succeeds").is_none());
         assert_eq!(
             transport.calls(),
-            vec![StationReleaseOrigin::Yandex, StationReleaseOrigin::Github]
+            vec![
+                (StationReleaseOrigin::Yandex, BETA_YANDEX_ENDPOINT),
+                (StationReleaseOrigin::Github, BETA_GITHUB_ENDPOINT),
+            ]
         );
+    }
+
+    #[test]
+    fn pinned_plugin_error_variants_map_to_closed_fallback_classes() {
+        let malformed_json = tauri::async_runtime::block_on(async {
+            let response = reqwest::Response::from(
+                http::Response::builder()
+                    .status(200)
+                    .body("not-json")
+                    .expect("malformed JSON response fixture"),
+            );
+            response
+                .json::<serde_json::Value>()
+                .await
+                .expect_err("JSON decode must fail")
+        });
+        assert!(malformed_json.is_decode());
+        assert_plugin_error_falls_back(
+            tauri_plugin_updater::Error::Reqwest(malformed_json),
+            StationFallbackReason::PrimaryMetadataInvalid,
+        );
+
+        let invalid_manifest =
+            serde_json::from_value::<tauri_plugin_updater::RemoteRelease>(serde_json::json!({
+                "version": "not-semver",
+                "platforms": {}
+            }))
+            .expect_err("invalid pinned manifest shape");
+        assert_plugin_error_falls_back(
+            tauri_plugin_updater::Error::Serialization(invalid_manifest),
+            StationFallbackReason::PrimaryMetadataInvalid,
+        );
+
+        for kind in [io::ErrorKind::TimedOut, io::ErrorKind::ConnectionReset] {
+            let request_error = tauri::async_runtime::block_on(async {
+                let body = reqwest::Body::wrap_stream(OneErrorStream(Some(io::Error::new(
+                    kind,
+                    "controlled body failure",
+                ))));
+                let response = reqwest::Response::from(
+                    http::Response::builder()
+                        .status(200)
+                        .body(body)
+                        .expect("transport response fixture"),
+                );
+                response
+                    .json::<serde_json::Value>()
+                    .await
+                    .expect_err("body transport failure")
+            });
+            assert!(request_error.is_decode());
+            assert_eq!(request_error.is_timeout(), kind == io::ErrorKind::TimedOut);
+            assert_plugin_error_falls_back(
+                tauri_plugin_updater::Error::Reqwest(request_error),
+                StationFallbackReason::PrimaryUnavailable,
+            );
+        }
+
+        assert_plugin_error_falls_back(
+            tauri_plugin_updater::Error::ReleaseNotFound,
+            StationFallbackReason::PrimaryUnavailable,
+        );
+
+        let http_status = reqwest::Response::from(
+            http::Response::builder()
+                .status(503)
+                .body("")
+                .expect("HTTP status fixture"),
+        )
+        .error_for_status()
+        .expect_err("HTTP 503 must fail");
+        assert!(http_status.is_status());
+        assert_plugin_error_falls_back(
+            tauri_plugin_updater::Error::Reqwest(http_status),
+            StationFallbackReason::PrimaryUnavailable,
+        );
+
+        let invalid_signature = base64::engine::general_purpose::STANDARD
+            .decode("not!base64")
+            .expect_err("invalid signature fixture");
+        assert_plugin_error_is_terminal(tauri_plugin_updater::Error::Base64(invalid_signature));
+
+        for error in [
+            tauri_plugin_updater::Error::InsecureTransportProtocol,
+            tauri_plugin_updater::Error::TargetNotFound("windows-x86_64".into()),
+        ] {
+            assert_plugin_error_is_terminal(error);
+        }
     }
 
     #[test]
@@ -868,7 +1196,10 @@ mod tests {
 
             assert_eq!(error.code, StationUpdateErrorCode::PolicyDenied);
             assert!(!error.retryable);
-            assert_eq!(transport.calls(), vec![StationReleaseOrigin::Yandex]);
+            assert_eq!(
+                transport.calls(),
+                vec![(StationReleaseOrigin::Yandex, BETA_YANDEX_ENDPOINT)]
+            );
         }
     }
 
@@ -929,7 +1260,10 @@ mod tests {
 
             assert_eq!(error.code, StationUpdateErrorCode::PolicyDenied);
             assert!(!error.retryable);
-            assert_eq!(transport.calls(), vec![StationReleaseOrigin::Yandex]);
+            assert_eq!(
+                transport.calls(),
+                vec![(StationReleaseOrigin::Yandex, BETA_YANDEX_ENDPOINT)]
+            );
         }
     }
 
@@ -954,14 +1288,16 @@ mod tests {
         let slot = CandidateSlot::default();
         let now = Instant::now();
 
-        slot.replace("first".into(), 1_u8, now)
+        let first_check = slot.begin_check().expect("begin first check");
+        slot.replace(first_check, "first".into(), 1_u8, now)
             .expect("store first");
-        slot.replace("second".into(), 2_u8, now)
-            .expect("replace first");
+        let second_check = slot.begin_check().expect("begin second check");
         assert_eq!(
             slot.take("first", now).expect_err("first invalidated").code,
             StationUpdateErrorCode::CandidateInvalid
         );
+        slot.replace(second_check, "second".into(), 2_u8, now)
+            .expect("store second");
         assert_eq!(slot.take("second", now).expect("consume second"), 2);
         assert_eq!(
             slot.take("second", now)
@@ -970,7 +1306,8 @@ mod tests {
             StationUpdateErrorCode::CandidateInvalid
         );
 
-        slot.replace("expired".into(), 3_u8, now)
+        let expiry_check = slot.begin_check().expect("begin expiry check");
+        slot.replace(expiry_check, "expired".into(), 3_u8, now)
             .expect("store expiring candidate");
         assert_eq!(
             slot.take("expired", now + CANDIDATE_TTL + Duration::from_millis(1))
@@ -978,6 +1315,114 @@ mod tests {
                 .code,
             StationUpdateErrorCode::CandidateExpired
         );
+    }
+
+    #[test]
+    fn older_overlapping_check_cannot_replace_or_invalidate_the_newer_candidate() {
+        tauri::async_runtime::block_on(async {
+            let candidates = Arc::new(CandidateSlot::default());
+            let (a_started_sender, mut a_started) = tauri::async_runtime::channel(1);
+            let (a_response, a_receiver) = tauri::async_runtime::channel(1);
+            let (b_started_sender, mut b_started) = tauri::async_runtime::channel(1);
+            let (b_response, b_receiver) = tauri::async_runtime::channel(1);
+            let transport = Arc::new(ControlledTransport::new(vec![
+                ScheduledCheck {
+                    origin: StationReleaseOrigin::Yandex,
+                    endpoint: BETA_YANDEX_ENDPOINT,
+                    started: a_started_sender,
+                    response: a_receiver,
+                },
+                ScheduledCheck {
+                    origin: StationReleaseOrigin::Yandex,
+                    endpoint: BETA_YANDEX_ENDPOINT,
+                    started: b_started_sender,
+                    response: b_receiver,
+                },
+            ]));
+            let checked_at = Instant::now();
+
+            let a_candidates = Arc::clone(&candidates);
+            let a_transport = Arc::clone(&transport);
+            let check_a = tauri::async_runtime::spawn(async move {
+                let generation = a_candidates.begin_check()?;
+                execute_update_check(
+                    &a_candidates,
+                    &*a_transport,
+                    StartedUpdateCheck {
+                        generation,
+                        channel: StationReleaseChannel::Beta,
+                        current_version: CURRENT_VERSION,
+                        now_unix: NOW_UNIX,
+                        candidate_id: "candidate-a".into(),
+                        checked_at,
+                    },
+                )
+                .await
+            });
+            a_started.recv().await.expect("check A started");
+
+            let b_candidates = Arc::clone(&candidates);
+            let b_transport = Arc::clone(&transport);
+            let check_b = tauri::async_runtime::spawn(async move {
+                let generation = b_candidates.begin_check()?;
+                execute_update_check(
+                    &b_candidates,
+                    &*b_transport,
+                    StartedUpdateCheck {
+                        generation,
+                        channel: StationReleaseChannel::Beta,
+                        current_version: CURRENT_VERSION,
+                        now_unix: NOW_UNIX,
+                        candidate_id: "candidate-b".into(),
+                        checked_at,
+                    },
+                )
+                .await
+            });
+            b_started.recv().await.expect("check B started");
+
+            b_response
+                .send(FakeOutcome::Update(candidate(StationReleaseOrigin::Yandex)))
+                .await
+                .expect("finish check B first");
+            let update_b = check_b
+                .await
+                .expect("join check B")
+                .expect("check B succeeds")
+                .expect("check B update");
+            assert_eq!(update_b.candidate_id, "candidate-b");
+
+            a_response
+                .send(FakeOutcome::Update(candidate(StationReleaseOrigin::Yandex)))
+                .await
+                .expect("finish check A late");
+            let error_a = check_a
+                .await
+                .expect("join check A")
+                .expect_err("check A is superseded");
+            assert_eq!(error_a.code, StationUpdateErrorCode::CheckSuperseded);
+            assert!(!error_a.retryable);
+            assert_eq!(
+                serde_json::to_string(&error_a).expect("serialize superseded error"),
+                r#"{"code":"check-superseded","retryable":false}"#
+            );
+
+            assert_eq!(
+                candidates
+                    .take("candidate-a", checked_at)
+                    .expect_err("stale candidate ID was never published")
+                    .code,
+                StationUpdateErrorCode::CandidateInvalid
+            );
+            assert_eq!(
+                candidates
+                    .take("candidate-b", checked_at)
+                    .expect("B remains the current candidate")
+                    .metadata
+                    .version,
+                UPDATE_VERSION
+            );
+        });
     }
 
     #[test]

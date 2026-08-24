@@ -2308,6 +2308,9 @@ name = "markiro-station"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "futures-core",
+ "http",
+ "reqwest",
  "semver",
  "serde",
  "serde_json",
