@@ -5,6 +5,870 @@ import test from "node:test";
 const root = new URL("../../../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 
+const scenarioLinePattern = /^\| [A-Z]+(?:-[A-Z]+)*-\d{2} — /;
+const scenarioId = (cells) => cells[0].split(" — ", 1)[0];
+const parseScenarioRows = (markdown) =>
+  markdown
+    .split("\n")
+    .filter((line) => scenarioLinePattern.test(line))
+    .map((line) =>
+      line
+        .split("|")
+        .slice(1, -1)
+        .map((cell) => cell.trim().replace(/\s+/g, " ")),
+    );
+
+const scenarioTuple = (cells) => {
+  assert.equal(cells.length, 8, `${cells[0]} column inventory`);
+  const separator = cells[0].indexOf(" — ");
+  assert.ok(separator > 0, `${cells[0]} scenario separator`);
+  assert.equal(cells[0].indexOf(" — ", separator + 3), -1, `${cells[0]} unique separator`);
+  return [cells[0].slice(0, separator), cells[0].slice(separator + 3), ...cells.slice(1)];
+};
+
+const mutateScenarioRows = (markdown, mutations) => {
+  const seen = new Set();
+  const result = markdown
+    .split("\n")
+    .map((line) => {
+      if (!scenarioLinePattern.test(line)) return line;
+      const cells = line
+        .split("|")
+        .slice(1, -1)
+        .map((cell) => cell.trim());
+      const id = scenarioId(cells);
+      const mutation = mutations[id];
+      if (!mutation) return line;
+      seen.add(id);
+      const mutated = mutation([...cells]);
+      assert.notDeepEqual(mutated, cells, `${id} mutation must change the row`);
+      return `| ${mutated.join(" | ")} |`;
+    })
+    .join("\n");
+  assert.deepEqual([...seen].sort(), Object.keys(mutations).sort(), "mutation target inventory");
+  return result;
+};
+
+const expectedBootstrapScenarios = [
+  [
+    "BASELINE-01",
+    "the strict DNS-disabled Phase 2 pre-transition beta rollback baseline is complete, publicly/provider-read verified, and no historical immutable release was retrofitted",
+    "BOOTSTRAP_READY",
+    "Live cloud/publication",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BOOTSTRAP-PUBLISH-01",
+    "the first dual-origin-adapter bootstrap beta normal `mode=publish` produces and publicly revalidates both immutable trees before both manifests and the beta alias promotion",
+    "BOOTSTRAP_READY",
+    "Live publication",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BOOTSTRAP-MIGRATION-01",
+    "a GitHub-reachable legacy GitHub-only client's existing GitHub updater path delivers the bootstrap beta",
+    "BOOTSTRAP_READY",
+    "Windows migration",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BOOTSTRAP-MIGRATION-02",
+    "a GitHub-blocked legacy client uses the verified explicit Yandex beta installer for a manual install-over to the bootstrap beta",
+    "BOOTSTRAP_READY",
+    "Restricted-network migration",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BOOTSTRAP-PRESERVE-01",
+    "application ID `app.markiro.station` is unchanged across bootstrap install-over",
+    "BOOTSTRAP_READY",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BOOTSTRAP-PRESERVE-02",
+    "the resolved Station SQLite path and `station-mirror.db` remain unchanged, readable, and contain the prior data",
+    "BOOTSTRAP_READY",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BOOTSTRAP-PRESERVE-03",
+    "station identity and pairing remain usable without re-pairing or exposing credentials",
+    "BOOTSTRAP_READY",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BOOTSTRAP-PRESERVE-04",
+    "local hardware and operator settings remain present after bootstrap install-over",
+    "BOOTSTRAP_READY",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BOOTSTRAP-PRESERVE-05",
+    "scan and print journals retain safe before/after identifiers and counts",
+    "BOOTSTRAP_READY",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BOOTSTRAP-PRESERVE-06",
+    "open/closed boxes and pending print recovery retain safe identifiers and SSCC relationships",
+    "BOOTSTRAP_READY",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BOOTSTRAP-PRESERVE-07",
+    "exceptions remain visible, recoverable, and synchronized according to prior state",
+    "BOOTSTRAP_READY",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BOOTSTRAP-PRESERVE-08",
+    "pending outbox entries survive bootstrap install/restart and later synchronize without duplication or deletion",
+    "BOOTSTRAP_READY",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BOOTSTRAP-BASIC-01",
+    "packaged bootstrap Station starts on the identified Windows and WebView2 runtime, opens the manual update center, and completes a manual update check",
+    "BOOTSTRAP_READY",
+    "Windows basic operation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BOOTSTRAP-BASIC-02",
+    "the configured scanner accepts a production-like scan through the supported serial or keyboard-wedge path",
+    "BOOTSTRAP_READY",
+    "Physical scanner smoke",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BOOTSTRAP-BASIC-03",
+    "the configured printer completes a print and preserves recoverability across a reported failure and retry",
+    "BOOTSTRAP_READY",
+    "Physical printer smoke",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+];
+
+const expectedBetaScenarios = [
+  [
+    "BETA-PUBLISH-01",
+    "the strictly newer validation/candidate beta normal `mode=publish` produces and publicly revalidates both immutable trees before both manifests and the beta alias promotion",
+    "BETA_SIGN_OFF",
+    "Live publication",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-RECOVERY-01",
+    "mutable-only recovery uses `mode=promote-existing` with the exact validation/candidate `repair_tag` after both existing immutable trees validate and match",
+    "BETA_SIGN_OFF",
+    "Live publication recovery",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-RECOVERY-02",
+    "a partial origin or origin mismatch is preserved as an incident; no overwrite, cross-copy, or mutable promotion occurs",
+    "BETA_SIGN_OFF",
+    "Live publication incident",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-UPDATE-01",
+    "bootstrap beta → validation/candidate beta Yandex primary update succeeds with GitHub blocked, including Yandex metadata selection and Yandex package download",
+    "BETA_SIGN_OFF",
+    "Customer restricted network",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-METADATA-FALLBACK-01",
+    "validation/candidate metadata request at Yandex fails before selection, then the exact GitHub fallback metadata is rechecked and visibly used",
+    "BETA_SIGN_OFF",
+    "Customer fallback network",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-PACKAGE-FALLBACK-01",
+    "validation/candidate Yandex metadata selects the candidate, its package download fails before install, then the exact GitHub fallback is rechecked and visibly supplies the package",
+    "BETA_SIGN_OFF",
+    "Customer fallback network",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-NO-UPDATE-01",
+    "a valid validation/candidate Yandex beta no-update response is authoritative and causes no GitHub request",
+    "BETA_SIGN_OFF",
+    "Customer network/diagnostics",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-INTEGRITY-01",
+    "validation/candidate origin version, date, target, or signature mismatch is terminal; no package request, install, or silent fallback starts",
+    "BETA_SIGN_OFF",
+    "Windows integrity boundary",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-INTEGRITY-02",
+    "a bad validation/candidate updater signature is terminal; no fallback or installer process starts",
+    "BETA_SIGN_OFF",
+    "Windows integrity boundary",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-PRESERVE-01",
+    "application ID `app.markiro.station` is unchanged from bootstrap through validation/candidate update",
+    "BETA_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-PRESERVE-02",
+    "the resolved Station SQLite path and `station-mirror.db` remain unchanged and readable after validation/candidate update",
+    "BETA_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-PRESERVE-03",
+    "station identity and pairing remain usable without re-pairing or exposing credentials",
+    "BETA_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-PRESERVE-04",
+    "local hardware and operator settings remain present after validation/candidate update",
+    "BETA_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-PRESERVE-05",
+    "scan and print journals retain safe before/after identifiers and counts",
+    "BETA_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-PRESERVE-06",
+    "open/closed boxes and pending print recovery retain safe identifiers and SSCC relationships",
+    "BETA_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-PRESERVE-07",
+    "exceptions remain visible, recoverable, and synchronized according to prior state",
+    "BETA_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-PRESERVE-08",
+    "pending outbox entries survive validation/candidate install/restart and later synchronize without duplication or deletion",
+    "BETA_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-SHIFT-01",
+    "an active shift denies installation while scans, printing, journals, boxes, exceptions, and outbox continue; install becomes available only after safe shift closure",
+    "BETA_SIGN_OFF",
+    "Packaged Windows/active shift",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-RECOVERY-03",
+    "restart while offline and later reconnect preserve the selected validation/candidate beta and all durable Station work",
+    "BETA_SIGN_OFF",
+    "Packaged Windows/recovery",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-HARDWARE-01",
+    "configured scanner serial and keyboard-wedge paths accept production-like scans after update",
+    "BETA_SIGN_OFF",
+    "Physical scanner",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-HARDWARE-02",
+    "configured printer prints, reports failure, retries, and supports scan-back without losing the pending box",
+    "BETA_SIGN_OFF",
+    "Physical printer",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-HARDWARE-03",
+    "operator sounds remain audible and correctly mapped after update",
+    "BETA_SIGN_OFF",
+    "Physical audio",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-HARDWARE-04",
+    "touch controls, fullscreen, and supported viewport remain operable after update",
+    "BETA_SIGN_OFF",
+    "Physical touch/display",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-WINDOWS-01",
+    "packaged Station starts and updates under the identified Windows and WebView2 runtime",
+    "BETA_SIGN_OFF",
+    "Windows/WebView2",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-WINDOWS-02",
+    "unsigned NSIS and the actual SmartScreen/unknown-publisher outcome are recorded without treating the Tauri updater signature as Authenticode",
+    "BETA_SIGN_OFF",
+    "Windows NSIS/SmartScreen",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-OFFLINE-01",
+    "a complete shift continues offline through scan, journal, box/exception handling, restart, and later outbox reconnect",
+    "BETA_SIGN_OFF",
+    "Packaged Windows/offline shift",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-ROLLBACK-01",
+    "the bootstrap predecessor is deliberately re-promoted by exact `repair_tag`; both beta channel manifests and the beta alias are verified against its immutable trees",
+    "BETA_SIGN_OFF",
+    "Live publication rollback",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "BETA-ROLLBACK-02",
+    "the validation/candidate beta is then re-promoted by exact `repair_tag`; both beta channel manifests and the beta alias are verified again before beta Overall can pass",
+    "BETA_SIGN_OFF",
+    "Live publication restoration",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+];
+
+const expectedStableScenarios = [
+  [
+    "PUBLISH-01",
+    "first dual-origin stable normal `mode=publish` creates and publicly revalidates both immutable trees before GitHub manifest, Yandex manifest, and default stable alias promotion",
+    "FIRST_STABLE_SIGN_OFF",
+    "Live publication",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "STABLE-RECOVERY-01",
+    "stable mutable-only repair revalidates the exact accepted beta and both stable immutable trees before using the protected promotion transaction",
+    "FIRST_STABLE_SIGN_OFF",
+    "Live publication recovery",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "STABLE-RECOVERY-02",
+    "a partial origin or origin mismatch is preserved as an incident; no overwrite, cross-copy, or mutable promotion occurs",
+    "FIRST_STABLE_SIGN_OFF",
+    "Live publication incident",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "STABLE-INSTALL-01",
+    "beta → stable manual install-over uses the verified default Yandex installer outside an active shift",
+    "FIRST_STABLE_SIGN_OFF",
+    "Packaged Windows migration",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "STABLE-CURRENT-01",
+    "the installed first stable receives an authoritative Yandex stable no-update response and makes no GitHub request",
+    "FIRST_STABLE_SIGN_OFF",
+    "Customer network/diagnostics",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "STABLE-UPDATE-01",
+    "stable → stable Yandex primary update succeeds with GitHub blocked, including Yandex metadata selection and Yandex package download",
+    "SUBSEQUENT_STABLE_SIGN_OFF",
+    "Customer restricted network",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "STABLE-METADATA-FALLBACK-01",
+    "stable update metadata request fails at Yandex before candidate selection, then the exact GitHub fallback metadata is rechecked and visibly used",
+    "SUBSEQUENT_STABLE_SIGN_OFF",
+    "Customer fallback network",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "STABLE-PACKAGE-FALLBACK-01",
+    "stable Yandex metadata selects a candidate, its package download fails before install, then the exact GitHub fallback is rechecked and visibly supplies the package",
+    "SUBSEQUENT_STABLE_SIGN_OFF",
+    "Customer fallback network",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "STABLE-INTEGRITY-01",
+    "a stable origin mismatch is terminal; no package request, install, or silent fallback starts",
+    "SUBSEQUENT_STABLE_SIGN_OFF",
+    "Windows integrity boundary",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "STABLE-INTEGRITY-02",
+    "a bad updater signature is terminal; no fallback or installer process starts",
+    "SUBSEQUENT_STABLE_SIGN_OFF",
+    "Windows integrity boundary",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "PRESERVE-01",
+    "application ID is `app.markiro.station` before and after stable install-over",
+    "EVERY_STABLE_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "PRESERVE-02",
+    "the resolved Station SQLite path and `station-mirror.db` remain unchanged and readable",
+    "EVERY_STABLE_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "PRESERVE-03",
+    "station identity and pairing remain usable without re-pairing or exposing credentials",
+    "EVERY_STABLE_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "PRESERVE-04",
+    "local hardware and operator settings remain present",
+    "EVERY_STABLE_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "PRESERVE-05",
+    "scan and print journals retain safe before/after identifiers and counts",
+    "EVERY_STABLE_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "PRESERVE-06",
+    "open/closed boxes and pending print recovery retain safe identifiers and SSCC relationships",
+    "EVERY_STABLE_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "PRESERVE-07",
+    "exceptions remain visible, recoverable, and synchronized according to prior state",
+    "EVERY_STABLE_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "PRESERVE-08",
+    "pending outbox entries survive install/restart and later synchronize without duplication or deletion",
+    "EVERY_STABLE_SIGN_OFF",
+    "Windows data preservation",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "SHIFT-01",
+    "an active shift denies installation while scans, printing, journals, boxes, exceptions, and outbox continue; install becomes available only after safe shift closure",
+    "EVERY_STABLE_SIGN_OFF",
+    "Packaged Windows/active shift",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "RECOVERY-03",
+    "restart while offline and later reconnect preserve the selected stable state and all durable Station work",
+    "EVERY_STABLE_SIGN_OFF",
+    "Packaged Windows/recovery",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "HARDWARE-01",
+    "configured scanner serial and keyboard-wedge paths accept production-like scans after update",
+    "EVERY_STABLE_SIGN_OFF",
+    "Physical scanner",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "HARDWARE-02",
+    "configured printer prints, reports failure, retries, and supports scan-back without losing the pending box",
+    "EVERY_STABLE_SIGN_OFF",
+    "Physical printer",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "HARDWARE-03",
+    "operator sounds remain audible and correctly mapped after update",
+    "EVERY_STABLE_SIGN_OFF",
+    "Physical audio",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "HARDWARE-04",
+    "touch controls, fullscreen, and supported viewport remain operable after update",
+    "EVERY_STABLE_SIGN_OFF",
+    "Physical touch/display",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "WINDOWS-01",
+    "packaged Station starts and updates under the identified Windows and WebView2 runtime",
+    "EVERY_STABLE_SIGN_OFF",
+    "Windows/WebView2",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "WINDOWS-02",
+    "unsigned NSIS and the actual SmartScreen/unknown-publisher outcome are recorded without treating the Tauri updater signature as Authenticode",
+    "EVERY_STABLE_SIGN_OFF",
+    "Windows NSIS/SmartScreen",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "OFFLINE-01",
+    "a complete shift continues offline through scan, journal, box/exception handling, restart, and later outbox reconnect",
+    "EVERY_STABLE_SIGN_OFF",
+    "Packaged Windows/offline shift",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "ROLLBACK-01",
+    "the previous accepted stable is deliberately re-promoted using its recorded `source_beta_tag`; both stable channel manifests and the default alias are verified against its immutable trees",
+    "SUBSEQUENT_STABLE_SIGN_OFF",
+    "Live publication rollback",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "ROLLBACK-02",
+    "the current candidate stable is then re-promoted using its recorded `source_beta_tag`; both stable channel manifests and the default alias are verified again before stable Overall can pass",
+    "SUBSEQUENT_STABLE_SIGN_OFF",
+    "Live publication restoration",
+    "NOT_RUN",
+    "",
+    "",
+    "",
+    "",
+  ],
+];
+
+const expectedAcceptanceScenarios = [
+  ...expectedBootstrapScenarios,
+  ...expectedBetaScenarios,
+  ...expectedStableScenarios,
+];
+
+const assertAcceptanceScenarioTable = (markdown) => {
+  const actual = parseScenarioRows(markdown).map(scenarioTuple);
+  const actualIds = actual.map(([id]) => id);
+  const expectedIds = expectedAcceptanceScenarios.map(([id]) => id);
+  assert.equal(new Set(actualIds).size, actualIds.length, "scenario IDs must be unique");
+  assert.equal(
+    new Set(expectedIds).size,
+    expectedIds.length,
+    "expected scenario IDs must be unique",
+  );
+  assert.deepStrictEqual(actual, expectedAcceptanceScenarios);
+};
+
 test("station beta docs cover manual promotion and recovery", async () => {
   const [runbook, acceptance, readme, checklist, roadmap] = await Promise.all([
     read("docs/runbooks/station-beta-release.md"),
@@ -281,192 +1145,7 @@ test("dual-origin acceptance records distinct flows with complete blank evidence
     /Automated CI and host proof[\s\S]*Windows, hardware, and customer proof/i,
   );
 
-  const expected = [
-    ["BASELINE-01", "BOOTSTRAP_READY", /DNS-disabled.*pre-transition.*rollback baseline/i],
-    [
-      "BOOTSTRAP-PUBLISH-01",
-      "BOOTSTRAP_READY",
-      /first dual-origin-adapter bootstrap beta.*normal `mode=publish`/i,
-    ],
-    [
-      "BOOTSTRAP-MIGRATION-01",
-      "BOOTSTRAP_READY",
-      /GitHub-reachable.*existing GitHub updater.*bootstrap beta/i,
-    ],
-    [
-      "BOOTSTRAP-MIGRATION-02",
-      "BOOTSTRAP_READY",
-      /GitHub-blocked.*Yandex beta installer.*manual install-over.*bootstrap beta/i,
-    ],
-    [
-      "BOOTSTRAP-PRESERVE-01",
-      "BOOTSTRAP_READY",
-      /application ID.*`app\.markiro\.station`.*bootstrap/i,
-    ],
-    [
-      "BOOTSTRAP-PRESERVE-02",
-      "BOOTSTRAP_READY",
-      /SQLite path.*`station-mirror\.db`.*unchanged.*readable/i,
-    ],
-    ["BOOTSTRAP-PRESERVE-03", "BOOTSTRAP_READY", /station identity.*pairing.*without re-pairing/i],
-    ["BOOTSTRAP-PRESERVE-04", "BOOTSTRAP_READY", /hardware.*operator settings.*remain/i],
-    ["BOOTSTRAP-PRESERVE-05", "BOOTSTRAP_READY", /scan.*print journals.*identifiers.*counts/i],
-    [
-      "BOOTSTRAP-PRESERVE-06",
-      "BOOTSTRAP_READY",
-      /open\/closed boxes.*pending print recovery.*SSCC/i,
-    ],
-    ["BOOTSTRAP-PRESERVE-07", "BOOTSTRAP_READY", /exceptions.*visible.*recoverable.*synchron/i],
-    [
-      "BOOTSTRAP-PRESERVE-08",
-      "BOOTSTRAP_READY",
-      /pending outbox.*survive.*restart.*without duplication.*deletion/i,
-    ],
-    ["BOOTSTRAP-BASIC-01", "BOOTSTRAP_READY", /starts.*Windows.*WebView2.*manual update check/i],
-    ["BOOTSTRAP-BASIC-02", "BOOTSTRAP_READY", /scanner.*production-like scan/i],
-    ["BOOTSTRAP-BASIC-03", "BOOTSTRAP_READY", /printer.*print.*failure.*retry/i],
-    [
-      "BETA-PUBLISH-01",
-      "BETA_SIGN_OFF",
-      /strictly newer validation\/candidate beta.*normal `mode=publish`/i,
-    ],
-    ["BETA-RECOVERY-01", "BETA_SIGN_OFF", /exact validation\/candidate `repair_tag`/i],
-    ["BETA-RECOVERY-02", "BETA_SIGN_OFF", /partial.*origin|origin.*mismatch/i],
-    ["BETA-UPDATE-01", "BETA_SIGN_OFF", /bootstrap beta.*validation.*Yandex primary/i],
-    [
-      "BETA-METADATA-FALLBACK-01",
-      "BETA_SIGN_OFF",
-      /validation.*metadata.*Yandex.*fails.*GitHub fallback/i,
-    ],
-    [
-      "BETA-PACKAGE-FALLBACK-01",
-      "BETA_SIGN_OFF",
-      /validation.*Yandex metadata.*package download fails.*GitHub fallback/i,
-    ],
-    ["BETA-NO-UPDATE-01", "BETA_SIGN_OFF", /validation.*Yandex.*no-update.*no GitHub/i],
-    ["BETA-INTEGRITY-01", "BETA_SIGN_OFF", /version.*date.*target.*signature/i],
-    ["BETA-INTEGRITY-02", "BETA_SIGN_OFF", /bad validation\/candidate updater signature/i],
-    [
-      "BETA-PRESERVE-01",
-      "BETA_SIGN_OFF",
-      /application ID.*`app\.markiro\.station`.*bootstrap.*validation/i,
-    ],
-    [
-      "BETA-PRESERVE-02",
-      "BETA_SIGN_OFF",
-      /SQLite path.*`station-mirror\.db`.*unchanged.*readable/i,
-    ],
-    ["BETA-PRESERVE-03", "BETA_SIGN_OFF", /station identity.*pairing.*without re-pairing/i],
-    ["BETA-PRESERVE-04", "BETA_SIGN_OFF", /hardware.*operator settings.*remain/i],
-    ["BETA-PRESERVE-05", "BETA_SIGN_OFF", /scan.*print journals.*identifiers.*counts/i],
-    ["BETA-PRESERVE-06", "BETA_SIGN_OFF", /open\/closed boxes.*pending print recovery.*SSCC/i],
-    ["BETA-PRESERVE-07", "BETA_SIGN_OFF", /exceptions.*visible.*recoverable.*synchron/i],
-    [
-      "BETA-PRESERVE-08",
-      "BETA_SIGN_OFF",
-      /pending outbox.*survive.*restart.*without duplication.*deletion/i,
-    ],
-    ["BETA-SHIFT-01", "BETA_SIGN_OFF", /active shift/i],
-    [
-      "BETA-RECOVERY-03",
-      "BETA_SIGN_OFF",
-      /restart.*offline.*reconnect.*validation.*durable Station work/i,
-    ],
-    ["BETA-HARDWARE-01", "BETA_SIGN_OFF", /scanner serial.*keyboard-wedge.*scans/i],
-    ["BETA-HARDWARE-02", "BETA_SIGN_OFF", /printer.*failure.*retr.*scan-back.*pending box/i],
-    ["BETA-HARDWARE-03", "BETA_SIGN_OFF", /operator sounds.*audible.*mapped/i],
-    ["BETA-HARDWARE-04", "BETA_SIGN_OFF", /touch controls.*fullscreen.*viewport/i],
-    ["BETA-WINDOWS-01", "BETA_SIGN_OFF", /starts.*updates.*Windows.*WebView2/i],
-    [
-      "BETA-WINDOWS-02",
-      "BETA_SIGN_OFF",
-      /unsigned NSIS.*SmartScreen.*Tauri updater signature.*Authenticode/i,
-    ],
-    [
-      "BETA-OFFLINE-01",
-      "BETA_SIGN_OFF",
-      /complete shift.*offline.*scan.*journal.*box.*exception.*restart.*outbox reconnect/i,
-    ],
-    [
-      "BETA-ROLLBACK-01",
-      "BETA_SIGN_OFF",
-      /bootstrap predecessor.*exact `repair_tag`.*manifests.*beta alias/i,
-    ],
-    [
-      "BETA-ROLLBACK-02",
-      "BETA_SIGN_OFF",
-      /validation\/candidate beta.*re-promoted.*exact `repair_tag`.*manifests.*beta alias/i,
-    ],
-    ["PUBLISH-01", "FIRST_STABLE_SIGN_OFF", /first dual-origin stable.*`mode=publish`/i],
-    ["STABLE-RECOVERY-01", "FIRST_STABLE_SIGN_OFF", /mutable-only repair/i],
-    ["STABLE-RECOVERY-02", "FIRST_STABLE_SIGN_OFF", /partial.*origin|origin.*mismatch/i],
-    ["STABLE-INSTALL-01", "FIRST_STABLE_SIGN_OFF", /beta.*stable.*manual install-over/i],
-    ["STABLE-CURRENT-01", "FIRST_STABLE_SIGN_OFF", /stable.*no-update.*no GitHub/i],
-    ["STABLE-UPDATE-01", "SUBSEQUENT_STABLE_SIGN_OFF", /stable.*stable.*Yandex primary/i],
-    ["STABLE-METADATA-FALLBACK-01", "SUBSEQUENT_STABLE_SIGN_OFF", /metadata.*GitHub fallback/i],
-    ["STABLE-PACKAGE-FALLBACK-01", "SUBSEQUENT_STABLE_SIGN_OFF", /package.*GitHub fallback/i],
-    ["STABLE-INTEGRITY-01", "SUBSEQUENT_STABLE_SIGN_OFF", /origin.*mismatch/i],
-    ["STABLE-INTEGRITY-02", "SUBSEQUENT_STABLE_SIGN_OFF", /bad updater signature/i],
-    ["PRESERVE-01", "EVERY_STABLE_SIGN_OFF", /application ID.*`app\.markiro\.station`/i],
-    ["PRESERVE-02", "EVERY_STABLE_SIGN_OFF", /SQLite path.*`station-mirror\.db`.*readable/i],
-    ["PRESERVE-03", "EVERY_STABLE_SIGN_OFF", /station identity.*pairing.*without re-pairing/i],
-    ["PRESERVE-04", "EVERY_STABLE_SIGN_OFF", /hardware.*operator settings.*remain/i],
-    ["PRESERVE-05", "EVERY_STABLE_SIGN_OFF", /scan.*print journals.*identifiers.*counts/i],
-    ["PRESERVE-06", "EVERY_STABLE_SIGN_OFF", /open\/closed boxes.*pending print.*SSCC/i],
-    ["PRESERVE-07", "EVERY_STABLE_SIGN_OFF", /exceptions.*visible.*recoverable.*synchron/i],
-    [
-      "PRESERVE-08",
-      "EVERY_STABLE_SIGN_OFF",
-      /pending outbox.*survive.*restart.*without duplication.*deletion/i,
-    ],
-    ["SHIFT-01", "EVERY_STABLE_SIGN_OFF", /active shift/i],
-    ["RECOVERY-03", "EVERY_STABLE_SIGN_OFF", /restart.*offline.*reconnect.*stable.*durable/i],
-    ["HARDWARE-01", "EVERY_STABLE_SIGN_OFF", /scanner serial.*keyboard-wedge.*scans/i],
-    ["HARDWARE-02", "EVERY_STABLE_SIGN_OFF", /printer.*failure.*retr.*scan-back.*pending box/i],
-    ["HARDWARE-03", "EVERY_STABLE_SIGN_OFF", /operator sounds.*audible.*mapped/i],
-    ["HARDWARE-04", "EVERY_STABLE_SIGN_OFF", /touch controls.*fullscreen.*viewport/i],
-    ["WINDOWS-01", "EVERY_STABLE_SIGN_OFF", /starts.*updates.*Windows.*WebView2/i],
-    [
-      "WINDOWS-02",
-      "EVERY_STABLE_SIGN_OFF",
-      /unsigned NSIS.*SmartScreen.*Tauri updater signature.*Authenticode/i,
-    ],
-    [
-      "OFFLINE-01",
-      "EVERY_STABLE_SIGN_OFF",
-      /complete shift.*offline.*scan.*journal.*box.*exception.*restart.*outbox reconnect/i,
-    ],
-    [
-      "ROLLBACK-01",
-      "SUBSEQUENT_STABLE_SIGN_OFF",
-      /previous accepted stable.*recorded `source_beta_tag`.*manifests.*default alias/i,
-    ],
-    [
-      "ROLLBACK-02",
-      "SUBSEQUENT_STABLE_SIGN_OFF",
-      /current candidate stable.*re-promoted.*recorded `source_beta_tag`.*manifests.*default alias/i,
-    ],
-  ];
-
-  const scenarioRows = acceptance
-    .split("\n")
-    .filter((line) => /^\| [A-Z]+(?:-[A-Z]+)*-\d{2} — /.test(line))
-    .map((line) =>
-      line
-        .split("|")
-        .slice(1, -1)
-        .map((cell) => cell.trim()),
-    );
-  assert.equal(scenarioRows.length, expected.length);
-  const byId = new Map(scenarioRows.map((cells) => [cells[0].split(" — ", 1)[0], cells]));
-  for (const [id, requiredFor, description] of expected) {
-    const row = byId.get(id);
-    assert.ok(row, `missing scenario ${id}`);
-    assert.equal(row[1], requiredFor, `${id} applicability`);
-    assert.match(row[0], description, `${id} description`);
-    assert.equal(row[3], "NOT_RUN", `${id} result`);
-    assert.deepEqual(row.slice(4), ["", "", "", ""], `${id} evidence must start blank`);
-  }
+  assertAcceptanceScenarioTable(acceptance);
 
   assert.deepEqual(
     acceptance.split("\n").filter((line) => /Overall result:/.test(line)),
@@ -476,6 +1155,88 @@ test("dual-origin acceptance records distinct flows with complete blank evidence
       "First/subsequent stable Overall result: `NOT_RUN`",
     ],
   );
+});
+
+test("strict acceptance table rejects semantic and structural mutations", async () => {
+  const acceptance = await read("docs/acceptance/station-dual-origin-release.md");
+  const rows = new Map(parseScenarioRows(acceptance).map((cells) => [scenarioId(cells), cells]));
+  const descriptions = new Map([...rows].map(([id, cells]) => [id, scenarioTuple(cells)[1]]));
+  const betaAudioRow = acceptance
+    .split("\n")
+    .find((line) => line.startsWith("| BETA-HARDWARE-03 — "));
+  assert.ok(betaAudioRow, "BETA-HARDWARE-03 source row");
+
+  const mutations = {
+    "negated scanner operation": mutateScenarioRows(acceptance, {
+      "BOOTSTRAP-BASIC-02": (cells) => [
+        cells[0].replace("accepts", "does not accept"),
+        ...cells.slice(1),
+      ],
+    }),
+    "negated candidate re-promotion": mutateScenarioRows(acceptance, {
+      "BETA-ROLLBACK-02": (cells) => [
+        cells[0].replace("is then re-promoted", "is not re-promoted"),
+        ...cells.slice(1),
+      ],
+    }),
+    "weakened outbox synchronization": mutateScenarioRows(acceptance, {
+      "BETA-PRESERVE-08": (cells) => [
+        cells[0].replace(
+          "survive validation/candidate install/restart and later synchronize without duplication or deletion",
+          "survive validation/candidate install/restart and may later synchronize; duplication or deletion safety is not guaranteed",
+        ),
+        ...cells.slice(1),
+      ],
+    }),
+    "swapped descriptions": mutateScenarioRows(acceptance, {
+      "BETA-HARDWARE-03": (cells) => [
+        `BETA-HARDWARE-03 — ${descriptions.get("BETA-HARDWARE-04")}`,
+        ...cells.slice(1),
+      ],
+      "BETA-HARDWARE-04": (cells) => [
+        `BETA-HARDWARE-04 — ${descriptions.get("BETA-HARDWARE-03")}`,
+        ...cells.slice(1),
+      ],
+    }),
+    "swapped applicability": mutateScenarioRows(acceptance, {
+      "BOOTSTRAP-BASIC-02": (cells) => [cells[0], "BETA_SIGN_OFF", ...cells.slice(2)],
+      "BETA-HARDWARE-01": (cells) => [cells[0], "BOOTSTRAP_READY", ...cells.slice(2)],
+    }),
+    "swapped evidence classes": mutateScenarioRows(acceptance, {
+      "BETA-HARDWARE-03": (cells) => [
+        cells[0],
+        cells[1],
+        "Physical touch/display",
+        ...cells.slice(3),
+      ],
+      "BETA-HARDWARE-04": (cells) => [cells[0], cells[1], "Physical audio", ...cells.slice(3)],
+    }),
+    "changed live-result default": mutateScenarioRows(acceptance, {
+      "BETA-HARDWARE-03": (cells) => [...cells.slice(0, 3), "PASS", ...cells.slice(4)],
+    }),
+    "filled evidence default": mutateScenarioRows(acceptance, {
+      "BETA-HARDWARE-03": (cells) => [...cells.slice(0, 7), "invented-evidence.txt"],
+    }),
+    "duplicated row": acceptance.replace(
+      /(?=\nValidation\/candidate beta Overall result:)/,
+      `\n${betaAudioRow}`,
+    ),
+    "removed row": acceptance.replace(`${betaAudioRow}\n`, ""),
+    "unexpected ID": mutateScenarioRows(acceptance, {
+      "BETA-HARDWARE-03": (cells) => [
+        cells[0].replace("BETA-HARDWARE-03", "BETA-HARDWARE-99"),
+        ...cells.slice(1),
+      ],
+    }),
+  };
+
+  for (const [name, mutatedAcceptance] of Object.entries(mutations)) {
+    assert.throws(
+      () => assertAcceptanceScenarioTable(mutatedAcceptance),
+      { name: "AssertionError" },
+      name,
+    );
+  }
 });
 
 test("beta and stable runbooks define exact post-success acceptance rollback inputs", async () => {
