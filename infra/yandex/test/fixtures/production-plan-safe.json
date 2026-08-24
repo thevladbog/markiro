@@ -1,4 +1,8 @@
 {
+  "variables": {
+    "terraform_service_account_id": { "value": "terraform-sa-id" },
+    "app_service_account_id": { "value": "app-runtime-sa-id" }
+  },
   "resource_changes": [
     {
       "address": "module.compute.yandex_vpc_address.app",
@@ -119,6 +123,7 @@
       "change": {
         "actions": ["no-op"],
         "before": {
+          "id": "release-origin-group-id",
           "name": "markiro-station-releases",
           "use_next": false,
           "origin": [
@@ -130,6 +135,7 @@
           ]
         },
         "after": {
+          "id": "release-origin-group-id",
           "name": "markiro-station-releases",
           "use_next": false,
           "origin": [
@@ -185,6 +191,8 @@
           "cname": "releases.markiro.app",
           "active": true,
           "origin_protocol": "https",
+          "origin_group_id": "release-origin-group-id",
+          "provider_cname": "cdn-provider.example.net",
           "options": [
             {
               "allowed_http_methods": ["GET", "HEAD"],
@@ -205,6 +213,8 @@
           "cname": "releases.markiro.app",
           "active": true,
           "origin_protocol": "https",
+          "origin_group_id": "release-origin-group-id",
+          "provider_cname": "cdn-provider.example.net",
           "options": [
             {
               "allowed_http_methods": ["GET", "HEAD"],

@@ -31,49 +31,51 @@ certificate и CDN выполняется с `enable_station_release_public_dns=
 1. Убедитесь, что `target_sha` — полный 40-символьный SHA текущего `main`.
 2. Зафиксируйте оба DNS input явно. Для первого release plan используйте
    `enable_station_release_public_dns=false`.
-3. Оставьте `plan_key`, `plan_sha256` и `plan_version_id` пустыми, запустите
-   `mode=plan` и approve только Environment `production-infrastructure`.
-4. Проверьте выведенный санитаризированный список Terraform address/actions. В
-   нём не должно быть замены app VM, удаления PostgreSQL, базы,
-   state/media/audit/release bucket, ослабления release policy или выдачи
-   release-доступа app identity.
-5. Сохраните все три non-secret идентификатора из notice успешного run: точный
-   `plan_key` под `production/plans/<GITHUB_RUN_ID>/<GITHUB_RUN_ATTEMPT>/`,
-   `plan_sha256` и `plan_version_id`. Не публикуйте сам plan.
+3. Оставьте `plan_key`, `plan_sha256`, `plan_version_id`, `plan_json_key`,
+   `plan_json_sha256` и `plan_json_version_id` пустыми,
+   `plan_review_confirmed=false`, запустите `mode=plan` и approve только
+   Environment `production-infrastructure`.
+4. Сохраните обе выданные тройки key/SHA-256/VersionId. Выполните полный
+   operator-only retrieval и review из `yandex-infrastructure-apply.md`; один
+   санитаризированный список Terraform address/actions не является review.
+5. Проверьте каждый before/after/after_unknown, включая IAM, DNS, CDN и bucket
+   policy. Не публикуйте binary plan или полный JSON.
 
-Plan run никогда не применяет изменения. Он загружает binary saved plan только
-в защищённый versioned Terraform state bucket. План не является GitHub artifact,
-не печатается в лог или summary, и его полный JSON также не сохраняется там.
+Plan run никогда не применяет изменения. Он привязывает оба object key к точным
+`GITHUB_RUN_ID` и `GITHUB_RUN_ATTEMPT`, затем загружает binary saved plan и полный
+plan JSON только в защищённый versioned Terraform state bucket. Они не являются
+GitHub artifact и не печатаются в log/summary.
 
 ## Запуск `mode=apply`
 
-После просмотра списка изменений остановитесь и получите явное подтверждение
-владельца инфраструктуры на применение именно этого saved plan.
+После полного локального просмотра обоих exact объектов остановитесь и получите
+явное подтверждение владельца инфраструктуры на применение именно этого plan.
 
 1. Запустите новый dispatch `mode=apply` с теми же точными `target_sha`,
    `enable_public_dns` и `enable_station_release_public_dns`.
-2. Введите без изменения полученные `plan_key`, 64-символьный `plan_sha256` и
-   точный `plan_version_id`.
+2. Введите без изменения `plan_key`, `plan_sha256`, `plan_version_id`,
+   `plan_json_key`, `plan_json_sha256`, `plan_json_version_id` и
+   `plan_review_confirmed=true`.
 3. Approve отдельный Environment `production-infrastructure-apply` только после
    того, как проверка плана завершена.
 
 Apply run повторно проверяет SHA/ref и оба boolean input, ограниченный формат и
 metadata object key, загружает только точную версию plan по переданному reviewer
-`plan_version_id`, сверяет SHA-256, повторяет
-`terraform show -json` и production guard, затем применяет этот же файл. После
-успешного apply workflow удаляет точный object `VersionId`; другие ключи и
-префиксы state bucket не затрагиваются.
+`plan_version_id`, сверяет оба SHA-256, регенерирует JSON из binary plan,
+byte/semantic-сравнивает его с exact escrow JSON, повторяет production guard и
+затем применяет этот же файл. После успешного apply workflow удаляет обе точные
+object versions; другие ключи и префиксы state bucket не затрагиваются.
 
 ## Остаточный план после ошибки
 
-Если apply, hash/metadata validation или guard завершился ошибкой, plan object
-намеренно остаётся в escrow для расследования. Не запускайте его повторно
+Если apply, hash/metadata validation или guard завершился ошибкой, оба plan object
+намеренно остаются в escrow для расследования. Не запускайте их повторно
 автоматически. Уполномоченный оператор сначала сверяет run, run attempt,
-`target_sha`, оба DNS input, `plan_key`, `plan_sha256`, `plan_version_id` и
-состояние инфраструктуры. Затем он либо запускает новый plan, либо после
-отдельного подтверждения удаляет только точный key
-`production/plans/<run-id>/<run-attempt>/<sha>/<flags>/production.tfplan` и
-точный reviewer-сохранённый VersionId (`plan_version_id`) через `--version-id`.
+`target_sha`, оба DNS input, обе тройки key/hash/VersionId и состояние
+инфраструктуры. Затем он либо запускает новый plan, либо после отдельного
+подтверждения удаляет только оба exact keys под
+`production/plans/<run-id>/<run-attempt>/<sha>/<flags>/` и точные
+reviewer-сохранённые VersionId через `--version-id`.
 Никогда не используйте unversioned/latest object lookup, не удаляйте
 `production/plans/` целиком и не расширяйте доступ state-backend identity на
 другой bucket или prefix.

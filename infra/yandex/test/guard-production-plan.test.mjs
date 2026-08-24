@@ -40,6 +40,109 @@ function resource(plan, address) {
   return found;
 }
 
+const publisherReference = [
+  "yandex_iam_service_account.station_release_publisher.id",
+  "yandex_iam_service_account.station_release_publisher",
+];
+const releaseBucketReference = [
+  "yandex_storage_bucket.releases.bucket",
+  "yandex_storage_bucket.releases",
+];
+const originGroupReference = [
+  "yandex_cdn_origin_group.releases.id",
+  "yandex_cdn_origin_group.releases",
+];
+const cdnReference = [
+  "yandex_cdn_resource.releases.provider_cname",
+  "yandex_cdn_resource.releases",
+];
+
+function addExactReleaseConfiguration(plan) {
+  plan.configuration = {
+    root_module: {
+      module_calls: {
+        station_releases: {
+          module: {
+            resources: [
+              {
+                address: "yandex_iam_service_account_static_access_key.publisher",
+                expressions: {
+                  service_account_id: { references: publisherReference },
+                },
+              },
+              {
+                address: "yandex_storage_bucket_iam_binding.publisher_uploader",
+                expressions: { members: { references: publisherReference } },
+              },
+              {
+                address: "yandex_storage_bucket_policy.releases",
+                expressions: {
+                  policy: {
+                    references: [
+                      ...releaseBucketReference,
+                      ...publisherReference,
+                      "var.terraform_service_account_id",
+                    ],
+                  },
+                },
+              },
+              {
+                address: "yandex_cdn_resource.releases",
+                expressions: { origin_group_id: { references: originGroupReference } },
+              },
+              {
+                address: "yandex_dns_recordset.public_release",
+                expressions: { data: { references: cdnReference } },
+              },
+            ],
+          },
+        },
+      },
+    },
+  };
+}
+
+function makeProviderComputedReleaseCreate(plan) {
+  addExactReleaseConfiguration(plan);
+  for (const change of plan.resource_changes.filter((candidate) =>
+    candidate.address.startsWith("module.station_releases."),
+  )) {
+    change.change.actions = ["create"];
+    change.change.before = null;
+  }
+  const publisher = resource(
+    plan,
+    "module.station_releases.yandex_iam_service_account.station_release_publisher",
+  );
+  publisher.change.after.id = null;
+  publisher.change.after_unknown = { id: true };
+  const key = resource(
+    plan,
+    "module.station_releases.yandex_iam_service_account_static_access_key.publisher",
+  );
+  key.change.after.service_account_id = null;
+  key.change.after_unknown = { service_account_id: true };
+  const binding = resource(
+    plan,
+    "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader",
+  );
+  binding.change.after.members = [null];
+  binding.change.after_unknown = { members: [true] };
+  const policy = resource(plan, "module.station_releases.yandex_storage_bucket_policy.releases");
+  policy.change.after.policy = null;
+  policy.change.after_unknown = { policy: true };
+  const origin = resource(plan, "module.station_releases.yandex_cdn_origin_group.releases");
+  origin.change.after.id = null;
+  origin.change.after_unknown = { id: true };
+  const cdn = resource(plan, "module.station_releases.yandex_cdn_resource.releases");
+  cdn.change.after.origin_group_id = null;
+  cdn.change.after.provider_cname = null;
+  cdn.change.after_unknown = { origin_group_id: true, provider_cname: true };
+  const dns = resource(plan, "module.station_releases.yandex_dns_recordset.public_release[0]");
+  dns.change.after.data = null;
+  dns.change.after_unknown = { data: true };
+}
+
 async function withPlan(plan, callback) {
   const directory = await mkdtemp(path.join(tmpdir(), "markiro-release-plan-guard-"));
   const planPath = path.join(directory, "plan.json");
@@ -71,53 +174,227 @@ test("production plan guard accepts the exact non-destructive Station release gr
     change.change.actions = ["create"];
     change.change.before = null;
   }
-  const publisher = resource(
-    creation,
-    "module.station_releases.yandex_iam_service_account.station_release_publisher",
-  );
-  publisher.change.after.id = null;
-  publisher.change.after_unknown = { id: true };
-  const key = resource(
-    creation,
-    "module.station_releases.yandex_iam_service_account_static_access_key.publisher",
-  );
-  key.change.after.service_account_id = null;
-  key.change.after.access_key = null;
-  key.change.after.encrypted_secret_key = null;
-  key.change.after_unknown = {
-    service_account_id: true,
-    access_key: true,
-    encrypted_secret_key: true,
-  };
-  const binding = resource(
-    creation,
+  assert.doesNotThrow(() => guardProductionPlan(creation));
+});
+
+test("production plan guard accepts provider-computed create edges only with exact references", async () => {
+  const creation = await readFixture("safe");
+  makeProviderComputedReleaseCreate(creation);
+  assert.doesNotThrow(() => guardProductionPlan(creation));
+
+  const wholeBindingUnknown = copy(creation);
+  const unknownBinding = resource(
+    wholeBindingUnknown,
     "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader",
   );
-  binding.change.after.members = [null];
-  binding.change.after_unknown = { members: [true] };
+  unknownBinding.change.after.members = null;
+  unknownBinding.change.after_unknown = { members: true };
+  assert.doesNotThrow(() => guardProductionPlan(wholeBindingUnknown));
+
+  const knownOriginWithComputedCdnEdge = await readFixture("safe");
+  addExactReleaseConfiguration(knownOriginWithComputedCdnEdge);
+  const computedCdn = resource(
+    knownOriginWithComputedCdnEdge,
+    "module.station_releases.yandex_cdn_resource.releases",
+  );
+  computedCdn.change.actions = ["update"];
+  computedCdn.change.after.origin_group_id = null;
+  computedCdn.change.after_unknown = { origin_group_id: true };
+  assert.doesNotThrow(() => guardProductionPlan(knownOriginWithComputedCdnEdge));
+
+  const knownCdnWithComputedDnsEdge = await readFixture("safe");
+  addExactReleaseConfiguration(knownCdnWithComputedDnsEdge);
+  const computedDns = resource(
+    knownCdnWithComputedDnsEdge,
+    "module.station_releases.yandex_dns_recordset.public_release[0]",
+  );
+  computedDns.change.actions = ["update"];
+  computedDns.change.after.data = null;
+  computedDns.change.after_unknown = { data: true };
+  assert.doesNotThrow(() => guardProductionPlan(knownCdnWithComputedDnsEdge));
+
+  for (const mutate of [
+    (plan) => {
+      delete plan.configuration;
+    },
+    (plan) => {
+      plan.configuration.root_module.module_calls.station_releases.module.resources.find(
+        (candidate) => candidate.address === "yandex_cdn_resource.releases",
+      ).expressions.origin_group_id.references = [
+        "yandex_cdn_origin_group.application.id",
+        "yandex_cdn_origin_group.application",
+      ];
+    },
+    (plan) => {
+      plan.configuration.root_module.module_calls.station_releases.module.resources.find(
+        (candidate) =>
+          candidate.address === "yandex_iam_service_account_static_access_key.publisher",
+      ).expressions.service_account_id.references = [
+        "yandex_iam_service_account.application.id",
+        "yandex_iam_service_account.application",
+      ];
+    },
+    (plan) => {
+      plan.configuration.root_module.module_calls.station_releases.module.resources
+        .find((candidate) => candidate.address === "yandex_dns_recordset.public_release")
+        .expressions.data.references.push("yandex_cdn_resource.application.provider_cname");
+    },
+    (plan) => {
+      plan.configuration.root_module.module_calls.station_releases.module.resources.find(
+        (candidate) => candidate.address === "yandex_storage_bucket_policy.releases",
+      ).expressions.policy.references = releaseBucketReference;
+    },
+  ]) {
+    const invalid = copy(creation);
+    mutate(invalid);
+    reject(invalid);
+  }
+
+  for (const references of [undefined, ["yandex_iam_service_account.application.id"]]) {
+    const invalid = copy(wholeBindingUnknown);
+    const expression =
+      invalid.configuration.root_module.module_calls.station_releases.module.resources.find(
+        (candidate) => candidate.address === "yandex_storage_bucket_iam_binding.publisher_uploader",
+      ).expressions;
+    if (references === undefined) delete expression.members;
+    else expression.members.references = references;
+    reject(invalid);
+  }
+});
+
+test("production plan guard binds release DNS, CDN, origin, bucket, and Terraform principal", async () => {
+  const safe = await readFixture("safe");
+  const mutations = [
+    (plan) => {
+      resource(
+        plan,
+        "module.station_releases.yandex_dns_recordset.public_release[0]",
+      ).change.after.data = ["substituted.example.net."];
+    },
+    (plan) => {
+      plan.resource_changes.push({
+        address: "yandex_dns_recordset.extra_release[0]",
+        type: "yandex_dns_recordset",
+        change: {
+          actions: ["create"],
+          before: null,
+          after: { name: "releases.markiro.app.", type: "A", data: ["203.0.113.9"] },
+        },
+      });
+    },
+    (plan) => {
+      resource(
+        plan,
+        "module.station_releases.yandex_cdn_resource.releases",
+      ).change.after.origin_group_id = "application-origin-group-id";
+    },
+    (plan) => {
+      resource(
+        plan,
+        "module.station_releases.yandex_cdn_origin_group.releases",
+      ).change.after.origin[0].source = "application-media.storage.yandexcloud.net";
+    },
+    (plan) => {
+      plan.resource_changes.push({
+        address: "yandex_resourcemanager_folder_iam_member.app_storage_admin",
+        type: "yandex_resourcemanager_folder_iam_member",
+        change: {
+          actions: ["create"],
+          before: null,
+          after: {
+            folder_id: "folder-id",
+            role: "storage.admin",
+            member: "serviceAccount:app-runtime-sa-id",
+          },
+        },
+      });
+    },
+    (plan) => {
+      const policyChange = resource(
+        plan,
+        "module.station_releases.yandex_storage_bucket_policy.releases",
+      ).change;
+      const policy = JSON.parse(policyChange.after.policy);
+      policy.Statement.find(
+        (statement) => statement.Sid === "AllowTerraformReleaseManagement",
+      ).Principal.CanonicalUser = "app-runtime-sa-id";
+      policyChange.after.policy = JSON.stringify(policy);
+    },
+  ];
+  for (const mutate of mutations) {
+    const plan = copy(safe);
+    mutate(plan);
+    reject(plan);
+  }
+});
+
+test("production plan guard fails closed for unclassified and computed security topology", async () => {
+  const safe = await readFixture("safe");
+  const unclassified = copy(safe);
+  unclassified.resource_changes.push({
+    address: "yandex_vpc_network.unreviewed",
+    type: "yandex_vpc_network",
+    change: { actions: ["no-op"], before: {}, after: {} },
+  });
+  reject(unclassified);
+
+  for (const [address, attribute] of [
+    ["module.station_releases.yandex_cdn_resource.releases", "origin_group_id"],
+    ["module.station_releases.yandex_dns_recordset.public_release[0]", "data"],
+  ]) {
+    const unknown = copy(safe);
+    resource(unknown, address).change.after[attribute] = null;
+    resource(unknown, address).change.after_unknown = { [attribute]: true };
+    reject(unknown);
+  }
+
+  const unknownPolicy = copy(safe);
   const policy = resource(
-    creation,
+    unknownPolicy,
     "module.station_releases.yandex_storage_bucket_policy.releases",
   );
   policy.change.after.policy = null;
   policy.change.after_unknown = { policy: true };
-  const origin = resource(creation, "module.station_releases.yandex_cdn_origin_group.releases");
-  origin.change.after.origin[0].source = null;
-  origin.change.after_unknown = { origin: [{ source: true }] };
-  const validation = resource(
-    creation,
-    "module.station_releases.yandex_dns_recordset.certificate_validation[0]",
-  );
-  validation.change.after.name = null;
-  validation.change.after.type = null;
-  validation.change.after.data = null;
-  validation.change.after_unknown = { name: true, type: true, data: true };
-  const cdn = resource(creation, "module.station_releases.yandex_cdn_resource.releases");
-  cdn.change.after.ssl_certificate[0].certificate_manager_id = null;
-  cdn.change.after_unknown = {
-    ssl_certificate: [{ certificate_manager_id: true }],
-  };
-  assert.doesNotThrow(() => guardProductionPlan(creation));
+  reject(unknownPolicy);
+});
+
+test("production plan guard classifies every safe production action exactly", async () => {
+  const safe = await readFixture("safe");
+  const unrelatedNoOp = copy(safe);
+  unrelatedNoOp.resource_changes.push({
+    address: "module.network.yandex_vpc_network.production",
+    type: "yandex_vpc_network",
+    change: { actions: ["no-op"], before: { id: "network-id" }, after: { id: "network-id" } },
+  });
+  assert.doesNotThrow(() => guardProductionPlan(unrelatedNoOp));
+
+  for (const actions of [["create"], ["update"], ["delete"]]) {
+    const changed = copy(unrelatedNoOp);
+    const network = resource(changed, "module.network.yandex_vpc_network.production");
+    network.change.actions = actions;
+    if (actions[0] === "delete") network.change.after = null;
+    reject(changed);
+  }
+
+  const protectedUpdate = copy(safe);
+  resource(protectedUpdate, "module.compute.yandex_compute_instance.app").change.actions = [
+    "update",
+  ];
+  reject(protectedUpdate);
+
+  for (const actions of [["create"], ["delete"]]) {
+    const dns = copy(safe);
+    dns.resource_changes.push({
+      address: directVmDnsAddresses[0],
+      type: "yandex_dns_recordset",
+      change: {
+        actions,
+        before: actions[0] === "create" ? null : { name: "admin.markiro.app.", type: "A" },
+        after: actions[0] === "delete" ? null : { name: "admin.markiro.app.", type: "A" },
+      },
+    });
+    reject(dns);
+  }
 });
 
 test("production plan guard rejects the committed unsafe release-bucket fixture", async () => {

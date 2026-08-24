@@ -570,6 +570,10 @@ test("infrastructure workflow escrows one reviewed plan between separately prote
   assert.match(workflow, /plan_key:[\s\S]*type:\s*string/);
   assert.match(workflow, /plan_sha256:[\s\S]*type:\s*string/);
   assert.match(workflow, /plan_version_id:[\s\S]*type:\s*string/);
+  assert.match(workflow, /plan_json_key:[\s\S]*type:\s*string/);
+  assert.match(workflow, /plan_json_sha256:[\s\S]*type:\s*string/);
+  assert.match(workflow, /plan_json_version_id:[\s\S]*type:\s*string/);
+  assert.match(workflow, /plan_review_confirmed:[\s\S]*type:\s*boolean/);
   const releaseDnsInput = workflow.match(
     /enable_station_release_public_dns:([\s\S]*?)\n\npermissions:/,
   )?.[1];
@@ -595,17 +599,22 @@ test("infrastructure workflow escrows one reviewed plan between separately prote
   assert.doesNotMatch(applyJob, /terraform[^\n]+\splan(?:\s|$)/);
 
   for (const job of [planJob, applyJob]) {
+    assert.match(job, /actions\/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020/);
+    assert.match(job, /pnpm install --frozen-lockfile/);
     assert.match(job, /\[\[ "\$TARGET_SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
     assert.match(job, /\[\[ "\$GITHUB_REF" == "refs\/heads\/main" \]\]/);
     assert.match(job, /\[\[ "\$\(git rev-parse HEAD\)" == "\$TARGET_SHA" \]\]/);
-    assert.match(job, /case "\$ENABLE_PUBLIC_DNS" in true\|false\)/);
-    assert.match(job, /case "\$ENABLE_STATION_RELEASE_PUBLIC_DNS" in true\|false\)/);
     assert.match(
       job,
       /export TF_VAR_public_dns_enabled="\$ENABLE_PUBLIC_DNS"[\s\S]*export TF_VAR_station_release_public_dns_enabled="\$ENABLE_STATION_RELEASE_PUBLIC_DNS"/,
     );
-    assert.match(job, /node infra\/yandex\/scripts\/guard-production-plan\.mjs "\$plan_json"/);
+    assert.match(
+      job,
+      /node infra\/yandex\/scripts\/guard-production-plan\.mjs "\$(?:plan_json|regenerated_plan_json)"/,
+    );
   }
+  assert.match(planJob, /case "\$ENABLE_PUBLIC_DNS" in true\|false\)/);
+  assert.match(planJob, /case "\$ENABLE_STATION_RELEASE_PUBLIC_DNS" in true\|false\)/);
 
   assert.match(
     planJob,
@@ -613,25 +622,42 @@ test("infrastructure workflow escrows one reviewed plan between separately prote
   );
   assert.match(planJob, /\[\[ "\$GITHUB_RUN_ATTEMPT" =~ \^\[1-9\]\[0-9\]\*\$ \]\]/);
   assert.match(planJob, /plan_sha256=.*sha256sum "\$plan"/);
+  assert.match(planJob, /plan_json_sha256=.*sha256sum "\$plan_json"/);
+  assert.match(planJob, /\(\( plan_size <= 268435456 \)\)/);
+  assert.match(planJob, /\(\( plan_json_size <= 67108864 \)\)/);
   assert.match(planJob, /aws s3api put-object[\s\S]*--bucket "\$YC_STATE_BUCKET_NAME"/);
   assert.match(planJob, /--key "\$plan_key"[\s\S]*--body "\$plan"/);
+  assert.match(planJob, /--key "\$plan_json_key"[\s\S]*--body "\$plan_json"/);
   assert.match(planJob, /--metadata[\s\S]*target-sha=.*enable-public-dns=.*source-run-attempt=/);
   assert.match(planJob, /plan_version_id="\$\(jq -er '\.VersionId' "\$put_response"\)"/);
   assert.match(planJob, /\[\[ "\$plan_version_id" =~ \^\[A-Za-z0-9\._\+\/=\-\]\{1,256\}\$ \]\]/);
   assert.match(planJob, /\[\[ "\$plan_version_id" != "null" \]\]/);
   assert.match(planJob, /printf 'plan_version_id=%s\\n' "\$plan_version_id" >> "\$GITHUB_OUTPUT"/);
-  assert.match(planJob, /Terraform plan escrow::plan_key=%s plan_sha256=%s plan_version_id=%s/);
+  assert.match(
+    planJob,
+    /printf 'plan_json_version_id=%s\\n' "\$plan_json_version_id" >> "\$GITHUB_OUTPUT"/,
+  );
+  assert.match(
+    planJob,
+    /Terraform plan escrow::plan_key=%s plan_sha256=%s plan_version_id=%s plan_json_key=%s plan_json_sha256=%s plan_json_version_id=%s/,
+  );
+  assert.match(planJob, /\[\[ "\$PLAN_REVIEW_CONFIRMED" == "false" \]\]/);
 
   assert.match(applyJob, /PLAN_KEY:\s*\$\{\{ inputs\.plan_key \}\}/);
   assert.match(applyJob, /PLAN_SHA256:\s*\$\{\{ inputs\.plan_sha256 \}\}/);
   assert.match(applyJob, /PLAN_VERSION_ID:\s*\$\{\{ inputs\.plan_version_id \}\}/);
-  assert.match(applyJob, /\[\[ "\$PLAN_SHA256" =~ \^\[0-9a-f\]\{64\}\$ \]\]/);
-  assert.match(applyJob, /\[\[ "\$PLAN_KEY" =~ \^production\\\/plans\\\//);
-  assert.match(applyJob, /\[\[ "\$PLAN_VERSION_ID" =~ \^\[A-Za-z0-9\._\+\/=\-\]\{1,256\}\$ \]\]/);
-  assert.match(applyJob, /\[\[ "\$PLAN_VERSION_ID" != "null" \]\]/);
+  assert.match(applyJob, /PLAN_JSON_KEY:\s*\$\{\{ inputs\.plan_json_key \}\}/);
+  assert.match(applyJob, /PLAN_JSON_SHA256:\s*\$\{\{ inputs\.plan_json_sha256 \}\}/);
+  assert.match(applyJob, /PLAN_JSON_VERSION_ID:\s*\$\{\{ inputs\.plan_json_version_id \}\}/);
+  assert.match(applyJob, /PLAN_REVIEW_CONFIRMED:\s*\$\{\{ inputs\.plan_review_confirmed \}\}/);
+  assert.match(
+    applyJob,
+    /terraform-plan-binding\.mjs validate[\s\\]*"\$TARGET_SHA" "\$ENABLE_PUBLIC_DNS" "\$ENABLE_STATION_RELEASE_PUBLIC_DNS"[\s\\]*"\$PLAN_KEY" "\$PLAN_SHA256" "\$PLAN_VERSION_ID"[\s\\]*"\$PLAN_JSON_KEY" "\$PLAN_JSON_SHA256" "\$PLAN_JSON_VERSION_ID"[\s\\]*"\$PLAN_REVIEW_CONFIRMED" "\$binding"/,
+  );
   assert.ok(
-    applyJob.indexOf('[[ "$PLAN_VERSION_ID" =~') < applyJob.indexOf('github_oidc_token="$(curl'),
-    "the reviewer-supplied VersionId must be validated before authentication",
+    applyJob.indexOf("terraform-plan-binding.mjs validate") <
+      applyJob.indexOf('github_oidc_token="$(curl'),
+    "both reviewer-supplied objects and review confirmation must be validated before authentication",
   );
   assert.match(applyJob, /aws s3api head-object[\s\S]*--key "\$PLAN_KEY"/);
   assert.match(applyJob, /aws s3api get-object[\s\S]*--key "\$PLAN_KEY"/);
@@ -640,26 +666,24 @@ test("infrastructure workflow escrows one reviewed plan between separately prote
     /--arg plan_version_id "\$PLAN_VERSION_ID"[\s\S]*\.VersionId == \$plan_version_id/,
   );
   assert.match(applyJob, /\.Metadata[\s\S]*target-sha[\s\S]*source-run-attempt/);
-  const objectCommands = [
-    ...applyJob.matchAll(
-      /aws s3api (head-object|get-object|delete-object) \\\n(?:[^\n]*\\\n)*[^\n]*/g,
-    ),
-  ];
-  assert.equal(objectCommands.length, 4);
-  assert.deepEqual(
-    objectCommands.map((match) => match[1]),
-    ["head-object", "get-object", "delete-object", "head-object"],
-  );
-  for (const command of objectCommands) {
-    assert.match(command[0], /--version-id "\$PLAN_VERSION_ID"/);
-  }
+  assert.equal((applyJob.match(/aws s3api head-object/g) ?? []).length, 2);
+  assert.equal((applyJob.match(/aws s3api get-object/g) ?? []).length, 2);
+  assert.match(applyJob, /--key "\$PLAN_KEY"[\s\S]*--version-id "\$PLAN_VERSION_ID"/);
+  assert.match(applyJob, /--key "\$PLAN_JSON_KEY"[\s\S]*--version-id "\$PLAN_JSON_VERSION_ID"/);
   assert.doesNotMatch(applyJob, /plan_version_id="\$\(jq/);
-  const hashGuard = applyJob.indexOf("sha256sum --check --status");
+  const hashGuard = applyJob.lastIndexOf("sha256sum --check --status");
+  const byteCompare = applyJob.indexOf('cmp --silent "$plan_json" "$regenerated_plan_json"');
+  const semanticCompare = applyJob.indexOf("jq --slurp -e '.[0] == .[1]'");
   const apply = applyJob.indexOf("terraform -chdir=infra/yandex/production apply");
-  assert.ok(hashGuard > -1 && apply > hashGuard, "exact plan hash must be verified before apply");
-  const deleteEscrow = applyJob.indexOf("aws s3api delete-object", apply);
-  assert.ok(deleteEscrow > apply, "the exact escrowed plan version must be deleted after apply");
-  assert.equal([...applyJob.matchAll(/--version-id "\$PLAN_VERSION_ID"/g)].length, 4);
+  assert.ok(hashGuard > -1 && byteCompare > hashGuard && semanticCompare > byteCompare);
+  assert.ok(apply > semanticCompare, "both exact escrow objects must be compared before apply");
+  const cleanup = applyJob.indexOf("terraform-plan-escrow.mjs cleanup", apply);
+  assert.ok(cleanup > apply, "both exact escrow versions must be typed-cleaned after apply");
+  assert.match(
+    applyJob,
+    /terraform-plan-escrow\.mjs cleanup[\s\\]*"\$YC_STATE_BUCKET_NAME"[\s\\]*"\$PLAN_KEY" "\$PLAN_VERSION_ID"[\s\\]*"\$PLAN_JSON_KEY" "\$PLAN_JSON_VERSION_ID"/,
+  );
+  assert.doesNotMatch(applyJob, /aws s3api delete-object|head-object[^]*2>&1/);
 
   assert.match(
     workflow,

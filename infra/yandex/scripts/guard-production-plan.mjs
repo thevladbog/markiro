@@ -16,6 +16,63 @@ const directVmDnsAddresses = new Set([
   "yandex_dns_recordset.landing_application[0]",
 ]);
 
+const safeProductionResources = new Map([
+  ["module.network.yandex_vpc_network.production", "yandex_vpc_network"],
+  ["module.network.yandex_vpc_gateway.nat", "yandex_vpc_gateway"],
+  ["module.network.yandex_vpc_route_table.private_egress", "yandex_vpc_route_table"],
+  ["module.network.yandex_vpc_subnet.app", "yandex_vpc_subnet"],
+  ["module.network.yandex_vpc_subnet.data", "yandex_vpc_subnet"],
+  ["module.network.yandex_vpc_security_group.app", "yandex_vpc_security_group"],
+  ["module.network.yandex_vpc_security_group.data", "yandex_vpc_security_group"],
+  ["module.compute.data.yandex_compute_image.ubuntu_lts", "yandex_compute_image"],
+  ["module.compute.yandex_vpc_address.app", "yandex_vpc_address"],
+  ["module.compute.yandex_compute_instance.app", "yandex_compute_instance"],
+  ["module.postgres.yandex_mdb_postgresql_cluster.production", "yandex_mdb_postgresql_cluster"],
+  ["module.postgres.yandex_mdb_postgresql_database.application", "yandex_mdb_postgresql_database"],
+  ["module.object_storage.yandex_storage_bucket.media", "yandex_storage_bucket"],
+  ["module.object_storage.yandex_storage_bucket.audit", "yandex_storage_bucket"],
+  ["module.object_storage.yandex_storage_bucket_policy.media_app", "yandex_storage_bucket_policy"],
+  [
+    "module.object_storage.yandex_storage_bucket_iam_binding.app_uploader",
+    "yandex_storage_bucket_iam_binding",
+  ],
+  ...[...directVmDnsAddresses].map((address) => [address, "yandex_dns_recordset"]),
+]);
+
+const retiredProductionResources = new Map([
+  ["yandex_logging_group.application", "yandex_logging_group"],
+  ["module.network.yandex_vpc_subnet.alb", "yandex_vpc_subnet"],
+  ["module.network.yandex_vpc_security_group.alb", "yandex_vpc_security_group"],
+  ["module.compute.terraform_data.app_cloud_init", "terraform_data"],
+  [
+    "module.compute.yandex_compute_instance_iam_binding.deployment_controller_app_viewer",
+    "yandex_compute_instance_iam_binding",
+  ],
+  ["module.compute.yandex_alb_target_group.app", "yandex_alb_target_group"],
+  ["module.ingress.yandex_vpc_address.markiro", "yandex_vpc_address"],
+  ["module.ingress.yandex_cm_certificate.markiro", "yandex_cm_certificate"],
+  ["module.ingress.yandex_dns_recordset.certificate_validation[0]", "yandex_dns_recordset"],
+  ["module.ingress.data.yandex_cm_certificate.issued", "yandex_cm_certificate"],
+  ["module.ingress.yandex_cm_certificate.kiosk", "yandex_cm_certificate"],
+  ["module.ingress.yandex_dns_recordset.kiosk_certificate_validation[0]", "yandex_dns_recordset"],
+  ["module.ingress.data.yandex_cm_certificate.kiosk_issued", "yandex_cm_certificate"],
+  ["module.ingress.yandex_alb_backend_group.app", "yandex_alb_backend_group"],
+  [
+    "module.ingress.yandex_sws_advanced_rate_limiter_profile.markiro",
+    "yandex_sws_advanced_rate_limiter_profile",
+  ],
+  ["module.ingress.yandex_sws_security_profile.markiro", "yandex_sws_security_profile"],
+  ["module.ingress.yandex_alb_http_router.markiro", "yandex_alb_http_router"],
+  ["module.ingress.yandex_alb_virtual_host.markiro", "yandex_alb_virtual_host"],
+  ["module.ingress.yandex_alb_load_balancer.markiro", "yandex_alb_load_balancer"],
+  ["module.ingress.yandex_dns_recordset.application[0]", "yandex_dns_recordset"],
+  ["module.ingress.yandex_dns_recordset.kiosk_application[0]", "yandex_dns_recordset"],
+  ["module.observability.yandex_logging_group.security", "yandex_logging_group"],
+  ["module.observability.yandex_audit_trails_trail.realtime", "yandex_audit_trails_trail"],
+  ["module.observability.yandex_audit_trails_trail.archive", "yandex_audit_trails_trail"],
+  ["module.observability.yandex_monitoring_dashboard.production", "yandex_monitoring_dashboard"],
+]);
+
 const releasePrefix = "module.station_releases.";
 const releaseAddresses = new Set([
   "module.station_releases.yandex_storage_bucket.releases",
@@ -28,13 +85,57 @@ const releaseAddresses = new Set([
   "module.station_releases.yandex_dns_recordset.certificate_validation[0]",
   "module.station_releases.yandex_cdn_resource.releases",
   "module.station_releases.yandex_dns_recordset.public_release[0]",
+  "module.station_releases.data.yandex_cm_certificate.issued",
+]);
+const releaseResourceTypes = new Map([
+  ["module.station_releases.yandex_storage_bucket.releases", "yandex_storage_bucket"],
+  ["module.station_releases.yandex_storage_bucket_policy.releases", "yandex_storage_bucket_policy"],
+  [
+    "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader",
+    "yandex_storage_bucket_iam_binding",
+  ],
+  [
+    "module.station_releases.yandex_iam_service_account.station_release_publisher",
+    "yandex_iam_service_account",
+  ],
+  [
+    "module.station_releases.yandex_iam_service_account_static_access_key.publisher",
+    "yandex_iam_service_account_static_access_key",
+  ],
+  ["module.station_releases.yandex_cdn_origin_group.releases", "yandex_cdn_origin_group"],
+  ["module.station_releases.yandex_cm_certificate.releases", "yandex_cm_certificate"],
+  [
+    "module.station_releases.yandex_dns_recordset.certificate_validation[0]",
+    "yandex_dns_recordset",
+  ],
+  ["module.station_releases.yandex_cdn_resource.releases", "yandex_cdn_resource"],
+  ["module.station_releases.yandex_dns_recordset.public_release[0]", "yandex_dns_recordset"],
+  ["module.station_releases.data.yandex_cm_certificate.issued", "yandex_cm_certificate"],
 ]);
 const requiredReleaseAddresses = new Set(
   [...releaseAddresses].filter(
-    (address) => address !== "module.station_releases.yandex_dns_recordset.public_release[0]",
+    (address) =>
+      address !== "module.station_releases.yandex_dns_recordset.public_release[0]" &&
+      address !== "module.station_releases.data.yandex_cm_certificate.issued",
   ),
 );
 const expectedReleaseDomain = "releases.markiro.app";
+const publisherReference = [
+  "yandex_iam_service_account.station_release_publisher.id",
+  "yandex_iam_service_account.station_release_publisher",
+];
+const releaseBucketReference = [
+  "yandex_storage_bucket.releases.bucket",
+  "yandex_storage_bucket.releases",
+];
+const originGroupReference = [
+  "yandex_cdn_origin_group.releases.id",
+  "yandex_cdn_origin_group.releases",
+];
+const cdnReference = [
+  "yandex_cdn_resource.releases.provider_cname",
+  "yandex_cdn_resource.releases",
+];
 
 function rejected() {
   throw new Error("production plan rejected");
@@ -100,9 +201,60 @@ function knownOrComputed(resource, attribute) {
   return value;
 }
 
+function configurationAddress(address) {
+  if (typeof address !== "string") rejected();
+  return address.replace(/\[(?:\d+|"(?:[^"\\]|\\.)*")\]/g, "");
+}
+
+function collectConfigurationResources(module, prefix, resources) {
+  if (!object(module)) rejected();
+  if (module.resources !== undefined) {
+    if (!Array.isArray(module.resources)) rejected();
+    for (const resource of module.resources) {
+      if (!object(resource) || typeof resource.address !== "string") rejected();
+      const address = prefix ? `${prefix}.${resource.address}` : resource.address;
+      const normalized = configurationAddress(address);
+      if (resources.has(normalized)) rejected();
+      resources.set(normalized, resource);
+    }
+  }
+  if (module.module_calls !== undefined) {
+    if (!object(module.module_calls)) rejected();
+    for (const [name, call] of Object.entries(module.module_calls)) {
+      if (!/^[A-Za-z0-9_-]+$/.test(name) || !object(call) || !object(call.module)) rejected();
+      const childPrefix = prefix ? `${prefix}.module.${name}` : `module.${name}`;
+      collectConfigurationResources(call.module, childPrefix, resources);
+    }
+  }
+}
+
+function proveExactReferences(plan, resource, attribute, expected) {
+  const resources = new Map();
+  collectConfigurationResources(plan.configuration?.root_module, "", resources);
+  const configuration = resources.get(configurationAddress(resource.address));
+  if (!object(configuration) || !object(configuration.expressions)) rejected();
+  const expression = configuration.expressions[attribute];
+  exactKeys(expression, ["references"]);
+  exactStrings(expression.references, expected);
+}
+
+function knownOrReferenced(plan, resource, attribute, expectedReferences) {
+  const value = resource.change?.after?.[attribute];
+  if (value === null || value === undefined) {
+    if (!computed(resource, attribute)) rejected();
+    proveExactReferences(plan, resource, attribute, expectedReferences);
+    return null;
+  }
+  return value;
+}
+
 function onlyCreate(resource) {
   const value = actions(resource);
   return value.length === 1 && value[0] === "create";
+}
+
+function onlyAllowedAction(resourceActions, allowed) {
+  return resourceActions.length === 1 && allowed.includes(resourceActions[0]);
 }
 
 function canonicalUser(statement) {
@@ -119,11 +271,18 @@ function statement(policy, sid, keys) {
   return value;
 }
 
-function validateReleasePolicy(resource, bucketName) {
+function validateReleasePolicy(plan, resource, bucketName, expectedTerraformId, appRuntimeId) {
   const value = after(resource);
   if (value.bucket !== bucketName) rejected();
   if (typeof value.policy !== "string") {
-    if (onlyCreate(resource) && computed(resource, "policy")) return;
+    if (onlyCreate(resource) && computed(resource, "policy")) {
+      proveExactReferences(plan, resource, "policy", [
+        ...releaseBucketReference,
+        ...publisherReference,
+        "var.terraform_service_account_id",
+      ]);
+      return;
+    }
     rejected();
   }
 
@@ -184,7 +343,12 @@ function validateReleasePolicy(resource, bucketName) {
     "Resource",
   ]);
   const terraformId = canonicalUser(terraform);
-  if (terraformId === publisherId) rejected();
+  if (
+    terraformId === publisherId ||
+    terraformId !== expectedTerraformId ||
+    terraformId === appRuntimeId
+  )
+    rejected();
   exactStrings(terraform.Action, ["s3:*"]);
   exactStrings(terraform.Resource, [bucketArn, `${bucketArn}/*`]);
 }
@@ -222,30 +386,36 @@ function validatePublisher(resource) {
   if (value.name !== "markiro-station-release-publisher") rejected();
 }
 
-function validatePublisherKey(resource, publisherId) {
+function validatePublisherKey(plan, resource, publisherId) {
   const value = after(resource);
   if (typeof value.secret_key === "string" && value.secret_key.length > 0) rejected();
-  const serviceAccountId = knownOrComputed(resource, "service_account_id");
+  const serviceAccountId = knownOrReferenced(
+    plan,
+    resource,
+    "service_account_id",
+    publisherReference,
+  );
   if (serviceAccountId !== null && publisherId !== null && serviceAccountId !== publisherId)
     rejected();
   const pgpKey = knownOrComputed(resource, "pgp_key");
   if (pgpKey !== null) nonblank(pgpKey);
 }
 
-function validatePublisherBinding(resource, bucketName, publisherId) {
+function validatePublisherBinding(plan, resource, bucketName, publisherId) {
   const value = after(resource);
   if (value.bucket !== bucketName || value.role !== "storage.uploader") rejected();
-  const members = knownOrComputed(resource, "members");
+  const members = knownOrReferenced(plan, resource, "members", publisherReference);
   if (members === null) return;
   if (
     publisherId === null &&
-    onlyCreate(resource) &&
     Array.isArray(members) &&
     members.length === 1 &&
     members[0] === null &&
     resource.change?.after_unknown?.members?.[0] === true
-  )
+  ) {
+    proveExactReferences(plan, resource, "members", publisherReference);
     return;
+  }
   if (publisherId === null) rejected();
   exactStrings(members, [`serviceAccount:${publisherId}`]);
 }
@@ -256,12 +426,9 @@ function validateOriginGroup(resource, bucketName) {
   if (!Array.isArray(value.origin) || value.origin.length !== 1) rejected();
   const origin = value.origin[0];
   if (!object(origin) || origin.enabled !== true || origin.backup !== false) rejected();
-  if (
-    origin.source !== null &&
-    origin.source !== undefined &&
-    origin.source !== `${bucketName}.storage.yandexcloud.net`
-  )
-    rejected();
+  if (origin.source !== `${bucketName}.storage.yandexcloud.net`) rejected();
+  const id = knownOrComputed(resource, "id");
+  return id === null ? null : nonblank(id);
 }
 
 function validateCertificate(resource) {
@@ -284,12 +451,14 @@ function validateCertificateRecord(resource) {
   if (data !== null && (!Array.isArray(data) || data.length !== 1)) rejected();
 }
 
-function validateCdn(resource) {
+function validateCdn(plan, resource, expectedOriginGroupId) {
   const value = after(resource);
+  const originGroupId = knownOrReferenced(plan, resource, "origin_group_id", originGroupReference);
   if (
     value.cname !== expectedReleaseDomain ||
     value.active !== true ||
-    value.origin_protocol !== "https"
+    value.origin_protocol !== "https" ||
+    (originGroupId !== null && originGroupId !== expectedOriginGroupId)
   )
     rejected();
   if (!Array.isArray(value.options) || value.options.length !== 1) rejected();
@@ -318,13 +487,64 @@ function validateCdn(resource) {
     certificate.certificate_manager_id !== undefined
   )
     nonblank(certificate.certificate_manager_id);
+  const providerCname = knownOrComputed(resource, "provider_cname");
+  return providerCname === null ? null : nonblank(providerCname).replace(/\.+$/, "");
 }
 
-function validatePublicDns(resource) {
+function validatePublicDns(plan, resource, expectedProviderCname) {
   const value = after(resource);
   if (value.name !== `${expectedReleaseDomain}.` || value.type !== "CNAME") rejected();
-  const data = knownOrComputed(resource, "data");
-  if (data !== null && (!Array.isArray(data) || data.length !== 1)) rejected();
+  const data = knownOrReferenced(plan, resource, "data", cdnReference);
+  if (data === null) return;
+  if (!Array.isArray(data) || data.length !== 1 || data[0] !== `${expectedProviderCname}.`)
+    rejected();
+}
+
+function planVariable(plan, name) {
+  const variable = plan.variables?.[name];
+  if (!object(variable) || Object.keys(variable).some((key) => key !== "value")) rejected();
+  return nonblank(variable.value);
+}
+
+function storageCapableRole(role) {
+  return (
+    typeof role === "string" &&
+    (role.startsWith("storage.") || role === "admin" || role === "editor")
+  );
+}
+
+function containsAppPrincipal(value, appRuntimeId) {
+  const principal = `serviceAccount:${appRuntimeId}`;
+  if (value === appRuntimeId || value === principal) return true;
+  if (Array.isArray(value)) return value.some((item) => containsAppPrincipal(item, appRuntimeId));
+  if (object(value))
+    return Object.values(value).some((item) => containsAppPrincipal(item, appRuntimeId));
+  return false;
+}
+
+function rejectApplicationStorageGrants(resource, appRuntimeId, releaseBucketName) {
+  for (const value of [resource.change?.before, resource.change?.after]) {
+    if (!object(value) || !containsAppPrincipal(value, appRuntimeId)) continue;
+    if (
+      [
+        "yandex_resourcemanager_folder_iam_member",
+        "yandex_resourcemanager_folder_iam_binding",
+        "yandex_resourcemanager_cloud_iam_member",
+        "yandex_resourcemanager_cloud_iam_binding",
+      ].includes(resource.type) &&
+      storageCapableRole(value.role)
+    )
+      rejected();
+    if (
+      [
+        "yandex_storage_bucket_iam_binding",
+        "yandex_storage_bucket_grant",
+        "yandex_storage_bucket_policy",
+      ].includes(resource.type) &&
+      (value.bucket === releaseBucketName || resource.address.startsWith(releasePrefix))
+    )
+      rejected();
+  }
 }
 
 function validateDirectVmDns(resource) {
@@ -338,20 +558,58 @@ function validateDirectVmDns(resource) {
 export function guardProductionPlan(plan) {
   if (!plan || typeof plan !== "object" || !Array.isArray(plan.resource_changes)) rejected();
 
+  const expectedTerraformId = planVariable(plan, "terraform_service_account_id");
+  const appRuntimeId = planVariable(plan, "app_service_account_id");
+  if (expectedTerraformId === appRuntimeId) rejected();
+
   const seen = new Set();
   const resources = new Map();
   for (const resource of plan.resource_changes) {
     if (!resource || typeof resource !== "object" || typeof resource.address !== "string")
       rejected();
-    const guarded =
-      protectedAddresses.has(resource.address) ||
-      directVmDnsAddresses.has(resource.address) ||
-      resource.address.startsWith(releasePrefix);
-    if (!guarded) continue;
     if (seen.has(resource.address)) rejected();
-    if (resource.address.startsWith(releasePrefix) && !releaseAddresses.has(resource.address))
-      rejected();
+    const expectedType =
+      releaseResourceTypes.get(resource.address) ??
+      safeProductionResources.get(resource.address) ??
+      retiredProductionResources.get(resource.address);
+    if (!expectedType || resource.type !== expectedType) rejected();
     const resourceActions = actions(resource);
+    if (
+      retiredProductionResources.has(resource.address) &&
+      (resourceActions.length !== 1 ||
+        resourceActions[0] !== "delete" ||
+        resource.change?.after !== null)
+    )
+      rejected();
+    if (safeProductionResources.has(resource.address)) {
+      const allowed = directVmDnsAddresses.has(resource.address)
+        ? ["no-op", "update"]
+        : resource.address.includes(".data.")
+          ? ["no-op", "read"]
+          : ["no-op"];
+      if (!onlyAllowedAction(resourceActions, allowed)) rejected();
+    }
+    if (
+      resource.address === "module.station_releases.data.yandex_cm_certificate.issued" &&
+      !onlyAllowedAction(resourceActions, ["no-op", "read"])
+    )
+      rejected();
+    if (
+      releaseResourceTypes.has(resource.address) &&
+      resource.address !== "module.station_releases.data.yandex_cm_certificate.issued"
+    ) {
+      const allowed =
+        resource.address === "module.station_releases.yandex_dns_recordset.public_release[0]"
+          ? ["no-op", "create", "update", "delete"]
+          : ["no-op", "create", "update"];
+      if (!onlyAllowedAction(resourceActions, allowed)) rejected();
+    }
+    if (
+      releaseResourceTypes.has(resource.address) &&
+      resource.address !== "module.station_releases.yandex_dns_recordset.public_release[0]" &&
+      resourceActions.includes("delete")
+    )
+      rejected();
     if (protectedAddresses.has(resource.address) && resourceActions.includes("delete")) rejected();
     seen.add(resource.address);
     resources.set(resource.address, resource);
@@ -373,19 +631,24 @@ export function guardProductionPlan(plan) {
   const publisherIdValue = knownOrComputed(publisher, "id");
   if (publisherIdValue !== null) nonblank(publisherIdValue);
   validatePublisherKey(
+    plan,
     resources.get("module.station_releases.yandex_iam_service_account_static_access_key.publisher"),
     publisherIdValue,
   );
   validatePublisherBinding(
+    plan,
     resources.get("module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader"),
     bucketName,
     publisherIdValue,
   );
   validateReleasePolicy(
+    plan,
     resources.get("module.station_releases.yandex_storage_bucket_policy.releases"),
     bucketName,
+    expectedTerraformId,
+    appRuntimeId,
   );
-  validateOriginGroup(
+  const releaseOriginGroupId = validateOriginGroup(
     resources.get("module.station_releases.yandex_cdn_origin_group.releases"),
     bucketName,
   );
@@ -395,13 +658,17 @@ export function guardProductionPlan(plan) {
   );
   const cdn = resources.get("module.station_releases.yandex_cdn_resource.releases");
   const publicDns = resources.get("module.station_releases.yandex_dns_recordset.public_release[0]");
-  if (publicDns && publicDns.change?.after !== null) validatePublicDns(publicDns);
   const publicDnsLive =
     publicDns && (publicDns.change?.before !== null || publicDns.change?.after !== null);
   if (includesDelete(cdn) && publicDnsLive) rejected();
-  if (cdn.change?.after !== null) validateCdn(cdn);
+  const providerCname =
+    cdn.change?.after !== null ? validateCdn(plan, cdn, releaseOriginGroupId) : null;
+  if (publicDns && publicDns.change?.after !== null) {
+    validatePublicDns(plan, publicDns, providerCname);
+  }
 
   for (const resource of plan.resource_changes) {
+    rejectApplicationStorageGrants(resource, appRuntimeId, bucketName);
     if (
       resource.address ===
         "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader" ||

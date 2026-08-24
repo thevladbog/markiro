@@ -31,13 +31,17 @@ enable_station_release_public_dns=false
 plan_key=
 plan_sha256=
 plan_version_id=
+plan_json_key=
+plan_json_sha256=
+plan_json_version_id=
+plan_review_confirmed=false
 ```
 
 Approve Environment `production-infrastructure`. Workflow строит один saved
 Terraform plan, проверяет запрет замены app VM и удаления PostgreSQL, базы, media
 и временно сохранённого audit bucket, но ничего не применяет. Просмотрите
-санитаризированный список изменений и сохраните все три выданных non-secret
-значения: `plan_key`, `plan_sha256` и точный `plan_version_id`.
+полный exact plan по operator-only процедуре
+`yandex-infrastructure-apply.md` и сохраните обе тройки key/SHA-256/VersionId.
 
 Ожидаемые удаления: ALB, backend/target groups, ALB subnet/address/security
 group, Certificate Manager certificates, SWS/ARL, Audit Trails, облачные log
@@ -55,11 +59,16 @@ enable_station_release_public_dns=false
 plan_key=<exact-key-from-reviewed-plan-run>
 plan_sha256=<exact-64-hex-from-reviewed-plan-run>
 plan_version_id=<exact-version-id-from-reviewed-plan-run>
+plan_json_key=<exact-json-key-from-reviewed-plan-run>
+plan_json_sha256=<exact-json-64-hex-from-reviewed-plan-run>
+plan_json_version_id=<exact-json-version-id-from-reviewed-plan-run>
+plan_review_confirmed=true
 ```
 
 Approve отдельный Environment `production-infrastructure-apply` только после
-review. Workflow повторно проверит binding и SHA-256, применит точный escrowed
-plan и удалит его точную версию после успеха.
+review. Workflow повторно проверит binding, оба SHA-256 и byte/semantic
+совпадение полного JSON, применит точный escrowed plan и удалит обе точные
+версии после успеха.
 
 ## 4. Проверить прямой DNS
 
