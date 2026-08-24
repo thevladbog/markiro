@@ -27,6 +27,7 @@ import {
   type PickupScanRejectionRowDto,
   type RejectionState,
 } from "./rejections-api.js";
+import { PickupViewNav } from "./PickupViewNav.js";
 
 /**
  * «Для себя» → отклонённые сканы. The durable home for codes the server
@@ -163,6 +164,7 @@ export function RejectionsPage() {
           </Link>
         }
       />
+      <PickupViewNav />
 
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
         <div style={{ width: 200 }}>

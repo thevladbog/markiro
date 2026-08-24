@@ -220,7 +220,7 @@ it.each(["/catalog/new", "/catalog/p1/edit"])(
 it("allows a read-only operator to open write-off reasons directly", async () => {
   renderAccessRoute("/kiosks/reasons", OPERATIONS_READ_ONLY);
 
-  expect(await screen.findByRole("heading", { name: "Киоски" })).toBeDefined();
+  expect(await screen.findByRole("heading", { name: "Выбытие" })).toBeDefined();
   expect(await screen.findByText("Причины списания не добавлены")).toBeDefined();
   expect(screen.queryByTestId("forbidden-page")).toBeNull();
   expect(screen.queryByRole("button", { name: "Добавить причину" })).toBeNull();

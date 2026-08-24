@@ -31,6 +31,7 @@ import {
   type PickupOrderStatus,
 } from "./api.js";
 import { useOpenRejectionSummary } from "./rejections-api.js";
+import { PickupViewNav } from "./PickupViewNav.js";
 
 type StatusFilter = "all" | PickupOrderStatus;
 type ReasonFilter = "all" | PickupOrderReason;
@@ -265,6 +266,7 @@ function PickupPageContent({
           ) : null
         }
       />
+      <PickupViewNav />
 
       {rejections.openCount > 0 && (
         <Alert

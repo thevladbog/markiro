@@ -1121,6 +1121,12 @@
     },
     "pickup": {
       "title": "Disposal",
+      "views": {
+        "label": "Disposal views",
+        "orders": "Orders",
+        "rejections": "Rejected scans",
+        "reasons": "Reasons"
+      },
       "emptyTitle": "No orders yet",
       "emptyHint": "Orders will appear here once employees start picking up items at the self-service kiosk.",
       "addAction": "Bulk export",

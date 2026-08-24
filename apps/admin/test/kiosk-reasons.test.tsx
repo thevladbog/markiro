@@ -137,10 +137,10 @@ it("moves reasons to a route-backed sibling view", async () => {
   fetchMock.mockClear();
   await user.click(await screen.findByRole("link", { name: "Причины списания" }));
 
-  expect(router.state.location.pathname).toBe("/kiosks/reasons");
-  expect(screen.getByRole("link", { name: "Причины списания" }).getAttribute("aria-current")).toBe(
-    "page",
-  );
+  expect(router.state.location.pathname).toBe("/pickup/reasons");
+  expect(
+    (await screen.findByRole("link", { name: "Причины" })).getAttribute("aria-current"),
+  ).toBe("page");
   expect(await screen.findByText(REASON_A.name)).toBeDefined();
   expect(screen.queryByText(ONLINE_KIOSK.name)).toBeNull();
   expect(fetchMock).not.toHaveBeenCalledWith("/api/kiosks", expect.anything());
@@ -154,7 +154,7 @@ it("keeps a failed reason edit in its row with the exact payload", async () => {
         ? jsonResponse(409, { message: "Reason is referenced" })
         : undefined,
   });
-  renderKiosksRouter("/kiosks/reasons");
+  renderKiosksRouter("/pickup/reasons");
   const user = userEvent.setup();
 
   await user.click(await screen.findByRole("button", { name: "Изменить" }));
@@ -179,7 +179,7 @@ it("keeps a failed reason edit in its row with the exact payload", async () => {
 
 it("renders a semantic reasons table for an authorized user", async () => {
   stubFetch({ reasons: [REASON_A] });
-  renderKiosksRouter("/kiosks/reasons");
+  renderKiosksRouter("/pickup/reasons");
 
   await screen.findByText(REASON_A.name);
   const table = screen.getByRole("table", { name: "Причины списания" });
@@ -198,9 +198,9 @@ it("uses a table-shaped loading state for reasons", async () => {
   stubFetch({
     onRequest: (path) => (path.endsWith("/api/pickup-reasons") ? pendingReasons : undefined),
   });
-  renderKiosksRouter("/kiosks/reasons");
+  renderKiosksRouter("/pickup/reasons");
 
-  await screen.findByRole("heading", { name: "Киоски" });
+  await screen.findByRole("heading", { name: "Выбытие" });
   const loading = screen.getByRole("status");
   expect(loading.querySelector("table")).not.toBeNull();
 });
@@ -217,7 +217,7 @@ it("does not fetch write-off reasons from the kiosk view", async () => {
 
 it("keeps direct read-only reasons access readable", async () => {
   stubFetch({ access: OPERATIONS_READ_ONLY, reasons: [REASON_A] });
-  renderKiosksRouter("/kiosks/reasons");
+  renderKiosksRouter("/pickup/reasons");
 
   expect(await screen.findByText(REASON_A.name)).toBeDefined();
   const table = screen.getByRole("table", { name: "Причины списания" });
@@ -232,7 +232,7 @@ it("keeps direct read-only reasons access readable", async () => {
 
 it("uses the full empty state for an authorized empty reasons table", async () => {
   stubFetch({ reasons: [] });
-  renderKiosksRouter("/kiosks/reasons");
+  renderKiosksRouter("/pickup/reasons");
 
   expect(await screen.findByText("Причины списания не добавлены")).toBeDefined();
   expect(screen.getByText("Причины не добавлены")).toBeDefined();
@@ -241,7 +241,7 @@ it("uses the full empty state for an authorized empty reasons table", async () =
 
 it("associates create and edit validation with the exact invalid reason field", async () => {
   const fetchMock = stubFetch({ reasons: [REASON_A] });
-  renderKiosksRouter("/kiosks/reasons");
+  renderKiosksRouter("/pickup/reasons");
   const user = userEvent.setup();
 
   await user.click(await screen.findByRole("button", { name: "Добавить причину" }));
@@ -296,7 +296,7 @@ it("creates a reason with the exact trimmed payload", async () => {
         ? jsonResponse(201, { id: "r2", name: "Брак упаковки", sortOrder: 2 })
         : undefined,
   });
-  renderKiosksRouter("/kiosks/reasons");
+  renderKiosksRouter("/pickup/reasons");
   const user = userEvent.setup();
 
   await user.click(await screen.findByRole("button", { name: "Добавить причину" }));
@@ -328,7 +328,7 @@ it("announces successful reason create, update, and delete operations", async ()
       return undefined;
     },
   });
-  renderKiosksRouter("/kiosks/reasons");
+  renderKiosksRouter("/pickup/reasons");
   const user = userEvent.setup();
 
   await user.click(await screen.findByRole("button", { name: "Добавить причину" }));
@@ -354,7 +354,7 @@ it("keeps a failed delete in its confirmation dialog", async () => {
         ? jsonResponse(409, { message: "Reason is referenced" })
         : undefined,
   });
-  renderKiosksRouter("/kiosks/reasons");
+  renderKiosksRouter("/pickup/reasons");
   const user = userEvent.setup();
 
   await user.click(await screen.findByRole("button", { name: "Удалить" }));
@@ -366,44 +366,44 @@ it("keeps a failed delete in its confirmation dialog", async () => {
 
 it("protects a non-empty create draft before local navigation", async () => {
   stubFetch({ reasons: [REASON_A] });
-  const { router } = renderKiosksRouter("/kiosks/reasons");
+  const { router } = renderKiosksRouter("/pickup/reasons");
   const user = userEvent.setup();
 
   await user.click(await screen.findByRole("button", { name: "Добавить причину" }));
   await user.type(screen.getByLabelText("Название"), "Брак упаковки");
   await user.click(
-    within(screen.getByRole("navigation", { name: "Разделы киосков" })).getByRole("link", {
-      name: "Киоски",
+    within(screen.getByRole("navigation", { name: "Разделы выбытия" })).getByRole("link", {
+      name: "Заявки",
     }),
   );
   expect(await screen.findByRole("alertdialog", { name: "Отменить изменения?" })).toBeDefined();
-  expect(router.state.location.pathname).toBe("/kiosks/reasons");
+  expect(router.state.location.pathname).toBe("/pickup/reasons");
 
   await user.click(screen.getByRole("button", { name: "Не сохранять" }));
-  await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+  await waitFor(() => expect(router.state.location.pathname).toBe("/pickup"));
 });
 
 it("leaves modified local-navigation clicks to the browser", async () => {
   stubFetch({ reasons: [REASON_A] });
-  const { router } = renderKiosksRouter("/kiosks/reasons");
+  const { router } = renderKiosksRouter("/pickup/reasons");
   const user = userEvent.setup();
 
   await user.click(await screen.findByRole("button", { name: "Добавить причину" }));
   await user.type(screen.getByLabelText("Название"), "Брак упаковки");
-  const kiosksLink = within(screen.getByRole("navigation", { name: "Разделы киосков" })).getByRole(
+  const kiosksLink = within(screen.getByRole("navigation", { name: "Разделы выбытия" })).getByRole(
     "link",
-    { name: "Киоски" },
+    { name: "Заявки" },
   );
 
   expect(fireEvent.click(kiosksLink, { button: 0, ctrlKey: true })).toBe(true);
   expect(screen.queryByRole("alertdialog", { name: "Отменить изменения?" })).toBeNull();
-  expect(router.state.location.pathname).toBe("/kiosks/reasons");
+  expect(router.state.location.pathname).toBe("/pickup/reasons");
 });
 
 it("confirms before replacing a dirty row edit with another row", async () => {
   const reasonB = { id: "r2", name: "Истёк срок годности", sortOrder: 2 };
   stubFetch({ reasons: [REASON_A, reasonB] });
-  renderKiosksRouter("/kiosks/reasons");
+  renderKiosksRouter("/pickup/reasons");
   const user = userEvent.setup();
 
   await user.click((await screen.findAllByRole("button", { name: "Изменить" }))[0]!);
@@ -418,7 +418,7 @@ it("confirms before replacing a dirty row edit with another row", async () => {
 
 it("confirms before replacing a dirty row edit with the create row", async () => {
   stubFetch({ reasons: [REASON_A] });
-  renderKiosksRouter("/kiosks/reasons");
+  renderKiosksRouter("/pickup/reasons");
   const user = userEvent.setup();
 
   await user.click(await screen.findByRole("button", { name: "Изменить" }));
@@ -441,20 +441,20 @@ it("marks local navigation unavailable while a reason mutation is pending", asyn
     onRequest: (path, init) =>
       path.endsWith("/api/pickup-reasons") && init?.method === "POST" ? createResponse : undefined,
   });
-  const { router } = renderKiosksRouter("/kiosks/reasons");
+  const { router } = renderKiosksRouter("/pickup/reasons");
   const user = userEvent.setup();
 
   await user.click(await screen.findByRole("button", { name: "Добавить причину" }));
   await user.type(screen.getByLabelText("Название"), "Брак упаковки");
   await user.click(screen.getByRole("button", { name: "Создать" }));
 
-  const kiosksLink = within(screen.getByRole("navigation", { name: "Разделы киосков" })).getByRole(
+  const kiosksLink = within(screen.getByRole("navigation", { name: "Разделы выбытия" })).getByRole(
     "link",
-    { name: "Киоски" },
+    { name: "Заявки" },
   );
   await waitFor(() => expect(kiosksLink.getAttribute("aria-disabled")).toBe("true"));
   await user.click(kiosksLink);
-  expect(router.state.location.pathname).toBe("/kiosks/reasons");
+  expect(router.state.location.pathname).toBe("/pickup/reasons");
 });
 
 it("does not replace a dirty edit when a query refetches", async () => {
@@ -465,7 +465,7 @@ it("does not replace a dirty edit when a query refetches", async () => {
         ? jsonResponse(200, { items: [currentReason] })
         : undefined,
   });
-  const { queryClient } = renderKiosksRouter("/kiosks/reasons");
+  const { queryClient } = renderKiosksRouter("/pickup/reasons");
   const user = userEvent.setup();
 
   await user.click(await screen.findByRole("button", { name: "Изменить" }));
@@ -487,7 +487,7 @@ it("preserves a dirty reason draft when a background refetch fails", async () =>
       return jsonResponse(200, { items: [REASON_A] });
     },
   });
-  const { queryClient } = renderKiosksRouter("/kiosks/reasons");
+  const { queryClient } = renderKiosksRouter("/pickup/reasons");
   const user = userEvent.setup();
 
   await user.click(await screen.findByRole("button", { name: "Изменить" }));

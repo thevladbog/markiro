@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { createBrowserRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
+import { createBrowserRouter, createRoutesFromElements, Navigate, Route, RouterProvider } from "react-router";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
@@ -37,7 +37,7 @@ import { InvitationPage } from "./pages/invitations/InvitationPage.js";
 import { KiosksPage } from "./pages/kiosks/index.js";
 import { KioskPairingPanelRoute } from "./pages/kiosks/KioskPairingPanelRoute.js";
 import { KioskCreatePanelRoute, KioskEditPanelRoute } from "./pages/kiosks/KioskPanelRoute.js";
-import { ReasonsPage } from "./pages/kiosks/ReasonsPage.js";
+import { ReasonsPage } from "./pages/pickup/ReasonsPage.js";
 import { LabelEditorPage } from "./pages/labels/editor/index.js";
 import { LabelTemplatesPage } from "./pages/labels/index.js";
 import { LinesPage } from "./pages/lines/index.js";
@@ -320,14 +320,7 @@ function appRouteElements() {
             }
           />
         </Route>
-        <Route
-          path="kiosks/reasons"
-          element={
-            <RequireCapability capability={C.OPERATIONS_READ}>
-              <ReasonsPage />
-            </RequireCapability>
-          }
-        />
+        <Route path="kiosks/reasons" element={<Navigate to="/pickup/reasons" replace />} />
         <Route
           path="integrations"
           element={
@@ -373,6 +366,14 @@ function appRouteElements() {
           element={
             <RequireCapability capability={C.OPERATIONS_READ}>
               <PickupPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="pickup/reasons"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <ReasonsPage />
             </RequireCapability>
           }
         />

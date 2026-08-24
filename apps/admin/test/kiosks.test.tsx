@@ -10,7 +10,7 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import type * as KiosksApiModule from "../src/pages/kiosks/api.js";
 import { KiosksPage } from "../src/pages/kiosks/index.js";
-import { ReasonsPage } from "../src/pages/kiosks/ReasonsPage.js";
+import { ReasonsPage } from "../src/pages/pickup/ReasonsPage.js";
 
 const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
 

@@ -362,7 +362,9 @@ describe("routing", () => {
       </QueryClientProvider>,
     );
 
-    await waitFor(() => expect(screen.getByText("Отклонённые сканы")).toBeDefined());
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Отклонённые сканы" })).toBeDefined(),
+    );
     expect(screen.queryByText("order detail")).toBeNull();
   });
 });
