@@ -2290,6 +2290,7 @@ mod tests {
     struct RecordingProgress {
         events: Vec<StationUpdateProgress>,
         fail_after: Option<usize>,
+        first_progress: Option<mpsc::Sender<()>>,
     }
 
     impl ProgressSink for RecordingProgress {
@@ -2298,6 +2299,13 @@ mod tests {
                 return Err(PackageDownloadFailure::Cancelled);
             }
             self.events.push(event);
+            if matches!(event, StationUpdateProgress::Progress { .. }) {
+                if let Some(first_progress) = self.first_progress.take() {
+                    first_progress
+                        .send(())
+                        .expect("signal first retained package bytes");
+                }
+            }
             Ok(())
         }
     }
@@ -2359,7 +2367,6 @@ mod tests {
             content_length: Option<u64>,
             prefix: Vec<u8>,
             stalled_for: Duration,
-            ready: Option<mpsc::Sender<()>>,
         },
         Truncated {
             content_length: u64,
@@ -2490,7 +2497,6 @@ mod tests {
                     content_length,
                     prefix,
                     stalled_for,
-                    ready,
                 } => {
                     write_http_response_head(
                         &mut package_stream,
@@ -2504,9 +2510,6 @@ mod tests {
                     package_stream
                         .flush()
                         .expect("flush stalled package prefix");
-                    if let Some(ready) = ready {
-                        ready.send(()).expect("signal stalled package");
-                    }
                     std::thread::sleep(stalled_for);
                 }
                 LocalPackageResponse::Truncated {
@@ -3586,6 +3589,7 @@ mod tests {
         let mut progress = RecordingProgress {
             events: Vec::new(),
             fail_after: Some(1),
+            first_progress: None,
         };
 
         let error = run_candidate_install(
@@ -3941,7 +3945,6 @@ mod tests {
                     content_length: Some(4),
                     prefix: b"te".to_vec(),
                     stalled_for: Duration::from_millis(125),
-                    ready: None,
                 })
             else {
                 return;
@@ -4074,13 +4077,12 @@ mod tests {
 
     #[test]
     fn download_real_pinned_update_cancellation_interrupts_a_stalled_body_and_cleans() {
-        let (ready_tx, ready_rx) = mpsc::channel();
+        let (first_progress_tx, first_progress_rx) = mpsc::channel();
         let Some((manifest_url, server)) =
             spawn_local_update_server(LocalPackageResponse::Stalled {
                 content_length: Some(4),
                 prefix: b"te".to_vec(),
                 stalled_for: Duration::from_millis(125),
-                ready: Some(ready_tx),
             })
         else {
             return;
@@ -4093,12 +4095,17 @@ mod tests {
             8,
             Arc::clone(&probe),
         );
-        let mut sink = RecordingProgress::default();
+        let mut sink = RecordingProgress {
+            first_progress: Some(first_progress_tx),
+            ..RecordingProgress::default()
+        };
         let control = Arc::new(TransferControl::default());
         let canceller = {
             let control = Arc::clone(&control);
             std::thread::spawn(move || {
-                ready_rx.recv().expect("stalled body is ready");
+                first_progress_rx
+                    .recv()
+                    .expect("partial package bytes were retained");
                 control.cancel();
             })
         };
