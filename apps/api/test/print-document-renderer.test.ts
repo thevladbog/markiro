@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { renderPrintHtml } from "../src/modules/billing/print-document-html";
 import { documentBarcodeValue } from "../src/modules/billing/print-document-layout";
-import { renderPrintPdf } from "../src/modules/billing/print-document-pdf";
+import { formatOfferTermsText, renderPrintPdf } from "../src/modules/billing/print-document-pdf";
 import type { PrintDocumentModel, PrintLine } from "../src/modules/billing/print-document-model";
 
 const baseLine: PrintLine = {
@@ -84,15 +84,16 @@ describe("print document HTML renderer", () => {
 
   it("renders the approved invoice hierarchy without duplicate labels", () => {
     const html = renderPrintHtml(baseInvoice);
+    const body = html.split("</head><body>")[1] ?? "";
 
-    expect(count(html, "СЧЁТ НА ОПЛАТУ")).toBe(1);
+    expect(count(body, "СЧЁТ НА ОПЛАТУ")).toBe(1);
     expect(html).toContain("№ 184 · 24.08.2026");
     expect(html).toContain("Лицензия и услуги платформы Markiro");
     expect(html).not.toContain("Основной расчётный счёт");
     expect(html).not.toContain("Оплатить по QR");
     expect(html).toContain('aria-label="QR-код для оплаты счёта"');
     expect(html).toContain('aria-label="Штрихкод формы"');
-    expect(count(html, "Сформировано системой Markiro")).toBe(1);
+    expect(count(body, "Сформировано системой Markiro")).toBe(1);
   });
 
   it("renders the approved eight-module Markiro lockup in the print header", () => {
@@ -117,18 +118,33 @@ describe("print document HTML renderer", () => {
   });
 
   it("renders offer cooperation terms and its non-invoice notice", () => {
+    const termsHtml =
+      '<h2>Порядок оплаты</h2><p>Смотрите <a href="https://markiro.ru/terms">условия</a>.</p><table><thead><tr><th>Этап</th><th>Срок</th></tr></thead><tbody><tr><td>Запуск</td><td>5 дней</td></tr></tbody></table>';
     const html = renderPrintHtml({
       ...baseInvoice,
       kind: "offer",
       number: "КП-27",
       status: "published",
-      termsHtml: "<p>Стоимость фиксируется на 30 календарных дней.</p>",
+      termsHtml,
     });
+    const body = html.split("</head><body>")[1] ?? "";
 
-    expect(count(html, "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ")).toBe(1);
+    expect(count(body, "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ")).toBe(1);
     expect(html).toContain("УСЛОВИЯ СОТРУДНИЧЕСТВА");
-    expect(html).toContain("Стоимость фиксируется на 30 календарных дней.");
+    expect(html).toContain("<h2>Порядок оплаты</h2>");
+    expect(html).toContain('<a href="https://markiro.ru/terms">условия</a>');
+    expect(html).toContain("<table><thead><tr><th>Этап</th><th>Срок</th></tr></thead>");
     expect(html).toContain("Не является счётом на оплату");
+  });
+
+  it("preserves offer headings, links, and table rows in PDF text", () => {
+    expect(
+      formatOfferTermsText(
+        '<h2>Порядок оплаты</h2><p>Смотрите <a href="https://markiro.ru/terms">условия</a>.</p><table><thead><tr><th>Этап</th><th>Срок</th></tr></thead><tbody><tr><td>Запуск</td><td>5 дней</td></tr></tbody></table>',
+      ),
+    ).toBe(
+      "Порядок оплаты\nСмотрите условия (https://markiro.ru/terms).\nЭтап\tСрок\nЗапуск\t5 дней",
+    );
   });
 
   it("keeps the machine barcode ASCII-safe for Cyrillic offer numbers", () => {
@@ -227,7 +243,7 @@ describe("print document HTML renderer", () => {
     expect(withComment.byteLength).not.toBe(withoutComment.byteLength);
   });
 
-  it("lays out a long invoice as two explicitly numbered pages", async () => {
+  it("keeps browser print furniture out while repeating document chrome", async () => {
     const lines = Array.from({ length: 15 }, (_, index) => ({
       ...baseLine,
       position: index + 1,
@@ -240,8 +256,35 @@ describe("print document HTML renderer", () => {
     const pdf = await renderPrintPdf(model);
 
     expect(countPdfPages(pdf)).toBe(2);
-    expect(html).toContain("Лист 1 из 2");
-    expect(html).toContain("Лист 2 из 2");
+    expect(html).toContain("@page{size:A4;margin:0}");
+    expect(html).toContain(".document-header{position:fixed");
+    expect(html).toContain('.document-id span::after{content:""}');
+    expect(html).toContain(".document-footer{position:fixed");
+    expect(html).not.toContain("counter(page)");
+    expect(html).not.toContain("@top-left{");
+    expect(html).not.toContain("@bottom-left{");
+    expect(html).not.toContain("Лист 1 из 2");
     expect(count(html, "БАНКОВСКИЕ РЕКВИЗИТЫ")).toBe(1);
+  });
+
+  it("lets the renderers paginate maximum-size comments and cooperation terms", async () => {
+    const longDescription = "Подробное описание услуги ".repeat(380).slice(0, 9_900);
+    const longTerms = `<h2>Подробные условия</h2><p>${"Условие сотрудничества ".repeat(820).slice(0, 19_000)}</p>`;
+    const model: PrintDocumentModel = {
+      ...baseInvoice,
+      kind: "offer",
+      number: "КП-LONG",
+      status: "published",
+      lines: [{ ...baseLine, description: longDescription }],
+      termsHtml: longTerms,
+    };
+
+    const html = renderPrintHtml(model);
+    const pdf = await renderPrintPdf(model);
+
+    expect(countPdfPages(pdf)).toBeGreaterThan(3);
+    expect(html).toContain(longDescription);
+    expect(html).toContain("Подробные условия");
+    expect(html).toContain("@page{size:A4;margin:0}");
   });
 });

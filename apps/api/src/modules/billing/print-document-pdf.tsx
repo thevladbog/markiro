@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import sanitizeHtml from "sanitize-html";
 import sharp from "sharp";
+import { sanitizeOfferTermsHtml } from "../platform-offers/offer-terms";
 import {
   amountInWords,
   documentBarcodeValue,
@@ -23,7 +24,6 @@ import {
   formatMoney,
   formatPrintDate,
   formatPrintDateTime,
-  paginatePrintLines,
   paymentPurpose,
   paymentQrPayload,
   profileIdentity,
@@ -51,26 +51,35 @@ const colors = {
 
 const styles = StyleSheet.create({
   page: {
-    paddingTop: 28,
+    paddingTop: 93,
     paddingHorizontal: 32,
     paddingBottom: 45,
     fontFamily: "IBM Plex Sans",
     fontSize: 8.5,
     color: colors.ink,
   },
-  header: {
+  headerRule: {
+    position: "absolute",
+    top: 28,
+    left: 32,
+    right: 32,
     height: 47,
     borderBottomWidth: 0.7,
     borderBottomColor: colors.rule,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
   },
-  brandLogo: { width: 113.4, height: 25.9 },
-  documentId: { alignItems: "flex-end", gap: 4 },
-  documentKind: { fontSize: 7.5, fontWeight: 600, letterSpacing: 1, color: "#565b54" },
+  brandLogo: { position: "absolute", top: 28, left: 32, width: 113.4, height: 25.9 },
+  documentKind: {
+    position: "absolute",
+    top: 28,
+    right: 32,
+    fontSize: 7.5,
+    fontWeight: 600,
+    letterSpacing: 1,
+    color: "#565b54",
+  },
+  documentMeta: { position: "absolute", top: 49, right: 32, fontSize: 8.5 },
   mono: { fontFamily: "IBM Plex Sans", letterSpacing: 0.45 },
-  body: { paddingTop: 18 },
+  body: {},
   subject: { fontSize: 20, fontWeight: 600, lineHeight: 1.05, maxWidth: 390 },
   meta: { marginTop: 5, marginBottom: 11, color: colors.muted },
   sectionLabel: { fontSize: 7, fontWeight: 600, letterSpacing: 0.9, color: "#565b54" },
@@ -201,8 +210,17 @@ function qrVector(svg: string): QrVector {
   };
 }
 
-function termsText(value: string): string {
-  return sanitizeHtml(value.replace(/<\/(?:p|li)>/gi, "$&\n"), {
+export function formatOfferTermsText(value: string): string {
+  const structured = sanitizeOfferTermsHtml(value)
+    .replace(
+      /<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi,
+      (_match, href: string, label: string) => `${label} (${href})`,
+    )
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<li\b[^>]*>/gi, "• ")
+    .replace(/<\/(?:th|td)>/gi, "\t")
+    .replace(/<\/(?:p|li|h[1-6]|tr|table|ul|ol)>/gi, "\n");
+  return sanitizeHtml(structured, {
     allowedTags: [],
     allowedAttributes: {},
   })
@@ -210,31 +228,28 @@ function termsText(value: string): string {
     .replaceAll("&amp;", "&")
     .replaceAll("&quot;", '"')
     .replaceAll("&#39;", "'")
+    .replaceAll(/[ \t]+\n/g, "\n")
+    .replaceAll(/\n[ \t]+/g, "\n")
+    .replaceAll(/\n{3,}/g, "\n\n")
     .trim();
 }
 
-function Header({
-  model,
-  page,
-  totalPages,
-  logo,
-}: {
-  model: PrintDocumentModel;
-  page: number;
-  totalPages: number;
-  logo: string;
-}) {
+function Header({ model, logo }: { model: PrintDocumentModel; logo: string }) {
   return (
-    <View style={styles.header}>
-      <Image style={styles.brandLogo} src={logo} />
-      <View style={styles.documentId}>
-        <Text style={styles.documentKind}>{documentKindLabel(model)}</Text>
-        <Text style={styles.mono}>
-          № {model.number} · {formatPrintDate(model.issuedOrPublishedAt)}
-          {totalPages > 1 ? ` · Лист ${page} из ${totalPages}` : ""}
-        </Text>
-      </View>
-    </View>
+    <>
+      <View style={styles.headerRule} fixed />
+      <Image style={styles.brandLogo} src={logo} cache={false} fixed />
+      <Text style={styles.documentKind} fixed>
+        {documentKindLabel(model)}
+      </Text>
+      <Text
+        style={[styles.mono, styles.documentMeta]}
+        fixed
+        render={({ pageNumber, totalPages }) =>
+          `№ ${model.number} · ${formatPrintDate(model.issuedOrPublishedAt)}${totalPages > 1 ? ` · Лист ${pageNumber} из ${totalPages}` : ""}`
+        }
+      />
+    </>
   );
 }
 
@@ -329,7 +344,7 @@ function LinesTable({ lines }: { lines: PrintLine[] }) {
 function Closing({ model }: { model: PrintDocumentModel }) {
   return (
     <>
-      <View style={styles.totals}>
+      <View style={styles.totals} wrap={false}>
         <View style={styles.totalRow}>
           <Text>Подытог</Text>
           <Text style={styles.mono}>{formatMoney(model.subtotal)}</Text>
@@ -347,7 +362,7 @@ function Closing({ model }: { model: PrintDocumentModel }) {
       {model.kind === "offer" && model.termsHtml ? (
         <View style={styles.noteSection}>
           <Text style={styles.sectionLabel}>УСЛОВИЯ СОТРУДНИЧЕСТВА</Text>
-          <Text style={styles.noteText}>{termsText(model.termsHtml)}</Text>
+          <Text style={styles.noteText}>{formatOfferTermsText(model.termsHtml)}</Text>
         </View>
       ) : null}
       {model.kind === "invoice" ? (
@@ -358,7 +373,7 @@ function Closing({ model }: { model: PrintDocumentModel }) {
       ) : (
         <Text style={styles.offerNotice}>Не является счётом на оплату</Text>
       )}
-      <View style={styles.signing}>
+      <View style={styles.signing} wrap={false}>
         <View style={styles.signature}>
           <Text style={styles.sectionLabel}>ПОСТАВЩИК</Text>
           <Text style={styles.signatureLine}>________________ / ____________________</Text>
@@ -382,45 +397,33 @@ export async function renderPrintPdf(model: PrintDocumentModel): Promise<Buffer>
     }),
     900,
   );
-  const pages = paginatePrintLines(model.lines);
   const pdf = await renderToBuffer(
     <Document title={`${documentKindLabel(model)} № ${model.number}`}>
-      {pages.map((lines, index) => {
-        const first = index === 0;
-        const last = index === pages.length - 1;
-        return (
-          <Page key={`${model.number}-${index + 1}`} size="A4" style={styles.page}>
-            <Header model={model} page={index + 1} totalPages={pages.length} logo={logo} />
-            <View style={styles.body}>
-              {first ? (
-                <>
-                  <Text style={styles.subject}>{documentSubject(model)}</Text>
-                  <Text style={styles.meta}>
-                    {model.kind === "invoice" ? "от" : "от"}{" "}
-                    {formatPrintDate(model.issuedOrPublishedAt)} ·{" "}
-                    {model.kind === "invoice" ? "оплатить до" : "действительно до"}{" "}
-                    {formatPrintDate(model.dueOrExpiresAt)}
-                  </Text>
-                  <Bank model={model} qr={qr} />
-                  <View style={styles.parties}>
-                    <Party label="ПОСТАВЩИК" profile={model.seller} />
-                    <Party label="ПОКУПАТЕЛЬ" profile={model.buyer} />
-                  </View>
-                </>
-              ) : null}
-              <View style={styles.itemsHeading}>
-                <Text style={styles.sectionLabel}>
-                  СОСТАВ {model.kind === "invoice" ? "СЧЁТА" : "ПРЕДЛОЖЕНИЯ"}
-                </Text>
-                <Text style={[styles.mono, styles.muted]}>{model.lines.length} поз.</Text>
-              </View>
-              <LinesTable lines={lines} />
-              {last ? <Closing model={model} /> : null}
-            </View>
-            <Footer model={model} barcode={barcode} />
-          </Page>
-        );
-      })}
+      <Page size="A4" style={styles.page} wrap>
+        <Header model={model} logo={logo} />
+        <View style={styles.body}>
+          <Text style={styles.subject}>{documentSubject(model)}</Text>
+          <Text style={styles.meta}>
+            от {formatPrintDate(model.issuedOrPublishedAt)} ·{" "}
+            {model.kind === "invoice" ? "оплатить до" : "действительно до"}{" "}
+            {formatPrintDate(model.dueOrExpiresAt)}
+          </Text>
+          <Bank model={model} qr={qr} />
+          <View style={styles.parties} wrap={false}>
+            <Party label="ПОСТАВЩИК" profile={model.seller} />
+            <Party label="ПОКУПАТЕЛЬ" profile={model.buyer} />
+          </View>
+          <View style={styles.itemsHeading}>
+            <Text style={styles.sectionLabel}>
+              СОСТАВ {model.kind === "invoice" ? "СЧЁТА" : "ПРЕДЛОЖЕНИЯ"}
+            </Text>
+            <Text style={[styles.mono, styles.muted]}>{model.lines.length} поз.</Text>
+          </View>
+          <LinesTable lines={model.lines} />
+          <Closing model={model} />
+        </View>
+        <Footer model={model} barcode={barcode} />
+      </Page>
     </Document>,
   );
   if (pdf.byteLength > 10 * 1024 * 1024) throw new Error("print_document_too_large");
