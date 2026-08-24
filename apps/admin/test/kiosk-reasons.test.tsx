@@ -134,9 +134,9 @@ it("redirects the retired kiosk reasons URL to the disposal view", async () => {
 
   expect(await screen.findByText(REASON_A.name)).toBeDefined();
   expect(router.state.location.pathname).toBe("/pickup/reasons");
-  expect(
-    (await screen.findByRole("link", { name: "Причины" })).getAttribute("aria-current"),
-  ).toBe("page");
+  expect((await screen.findByRole("link", { name: "Причины" })).getAttribute("aria-current")).toBe(
+    "page",
+  );
   expect(fetchMock).not.toHaveBeenCalledWith("/api/kiosks", expect.anything());
 });
 

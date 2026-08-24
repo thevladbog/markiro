@@ -307,7 +307,8 @@ function appRouteElements() {
           <Route path="reasons" element={<Navigate to="/pickup/reasons" replace />} />
           <Route path="new" element={<KioskPathRedirect />} />
           <Route path=":kioskId/edit" element={<KioskPathRedirect suffix="edit" />} />
-          <Route path=":kioskId/pair" element={<KioskPathRedirect suffix="pair" />} /></Route>
+          <Route path=":kioskId/pair" element={<KioskPathRedirect suffix="pair" />} />
+        </Route>
         <Route
           path="integrations"
           element={

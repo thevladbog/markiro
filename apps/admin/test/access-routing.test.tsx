@@ -203,9 +203,9 @@ it("redirects the retired kiosks section into the unified devices page", async (
   const { requests } = renderAccessRoute("/kiosks", MANAGER_ACCESS);
 
   expect(await screen.findByRole("heading", { name: "Устройства" })).toBeDefined();
-  await expect.poll(() => requests.some((request) => request.startsWith("/api/devices"))).toBe(
-    true,
-  );
+  await expect
+    .poll(() => requests.some((request) => request.startsWith("/api/devices")))
+    .toBe(true);
   expect(requests).not.toContain("/api/kiosks");
 });
 

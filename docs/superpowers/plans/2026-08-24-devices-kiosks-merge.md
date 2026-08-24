@@ -21,6 +21,7 @@
 ### Task 1: DevicesPage hosts kiosk panels
 
 **Files:**
+
 - Modify: `apps/admin/src/app.tsx` (routes 257–305)
 - Modify: `apps/admin/src/pages/devices/index.tsx`
 - Modify: `apps/admin/src/pages/kiosks/KioskPanelRoute.tsx` (`closeKioskPanel`, create-panel pair link)
@@ -29,6 +30,7 @@
 - Test: `apps/admin/test/devices.test.tsx` (add panel-hosting cases), `apps/admin/test/kiosks-routing.test.tsx` (retarget paths)
 
 **Interfaces:**
+
 - Consumes: `KiosksPanelContext`, `KiosksPanelLocationState`, `useKiosks` from `pages/kiosks/`.
 - Produces: `devices` route is a layout route with children `kiosks/new`, `kiosks/:kioskId/edit`, `kiosks/:kioskId/pair`; `DevicesPage` renders `<Outlet context={… satisfies KiosksPanelContext}>`; `closeKioskPanel` falls back to `/devices` (not `/kiosks`).
 
@@ -72,6 +74,7 @@
 ```
 
 Keep the old `/kiosks` subtree for now (Task 3 removes it) so existing tests stay green mid-refactor.
+
 - [ ] **Step 3: Host the Outlet in DevicesPage.** In `pages/devices/index.tsx` import `Outlet` from react-router, `useKiosks` and `KiosksPanelContext` type from `../kiosks/`; inside the component add `const kiosksResult = useKiosks();` and before the closing `</div>` render:
 
 ```tsx
@@ -91,6 +94,7 @@ Keep the old `/kiosks` subtree for now (Task 3 removes it) so existing tests sta
 ```
 
 Note: `useKiosks` mounts an extra query on the devices page; acceptable (same data the panels need, cached by TanStack Query).
+
 - [ ] **Step 4: Retarget panel navigation.** In `KioskPanelRoute.tsx`: `closeKioskPanel` fallback `navigate("/kiosks", …)` → `navigate("/devices", …)`; create-success pair button `/kiosks/${created.id}/pair` → `/devices/kiosks/${created.id}/pair`. In `KioskPairingPanelRoute.tsx` update any `/kiosks` navigation targets the same way. In `DeviceActions.tsx` change the settings link to `to={`/devices/kiosks/${device.id}/edit`}` and pass `state={{ kiosksBackground: true }}` so closing returns to the devices list in-place.
 - [ ] **Step 5: Run tests, fix retargeted expectations** in `kiosks-routing.test.tsx` / `device-pairing` tests that assert old link hrefs. Run: `pnpm --filter @markiro/admin test` — expect PASS.
 - [ ] **Step 6: Commit** — `git commit -m "feat(admin): host kiosk settings panels under /devices"`.
@@ -98,6 +102,7 @@ Note: `useKiosks` mounts an extra query on the devices page; acceptable (same da
 ### Task 2: Reasons move into «Выбытие» with tab navigation
 
 **Files:**
+
 - Create: `apps/admin/src/pages/pickup/PickupViewNav.tsx`
 - Move: `apps/admin/src/pages/kiosks/ReasonsPage.tsx` → `apps/admin/src/pages/pickup/ReasonsPage.tsx` (imports become `../kiosks/…` for api/css helpers)
 - Modify: `apps/admin/src/pages/pickup/index.tsx`, `apps/admin/src/pages/pickup/Rejections.tsx` (render the nav)
@@ -106,6 +111,7 @@ Note: `useKiosks` mounts an extra query on the devices page; acceptable (same da
 - Test: `apps/admin/test/kiosk-reasons.test.tsx` (retarget to `/pickup/reasons`), `apps/admin/test/pickup.test.tsx` (nav presence)
 
 **Interfaces:**
+
 - Produces: `PickupViewNav` — `(props: { active: "orders" | "rejections" | "reasons" }) => ReactElement`, renders `<nav aria-label={t("pages.pickup.views.label")}>` with three `NavLink`s to `/pickup`, `/pickup/rejections`, `/pickup/reasons`. `ReasonsPage` no longer wraps itself in `KiosksLayout`; it wraps content in `AdminPage` + own `PageHeader` (`pages.kiosks.reasons.title`) + `PickupViewNav`.
 
 - [ ] **Step 1: Failing test** — in `pickup.test.tsx` assert the orders page renders links «Заявки», «Отклонённые сканы», «Причины» pointing to `/pickup`, `/pickup/rejections`, `/pickup/reasons`. Expect FAIL.
@@ -140,6 +146,7 @@ export function PickupViewNav(): ReactElement {
 ```
 
 en: `{ "label": "Disposal views", "orders": "Orders", "rejections": "Rejected scans", "reasons": "Reasons" }`. Render `<PickupViewNav />` right under the `PageHeader` in `pickup/index.tsx` and `Rejections.tsx`.
+
 - [ ] **Step 3: Move `ReasonsPage`** to `pages/pickup/ReasonsPage.tsx`; replace every `KiosksLayout` wrapper with `<AdminPage className="mk-kiosks-page"><PageHeader title={t("pages.kiosks.reasons.title")} /><PickupViewNav />…</AdminPage>`; drop the `onNavigate`/`navigate` plumbing that switched between `/kiosks` views (the editor's `{ kind: "navigate" }` state entries now target `/pickup` | `/pickup/reasons` or are removed if only used for the old tabs). Update `app.tsx`: add `pickup/reasons` route (element `ReasonsPage`, `OPERATIONS_READ`) **above** `pickup/:id`; point the old `kiosks/reasons` route at a `<Navigate to="/pickup/reasons" replace />` for now.
 - [ ] **Step 4: Retarget `kiosk-reasons.test.tsx`** to mount `/pickup/reasons`. Run: `pnpm --filter @markiro/admin test` — expect PASS.
 - [ ] **Step 5: Commit** — `git commit -m "feat(admin): move disposal reasons under /pickup with view tabs"`.
@@ -147,6 +154,7 @@ en: `{ "label": "Disposal views", "orders": "Orders", "rejections": "Rejected sc
 ### Task 3: Retire the «Киоски» section
 
 **Files:**
+
 - Modify: `apps/admin/src/app.tsx` (replace `/kiosks` subtree with redirects)
 - Modify: `apps/admin/src/layout/AppShell.tsx` (drop `nav.kiosks` entry)
 - Modify: `apps/admin/src/pages/kiosks/KioskPanelRoute.tsx` (add archive action to edit panel)
@@ -155,6 +163,7 @@ en: `{ "label": "Disposal views", "orders": "Orders", "rejections": "Rejected sc
 - Test: `apps/admin/test/shell-layout.test.tsx`, delete `apps/admin/test/kiosks.test.tsx` list cases (fold archive coverage into a panel test), retarget `kiosks-routing.test.tsx` redirect cases
 
 **Interfaces:**
+
 - Consumes: `useArchiveKiosk` from `pages/kiosks/api.ts`.
 - Produces: edit panel footer gains a destructive «Архивировать» button (visible when `kiosk.status === "active"`; panel already renders only for `OPERATIONS_WRITE`) opening the existing archive `ConfirmDialog` flow (moved from the deleted list's `AuthorizedKioskRowActions`); on success: toast `pages.kiosks.toasts.archiveSuccess`, close panel.
 
@@ -188,6 +197,7 @@ function KioskPathRedirect({ suffix }: { suffix: "edit" | "pair" }) {
 ### Task 4: Final verification and docs
 
 **Files:**
+
 - Modify: `docs/working-map.md` (if it names the «Киоски» admin section), `docs/architecture.md` (only if it lists admin sidebar sections)
 
 - [ ] **Step 1:** `pnpm --filter @markiro/admin lint && pnpm --filter @markiro/admin typecheck && pnpm --filter @markiro/admin test` — expect all PASS.

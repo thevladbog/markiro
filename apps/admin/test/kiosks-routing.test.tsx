@@ -357,7 +357,9 @@ it("continues from create to safe pairing when the kiosk refetch fails", async (
   await waitFor(() => expect(kioskListRequests).toBe(2));
   await user.click(screen.getByRole("button", { name: "Настроить привязку" }));
 
-  await waitFor(() => expect(router.state.location.pathname).toBe(`/devices/kiosks/${created.id}/pair`));
+  await waitFor(() =>
+    expect(router.state.location.pathname).toBe(`/devices/kiosks/${created.id}/pair`),
+  );
   expect(await screen.findByRole("button", { name: "Сформировать код" })).toBeDefined();
   expect(
     fetchMock.mock.calls.some(
@@ -654,7 +656,10 @@ it("initializes the employee QR checkbox from an enabled kiosk profile", async (
     return undefined;
   });
   renderKiosksRouter(
-    ["/devices", { pathname: `/devices/kiosks/${KIOSK.id}/edit`, state: { kiosksBackground: true } }],
+    [
+      "/devices",
+      { pathname: `/devices/kiosks/${KIOSK.id}/edit`, state: { kiosksBackground: true } },
+    ],
     WRITE_ACCESS,
     [kioskWithEmployeeQr],
   );

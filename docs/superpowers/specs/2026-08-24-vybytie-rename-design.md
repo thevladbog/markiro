@@ -19,17 +19,17 @@
 
 ## Объём изменений
 
-| Место | Было | Станет |
-| --- | --- | --- |
-| `apps/admin/src/i18n/ru.json` `nav.pickup` | Для себя | Выбытие |
-| `apps/admin/src/i18n/ru.json` `pickup.title` | Для себя | Выбытие |
+| Место                                             | Было                            | Станет                             |
+| ------------------------------------------------- | ------------------------------- | ---------------------------------- |
+| `apps/admin/src/i18n/ru.json` `nav.pickup`        | Для себя                        | Выбытие                            |
+| `apps/admin/src/i18n/ru.json` `pickup.title`      | Для себя                        | Выбытие                            |
 | `apps/admin/src/i18n/ru.json` (emptyHint киосков) | …для выдачи товаров «для себя». | …для оформления выбытия продукции. |
-| `apps/admin/src/i18n/en.json` `nav.pickup` | Self-pickup | Disposal |
-| `apps/admin/src/i18n/en.json` `pickup.title` | Self-pickup | Disposal |
-| `apps/kiosk/src/i18n/ru.json` `logo` | маркиро · для себя | маркиро · выбытие |
-| `apps/kiosk/src/i18n/en.json` `logo` | markiro · for yourself | markiro · disposal |
-| `README.ru.md` / `README.md` подписи галереи | Киоск «Для себя» | Киоск «Выбытие» |
-| `apps/admin/test/shell-layout.test.tsx` | ожидает «Для себя» | ожидает «Выбытие» |
+| `apps/admin/src/i18n/en.json` `nav.pickup`        | Self-pickup                     | Disposal                           |
+| `apps/admin/src/i18n/en.json` `pickup.title`      | Self-pickup                     | Disposal                           |
+| `apps/kiosk/src/i18n/ru.json` `logo`              | маркиро · для себя              | маркиро · выбытие                  |
+| `apps/kiosk/src/i18n/en.json` `logo`              | markiro · for yourself          | markiro · disposal                 |
+| `README.ru.md` / `README.md` подписи галереи      | Киоск «Для себя»                | Киоск «Выбытие»                    |
+| `apps/admin/test/shell-layout.test.tsx`           | ожидает «Для себя»              | ожидает «Выбытие»                  |
 
 Не меняем: исторические планы/спеки в `docs/superpowers/`, архивный
 design-handoff (`docs/design-briefs/`), комментарии в коде с упоминанием старого
