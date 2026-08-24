@@ -170,22 +170,32 @@ restoration — отдельный жёсткий отказ; immutable release 
 `mode=seed-baseline` — отдельный защищённый одноразовый режим только для нового
 strict dual-origin pre-transition beta. Нельзя retrofit или переупаковать старую
 legacy beta с GitHub-only evidence: workflow обязан собрать и подписать новую
-версию, опубликовать её strict GitHub tree и передать скачанный public GitHub
-source в Task 5 `seed-baseline`. Оператор передаёт точный JSON evidence отдельно
-одобренного и применённого инфраструктурного plan, в котором
+версию, опубликовать и повторно скачать её strict GitHub tree. Затем
+`prepare-seed-immutable` требует либо полностью пустой Yandex immutable prefix,
+либо уже полный exact prefix безопасного повтора: в первом случае условно
+загружает все объекты, во втором ничего не пишет, а mixed/partial prefix
+отклоняет. До первой mutable backup или write workflow публично скачивает обе
+immutable trees в новые каталоги, валидирует их и сравнивает common assets.
+Yandex tree в seed читается через фиксированный provider host
+`https://storage.yandexcloud.net`, не через ещё выключенный release DNS.
+Оператор передаёт точный JSON evidence отдельно одобренного и применённого
+инфраструктурного plan, в котором
 `enableStationReleasePublicDns` равно `false`; значение `true`, лишнее поле или
 неверные SHA/VersionId останавливают команду. Workflow не включает DNS и не
 принимает boolean default вместо evidence.
 
 Protected publisher вызывает точный gate `--confirm-empty-channel-bootstrap`.
-GitHub channel уже должен иметь предыдущий manifest backup. На Yandex допустимы
-только полностью пустая mutable pair либо уже полная byte-identical known-good
-pair после безопасного повтора; частичная или чужая pair запрещена. Publisher
-публикует только отсутствующие immutable objects, читает их через
-`https://storage.yandexcloud.net`, создаёт Yandex manifest и beta alias и при
-первой ошибке повторно применяет и проверяет полную known-good pair. Bootstrap
-record и закрытый recovery backup сохраняются отдельным workflow artifact.
-Release DNS остаётся выключенным до отдельного STOP/plan/apply из
+Только после dual-origin immutable proof workflow сохраняет предыдущий GitHub
+manifest и read-only preflight проверяет, что Yandex mutable pair полностью
+пуста либо уже является полной byte-identical provider-verified pair безопасного
+повтора; частичная или чужая pair запрещена. Затем workflow продвигает GitHub
+manifest первым и передаёт скачанный public GitHub source в Task 5
+`seed-baseline`, который повторяет preflight для защиты от race, создаёт Yandex
+manifest и beta alias и при первой ошибке повторно применяет и проверяет полную
+known-good pair. Общий trap восстанавливает и проверяет GitHub manifest, если
+Task 5 сообщает ошибку. Bootstrap record и закрытый recovery backup сохраняются
+отдельным workflow artifact. Release DNS остаётся выключенным до отдельного
+STOP/plan/apply из
 [bootstrap runbook](station-release-origin-bootstrap.md).
 
 ### Partial-origin recovery

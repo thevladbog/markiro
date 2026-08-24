@@ -157,7 +157,7 @@ test("publish and seed build once and stage two closed origin trees from one inp
   assert.doesNotMatch(JSON.stringify(workflow.jobs.release), /tauri build|normalize-signing-key/);
 });
 
-test("immutable publication and public dual-origin validation precede every normal promotion", async () => {
+test("immutable publication and public dual-origin validation precede every mode's mutable work", async () => {
   const text = await source();
   const workflow = load(text);
   const steps = workflow.jobs.release.steps;
@@ -168,10 +168,10 @@ test("immutable publication and public dual-origin validation precede every norm
   );
   const promote = steps.find((step) => step.name === "Promote beta mutable targets");
   assert.equal(github.if, "inputs.mode == 'publish' || inputs.mode == 'seed-baseline'");
-  assert.equal(yandex.if, "inputs.mode == 'publish'");
+  assert.equal(yandex.if, "inputs.mode == 'publish' || inputs.mode == 'seed-baseline'");
   assert.equal(
     publicValidation.if,
-    "inputs.mode == 'publish' || inputs.mode == 'promote-existing'",
+    "inputs.mode == 'publish' || inputs.mode == 'promote-existing' || inputs.mode == 'seed-baseline'",
   );
   assert.ok(steps.indexOf(github) < steps.indexOf(yandex));
   assert.ok(steps.indexOf(yandex) < steps.indexOf(publicValidation));
@@ -182,11 +182,40 @@ test("immutable publication and public dual-origin validation precede every norm
     github.run.indexOf('gh release edit "$tag"') <
       github.run.lastIndexOf('gh release download "$tag"'),
   );
-  assert.match(yandex.run, /yandex-publisher\.mjs publish-immutable/);
+  const seedImmutableBranch = yandex.run.slice(
+    yandex.run.indexOf('"seed-baseline" ]; then'),
+    yandex.run.indexOf("else"),
+  );
+  const normalImmutableBranch = yandex.run.slice(
+    yandex.run.indexOf("else"),
+    yandex.run.lastIndexOf("fi"),
+  );
+  assert.match(seedImmutableBranch, /yandex-publisher\.mjs prepare-seed-immutable/);
+  assert.doesNotMatch(seedImmutableBranch, /yandex-publisher\.mjs publish-immutable/);
+  assert.match(normalImmutableBranch, /yandex-publisher\.mjs publish-immutable/);
+  assert.doesNotMatch(normalImmutableBranch, /prepare-seed-immutable/);
   assert.match(publicValidation.run, /station-github-public/);
   assert.match(publicValidation.run, /station-yandex-public/);
   assert.match(publicValidation.run, /gh release download/);
-  assert.match(publicValidation.run, /https:\/\/releases\.markiro\.app\/station\/beta\/releases/);
+  assert.equal(
+    publicValidation.env.YANDEX_STATION_RELEASE_BUCKET,
+    "${{ vars.YANDEX_STATION_RELEASE_BUCKET }}",
+  );
+  const seedPublicBranch = publicValidation.run.slice(
+    publicValidation.run.indexOf('"seed-baseline" ]; then'),
+    publicValidation.run.indexOf("else"),
+  );
+  const normalPublicBranch = publicValidation.run.slice(
+    publicValidation.run.indexOf("else"),
+    publicValidation.run.indexOf("fi"),
+  );
+  assert.match(
+    seedPublicBranch,
+    /https:\/\/storage\.yandexcloud\.net\/\$YANDEX_STATION_RELEASE_BUCKET\/station\/beta\/releases/,
+  );
+  assert.doesNotMatch(seedPublicBranch, /https:\/\/releases\.markiro\.app/);
+  assert.match(normalPublicBranch, /https:\/\/releases\.markiro\.app\/station\/beta\/releases/);
+  assert.doesNotMatch(normalPublicBranch, /storage\.yandexcloud\.net/);
   assert.match(publicValidation.run, /artifacts\.mjs validate-origin github beta/);
   assert.match(publicValidation.run, /artifacts\.mjs validate-origin yandex beta/);
   assert.match(publicValidation.run, /artifacts\.mjs compare-origins/);
@@ -208,13 +237,17 @@ test("one mutable transaction backs up completely, promotes in order and rolls b
     'gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json',
   );
   const yandexBackup = run.indexOf("yandex-publisher.mjs backup-mutables");
+  const seedPreflight = run.indexOf("yandex-publisher.mjs preflight-seed-mutables");
   const githubPromotion = run.indexOf(
     'gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY"',
     githubBackup + 1,
   );
   const yandexPromotion = run.indexOf("yandex-publisher.mjs promote");
+  const yandexSeed = run.indexOf("yandex-publisher.mjs seed-baseline");
   assert.ok(githubBackup >= 0 && githubBackup < yandexBackup);
   assert.ok(yandexBackup < githubPromotion && githubPromotion < yandexPromotion);
+  assert.ok(githubBackup < seedPreflight && seedPreflight < githubPromotion);
+  assert.ok(githubPromotion < yandexSeed);
   assert.doesNotMatch(run.slice(githubBackup, yandexBackup), /\|\| true/);
   assert.match(run, /trap rollback_transaction EXIT/);
   assert.match(run, /trap 'exit 129' HUP/);
@@ -255,6 +288,34 @@ test("one mutable transaction backs up completely, promotes in order and rolls b
   );
   assert.doesNotMatch(run, /gh release create station-beta-channel/);
   assert.doesNotMatch(run, /delete-object|DeleteObject/);
+});
+
+test("seed and normal modes use disjoint publisher branches under one compensation trap", async () => {
+  const workflow = load(await source());
+  const step = workflow.jobs.release.steps.find(
+    (candidate) => candidate.name === "Promote beta mutable targets",
+  );
+  const run = step.run;
+  const branchStart = run.indexOf('"seed-baseline" ]; then');
+  const branchElse = run.indexOf("else", branchStart);
+  const branchEnd = run.indexOf("fi", branchElse);
+  const seedPreflightBranch = run.slice(branchStart, branchElse);
+  const normalBackupBranch = run.slice(branchElse, branchEnd);
+  assert.match(seedPreflightBranch, /preflight-seed-mutables/);
+  assert.doesNotMatch(seedPreflightBranch, /backup-mutables|yandex-publisher\.mjs promote/);
+  assert.match(normalBackupBranch, /backup-mutables/);
+  assert.doesNotMatch(normalBackupBranch, /preflight-seed-mutables|seed-baseline/);
+
+  const seedPromotionStart = run.lastIndexOf('"seed-baseline" ]; then');
+  const seedPromotionElse = run.indexOf("else", seedPromotionStart);
+  const seedPromotionEnd = run.indexOf("fi", seedPromotionElse);
+  const seedPromotionBranch = run.slice(seedPromotionStart, seedPromotionElse);
+  const normalPromotionBranch = run.slice(seedPromotionElse, seedPromotionEnd);
+  assert.match(seedPromotionBranch, /yandex-publisher\.mjs seed-baseline/);
+  assert.doesNotMatch(seedPromotionBranch, /yandex-publisher\.mjs promote\s/);
+  assert.match(normalPromotionBranch, /yandex-publisher\.mjs promote\s/);
+  assert.doesNotMatch(normalPromotionBranch, /yandex-publisher\.mjs seed-baseline/);
+  assert.ok(run.indexOf("trap rollback_transaction EXIT") < seedPromotionStart);
 });
 
 test("validates raw and wrapped Tauri keys without rewriting them", async () => {

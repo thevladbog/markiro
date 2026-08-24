@@ -837,6 +837,9 @@ async function publishBootstrapImmutables({ store, providerReader, tree, channel
         if (error?.message !== "station release object already exists") throw error;
       }
     }
+    if (absent.length !== 0 && absent.length !== objects.length) {
+      publicationFailed();
+    }
     for (const object of absent) {
       await store.putImmutable(object.key, object.file, object.contentType);
     }
@@ -846,6 +849,29 @@ async function publishBootstrapImmutables({ store, providerReader, tree, channel
     publicationFailed();
   }
   return absent.length === 0 ? "existing-and-provider-verified" : "published-and-provider-verified";
+}
+
+async function preflightSeedMutableState({ store, providerReader, tree, channel, version }) {
+  const targets = await readTargets(releaseTargets(channel, version, tree));
+  const mutable = mutableDescriptors(channel);
+  let current;
+  try {
+    current = await Promise.all(mutable.map(({ key }) => store.getMutable(key)));
+  } catch {
+    publicationFailed();
+  }
+  const present = current.filter((object) => object !== null).length;
+  if (present === 1 || (present === 2 && !isCompleteTargetBaseline(current, targets))) {
+    incompleteBaseline();
+  }
+  if (present === 2) {
+    try {
+      await verifyTargets(providerReader, targets);
+    } catch {
+      publicationFailed();
+    }
+  }
+  return { targets, present };
 }
 
 function originBootstrapEvidence(origin, validated, names) {
@@ -944,6 +970,18 @@ export function createYandexPublisher({ store, providerReader } = {}) {
       await readPublicTree({ reader: store, tree, channel, version });
     },
 
+    async prepareSeedImmutable({ tree, channel, version } = {}) {
+      ensureProviderReader(providerReader);
+      await validateLocalTree(tree, channel, version);
+      await publishBootstrapImmutables({ store, providerReader, tree, channel, version });
+    },
+
+    async preflightSeedMutables({ tree, channel, version } = {}) {
+      ensureProviderReader(providerReader);
+      await validateLocalTree(tree, channel, version);
+      await preflightSeedMutableState({ store, providerReader, tree, channel, version });
+    },
+
     async backupMutables({ channel, backupDirectory } = {}) {
       const expected = mutableDescriptors(channel);
       let objects;
@@ -1030,18 +1068,13 @@ export function createYandexPublisher({ store, providerReader } = {}) {
         source,
       });
       try {
-        const targets = await readTargets(releaseTargets(channel, version, trees.yandexDirectory));
-        const mutable = mutableDescriptors(channel);
-        let current;
-        try {
-          current = await Promise.all(mutable.map(({ key }) => store.getMutable(key)));
-        } catch {
-          publicationFailed();
-        }
-        const present = current.filter((object) => object !== null).length;
-        if (present === 1 || (present === 2 && !isCompleteTargetBaseline(current, targets))) {
-          incompleteBaseline();
-        }
+        const { targets, present } = await preflightSeedMutableState({
+          store,
+          providerReader,
+          tree: trees.yandexDirectory,
+          channel,
+          version,
+        });
 
         const immutableResult = await publishBootstrapImmutables({
           store,
@@ -1158,17 +1191,19 @@ function ensureCliVersion(channel, version) {
 export async function runYandexPublisherCli(args, { publisher } = {}) {
   if (!Array.isArray(args) || !publisher) commandInvalid();
   const [command, ...values] = args;
-  if (command === "publish-immutable" || command === "validate-public") {
+  const treeCommands = {
+    "publish-immutable": "publishImmutable",
+    "validate-public": "validatePublic",
+    "prepare-seed-immutable": "prepareSeedImmutable",
+    "preflight-seed-mutables": "preflightSeedMutables",
+  };
+  if (Object.hasOwn(treeCommands, command)) {
     if (values.length !== 3) commandInvalid();
     const [tree, channel, version] = values;
     ensureCliPath(tree);
     ensureCliChannel(channel);
     ensureCliVersion(channel, version);
-    return publisher[command === "publish-immutable" ? "publishImmutable" : "validatePublic"]({
-      tree,
-      channel,
-      version,
-    });
+    return publisher[treeCommands[command]]({ tree, channel, version });
   }
   if (command === "seed-baseline") {
     if (values.length !== 8) commandInvalid();

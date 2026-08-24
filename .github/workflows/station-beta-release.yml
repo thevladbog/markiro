@@ -308,7 +308,7 @@ jobs:
             "$RUNNER_TEMP/station-github-public" "$version"
 
       - name: Publish immutable Yandex beta
-        if: inputs.mode == 'publish'
+        if: inputs.mode == 'publish' || inputs.mode == 'seed-baseline'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.YANDEX_STATION_RELEASE_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}
@@ -328,13 +328,19 @@ jobs:
           trap 'exit 130' INT
           trap 'exit 143' TERM
           unset AWS_SESSION_TOKEN
-          node tools/station-release/yandex-publisher.mjs publish-immutable \
-            "$RUNNER_TEMP/station-candidate/yandex" beta "$version"
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            node tools/station-release/yandex-publisher.mjs prepare-seed-immutable \
+              "$RUNNER_TEMP/station-candidate/yandex" beta "$version"
+          else
+            node tools/station-release/yandex-publisher.mjs publish-immutable \
+              "$RUNNER_TEMP/station-candidate/yandex" beta "$version"
+          fi
 
       - name: Download and validate public immutable trees
-        if: inputs.mode == 'publish' || inputs.mode == 'promote-existing'
+        if: inputs.mode == 'publish' || inputs.mode == 'promote-existing' || inputs.mode == 'seed-baseline'
         env:
           GH_TOKEN: ${{ github.token }}
+          YANDEX_STATION_RELEASE_BUCKET: ${{ vars.YANDEX_STATION_RELEASE_BUCKET }}
         shell: bash
         run: |
           set -euo pipefail
@@ -348,6 +354,13 @@ jobs:
           gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$github_public"
           installer="markiro-station-${version}-windows-x86_64-setup.exe"
           bundle="markiro-station-${version}-windows-x86_64.nsis.zip"
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            [[ "$YANDEX_STATION_RELEASE_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
+            [[ "$YANDEX_STATION_RELEASE_BUCKET" != *..* ]]
+            yandex_release_base="https://storage.yandexcloud.net/$YANDEX_STATION_RELEASE_BUCKET/station/beta/releases/$version"
+          else
+            yandex_release_base="https://releases.markiro.app/station/beta/releases/$version"
+          fi
           for asset in \
             "$installer" \
             "$bundle" \
@@ -358,7 +371,7 @@ jobs:
             release-notes.md; do
             curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 \
               --output "$yandex_public/$asset" \
-              "https://releases.markiro.app/station/beta/releases/$version/$asset"
+              "$yandex_release_base/$asset"
           done
           node tools/station-release/artifacts.mjs validate-origin github beta \
             "$github_public" "$version"
@@ -441,7 +454,10 @@ jobs:
 
           github_tree="$RUNNER_TEMP/station-github-public"
           test -d "$github_tree"
-          if [ "${{ inputs.mode }}" != "seed-baseline" ]; then
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            node tools/station-release/yandex-publisher.mjs preflight-seed-mutables \
+              "$RUNNER_TEMP/station-yandex-public" beta "$version"
+          else
             rm -rf "$yandex_backup"
             node tools/station-release/yandex-publisher.mjs backup-mutables beta "$yandex_backup"
           fi

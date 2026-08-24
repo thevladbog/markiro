@@ -343,6 +343,204 @@ test("publishes and publicly revalidates every immutable release object", async 
   );
 });
 
+test("prepares an entirely absent seed prefix without any mutable access", async () => {
+  const tree = await yandexTree();
+  const store = fakeStore();
+  const provider = fakeProvider(store);
+
+  await createYandexPublisher({ store, providerReader: provider }).prepareSeedImmutable({
+    tree,
+    channel,
+    version,
+  });
+
+  assert.equal(store.calls.filter((call) => call.method === "assertAbsent").length, 7);
+  assert.equal(store.calls.filter((call) => call.method === "putImmutable").length, 7);
+  assert.equal(provider.calls.filter((call) => call.method === "providerReadPublic").length, 7);
+  assert.equal(
+    store.calls.some((call) =>
+      ["getMutable", "putMutable", "copyImmutableToAlias"].includes(call.method),
+    ),
+    false,
+  );
+});
+
+test("accepts an exact complete seed prefix retry without immutable or mutable writes", async () => {
+  const tree = await yandexTree();
+  const store = fakeStore();
+  await loadImmutableTree(store, tree);
+  const provider = fakeProvider(store);
+
+  await createYandexPublisher({ store, providerReader: provider }).prepareSeedImmutable({
+    tree,
+    channel,
+    version,
+  });
+
+  assert.equal(
+    store.calls.some((call) =>
+      ["putImmutable", "getMutable", "putMutable", "copyImmutableToAlias"].includes(call.method),
+    ),
+    false,
+  );
+  assert.equal(provider.calls.filter((call) => call.method === "providerReadPublic").length, 7);
+});
+
+test("rejects a mixed seed prefix before any immutable or mutable write", async () => {
+  const tree = await yandexTree();
+  const store = fakeStore();
+  await loadImmutableTree(store, tree);
+  const location = stationReleaseLocation({ channel, origin: "yandex", version });
+  store.immutable.delete(location.immutablePrefix + names.notes);
+  const provider = fakeProvider(store);
+
+  await assert.rejects(
+    createYandexPublisher({ store, providerReader: provider }).prepareSeedImmutable({
+      tree,
+      channel,
+      version,
+    }),
+    /station release publication failed/,
+  );
+
+  assert.equal(
+    store.calls.some((call) =>
+      ["putImmutable", "getMutable", "putMutable", "copyImmutableToAlias"].includes(call.method),
+    ),
+    false,
+  );
+  assert.deepEqual(provider.calls, []);
+});
+
+test("preflights absent seed mutables without writing either target", async () => {
+  const tree = await yandexTree();
+  const store = fakeStore();
+  const provider = fakeProvider(store);
+
+  await createYandexPublisher({ store, providerReader: provider }).preflightSeedMutables({
+    tree,
+    channel,
+    version,
+  });
+
+  assert.equal(store.calls.filter((call) => call.method === "getMutable").length, 2);
+  assert.equal(
+    store.calls.some((call) =>
+      ["putMutable", "copyImmutableToAlias", "putImmutable"].includes(call.method),
+    ),
+    false,
+  );
+  assert.deepEqual(provider.calls, []);
+});
+
+test("rejects a partial seed mutable pair without writing either target", async () => {
+  const tree = await yandexTree();
+  const store = fakeStore();
+  store.mutable.set("station/beta/latest.json", {
+    bytes: Buffer.from(await readFile(join(tree, names.manifest))),
+    contentType: "application/json",
+    sourceKey: null,
+  });
+  const provider = fakeProvider(store);
+
+  await assert.rejects(
+    createYandexPublisher({ store, providerReader: provider }).preflightSeedMutables({
+      tree,
+      channel,
+      version,
+    }),
+    /incomplete station release baseline/,
+  );
+
+  assert.equal(
+    store.calls.some((call) =>
+      ["putMutable", "copyImmutableToAlias", "putImmutable"].includes(call.method),
+    ),
+    false,
+  );
+  assert.deepEqual(provider.calls, []);
+});
+
+test("preflights only an exact complete provider-verified seed retry pair", async () => {
+  const tree = await yandexTree();
+  const store = fakeStore();
+  const location = stationReleaseLocation({ channel, origin: "yandex", version });
+  store.mutable.set(location.mutableManifestKey, {
+    bytes: Buffer.from(await readFile(join(tree, names.manifest))),
+    contentType: "application/json",
+    sourceKey: null,
+  });
+  store.mutable.set(location.mutableInstallerKey, {
+    bytes: Buffer.from(await readFile(join(tree, names.installer))),
+    contentType: "application/vnd.microsoft.portable-executable",
+    sourceKey: location.immutablePrefix + names.installer,
+  });
+  const provider = fakeProvider(store);
+  const publisher = createYandexPublisher({ store, providerReader: provider });
+
+  await publisher.preflightSeedMutables({ tree, channel, version });
+  assert.equal(provider.calls.filter((call) => call.method === "providerReadPublic").length, 2);
+  assert.equal(
+    store.calls.some((call) =>
+      ["putMutable", "copyImmutableToAlias", "putImmutable"].includes(call.method),
+    ),
+    false,
+  );
+
+  store.mutable.get(location.mutableManifestKey).bytes = Buffer.from("wrong manifest");
+  store.calls.length = 0;
+  provider.calls.length = 0;
+  await assert.rejects(
+    publisher.preflightSeedMutables({ tree, channel, version }),
+    /incomplete station release baseline/,
+  );
+  assert.equal(
+    store.calls.some((call) =>
+      ["putMutable", "copyImmutableToAlias", "putImmutable"].includes(call.method),
+    ),
+    false,
+  );
+  assert.deepEqual(provider.calls, []);
+});
+
+test("rejects a locally exact seed pair when provider bytes differ", async () => {
+  const tree = await yandexTree();
+  const store = fakeStore();
+  const location = stationReleaseLocation({ channel, origin: "yandex", version });
+  store.mutable.set(location.mutableManifestKey, {
+    bytes: Buffer.from(await readFile(join(tree, names.manifest))),
+    contentType: "application/json",
+    sourceKey: null,
+  });
+  store.mutable.set(location.mutableInstallerKey, {
+    bytes: Buffer.from(await readFile(join(tree, names.installer))),
+    contentType: "application/vnd.microsoft.portable-executable",
+    sourceKey: location.immutablePrefix + names.installer,
+  });
+  const provider = fakeProvider(store);
+  provider.setReadHook(async (key, { mutable }) => {
+    if (key === location.mutableManifestKey) {
+      mutable.get(key).bytes = Buffer.from("different provider manifest");
+    }
+  });
+
+  await assert.rejects(
+    createYandexPublisher({ store, providerReader: provider }).preflightSeedMutables({
+      tree,
+      channel,
+      version,
+    }),
+    /station release publication failed/,
+  );
+
+  assert.equal(
+    store.calls.some((call) =>
+      ["putMutable", "copyImmutableToAlias", "putImmutable"].includes(call.method),
+    ),
+    false,
+  );
+});
+
 test("rejects public immutable bytes that do not reproduce the staged tree", async () => {
   const tree = await yandexTree();
   const store = fakeStore();
@@ -651,6 +849,38 @@ test("accepts the complete matching pair on a retry without overwriting immutabl
   });
 });
 
+test("seed reuses a separately prepared exact immutable prefix without rewriting it", async () => {
+  const githubTree = await githubBetaTree();
+  const preparedTree = await yandexTree();
+  const store = fakeStore();
+  const provider = fakeProvider(store);
+  const publisher = createYandexPublisher({ store, providerReader: provider });
+  await publisher.prepareSeedImmutable({
+    tree: preparedTree,
+    channel,
+    version,
+  });
+  store.calls.length = 0;
+  provider.calls.length = 0;
+  const parent = await mkdtemp(join(tmpdir(), "markiro-seed-prepared-"));
+  const inputs = await writeBootstrapInputs(parent);
+  const input = seedInput({ githubTree, parent, ...inputs });
+
+  await publisher.seedBaseline(input);
+
+  assert.equal(
+    store.calls.some((call) => call.method === "putImmutable"),
+    false,
+  );
+  assert.equal(store.calls.filter((call) => call.method === "assertAbsent").length, 7);
+  assert.equal(
+    store.calls.some((call) => ["putMutable", "copyImmutableToAlias"].includes(call.method)),
+    true,
+  );
+  const record = JSON.parse(await readFile(input.recordPath, "utf8"));
+  assert.equal(record.result.immutables, "existing-and-provider-verified");
+});
+
 test("accepts the explicitly confirmed legacy stable solely for baseline seeding", async () => {
   const stable = await legacyGithubStableTree();
   const parent = await mkdtemp(join(tmpdir(), "markiro-stable-seed-"));
@@ -949,12 +1179,14 @@ test("rejects an alias backup whose source is not the same-channel immutable ins
   }
 });
 
-test("CLI permits only the six bounded commands and no promote-existing or credential flags", async () => {
+test("CLI permits only the eight bounded commands and no promote-existing or credential flags", async () => {
   const calls = [];
   const publisher = Object.fromEntries(
     [
       "publishImmutable",
       "validatePublic",
+      "prepareSeedImmutable",
+      "preflightSeedMutables",
       "seedBaseline",
       "backupMutables",
       "promote",
@@ -975,6 +1207,17 @@ test("CLI permits only the six bounded commands and no promote-existing or crede
 
   await runYandexPublisherCli(["publish-immutable", tree, channel, version], { publisher });
   assert.equal(calls[0].method, "publishImmutable");
+  await runYandexPublisherCli(["prepare-seed-immutable", tree, channel, version], { publisher });
+  assert.equal(calls.at(-1).method, "prepareSeedImmutable");
+  await runYandexPublisherCli(["preflight-seed-mutables", tree, channel, version], { publisher });
+  assert.equal(calls.at(-1).method, "preflightSeedMutables");
+  await assert.rejects(
+    runYandexPublisherCli(
+      ["prepare-seed-immutable", "https://evil.invalid/tree", channel, version],
+      { publisher },
+    ),
+    /invalid station release publisher command/,
+  );
   await assert.rejects(
     runYandexPublisherCli(["promote-existing", tree, channel, backupDirectory], { publisher }),
     /invalid station release publisher command/,
@@ -1017,7 +1260,7 @@ test("CLI permits only the six bounded commands and no promote-existing or crede
       confirmation: bootstrapConfirmation,
     },
   });
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 4);
 });
 
 test("constructs an explicit bounded environment-only AWS credential object", () => {
