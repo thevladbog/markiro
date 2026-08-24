@@ -16,15 +16,16 @@ import {
   usePickupReasons,
   useUpdateReason,
   type ReasonDto,
-} from "./api.js";
-import { KiosksLayout } from "./KiosksLayout.js";
+} from "../kiosks/api.js";
+import "../kiosks/kiosks.css";
+import { PickupViewLayout, type PickupViewPath } from "./PickupViewNav.js";
 
 type ReasonDraft = { name: string; sortOrder: string };
 type ReasonFieldErrors = Partial<Record<keyof ReasonDraft, string>>;
 type LocalAction =
   | { kind: "edit"; reasonId: string }
   | { kind: "create" }
-  | { kind: "navigate"; to: "/kiosks" | "/kiosks/reasons" };
+  | { kind: "navigate"; to: PickupViewPath };
 
 function draftFrom(reason: ReasonDto): ReasonDraft {
   return { name: reason.name, sortOrder: String(reason.sortOrder) };
@@ -117,15 +118,15 @@ export function ReasonsPage(): ReactElement {
 
   if (isPending && !hasUsableData) {
     return (
-      <KiosksLayout>
+      <PickupViewLayout>
         <ReasonsTableSkeleton />
-      </KiosksLayout>
+      </PickupViewLayout>
     );
   }
 
   if (isError && !hasUsableData) {
     return (
-      <KiosksLayout>
+      <PickupViewLayout>
         <div className="mk-kiosks-section-state">
           <Alert tone="error">{t("common.loadError")}</Alert>
           <div>
@@ -134,7 +135,7 @@ export function ReasonsPage(): ReactElement {
             </Button>
           </div>
         </div>
-      </KiosksLayout>
+      </PickupViewLayout>
     );
   }
 
@@ -153,10 +154,10 @@ export function ReasonsPage(): ReactElement {
   }
 
   return (
-    <KiosksLayout>
+    <PickupViewLayout>
       {showRefetchWarning ? <ReasonsRefetchWarning retry={retry} /> : null}
       <ReadOnlyReasons items={items} />
-    </KiosksLayout>
+    </PickupViewLayout>
   );
 }
 
@@ -199,7 +200,7 @@ function AuthorizedReasonsEditor({
   items: ReasonDto[];
   showRefetchWarning: boolean;
   onRetry: () => void;
-  onNavigate: (to: "/kiosks" | "/kiosks/reasons") => void;
+  onNavigate: (to: PickupViewPath) => void;
 }): ReactElement {
   const { t } = useTranslation();
   const createMutation = useCreateReason();
@@ -352,7 +353,7 @@ function AuthorizedReasonsEditor({
   };
 
   return (
-    <KiosksLayout
+    <PickupViewLayout
       actions={
         <Button type="button" disabled={busy} onClick={() => requestAction({ kind: "create" })}>
           {t("pages.kiosks.reasons.addAction")}
@@ -574,6 +575,6 @@ function AuthorizedReasonsEditor({
         }}
         onConfirm={() => void confirmDelete()}
       />
-    </KiosksLayout>
+    </PickupViewLayout>
   );
 }

@@ -151,6 +151,10 @@ export function Modal({
           display: "flex",
           flexDirection: "column",
           outline: "none",
+          // Rendered inline (no portal), so a nowrap ancestor -- e.g. a
+          // Table cell hosting a row-action confirm -- would otherwise be
+          // inherited by the dialog copy and force horizontal scrolling.
+          whiteSpace: "normal",
           ...style,
         }}
       >

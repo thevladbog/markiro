@@ -7,6 +7,7 @@ import { Alert, Badge, Button, EmptyState, PageHeader, Select, Spinner, Table } 
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
 import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
+import { RegistryTabs } from "../code-search/RegistryTabs.js";
 import { useEmployees } from "../employees/api.js";
 import { useShifts, type ShiftDto } from "../shifts/api.js";
 import { useBoxes, type BoxDto } from "./api.js";
@@ -112,7 +113,10 @@ export function BoxesPage() {
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <PageHeader
-        title={t("pages.boxes.title")}
+        // Shares the code-search title: since the "Короба" sidebar item was
+        // folded into "Поиск кодов", this page is that section's second tab
+        // and the tab row below carries the "Короба" label.
+        title={t("pages.codeSearch.title")}
         actions={
           <Button
             type="button"
@@ -125,6 +129,8 @@ export function BoxesPage() {
           </Button>
         }
       />
+
+      <RegistryTabs active="boxes" />
 
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
         <div style={{ width: "min(100%, 440px)" }}>
