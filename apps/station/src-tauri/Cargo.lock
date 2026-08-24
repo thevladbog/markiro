@@ -2309,7 +2309,9 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "futures-core",
+ "futures-util",
  "http",
+ "minisign-verify",
  "reqwest",
  "semver",
  "serde",
@@ -2324,6 +2326,7 @@ dependencies = [
  "url",
  "uuid",
  "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]
