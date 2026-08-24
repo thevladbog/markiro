@@ -242,9 +242,10 @@ test("immutable publication and public dual-origin validation precede every mode
   assert.ok(steps.indexOf(publicValidation) < steps.indexOf(promote));
   assert.match(github.run, /gh release view "\$tag"[\s\S]*exit 1[\s\S]*gh release create/);
   assert.doesNotMatch(github.run, /release upload[^\n]*--clobber/);
-  assert.ok(
-    github.run.indexOf('gh release edit "$tag"') <
-      github.run.lastIndexOf('gh release download "$tag"'),
+  assert.ok(github.run.indexOf('gh release edit "$tag"') < github.run.indexOf("github-public.mjs"));
+  assert.match(
+    github.run,
+    /env -u GH_TOKEN -u GITHUB_TOKEN node tools\/station-release\/github-public\.mjs[\s\\]*download-release beta "\$version"/,
   );
   const seedImmutableBranch = yandex.run.slice(
     yandex.run.indexOf('"seed-baseline" ]; then'),
@@ -260,18 +261,21 @@ test("immutable publication and public dual-origin validation precede every mode
   assert.doesNotMatch(normalImmutableBranch, /prepare-seed-immutable/);
   assert.match(publicValidation.run, /station-github-public/);
   assert.match(publicValidation.run, /station-yandex-public/);
-  assert.match(publicValidation.run, /gh release download/);
+  assert.match(
+    publicValidation.run,
+    /env -u GH_TOKEN -u GITHUB_TOKEN node tools\/station-release\/github-public\.mjs[\s\\]*download-release beta "\$version"/,
+  );
+  assert.doesNotMatch(publicValidation.run, /gh release download/);
   assert.equal(
     publicValidation.env.YANDEX_STATION_RELEASE_BUCKET,
     "${{ vars.YANDEX_STATION_RELEASE_BUCKET }}",
   );
-  const seedPublicBranch = publicValidation.run.slice(
-    publicValidation.run.indexOf('"seed-baseline" ]; then'),
-    publicValidation.run.indexOf("else"),
-  );
+  const seedPublicStart = publicValidation.run.lastIndexOf('"seed-baseline" ]; then');
+  const seedPublicElse = publicValidation.run.indexOf("else", seedPublicStart);
+  const seedPublicBranch = publicValidation.run.slice(seedPublicStart, seedPublicElse);
   const normalPublicBranch = publicValidation.run.slice(
-    publicValidation.run.indexOf("else"),
-    publicValidation.run.indexOf("fi"),
+    seedPublicElse,
+    publicValidation.run.indexOf("fi", seedPublicElse),
   );
   assert.match(
     seedPublicBranch,
@@ -298,7 +302,8 @@ test("one mutable transaction backs up completely, promotes in order and rolls b
   );
   const run = step.run;
   const githubBackup = run.indexOf(
-    'gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json',
+    '"$RUNNER_TEMP/station-github-channel-backup/latest.json"',
+    run.indexOf("trap rollback_transaction EXIT"),
   );
   const yandexBackup = run.indexOf("yandex-publisher.mjs backup-mutables");
   const seedPreflight = run.indexOf("yandex-publisher.mjs preflight-seed-mutables");
@@ -352,6 +357,87 @@ test("one mutable transaction backs up completely, promotes in order and rolls b
   );
   assert.doesNotMatch(run, /gh release create station-beta-channel/);
   assert.doesNotMatch(run, /delete-object|DeleteObject/);
+  assert.equal((run.match(/download-channel beta/g) ?? []).length, 3);
+  assert.doesNotMatch(run, /gh release download station-beta-channel/);
+  assert.match(
+    run,
+    /beta-transition[\s\\]*"\$RUNNER_TEMP\/station-beta-release-summary\.json" restored/,
+  );
+  assert.match(
+    run,
+    /beta-transition[\s\\]*"\$RUNNER_TEMP\/station-beta-release-summary\.json" restoration-failed/,
+  );
+});
+
+test("beta terminal summary is initialized early, tracks every boundary, and always renders bounded state", async () => {
+  const workflow = load(await source());
+  const steps = workflow.jobs.release.steps;
+  const initialize = steps.find((step) => step.name === "Initialize bounded beta release summary");
+  const resolve = steps.find((step) => step.name === "Resolve release candidate");
+  const record = steps.find((step) => step.name === "Record beta release summary provenance");
+  const github = steps.find((step) => step.name === "Publish immutable GitHub beta");
+  const publicValidation = steps.find(
+    (step) => step.name === "Download and validate public immutable trees",
+  );
+  const promote = steps.find((step) => step.name === "Promote beta mutable targets");
+  const summary = steps.find((step) => step.name === "Write bounded beta release summary");
+  assert.ok(steps.indexOf(initialize) < steps.indexOf(resolve));
+  assert.ok(steps.indexOf(record) < steps.indexOf(github));
+  assert.equal(summary.if, "always()");
+  assert.match(summary.run, /beta-render/);
+  assert.match(summary.run, /GITHUB_STEP_SUMMARY/);
+  assert.match(summary.run, /External acceptance: `NOT_RUN`/);
+  for (const label of [
+    "Mode",
+    "Version",
+    "Source commit",
+    "Release commit",
+    "GitHub manifest SHA-256",
+    "Yandex manifest SHA-256",
+    "GitHub evidence SHA-256",
+    "Yandex evidence SHA-256",
+    "Installer SHA-256",
+    "Updater bundle SHA-256",
+    "Detached signature SHA-256",
+    "Immutable publication",
+    "Promotion",
+    "Rollback/restoration",
+    "Outcome",
+  ]) {
+    assert.match(summary.run, new RegExp(`- ${label}:`));
+  }
+  for (const event of [
+    "github-publication-attempted",
+    "github-draft-created",
+    "github-assets-uploaded",
+    "github-draft-assets-validated",
+    "github-undraft-attempted",
+    "github-public-validated",
+  ]) {
+    assert.match(github.run, new RegExp(event));
+  }
+  for (const event of ["existing-public-validation-started", "both-public-validated"]) {
+    assert.match(publicValidation.run, new RegExp(event));
+  }
+  for (const event of [
+    "mutable-backup-complete",
+    "github-manifest-promoted",
+    "yandex-manifest-promoted",
+    "all-promoted",
+    "restored",
+    "restoration-failed",
+  ]) {
+    assert.match(promote.run, new RegExp(event));
+  }
+  assert.match(publicValidation.run, /githubManifestSha256/);
+  assert.match(publicValidation.run, /yandexManifestSha256/);
+  assert.match(publicValidation.run, /githubEvidenceSha256/);
+  assert.match(publicValidation.run, /yandexEvidenceSha256/);
+  assert.match(publicValidation.run, /installerSha256/);
+  assert.match(publicValidation.run, /bundleSha256/);
+  assert.match(publicValidation.run, /signatureSha256/);
+  assert.doesNotMatch(summary.run, /AWS_|GH_TOKEN|secret|station-candidate/);
+  assert.ok(Buffer.byteLength(summary.run) < 8192);
 });
 
 test("seed and normal modes use disjoint publisher branches under one compensation trap", async () => {

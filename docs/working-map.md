@@ -158,8 +158,8 @@ errors.
 - CI separates static checks, API/database tests, app tests, production bundle
   contracts, Rust checks, Windows Station builds, image publication and Station
   beta release provenance.
-- Station beta and stable releases are built and signed in GitHub Actions,
-  published as matching immutable binaries to Yandex primary and GitHub mirror,
+- Station beta and stable workflows are configured to build, sign, and publish
+  matching immutable binaries to Yandex primary and GitHub mirror,
   and exposed through fixed channel-specific manifests. The Station webview
   calls only the three semantic Rust updater commands; Rust owns Yandex-first
   metadata/package fallback and the Tauri signature/install boundary. Start at

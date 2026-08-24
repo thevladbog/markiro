@@ -107,7 +107,12 @@ test("normal stable modes validate the exact beta at both origins before rebuild
   assert.ok(steps.indexOf(prepare) < steps.indexOf(build));
   assert.ok(steps.indexOf(build) < steps.indexOf(signing));
   assert.match(accepted.run, /gh release view "\$source_beta_tag"/);
-  assert.match(accepted.run, /gh release download "\$source_beta_tag"/);
+  assert.match(
+    accepted.run,
+    /env -u GH_TOKEN -u GITHUB_TOKEN node tools\/station-release\/github-public\.mjs[\s\\]*download-release beta "\$beta_version"/,
+  );
+  assert.doesNotMatch(accepted.run, /mkdir "\$github_beta_dir"/);
+  assert.doesNotMatch(accepted.run, /gh release download "\$source_beta_tag"/);
   assert.match(
     accepted.run,
     /https:\/\/releases\.markiro\.app\/station\/beta\/releases\/\$beta_version/,
@@ -307,7 +312,8 @@ test("stable mutables promote GitHub, Yandex manifest, then the default stable a
   const step = workflowStep(workflow, "release", "Promote stable mutable targets");
   const run = step.run;
   const githubBackup = run.indexOf(
-    'gh release download station-stable-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json',
+    '"$RUNNER_TEMP/station-stable-github-channel-backup/latest.json"',
+    run.indexOf("trap rollback_transaction EXIT"),
   );
   const yandexBackup = run.indexOf("yandex-publisher.mjs backup-mutables stable");
   const githubPromotion = run.indexOf(

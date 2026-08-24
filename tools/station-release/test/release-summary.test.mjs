@@ -258,3 +258,104 @@ test("normal summary CLI rejects explicit all-null provenance before the first t
     );
   }
 });
+
+test("beta summary covers publish, promote-existing, seed, compensation, restoration failure and early failure", async () => {
+  const {
+    createBetaReleaseSummaryState,
+    renderBetaReleaseSummary,
+    transitionBetaReleaseSummary,
+    updateBetaReleaseSummary,
+  } = await summaryModule();
+  const provenance = {
+    version: "1.2.3-beta.4",
+    sourceSha: "1".repeat(40),
+    releaseSha: "2".repeat(40),
+  };
+  const digests = {
+    githubManifestSha256: digest("a"),
+    yandexManifestSha256: digest("b"),
+    githubEvidenceSha256: digest("c"),
+    yandexEvidenceSha256: digest("d"),
+    installerSha256: digest("e"),
+    bundleSha256: digest("f"),
+    signatureSha256: digest("0"),
+  };
+
+  const early = renderBetaReleaseSummary(createBetaReleaseSummaryState("publish"));
+  assert.match(early, /Mode: `publish`/);
+  assert.match(early, /Source commit: `not-recorded`/);
+  assert.match(early, /Outcome: `not-completed`/);
+  assert.match(early, /External acceptance: `NOT_RUN`/);
+  assert.ok(Buffer.byteLength(early) < 8192);
+  assert.doesNotMatch(early, /secret|token/i);
+
+  for (const mode of ["publish", "seed-baseline"]) {
+    let state = updateBetaReleaseSummary(createBetaReleaseSummaryState(mode), provenance);
+    for (const event of [
+      "github-publication-attempted",
+      "github-draft-created",
+      "github-assets-uploaded",
+      "github-draft-assets-validated",
+      "github-undraft-attempted",
+      "github-public-validated",
+      "yandex-publication-attempted",
+      "yandex-immutable-published",
+    ]) {
+      state = transitionBetaReleaseSummary(state, event);
+    }
+    assert.match(renderBetaReleaseSummary(state), /Outcome: `partial-immutables`/);
+    state = updateBetaReleaseSummary(state, digests);
+    for (const event of [
+      "both-public-validated",
+      "mutable-backup-complete",
+      "github-manifest-promoted",
+      "yandex-manifest-promoted",
+      "all-promoted",
+    ]) {
+      state = transitionBetaReleaseSummary(state, event);
+    }
+    assert.match(
+      renderBetaReleaseSummary(state),
+      new RegExp(`Outcome: \`${mode === "seed-baseline" ? "seeded" : "promoted"}\``),
+    );
+  }
+
+  let existing = updateBetaReleaseSummary(
+    createBetaReleaseSummaryState("promote-existing"),
+    provenance,
+  );
+  existing = transitionBetaReleaseSummary(existing, "existing-public-validation-started");
+  existing = updateBetaReleaseSummary(existing, digests);
+  existing = transitionBetaReleaseSummary(existing, "both-public-validated");
+  assert.match(renderBetaReleaseSummary(existing), /Outcome: `immutable-but-not-promoted`/);
+  existing = transitionBetaReleaseSummary(existing, "mutable-backup-complete");
+  existing = transitionBetaReleaseSummary(existing, "github-manifest-promoted");
+  const restored = transitionBetaReleaseSummary(existing, "restored");
+  assert.match(renderBetaReleaseSummary(restored), /Outcome: `restored-after-failure`/);
+  const restorationFailed = transitionBetaReleaseSummary(existing, "restoration-failed");
+  assert.match(renderBetaReleaseSummary(restorationFailed), /Outcome: `restoration-failed`/);
+});
+
+test("beta summary CLI persists only bounded typed state", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "markiro-beta-summary-cli-"));
+  const statePath = join(directory, "state.json");
+  const outputPath = join(directory, "summary.md");
+  await runSummaryCli(["beta-init", "publish", statePath]);
+  await runSummaryCli([
+    "beta-update",
+    statePath,
+    "version",
+    "1.2.3-beta.4",
+    "sourceSha",
+    "1".repeat(40),
+    "releaseSha",
+    "2".repeat(40),
+  ]);
+  await runSummaryCli(["beta-transition", statePath, "github-publication-attempted"]);
+  await runSummaryCli(["beta-render", statePath, outputPath]);
+  assert.match(await readFile(outputPath, "utf8"), /github-publication-attempted/);
+  await assert.rejects(
+    runSummaryCli(["beta-update", statePath, "sourceSha", "github_pat_secret"]),
+    /invalid station release summary/,
+  );
+});

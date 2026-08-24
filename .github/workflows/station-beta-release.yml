@@ -240,6 +240,15 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      - name: Initialize bounded beta release summary
+        env:
+          MODE: ${{ inputs.mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/station-release/release-summary.mjs beta-init \
+            "$MODE" "$RUNNER_TEMP/station-beta-release-summary.json"
+
       - name: Install locked publisher dependencies
         shell: bash
         run: pnpm install --frozen-lockfile
@@ -290,6 +299,16 @@ jobs:
           printf 'version=%s\ntag=%s\nrelease_sha=%s\n' \
             "$version" "$tag" "$release_sha" >> "$GITHUB_ENV"
 
+      - name: Record beta release summary provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/station-release/release-summary.mjs beta-update \
+            "$RUNNER_TEMP/station-beta-release-summary.json" \
+            version "$version" \
+            sourceSha "$GITHUB_SHA" \
+            releaseSha "$release_sha"
+
       - name: Publish immutable GitHub beta
         if: inputs.mode == 'publish' || inputs.mode == 'seed-baseline'
         env:
@@ -303,25 +322,36 @@ jobs:
             echo "immutable GitHub release already exists" >&2
             exit 1
           fi
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" github-publication-attempted
           auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           git -c "http.extraheader=$auth_header" push origin "HEAD:refs/heads/$candidate_ref"
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --prerelease \
             --target "$release_sha" --title "Markiro Station $version" \
             --notes-file "$github_tree/release-notes.md"
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" github-draft-created
           gh release upload "$tag" --repo "$GITHUB_REPOSITORY" "$github_tree"/*
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" github-assets-uploaded
           rm -rf "$RUNNER_TEMP/station-github-public"
           mkdir "$RUNNER_TEMP/station-github-public"
           gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
             --dir "$RUNNER_TEMP/station-github-public"
           node tools/station-release/artifacts.mjs validate-origin github beta \
             "$RUNNER_TEMP/station-github-public" "$version"
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" github-draft-assets-validated
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" github-undraft-attempted
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
           rm -rf "$RUNNER_TEMP/station-github-public"
-          mkdir "$RUNNER_TEMP/station-github-public"
-          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
-            --dir "$RUNNER_TEMP/station-github-public"
+          env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+            download-release beta "$version" "$RUNNER_TEMP/station-github-public"
           node tools/station-release/artifacts.mjs validate-origin github beta \
             "$RUNNER_TEMP/station-github-public" "$version"
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" github-public-validated
 
       - name: Publish immutable Yandex beta
         if: inputs.mode == 'publish' || inputs.mode == 'seed-baseline'
@@ -344,6 +374,8 @@ jobs:
           trap 'exit 130' INT
           trap 'exit 143' TERM
           unset AWS_SESSION_TOKEN
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" yandex-publication-attempted
           if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
             node tools/station-release/yandex-publisher.mjs prepare-seed-immutable \
               "$RUNNER_TEMP/station-candidate/yandex" beta "$version"
@@ -351,6 +383,8 @@ jobs:
             node tools/station-release/yandex-publisher.mjs publish-immutable \
               "$RUNNER_TEMP/station-candidate/yandex" beta "$version"
           fi
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" yandex-immutable-published
 
       - name: Download and validate public immutable trees
         if: inputs.mode == 'publish' || inputs.mode == 'promote-existing' || inputs.mode == 'seed-baseline'
@@ -363,11 +397,16 @@ jobs:
           github_public="$RUNNER_TEMP/station-github-public"
           yandex_public="$RUNNER_TEMP/station-yandex-public"
           rm -rf "$github_public" "$yandex_public"
-          mkdir "$github_public" "$yandex_public"
+          mkdir "$yandex_public"
+          if [ "${{ inputs.mode }}" = "promote-existing" ]; then
+            node tools/station-release/release-summary.mjs beta-transition \
+              "$RUNNER_TEMP/station-beta-release-summary.json" existing-public-validation-started
+          fi
           test "$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
             --json tagName,isDraft,isPrerelease,targetCommitish \
             --jq 'select(.isDraft == false and .isPrerelease == true and .targetCommitish == "'"$release_sha"'") | .tagName')" = "$tag"
-          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$github_public"
+          env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+            download-release beta "$version" "$github_public"
           installer="markiro-station-${version}-windows-x86_64-setup.exe"
           bundle="markiro-station-${version}-windows-x86_64.nsis.zip"
           if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
@@ -397,6 +436,24 @@ jobs:
             "$github_public" "$yandex_public" beta "$version"
           test "$(grep -o \"\\\"releaseSha\\\"[[:space:]]*:[[:space:]]*\\\"$release_sha\\\"\" \
             "$github_public/release-evidence.json" | wc -l)" = 1
+          github_manifest_sha256="$(sha256sum "$github_public/latest.json" | cut -d ' ' -f 1)"
+          yandex_manifest_sha256="$(sha256sum "$yandex_public/latest.json" | cut -d ' ' -f 1)"
+          github_evidence_sha256="$(sha256sum "$github_public/release-evidence.json" | cut -d ' ' -f 1)"
+          yandex_evidence_sha256="$(sha256sum "$yandex_public/release-evidence.json" | cut -d ' ' -f 1)"
+          installer_sha256="$(sha256sum "$github_public/$installer" | cut -d ' ' -f 1)"
+          bundle_sha256="$(sha256sum "$github_public/$bundle" | cut -d ' ' -f 1)"
+          signature_sha256="$(sha256sum "$github_public/$bundle.sig" | cut -d ' ' -f 1)"
+          node tools/station-release/release-summary.mjs beta-update \
+            "$RUNNER_TEMP/station-beta-release-summary.json" \
+            githubManifestSha256 "$github_manifest_sha256" \
+            yandexManifestSha256 "$yandex_manifest_sha256" \
+            githubEvidenceSha256 "$github_evidence_sha256" \
+            yandexEvidenceSha256 "$yandex_evidence_sha256" \
+            installerSha256 "$installer_sha256" \
+            bundleSha256 "$bundle_sha256" \
+            signatureSha256 "$signature_sha256"
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" both-public-validated
 
       - name: Promote beta mutable targets
         env:
@@ -415,6 +472,7 @@ jobs:
           unset AWS_SESSION_TOKEN
           github_may_have_changed=false
           yandex_may_have_changed=false
+          backup_complete=false
           restoration_failed=false
           yandex_backup="$RUNNER_TEMP/station-yandex-channel-backup"
 
@@ -438,8 +496,9 @@ jobs:
                 if ! rm -rf "$RUNNER_TEMP/station-github-rollback-verify" || \
                   ! mkdir "$RUNNER_TEMP/station-github-rollback-verify"; then
                   restoration_failed=true
-                elif ! gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" \
-                  --pattern latest.json --dir "$RUNNER_TEMP/station-github-rollback-verify" || \
+                elif ! env -u GH_TOKEN -u GITHUB_TOKEN node \
+                  tools/station-release/github-public.mjs download-channel beta \
+                  "$RUNNER_TEMP/station-github-rollback-verify/latest.json" || \
                   ! cmp "$RUNNER_TEMP/station-github-rollback-verify/latest.json" \
                     "$RUNNER_TEMP/station-github-channel-backup/latest.json"; then
                   restoration_failed=true
@@ -448,8 +507,17 @@ jobs:
             fi
             unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
             if [ "$restoration_failed" = true ]; then
+              if [ "$backup_complete" = true ]; then
+                node tools/station-release/release-summary.mjs beta-transition \
+                  "$RUNNER_TEMP/station-beta-release-summary.json" restoration-failed
+              fi
               echo "station release mutable restoration failed" >&2
               exit 86
+            fi
+            if [ "$backup_complete" = true ] && \
+              { [ "$github_may_have_changed" = true ] || [ "$yandex_may_have_changed" = true ]; }; then
+              node tools/station-release/release-summary.mjs beta-transition \
+                "$RUNNER_TEMP/station-beta-release-summary.json" restored
             fi
             exit "$status"
           }
@@ -464,8 +532,9 @@ jobs:
             --json tagName,isDraft,isPrerelease \
             --jq 'select(.isDraft == false and .isPrerelease == true) | .tagName')" = \
             "station-beta-channel"
-          gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json \
-            --dir "$RUNNER_TEMP/station-github-channel-backup"
+          env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+            download-channel beta \
+            "$RUNNER_TEMP/station-github-channel-backup/latest.json"
           test -f "$RUNNER_TEMP/station-github-channel-backup/latest.json"
 
           github_tree="$RUNNER_TEMP/station-github-public"
@@ -477,6 +546,9 @@ jobs:
             rm -rf "$yandex_backup"
             node tools/station-release/yandex-publisher.mjs backup-mutables beta "$yandex_backup"
           fi
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" mutable-backup-complete
+          backup_complete=true
 
           rm -rf "$RUNNER_TEMP/station-github-channel-upload"
           mkdir "$RUNNER_TEMP/station-github-channel-upload"
@@ -486,9 +558,11 @@ jobs:
             "$RUNNER_TEMP/station-github-channel-upload/latest.json" --clobber
           rm -rf "$RUNNER_TEMP/station-github-channel-verify"
           mkdir "$RUNNER_TEMP/station-github-channel-verify"
-          gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json \
-            --dir "$RUNNER_TEMP/station-github-channel-verify"
+          env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+            download-channel beta "$RUNNER_TEMP/station-github-channel-verify/latest.json"
           cmp "$RUNNER_TEMP/station-github-channel-verify/latest.json" "$github_tree/latest.json"
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" github-manifest-promoted
 
           if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
             release_metadata="$RUNNER_TEMP/station-seed-release.json"
@@ -506,6 +580,10 @@ jobs:
             node tools/station-release/yandex-publisher.mjs seed-baseline \
               "$github_tree" "$tag" "$release_metadata" "$infrastructure_evidence" beta \
               "$seed_backup" "$bootstrap_record" --confirm-empty-channel-bootstrap
+            node tools/station-release/release-summary.mjs beta-transition \
+              "$RUNNER_TEMP/station-beta-release-summary.json" yandex-manifest-promoted
+            node tools/station-release/release-summary.mjs beta-transition \
+              "$RUNNER_TEMP/station-beta-release-summary.json" all-promoted
           else
             yandex_may_have_changed=true
             node tools/station-release/yandex-publisher.mjs promote \
@@ -520,8 +598,12 @@ jobs:
               "https://releases.markiro.app/station/beta/download"
             cmp "$RUNNER_TEMP/station-yandex-channel-verify/latest.json" \
               "$RUNNER_TEMP/station-yandex-public/latest.json"
+            node tools/station-release/release-summary.mjs beta-transition \
+              "$RUNNER_TEMP/station-beta-release-summary.json" yandex-manifest-promoted
             cmp "$RUNNER_TEMP/station-yandex-channel-verify/download" \
               "$RUNNER_TEMP/station-yandex-public/markiro-station-${version}-windows-x86_64-setup.exe"
+            node tools/station-release/release-summary.mjs beta-transition \
+              "$RUNNER_TEMP/station-beta-release-summary.json" all-promoted
           fi
 
       - name: Preserve beta baseline recovery evidence
@@ -534,6 +616,36 @@ jobs:
             ${{ runner.temp }}/station-bootstrap-record.json
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Write bounded beta release summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          summary_state="$RUNNER_TEMP/station-beta-release-summary.json"
+          if [ -f "$summary_state" ] && [ ! -L "$summary_state" ]; then
+            node tools/station-release/release-summary.mjs beta-render \
+              "$summary_state" "$GITHUB_STEP_SUMMARY"
+          else
+            printf '%s\n' \
+              '## Markiro Station beta publication' \
+              '- Mode: `not-recorded`' \
+              '- Version: `not-recorded`' \
+              '- Source commit: `not-recorded`' \
+              '- Release commit: `not-recorded`' \
+              '- GitHub manifest SHA-256: `not-recorded`' \
+              '- Yandex manifest SHA-256: `not-recorded`' \
+              '- GitHub evidence SHA-256: `not-recorded`' \
+              '- Yandex evidence SHA-256: `not-recorded`' \
+              '- Installer SHA-256: `not-recorded`' \
+              '- Updater bundle SHA-256: `not-recorded`' \
+              '- Detached signature SHA-256: `not-recorded`' \
+              '- Immutable publication: `not-started`' \
+              '- Promotion: `not-started`' \
+              '- Rollback/restoration: `not-required`' \
+              '- Outcome: `not-completed`' \
+              '- External acceptance: `NOT_RUN`.' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Cleanup owned candidate ref and temporary release material
         if: always()

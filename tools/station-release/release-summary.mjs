@@ -61,6 +61,39 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const SHA = /^[0-9a-f]{40}$/;
 const MAX_STATE_BYTES = 16 * 1024;
 
+const BETA_IMMUTABLE_STATES = new Set([
+  "not-started",
+  "github-publication-attempted",
+  "github-draft-created",
+  "github-assets-uploaded",
+  "github-draft-assets-validated",
+  "github-undraft-attempted",
+  "github-public-validated",
+  "yandex-publication-attempted",
+  "yandex-immutable-published",
+  "existing-public-validation-started",
+  "both-public-validated",
+]);
+const BETA_PROMOTION_STATES = new Set([
+  "not-started",
+  "mutable-backup-complete",
+  "github-manifest-promoted",
+  "yandex-manifest-promoted",
+  "all-promoted",
+]);
+const BETA_DATA_KEYS = ["version", "sourceSha", "releaseSha", ...STABLE_DIGEST_KEYS];
+const BETA_STATE_KEYS = [
+  "mode",
+  "version",
+  "sourceSha",
+  "releaseSha",
+  ...STABLE_DIGEST_KEYS,
+  "immutableState",
+  "promotionState",
+  "rollbackState",
+  "outcome",
+];
+
 function invalid() {
   throw new Error("invalid station release summary");
 }
@@ -318,39 +351,221 @@ export function renderReleaseSummary(state) {
   return output;
 }
 
+function validateBetaState(state, { allowEmptyProvenance = true } = {}) {
+  const beta = state?.version === null ? null : parseStationBetaTag(`station-v${state?.version}`);
+  if (
+    !isPlainObject(state) ||
+    Object.keys(state).sort().join(",") !== [...BETA_STATE_KEYS].sort().join(",") ||
+    !MODES.has(state.mode) ||
+    (state.version !== null && !beta) ||
+    (state.sourceSha !== null && !SHA.test(state.sourceSha)) ||
+    (state.releaseSha !== null && !SHA.test(state.releaseSha)) ||
+    STABLE_DIGEST_KEYS.some((key) => state[key] !== null && !SHA256.test(state[key])) ||
+    !BETA_IMMUTABLE_STATES.has(state.immutableState) ||
+    !BETA_PROMOTION_STATES.has(state.promotionState) ||
+    !ROLLBACK_STATES.has(state.rollbackState) ||
+    !OUTCOMES.has(state.outcome)
+  ) {
+    invalid();
+  }
+  const provenance = [state.version, state.sourceSha, state.releaseSha];
+  const present = provenance.filter((value) => value !== null).length;
+  const pristine =
+    present === 0 &&
+    allowEmptyProvenance &&
+    STABLE_DIGEST_KEYS.every((key) => state[key] === null) &&
+    state.immutableState === "not-started" &&
+    state.promotionState === "not-started" &&
+    state.rollbackState === "not-required" &&
+    state.outcome === "pending";
+  if (present !== provenance.length && !pristine) invalid();
+  return state;
+}
+
+export function createBetaReleaseSummaryState(mode) {
+  if (!MODES.has(mode)) invalid();
+  return validateBetaState({
+    mode,
+    version: null,
+    sourceSha: null,
+    releaseSha: null,
+    ...Object.fromEntries(STABLE_DIGEST_KEYS.map((key) => [key, null])),
+    immutableState: "not-started",
+    promotionState: "not-started",
+    rollbackState: "not-required",
+    outcome: "pending",
+  });
+}
+
+export function updateBetaReleaseSummary(state, patch) {
+  validateBetaState(state);
+  if (!hasOnlyKeys(patch, BETA_DATA_KEYS) || Object.keys(patch).length === 0) invalid();
+  return validateBetaState(
+    { ...state, ...patch },
+    {
+      allowEmptyProvenance: !["version", "sourceSha", "releaseSha"].some((key) =>
+        Object.hasOwn(patch, key),
+      ),
+    },
+  );
+}
+
+function transitionBetaImmutable(state, expected, next, mode = state.mode) {
+  if (
+    state.mode !== mode ||
+    state.immutableState !== expected ||
+    state.promotionState !== "not-started" ||
+    state.rollbackState !== "not-required" ||
+    state.outcome !== "pending"
+  ) {
+    invalid();
+  }
+  return validateBetaState({ ...state, immutableState: next });
+}
+
+export function transitionBetaReleaseSummary(state, event) {
+  validateBetaState(state, { allowEmptyProvenance: false });
+  const publishTransitions = {
+    "github-publication-attempted": ["not-started", "github-publication-attempted"],
+    "github-draft-created": ["github-publication-attempted", "github-draft-created"],
+    "github-assets-uploaded": ["github-draft-created", "github-assets-uploaded"],
+    "github-draft-assets-validated": ["github-assets-uploaded", "github-draft-assets-validated"],
+    "github-undraft-attempted": ["github-draft-assets-validated", "github-undraft-attempted"],
+    "github-public-validated": ["github-undraft-attempted", "github-public-validated"],
+    "yandex-publication-attempted": ["github-public-validated", "yandex-publication-attempted"],
+    "yandex-immutable-published": ["yandex-publication-attempted", "yandex-immutable-published"],
+  };
+  if (Object.hasOwn(publishTransitions, event)) {
+    if (state.mode !== "publish" && state.mode !== "seed-baseline") invalid();
+    const [expected, next] = publishTransitions[event];
+    return transitionBetaImmutable(state, expected, next);
+  }
+  if (event === "existing-public-validation-started") {
+    return transitionBetaImmutable(
+      state,
+      "not-started",
+      "existing-public-validation-started",
+      "promote-existing",
+    );
+  }
+  if (event === "both-public-validated") {
+    const expected =
+      state.mode === "promote-existing"
+        ? "existing-public-validation-started"
+        : "yandex-immutable-published";
+    return transitionBetaImmutable(state, expected, "both-public-validated");
+  }
+  const promotionTransitions = {
+    "mutable-backup-complete": ["not-started", "mutable-backup-complete"],
+    "github-manifest-promoted": ["mutable-backup-complete", "github-manifest-promoted"],
+    "yandex-manifest-promoted": ["github-manifest-promoted", "yandex-manifest-promoted"],
+    "all-promoted": ["yandex-manifest-promoted", "all-promoted"],
+  };
+  if (Object.hasOwn(promotionTransitions, event)) {
+    const [expected, next] = promotionTransitions[event];
+    if (
+      state.immutableState !== "both-public-validated" ||
+      state.promotionState !== expected ||
+      state.rollbackState !== "not-required" ||
+      state.outcome !== "pending"
+    ) {
+      invalid();
+    }
+    return validateBetaState({
+      ...state,
+      promotionState: next,
+      ...(event === "all-promoted"
+        ? { outcome: state.mode === "seed-baseline" ? "seeded" : "promoted" }
+        : {}),
+    });
+  }
+  if (event === "restored" || event === "restoration-failed") {
+    if (
+      state.immutableState !== "both-public-validated" ||
+      state.promotionState === "not-started" ||
+      state.promotionState === "all-promoted" ||
+      state.rollbackState !== "not-required" ||
+      state.outcome !== "pending"
+    ) {
+      invalid();
+    }
+    return validateBetaState({
+      ...state,
+      rollbackState: event,
+      outcome: event === "restored" ? "restored-after-failure" : "restoration-failed",
+    });
+  }
+  invalid();
+}
+
+function renderedBetaOutcome(state) {
+  if (state.outcome !== "pending") return state.outcome;
+  if (state.immutableState === "existing-public-validation-started") {
+    return "existing-immutables-not-validated";
+  }
+  if (state.immutableState === "both-public-validated") return "immutable-but-not-promoted";
+  if (state.immutableState !== "not-started") return "partial-immutables";
+  return "not-completed";
+}
+
+export function renderBetaReleaseSummary(state) {
+  validateBetaState(state);
+  const output = `${[
+    "## Markiro Station beta publication",
+    `- Mode: \`${state.mode}\``,
+    `- Version: \`${display(state.version)}\``,
+    `- Source commit: \`${display(state.sourceSha)}\``,
+    `- Release commit: \`${display(state.releaseSha)}\``,
+    `- GitHub manifest SHA-256: \`${display(state.githubManifestSha256)}\``,
+    `- Yandex manifest SHA-256: \`${display(state.yandexManifestSha256)}\``,
+    `- GitHub evidence SHA-256: \`${display(state.githubEvidenceSha256)}\``,
+    `- Yandex evidence SHA-256: \`${display(state.yandexEvidenceSha256)}\``,
+    `- Installer SHA-256: \`${display(state.installerSha256)}\``,
+    `- Updater bundle SHA-256: \`${display(state.bundleSha256)}\``,
+    `- Detached signature SHA-256: \`${display(state.signatureSha256)}\``,
+    `- Immutable publication: \`${state.immutableState}\``,
+    `- Promotion: \`${state.promotionState}\``,
+    `- Rollback/restoration: \`${state.rollbackState}\``,
+    `- Outcome: \`${renderedBetaOutcome(state)}\``,
+    "- External acceptance: `NOT_RUN` (Authenticode, Windows, updater, and hardware).",
+  ].join("\n")}\n`;
+  if (Buffer.byteLength(output) > 8192) invalid();
+  return output;
+}
+
 function ensureAbsolutePath(path) {
   if (typeof path !== "string" || !isAbsolute(path) || resolve(path) !== path) invalid();
 }
 
-async function readState(path) {
+async function readState(path, validator = validateState) {
   ensureAbsolutePath(path);
   try {
     const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink() || info.size <= 0 || info.size > MAX_STATE_BYTES) {
       invalid();
     }
-    return validateState(JSON.parse(await readFile(path, "utf8")));
+    return validator(JSON.parse(await readFile(path, "utf8")));
   } catch (error) {
     if (error?.message === "invalid station release summary") throw error;
     invalid();
   }
 }
 
-async function writeExclusive(path, state) {
+async function writeExclusive(path, state, validator = validateState) {
   ensureAbsolutePath(path);
   let handle;
   try {
     handle = await open(path, "wx", 0o600);
-    await handle.writeFile(`${JSON.stringify(validateState(state))}\n`);
+    await handle.writeFile(`${JSON.stringify(validator(state))}\n`);
     await handle.sync();
   } finally {
     await handle?.close().catch(() => undefined);
   }
 }
 
-async function replaceState(path, state) {
+async function replaceState(path, state, validator = validateState) {
   const temporary = `${path}.station-summary-${process.pid}.tmp`;
-  await writeExclusive(temporary, state);
+  await writeExclusive(temporary, state, validator);
   try {
     await rename(temporary, path);
   } catch (error) {
@@ -361,13 +576,20 @@ async function replaceState(path, state) {
 
 async function main() {
   const [, , command, ...args] = process.argv;
-  if (command === "init") {
+  const betaCommand = command.startsWith("beta-");
+  const operation = betaCommand ? command.slice("beta-".length) : command;
+  const create = betaCommand ? createBetaReleaseSummaryState : createReleaseSummaryState;
+  const update = betaCommand ? updateBetaReleaseSummary : updateReleaseSummary;
+  const transition = betaCommand ? transitionBetaReleaseSummary : transitionReleaseSummary;
+  const render = betaCommand ? renderBetaReleaseSummary : renderReleaseSummary;
+  const validator = betaCommand ? validateBetaState : validateState;
+  if (operation === "init") {
     const [mode, path, ...extra] = args;
     if (!mode || !path || extra.length > 0) invalid();
-    await writeExclusive(path, createReleaseSummaryState(mode));
+    await writeExclusive(path, create(mode), validator);
     return;
   }
-  if (command === "update") {
+  if (operation === "update") {
     const [path, ...pairs] = args;
     if (!path || pairs.length === 0 || pairs.length % 2 !== 0) invalid();
     const patch = {};
@@ -377,22 +599,22 @@ async function main() {
       if (!key || value === undefined || Object.hasOwn(patch, key)) invalid();
       patch[key] = value === "null" ? null : value;
     }
-    await replaceState(path, updateReleaseSummary(await readState(path), patch));
+    await replaceState(path, update(await readState(path, validator), patch), validator);
     return;
   }
-  if (command === "transition") {
+  if (operation === "transition") {
     const [path, event, ...extra] = args;
     if (!path || !event || extra.length > 0) invalid();
-    await replaceState(path, transitionReleaseSummary(await readState(path), event));
+    await replaceState(path, transition(await readState(path, validator), event), validator);
     return;
   }
-  if (command === "render") {
+  if (operation === "render") {
     const [path, outputPath, ...extra] = args;
     if (!path || !outputPath || extra.length > 0) invalid();
     ensureAbsolutePath(outputPath);
     const parent = await lstat(dirname(outputPath));
     if (!parent.isDirectory() || parent.isSymbolicLink()) invalid();
-    await appendFile(outputPath, renderReleaseSummary(await readState(path)), { mode: 0o600 });
+    await appendFile(outputPath, render(await readState(path, validator)), { mode: 0o600 });
     return;
   }
   invalid();

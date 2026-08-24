@@ -133,11 +133,12 @@ jobs:
           github_beta_dir="$RUNNER_TEMP/station-accepted-beta-github"
           yandex_beta_dir="$RUNNER_TEMP/station-accepted-beta-yandex"
           rm -rf "$github_beta_dir" "$yandex_beta_dir"
-          mkdir "$github_beta_dir" "$yandex_beta_dir"
+          mkdir "$yandex_beta_dir"
           gh release view "$source_beta_tag" --repo "$GITHUB_REPOSITORY" \
             --json tagName,isDraft,isPrerelease,targetCommitish > "$beta_release_json"
-          gh release download "$source_beta_tag" --repo "$GITHUB_REPOSITORY" --dir "$github_beta_dir"
           beta_version="${source_beta_tag#station-v}"
+          env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+            download-release beta "$beta_version" "$github_beta_dir"
           installer="markiro-station-${beta_version}-windows-x86_64-setup.exe"
           bundle="markiro-station-${beta_version}-windows-x86_64.nsis.zip"
           yandex_beta_base="https://releases.markiro.app/station/beta/releases/$beta_version"
@@ -865,8 +866,9 @@ jobs:
             --json tagName,isDraft,isPrerelease \
             --jq 'select(.isDraft == false and .isPrerelease == true) | .tagName')" = \
             "station-stable-channel"
-          gh release download station-stable-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json \
-            --dir "$RUNNER_TEMP/station-stable-github-channel-backup"
+          env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+            download-channel stable \
+            "$RUNNER_TEMP/station-stable-github-channel-backup/latest.json"
           test -f "$RUNNER_TEMP/station-stable-github-channel-backup/latest.json"
 
           rm -rf "$yandex_backup"
