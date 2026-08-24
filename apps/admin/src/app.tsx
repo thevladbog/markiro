@@ -261,7 +261,32 @@ function appRouteElements() {
               <DevicesPage />
             </RequireCapability>
           }
-        />
+        >
+          <Route
+            path="kiosks/new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <KioskCreatePanelRoute />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="kiosks/:kioskId/edit"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <KioskEditPanelRoute />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="kiosks/:kioskId/pair"
+            element={
+              <RequireCapability capability={C.CREDENTIALS_MANAGE}>
+                <KioskPairingPanelRoute />
+              </RequireCapability>
+            }
+          />
+        </Route>
         <Route
           path="kiosks"
           element={

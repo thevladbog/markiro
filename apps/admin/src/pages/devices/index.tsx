@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router";
+import { Outlet, useMatch, useSearchParams } from "react-router";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import {
@@ -17,6 +17,8 @@ import type { TableColumn } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
 import { useActiveOrg } from "../../layout/useActiveOrg.js";
+import type { KiosksPanelContext } from "../kiosks/KioskPanelRoute.js";
+import { useKiosks } from "../kiosks/api.js";
 import { DeviceActions } from "./DeviceActions.js";
 import { DeviceDrawer } from "./DeviceDrawer.js";
 import { DevicePager } from "./DevicePager.js";
@@ -42,6 +44,30 @@ function parsePage(value: string | null): number {
   return Number.isInteger(number) && number > 0 ? number : 1;
 }
 
+/**
+ * Mounts the kiosks query only while a kiosk panel route is open, so the plain
+ * devices list never calls `GET /kiosks`, and feeds the panels the same
+ * `KiosksPanelContext` the retired kiosk list used to provide.
+ */
+function KioskPanelOutlet(): ReactElement {
+  const kiosks = useKiosks();
+  return (
+    <Outlet
+      context={
+        {
+          kiosks: kiosks.data ?? [],
+          kiosksPending: kiosks.isPending,
+          kiosksError: kiosks.isError,
+          kiosksResolved: kiosks.data !== undefined,
+          retryPanelData: async () => {
+            await kiosks.refetch();
+          },
+        } satisfies KiosksPanelContext
+      }
+    />
+  );
+}
+
 export function DevicesPage() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -56,6 +82,7 @@ export function DevicesPage() {
   const canManageCredentials = useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
   const allowStation = canManageCredentials;
   const allowKiosk = canWriteOperations;
+  const kioskPanelOpen = useMatch("/devices/kiosks/*") !== null;
   const result = useDevices({
     ...(type ? { type } : {}),
     ...(status ? { status } : {}),
@@ -200,6 +227,7 @@ export function DevicesPage() {
           onClose={() => setDrawer(null)}
         />
       ) : null}
+      {kioskPanelOpen ? <KioskPanelOutlet /> : null}
     </div>
   );
 }

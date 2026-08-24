@@ -54,7 +54,8 @@ export function DeviceActions({
       >
         {device.type === "kiosk" ? (
           <Link
-            to={`/kiosks/${device.id}/edit`}
+            to={`/devices/kiosks/${device.id}/edit`}
+            state={{ kiosksBackground: true }}
             className="mk-device-actions__kiosk-settings"
             style={{
               display: "inline-flex",

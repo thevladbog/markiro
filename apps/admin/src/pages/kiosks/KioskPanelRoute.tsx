@@ -22,6 +22,7 @@ import {
   type KioskSectionNavItem,
 } from "./KioskSectionNav.js";
 import { getKioskOperationalState } from "./kioskState.js";
+import "./kiosks.css";
 
 export interface KiosksPanelContext {
   kiosks: KioskDto[];
@@ -40,11 +41,18 @@ type SectionFlags = { profile: boolean; products: boolean };
 const CLEAN_SECTIONS: SectionFlags = { profile: false, products: false };
 const SECTION_ORDER: KioskSectionId[] = ["profile", "products"];
 
+/** Base path of the kiosk panel routes for the surface the panel is mounted on. */
+export function kioskPanelBase(pathname: string): string {
+  return pathname.startsWith("/devices") ? "/devices/kiosks" : "/kiosks";
+}
+
 export function closeKioskPanel(location: Location, navigate: NavigateFunction) {
   if ((location.state as KiosksPanelLocationState | null)?.kiosksBackground === true) {
     void navigate(-1);
   } else {
-    void navigate("/kiosks", { replace: true });
+    void navigate(location.pathname.startsWith("/devices") ? "/devices" : "/kiosks", {
+      replace: true,
+    });
   }
 }
 
@@ -170,7 +178,7 @@ export function KioskCreatePanelRoute(): ReactElement {
               <Button
                 type="button"
                 onClick={() => {
-                  void navigate(`/kiosks/${created.id}/pair`, {
+                  void navigate(`${kioskPanelBase(location.pathname)}/${created.id}/pair`, {
                     replace: true,
                     state: (location.state as KiosksPanelLocationState | null)?.kiosksBackground
                       ? ({ kiosksBackground: true } satisfies KiosksPanelLocationState)
