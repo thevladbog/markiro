@@ -1006,10 +1006,17 @@ export function createYandexPublisher({ store, providerReader } = {}) {
       const infrastructure = validateInfrastructureEvidence(infrastructureEvidence.value);
       let source;
       try {
-        source = await validateLegacyGithubStationReleaseDirectory(input.githubTree, {
-          channel,
-          version,
-        });
+        source =
+          channel === "stable"
+            ? await validateLegacyGithubStationReleaseDirectory(input.githubTree, {
+                channel,
+                version,
+              })
+            : await validateStationReleaseDirectory(input.githubTree, {
+                channel,
+                origin: "github",
+                version,
+              });
       } catch {
         bootstrapInvalid();
       }

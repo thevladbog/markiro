@@ -185,10 +185,13 @@ state с `releases.markiro.app`, проверьте точные DNS challenge r
 ## 8. Засеять baseline и проверить provider host
 
 До DNS activation выполните `seed-baseline` отдельно для `stable` и `beta`.
-Это единственный путь, которому разрешено прочитать старую GitHub-only evidence.
-Обычная beta/stable публикация и stable promotion принимают только строгие новые
-GitHub и Yandex schemas. Не передавайте команде URL или ожидаемые hashes: она
-выводит канонические URL/keys сама и пересчитывает hashes из проверенных файлов.
+Только stable seed разрешено прочитать старую GitHub-only stable evidence и
+только для rollback baseline. Beta seed уже требует строгую новую origin-aware
+GitHub evidence от нового dual-published pre-transition beta; legacy beta
+отклоняется до любого store/provider вызова. Обычная beta/stable публикация и
+stable promotion также принимают только строгие новые GitHub и Yandex schemas.
+Не передавайте команде URL или ожидаемые hashes: она выводит канонические
+URL/keys сама и пересчитывает hashes из проверенных файлов.
 
 Seed получает уже скачанный caller-provided acquisition directory. Создайте его
 в защищённом release job через `mktemp -d`, скачайте в него ровно семь

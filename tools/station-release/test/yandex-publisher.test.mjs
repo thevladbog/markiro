@@ -81,6 +81,13 @@ async function yandexTree() {
   return tree;
 }
 
+async function githubBetaTree() {
+  const root = await mkdtemp(join(tmpdir(), "markiro-github-beta-"));
+  const tree = join(root, "github");
+  await stageTree("github", tree);
+  return tree;
+}
+
 async function legacyGithubBetaTree() {
   const root = await mkdtemp(join(tmpdir(), "markiro-legacy-github-beta-"));
   const tree = join(root, "github");
@@ -456,8 +463,8 @@ test("refuses an existing backup directory without removing its contents", async
   assert.equal(await readFile(marker, "utf8"), "preserve me");
 });
 
-test("seeds a legacy accepted beta through the provider host and writes bounded evidence", async () => {
-  const githubTree = await legacyGithubBetaTree();
+test("seeds a strict origin-aware beta through the provider host and records its evidence", async () => {
+  const githubTree = await githubBetaTree();
   const parent = await mkdtemp(join(tmpdir(), "markiro-seed-parent-"));
   const inputs = await writeBootstrapInputs(parent);
   const store = fakeStore();
@@ -499,12 +506,18 @@ test("seeds a legacy accepted beta through the provider host and writes bounded 
   assert.equal(record.source.baseSha, "a".repeat(40));
   assert.equal(record.source.releaseSha, "b".repeat(40));
   assert.match(record.source.releaseMetadataSha256, /^[0-9a-f]{64}$/);
-  assert.match(record.source.evidenceSha256, /^[0-9a-f]{64}$/);
+  assert.equal(
+    record.source.evidenceSha256,
+    digest(await readFile(join(githubTree, names.evidence))),
+  );
   assert.equal(record.infrastructure.enableStationReleasePublicDns, false);
   assert.match(record.infrastructure.evidenceSha256, /^[0-9a-f]{64}$/);
   assert.equal(record.origins.github.origin, "github");
   assert.equal(record.origins.yandex.origin, "yandex");
-  assert.match(record.origins.github.evidenceSha256, /^[0-9a-f]{64}$/);
+  assert.equal(
+    record.origins.github.evidenceSha256,
+    digest(await readFile(join(githubTree, names.evidence))),
+  );
   assert.match(record.origins.yandex.evidenceSha256, /^[0-9a-f]{64}$/);
   assert.match(record.commonAssets.signatureSha256, /^[0-9a-f]{64}$/);
   assert.match(record.mutableBackup.indexSha256, /^[0-9a-f]{64}$/);
@@ -519,8 +532,27 @@ test("seeds a legacy accepted beta through the provider host and writes bounded 
   );
 });
 
-test("refuses DNS-enabled evidence and an incomplete mutable pair before immutable publication", async () => {
+test("rejects a legacy beta before any store or provider interaction", async () => {
   const githubTree = await legacyGithubBetaTree();
+  const parent = await mkdtemp(join(tmpdir(), "markiro-legacy-beta-refused-"));
+  const inputs = await writeBootstrapInputs(parent);
+  const store = fakeStore();
+  const provider = fakeProvider(store);
+  const input = seedInput({ githubTree, parent, ...inputs });
+
+  await assert.rejects(
+    createYandexPublisher({ store, providerReader: provider }).seedBaseline(input),
+    /invalid station release bootstrap/,
+  );
+
+  assert.deepEqual(store.calls, []);
+  assert.deepEqual(provider.calls, []);
+  await assert.rejects(stat(input.backupDirectory), { code: "ENOENT" });
+  await assert.rejects(stat(input.recordPath), { code: "ENOENT" });
+});
+
+test("refuses DNS-enabled evidence and an incomplete mutable pair before immutable publication", async () => {
+  const githubTree = await githubBetaTree();
   for (const setup of [
     async (parent, _store) =>
       writeBootstrapInputs(parent, {
@@ -552,7 +584,7 @@ test("refuses DNS-enabled evidence and an incomplete mutable pair before immutab
 });
 
 test("rejects symlinked or oversized bootstrap evidence before object storage", async () => {
-  const githubTree = await legacyGithubBetaTree();
+  const githubTree = await githubBetaTree();
   for (const prepareInvalidEvidence of [
     async (parent) => {
       const real = join(parent, "infrastructure-real.json");
@@ -588,7 +620,7 @@ test("rejects symlinked or oversized bootstrap evidence before object storage", 
 });
 
 test("accepts the complete matching pair on a retry without overwriting immutable keys", async () => {
-  const githubTree = await legacyGithubBetaTree();
+  const githubTree = await githubBetaTree();
   const store = fakeStore();
   const provider = fakeProvider(store);
   const publisher = createYandexPublisher({ store, providerReader: provider });
@@ -644,7 +676,7 @@ test("accepts the explicitly confirmed legacy stable solely for baseline seeding
 });
 
 test("compensates a seed failure after manifest mutation with the complete baseline", async () => {
-  const githubTree = await legacyGithubBetaTree();
+  const githubTree = await githubBetaTree();
   const parent = await mkdtemp(join(tmpdir(), "markiro-seed-manifest-failure-"));
   const inputs = await writeBootstrapInputs(parent);
   const input = seedInput({ githubTree, parent, ...inputs });
@@ -686,7 +718,7 @@ test("compensates a seed failure after manifest mutation with the complete basel
 });
 
 test("compensates a seed failure after alias mutation with the complete baseline", async () => {
-  const githubTree = await legacyGithubBetaTree();
+  const githubTree = await githubBetaTree();
   const parent = await mkdtemp(join(tmpdir(), "markiro-seed-alias-failure-"));
   const inputs = await writeBootstrapInputs(parent);
   const input = seedInput({ githubTree, parent, ...inputs });
@@ -725,7 +757,7 @@ test("compensates a seed failure after alias mutation with the complete baseline
 });
 
 test("reports a distinct hard failure when seed compensation cannot restore the baseline", async () => {
-  const githubTree = await legacyGithubBetaTree();
+  const githubTree = await githubBetaTree();
   const parent = await mkdtemp(join(tmpdir(), "markiro-seed-recovery-failure-"));
   const inputs = await writeBootstrapInputs(parent);
   const input = seedInput({ githubTree, parent, ...inputs });
@@ -924,7 +956,7 @@ test("CLI permits only the six bounded commands and no promote-existing or crede
     ]),
   );
   const tree = await yandexTree();
-  const githubTree = await legacyGithubBetaTree();
+  const githubTree = await githubBetaTree();
   const parent = await mkdtemp(join(tmpdir(), "markiro-cli-parent-"));
   const backupDirectory = join(parent, "backup");
   const recordPath = join(parent, "bootstrap-record.json");
