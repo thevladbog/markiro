@@ -1,6 +1,6 @@
 import { posix } from "node:path";
 
-import { unzipSync } from "fflate";
+import { Inflate } from "fflate";
 import { XMLParser } from "fast-xml-parser";
 
 import type { InventoryChzStatus } from "@markiro/domain";
@@ -96,6 +96,8 @@ interface ZipEntryMetadata {
   originalName: string;
   canonicalName: string;
   directory: boolean;
+  compression: number;
+  dataOffset: number;
   compressedSize: number;
   uncompressedSize: number;
 }
@@ -375,6 +377,8 @@ function inspectZip(bytes: Uint8Array): ZipEntryMetadata[] {
       originalName,
       canonicalName,
       directory: originalName.endsWith("/"),
+      compression: method,
+      dataOffset: localHeaderEnd,
       compressedSize,
       uncompressedSize,
     });
@@ -389,22 +393,35 @@ function unzipBounded(bytes: Uint8Array): {
   contents: Map<string, Uint8Array>;
 } {
   const entries = inspectZip(bytes);
-  let inflated: Record<string, Uint8Array>;
-  try {
-    inflated = unzipSync(bytes);
-  } catch {
-    return fail("CHZ_ZIP_INVALID");
-  }
   const contents = new Map<string, Uint8Array>();
   let actualTotal = 0;
   for (const entry of entries) {
-    const content = inflated[entry.originalName];
-    if (content === undefined || content.length !== entry.uncompressedSize) fail("CHZ_ZIP_INVALID");
+    const compressed = bytes.subarray(entry.dataOffset, entry.dataOffset + entry.compressedSize);
+    let content: Uint8Array;
+    if (entry.compression === 0) {
+      if (compressed.length !== entry.uncompressedSize) fail("CHZ_ZIP_INVALID");
+      content = compressed.slice();
+    } else {
+      content = new Uint8Array(entry.uncompressedSize);
+      let offset = 0;
+      let finished = false;
+      const decoder = new Inflate((chunk, final) => {
+        if (offset + chunk.length > content.length) fail("CHZ_ZIP_INVALID");
+        content.set(chunk, offset);
+        offset += chunk.length;
+        finished = final;
+      });
+      try {
+        decoder.push(compressed, true);
+      } catch {
+        return fail("CHZ_ZIP_INVALID");
+      }
+      if (!finished || offset !== entry.uncompressedSize) fail("CHZ_ZIP_INVALID");
+    }
     actualTotal += content.length;
     if (actualTotal > CHZ_MAX_UNCOMPRESSED_BYTES) fail("CHZ_ZIP_EXPANSION_LIMIT");
     contents.set(entry.canonicalName, content);
   }
-  if (Object.keys(inflated).length !== entries.length) fail("CHZ_ZIP_INVALID");
   return { entries, contents };
 }
 

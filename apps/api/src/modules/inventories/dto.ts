@@ -46,7 +46,7 @@ export function inventoryCivilDateSchema(field: "productionDateFrom" | "producti
 const productionDateFromSchema = inventoryCivilDateSchema("productionDateFrom");
 const productionDateToSchema = inventoryCivilDateSchema("productionDateTo");
 
-export const createInventorySchema = z.object({
+export const createInventorySchema = z.strictObject({
   productId: z.string().uuid(),
   lineId: z.string().uuid(),
   mode: z.enum(INVENTORY_MODES),
@@ -56,7 +56,7 @@ export const createInventorySchema = z.object({
 });
 export type CreateInventoryDto = z.infer<typeof createInventorySchema>;
 
-export const updateInventorySchema = z.object({
+export const updateInventorySchema = z.strictObject({
   productId: z.string().uuid().optional(),
   lineId: z.string().uuid().optional(),
   mode: z.enum(INVENTORY_MODES).optional(),

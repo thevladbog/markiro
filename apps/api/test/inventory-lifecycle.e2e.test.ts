@@ -5,7 +5,7 @@ import { Test } from "@nestjs/testing";
 import { and, eq, sql } from "drizzle-orm";
 import express from "express";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { schema, type Db } from "@markiro/db";
 import { INVENTORY_CHZ_STATUSES, type LabelTemplateSpec } from "@markiro/domain";
@@ -13,6 +13,7 @@ import { INVENTORY_CHZ_STATUSES, type LabelTemplateSpec } from "@markiro/domain"
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { InventoryLifecycleService } from "../src/modules/inventories/inventory-lifecycle.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { setOnlyOrganizationMemberRole, signUpAndActivate } from "./support/auth";
 import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
@@ -413,6 +414,33 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
         ),
       );
     expect(audits).toHaveLength(1);
+  });
+
+  it("rejects an invalid newly generated manifest before persisting running state", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedReadyInventory(agent);
+    const lifecycle = app!.get(InventoryLifecycleService);
+    const manifestSpy = vi
+      .spyOn(lifecycle as unknown as { toManifest: (facts: unknown) => unknown }, "toManifest")
+      .mockReturnValue({ inventoryId: fixture.inventoryId, privateDetail: "manifest-secret" });
+
+    try {
+      const response = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(409);
+      expect(response.body).toEqual({ code: "INVENTORY_STORED_MANIFEST_INVALID" });
+      expect(JSON.stringify(response.body)).not.toContain("manifest-secret");
+    } finally {
+      manifestSpy.mockRestore();
+    }
+
+    const [inventory] = await db
+      .select({
+        status: schema.inventories.status,
+        stationManifest: schema.inventories.stationManifest,
+        startedAt: schema.inventories.startedAt,
+      })
+      .from(schema.inventories)
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+    expect(inventory).toEqual({ status: "ready", stationManifest: null, startedAt: null });
   });
 
   it("rejects a corrupt stored running manifest with a sanitized stable error", async () => {

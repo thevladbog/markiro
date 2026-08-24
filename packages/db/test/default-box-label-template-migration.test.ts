@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,8 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
@@ -157,121 +159,16 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
     await maintenancePool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
     created = true;
     legacyMigrationsFolder = await mkdtemp(join(tmpdir(), "markiro-default-box-label-migration-"));
-    await cp(migrationsFolder, legacyMigrationsFolder, { recursive: true });
-    await rm(join(legacyMigrationsFolder, "0042_default_box_label_template.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "0043_station_shift_close_presence.sql"), {
-      force: true,
+    await copyMigrationsThroughIndex({
+      sourceFolder: migrationsFolder,
+      targetFolder: legacyMigrationsFolder,
+      lastIncludedIndex: 41,
     });
-    await rm(join(legacyMigrationsFolder, "0044_landing_demo_email.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "0045_flawless_overlord.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "0046_yummy_morph.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "0047_late_blue_blade.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "0048_product_shelf_life_days.sql"), {
-      force: true,
-    });
-    await rm(join(legacyMigrationsFolder, "0049_default_label_templates.sql"), {
-      force: true,
-    });
-    await rm(join(legacyMigrationsFolder, "0050_reseed_default_label_templates.sql"), {
-      force: true,
-    });
-    await rm(join(legacyMigrationsFolder, "0051_glorious_hydra.sql"), {
-      force: true,
-    });
-    await rm(join(legacyMigrationsFolder, "0052_center_sscc_and_fit_label_templates.sql"), {
-      force: true,
-    });
-    await rm(join(legacyMigrationsFolder, "0053_date_free_label_templates.sql"), {
-      force: true,
-    });
-    await rm(join(legacyMigrationsFolder, "0054_shift_production_date.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "0055_brief_mole_man.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "0056_align_dated_label_quantity.sql"), {
-      force: true,
-    });
-    await rm(join(legacyMigrationsFolder, "0057_product_print_name.sql"), {
-      force: true,
-    });
-    await rm(join(legacyMigrationsFolder, "0058_remarkable_pyro.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "0059_print_name_label_templates.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "0060_saas_legal_profiles.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "0061_saas_bank_accounts.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "0062_document_account_snapshots.sql"), {
-      force: true,
-    });
-    await rm(join(legacyMigrationsFolder, "0063_payment_account_evidence.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "0064_normalize_operator_billing_profile_kind.sql"), {
-      force: true,
-    });
-    await rm(join(legacyMigrationsFolder, "0065_saas_party_actual_addresses.sql"), {
-      force: true,
-    });
-    await rm(join(legacyMigrationsFolder, "0066_panoramic_hemingway.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "0067_flashy_outlaw_kid.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "0068_inventory_protected_date_precedence.sql"), {
-      force: true,
-    });
-    await rm(join(legacyMigrationsFolder, "0069_inventory_station_manifest.sql"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0042_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0043_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0044_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0045_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0046_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0047_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0048_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0049_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0050_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0051_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0052_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0053_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0054_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0055_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0056_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0057_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0058_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0059_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0060_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0061_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0064_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0065_snapshot.json"), { force: true });
-    await rm(join(legacyMigrationsFolder, "meta", "0069_snapshot.json"), { force: true });
     const journalPath = join(legacyMigrationsFolder, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
     };
-    journal.entries = journal.entries.filter(
-      (entry) =>
-        entry.tag !== "0042_default_box_label_template" &&
-        entry.tag !== "0043_station_shift_close_presence" &&
-        entry.tag !== "0044_landing_demo_email" &&
-        entry.tag !== "0045_flawless_overlord" &&
-        entry.tag !== "0046_yummy_morph" &&
-        entry.tag !== "0047_late_blue_blade" &&
-        entry.tag !== "0048_product_shelf_life_days" &&
-        entry.tag !== "0049_default_label_templates" &&
-        entry.tag !== "0050_reseed_default_label_templates" &&
-        entry.tag !== "0051_glorious_hydra" &&
-        entry.tag !== "0052_center_sscc_and_fit_label_templates" &&
-        entry.tag !== "0053_date_free_label_templates" &&
-        entry.tag !== "0054_shift_production_date" &&
-        entry.tag !== "0055_brief_mole_man" &&
-        entry.tag !== "0056_align_dated_label_quantity" &&
-        entry.tag !== "0057_product_print_name" &&
-        entry.tag !== "0058_remarkable_pyro" &&
-        entry.tag !== "0059_print_name_label_templates" &&
-        entry.tag !== "0060_saas_legal_profiles" &&
-        entry.tag !== "0061_saas_bank_accounts" &&
-        entry.tag !== "0062_document_account_snapshots" &&
-        entry.tag !== "0063_payment_account_evidence" &&
-        entry.tag !== "0064_normalize_operator_billing_profile_kind" &&
-        entry.tag !== "0065_saas_party_actual_addresses" &&
-        entry.tag !== "0066_panoramic_hemingway" &&
-        entry.tag !== "0067_flashy_outlaw_kid" &&
-        entry.tag !== "0068_inventory_protected_date_precedence" &&
-        entry.tag !== "0069_inventory_station_manifest",
-    );
     expect(journal.entries.at(-1)?.tag).toBe("0041_product_images");
-    await writeFile(journalPath, JSON.stringify(journal));
 
     await migrate(drizzle(pool), { migrationsFolder: legacyMigrationsFolder });
     for (const [index, fixture] of fixtures.entries()) {

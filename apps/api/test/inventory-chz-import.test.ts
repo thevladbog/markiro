@@ -317,6 +317,18 @@ function markUnsupportedCompression(bytes: Uint8Array): Uint8Array {
   return result;
 }
 
+function understateZipUncompressedSize(bytes: Uint8Array): Uint8Array {
+  const result = bytes.slice();
+  const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
+  const local = findZipSignature(result, 0x04034b50);
+  const central = findZipSignature(result, 0x02014b50);
+  const actualSize = view.getUint32(central + 24, true);
+  if (actualSize === 0) throw new Error("ZIP test fixture must not be empty");
+  view.setUint32(local + 22, actualSize - 1, true);
+  view.setUint32(central + 24, actualSize - 1, true);
+  return result;
+}
+
 function withDataDescriptor(
   bytes: Uint8Array,
   options: { corrupt?: boolean; wideSizes?: boolean } = {},
@@ -511,6 +523,23 @@ describe("Chestny ZNAK inventory import parser", () => {
     expectImportError(
       () =>
         parse(withDataDescriptor(zip, { corrupt: true, wideSizes: true }), {
+          filename: "status.zip",
+          mimeType: MIME_ZIP,
+        }),
+      "CHZ_ZIP_INVALID",
+    );
+  });
+
+  it("rejects a ZIP entry that expands beyond its declared uncompressed size", () => {
+    const csvWithTrailingNewline = new Uint8Array([
+      ...csvBytes("INTRODUCED", [dataRow("INTRODUCED")]),
+      0x0a,
+    ]);
+    const zip = zipSync({ "status.csv": csvWithTrailingNewline });
+
+    expectImportError(
+      () =>
+        parse(understateZipUncompressedSize(zip), {
           filename: "status.zip",
           mimeType: MIME_ZIP,
         }),

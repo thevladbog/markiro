@@ -406,6 +406,24 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     expect(check.boxLabelTemplate).toBeNull();
   });
 
+  it("rejects unknown create fields instead of silently discarding them", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { productId, lineId } = await seedPreparation(agent);
+
+    await agent
+      .post("/inventories")
+      .send({ ...createBody(productId, lineId), unexpected: "discarded" })
+      .expect(400);
+  });
+
+  it("rejects unknown update fields instead of treating them as an empty patch", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { productId, lineId } = await seedPreparation(agent);
+    const inventory = await createInventory(agent, productId, lineId);
+
+    await agent.patch(`/inventories/${inventory.id}`).send({ unexpected: "discarded" }).expect(400);
+  });
+
   it("requires an explicit tenant box template for repack and preserves it until changed", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
@@ -768,16 +786,24 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     expect(audit?.after).toMatchObject({ parsedStatus: null, includedGtin14: null });
   });
 
-  it("rolls back an unexpected parser failure and permits a successful same-digest retry", async () => {
+  it("cleans a pre-transaction upload after an unexpected parser failure and permits a same-digest retry", async () => {
     const agent = request.agent(app!.getHttpServer());
     const { tenantId, productId, lineId } = await seedPreparation(agent);
     const inventory = await createInventory(agent, productId, lineId);
     const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/INTRODUCED/${INTRODUCED_DIGEST}.csv`;
     parseChzImportFault.unexpectedFailuresRemaining = 1;
+    const transactionSpy = vi.spyOn(db, "transaction");
 
-    const failed = await upload(agent, inventory.id, "INTRODUCED").expect(500);
-    expect(failed.body).toEqual({ statusCode: 500, message: "Internal server error" });
-    expect(JSON.stringify(failed.body)).not.toMatch(/synthetic|CHZ_IMPORT_PARSE_FAILED|objectKey/i);
+    try {
+      const failed = await upload(agent, inventory.id, "INTRODUCED").expect(500);
+      expect(failed.body).toEqual({ statusCode: 500, message: "Internal server error" });
+      expect(JSON.stringify(failed.body)).not.toMatch(
+        /synthetic|CHZ_IMPORT_PARSE_FAILED|objectKey/i,
+      );
+      expect(transactionSpy).not.toHaveBeenCalled();
+    } finally {
+      transactionSpy.mockRestore();
+    }
     expect(storage.putVerified).toHaveBeenCalledTimes(1);
     expect(storage.delete).toHaveBeenCalledTimes(1);
     expect(storage.delete).toHaveBeenCalledWith(expectedKey);
@@ -838,6 +864,39 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     expect(durableImports).toEqual([{ id: retry.body.id }]);
   });
 
+  it("rejects and cleans a pre-transaction upload when the product GTIN changes before persistence", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent);
+    const inventory = await createInventory(agent, productId, lineId);
+    const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/INTRODUCED/${INTRODUCED_DIGEST}.csv`;
+    storage.putVerified.mockImplementationOnce(
+      async (key: string, body: Buffer, _contentType: string, sha256: string) => {
+        await db
+          .update(schema.products)
+          .set({ gtin14: "04680089900390" })
+          .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
+        objects.set(key, Buffer.from(body));
+        return { byteSize: body.byteLength, sha256 };
+      },
+    );
+
+    await upload(agent, inventory.id, "INTRODUCED").expect(409, {
+      code: "INVENTORY_PRODUCT_GTIN_CHANGED",
+    });
+    expect(storage.delete).toHaveBeenCalledWith(expectedKey);
+    expect(objects.size).toBe(0);
+    const imports = await db
+      .select({ id: schema.inventoryImports.id })
+      .from(schema.inventoryImports)
+      .where(
+        and(
+          eq(schema.inventoryImports.tenantId, tenantId),
+          eq(schema.inventoryImports.inventoryId, inventory.id),
+        ),
+      );
+    expect(imports).toEqual([]);
+  });
+
   it("deduplicates concurrent same-file requests only within tenant, inventory, and status", async () => {
     const agent = request.agent(app!.getHttpServer());
     const { tenantId, productId, lineId } = await seedPreparation(agent);
@@ -849,7 +908,12 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       upload(agent, firstInventory.id, "INTRODUCED").expect(201),
     ]);
     expect(repeated.body).toEqual(first.body);
-    expect(storage.putVerified).toHaveBeenCalledTimes(1);
+    const expectedKey = `tenants/${tenantId}/inventories/${firstInventory.id}/imports/INTRODUCED/${INTRODUCED_DIGEST}.csv`;
+    expect(storage.putVerified).toHaveBeenCalled();
+    expect(new Set(storage.putVerified.mock.calls.map(([key]) => key))).toEqual(
+      new Set([expectedKey]),
+    );
+    expect([...objects.keys()]).toEqual([expectedKey]);
     const deduplicatedRows = await db
       .select({ id: schema.inventoryImports.id })
       .from(schema.inventoryImports)
@@ -863,9 +927,10 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       );
     expect(deduplicatedRows).toHaveLength(1);
 
+    storage.putVerified.mockClear();
     await upload(agent, firstInventory.id, "EMITTED").expect(422);
     await upload(agent, secondInventory.id, "INTRODUCED").expect(201);
-    expect(storage.putVerified).toHaveBeenCalledTimes(3);
+    expect(storage.putVerified).toHaveBeenCalledTimes(2);
   });
 
   it("checks digest idempotency before retry filename classification but rejects a new unsupported container", async () => {

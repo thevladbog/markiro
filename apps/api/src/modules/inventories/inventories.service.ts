@@ -333,6 +333,82 @@ export class InventoriesService {
     const publication: { current: PublishedAttempt | null } = { current: null };
 
     try {
+      const [preflightInventory] = await this.db
+        .select({
+          id: schema.inventories.id,
+          productId: schema.inventories.productId,
+          status: schema.inventories.status,
+        })
+        .from(schema.inventories)
+        .where(
+          and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
+        );
+      if (!preflightInventory) throw new NotFoundException();
+      this.assertMutable(preflightInventory.status);
+
+      const preflightExisting = await this.findImportRow(
+        this.db,
+        tenantId,
+        inventoryId,
+        declaredStatus,
+        sha256,
+      );
+      if (preflightExisting) {
+        return this.importDtoWithStoredDiagnostic(this.db, preflightExisting);
+      }
+      const containerKind = this.containerKind(file.originalName);
+
+      const [preflightProduct] = await this.db
+        .select({ gtin14: schema.products.gtin14, status: schema.products.status })
+        .from(schema.products)
+        .where(
+          and(
+            eq(schema.products.tenantId, tenantId),
+            eq(schema.products.id, preflightInventory.productId),
+          ),
+        );
+      if (!preflightProduct || preflightProduct.status !== "active") {
+        throw new UnprocessableEntityException({ code: "INVENTORY_PRODUCT_INACTIVE" });
+      }
+
+      const objectKey = this.importObjectKey(
+        tenantId,
+        inventoryId,
+        declaredStatus,
+        sha256,
+        containerKind,
+      );
+      publication.current = { tenantId, inventoryId, importId, objectKey };
+      const verified = await this.storage.putVerified(objectKey, file.bytes, file.mimeType, sha256);
+
+      let parsedStatus: InventoryChzStatus | null;
+      let includedGtin14: string | null;
+      let result: "succeeded" | "failed" = "succeeded";
+      let rowCount = 0;
+      let duplicateCount = 0;
+      let errorCode: string | null = null;
+      let errorRowNumber: number | undefined;
+      try {
+        const parsed = parseChzImport({
+          filename: file.originalName,
+          mimeType: file.mimeType,
+          bytes: file.bytes,
+          expectedStatus: declaredStatus,
+          expectedGtin14: preflightProduct.gtin14,
+        });
+        parsedStatus = parsed.filter.status;
+        includedGtin14 = parsed.filter.includedGtin14;
+        rowCount = parsed.rows.length;
+        duplicateCount = rowCount - new Set(parsed.rows.map((row) => row.codeHash)).size;
+      } catch (error) {
+        if (!(error instanceof ChzImportError)) throw error;
+        result = "failed";
+        errorCode = error.code;
+        errorRowNumber = error.rowNumber;
+        parsedStatus = error.parsedStatus ?? null;
+        includedGtin14 = error.includedGtin14 ?? null;
+      }
+
       return await this.db.transaction(async (tx) => {
         const [inventory] = await tx
           .select({
@@ -356,7 +432,6 @@ export class InventoriesService {
           sha256,
         );
         if (existing) return this.importDtoWithStoredDiagnostic(tx, existing);
-        const containerKind = this.containerKind(file.originalName);
 
         const [product] = await tx
           .select({ gtin14: schema.products.gtin14, status: schema.products.status })
@@ -371,48 +446,8 @@ export class InventoriesService {
         if (!product || product.status !== "active") {
           throw new UnprocessableEntityException({ code: "INVENTORY_PRODUCT_INACTIVE" });
         }
-
-        const objectKey = this.importObjectKey(
-          tenantId,
-          inventoryId,
-          declaredStatus,
-          sha256,
-          containerKind,
-        );
-        publication.current = { tenantId, inventoryId, importId, objectKey };
-        const verified = await this.storage.putVerified(
-          objectKey,
-          file.bytes,
-          file.mimeType,
-          sha256,
-        );
-
-        let parsedStatus: InventoryChzStatus | null;
-        let includedGtin14: string | null;
-        let result: "succeeded" | "failed" = "succeeded";
-        let rowCount = 0;
-        let duplicateCount = 0;
-        let errorCode: string | null = null;
-        let errorRowNumber: number | undefined;
-        try {
-          const parsed = parseChzImport({
-            filename: file.originalName,
-            mimeType: file.mimeType,
-            bytes: file.bytes,
-            expectedStatus: declaredStatus,
-            expectedGtin14: product.gtin14,
-          });
-          parsedStatus = parsed.filter.status;
-          includedGtin14 = parsed.filter.includedGtin14;
-          rowCount = parsed.rows.length;
-          duplicateCount = rowCount - new Set(parsed.rows.map((row) => row.codeHash)).size;
-        } catch (error) {
-          if (!(error instanceof ChzImportError)) throw error;
-          result = "failed";
-          errorCode = error.code;
-          errorRowNumber = error.rowNumber;
-          parsedStatus = error.parsedStatus ?? null;
-          includedGtin14 = error.includedGtin14 ?? null;
+        if (product.gtin14 !== preflightProduct.gtin14) {
+          throw new ConflictException({ code: "INVENTORY_PRODUCT_GTIN_CHANGED" });
         }
 
         await tx.insert(schema.inventoryImports).values({

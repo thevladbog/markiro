@@ -79,7 +79,13 @@ export class InventoryLifecycleService {
       }
 
       const facts = await this.loadStartFacts(tx, tenantId, inventory);
-      const manifest = this.toManifest(facts);
+      const generatedManifest = this.toManifest(facts);
+      let manifest: StationInventoryManifest;
+      try {
+        manifest = parseStationInventoryManifest(generatedManifest);
+      } catch {
+        throw new ConflictException({ code: "INVENTORY_STORED_MANIFEST_INVALID" });
+      }
       const startedAt = new Date();
       await tx
         .update(schema.inventories)
