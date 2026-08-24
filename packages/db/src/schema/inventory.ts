@@ -185,6 +185,34 @@ export const inventories = pgTable(
         sql`(${table.completionAcknowledgedByUserId} is null and ${table.completionAcknowledgedAt} is null)
         or (${table.completionAcknowledgedByUserId} is not null and ${table.completionAcknowledgedAt} is not null)`,
       ),
+      check(
+        "inventories_started_fields_check",
+        sql`(${table.startedByUserId} is null and ${table.startedAt} is null)
+          or (${table.startedByUserId} is not null and ${table.startedAt} is not null)`,
+      ),
+      check(
+        "inventories_closed_fields_check",
+        sql`(${table.closedByUserId} is null and ${table.closedAt} is null)
+          or (${table.closedByUserId} is not null and ${table.closedAt} is not null)`,
+      ),
+      check(
+        "inventories_completed_fields_check",
+        sql`(${table.completedByUserId} is null and ${table.completedAt} is null)
+          or (${table.completedByUserId} is not null and ${table.completedAt} is not null)`,
+      ),
+      check(
+        "inventories_completed_lifecycle_check",
+        sql`(${table.status} = 'completed'
+            and ${table.completedByUserId} is not null
+            and ${table.completedAt} is not null
+            and ${table.completionAcknowledgedByUserId} is not null
+            and ${table.completionAcknowledgedAt} is not null)
+          or (${table.status} <> 'completed'
+            and ${table.completedByUserId} is null
+            and ${table.completedAt} is null
+            and ${table.completionAcknowledgedByUserId} is null
+            and ${table.completionAcknowledgedAt} is null)`,
+      ),
     ];
   },
 );
@@ -223,6 +251,13 @@ export const inventoryImports = pgTable(
       table.inventoryId,
       table.declaredStatus,
     ),
+    unique("inventory_imports_tenant_id_inventory_status_outcome_uq").on(
+      table.tenantId,
+      table.id,
+      table.inventoryId,
+      table.declaredStatus,
+      table.parseOutcome,
+    ),
     foreignKey({
       name: "inventory_imports_tenant_inventory_fk",
       columns: [table.tenantId, table.inventoryId],
@@ -251,10 +286,14 @@ export const inventoryImports = pgTable(
     check(
       "inventory_imports_parse_outcome_check",
       sql`(${table.parseOutcome} = 'succeeded'
+          and ${table.parsedStatus} is not null
           and ${table.parsedStatus} = ${table.declaredStatus}
           and ${table.includedGtin14} is not null
+          and ${table.errorCount} = 0
           and ${table.errorCode} is null)
-        or (${table.parseOutcome} = 'failed' and ${table.errorCode} is not null)`,
+        or (${table.parseOutcome} = 'failed'
+          and ${table.errorCount} > 0
+          and ${table.errorCode} is not null)`,
     ),
   ],
 );
@@ -328,6 +367,9 @@ export const inventorySnapshotInputs = pgTable(
     inventoryId: uuid("inventory_id").notNull(),
     status: inventoryChzStatusEnum("status").notNull(),
     importId: uuid("import_id").notNull(),
+    importParseOutcome: inventoryImportParseOutcomeEnum("import_parse_outcome")
+      .notNull()
+      .default("succeeded"),
   },
   (table) => [
     unique("inventory_snapshot_inputs_tenant_snapshot_status_uq").on(
@@ -351,14 +393,25 @@ export const inventorySnapshotInputs = pgTable(
     }),
     foreignKey({
       name: "inventory_snapshot_inputs_tenant_import_inventory_status_fk",
-      columns: [table.tenantId, table.importId, table.inventoryId, table.status],
+      columns: [
+        table.tenantId,
+        table.importId,
+        table.inventoryId,
+        table.status,
+        table.importParseOutcome,
+      ],
       foreignColumns: [
         inventoryImports.tenantId,
         inventoryImports.id,
         inventoryImports.inventoryId,
         inventoryImports.declaredStatus,
+        inventoryImports.parseOutcome,
       ],
     }),
+    check(
+      "inventory_snapshot_inputs_successful_import_check",
+      sql`${table.importParseOutcome} = 'succeeded'`,
+    ),
   ],
 );
 
@@ -411,6 +464,7 @@ export const inventorySnapshotCodes = pgTable(
       "inventory_snapshot_codes_classification_check",
       sql`not (${table.expected} and ${table.protected})
         and ${table.protected} = coalesce(${table.sourceState} = 'MOVING_BY_UD', false)
+        and (${table.sourceStatus} <> 'INTRODUCED' or ${table.sourceProductionDate} is not null)
         and (not ${table.expected}
           or (${table.sourceStatus} = 'INTRODUCED' and ${table.sourceProductionDate} is not null))`,
     ),

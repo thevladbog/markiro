@@ -1,6 +1,10 @@
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+
 import { getTableName, is } from "drizzle-orm";
-import { getTableConfig, IndexedColumn, type AnyPgTable } from "drizzle-orm/pg-core";
-import { describe, expect, it } from "vitest";
+import { getTableConfig, IndexedColumn, PgDialect, type AnyPgTable } from "drizzle-orm/pg-core";
+import pg from "pg";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { schema } from "../src/index.js";
 
@@ -24,6 +28,14 @@ function constraintColumns(tableName: string, constraintName: string): string[] 
   );
   if (constraint === undefined) throw new Error(`missing unique constraint ${constraintName}`);
   return constraint.columns.map((column) => column.name);
+}
+
+function checkExpression(tableName: string, checkName: string): string {
+  const constraint = getTableConfig(table(tableName)).checks.find(
+    (item) => item.name === checkName,
+  );
+  if (constraint === undefined) throw new Error(`missing check ${checkName}`);
+  return new PgDialect().sqlToQuery(constraint.value).sql.replaceAll(/"[^"]+"\./g, "");
 }
 
 function foreignKeyColumns(
@@ -146,8 +158,8 @@ describe("inventory preparation schema", () => {
         "inventory_snapshot_inputs_tenant_import_inventory_status_fk",
       ),
     ).toEqual({
-      columns: ["tenant_id", "import_id", "inventory_id", "status"],
-      foreignColumns: ["tenant_id", "id", "inventory_id", "declared_status"],
+      columns: ["tenant_id", "import_id", "inventory_id", "status", "import_parse_outcome"],
+      foreignColumns: ["tenant_id", "id", "inventory_id", "declared_status", "parse_outcome"],
       foreignTable: "inventory_imports",
     });
     expect(
@@ -157,6 +169,21 @@ describe("inventory preparation schema", () => {
       foreignColumns: ["tenant_id", "id"],
       foreignTable: "inventory_snapshots",
     });
+
+    for (const [tableName, foreignKeyName] of [
+      ["inventories", "inventories_tenant_active_snapshot_fk"],
+      ["inventoryImports", "inventory_imports_tenant_inventory_fk"],
+      ["inventorySnapshots", "inventory_snapshots_tenant_inventory_fk"],
+      ["inventorySnapshotInputs", "inventory_snapshot_inputs_tenant_snapshot_inventory_fk"],
+      ["inventorySnapshotInputs", "inventory_snapshot_inputs_tenant_import_inventory_status_fk"],
+      ["inventorySnapshotCodes", "inventory_snapshot_codes_tenant_snapshot_fk"],
+    ] as const) {
+      const key = getTableConfig(table(tableName)).foreignKeys.find(
+        (item) => item.getName() === foreignKeyName,
+      );
+      expect(key?.onDelete, `${foreignKeyName} must retain evidence on delete`).toBe("no action");
+      expect(key?.onUpdate, `${foreignKeyName} must retain identity on update`).toBe("no action");
+    }
   });
 
   it("permits only one immutable snapshot and one selected import per status", () => {
@@ -172,6 +199,83 @@ describe("inventory preparation schema", () => {
     expect(
       constraintColumns("inventorySnapshotCodes", "inventory_snapshot_codes_tenant_hash_uq"),
     ).toEqual(["tenant_id", "snapshot_id", "code_hash"]);
+    expect(
+      constraintColumns(
+        "inventoryImports",
+        "inventory_imports_tenant_id_inventory_status_outcome_uq",
+      ),
+    ).toEqual(["tenant_id", "id", "inventory_id", "declared_status", "parse_outcome"]);
+    expect(
+      constraintColumns("inventorySnapshots", "inventory_snapshots_tenant_id_inventory_uq"),
+    ).toEqual(["tenant_id", "id", "inventory_id"]);
+  });
+
+  it("requires complete successful parse facts and a sanitized failure", () => {
+    const expression = checkExpression("inventoryImports", "inventory_imports_parse_outcome_check");
+
+    expect(expression).toContain('"parsed_status" is not null');
+    expect(expression).toContain('"included_gtin14" is not null');
+    expect(expression).toContain('"error_count" = 0');
+    expect(expression).toContain('"error_code" is null');
+    expect(expression).toContain('"error_count" > 0');
+    expect(expression).toContain('"error_code" is not null');
+  });
+
+  it("selects only a successful import through a checked composite foreign key", () => {
+    expect(Object.keys(schema.inventorySnapshotInputs)).toContain("importParseOutcome");
+    expect(
+      checkExpression(
+        "inventorySnapshotInputs",
+        "inventory_snapshot_inputs_successful_import_check",
+      ),
+    ).toContain("\"import_parse_outcome\" = 'succeeded'");
+    expect(
+      foreignKeyColumns(
+        "inventorySnapshotInputs",
+        "inventory_snapshot_inputs_tenant_import_inventory_status_fk",
+      ),
+    ).toEqual({
+      columns: ["tenant_id", "import_id", "inventory_id", "status", "import_parse_outcome"],
+      foreignColumns: ["tenant_id", "id", "inventory_id", "declared_status", "parse_outcome"],
+      foreignTable: "inventory_imports",
+    });
+  });
+
+  it("requires a source production date for every introduced snapshot code", () => {
+    const expression = checkExpression(
+      "inventorySnapshotCodes",
+      "inventory_snapshot_codes_classification_check",
+    );
+
+    expect(expression).toContain(
+      '("source_status" <> \'INTRODUCED\' or "source_production_date" is not null)',
+    );
+    expect(expression).toContain(
+      '"protected" = coalesce("source_state" = \'MOVING_BY_UD\', false)',
+    );
+  });
+
+  it("pairs lifecycle evidence and requires completion acknowledgement", () => {
+    expect(checkExpression("inventories", "inventories_started_fields_check")).toContain(
+      '("started_by_user_id" is null and "started_at" is null)',
+    );
+    expect(checkExpression("inventories", "inventories_closed_fields_check")).toContain(
+      '("closed_by_user_id" is null and "closed_at" is null)',
+    );
+    expect(checkExpression("inventories", "inventories_completed_fields_check")).toContain(
+      '("completed_by_user_id" is null and "completed_at" is null)',
+    );
+    const lifecycle = checkExpression("inventories", "inventories_completed_lifecycle_check");
+    expect(lifecycle).toContain("\"status\" = 'completed'");
+    expect(lifecycle).toContain('"completion_acknowledged_by_user_id" is not null');
+    expect(lifecycle).toContain('"completion_acknowledged_at" is not null');
+    const emergency = checkExpression("inventories", "inventories_emergency_close_fields_check");
+    expect(emergency).toContain('"emergency_close_reason" is null');
+    expect(emergency).toContain('"emergency_closed_by_user_id" is null');
+    expect(emergency).toContain('"emergency_closed_at" is null');
+    expect(emergency).toContain('"emergency_close_reason" is not null');
+    expect(emergency).toContain('"emergency_closed_by_user_id" is not null');
+    expect(emergency).toContain('"emergency_closed_at" is not null');
   });
 
   it("declares date, digest, count, lifecycle, mode, and classification checks", () => {
@@ -219,5 +323,236 @@ describe("inventory preparation schema", () => {
     expect(
       indexColumns("inventorySnapshotCodes", "inventory_snapshot_codes_expected_date_idx"),
     ).toEqual(["snapshot_id", "expected", "source_production_date"]);
+  });
+});
+
+const databaseUrl = process.env.DATABASE_URL;
+
+describe.skipIf(!databaseUrl)("inventory preparation PostgreSQL invariants", () => {
+  const pool = new pg.Pool({ connectionString: databaseUrl });
+  let client: pg.PoolClient;
+  const tenantId = `inventory-review-${randomUUID()}`;
+  const userId = `inventory-review-user-${randomUUID()}`;
+  const productId = randomUUID();
+  const lineId = randomUUID();
+  const inventoryId = randomUUID();
+  const snapshotId = randomUUID();
+  const failedImportId = randomUUID();
+  let savepointSequence = 0;
+
+  async function expectConstraintViolation(
+    statement: string,
+    parameters: readonly unknown[],
+    expectedCode: "23503" | "23514" = "23514",
+  ): Promise<void> {
+    savepointSequence += 1;
+    const savepoint = `inventory_review_${savepointSequence}`;
+    await client.query(`savepoint ${savepoint}`);
+    let caught: unknown;
+    try {
+      await client.query(statement, [...parameters]);
+    } catch (error) {
+      caught = error;
+    } finally {
+      await client.query(`rollback to savepoint ${savepoint}`);
+      await client.query(`release savepoint ${savepoint}`);
+    }
+    expect(caught).toMatchObject({ code: expectedCode });
+  }
+
+  beforeAll(async () => {
+    client = await pool.connect();
+    await client.query("begin");
+    const migrationNames = ["0066_panoramic_hemingway.sql", "0067_flashy_outlaw_kid.sql"];
+    for (const migrationName of migrationNames) {
+      const migration = readFileSync(
+        new URL(`../migrations/${migrationName}`, import.meta.url),
+        "utf8",
+      );
+      for (const statement of migration.split("--> statement-breakpoint")) {
+        if (statement.trim() !== "") await client.query(statement);
+      }
+    }
+    await client.query(
+      `insert into organization (id, name, slug, created_at) values ($1, $2, $3, now())`,
+      [tenantId, "Inventory review", `inventory-review-${randomUUID()}`],
+    );
+    await client.query(
+      `insert into "user" (id, name, email, email_verified, created_at, updated_at)
+       values ($1, $2, $3, false, now(), now())`,
+      [userId, "Inventory review", `${randomUUID()}@example.invalid`],
+    );
+    await client.query(
+      `insert into products (id, tenant_id, gtin14, name) values ($1, $2, $3, $4)`,
+      [productId, tenantId, "04680089900383", "Inventory review product"],
+    );
+    await client.query(`insert into lines (id, tenant_id, name) values ($1, $2, $3)`, [
+      lineId,
+      tenantId,
+      "Inventory review line",
+    ]);
+    await client.query(
+      `insert into inventories
+         (id, tenant_id, number, product_id, gtin14_snapshot, line_id, mode,
+          production_date_from, production_date_to, created_by_user_id)
+       values ($1, $2, $3, $4, $5, $6, 'check', '2026-08-01', '2026-08-31', $7)`,
+      [inventoryId, tenantId, `INV-${randomUUID()}`, productId, "04680089900383", lineId, userId],
+    );
+    await client.query(
+      `insert into inventory_imports
+         (id, tenant_id, inventory_id, declared_status, file_name, container_kind,
+          byte_size, sha256, object_key, parse_outcome, row_count, error_count,
+          duplicate_count, error_code, created_by_user_id)
+       values ($1, $2, $3, 'EMITTED', 'failed.csv', 'csv', 1, $4, 'private/failed',
+               'failed', 0, 1, 0, 'CHZ_FILTER_INVALID', $5)`,
+      [failedImportId, tenantId, inventoryId, "f".repeat(64), userId],
+    );
+    await client.query(
+      `insert into inventory_snapshots
+         (id, tenant_id, inventory_id, combined_digest, emitted_count, introduced_count,
+          applied_count, retired_count, written_off_count, disaggregation_count,
+          protected_count, expected_count, package_count, loose_count, fixed_by_user_id)
+       values ($1, $2, $3, $4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $5)`,
+      [snapshotId, tenantId, inventoryId, "d".repeat(64), userId],
+    );
+  });
+
+  afterAll(async () => {
+    if (client !== undefined) {
+      await client.query("rollback");
+      client.release();
+    }
+    await pool.end();
+  });
+
+  it("rejects incomplete or contradictory import outcomes", async () => {
+    const statement = `insert into inventory_imports
+         (tenant_id, inventory_id, declared_status, file_name, container_kind, byte_size,
+          sha256, object_key, parsed_status, included_gtin14, parse_outcome, row_count,
+          error_count, duplicate_count, error_code, created_by_user_id)
+       values ($1, $2, 'INTRODUCED', 'invalid.csv', 'csv', 1, $3, 'private/invalid',
+               $4, $5, $6, 0, $7, 0, $8, $9)`;
+    const cases = [
+      [null, "04680089900383", "succeeded", 0, null],
+      ["INTRODUCED", null, "succeeded", 0, null],
+      ["INTRODUCED", "04680089900383", "succeeded", 1, "UNEXPECTED_ERROR"],
+      [null, null, "failed", 1, null],
+      [null, null, "failed", 0, "PARSE_FAILED"],
+    ] as const;
+
+    for (const [parsedStatus, includedGtin14, outcome, errorCount, errorCode] of cases) {
+      await expectConstraintViolation(statement, [
+        tenantId,
+        inventoryId,
+        "a".repeat(64),
+        parsedStatus,
+        includedGtin14,
+        outcome,
+        errorCount,
+        errorCode,
+        userId,
+      ]);
+    }
+  });
+
+  it("rejects selecting a failed import for a snapshot", async () => {
+    const columns = await client.query<{ present: boolean }>(
+      `select exists (
+         select 1 from information_schema.columns
+         where table_schema = current_schema()
+           and table_name = 'inventory_snapshot_inputs'
+           and column_name = 'import_parse_outcome'
+       ) as present`,
+    );
+    const statement = columns.rows[0]?.present
+      ? `insert into inventory_snapshot_inputs
+           (tenant_id, snapshot_id, inventory_id, status, import_id, import_parse_outcome)
+         values ($1, $2, $3, 'EMITTED', $4, 'succeeded')`
+      : `insert into inventory_snapshot_inputs
+           (tenant_id, snapshot_id, inventory_id, status, import_id)
+         values ($1, $2, $3, 'EMITTED', $4)`;
+
+    await expectConstraintViolation(
+      statement,
+      [tenantId, snapshotId, inventoryId, failedImportId],
+      "23503",
+    );
+  });
+
+  it("rejects an introduced snapshot code without a source production date", async () => {
+    await expectConstraintViolation(
+      `insert into inventory_snapshot_codes
+         (tenant_id, snapshot_id, canonical_raw, code_hash, gtin14, serial, source_status,
+          source_production_date, expected, protected)
+       values ($1, $2, 'raw-km', $3, '04680089900383', 'SERIAL', 'INTRODUCED', null, false, false)`,
+      [tenantId, snapshotId, "b".repeat(64)],
+    );
+
+    for (const [index, status] of [
+      "EMITTED",
+      "APPLIED",
+      "RETIRED",
+      "WRITTEN_OFF",
+      "DISAGGREGATION",
+    ].entries()) {
+      await client.query(
+        `insert into inventory_snapshot_codes
+           (tenant_id, snapshot_id, canonical_raw, code_hash, gtin14, serial, source_status,
+            source_production_date, expected, protected)
+         values ($1, $2, $3, $4, '04680089900383', $5, $6, null, false, false)`,
+        [tenantId, snapshotId, `raw-${status}`, index.toString(16).repeat(64), status, status],
+      );
+    }
+    await client.query(
+      `insert into inventory_snapshot_codes
+         (tenant_id, snapshot_id, canonical_raw, code_hash, gtin14, serial, source_status,
+          source_state, source_production_date, expected, protected)
+       values ($1, $2, 'raw-protected', $3, '04680089900383', 'PROTECTED', 'INTRODUCED',
+               'MOVING_BY_UD', '2026-08-15', false, true)`,
+      [tenantId, snapshotId, "f".repeat(64)],
+    );
+  });
+
+  it("rejects partial start and close evidence", async () => {
+    const values = [tenantId, productId, lineId, userId, `INV-${randomUUID()}`, randomUUID()];
+    await expectConstraintViolation(
+      `insert into inventories
+         (tenant_id, number, id, product_id, gtin14_snapshot, line_id, mode,
+          production_date_from, production_date_to, created_by_user_id, started_by_user_id)
+       values ($1, $5, $6, $2, '04680089900383', $3, 'check', '2026-08-01', '2026-08-31', $4, $4)`,
+      values,
+    );
+    values[4] = `INV-${randomUUID()}`;
+    values[5] = randomUUID();
+    await expectConstraintViolation(
+      `insert into inventories
+         (tenant_id, number, id, product_id, gtin14_snapshot, line_id, mode,
+          production_date_from, production_date_to, created_by_user_id, closed_at)
+       values ($1, $5, $6, $2, '04680089900383', $3, 'check', '2026-08-01', '2026-08-31', $4, now())`,
+      values,
+    );
+  });
+
+  it("rejects completion without explicit acknowledgement", async () => {
+    await expectConstraintViolation(
+      `update inventories
+       set status = 'completed', active_snapshot_id = $1,
+           completed_by_user_id = $2, completed_at = now()
+       where tenant_id = $3 and id = $4`,
+      [snapshotId, userId, tenantId, inventoryId],
+    );
+    await expectConstraintViolation(
+      `update inventories
+       set completion_acknowledged_by_user_id = $1, completion_acknowledged_at = now()
+       where tenant_id = $2 and id = $3`,
+      [userId, tenantId, inventoryId],
+    );
+    await expectConstraintViolation(
+      `update inventories
+       set status = 'completed', active_snapshot_id = $1,
+           completion_acknowledged_by_user_id = $2, completion_acknowledged_at = now()
+       where tenant_id = $3 and id = $4`,
+      [snapshotId, userId, tenantId, inventoryId],
+    );
   });
 });
