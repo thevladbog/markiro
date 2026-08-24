@@ -3,7 +3,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { renderPrintHtml } from "../src/modules/billing/print-document-html";
-import { documentBarcodeValue } from "../src/modules/billing/print-document-layout";
+import {
+  amountInWords,
+  documentBarcodeValue,
+  paymentQrPayload,
+} from "../src/modules/billing/print-document-layout";
 import { formatOfferTermsText, renderPrintPdf } from "../src/modules/billing/print-document-pdf";
 import type { PrintDocumentModel, PrintLine } from "../src/modules/billing/print-document-model";
 
@@ -84,24 +88,28 @@ describe("print document HTML renderer", () => {
 
   it("renders the approved invoice hierarchy without duplicate labels", () => {
     const html = renderPrintHtml(baseInvoice);
-    const body = html.split("</head><body>")[1] ?? "";
+    const screenPage = html.match(/<article class="print-page">[\s\S]*<\/article>/)?.[0] ?? "";
 
-    expect(count(body, "СЧЁТ НА ОПЛАТУ")).toBe(1);
+    expect(count(screenPage, "СЧЁТ НА ОПЛАТУ")).toBe(1);
     expect(html).toContain("№ 184 · 24.08.2026");
     expect(html).toContain("Лицензия и услуги платформы Markiro");
     expect(html).not.toContain("Основной расчётный счёт");
     expect(html).not.toContain("Оплатить по QR");
     expect(html).toContain('aria-label="QR-код для оплаты счёта"');
     expect(html).toContain('aria-label="Штрихкод формы"');
-    expect(count(body, "Сформировано системой Markiro")).toBe(1);
+    expect(count(screenPage, "Сформировано системой Markiro")).toBe(1);
+    expect(count(html, 'aria-hidden="true"')).toBe(2);
   });
 
   it("renders the approved eight-module Markiro lockup in the print header", () => {
     const html = renderPrintHtml(baseInvoice);
-    const logo = html.match(/<svg class="brand-logo brand-logo--markiro"[\s\S]*?<\/svg>/)?.[0];
+    const logo = readFileSync(
+      join(process.cwd(), "src/modules/billing/assets/markiro-logo-on-light.svg"),
+      "utf8",
+    );
 
-    expect(logo).toBeDefined();
-    expect(count(logo ?? "", "<rect ")).toBe(9);
+    expect(html).toContain('<img class="brand-logo--markiro" src="data:image/png;base64,');
+    expect(count(logo, "<rect ")).toBe(9);
     expect(logo).toContain('fill="#3DDC7A"');
     expect(logo).toContain(">маркиро</text>");
     expect(logo).toContain('viewBox="0 0 280 64"');
@@ -115,6 +123,11 @@ describe("print document HTML renderer", () => {
       "utf8",
     );
     expect(bundledLogo.trim()).toBe(approvedLogo.trim());
+    expect(
+      readFileSync(join(process.cwd(), "src/modules/billing/assets/markiro-logo-on-light.png"))
+        .subarray(0, 8)
+        .toString("hex"),
+    ).toBe("89504e470d0a1a0a");
   });
 
   it("renders offer cooperation terms and its non-invoice notice", () => {
@@ -127,9 +140,9 @@ describe("print document HTML renderer", () => {
       status: "published",
       termsHtml,
     });
-    const body = html.split("</head><body>")[1] ?? "";
+    const screenPage = html.match(/<article class="print-page">[\s\S]*<\/article>/)?.[0] ?? "";
 
-    expect(count(body, "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ")).toBe(1);
+    expect(count(screenPage, "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ")).toBe(1);
     expect(html).toContain("УСЛОВИЯ СОТРУДНИЧЕСТВА");
     expect(html).toContain("<h2>Порядок оплаты</h2>");
     expect(html).toContain('<a href="https://markiro.ru/terms">условия</a>');
@@ -144,6 +157,39 @@ describe("print document HTML renderer", () => {
       ),
     ).toBe(
       "Порядок оплаты\nСмотрите условия (https://markiro.ru/terms).\nЭтап\tСрок\nЗапуск\t5 дней",
+    );
+  });
+
+  it("decodes offer term entities only once", () => {
+    expect(formatOfferTermsText("<p>&amp;quot; &amp;#39; &amp;nbsp;</p>")).toBe(
+      "&quot; &#39; &nbsp;",
+    );
+  });
+
+  it.each([
+    ["0.00", "Ноль рублей 00 копеек"],
+    ["0.50", "Ноль рублей 50 копеек"],
+  ])("spells sub-ruble amount %s without omitting zero rubles", (value, expected) => {
+    expect(amountInWords(value)).toBe(expected);
+  });
+
+  it("omits a payment QR when its mandatory correspondent account is absent", () => {
+    expect(
+      paymentQrPayload({
+        ...baseInvoice,
+        seller: { ...baseInvoice.seller, correspondentAccount: null },
+      }),
+    ).toBeNull();
+  });
+
+  it("declares an alternate payment QR delimiter when a value contains a vertical bar", () => {
+    expect(
+      paymentQrPayload({
+        ...baseInvoice,
+        seller: { ...baseInvoice.seller, legalName: "ООО | Маркиро" },
+      }),
+    ).toBe(
+      "ST00012#Name=ООО | Маркиро#PersonalAcc=40802810500001234567#BankName=Банк АО «Точка»#BIC=044525104#CorrespAcc=30101810745374525104#PayeeINN=000000000000#Sum=1200000#Purpose=Оплата по счёту № 184 от 24.08.2026. Без НДС.",
     );
   });
 

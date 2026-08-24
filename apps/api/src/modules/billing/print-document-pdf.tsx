@@ -198,6 +198,13 @@ async function svgDataUri(svg: string, width: number): Promise<string> {
 
 type QrVector = { viewBox: string; path: string };
 
+const plainTextEntities: Readonly<Record<string, string>> = {
+  "&nbsp;": " ",
+  "&amp;": "&",
+  "&quot;": '"',
+  "&#39;": "'",
+};
+
 function qrVector(svg: string): QrVector {
   const match = svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"[\s\S]*?<path d="([^"]+)"/);
   if (!match) throw new Error("payment_qr_render_failed");
@@ -224,10 +231,8 @@ export function formatOfferTermsText(value: string): string {
     allowedTags: [],
     allowedAttributes: {},
   })
-    .replaceAll("&nbsp;", " ")
-    .replaceAll("&amp;", "&")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&#39;", "'")
+    .replace(/&(?:nbsp|amp|quot|#39);/g, (entity) => plainTextEntities[entity] ?? entity)
+    .replaceAll("\u00a0", " ")
     .replaceAll(/[ \t]+\n/g, "\n")
     .replaceAll(/\n[ \t]+/g, "\n")
     .replaceAll(/\n{3,}/g, "\n\n")

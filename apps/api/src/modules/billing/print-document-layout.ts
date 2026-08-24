@@ -1,7 +1,4 @@
-import type { BillingProfileSnapshot, PrintDocumentModel, PrintLine } from "./print-document-model";
-
-const FIRST_PAGE_LINES = 8;
-const NEXT_PAGE_LINES = 7;
+import type { BillingProfileSnapshot, PrintDocumentModel } from "./print-document-model";
 
 export function formatPrintDate(value: Date | null): string {
   return value
@@ -62,18 +59,22 @@ export function paymentPurpose(model: PrintDocumentModel): string {
   return `Оплата по счёту № ${model.number} от ${formatPrintDate(model.issuedOrPublishedAt)}. ${vatText}`;
 }
 
-function escapeQrField(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll("|", "\\|");
-}
-
 function qrField(name: string, value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? `${name}=${escapeQrField(value)}` : null;
+  return typeof value === "string" && value.length > 0 ? `${name}=${value}` : null;
 }
 
 export function paymentQrPayload(model: PrintDocumentModel): string | null {
   if (model.kind !== "invoice") return null;
   const seller = model.seller;
-  if (!seller.legalName || !seller.bankAccount || !seller.bankName || !seller.bic) return null;
+  if (
+    !seller.legalName ||
+    !seller.bankAccount ||
+    !seller.bankName ||
+    !seller.bic ||
+    !seller.correspondentAccount
+  ) {
+    return null;
+  }
   const kopecks = Math.round(Number(model.total) * 100);
   if (!Number.isFinite(kopecks) || kopecks < 0) return null;
   const fields = [
@@ -87,16 +88,10 @@ export function paymentQrPayload(model: PrintDocumentModel): string | null {
     `Sum=${kopecks}`,
     qrField("Purpose", paymentPurpose(model)),
   ].filter((field): field is string => field !== null);
-  return `ST00012|${fields.join("|")}`;
-}
-
-export function paginatePrintLines(lines: PrintLine[]): PrintLine[][] {
-  if (lines.length <= FIRST_PAGE_LINES) return [lines];
-  const pages = [lines.slice(0, FIRST_PAGE_LINES)];
-  for (let offset = FIRST_PAGE_LINES; offset < lines.length; offset += NEXT_PAGE_LINES) {
-    pages.push(lines.slice(offset, offset + NEXT_PAGE_LINES));
-  }
-  return pages;
+  const delimiter = ["|", "#", ";", ":", "^", "~"].find((candidate) =>
+    fields.every((field) => !field.includes(candidate)),
+  );
+  return delimiter ? `ST00012${delimiter}${fields.join(delimiter)}` : null;
 }
 
 const hundreds = [
@@ -197,7 +192,8 @@ export function amountInWords(value: string): string {
       rubles %= group.divisor;
     }
   }
-  if (rubles > 0 || words.length === 0) words.push(...tripletWords(rubles, false));
+  if (rubles > 0) words.push(...tripletWords(rubles, false));
+  if (words.length === 0) words.push("ноль");
   const fullRubles = Math.floor(rounded / 100);
   const text = `${words.join(" ")} ${plural(fullRubles, ["рубль", "рубля", "рублей"])} ${String(kopecks).padStart(2, "0")} ${plural(kopecks, ["копейка", "копейки", "копеек"])}`;
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
