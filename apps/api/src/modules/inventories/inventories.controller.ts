@@ -43,17 +43,22 @@ import { CHZ_MAX_COMPRESSED_BYTES } from "./chz-tabular-reader";
 import {
   createInventoryOpenApiSchema,
   createInventorySchema,
+  fixInventorySnapshotOpenApiSchema,
+  fixInventorySnapshotSchema,
   inventoryIdSchema,
   inventoryImportOpenApiSchema,
   inventoryImportStatusSchema,
   inventoryOpenApiSchema,
+  inventorySnapshotOpenApiSchema,
   listInventoriesOpenApiSchema,
   updateInventoryOpenApiSchema,
   updateInventorySchema,
   type CreateInventoryDto,
+  type FixInventorySnapshotDto,
   type InventoryDto,
   type InventoryImportDto,
   type ListInventoriesResponseDto,
+  type InventorySnapshotDto,
   type UpdateInventoryDto,
 } from "./dto";
 import { InventoriesService } from "./inventories.service";
@@ -154,5 +159,19 @@ export class InventoriesController {
     });
     if (result.result === "failed") throw new UnprocessableEntityException(result);
     return result;
+  }
+
+  @Post(":id/snapshots")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiBody({ schema: fixInventorySnapshotOpenApiSchema })
+  @ApiCreatedResponse({ schema: inventorySnapshotOpenApiSchema })
+  fixSnapshot(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Body(new ZodValidationPipe(fixInventorySnapshotSchema)) body: FixInventorySnapshotDto,
+  ): Promise<InventorySnapshotDto> {
+    return this.inventories.fixSnapshot(req.tenantId!, req.userId!, id, body);
   }
 }

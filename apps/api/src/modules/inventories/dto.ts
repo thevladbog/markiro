@@ -108,6 +108,61 @@ export interface InventoryImportDto {
   diagnostics: InventoryImportDiagnosticDto[];
 }
 
+const selectedInventoryImportsSchema = z
+  .strictObject({
+    EMITTED: z.string().uuid(),
+    INTRODUCED: z.string().uuid(),
+    APPLIED: z.string().uuid(),
+    RETIRED: z.string().uuid(),
+    WRITTEN_OFF: z.string().uuid(),
+    DISAGGREGATION: z.string().uuid(),
+  })
+  .superRefine((imports, context) => {
+    const seen = new Map<string, InventoryChzStatus>();
+    for (const status of INVENTORY_CHZ_STATUSES) {
+      const importId = imports[status];
+      const previousStatus = seen.get(importId);
+      if (previousStatus !== undefined) {
+        context.addIssue({
+          code: "custom",
+          message: `Import is already selected for ${previousStatus}`,
+          path: [status],
+        });
+      } else {
+        seen.set(importId, status);
+      }
+    }
+  });
+
+export const fixInventorySnapshotSchema = z.strictObject({
+  imports: selectedInventoryImportsSchema,
+});
+export type FixInventorySnapshotDto = z.infer<typeof fixInventorySnapshotSchema>;
+export type InventorySnapshotInputSelectionDto = FixInventorySnapshotDto["imports"];
+
+export interface InventorySnapshotCountsDto {
+  emitted: number;
+  introduced: number;
+  applied: number;
+  retired: number;
+  writtenOff: number;
+  disaggregation: number;
+  protected: number;
+  expected: number;
+  packages: number;
+  loose: number;
+}
+
+export interface InventorySnapshotDto {
+  id: string;
+  inventoryId: string;
+  revision: number;
+  combinedDigest: string;
+  fixedAt: string;
+  inputs: InventorySnapshotInputSelectionDto;
+  counts: InventorySnapshotCountsDto;
+}
+
 const uuidSchema = { type: "string", format: "uuid" } as const;
 const dateSchema = { type: "string", format: "date" } as const;
 const dateTimeSchema = { type: "string", format: "date-time" } as const;
@@ -231,6 +286,62 @@ export const inventoryImportOpenApiSchema: SchemaObject = {
           rowNumber: { type: "integer", minimum: 1 },
         },
       },
+    },
+  },
+};
+
+const inventorySnapshotInputProperties = Object.fromEntries(
+  INVENTORY_CHZ_STATUSES.map((status) => [status, uuidSchema]),
+);
+
+export const fixInventorySnapshotOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["imports"],
+  properties: {
+    imports: {
+      type: "object",
+      additionalProperties: false,
+      required: [...INVENTORY_CHZ_STATUSES],
+      properties: inventorySnapshotInputProperties,
+    },
+  },
+};
+
+const inventorySnapshotCountProperties = {
+  emitted: { type: "integer", minimum: 0 },
+  introduced: { type: "integer", minimum: 0 },
+  applied: { type: "integer", minimum: 0 },
+  retired: { type: "integer", minimum: 0 },
+  writtenOff: { type: "integer", minimum: 0 },
+  disaggregation: { type: "integer", minimum: 0 },
+  protected: { type: "integer", minimum: 0 },
+  expected: { type: "integer", minimum: 0 },
+  packages: { type: "integer", minimum: 0 },
+  loose: { type: "integer", minimum: 0 },
+} satisfies Record<keyof InventorySnapshotCountsDto, SchemaObject>;
+
+export const inventorySnapshotOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "inventoryId", "revision", "combinedDigest", "fixedAt", "inputs", "counts"],
+  properties: {
+    id: uuidSchema,
+    inventoryId: uuidSchema,
+    revision: { type: "integer", minimum: 1 },
+    combinedDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    fixedAt: dateTimeSchema,
+    inputs: {
+      type: "object",
+      additionalProperties: false,
+      required: [...INVENTORY_CHZ_STATUSES],
+      properties: inventorySnapshotInputProperties,
+    },
+    counts: {
+      type: "object",
+      additionalProperties: false,
+      required: Object.keys(inventorySnapshotCountProperties),
+      properties: inventorySnapshotCountProperties,
     },
   },
 };

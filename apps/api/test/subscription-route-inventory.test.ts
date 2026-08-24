@@ -210,6 +210,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /integrations/:type/credentials (IntegrationsController.issueCredentials)",
       "POST /inventories (InventoriesController.create)",
       "POST /inventories/:id/imports/:status (InventoriesController.importEvidence)",
+      "POST /inventories/:id/snapshots (InventoriesController.fixSnapshot)",
       "POST /kiosks (KiosksController.createKiosk)",
       "POST /kiosks/:id/enroll (KiosksController.enroll)",
       "POST /kiosks/:id/pairing-code (KiosksController.issuePairingCode)",

@@ -21,13 +21,16 @@ import { ChzImportError, parseChzImport } from "./chz-import-parser";
 import type { ChzContainerKind } from "./chz-tabular-reader";
 import type {
   CreateInventoryDto,
+  FixInventorySnapshotDto,
   InventoryDto,
   InventoryImportDto,
   InventoryLifecycleStatus,
   InventoryMode,
   ListInventoriesResponseDto,
+  InventorySnapshotDto,
   UpdateInventoryDto,
 } from "./dto";
+import { InventorySnapshotService } from "./inventory-snapshot.service";
 
 type InventoryTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type InventoryImport = typeof schema.inventoryImports.$inferSelect;
@@ -94,6 +97,7 @@ export class InventoriesService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly storage: ObjectStorageService,
+    private readonly snapshots: InventorySnapshotService,
   ) {}
 
   async list(tenantId: string): Promise<ListInventoriesResponseDto> {
@@ -507,6 +511,15 @@ export class InventoriesService {
       }
       throw error;
     }
+  }
+
+  fixSnapshot(
+    tenantId: string,
+    actorUserId: string,
+    inventoryId: string,
+    input: FixInventorySnapshotDto,
+  ): Promise<InventorySnapshotDto> {
+    return this.snapshots.fix(tenantId, actorUserId, inventoryId, input);
   }
 
   private async resolveParameters(

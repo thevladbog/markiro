@@ -464,7 +464,9 @@ export const inventorySnapshotCodes = pgTable(
       "inventory_snapshot_codes_classification_check",
       sql`not (${table.expected} and ${table.protected})
         and ${table.protected} = coalesce(${table.sourceState} = 'MOVING_BY_UD', false)
-        and (${table.sourceStatus} <> 'INTRODUCED' or ${table.sourceProductionDate} is not null)
+        and (${table.protected}
+          or ${table.sourceStatus} <> 'INTRODUCED'
+          or ${table.sourceProductionDate} is not null)
         and (not ${table.expected}
           or (${table.sourceStatus} = 'INTRODUCED' and ${table.sourceProductionDate} is not null))`,
     ),

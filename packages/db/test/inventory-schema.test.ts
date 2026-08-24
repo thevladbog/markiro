@@ -241,15 +241,15 @@ describe("inventory preparation schema", () => {
     });
   });
 
-  it("requires a source production date for every introduced snapshot code", () => {
+  it("requires an introduced source date only when movement protection does not apply", () => {
     const expression = checkExpression(
       "inventorySnapshotCodes",
       "inventory_snapshot_codes_classification_check",
     );
 
-    expect(expression).toContain(
-      '("source_status" <> \'INTRODUCED\' or "source_production_date" is not null)',
-    );
+    expect(expression).toContain('and ("protected"');
+    expect(expression).toContain("or \"source_status\" <> 'INTRODUCED'");
+    expect(expression).toContain('or "source_production_date" is not null)');
     expect(expression).toContain(
       '"protected" = coalesce("source_state" = \'MOVING_BY_UD\', false)',
     );
@@ -420,7 +420,11 @@ async function ensureInventoryTestSchema(
 ): Promise<InventorySchemaSetupResult> {
   if ((await inspectInventoryTestSchema(client)) === "current") return "existing";
 
-  for (const migrationName of ["0066_panoramic_hemingway.sql", "0067_flashy_outlaw_kid.sql"]) {
+  for (const migrationName of [
+    "0066_panoramic_hemingway.sql",
+    "0067_flashy_outlaw_kid.sql",
+    "0068_inventory_protected_date_precedence.sql",
+  ]) {
     const migration = readFileSync(
       new URL(`../migrations/${migrationName}`, import.meta.url),
       "utf8",
@@ -603,7 +607,7 @@ describe.skipIf(!databaseUrl)("inventory preparation PostgreSQL invariants", () 
     );
   });
 
-  it("rejects an introduced snapshot code without a source production date", async () => {
+  it("rejects an unprotected introduced code without a date but permits protected precedence", async () => {
     await expectConstraintViolation(
       `insert into inventory_snapshot_codes
          (tenant_id, snapshot_id, canonical_raw, code_hash, gtin14, serial, source_status,
@@ -632,7 +636,7 @@ describe.skipIf(!databaseUrl)("inventory preparation PostgreSQL invariants", () 
          (tenant_id, snapshot_id, canonical_raw, code_hash, gtin14, serial, source_status,
           source_state, source_production_date, expected, protected)
        values ($1, $2, 'raw-protected', $3, '04680089900383', 'PROTECTED', 'INTRODUCED',
-               'MOVING_BY_UD', '2026-08-15', false, true)`,
+               'MOVING_BY_UD', null, false, true)`,
       [tenantId, snapshotId, "f".repeat(64)],
     );
   });

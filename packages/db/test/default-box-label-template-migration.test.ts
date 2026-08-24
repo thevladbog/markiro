@@ -208,6 +208,9 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
     });
     await rm(join(legacyMigrationsFolder, "0066_panoramic_hemingway.sql"), { force: true });
     await rm(join(legacyMigrationsFolder, "0067_flashy_outlaw_kid.sql"), { force: true });
+    await rm(join(legacyMigrationsFolder, "0068_inventory_protected_date_precedence.sql"), {
+      force: true,
+    });
     await rm(join(legacyMigrationsFolder, "meta", "0042_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0043_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0044_snapshot.json"), { force: true });
@@ -261,7 +264,8 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
         entry.tag !== "0064_normalize_operator_billing_profile_kind" &&
         entry.tag !== "0065_saas_party_actual_addresses" &&
         entry.tag !== "0066_panoramic_hemingway" &&
-        entry.tag !== "0067_flashy_outlaw_kid",
+        entry.tag !== "0067_flashy_outlaw_kid" &&
+        entry.tag !== "0068_inventory_protected_date_precedence",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0041_product_images");
     await writeFile(journalPath, JSON.stringify(journal));

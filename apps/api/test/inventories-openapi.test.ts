@@ -76,6 +76,7 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       ["/inventories/{id}", "get"],
       ["/inventories/{id}", "patch"],
       ["/inventories/{id}/imports/{status}", "post"],
+      ["/inventories/{id}/snapshots", "post"],
     ] as const;
     for (const [path, method] of paths) operation(document, path, method);
 
@@ -117,6 +118,64 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
     ]);
     expect(JSON.stringify(document.paths["/inventories/{id}/imports/{status}"])).not.toMatch(
       /objectKey|fileName|canonicalKm|credential|rawCause/i,
+    );
+  });
+
+  it("documents strict six-slot fixation input and the immutable snapshot summary", () => {
+    const fixation = operation(document, "/inventories/{id}/snapshots", "post");
+    const requestBody = fixation.requestBody;
+    if (!requestBody || "$ref" in requestBody) throw new Error("Missing fixation request body");
+    const requestSchema = (requestBody.content as Record<string, { schema?: JsonSchema }>)[
+      "application/json"
+    ]?.schema;
+    if (!requestSchema) throw new Error("Missing fixation JSON schema");
+    exactObject(requestSchema, ["imports"]);
+    const imports = requestSchema.properties?.imports;
+    if (!imports) throw new Error("Missing fixation imports object");
+    exactObject(imports, [
+      "EMITTED",
+      "INTRODUCED",
+      "APPLIED",
+      "RETIRED",
+      "WRITTEN_OFF",
+      "DISAGGREGATION",
+    ]);
+    expect(Object.values(imports.properties ?? {})).toEqual(
+      Array.from({ length: 6 }, () => ({ type: "string", format: "uuid" })),
+    );
+
+    const result = responseSchema(document, "/inventories/{id}/snapshots", "post", "201");
+    exactObject(result, [
+      "id",
+      "inventoryId",
+      "revision",
+      "combinedDigest",
+      "fixedAt",
+      "inputs",
+      "counts",
+    ]);
+    exactObject(result.properties!.inputs!, [
+      "EMITTED",
+      "INTRODUCED",
+      "APPLIED",
+      "RETIRED",
+      "WRITTEN_OFF",
+      "DISAGGREGATION",
+    ]);
+    exactObject(result.properties!.counts!, [
+      "emitted",
+      "introduced",
+      "applied",
+      "retired",
+      "writtenOff",
+      "disaggregation",
+      "protected",
+      "expected",
+      "packages",
+      "loose",
+    ]);
+    expect(JSON.stringify(fixation)).not.toMatch(
+      /objectKey|fileName|canonicalRaw|canonicalKm|sourceState|sourceProductionDate/i,
     );
   });
 
