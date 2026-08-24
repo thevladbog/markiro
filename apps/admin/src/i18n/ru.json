@@ -220,7 +220,6 @@
     "catalog": "Каталог",
     "shifts": "Смены",
     "lines": "Линии",
-    "boxes": "Короба",
     "codes": "Поиск кодов",
     "conflicts": "Конфликты",
     "counterparties": "Контрагенты",
@@ -1000,6 +999,11 @@
     "codeSearch": {
       "title": "Поиск кодов",
       "backAction": "← Поиск кодов",
+      "tabs": {
+        "label": "Разделы поиска кодов",
+        "codes": "Коды",
+        "boxes": "Короба"
+      },
       "searchPlaceholder": "Введите SSCC или код маркировки",
       "searchButton": "Найти",
       "empty": "Коды не найдены",

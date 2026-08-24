@@ -38,12 +38,9 @@ export const NAV_ITEMS: ReadonlyArray<{
     sectionKey: "shell.sections.production",
     capability: C.OPERATIONS_READ,
   },
-  {
-    to: "/boxes",
-    key: "nav.boxes",
-    sectionKey: "shell.sections.production",
-    capability: C.OPERATIONS_READ,
-  },
+  // "/boxes" has no sidebar entry of its own: it is reachable as the
+  // "Короба" tab inside the code-search section (see
+  // pages/code-search/RegistryTabs.tsx).
   {
     to: "/codes",
     key: "nav.codes",
@@ -183,7 +180,13 @@ export function AppShell() {
             to={item.to}
             end={item.to === "/"}
             className={({ isActive }) =>
-              cn("mk-sidebar__link", isActive && "mk-sidebar__link--active")
+              cn(
+                "mk-sidebar__link",
+                // /boxes lives under the code-search section as its "Короба"
+                // tab, so the "Поиск кодов" item stays lit there too.
+                (isActive || (item.to === "/codes" && location.pathname.startsWith("/boxes"))) &&
+                  "mk-sidebar__link--active",
+              )
             }
           >
             {content}

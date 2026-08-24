@@ -220,7 +220,6 @@
     "catalog": "Catalog",
     "shifts": "Shifts",
     "lines": "Lines",
-    "boxes": "Boxes",
     "codes": "Code search",
     "conflicts": "Conflicts",
     "counterparties": "Counterparties",
@@ -1000,6 +999,11 @@
     "codeSearch": {
       "title": "Code search",
       "backAction": "← Code search",
+      "tabs": {
+        "label": "Code search sections",
+        "codes": "Codes",
+        "boxes": "Boxes"
+      },
       "searchPlaceholder": "Enter an SSCC or marking code",
       "searchButton": "Search",
       "empty": "No codes found",
