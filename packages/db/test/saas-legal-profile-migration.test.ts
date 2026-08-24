@@ -45,10 +45,12 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
     await rm(join(legacyMigrations, "0068_inventory_protected_date_precedence.sql"), {
       force: true,
     });
+    await rm(join(legacyMigrations, "0069_inventory_station_manifest.sql"), { force: true });
     await rm(join(legacyMigrations, "meta", "0060_snapshot.json"), { force: true });
     await rm(join(legacyMigrations, "meta", "0061_snapshot.json"), { force: true });
     await rm(join(legacyMigrations, "meta", "0064_snapshot.json"), { force: true });
     await rm(join(legacyMigrations, "meta", "0065_snapshot.json"), { force: true });
+    await rm(join(legacyMigrations, "meta", "0069_snapshot.json"), { force: true });
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -63,7 +65,8 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
         entry.tag !== "0065_saas_party_actual_addresses" &&
         entry.tag !== "0066_panoramic_hemingway" &&
         entry.tag !== "0067_flashy_outlaw_kid" &&
-        entry.tag !== "0068_inventory_protected_date_precedence",
+        entry.tag !== "0068_inventory_protected_date_precedence" &&
+        entry.tag !== "0069_inventory_station_manifest",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 

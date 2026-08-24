@@ -153,6 +153,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
       update: writePolicy,
       importEvidence: writePolicy,
       fixSnapshot: writePolicy,
+      start: writePolicy,
     },
   ],
   [

@@ -484,6 +484,13 @@
       "when": 1787597064137,
       "tag": "0068_inventory_protected_date_precedence",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1787600498861,
+      "tag": "0069_inventory_station_manifest",
+      "breakpoints": true
     }
   ]
 }

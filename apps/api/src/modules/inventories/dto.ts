@@ -4,6 +4,11 @@ import type { SchemaObject } from "@nestjs/swagger";
 
 import { INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@markiro/domain";
 
+export type {
+  StationInventoryLabelTemplateDescriptor,
+  StationInventoryManifest,
+} from "./station-inventory.dto";
+
 export const INVENTORY_MODES = ["check", "repack"] as const;
 export type InventoryMode = (typeof INVENTORY_MODES)[number];
 

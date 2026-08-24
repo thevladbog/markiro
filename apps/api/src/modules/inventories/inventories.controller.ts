@@ -62,13 +62,21 @@ import {
   type UpdateInventoryDto,
 } from "./dto";
 import { InventoriesService } from "./inventories.service";
+import { InventoryLifecycleService } from "./inventory-lifecycle.service";
+import {
+  stationInventoryManifestOpenApiSchema,
+  type StationInventoryManifest,
+} from "./station-inventory.dto";
 
 @ApiTags("inventories")
 @Controller("inventories")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
 export class InventoriesController {
-  constructor(private readonly inventories: InventoriesService) {}
+  constructor(
+    private readonly inventories: InventoriesService,
+    private readonly lifecycle: InventoryLifecycleService,
+  ) {}
 
   @Get()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
@@ -173,5 +181,17 @@ export class InventoriesController {
     @Body(new ZodValidationPipe(fixInventorySnapshotSchema)) body: FixInventorySnapshotDto,
   ): Promise<InventorySnapshotDto> {
     return this.inventories.fixSnapshot(req.tenantId!, req.userId!, id, body);
+  }
+
+  @Post(":id/start")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiCreatedResponse({ schema: stationInventoryManifestOpenApiSchema })
+  start(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+  ): Promise<StationInventoryManifest> {
+    return this.lifecycle.start(req.tenantId!, req.userId!, id);
   }
 }

@@ -10,8 +10,13 @@ import { loadEnv } from "../src/env";
 type JsonSchema = {
   type?: string;
   enum?: unknown[];
+  oneOf?: JsonSchema[];
   format?: string;
   nullable?: boolean;
+  minimum?: number;
+  maximum?: number;
+  pattern?: string;
+  additionalProperties?: boolean;
   required?: string[];
   properties?: Record<string, JsonSchema>;
   items?: JsonSchema;
@@ -77,6 +82,7 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       ["/inventories/{id}", "patch"],
       ["/inventories/{id}/imports/{status}", "post"],
       ["/inventories/{id}/snapshots", "post"],
+      ["/inventories/{id}/start", "post"],
     ] as const;
     for (const [path, method] of paths) operation(document, path, method);
 
@@ -226,5 +232,74 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
     const list = responseSchema(document, "/inventories", "get", "200");
     exactObject(list, ["items"]);
     exactObject(list.properties!.items!.items!, fields);
+  });
+
+  it("freezes the exact start manifest, print model, and bounded Plan 2 limits", () => {
+    const start = operation(document, "/inventories/{id}/start", "post");
+    expect(start.requestBody).toBeUndefined();
+    const manifest = responseSchema(document, "/inventories/{id}/start", "post", "201");
+    exactObject(manifest, [
+      "inventoryId",
+      "inventoryNumber",
+      "snapshotId",
+      "snapshotRevision",
+      "combinedDigest",
+      "codeCount",
+      "productId",
+      "productName",
+      "gtin14",
+      "mode",
+      "lineId",
+      "lineName",
+      "productionDateFrom",
+      "productionDateTo",
+      "boxLabelTemplate",
+      "limits",
+    ]);
+    expect(manifest.additionalProperties).toBe(false);
+    expect(manifest.properties).toMatchObject({
+      inventoryId: { type: "string", format: "uuid" },
+      inventoryNumber: { type: "string" },
+      snapshotId: { type: "string", format: "uuid" },
+      snapshotRevision: { type: "integer", minimum: 1, maximum: 1 },
+      combinedDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+      codeCount: { type: "integer", minimum: 0 },
+      productId: { type: "string", format: "uuid" },
+      productName: { type: "string" },
+      gtin14: { type: "string", pattern: "^[0-9]{14}$" },
+      mode: { type: "string", enum: ["check", "repack"] },
+      lineId: { type: "string", format: "uuid" },
+      lineName: { type: "string" },
+      productionDateFrom: { type: "string", format: "date" },
+      productionDateTo: { type: "string", format: "date" },
+    });
+
+    const limits = manifest.properties!.limits!;
+    exactObject(limits, ["codePageSize", "eventBatchSize", "progressPageSize"]);
+    expect(limits.additionalProperties).toBe(false);
+    expect(limits.properties).toEqual({
+      codePageSize: { type: "integer", enum: [200] },
+      eventBatchSize: { type: "integer", enum: [100] },
+      progressPageSize: { type: "integer", enum: [200] },
+    });
+
+    const template = manifest.properties!.boxLabelTemplate!;
+    expect(template.nullable).toBe(true);
+    exactObject(template, ["id", "name", "spec"]);
+    expect(template.additionalProperties).toBe(false);
+    const spec = template.properties!.spec!;
+    exactObject(spec, ["widthMm", "heightMm", "dpi", "language", "elements"]);
+    expect(spec.additionalProperties).toBe(false);
+    expect(spec.properties).toMatchObject({
+      widthMm: { type: "number", minimum: 10, maximum: 300 },
+      heightMm: { type: "number", minimum: 10, maximum: 300 },
+      dpi: { type: "integer", enum: [203, 300] },
+      language: { type: "string", enum: ["zpl", "tspl"] },
+      elements: { type: "array" },
+    });
+    expect(spec.properties!.elements!.items!.oneOf).toHaveLength(5);
+    expect(JSON.stringify(start)).not.toMatch(
+      /startedBy|actorUser|objectKey|fileName|canonicalRaw|rawKm|credential|pinHash|badgeHash/i,
+    );
   });
 });

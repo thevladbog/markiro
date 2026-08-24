@@ -8,6 +8,7 @@ import {
   foreignKey,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -107,6 +108,7 @@ export const inventories = pgTable(
     boxLabelTemplateId: uuid("box_label_template_id"),
     status: inventoryLifecycleStatusEnum("status").notNull().default("draft"),
     activeSnapshotId: uuid("active_snapshot_id"),
+    stationManifest: jsonb("station_manifest"),
     resultRevision: integer("result_revision").notNull().default(0),
     createdByUserId: text("created_by_user_id")
       .notNull()
@@ -174,6 +176,11 @@ export const inventories = pgTable(
         "inventories_active_snapshot_lifecycle_check",
         sql`(${table.status} in ('draft', 'preparing') and ${table.activeSnapshotId} is null)
         or (${table.status} in ('ready', 'running', 'closed', 'completed') and ${table.activeSnapshotId} is not null)`,
+      ),
+      check(
+        "inventories_station_manifest_lifecycle_check",
+        sql`(${table.status} in ('draft', 'preparing', 'ready') and ${table.stationManifest} is null)
+        or (${table.status} in ('running', 'closed', 'completed') and ${table.stationManifest} is not null)`,
       ),
       check(
         "inventories_emergency_close_fields_check",

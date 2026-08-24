@@ -278,6 +278,37 @@ describe("inventory preparation schema", () => {
     expect(emergency).toContain('"emergency_closed_at" is not null');
   });
 
+  it("requires exactly one frozen station manifest after start", () => {
+    expect(Object.keys(schema.inventories)).toContain("stationManifest");
+    const lifecycle = checkExpression(
+      "inventories",
+      "inventories_station_manifest_lifecycle_check",
+    );
+    expect(lifecycle).toContain("\"status\" in ('draft', 'preparing', 'ready')");
+    expect(lifecycle).toContain('"station_manifest" is null');
+    expect(lifecycle).toContain("\"status\" in ('running', 'closed', 'completed')");
+    expect(lifecycle).toContain('"station_manifest" is not null');
+  });
+
+  it("packages migration 0069 and its generated snapshot in the journal", () => {
+    const migration = readFileSync(
+      new URL("../migrations/0069_inventory_station_manifest.sql", import.meta.url),
+      "utf8",
+    );
+    const snapshot = readFileSync(
+      new URL("../migrations/meta/0069_snapshot.json", import.meta.url),
+      "utf8",
+    );
+    const journal = JSON.parse(
+      readFileSync(new URL("../migrations/meta/_journal.json", import.meta.url), "utf8"),
+    ) as { entries: Array<{ tag: string }> };
+
+    expect(migration).toContain('ALTER TABLE "inventories" ADD COLUMN "station_manifest" jsonb');
+    expect(migration).toContain('CONSTRAINT "inventories_station_manifest_lifecycle_check"');
+    expect(snapshot).toContain('"station_manifest"');
+    expect(journal.entries.at(-1)?.tag).toBe("0069_inventory_station_manifest");
+  });
+
   it("declares date, digest, count, lifecycle, mode, and classification checks", () => {
     const checks = [
       ...getTableConfig(table("inventories")).checks,
@@ -292,6 +323,7 @@ describe("inventory preparation schema", () => {
         "inventories_result_revision_nonnegative_check",
         "inventories_mode_template_check",
         "inventories_active_snapshot_lifecycle_check",
+        "inventories_station_manifest_lifecycle_check",
         "inventory_imports_byte_size_nonnegative_check",
         "inventory_imports_sha256_check",
         "inventory_imports_counts_nonnegative_check",
@@ -347,6 +379,7 @@ const inventoryCurrentConstraints = [
   "inventories_closed_fields_check",
   "inventories_completed_fields_check",
   "inventories_completed_lifecycle_check",
+  "inventories_station_manifest_lifecycle_check",
   "inventory_imports_tenant_id_inventory_status_outcome_uq",
   "inventory_snapshot_inputs_successful_import_check",
 ] as const;
@@ -424,6 +457,7 @@ async function ensureInventoryTestSchema(
     "0066_panoramic_hemingway.sql",
     "0067_flashy_outlaw_kid.sql",
     "0068_inventory_protected_date_precedence.sql",
+    "0069_inventory_station_manifest.sql",
   ]) {
     const migration = readFileSync(
       new URL(`../migrations/${migrationName}`, import.meta.url),
@@ -658,6 +692,22 @@ describe.skipIf(!databaseUrl)("inventory preparation PostgreSQL invariants", () 
           production_date_from, production_date_to, created_by_user_id, closed_at)
        values ($1, $5, $6, $2, '04680089900383', $3, 'check', '2026-08-01', '2026-08-31', $4, now())`,
       values,
+    );
+  });
+
+  it("rejects a manifest before start and a missing manifest after start", async () => {
+    await expectConstraintViolation(
+      `update inventories
+       set station_manifest = '{}'::jsonb
+       where tenant_id = $1 and id = $2`,
+      [tenantId, inventoryId],
+    );
+    await expectConstraintViolation(
+      `update inventories
+       set status = 'running', active_snapshot_id = $1,
+           started_by_user_id = $2, started_at = now()
+       where tenant_id = $3 and id = $4`,
+      [snapshotId, userId, tenantId, inventoryId],
     );
   });
 

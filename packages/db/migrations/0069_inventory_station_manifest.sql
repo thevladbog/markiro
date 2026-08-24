@@ -1,0 +1,3 @@
+ALTER TABLE "inventories" ADD COLUMN "station_manifest" jsonb;--> statement-breakpoint
+ALTER TABLE "inventories" ADD CONSTRAINT "inventories_station_manifest_lifecycle_check" CHECK (("inventories"."status" in ('draft', 'preparing', 'ready') and "inventories"."station_manifest" is null)
+        or ("inventories"."status" in ('running', 'closed', 'completed') and "inventories"."station_manifest" is not null));
