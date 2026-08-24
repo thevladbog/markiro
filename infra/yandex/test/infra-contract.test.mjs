@@ -516,6 +516,57 @@ test("infrastructure workflow has one protected manual apply without legacy phas
   );
 });
 
+test("infrastructure workflow keeps Station release inputs and DNS approval isolated from publisher credentials", async () => {
+  const workflow = await source(".github/workflows/yandex-infrastructure.yml");
+
+  assert.match(
+    workflow,
+    /workflow_dispatch:[\s\S]*enable_public_dns:[\s\S]*enable_station_release_public_dns:/,
+  );
+  const releaseDnsInput = workflow.match(
+    /enable_station_release_public_dns:([\s\S]*?)\n\npermissions:/,
+  )?.[1];
+  assert.ok(releaseDnsInput);
+  assert.match(releaseDnsInput, /required:\s*true/);
+  assert.match(releaseDnsInput, /default:\s*false/);
+  assert.match(releaseDnsInput, /type:\s*boolean/);
+  assert.match(
+    workflow,
+    /ENABLE_STATION_RELEASE_PUBLIC_DNS:\s*\$\{\{ inputs\.enable_station_release_public_dns \}\}/,
+  );
+  assert.match(
+    workflow,
+    /TF_VAR_station_release_bucket_name:\s*\$\{\{ vars\.YC_STATION_RELEASE_BUCKET_NAME \}\}/,
+  );
+  assert.match(
+    workflow,
+    /TF_VAR_station_release_domain:\s*\$\{\{ vars\.MARKIRO_STATION_RELEASE_DOMAIN \}\}/,
+  );
+  assert.match(
+    workflow,
+    /TF_VAR_station_release_publisher_pgp_key:\s*\$\{\{ vars\.YC_STATION_RELEASE_PUBLISHER_PGP_KEY \}\}/,
+  );
+  assert.match(
+    workflow,
+    /case "\$ENABLE_PUBLIC_DNS" in true\|false\)[\s\S]*case "\$ENABLE_STATION_RELEASE_PUBLIC_DNS" in true\|false\)/,
+  );
+  assert.match(
+    workflow,
+    /export TF_VAR_public_dns_enabled="\$ENABLE_PUBLIC_DNS"[\s\S]*export TF_VAR_station_release_public_dns_enabled="\$ENABLE_STATION_RELEASE_PUBLIC_DNS"/,
+  );
+  assert.match(workflow, /\[\[ "\$TARGET_SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+  assert.match(workflow, /\[\[ "\$GITHUB_REF" == "refs\/heads\/main" \]\]/);
+  assert.match(workflow, /\[\[ "\$\(git rev-parse HEAD\)" == "\$TARGET_SHA" \]\]/);
+
+  assert.doesNotMatch(workflow, /YANDEX_STATION_RELEASE_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY)/);
+  assert.doesNotMatch(workflow, /terraform[^\n]*\soutput(?:\s|$)/);
+  assert.doesNotMatch(workflow, /actions\/upload-artifact/);
+  assert.doesNotMatch(
+    workflow,
+    /(?:--access-key|--secret-key|access_key\s*=\s*\$\{\{|secret_key\s*=\s*\$\{\{)/i,
+  );
+});
+
 test("MVP design and plan retain only identities and secrets that still exist", async () => {
   const [plan, design] = await Promise.all([
     source("docs/superpowers/plans/2026-08-09-yandex-direct-vm-mvp.md"),

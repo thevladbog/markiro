@@ -54,3 +54,95 @@ test("station stable docs separate automated release proof from physical accepta
   assert.match(readme, /Manual stable updates/);
   assert.match(checklist, /Station stable/);
 });
+
+test("Station release origin bootstrap separates protected credentials and approval gates", async () => {
+  const [infrastructure, secrets, bootstrap] = await Promise.all([
+    read("docs/runbooks/yandex-infrastructure.md"),
+    read("docs/runbooks/yandex-infrastructure-secrets.md"),
+    read("docs/runbooks/station-release-origin-bootstrap.md"),
+  ]);
+  const combined = `${infrastructure}\n${secrets}\n${bootstrap}`;
+
+  for (const value of [
+    "YC_STATION_RELEASE_BUCKET_NAME",
+    "MARKIRO_STATION_RELEASE_DOMAIN",
+    "YC_STATION_RELEASE_PUBLISHER_PGP_KEY",
+    "YANDEX_STATION_RELEASE_ACCESS_KEY_ID",
+    "YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY",
+    "YANDEX_STATION_RELEASE_BUCKET",
+    "YANDEX_STATION_RELEASE_ENDPOINT",
+  ]) {
+    assert.match(combined, new RegExp(value));
+  }
+  assert.match(secrets, /GitHub Environment `station-release`/);
+  assert.match(secrets, /защит.*environment|environment.*защит/is);
+  assert.match(secrets, /не созда(?:е|ё|ю)т.*Environment|Environment.*созда(?:е|ё|ю)т/is);
+  const stationReleaseInventory = secrets.match(
+    /## GitHub Environment `station-release`([\s\S]*?)## Ротация/,
+  )?.[1];
+  assert.ok(stationReleaseInventory);
+  assert.deepEqual(
+    [...stationReleaseInventory.matchAll(/- (?:secret|variable) `([^`]+)`/g)].map(
+      (match) => match[1],
+    ),
+    [
+      "YANDEX_STATION_RELEASE_ACCESS_KEY_ID",
+      "YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY",
+      "YANDEX_STATION_RELEASE_BUCKET",
+      "YANDEX_STATION_RELEASE_ENDPOINT",
+    ],
+  );
+
+  const ordered = [
+    "## 1. Подготовить защищённый план без release DNS",
+    "## 2. Остановиться перед первым apply",
+    "## 3. Получить зашифрованные outputs из защищённого state",
+    "## 4. Расшифровать секрет локально",
+    "## 5. Остановиться перед записью GitHub secrets",
+    "## 6. Проверить разрешения только в release prefix",
+    "## 7. Проверить certificate challenge",
+    "## 8. Засеять baseline и проверить provider host",
+    "## 9. Остановиться перед включением release DNS",
+  ];
+  let previous = -1;
+  for (const heading of ordered) {
+    const index = bootstrap.indexOf(heading);
+    assert.ok(index > previous, `missing or unordered ${heading}`);
+    previous = index;
+  }
+
+  assert.match(bootstrap, /enable_station_release_public_dns=false/);
+  assert.match(bootstrap, /enable_station_release_public_dns=true/);
+  assert.match(bootstrap, /umask 077/);
+  assert.match(bootstrap, /mktemp -d/);
+  assert.match(bootstrap, /chmod 600/);
+  assert.match(bootstrap, /trap cleanup/);
+  assert.match(
+    bootstrap,
+    /gh secret set YANDEX_STATION_RELEASE_ACCESS_KEY_ID --env station-release < "\$access_key_file"/,
+  );
+  assert.match(
+    bootstrap,
+    /gh secret set YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY --env station-release < "\$secret_key_file"/,
+  );
+  assert.match(bootstrap, /DELETE-PLAINTEXT/);
+  assert.match(bootstrap, /release_prefix='station\/'/);
+  assert.match(bootstrap, /storage\.yandexcloud\.net/);
+  assert.match(bootstrap, /ISSUED/);
+  assert.match(bootstrap, /baseline/is);
+  assert.match(bootstrap, /отдельн.*одобрен.*apply/is);
+  assert.ok(bootstrap.indexOf("STOP 1 — APPLY") < bootstrap.indexOf("вручную разрешает apply"));
+  assert.ok(
+    bootstrap.indexOf("STOP 2 — SECRETS") <
+      bootstrap.indexOf("gh secret set YANDEX_STATION_RELEASE_ACCESS_KEY_ID"),
+  );
+  assert.ok(
+    bootstrap.indexOf("STOP 3 — DNS") < bootstrap.indexOf("enable_station_release_public_dns=true"),
+  );
+
+  assert.doesNotMatch(
+    bootstrap,
+    /gh secret set YANDEX_STATION_RELEASE_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY)[^\n]*(?:--body|--value|=\$)/,
+  );
+  assert.doesNotMatch(combined, /actions\/upload-artifact/);
+});

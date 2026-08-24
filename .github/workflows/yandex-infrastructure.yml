@@ -14,6 +14,11 @@ on:
         required: true
         default: false
         type: boolean
+      enable_station_release_public_dns:
+        description: Publish releases.markiro.app only after the Station release baseline is verified
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -84,6 +89,7 @@ jobs:
     env:
       TARGET_SHA: ${{ inputs.target_sha }}
       ENABLE_PUBLIC_DNS: ${{ inputs.enable_public_dns }}
+      ENABLE_STATION_RELEASE_PUBLIC_DNS: ${{ inputs.enable_station_release_public_dns }}
       YC_CLOUD_ID: ${{ vars.YC_CLOUD_ID }}
       YC_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
       YC_OIDC_AUDIENCE: ${{ vars.YC_OIDC_AUDIENCE }}
@@ -106,10 +112,13 @@ jobs:
       TF_VAR_state_bucket_name: ${{ vars.YC_STATE_BUCKET_NAME }}
       TF_VAR_media_bucket_name: ${{ vars.YC_MEDIA_BUCKET_NAME }}
       TF_VAR_audit_bucket_name: ${{ vars.YC_AUDIT_BUCKET_NAME }}
+      TF_VAR_station_release_bucket_name: ${{ vars.YC_STATION_RELEASE_BUCKET_NAME }}
       TF_VAR_domain: ${{ vars.MARKIRO_DOMAIN }}
       TF_VAR_saas_admin_domain: ${{ vars.MARKIRO_SAAS_ADMIN_DOMAIN }}
       TF_VAR_kiosk_domain: ${{ vars.MARKIRO_KIOSK_DOMAIN }}
       TF_VAR_landing_domain: ${{ vars.MARKIRO_LANDING_DOMAIN }}
+      TF_VAR_station_release_domain: ${{ vars.MARKIRO_STATION_RELEASE_DOMAIN }}
+      TF_VAR_station_release_publisher_pgp_key: ${{ vars.YC_STATION_RELEASE_PUBLISHER_PGP_KEY }}
       TF_VAR_dns_zone_id: ${{ vars.YC_DNS_ZONE_ID }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -145,7 +154,9 @@ jobs:
           [[ "$GITHUB_REF" == "refs/heads/main" ]]
           [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
           case "$ENABLE_PUBLIC_DNS" in true|false) ;; *) exit 1 ;; esac
+          case "$ENABLE_STATION_RELEASE_PUBLIC_DNS" in true|false) ;; *) exit 1 ;; esac
           export TF_VAR_public_dns_enabled="$ENABLE_PUBLIC_DNS"
+          export TF_VAR_station_release_public_dns_enabled="$ENABLE_STATION_RELEASE_PUBLIC_DNS"
 
           if ! github_oidc_token="$(curl --fail --silent --show-error --max-time 30 --get \
             --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
