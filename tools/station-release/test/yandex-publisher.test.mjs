@@ -206,8 +206,8 @@ function fakeStore() {
         sourceKey: input.immutableKey,
       });
     },
-    async readPublic(key) {
-      calls.push({ method: "readPublic", key });
+    async readPublic(key, expected) {
+      calls.push({ method: "readPublic", key, expected });
       if (readHook) await readHook(key, { immutable, mutable, calls });
       const object = immutable.has(key) ? { bytes: immutable.get(key) } : mutable.get(key);
       if (!object) throw new Error("missing public object");
@@ -1093,6 +1093,31 @@ test("verifies backup hashes before rollback and only restores mutable keys", as
       "readPublic:station/beta/download",
       "putMutable:station/beta/latest.json",
       "readPublic:station/beta/latest.json",
+    ],
+  );
+  assert.deepEqual(
+    store.calls
+      .filter((call) => call.method === "readPublic")
+      .map(({ key, expected }) => ({ key, expected })),
+    [
+      {
+        key: "station/beta/download",
+        expected: {
+          contentType: "application/vnd.microsoft.portable-executable",
+          cacheControl: "public, max-age=0, must-revalidate",
+          contentDisposition: `attachment; filename="${previousNames.installer}"`,
+          maxBytes: 512 * 1024 * 1024,
+        },
+      },
+      {
+        key: "station/beta/latest.json",
+        expected: {
+          contentType: "application/json",
+          cacheControl: "public, max-age=0, must-revalidate",
+          contentDisposition: null,
+          maxBytes: 256 * 1024,
+        },
+      },
     ],
   );
   assert.equal(

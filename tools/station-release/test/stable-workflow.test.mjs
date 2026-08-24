@@ -116,6 +116,9 @@ test("normal stable modes validate the exact beta at both origins before rebuild
   assert.match(accepted.run, /test "\$beta_release_sha" = "\$beta_target_sha"/);
   assert.match(accepted.run, /git merge-base --is-ancestor "\$base_sha" origin\/main/);
   assert.match(accepted.run, /--commit "\$base_sha"/);
+  assert.match(accepted.run, /stable-boundary\.mjs resolve-state/);
+  assert.match(accepted.run, /--json tagName,isDraft,isPrerelease,publishedAt > "\$releases_file"/);
+  assert.doesNotMatch(accepted.run, /gh release list[^\n]*targetCommitish/);
   assert.equal(prepare.if, "inputs.mode == 'publish'");
   assert.match(prepare.run, /git checkout --detach "\$base_sha"/);
   assert.match(prepare.run, /git rev-parse HEAD\^/);
@@ -142,9 +145,9 @@ test("publish stages two stable trees from one build and keeps stable provenance
   assert.match(stage.run, /artifacts\.mjs validate-origin github stable/);
   assert.match(stage.run, /artifacts\.mjs validate-origin yandex stable/);
   assert.match(stage.run, /artifacts\.mjs compare-origins/);
-  assert.match(stage.run, /candidate_base_sha="\$\(git rev-parse "\$candidate_release_sha\^"\)"/);
-  assert.match(stage.run, /git merge-base --is-ancestor "\$candidate_base_sha" "\$base_sha"/);
-  assert.match(stage.run, /git rev-parse "\$earliest_base_sha\^"/);
+  assert.match(stage.run, /stable-boundary\.mjs resolve-changelog/);
+  assert.match(stage.run, /github-public\.mjs[\s\\]*download-release/);
+  assert.doesNotMatch(stage.run, /git tag --list|candidate_release_sha|earliest_base_sha/);
   assert.match(
     stage.run,
     /git bundle create "\$RUNNER_TEMP\/station-stable-candidate\/source\.bundle"[\s\\]*HEAD "\^\$base_sha"/,
@@ -177,12 +180,19 @@ test("both public stable trees are proven before the complete mutable transactio
   assert.ok(steps.indexOf(publicValidation) < steps.indexOf(promote));
   assert.match(github.run, /gh release view "\$tag"[\s\S]*exit 1[\s\S]*gh release create/);
   assert.doesNotMatch(github.run, /release upload[^\n]*--clobber/);
+  assert.match(github.run, /github-public\.mjs[\s\\]*download-release stable "\$version"/);
   assert.match(
     yandex.run,
     /yandex-publisher\.mjs publish-immutable[\s\\]*"\$RUNNER_TEMP\/station-stable-candidate\/yandex" stable "\$version"/,
   );
   assert.match(publicValidation.run, /station-stable-github-public/);
   assert.match(publicValidation.run, /station-stable-yandex-public/);
+  assert.match(publicValidation.run, /unset GH_TOKEN GITHUB_TOKEN/);
+  assert.match(
+    publicValidation.run,
+    /github-public\.mjs[\s\\]*download-release[\s\\]*stable "\$version"/,
+  );
+  assert.doesNotMatch(publicValidation.run, /gh release download/);
   assert.match(
     publicValidation.run,
     /https:\/\/releases\.markiro\.app\/station\/stable\/releases\/\$version/,
@@ -222,9 +232,12 @@ test("stable mutables promote GitHub, Yandex manifest, then the default stable a
       rollback.indexOf("station-stable-github-channel-backup/latest.json"),
   );
   assert.match(rollback, /station-stable-github-rollback-verify/);
+  assert.match(rollback, /github-public\.mjs download-channel stable/);
+  assert.doesNotMatch(rollback, /gh release download station-stable-channel/);
   assert.match(rollback, /station release mutable restoration failed/);
   assert.match(run, /https:\/\/releases\.markiro\.app\/station\/stable\/latest\.json/);
   assert.match(run, /https:\/\/releases\.markiro\.app\/station\/download/);
+  assert.match(run, /github-public\.mjs download-channel stable/);
   assert.doesNotMatch(run, /station\/beta\/download/);
   assert.doesNotMatch(run, /gh release create station-stable-channel/);
   assert.doesNotMatch(run, /delete-object|DeleteObject/);
@@ -250,7 +263,8 @@ test("one-time stable seed uses the latest legacy stable only while release DNS 
   assert.equal(seed.if, "inputs.mode == 'seed-baseline'");
   assert.match(seed.run, /gh release list[\s\S]*parseStationStableTag/);
   assert.match(seed.run, /test "\$seed_stable_tag" = "\$latest_stable_tag"/);
-  assert.match(seed.run, /gh release download "\$seed_stable_tag"/);
+  assert.match(seed.run, /github-public\.mjs[\s\\]*download-release stable/);
+  assert.doesNotMatch(seed.run, /gh release download "\$seed_stable_tag"/);
   assert.match(
     seed.run,
     /yandex-publisher\.mjs seed-baseline[\s\S]* stable[\s\\]*[\s\S]*--confirm-empty-channel-bootstrap/,
@@ -267,4 +281,29 @@ test("one-time stable seed uses the latest legacy stable only while release DNS 
     "inputs.mode == 'publish' || inputs.mode == 'promote-existing'",
   );
   assert.equal(promote.if, "inputs.mode == 'publish' || inputs.mode == 'promote-existing'");
+});
+
+test("always emits a bounded publication and compensation summary", async () => {
+  const workflow = load(await source());
+  const summary = workflowStep(workflow, "release", "Summarize stable release");
+  const github = workflowStep(workflow, "release", "Publish immutable GitHub stable");
+  const yandex = workflowStep(workflow, "release", "Publish immutable Yandex stable");
+  const publicValidation = workflowStep(
+    workflow,
+    "release",
+    "Download and validate public immutable stable trees",
+  );
+  const promote = workflowStep(workflow, "release", "Promote stable mutable targets");
+
+  assert.equal(summary.if, "always()");
+  assert.match(summary.run, /release-summary\.mjs render/);
+  assert.doesNotMatch(summary.run, /\$\{\{ toJSON\(|error\.message|stderr|stdout/);
+  assert.match(github.run, /release-summary\.mjs update[\s\S]*immutableState/);
+  assert.match(yandex.run, /release-summary\.mjs update[\s\S]*immutableState/);
+  assert.match(publicValidation.run, /githubManifestSha256/);
+  assert.match(publicValidation.run, /yandexEvidenceSha256/);
+  assert.match(publicValidation.run, /installerSha256/);
+  assert.match(promote.run, /promotionState/);
+  assert.match(promote.run, /rollbackState/);
+  assert.match(promote.run, /immutable-but-not-promoted|restored-after-failure/);
 });

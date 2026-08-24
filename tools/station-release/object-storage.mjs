@@ -117,6 +117,54 @@ function immutableContentType(parsed) {
   return "text/plain";
 }
 
+function ensurePublicExpectation(key, expected, maxBytes) {
+  const parsed = ensureReadableKey(key);
+  if (
+    !expected ||
+    typeof expected !== "object" ||
+    Array.isArray(expected) ||
+    Object.keys(expected).sort().join(",") !==
+      "cacheControl,contentDisposition,contentType,maxBytes" ||
+    expected.maxBytes !== maxBytes
+  ) {
+    invalid();
+  }
+  ensureContentType(expected.contentType);
+  const contentType =
+    parsed.type === "immutable"
+      ? immutableContentType(parsed)
+      : parsed.kind === "manifest"
+        ? "application/json"
+        : INSTALLER_CONTENT_TYPE;
+  const cacheControl =
+    parsed.type === "immutable" ? IMMUTABLE_CACHE_CONTROL : MUTABLE_CACHE_CONTROL;
+  if (expected.contentType !== contentType || expected.cacheControl !== cacheControl) invalid();
+  if (parsed.kind !== "installer") {
+    if (expected.contentDisposition !== null) invalid();
+  } else if (parsed.type === "mutable") {
+    if (
+      typeof expected.contentDisposition !== "string" ||
+      !/^attachment; filename="markiro-station-(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.[1-9]\d*)?-windows-x86_64-setup\.exe"$/.test(
+        expected.contentDisposition,
+      )
+    ) {
+      invalid();
+    }
+    const version = expected.contentDisposition.slice(
+      'attachment; filename="markiro-station-'.length,
+      -'-windows-x86_64-setup.exe"'.length,
+    );
+    try {
+      stationReleaseLocation({ channel: parsed.channel, origin: "yandex", version });
+    } catch {
+      invalid();
+    }
+  } else if (expected.contentDisposition !== null) {
+    invalid();
+  }
+  return expected;
+}
+
 export async function validateStationImmutableObject({ key, file, contentType } = {}) {
   const parsed = parseImmutableKey(key);
   const maxBytes = maxBytesForKey(key);
@@ -342,8 +390,9 @@ export function createStationObjectStore({
       }
     },
 
-    async readPublic(key) {
+    async readPublic(key, expected) {
       const maxBytes = maxBytesForKey(key);
+      ensurePublicExpectation(key, expected, maxBytes);
       const url = `${PUBLIC_BASE_URL}/${key}`;
       let response;
       try {
@@ -351,7 +400,10 @@ export function createStationObjectStore({
         if (
           !response?.ok ||
           response.redirected === true ||
-          (typeof response.url === "string" && response.url.length > 0 && response.url !== url)
+          (typeof response.url === "string" && response.url.length > 0 && response.url !== url) ||
+          response.headers?.get?.("content-type") !== expected.contentType ||
+          response.headers?.get?.("cache-control") !== expected.cacheControl ||
+          response.headers?.get?.("content-disposition") !== expected.contentDisposition
         ) {
           throw publicFailure();
         }

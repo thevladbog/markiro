@@ -214,17 +214,30 @@ test("rejects traversal, unexpected prefixes, and mismatched alias copies before
 
 test("bounds public reads and rejects non-2xx responses and redirects", async () => {
   const requests = [];
+  const expected = {
+    contentType: "application/json",
+    cacheControl: "public, max-age=0, must-revalidate",
+    contentDisposition: null,
+    maxBytes: 256 * 1024,
+  };
   const okStore = createStore(
     fakeClient(async () => ({})),
     async (url, init) => {
       requests.push({ url, init });
       return new Response("public manifest", {
         status: 200,
-        headers: { "content-length": "15" },
+        headers: {
+          "content-length": "15",
+          "content-type": expected.contentType,
+          "cache-control": expected.cacheControl,
+        },
       });
     },
   );
-  assert.deepEqual(await okStore.readPublic(mutableManifestKey), Buffer.from("public manifest"));
+  assert.deepEqual(
+    await okStore.readPublic(mutableManifestKey, expected),
+    Buffer.from("public manifest"),
+  );
   assert.deepEqual(requests, [
     {
       url: `${publicBaseUrl}/${mutableManifestKey}`,
@@ -237,7 +250,7 @@ test("bounds public reads and rejects non-2xx responses and redirects", async ()
     async () => new Response("secret provider body", { status: 503 }),
   );
   await assert.rejects(
-    errorStore.readPublic(mutableManifestKey),
+    errorStore.readPublic(mutableManifestKey, expected),
     (error) =>
       error.message === "station public object read failed" &&
       !error.message.includes("secret provider body"),
@@ -254,7 +267,10 @@ test("bounds public reads and rejects non-2xx responses and redirects", async ()
       body: new Response("evil").body,
     }),
   );
-  await assert.rejects(redirectStore.readPublic(mutableManifestKey), /public object read failed/);
+  await assert.rejects(
+    redirectStore.readPublic(mutableManifestKey, expected),
+    /public object read failed/,
+  );
 
   const oversizedStore = createStore(
     fakeClient(async () => ({})),
@@ -264,7 +280,30 @@ test("bounds public reads and rejects non-2xx responses and redirects", async ()
         headers: { "content-length": String(256 * 1024 + 1) },
       }),
   );
-  await assert.rejects(oversizedStore.readPublic(mutableManifestKey), /public object read failed/);
+  await assert.rejects(
+    oversizedStore.readPublic(mutableManifestKey, expected),
+    /public object read failed/,
+  );
+
+  const wrongMetadataStore = createStore(
+    fakeClient(async () => ({})),
+    async () =>
+      new Response("public manifest", {
+        status: 200,
+        headers: {
+          "content-type": "text/plain",
+          "cache-control": expected.cacheControl,
+        },
+      }),
+  );
+  await assert.rejects(
+    wrongMetadataStore.readPublic(mutableManifestKey, expected),
+    /public object read failed/,
+  );
+  await assert.rejects(
+    okStore.readPublic(mutableManifestKey, { ...expected, maxBytes: 0 }),
+    /invalid station object storage request/,
+  );
 });
 
 test("sanitizes provider failures for puts, gets, and copies", async () => {

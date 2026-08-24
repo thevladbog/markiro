@@ -553,7 +553,8 @@ export async function validateStationReleaseDirectory(directory, expected) {
   return validateStationReleaseDirectoryInternal(directory, expected);
 }
 
-// Task 5 may call this only while seeding the one-time GitHub baseline.
+// Legacy GitHub evidence is allowed only for the one-time baseline seed and the
+// explicitly flagged previous-stable changelog boundary during that migration.
 export async function validateLegacyGithubStationReleaseDirectory(directory, expected) {
   return validateStationReleaseDirectoryInternal(
     directory,
