@@ -1,4 +1,8 @@
-import { STATION_MIGRATIONS, type OperatorMirrorRecord } from "@markiro/db/station-sqlite";
+import {
+  STATION_MIGRATIONS,
+  SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATIONS,
+  type OperatorMirrorRecord,
+} from "@markiro/db/station-sqlite";
 
 /** Backend-agnostic SQL surface so mirror logic is testable with node:sqlite. */
 export interface SqlExecutor {
@@ -125,7 +129,20 @@ function isDuplicateColumnError(err: unknown): boolean {
 }
 
 export async function applyMigrations(exec: SqlExecutor): Promise<void> {
+  const inventoryEventColumns = await exec.all<{ name: string }>(
+    "PRAGMA table_info(inventory_scan_events_mirror)",
+  );
+  const finalLegacyAuditExists = inventoryEventColumns.some(
+    (column) => column.name === "legacy_audit_version",
+  );
   for (const stmt of STATION_MIGRATIONS) {
+    // Once every legacy row carries the final marker, the round-2 audit must
+    // never run again: its proof depended on an outbox that sync may now have
+    // acknowledged and deleted. The appended versioned audit remains
+    // rerunnable and new journal events start at that version.
+    if (finalLegacyAuditExists && SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATIONS.includes(stmt)) {
+      continue;
+    }
     try {
       await exec.run(stmt);
     } catch (err) {

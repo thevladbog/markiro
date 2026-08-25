@@ -144,6 +144,38 @@ function suspendOnce(base: SqlExecutor, pattern: RegExp) {
 }
 
 describe("inventory journal", () => {
+  it("keeps an audited committed event after its acknowledged outbox is drained and migrations rerun", async () => {
+    const { db, exec } = await setup();
+    const code = seedCode(db, "ACK-DRAINED");
+    await recordInventoryScan(exec, input(code.km.raw, "event-ack-drained"));
+    expect(await readInventoryProgress(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID)).toMatchObject({
+      verified: 1,
+    });
+
+    db.prepare("DELETE FROM inventory_outbox WHERE event_id = 'event-ack-drained'").run();
+    await applyMigrations(exec);
+
+    expect(
+      db
+        .prepare(
+          `SELECT commit_state, legacy_audit_version FROM inventory_scan_events_mirror
+           WHERE event_id = 'event-ack-drained'`,
+        )
+        .get(),
+    ).toEqual({ commit_state: "committed", legacy_audit_version: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get()).toEqual(
+      {
+        count: 1,
+      },
+    );
+    expect(await readInventoryProgress(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID)).toMatchObject({
+      verified: 1,
+    });
+    expect(await listRecentInventoryOperations(exec, INVENTORY_ID, SNAPSHOT_ID)).toMatchObject([
+      { eventId: "event-ack-drained", verdict: "expected" },
+    ]);
+  });
+
   it("fails legacy orphan/mismatched events while preserving exact expected and unknown outboxes", async () => {
     const stateMigration = STATION_MIGRATIONS.findIndex((statement) =>
       statement.includes("ADD COLUMN commit_state"),
@@ -279,10 +311,35 @@ describe("inventory journal", () => {
         .all(),
     ).toEqual([{ first_accepted_event_id: "legacy-success" }]);
 
+    db.prepare(
+      `DELETE FROM inventory_outbox
+        WHERE event_id IN ('legacy-success', 'legacy-unknown')`,
+    ).run();
     await applyMigrations(exec);
     await expect(reconcilePendingInventoryEvents(exec, INVENTORY_ID, SNAPSHOT_ID)).resolves.toEqual(
       { requiresRescan: true, recoveredCommitted: 0, failed: 2 },
     );
+    expect(
+      db
+        .prepare(
+          `SELECT event_id, commit_state, legacy_audit_version
+             FROM inventory_scan_events_mirror
+            WHERE event_id IN ('legacy-success', 'legacy-unknown')
+            ORDER BY event_id`,
+        )
+        .all(),
+    ).toEqual([
+      { event_id: "legacy-success", commit_state: "committed", legacy_audit_version: 1 },
+      { event_id: "legacy-unknown", commit_state: "committed", legacy_audit_version: 1 },
+    ]);
+    expect(await readInventoryProgress(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID)).toMatchObject({
+      verified: 1,
+      discrepancies: 1,
+    });
+    expect(await listRecentInventoryOperations(exec, INVENTORY_ID, SNAPSHOT_ID)).toMatchObject([
+      { eventId: "legacy-unknown", verdict: "unknown" },
+      { eventId: "legacy-success", verdict: "expected" },
+    ]);
   });
 
   it("persists the active date across restart and applies a later change only to future observations", async () => {

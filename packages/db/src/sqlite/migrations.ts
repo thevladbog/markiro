@@ -690,4 +690,309 @@ export const STATION_MIGRATIONS: string[] = [
          AND event.event_id = result.first_accepted_event_id
          AND event.commit_state = 'failed'
     );`,
+  // Version 1 is the final one-time legacy proof. New events are inserted at
+  // this version; existing rows start at zero and are audited exactly once.
+  `ALTER TABLE inventory_scan_events_mirror
+     ADD COLUMN legacy_audit_version INTEGER NOT NULL DEFAULT 0;`,
+  // Box proof uses the current unique winner set, but accepts another owner
+  // only when its reservation tuple (sequence, device, event) precedes this
+  // box and its item/parent identity exactly covers that child. Recursive
+  // invalidation prevents a later box from depending on a prior owner that
+  // fails its own final proof.
+  `WITH RECURSIVE
+     candidates AS (
+       SELECT event.*
+         FROM inventory_scan_events_mirror event
+        WHERE event.legacy_audit_version = 0
+          AND event.commit_state IN ('committed', 'failed')
+     ),
+     structurally_valid AS (
+       SELECT event.*
+         FROM candidates event
+        WHERE event.commit_state = 'committed'
+          AND (
+            (
+              event.kind = 'item'
+              AND event.local_verdict IN ('expected', 'protected', 'known-ineligible')
+              AND event.code_hash IS NOT NULL
+              AND (
+                SELECT COUNT(*) FROM inventory_code_results_mirror owned
+                 WHERE owned.inventory_id = event.inventory_id
+                   AND owned.snapshot_id = event.snapshot_id
+                   AND owned.first_accepted_event_id = event.event_id
+              ) = 1
+              AND EXISTS (
+                SELECT 1 FROM inventory_code_results_mirror owned
+                 WHERE owned.inventory_id = event.inventory_id
+                   AND owned.snapshot_id = event.snapshot_id
+                   AND owned.first_accepted_event_id = event.event_id
+                   AND owned.code_hash = event.code_hash
+                   AND owned.winning_device_id = event.device_id
+                   AND owned.winning_scanned_at = event.scanned_at
+                   AND owned.observed_production_date IS event.active_production_date
+                   AND owned.origin_classification = event.local_verdict
+                   AND owned.classification = event.local_verdict
+              )
+            )
+            OR (
+              event.kind = 'known_box'
+              AND event.local_verdict IN ('expected', 'protected', 'known-ineligible')
+              AND substr(event.normalized_identity, 1, 10) = 'known_box:'
+              AND EXISTS (
+                SELECT 1 FROM inventory_task_mirror task
+                 WHERE task.inventory_id = event.inventory_id
+                   AND task.active_snapshot_id = event.snapshot_id
+              )
+              AND EXISTS (
+                SELECT 1 FROM inventory_code_results_mirror owned
+                 WHERE owned.inventory_id = event.inventory_id
+                   AND owned.snapshot_id = event.snapshot_id
+                   AND owned.first_accepted_event_id = event.event_id
+                   AND owned.origin_classification = event.local_verdict
+                   AND owned.classification = event.local_verdict
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM inventory_code_results_mirror owned
+                LEFT JOIN inventory_snapshot_codes_mirror snapshot
+                  ON snapshot.snapshot_id = owned.snapshot_id
+                 AND snapshot.code_hash = owned.code_hash
+               WHERE owned.inventory_id = event.inventory_id
+                 AND owned.snapshot_id = event.snapshot_id
+                 AND owned.first_accepted_event_id = event.event_id
+                 AND (
+                   snapshot.code_hash IS NULL
+                   OR snapshot.parent_sscc IS NOT substr(event.normalized_identity, 11)
+                   OR owned.winning_device_id IS NOT event.device_id
+                   OR owned.winning_scanned_at IS NOT event.scanned_at
+                   OR owned.observed_production_date IS NOT event.active_production_date
+                   OR owned.origin_classification IS NOT CASE
+                     WHEN snapshot.source_state = 'MOVING_BY_UD' OR snapshot.protected = 1
+                       THEN 'protected'
+                     WHEN snapshot.expected = 1 THEN 'expected'
+                     ELSE 'known-ineligible'
+                   END
+                   OR owned.classification IS NOT CASE
+                     WHEN snapshot.source_state = 'MOVING_BY_UD' OR snapshot.protected = 1
+                       THEN 'protected'
+                     WHEN snapshot.expected = 1 THEN 'expected'
+                     ELSE 'known-ineligible'
+                   END
+                 )
+              )
+              AND EXISTS (
+                SELECT 1 FROM inventory_snapshot_codes_mirror child
+                 WHERE child.snapshot_id = event.snapshot_id
+                   AND child.parent_sscc = substr(event.normalized_identity, 11)
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM inventory_snapshot_codes_mirror child
+                 WHERE child.snapshot_id = event.snapshot_id
+                   AND child.parent_sscc = substr(event.normalized_identity, 11)
+                   AND NOT EXISTS (
+                     SELECT 1 FROM inventory_code_results_mirror winner
+                     LEFT JOIN inventory_scan_events_mirror owner
+                       ON owner.inventory_id = winner.inventory_id
+                      AND owner.snapshot_id = winner.snapshot_id
+                      AND owner.event_id = winner.first_accepted_event_id
+                      WHERE winner.inventory_id = event.inventory_id
+                        AND winner.snapshot_id = event.snapshot_id
+                        AND winner.code_hash = child.code_hash
+                        AND winner.winning_device_id IS COALESCE(owner.device_id, event.device_id)
+                        AND winner.winning_scanned_at IS COALESCE(owner.scanned_at, event.scanned_at)
+                        AND winner.observed_production_date IS
+                              COALESCE(owner.active_production_date, event.active_production_date)
+                        AND winner.origin_classification IS CASE
+                          WHEN child.source_state = 'MOVING_BY_UD' OR child.protected = 1
+                            THEN 'protected'
+                          WHEN child.expected = 1 THEN 'expected'
+                          ELSE 'known-ineligible'
+                        END
+                        AND winner.classification IS winner.origin_classification
+                        AND (
+                          winner.first_accepted_event_id = event.event_id
+                          OR (
+                            owner.commit_state = 'committed'
+                            AND (
+                              owner.device_sequence < event.device_sequence
+                              OR (
+                                owner.device_sequence = event.device_sequence
+                                AND owner.device_id < event.device_id
+                              )
+                              OR (
+                                owner.device_sequence = event.device_sequence
+                                AND owner.device_id = event.device_id
+                                AND owner.event_id < event.event_id
+                              )
+                            )
+                            AND (
+                              (owner.kind = 'item' AND owner.code_hash = child.code_hash)
+                              OR (
+                                owner.kind = 'known_box'
+                                AND owner.normalized_identity =
+                                      'known_box:' || child.parent_sscc
+                                AND NOT EXISTS (
+                                  SELECT 1 FROM inventory_code_results_mirror owner_extra
+                                  LEFT JOIN inventory_snapshot_codes_mirror owner_snapshot
+                                    ON owner_snapshot.snapshot_id = owner_extra.snapshot_id
+                                   AND owner_snapshot.code_hash = owner_extra.code_hash
+                                 WHERE owner_extra.inventory_id = owner.inventory_id
+                                   AND owner_extra.snapshot_id = owner.snapshot_id
+                                   AND owner_extra.first_accepted_event_id = owner.event_id
+                                   AND (
+                                     owner_snapshot.code_hash IS NULL
+                                     OR owner_snapshot.parent_sscc IS NOT child.parent_sscc
+                                     OR owner_extra.classification IS NOT
+                                          owner_extra.origin_classification
+                                   )
+                                )
+                              )
+                            )
+                          )
+                        )
+                   )
+              )
+            )
+            OR (
+              event.local_verdict IN ('unknown', 'duplicate')
+              AND NOT EXISTS (
+                SELECT 1 FROM inventory_code_results_mirror owned
+                 WHERE owned.inventory_id = event.inventory_id
+                   AND owned.snapshot_id = event.snapshot_id
+                   AND owned.first_accepted_event_id = event.event_id
+              )
+              AND (
+                event.local_verdict = 'unknown'
+                OR event.kind <> 'known_box'
+                OR (
+                  substr(event.normalized_identity, 1, 10) = 'known_box:'
+                  AND EXISTS (
+                    SELECT 1 FROM inventory_task_mirror task
+                     WHERE task.inventory_id = event.inventory_id
+                       AND task.active_snapshot_id = event.snapshot_id
+                  )
+                  AND EXISTS (
+                    SELECT 1 FROM inventory_snapshot_codes_mirror child
+                     WHERE child.snapshot_id = event.snapshot_id
+                       AND child.parent_sscc = substr(event.normalized_identity, 11)
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM inventory_snapshot_codes_mirror child
+                     WHERE child.snapshot_id = event.snapshot_id
+                       AND child.parent_sscc = substr(event.normalized_identity, 11)
+                       AND NOT EXISTS (
+                         SELECT 1 FROM inventory_code_results_mirror winner
+                         JOIN inventory_scan_events_mirror owner
+                           ON owner.inventory_id = winner.inventory_id
+                          AND owner.snapshot_id = winner.snapshot_id
+                          AND owner.event_id = winner.first_accepted_event_id
+                          WHERE winner.inventory_id = event.inventory_id
+                            AND winner.snapshot_id = event.snapshot_id
+                            AND winner.code_hash = child.code_hash
+                            AND winner.winning_device_id = owner.device_id
+                            AND winner.winning_scanned_at = owner.scanned_at
+                            AND winner.observed_production_date IS owner.active_production_date
+                            AND winner.origin_classification IS CASE
+                              WHEN child.source_state = 'MOVING_BY_UD' OR child.protected = 1
+                                THEN 'protected'
+                              WHEN child.expected = 1 THEN 'expected'
+                              ELSE 'known-ineligible'
+                            END
+                            AND winner.classification IS winner.origin_classification
+                            AND owner.commit_state = 'committed'
+                            AND (
+                              owner.device_sequence < event.device_sequence
+                              OR (
+                                owner.device_sequence = event.device_sequence
+                                AND owner.device_id < event.device_id
+                              )
+                              OR (
+                                owner.device_sequence = event.device_sequence
+                                AND owner.device_id = event.device_id
+                                AND owner.event_id < event.event_id
+                              )
+                            )
+                            AND (
+                              (owner.kind = 'item' AND owner.code_hash = child.code_hash)
+                              OR (
+                                owner.kind = 'known_box'
+                                AND owner.normalized_identity =
+                                      'known_box:' || child.parent_sscc
+                                AND NOT EXISTS (
+                                  SELECT 1 FROM inventory_code_results_mirror owner_extra
+                                  LEFT JOIN inventory_snapshot_codes_mirror owner_snapshot
+                                    ON owner_snapshot.snapshot_id = owner_extra.snapshot_id
+                                   AND owner_snapshot.code_hash = owner_extra.code_hash
+                                 WHERE owner_extra.inventory_id = owner.inventory_id
+                                   AND owner_extra.snapshot_id = owner.snapshot_id
+                                   AND owner_extra.first_accepted_event_id = owner.event_id
+                                   AND (
+                                     owner_snapshot.code_hash IS NULL
+                                     OR owner_snapshot.parent_sscc IS NOT child.parent_sscc
+                                     OR owner_extra.classification IS NOT
+                                          owner_extra.origin_classification
+                                   )
+                                )
+                              )
+                            )
+                       )
+                  )
+                )
+              )
+            )
+          )
+     ),
+     invalid(inventory_id, snapshot_id, event_id) AS (
+       SELECT candidate.inventory_id, candidate.snapshot_id, candidate.event_id
+         FROM candidates candidate
+        WHERE NOT EXISTS (
+          SELECT 1 FROM structurally_valid valid
+           WHERE valid.inventory_id = candidate.inventory_id
+             AND valid.snapshot_id = candidate.snapshot_id
+             AND valid.event_id = candidate.event_id
+        )
+       UNION
+       SELECT dependent.inventory_id, dependent.snapshot_id, dependent.event_id
+         FROM structurally_valid dependent
+         JOIN inventory_snapshot_codes_mirror child
+           ON child.snapshot_id = dependent.snapshot_id
+          AND child.parent_sscc = substr(dependent.normalized_identity, 11)
+         JOIN inventory_code_results_mirror winner
+           ON winner.inventory_id = dependent.inventory_id
+          AND winner.snapshot_id = dependent.snapshot_id
+          AND winner.code_hash = child.code_hash
+         JOIN invalid bad_owner
+           ON bad_owner.inventory_id = winner.inventory_id
+          AND bad_owner.snapshot_id = winner.snapshot_id
+          AND bad_owner.event_id = winner.first_accepted_event_id
+        WHERE dependent.kind = 'known_box'
+          AND winner.first_accepted_event_id <> dependent.event_id
+     )
+   UPDATE inventory_scan_events_mirror AS event
+      SET commit_state = CASE WHEN EXISTS (
+            SELECT 1 FROM invalid bad
+             WHERE bad.inventory_id = event.inventory_id
+               AND bad.snapshot_id = event.snapshot_id
+               AND bad.event_id = event.event_id
+          ) THEN 'failed' ELSE 'committed' END,
+          legacy_audit_version = 1
+    WHERE event.legacy_audit_version = 0
+      AND event.commit_state IN ('committed', 'failed');`,
+  `DELETE FROM inventory_code_results_mirror AS result
+    WHERE EXISTS (
+      SELECT 1 FROM inventory_scan_events_mirror event
+       WHERE event.inventory_id = result.inventory_id
+         AND event.snapshot_id = result.snapshot_id
+         AND event.event_id = result.first_accepted_event_id
+         AND event.commit_state = 'failed'
+         AND event.legacy_audit_version = 1
+    );`,
 ];
+
+/** Round-2 statements superseded once the one-time version marker exists. */
+export const SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATIONS = STATION_MIGRATIONS.filter(
+  (statement) =>
+    (statement.includes("SET commit_state = CASE WHEN EXISTS (") &&
+      !statement.includes("legacy_audit_version")) ||
+    (statement.includes("DELETE FROM inventory_code_results_mirror AS result") &&
+      !statement.includes("legacy_audit_version = 1")),
+);

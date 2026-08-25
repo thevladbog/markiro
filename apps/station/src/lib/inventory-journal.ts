@@ -375,8 +375,8 @@ async function reserveEvent(
     `INSERT INTO inventory_scan_events_mirror
        (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
         kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict,
-        commit_state)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+        commit_state, legacy_audit_version)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1)
      ON CONFLICT(inventory_id, snapshot_id, event_id) DO NOTHING`,
     [
       input.inventoryId,
@@ -642,7 +642,7 @@ async function finalizePendingEvent(
 ): Promise<void> {
   await exec.run(
     `UPDATE inventory_scan_events_mirror
-        SET commit_state = 'committed'
+        SET commit_state = 'committed', legacy_audit_version = 1
       WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ? AND commit_state = 'pending'`,
     [inventoryId, snapshotId, eventId],
   );
@@ -700,7 +700,7 @@ async function reconcileOnePendingEvent(
   );
   await exec.run(
     `UPDATE inventory_scan_events_mirror
-        SET commit_state = 'failed'
+        SET commit_state = 'failed', legacy_audit_version = 1
       WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ? AND commit_state = 'pending'
         AND NOT EXISTS (
           SELECT 1 FROM inventory_outbox queued

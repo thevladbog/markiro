@@ -1,6 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { STATION_MIGRATIONS } from "../src/sqlite/migrations.js";
+import {
+  STATION_MIGRATIONS,
+  SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATIONS,
+} from "../src/sqlite/migrations.js";
 import {
   inventoryCodeResultsMirror,
   inventoryConflictsMirror,
@@ -31,7 +34,18 @@ function applyStatements(db: DatabaseSync, statements: readonly string[]): void 
 }
 
 function applyStationMigrations(db: DatabaseSync): void {
-  applyStatements(db, STATION_MIGRATIONS);
+  const columns = db.prepare("PRAGMA table_info(inventory_scan_events_mirror)").all() as Array<{
+    name: string;
+  }>;
+  const finalLegacyAuditExists = columns.some((column) => column.name === "legacy_audit_version");
+  applyStatements(
+    db,
+    STATION_MIGRATIONS.filter(
+      (statement) =>
+        !finalLegacyAuditExists ||
+        !SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATIONS.includes(statement),
+    ),
+  );
 }
 
 function migratedDb(): DatabaseSync {
@@ -433,6 +447,234 @@ describe("STATION_MIGRATIONS", () => {
         count: 0,
       },
     );
+  });
+
+  it("proves exact item and complete box projections before finalizing the legacy audit", () => {
+    const stateMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN commit_state"),
+    );
+    expect(stateMigration).toBeGreaterThan(0);
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, stateMigration));
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, active_snapshot_id)
+       VALUES ('inventory-proof', 'INV-PROOF', 'snapshot-proof')`,
+    ).run();
+
+    const insertSnapshot = db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status, source_state,
+          parent_sscc, expected, protected)
+       VALUES ('snapshot-proof', ?, ?, '04600000000015', ?, ?, ?, ?, ?, ?)`,
+    );
+    const snapshot = (
+      hash: string,
+      parent: string | null,
+      origin: "expected" | "protected" | "known-ineligible" = "expected",
+    ) => {
+      insertSnapshot.run(
+        hash,
+        `raw-${hash}`,
+        hash,
+        origin === "known-ineligible" ? "APPLIED" : "INTRODUCED",
+        origin === "protected" ? "MOVING_BY_UD" : null,
+        parent,
+        origin === "expected" ? 1 : 0,
+        origin === "protected" ? 1 : 0,
+      );
+    };
+    const events: Array<{
+      eventId: string;
+      sequence: number;
+      kind: "item" | "known_box";
+      identity: string;
+      codeHash: string | null;
+      rawPayload: string;
+      verdict: "expected" | "duplicate";
+    }> = [];
+    const addEvent = (event: (typeof events)[number]) => {
+      events.push(event);
+      const scannedAt = `2026-08-25T08:${String(event.sequence).padStart(2, "0")}:00.000Z`;
+      db.prepare(
+        `INSERT INTO inventory_scan_events_mirror
+           (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
+            scanned_at, kind, normalized_identity, code_hash, raw_payload,
+            active_production_date, local_verdict)
+         VALUES ('inventory-proof', 'snapshot-proof', ?, 'device-proof', ?, 'operator-proof',
+                 ?, ?, ?, ?, ?, '2026-08-20', ?)`,
+      ).run(
+        event.eventId,
+        event.sequence,
+        scannedAt,
+        event.kind,
+        event.identity,
+        event.codeHash,
+        event.rawPayload,
+        event.verdict,
+      );
+      db.prepare(
+        `INSERT INTO inventory_outbox
+           (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+         VALUES ('inventory-proof', 'snapshot-proof', ?, ?, ?, ?)`,
+      ).run(
+        event.eventId,
+        event.sequence,
+        JSON.stringify({
+          eventId: event.eventId,
+          deviceSequence: event.sequence,
+          operatorId: "operator-proof",
+          scannedAt,
+          kind: event.kind,
+          normalizedIdentity: event.identity,
+          codeHash: event.codeHash,
+          canonicalRaw: event.rawPayload,
+          activeProductionDate: "2026-08-20",
+          localVerdict: event.verdict,
+        }),
+        scannedAt,
+      );
+    };
+    const addResult = (
+      hash: string,
+      eventId: string,
+      sequence: number,
+      origin: "expected" | "protected" | "known-ineligible" = "expected",
+      classification = origin,
+    ) => {
+      const scannedAt = `2026-08-25T08:${String(sequence).padStart(2, "0")}:00.000Z`;
+      db.prepare(
+        `INSERT INTO inventory_code_results_mirror
+           (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
+            winning_scanned_at, observed_production_date, classification,
+            origin_classification, updated_at)
+         VALUES ('inventory-proof', 'snapshot-proof', ?, ?, 'device-proof', ?, '2026-08-20',
+                 ?, ?, ?)`,
+      ).run(hash, eventId, scannedAt, classification, origin, scannedAt);
+    };
+
+    addEvent({
+      eventId: "item-wrong-hash",
+      sequence: 1,
+      kind: "item",
+      identity: "item:item-right-hash",
+      codeHash: "item-right-hash",
+      rawPayload: "raw-item-right-hash",
+      verdict: "expected",
+    });
+    addResult("item-foreign-hash", "item-wrong-hash", 1);
+
+    addEvent({
+      eventId: "item-wrong-classification",
+      sequence: 2,
+      kind: "item",
+      identity: "item:item-class-hash",
+      codeHash: "item-class-hash",
+      rawPayload: "raw-item-class-hash",
+      verdict: "expected",
+    });
+    addResult("item-class-hash", "item-wrong-classification", 2, "expected", "protected");
+
+    const foreignBox = "111111111111111111";
+    snapshot("foreign-owned-child", foreignBox);
+    snapshot("foreign-extra-child", "999999999999999999");
+    addEvent({
+      eventId: "box-foreign-child",
+      sequence: 3,
+      kind: "known_box",
+      identity: `known_box:${foreignBox}`,
+      codeHash: null,
+      rawPayload: foreignBox,
+      verdict: "expected",
+    });
+    addResult("foreign-owned-child", "box-foreign-child", 3);
+    addResult("foreign-extra-child", "box-foreign-child", 3);
+
+    const partialBox = "222222222222222222";
+    snapshot("partial-child-one", partialBox);
+    snapshot("partial-child-two", partialBox);
+    addEvent({
+      eventId: "box-partial",
+      sequence: 4,
+      kind: "known_box",
+      identity: `known_box:${partialBox}`,
+      codeHash: null,
+      rawPayload: partialBox,
+      verdict: "expected",
+    });
+    addResult("partial-child-one", "box-partial", 4);
+
+    const mixedBox = "333333333333333333";
+    snapshot("mixed-expected", mixedBox, "expected");
+    snapshot("mixed-protected", mixedBox, "protected");
+    snapshot("mixed-ineligible", mixedBox, "known-ineligible");
+    addEvent({
+      eventId: "box-mixed-valid",
+      sequence: 5,
+      kind: "known_box",
+      identity: `known_box:${mixedBox}`,
+      codeHash: null,
+      rawPayload: mixedBox,
+      verdict: "expected",
+    });
+    addResult("mixed-expected", "box-mixed-valid", 5, "expected");
+    addResult("mixed-protected", "box-mixed-valid", 5, "protected");
+    addResult("mixed-ineligible", "box-mixed-valid", 5, "known-ineligible");
+    addEvent({
+      eventId: "box-mixed-duplicate",
+      sequence: 6,
+      kind: "known_box",
+      identity: `known_box:${mixedBox}`,
+      codeHash: null,
+      rawPayload: mixedBox,
+      verdict: "duplicate",
+    });
+    addEvent({
+      eventId: "item-extra-projection",
+      sequence: 7,
+      kind: "item",
+      identity: "item:item-extra-right",
+      codeHash: "item-extra-right",
+      rawPayload: "raw-item-extra-right",
+      verdict: "expected",
+    });
+    addResult("item-extra-right", "item-extra-projection", 7);
+    addResult("item-extra-foreign", "item-extra-projection", 7);
+
+    applyStatements(db, STATION_MIGRATIONS.slice(stateMigration));
+    expect(
+      db
+        .prepare(
+          `SELECT event_id, commit_state, legacy_audit_version
+             FROM inventory_scan_events_mirror
+           ORDER BY device_sequence`,
+        )
+        .all(),
+    ).toEqual([
+      { event_id: "item-wrong-hash", commit_state: "failed", legacy_audit_version: 1 },
+      {
+        event_id: "item-wrong-classification",
+        commit_state: "failed",
+        legacy_audit_version: 1,
+      },
+      { event_id: "box-foreign-child", commit_state: "failed", legacy_audit_version: 1 },
+      { event_id: "box-partial", commit_state: "failed", legacy_audit_version: 1 },
+      { event_id: "box-mixed-valid", commit_state: "committed", legacy_audit_version: 1 },
+      { event_id: "box-mixed-duplicate", commit_state: "committed", legacy_audit_version: 1 },
+      { event_id: "item-extra-projection", commit_state: "failed", legacy_audit_version: 1 },
+    ]);
+    expect(
+      db
+        .prepare(
+          `SELECT code_hash, first_accepted_event_id FROM inventory_code_results_mirror
+           ORDER BY code_hash`,
+        )
+        .all(),
+    ).toEqual([
+      { code_hash: "mixed-expected", first_accepted_event_id: "box-mixed-valid" },
+      { code_hash: "mixed-ineligible", first_accepted_event_id: "box-mixed-valid" },
+      { code_hash: "mixed-protected", first_accepted_event_id: "box-mixed-valid" },
+    ]);
   });
 
   it("adds durable content/order/page fences to an existing inventory mirror", () => {

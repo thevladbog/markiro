@@ -413,6 +413,7 @@ export const inventoryScanEventsMirror = sqliteTable(
     activeProductionDate: text("active_production_date"),
     localVerdict: text("local_verdict").notNull(),
     commitState: text("commit_state").notNull().default("committed"),
+    legacyAuditVersion: integer("legacy_audit_version").notNull().default(0),
   },
   (table) => [
     primaryKey({ columns: [table.inventoryId, table.snapshotId, table.eventId] }),
