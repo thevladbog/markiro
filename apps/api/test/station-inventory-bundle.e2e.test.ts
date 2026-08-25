@@ -13,6 +13,7 @@ import type { LabelTemplateSpec } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { formatInventoryTaskBarcode } from "../src/modules/inventories/station-inventory.dto";
 import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
@@ -258,6 +259,18 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       .expect(200);
   }
 
+  async function createOperator(agent: Agent, fullName: string): Promise<string> {
+    const operator = await agent.post("/employees").send({ fullName }).expect(201);
+    await agent
+      .put(`/operators/${operator.body.id as string}`)
+      .send({
+        login: String((Number.parseInt(randomUUID().slice(0, 8), 16) % 900_000) + 100_000),
+        pin: "1234",
+      })
+      .expect(200);
+    return operator.body.id as string;
+  }
+
   async function attachExpiredSubscription(
     tenantId: string,
     startsAt: Date,
@@ -419,6 +432,156 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       .where(eq(schema.shifts.tenantId, fixture.tenantId));
     expect(afterShifts?.value).toBe(beforeShifts?.value);
   });
+
+  it.each([
+    { name: "operator changes", initial: "assigned", retry: "other_operator" },
+    { name: "the configured device line changes", initial: "cross_line", retry: "other_line" },
+    { name: "barcode join semantics change", initial: "assigned", retry: "task_barcode" },
+    {
+      name: "the different-line confirmation context changes",
+      initial: "assigned",
+      retry: "cross_line",
+    },
+  ] as const)(
+    "rejects an active repack participant conflict when $name before allocating another SSCC block",
+    async ({ initial, retry }) => {
+      const agent = request.agent(app!.getHttpServer());
+      const fixture = await seedBundle(agent, "repack");
+      const otherOperatorId = await createOperator(agent, "Other Bundle Operator");
+      const firstOtherLineId = randomUUID();
+      const secondOtherLineId = randomUUID();
+      await db.insert(schema.lines).values([
+        { id: firstOtherLineId, tenantId: fixture.tenantId, name: "Other bundle line A" },
+        { id: secondOtherLineId, tenantId: fixture.tenantId, name: "Other bundle line B" },
+      ]);
+      if (initial === "cross_line") {
+        await db
+          .update(schema.stationDevices)
+          .set({ lineId: firstOtherLineId })
+          .where(
+            and(
+              eq(schema.stationDevices.tenantId, fixture.tenantId),
+              eq(schema.stationDevices.id, fixture.deviceId),
+            ),
+          );
+      }
+
+      const barcode = formatInventoryTaskBarcode(fixture.inventoryId);
+      await request(app!.getHttpServer())
+        .post(`/station/inventories/${fixture.inventoryId}/join`)
+        .set("x-api-key", fixture.apiKey)
+        .send({
+          operatorId: fixture.operatorId,
+          ...(initial === "cross_line" ? { barcode, confirmDifferentLine: true } : {}),
+        })
+        .expect(200);
+
+      await db
+        .update(schema.inventoryDeviceParticipants)
+        .set({ pendingEventCount: 7, openBoxCount: 3 })
+        .where(
+          and(
+            eq(schema.inventoryDeviceParticipants.tenantId, fixture.tenantId),
+            eq(schema.inventoryDeviceParticipants.inventoryId, fixture.inventoryId),
+            eq(schema.inventoryDeviceParticipants.deviceId, fixture.deviceId),
+          ),
+        );
+      const [allocatedBlock] = await db
+        .select({ id: schema.ssccBlocks.id, toSerial: schema.ssccBlocks.toSerial })
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, fixture.tenantId),
+            eq(schema.ssccBlocks.deviceId, fixture.deviceId),
+          ),
+        );
+      if (!allocatedBlock) throw new Error("Expected repack join to allocate an SSCC block");
+      await db
+        .update(schema.ssccBlocks)
+        .set({ consumedThroughSerial: allocatedBlock.toSerial })
+        .where(eq(schema.ssccBlocks.id, allocatedBlock.id));
+
+      const participantWhere = and(
+        eq(schema.inventoryDeviceParticipants.tenantId, fixture.tenantId),
+        eq(schema.inventoryDeviceParticipants.inventoryId, fixture.inventoryId),
+        eq(schema.inventoryDeviceParticipants.deviceId, fixture.deviceId),
+      );
+      const auditWhere = and(
+        eq(schema.tenantAuditEvents.organizationId, fixture.tenantId),
+        eq(schema.tenantAuditEvents.action, "inventory.station.joined"),
+        eq(schema.tenantAuditEvents.targetId, fixture.inventoryId),
+      );
+      const [participantBefore] = await db
+        .select()
+        .from(schema.inventoryDeviceParticipants)
+        .where(participantWhere);
+      const auditsBefore = await db.select().from(schema.tenantAuditEvents).where(auditWhere);
+      const blocksBefore = await db
+        .select()
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, fixture.tenantId),
+            eq(schema.ssccBlocks.deviceId, fixture.deviceId),
+          ),
+        );
+      if (!participantBefore) throw new Error("Expected active inventory participant");
+
+      if (retry === "other_line") {
+        await db
+          .update(schema.stationDevices)
+          .set({ lineId: secondOtherLineId })
+          .where(
+            and(
+              eq(schema.stationDevices.tenantId, fixture.tenantId),
+              eq(schema.stationDevices.id, fixture.deviceId),
+            ),
+          );
+      } else if (retry === "cross_line") {
+        await db
+          .update(schema.stationDevices)
+          .set({ lineId: firstOtherLineId })
+          .where(
+            and(
+              eq(schema.stationDevices.tenantId, fixture.tenantId),
+              eq(schema.stationDevices.id, fixture.deviceId),
+            ),
+          );
+      }
+
+      await request(app!.getHttpServer())
+        .post(`/station/inventories/${fixture.inventoryId}/join`)
+        .set("x-api-key", fixture.apiKey)
+        .send({
+          operatorId: retry === "other_operator" ? otherOperatorId : fixture.operatorId,
+          ...(retry === "other_line" || retry === "task_barcode" || retry === "cross_line"
+            ? { barcode }
+            : {}),
+          ...(retry === "other_line" || retry === "cross_line"
+            ? { confirmDifferentLine: true }
+            : {}),
+        })
+        .expect(409, { code: "INVENTORY_ACTIVE_PARTICIPANT_CONFLICT" });
+
+      const [participantAfter] = await db
+        .select()
+        .from(schema.inventoryDeviceParticipants)
+        .where(participantWhere);
+      const auditsAfter = await db.select().from(schema.tenantAuditEvents).where(auditWhere);
+      const blocksAfter = await db
+        .select()
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, fixture.tenantId),
+            eq(schema.ssccBlocks.deviceId, fixture.deviceId),
+          ),
+        );
+      expect(participantAfter).toEqual(participantBefore);
+      expect(auditsAfter).toEqual(auditsBefore);
+      expect(blocksAfter).toEqual(blocksBefore);
+    },
+  );
 
   it("fails a repack join atomically when its frozen template or usable SSCC allocation is unavailable", async () => {
     const invalidTemplateAgent = request.agent(app!.getHttpServer());

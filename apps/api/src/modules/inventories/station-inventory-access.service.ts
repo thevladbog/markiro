@@ -108,9 +108,17 @@ export class StationInventoryAccessService {
       if (differentLine && input.confirmDifferentLine !== true) {
         throw new ConflictException({ code: "INVENTORY_DIFFERENT_LINE_CONFIRMATION_REQUIRED" });
       }
+      const joinMethod = input.barcode === undefined ? "assigned_line" : "task_barcode";
+      const differentLineConfirmed = differentLine;
 
       const [existingParticipant] = await tx
-        .select({ leftAt: schema.inventoryDeviceParticipants.leftAt })
+        .select({
+          operatorId: schema.inventoryDeviceParticipants.operatorId,
+          configuredLineId: schema.inventoryDeviceParticipants.configuredLineId,
+          joinMethod: schema.inventoryDeviceParticipants.joinMethod,
+          differentLineConfirmed: schema.inventoryDeviceParticipants.differentLineConfirmed,
+          leftAt: schema.inventoryDeviceParticipants.leftAt,
+        })
         .from(schema.inventoryDeviceParticipants)
         .where(
           and(
@@ -120,11 +128,20 @@ export class StationInventoryAccessService {
           ),
         )
         .for("update");
-      const manifest = await this.bundles.prepareJoinManifest(tx, tenantId, inventoryId, deviceId);
-      if (existingParticipant?.leftAt === null) return manifest;
+      if (existingParticipant?.leftAt === null) {
+        if (
+          existingParticipant.operatorId !== operator.id ||
+          existingParticipant.configuredLineId !== deviceLineId ||
+          existingParticipant.joinMethod !== joinMethod ||
+          existingParticipant.differentLineConfirmed !== differentLineConfirmed
+        ) {
+          throw new ConflictException({ code: "INVENTORY_ACTIVE_PARTICIPANT_CONFLICT" });
+        }
+        return this.bundles.prepareJoinManifest(tx, tenantId, inventoryId, deviceId);
+      }
 
+      const manifest = await this.bundles.prepareJoinManifest(tx, tenantId, inventoryId, deviceId);
       const now = new Date();
-      const joinMethod = differentLine ? "task_barcode" : "assigned_line";
       if (existingParticipant) {
         await tx
           .update(schema.inventoryDeviceParticipants)
@@ -132,7 +149,7 @@ export class StationInventoryAccessService {
             operatorId: operator.id,
             configuredLineId: deviceLineId,
             joinMethod,
-            differentLineConfirmed: differentLine,
+            differentLineConfirmed,
             joinedAt: now,
             leftAt: null,
             heartbeatAt: now,
@@ -152,7 +169,7 @@ export class StationInventoryAccessService {
           operatorId: operator.id,
           configuredLineId: deviceLineId,
           joinMethod,
-          differentLineConfirmed: differentLine,
+          differentLineConfirmed,
           joinedAt: now,
           heartbeatAt: now,
         });
@@ -175,7 +192,7 @@ export class StationInventoryAccessService {
           inventoryLineId: inventory.lineId,
           joinMethod,
           taskBarcodeUsed: input.barcode !== undefined,
-          differentLineConfirmed: differentLine,
+          differentLineConfirmed,
         },
       });
       return manifest;
