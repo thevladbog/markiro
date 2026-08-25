@@ -105,6 +105,10 @@ test("active infrastructure runbooks require separate reviewed plan and apply ru
     assert.match(runbook, /plan_json_version_id/);
     assert.match(runbook, /plan_review_confirmed=true/);
   }
+  assert.match(infrastructure, /owner_confirmation.*APPLY-YANDEX-INFRASTRUCTURE/is);
+  assert.match(infrastructure, /github\.actor.*github\.repository_owner/is);
+  assert.match(infrastructure, /одно-владельческ/i);
+  assert.match(infrastructure, /не двухпользовательск/i);
   assert.match(goLive, /enable_station_release_public_dns=false/);
   assert.match(bootstrap, /production-infrastructure/);
   assert.match(bootstrap, /production-infrastructure-apply/);

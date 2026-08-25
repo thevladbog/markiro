@@ -8,10 +8,14 @@ Environment `station-release`, не записывают GitHub secrets и не 
 
 Environment `production-infrastructure` используется только запуском
 `mode=plan`. Отдельный Environment `production-infrastructure-apply`
-используется только запуском `mode=apply`, чтобы его approval происходил после
-проверки точного сохранённого плана. Оба Environment должны разрешать deployment
-только из `main`, требовать approval авторизованного владельца инфраструктуры и
-содержать один и тот же утверждённый набор GitHub variables:
+используется только запуском `mode=apply`, после проверки точного сохранённого
+плана. Оба Environment должны разрешать deployment только из `main` и содержать
+один и тот же утверждённый набор GitHub variables. На текущем GitHub plan
+required reviewers для private repository недоступны, поэтому до входа в apply
+Environment workflow требует `github.actor == github.repository_owner` и точный
+`owner_confirmation=APPLY-YANDEX-INFRASTRUCTURE`. Это одно-владельческое
+подтверждение, не двухпользовательский approval; нативный reviewer требует
+подходящего GitHub Enterprise plan.
 
 - `YC_CLOUD_ID`
 - `YC_FOLDER_ID`

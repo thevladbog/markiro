@@ -15,11 +15,19 @@
    полный review по процедуре ниже. Санитаризированного address/actions в логе
    недостаточно.
 5. После явного подтверждения запустите `mode=apply` с теми же target SHA и DNS
-   flags, обеими точными тройками и `plan_review_confirmed=true`.
-6. Approve отдельный Environment `production-infrastructure-apply`. Apply run
+   flags, обеими точными тройками, `plan_review_confirmed=true` и точным
+   `owner_confirmation=APPLY-YANDEX-INFRASTRUCTURE`.
+6. Dispatch должен выполнять владелец репозитория из `main`: workflow проверяет
+   `github.actor == github.repository_owner`, точную фразу и ref до входа в
+   отдельный Environment `production-infrastructure-apply`. Apply run
    проверяет оба объекта, регенерирует JSON из binary plan, сравнивает его
    byte-for-byte и семантически с escrow JSON, повторяет fail-closed guard и
    только затем применяет saved plan.
+
+На текущем GitHub plan required reviewers для private repository недоступны.
+Gate является одно-владельческим подтверждением, не двухпользовательским
+approval. Явное подтверждение на точный reviewed plan всё равно получают до
+dispatch; фраза не заменяет содержательный review.
 
 ## Полный локальный review точных защищённых версий
 

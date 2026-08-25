@@ -4,7 +4,7 @@ Workflow `.github/workflows/yandex-infrastructure.yml` валидирует Terr
 pull request. Production dispatch разделён на два независимых ручных запуска:
 `mode=plan` создаёт план под защитой GitHub Environment
 `production-infrastructure`, а `mode=apply` применяет именно этот план только
-после нового approval в отдельном Environment
+после отдельного owner-confirmation gate и входа в Environment
 `production-infrastructure-apply`.
 
 Перед первым использованием разделённого workflow оператор должен создать и
@@ -56,8 +56,17 @@ GitHub artifact и не печатаются в log/summary.
 2. Введите без изменения `plan_key`, `plan_sha256`, `plan_version_id`,
    `plan_json_key`, `plan_json_sha256`, `plan_json_version_id` и
    `plan_review_confirmed=true`.
-3. Approve отдельный Environment `production-infrastructure-apply` только после
-   того, как проверка плана завершена.
+3. Укажите точный `owner_confirmation=APPLY-YANDEX-INFRASTRUCTURE`. Dispatch
+   обязан запускать владелец репозитория: workflow проверяет
+   `github.actor == github.repository_owner`, точную фразу и ветку `main` до
+   входа в Environment, OIDC и Terraform.
+4. Environment `production-infrastructure-apply` должен быть ограничен веткой
+   `main` и содержать только утверждённые variables.
+
+На текущем GitHub plan required reviewers для private repository недоступны.
+Поэтому это одно-владельческое подтверждение, не двухпользовательский approval.
+Нативный reviewer можно вернуть при переходе на подходящий GitHub Enterprise
+plan, не ослабляя owner-confirmation gate.
 
 Apply run повторно проверяет SHA/ref и оба boolean input, ограниченный формат и
 metadata object key, загружает только точную версию plan по переданному reviewer

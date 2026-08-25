@@ -1382,7 +1382,10 @@ test("Station release origin bootstrap separates protected credentials and appro
   assert.match(infrastructure, /точн.*key.*VersionId|key.*точн.*VersionId/is);
   assert.match(infrastructure, /residual|остаточн/is);
   assert.match(infrastructure, /version-id|VersionId/);
-  assert.ok(bootstrap.indexOf("STOP 1 — APPLY") < bootstrap.indexOf("вручную разрешает apply"));
+  assert.ok(
+    bootstrap.indexOf("STOP 1 — APPLY") <
+      bootstrap.indexOf("owner_confirmation=APPLY-YANDEX-INFRASTRUCTURE"),
+  );
   assert.ok(
     bootstrap.indexOf("STOP 2 — SECRETS") <
       bootstrap.indexOf("gh secret set YANDEX_STATION_RELEASE_ACCESS_KEY_ID"),
