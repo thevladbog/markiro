@@ -383,6 +383,41 @@ test("production plan guard classifies every safe production action exactly", as
   reject(protectedUpdate);
 });
 
+test("guard CLI reports only a fixed rejection scope without plan values", async () => {
+  const safe = await readFixture("safe");
+  const protectedUpdate = copy(safe);
+  resource(protectedUpdate, "module.compute.yandex_compute_instance.app").change.actions = [
+    "update",
+  ];
+  await withPlan(protectedUpdate, (planPath) => {
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [script, planPath], { cwd: root, stdio: "pipe" });
+      assert.fail("guard CLI unexpectedly accepted protected update");
+    } catch (error) {
+      stderr = String(error.stderr);
+    }
+    assert.equal(stderr, "production plan rejected (safe-resource-action)\n");
+  });
+
+  const invalidBucket = copy(safe);
+  resource(
+    invalidBucket,
+    "module.station_releases.yandex_storage_bucket.releases",
+  ).change.after.acl = "do-not-print-this-plan-value";
+  await withPlan(invalidBucket, (planPath) => {
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [script, planPath], { cwd: root, stdio: "pipe" });
+      assert.fail("guard CLI unexpectedly accepted invalid release bucket");
+    } catch (error) {
+      stderr = String(error.stderr);
+    }
+    assert.equal(stderr, "production plan rejected (release-bucket)\n");
+    assert.doesNotMatch(stderr, /do-not-print-this-plan-value/);
+  });
+});
+
 test("production plan guard permits direct-VM DNS flag enable and disable transitions", async () => {
   const safe = await readFixture("safe");
   for (const address of directVmDnsAddresses) {
