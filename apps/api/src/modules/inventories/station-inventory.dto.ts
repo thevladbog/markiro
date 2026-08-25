@@ -39,7 +39,11 @@ export interface StationInventoryManifest {
   readonly inventoryNumber: string;
   readonly snapshotId: string;
   readonly snapshotRevision: 1;
+  /** Server-owned immutable ordering/fixation fact for rollback prevention. */
+  readonly snapshotFixedAt: string;
   readonly combinedDigest: string;
+  /** SHA-256 over every immutable snapshot-code row in code-hash order. */
+  readonly contentDigest: string;
   /** All six source-status rows, not only expected inventory stock. */
   readonly codeCount: number;
   readonly productId: string;
@@ -139,7 +143,9 @@ const storedStationInventoryManifestSchema = z
     inventoryNumber: z.string(),
     snapshotId: z.uuid(),
     snapshotRevision: z.literal(1),
+    snapshotFixedAt: z.iso.datetime(),
     combinedDigest: z.string().regex(/^[0-9a-f]{64}$/),
+    contentDigest: z.string().regex(/^[0-9a-f]{64}$/),
     codeCount: z.number().int().nonnegative(),
     productId: z.uuid(),
     productName: z.string(),
@@ -303,7 +309,9 @@ export const stationInventoryManifestOpenApiSchema: SchemaObject = {
     "inventoryNumber",
     "snapshotId",
     "snapshotRevision",
+    "snapshotFixedAt",
     "combinedDigest",
+    "contentDigest",
     "codeCount",
     "productId",
     "productName",
@@ -322,7 +330,9 @@ export const stationInventoryManifestOpenApiSchema: SchemaObject = {
     inventoryNumber: { type: "string" },
     snapshotId: { type: "string", format: "uuid" },
     snapshotRevision: { type: "integer", minimum: 1, maximum: 1 },
+    snapshotFixedAt: { type: "string", format: "date-time" },
     combinedDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    contentDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
     codeCount: { type: "integer", minimum: 0 },
     productId: { type: "string", format: "uuid" },
     productName: { type: "string" },
@@ -447,9 +457,13 @@ export interface StationInventoryBundleCodeDto {
 export interface StationInventoryBundleCodesDto {
   snapshotId: string;
   snapshotRevision: 1;
+  snapshotFixedAt: string;
   combinedDigest: string;
+  contentDigest: string;
+  cursor: string | null;
   items: StationInventoryBundleCodeDto[];
   nextCursor: string | null;
+  pageDigest: string;
 }
 
 export const stationInventoryBundleCodesQuerySchema = z.strictObject({
@@ -587,12 +601,26 @@ const stationInventoryBundleCodeOpenApiSchema: SchemaObject = {
 export const stationInventoryBundleCodesOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["snapshotId", "snapshotRevision", "combinedDigest", "items", "nextCursor"],
+  required: [
+    "snapshotId",
+    "snapshotRevision",
+    "snapshotFixedAt",
+    "combinedDigest",
+    "contentDigest",
+    "cursor",
+    "items",
+    "nextCursor",
+    "pageDigest",
+  ],
   properties: {
     snapshotId: { type: "string", format: "uuid" },
     snapshotRevision: { type: "integer", minimum: 1, maximum: 1 },
+    snapshotFixedAt: { type: "string", format: "date-time" },
     combinedDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    contentDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    cursor: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true },
     items: { type: "array", items: stationInventoryBundleCodeOpenApiSchema },
     nextCursor: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true },
+    pageDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
   },
 };

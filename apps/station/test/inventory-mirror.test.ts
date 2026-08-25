@@ -1,12 +1,15 @@
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { inventorySnapshotContentDigest, inventorySnapshotPageDigest } from "@markiro/domain";
+
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import {
   beginInventoryMirror,
   ingestInventoryPage,
   publishInventorySnapshot,
   readInventoryMirrorState,
+  type InventoryBundleCode,
   type InventoryBundleManifest,
   type InventoryBundlePage,
 } from "../src/lib/inventory-mirror.js";
@@ -16,6 +19,8 @@ const SNAPSHOT_A = "22222222-2222-4222-8222-222222222222";
 const SNAPSHOT_B = "33333333-3333-4333-8333-333333333333";
 const DIGEST_A = "a".repeat(64);
 const DIGEST_B = "b".repeat(64);
+const FIXED_A = "2026-08-25T01:00:00.000Z";
+const FIXED_B = "2026-08-25T02:00:00.000Z";
 
 const rows = [
   {
@@ -57,12 +62,15 @@ const rows = [
 ] as const;
 
 function manifest(snapshotId = SNAPSHOT_A, combinedDigest = DIGEST_A): InventoryBundleManifest {
+  const contentDigest = inventorySnapshotContentDigest(rows);
   return {
     inventoryId: INVENTORY_ID,
     inventoryNumber: "INV-2026-001",
     snapshotId,
     snapshotRevision: 1,
+    snapshotFixedAt: snapshotId === SNAPSHOT_A ? FIXED_A : FIXED_B,
     combinedDigest,
+    contentDigest,
     codeCount: 3,
     productId: "44444444-4444-4444-8444-444444444444",
     productName: "Сидр",
@@ -83,10 +91,30 @@ function manifest(snapshotId = SNAPSHOT_A, combinedDigest = DIGEST_A): Inventory
 function page(
   snapshotId: string,
   digest: string,
-  items: InventoryBundlePage["items"],
+  items: readonly InventoryBundleCode[],
   nextCursor: string | null,
+  cursor: string | null = null,
+  manifestValue = manifest(snapshotId, digest),
 ): InventoryBundlePage {
-  return { snapshotId, snapshotRevision: 1, combinedDigest: digest, items, nextCursor };
+  const proof = {
+    snapshotId,
+    snapshotFixedAt: manifestValue.snapshotFixedAt,
+    contentDigest: manifestValue.contentDigest,
+    cursor,
+    items: [...items],
+    nextCursor,
+  };
+  return {
+    snapshotId,
+    snapshotRevision: 1,
+    snapshotFixedAt: manifestValue.snapshotFixedAt,
+    combinedDigest: digest,
+    contentDigest: manifestValue.contentDigest,
+    cursor,
+    items: [...items],
+    nextCursor,
+    pageDigest: inventorySnapshotPageDigest(proof),
+  };
 }
 
 function makeExecutor(): { db: DatabaseSync; exec: SqlExecutor } {
@@ -135,7 +163,7 @@ describe("inventory mirror staging", () => {
       exec,
       resumed,
       rows[1].codeHash,
-      page(SNAPSHOT_A, DIGEST_A, rows.slice(2), null),
+      page(SNAPSHOT_A, DIGEST_A, rows.slice(2), null, rows[1].codeHash),
     );
     await expect(publishInventorySnapshot(exec, resumed)).resolves.toBe(true);
     expect(await readInventoryMirrorState(exec, INVENTORY_ID)).toMatchObject({
@@ -168,7 +196,7 @@ describe("inventory mirror staging", () => {
     await expect(ingestInventoryPage(exec, candidate, null, firstPage)).resolves.toBeUndefined();
     await expect(
       ingestInventoryPage(exec, candidate, null, { ...firstPage, nextCursor: null }),
-    ).rejects.toThrow("inventory bundle next cursor mismatch");
+    ).rejects.toThrow("inventory bundle page digest mismatch");
 
     expect(
       db.prepare("SELECT COUNT(*) AS count FROM inventory_snapshot_codes_mirror").get(),
@@ -223,7 +251,7 @@ describe("inventory mirror staging", () => {
       exec,
       newer,
       rows[1].codeHash,
-      page(SNAPSHOT_B, DIGEST_B, rows.slice(2), null),
+      page(SNAPSHOT_B, DIGEST_B, rows.slice(2), null, rows[1].codeHash),
     );
     expect(await publishInventorySnapshot(exec, newer)).toBe(true);
     expect(await publishInventorySnapshot(exec, older)).toBe(false);
@@ -237,9 +265,11 @@ describe("inventory mirror staging", () => {
     await ingestInventoryPage(exec, first, null, page(SNAPSHOT_A, DIGEST_A, rows, null));
     expect(await publishInventorySnapshot(exec, first)).toBe(true);
 
-    const secondManifest = { ...manifest(SNAPSHOT_B, DIGEST_B), codeCount: 4 };
+    const secondManifest = manifest(SNAPSHOT_B, DIGEST_B);
     const second = await beginInventoryMirror(exec, secondManifest);
-    await ingestInventoryPage(exec, second, null, page(SNAPSHOT_B, DIGEST_B, rows, null));
+    await expect(
+      ingestInventoryPage(exec, second, null, page(SNAPSHOT_B, DIGEST_B, rows.slice(0, 2), null)),
+    ).rejects.toThrow("inventory bundle content digest mismatch");
     expect(await publishInventorySnapshot(exec, second)).toBe(false);
     expect(await readInventoryMirrorState(exec, INVENTORY_ID)).toMatchObject({
       activeSnapshotId: SNAPSHOT_A,
@@ -250,10 +280,7 @@ describe("inventory mirror staging", () => {
           "SELECT snapshot_id, COUNT(*) AS count FROM inventory_snapshot_codes_mirror GROUP BY snapshot_id ORDER BY snapshot_id",
         )
         .all(),
-    ).toEqual([
-      { snapshot_id: SNAPSHOT_A, count: 3 },
-      { snapshot_id: SNAPSHOT_B, count: 3 },
-    ]);
+    ).toEqual([{ snapshot_id: SNAPSHOT_A, count: 3 }]);
 
     const corrected = await beginInventoryMirror(exec, manifest(SNAPSHOT_B, DIGEST_B));
     await ingestInventoryPage(exec, corrected, null, page(SNAPSHOT_B, DIGEST_B, rows, null));
@@ -261,5 +288,121 @@ describe("inventory mirror staging", () => {
     expect(
       db.prepare("SELECT DISTINCT snapshot_id FROM inventory_snapshot_codes_mirror").all(),
     ).toEqual([{ snapshot_id: SNAPSHOT_B }]);
+  });
+
+  it("refreshes active repack SSCC safety facts monotonically without redownloading codes", async () => {
+    const base = {
+      ...manifest(),
+      mode: "repack" as const,
+      boxLabelTemplate: {
+        id: "66666666-6666-4666-8666-666666666666",
+        name: "Короб",
+        spec: {
+          widthMm: 58,
+          heightMm: 40,
+          dpi: 203 as const,
+          language: "zpl" as const,
+          elements: [],
+        },
+      },
+      sscc: {
+        issuerPrefix: "460000009",
+        extensionDigit: 0,
+        fromSerial: 1,
+        toSerial: 2000,
+        consumedThroughSerial: 10,
+      },
+      ssccRevokedFrom: [] as number[],
+    };
+    const first = await beginInventoryMirror(exec, base);
+    await ingestInventoryPage(
+      exec,
+      first,
+      null,
+      page(SNAPSHOT_A, DIGEST_A, rows, null, null, base),
+    );
+    expect(await publishInventorySnapshot(exec, first)).toBe(true);
+
+    const advanced = {
+      ...base,
+      sscc: { ...base.sscc, consumedThroughSerial: 20 },
+      ssccRevokedFrom: [3000],
+    };
+    const refreshed = await beginInventoryMirror(exec, advanced);
+    expect(refreshed.alreadyActive).toBe(true);
+
+    const stale = await beginInventoryMirror(exec, base);
+    expect(stale.alreadyActive).toBe(true);
+    const stored = db.prepare("SELECT active_manifest_json FROM inventory_task_mirror").get() as {
+      active_manifest_json: string;
+    };
+    expect(JSON.parse(stored.active_manifest_json)).toMatchObject({
+      sscc: { consumedThroughSerial: 20 },
+      ssccRevokedFrom: [3000],
+    });
+    expect(
+      db.prepare("SELECT COUNT(*) AS count FROM inventory_snapshot_codes_mirror").get(),
+    ).toEqual({ count: 3 });
+  });
+
+  it("fences fetch-response reordering so a late older snapshot cannot roll back active state", async () => {
+    const older = manifest(SNAPSHOT_A, DIGEST_A);
+    const newer = manifest(SNAPSHOT_B, DIGEST_B);
+    const first = await beginInventoryMirror(exec, older);
+    await ingestInventoryPage(exec, first, null, page(SNAPSHOT_A, DIGEST_A, rows, null));
+    expect(await publishInventorySnapshot(exec, first)).toBe(true);
+
+    const next = await beginInventoryMirror(exec, newer);
+    await ingestInventoryPage(exec, next, null, page(SNAPSHOT_B, DIGEST_B, rows, null));
+    expect(await publishInventorySnapshot(exec, next)).toBe(true);
+
+    await expect(beginInventoryMirror(exec, older)).rejects.toThrow(
+      "inventory snapshot rollback rejected",
+    );
+    expect(await readInventoryMirrorState(exec, INVENTORY_ID)).toMatchObject({
+      activeSnapshotId: SNAPSHOT_B,
+    });
+  });
+
+  it("serializes disjoint page acceptance at the same cursor with one SQLite statement", async () => {
+    const candidate = await beginInventoryMirror(exec, manifest());
+    const left = page(SNAPSHOT_A, DIGEST_A, rows.slice(0, 1), rows[0].codeHash);
+    const right = page(SNAPSHOT_A, DIGEST_A, rows.slice(1, 2), rows[1].codeHash);
+
+    const results = await Promise.allSettled([
+      ingestInventoryPage(exec, candidate, null, left),
+      ingestInventoryPage(exec, candidate, null, right),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const stored = db
+      .prepare("SELECT code_hash FROM inventory_snapshot_codes_mirror ORDER BY code_hash")
+      .all();
+    expect([[{ code_hash: rows[0].codeHash }], [{ code_hash: rows[1].codeHash }]]).toContainEqual(
+      stored,
+    );
+    expect(await publishInventorySnapshot(exec, candidate)).toBe(false);
+  });
+
+  it("rejects disjoint concurrent final pages before they can combine at a shared cursor", async () => {
+    const expectedManifest = manifest();
+    const candidate = await beginInventoryMirror(exec, expectedManifest);
+    const alternate = {
+      ...rows[0],
+      codeHash: "629f45be66be2b61b0343375808c0ff52c5afae069dbfa071fa5c6b69f3c058d",
+      canonicalRaw: "010460000000001521SERIAL-D",
+      serial: "SERIAL-D",
+    };
+    const firstFinal = page(SNAPSHOT_A, DIGEST_A, rows.slice(0, 2), null);
+    const mixedFinal = page(SNAPSHOT_A, DIGEST_A, [alternate], null);
+    const results = await Promise.allSettled([
+      ingestInventoryPage(exec, candidate, null, firstFinal),
+      ingestInventoryPage(exec, candidate, null, mixedFinal),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(0);
+    expect(await publishInventorySnapshot(exec, candidate)).toBe(false);
+    const stored = db
+      .prepare("SELECT code_hash FROM inventory_snapshot_codes_mirror ORDER BY code_hash")
+      .all();
+    expect(stored).toEqual([]);
   });
 });

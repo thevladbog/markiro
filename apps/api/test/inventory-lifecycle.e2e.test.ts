@@ -8,7 +8,12 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { schema, type Db } from "@markiro/db";
-import { INVENTORY_CHZ_STATUSES, type LabelTemplateSpec } from "@markiro/domain";
+import {
+  inventorySnapshotContentDigest,
+  INVENTORY_CHZ_STATUSES,
+  type LabelTemplateSpec,
+  type StationInventoryBundleCode,
+} from "@markiro/domain";
 
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -24,6 +29,44 @@ const ready = Boolean(
 
 const GTIN14 = "04680089900383";
 const SNAPSHOT_DIGEST = "a".repeat(64);
+const SNAPSHOT_CODES: StationInventoryBundleCode[] = [
+  ...Array.from({ length: 2 }, (_, index) => ({
+    sourceStatus: "EMITTED" as const,
+    sourceState: index === 0 ? "MOVING_BY_UD" : null,
+    sourceProductionDate: null,
+    expected: false,
+    protected: index === 0,
+  })),
+  ...Array.from({ length: 3 }, (_, index) => ({
+    sourceStatus: "INTRODUCED" as const,
+    sourceState: null,
+    sourceProductionDate: index < 2 ? `2026-08-0${index + 1}` : "2026-07-31",
+    expected: index < 2,
+    protected: false,
+  })),
+  ...Array.from({ length: 4 }, () => ({
+    sourceStatus: "RETIRED" as const,
+    sourceState: null,
+    sourceProductionDate: null,
+    expected: false,
+    protected: false,
+  })),
+  {
+    sourceStatus: "WRITTEN_OFF" as const,
+    sourceState: null,
+    sourceProductionDate: null,
+    expected: false,
+    protected: false,
+  },
+].map((facts, index) => ({
+  codeHash: index.toString(16).padStart(64, "0"),
+  canonicalRaw: `010468008990038321LIFECYCLE-${index}`,
+  gtin14: GTIN14,
+  serial: `LIFECYCLE-${index}`,
+  parentSscc: index === 0 ? "046000000000000012" : null,
+  ...facts,
+}));
+const CONTENT_DIGEST = inventorySnapshotContentDigest(SNAPSHOT_CODES);
 const BOX_LABEL_SPEC = {
   widthMm: 58,
   heightMm: 40,
@@ -58,6 +101,7 @@ interface ReadyInventoryFixture {
   productId: string;
   lineId: string;
   snapshotId: string;
+  snapshotFixedAt: string;
   templateId: string | null;
 }
 
@@ -210,8 +254,24 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
         looseCount: snapshotCounts.loose,
         fixedByUserId: actorId,
       })
-      .returning({ id: schema.inventorySnapshots.id });
+      .returning({ id: schema.inventorySnapshots.id, fixedAt: schema.inventorySnapshots.fixedAt });
     if (!snapshot) throw new Error("Expected snapshot fixture");
+    await db.insert(schema.inventorySnapshotCodes).values(
+      SNAPSHOT_CODES.map((code) => ({
+        tenantId,
+        snapshotId: snapshot.id,
+        canonicalRaw: code.canonicalRaw,
+        codeHash: code.codeHash,
+        gtin14: code.gtin14,
+        serial: code.serial,
+        sourceStatus: code.sourceStatus,
+        sourceState: code.sourceState,
+        sourceProductionDate: code.sourceProductionDate,
+        parentSscc: code.parentSscc,
+        expected: code.expected,
+        protected: code.protected,
+      })),
+    );
     await db.insert(schema.inventorySnapshotInputs).values(
       imports.map((input) => ({
         tenantId,
@@ -237,6 +297,7 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
       productId,
       lineId,
       snapshotId: snapshot.id,
+      snapshotFixedAt: snapshot.fixedAt.toISOString(),
       templateId,
     };
   }
@@ -273,7 +334,9 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
       inventoryNumber: fixture.inventoryNumber,
       snapshotId: fixture.snapshotId,
       snapshotRevision: 1,
+      snapshotFixedAt: fixture.snapshotFixedAt,
       combinedDigest: SNAPSHOT_DIGEST,
+      contentDigest: CONTENT_DIGEST,
       codeCount: 10,
       productId: fixture.productId,
       productName: "Inventory Water",

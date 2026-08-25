@@ -449,4 +449,46 @@ export const STATION_MIGRATIONS: string[] = [
    );`,
   `CREATE INDEX IF NOT EXISTS inventory_conflicts_mirror_state_idx
      ON inventory_conflicts_mirror (inventory_id, snapshot_id, state, detected_at);`,
+  // Task 3 review hardening: these remain trailing ALTERs because Task 3's
+  // nine tables may already exist on a deployed station. They add the
+  // server-owned snapshot order, immutable content proof, and one-statement
+  // page acceptance fence without replacing the authoritative tables.
+  `ALTER TABLE inventory_task_mirror ADD COLUMN active_snapshot_fixed_at TEXT;`,
+  `ALTER TABLE inventory_task_mirror ADD COLUMN active_content_digest TEXT;`,
+  `ALTER TABLE inventory_task_mirror ADD COLUMN staged_snapshot_fixed_at TEXT;`,
+  `ALTER TABLE inventory_task_mirror ADD COLUMN staged_content_digest TEXT;`,
+  `ALTER TABLE inventory_task_mirror ADD COLUMN staged_verified_content_digest TEXT;`,
+  `ALTER TABLE inventory_task_mirror ADD COLUMN staged_last_page_digest TEXT;`,
+  `ALTER TABLE inventory_task_mirror ADD COLUMN staged_page_json TEXT;`,
+  // The task-row UPDATE is the only page-acceptance statement sent through
+  // the pooled SqlExecutor. SQLite executes this trigger in that statement's
+  // own transaction, so a losing concurrent cursor/page-digest fence inserts
+  // no code rows and cannot contaminate the candidate.
+  `DROP TRIGGER IF EXISTS inventory_task_mirror_accept_page;`,
+  `CREATE TRIGGER inventory_task_mirror_accept_page
+     AFTER UPDATE OF staged_page_json ON inventory_task_mirror
+     WHEN NEW.staged_page_json IS NOT NULL
+       AND NEW.staged_last_page_digest IS NOT NULL
+       AND NEW.staged_last_page_digest <> COALESCE(OLD.staged_last_page_digest, '')
+     BEGIN
+       INSERT INTO inventory_snapshot_codes_mirror (
+         snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+         source_state, source_production_date, parent_sscc, expected, protected
+       )
+       SELECT
+         NEW.staged_snapshot_id,
+         json_extract(page_item.value, '$.codeHash'),
+         json_extract(page_item.value, '$.canonicalRaw'),
+         json_extract(page_item.value, '$.gtin14'),
+         json_extract(page_item.value, '$.serial'),
+         json_extract(page_item.value, '$.sourceStatus'),
+         json_extract(page_item.value, '$.sourceState'),
+         json_extract(page_item.value, '$.sourceProductionDate'),
+         json_extract(page_item.value, '$.parentSscc'),
+         json_extract(page_item.value, '$.expected'),
+         json_extract(page_item.value, '$.protected')
+       FROM json_each(NEW.staged_page_json) AS page_item
+       WHERE 1
+       ON CONFLICT(snapshot_id, code_hash) DO NOTHING;
+     END;`,
 ];

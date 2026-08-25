@@ -8,6 +8,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { schema, type Db } from "@markiro/db";
+import { inventorySnapshotContentDigest } from "@markiro/domain";
 
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -22,6 +23,7 @@ const ready = Boolean(
 
 const GTIN14 = "04680089900383";
 const DIGEST = "a".repeat(64);
+const EMPTY_CONTENT_DIGEST = inventorySnapshotContentDigest([]);
 
 type Agent = ReturnType<typeof request.agent>;
 
@@ -117,7 +119,7 @@ describe.skipIf(!ready)("station inventory task access e2e", () => {
         looseCount: 0,
         fixedByUserId: member.userId,
       })
-      .returning({ id: schema.inventorySnapshots.id });
+      .returning({ id: schema.inventorySnapshots.id, fixedAt: schema.inventorySnapshots.fixedAt });
     if (!snapshot) throw new Error("Expected snapshot");
 
     await db
@@ -130,7 +132,9 @@ describe.skipIf(!ready)("station inventory task access e2e", () => {
           inventoryNumber,
           snapshotId: snapshot.id,
           snapshotRevision: 1,
+          snapshotFixedAt: snapshot.fixedAt.toISOString(),
           combinedDigest: DIGEST,
+          contentDigest: EMPTY_CONTENT_DIGEST,
           codeCount: 0,
           productId,
           productName: "Inventory Water",

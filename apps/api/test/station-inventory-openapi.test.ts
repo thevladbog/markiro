@@ -115,7 +115,9 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
     expect(manifest.properties).toMatchObject({
       snapshotId: { type: "string", format: "uuid" },
       snapshotRevision: { type: "integer", minimum: 1, maximum: 1 },
+      snapshotFixedAt: { type: "string", format: "date-time" },
       combinedDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+      contentDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
       codeCount: { type: "integer", minimum: 0 },
       boxCapacity: { type: "integer", minimum: 1 },
     });
@@ -136,9 +138,13 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
     exactClosedObject(page, [
       "snapshotId",
       "snapshotRevision",
+      "snapshotFixedAt",
       "combinedDigest",
+      "contentDigest",
+      "cursor",
       "items",
       "nextCursor",
+      "pageDigest",
     ]);
     expect(page.properties?.items?.items?.properties).toMatchObject({
       codeHash: { type: "string", pattern: "^[0-9a-f]{64}$" },

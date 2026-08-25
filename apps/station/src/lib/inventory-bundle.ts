@@ -1,11 +1,13 @@
 import type { StationClient } from "./api-client.js";
 import {
+  parseStationInventoryBundleManifest,
+  parseStationInventoryBundlePage,
+} from "@markiro/domain";
+import {
   beginInventoryMirror,
   ingestInventoryPage,
   publishInventorySnapshot,
   readInventoryMirrorState,
-  type InventoryBundleManifest,
-  type InventoryBundlePage,
 } from "./inventory-mirror.js";
 import type { SqlExecutor } from "./mirror.js";
 
@@ -20,14 +22,20 @@ export async function mirrorInventoryBundle(
   exec: SqlExecutor,
   inventoryId: string,
 ): Promise<boolean> {
-  const manifest = await client.get<InventoryBundleManifest>(
-    `/station/inventories/${inventoryId}/bundle/manifest`,
+  const manifest = parseStationInventoryBundleManifest(
+    await client.get<unknown>(`/station/inventories/${inventoryId}/bundle/manifest`),
   );
+  if (manifest.inventoryId !== inventoryId) {
+    throw new Error("inventory bundle requested inventory mismatch");
+  }
   const candidate = await beginInventoryMirror(exec, manifest);
   if (candidate.alreadyActive) return true;
 
   let state = await readInventoryMirrorState(exec, inventoryId);
-  if (state?.verifiedDigest === candidate.combinedDigest) {
+  if (
+    state?.verifiedDigest === candidate.combinedDigest &&
+    state.verifiedContentDigest === candidate.contentDigest
+  ) {
     return publishInventorySnapshot(exec, candidate);
   }
 
@@ -35,8 +43,10 @@ export async function mirrorInventoryBundle(
   for (;;) {
     const query = new URLSearchParams({ limit: String(manifest.limits.codePageSize) });
     if (cursor !== null) query.set("cursor", cursor);
-    const page = await client.get<InventoryBundlePage>(
-      `/station/inventories/${inventoryId}/bundle/codes?${query.toString()}`,
+    const page = parseStationInventoryBundlePage(
+      await client.get<unknown>(
+        `/station/inventories/${inventoryId}/bundle/codes?${query.toString()}`,
+      ),
     );
     await ingestInventoryPage(exec, candidate, cursor, page);
     if (page.nextCursor === null) return publishInventorySnapshot(exec, candidate);

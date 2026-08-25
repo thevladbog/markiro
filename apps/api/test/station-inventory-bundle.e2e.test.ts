@@ -8,7 +8,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { schema, type Db } from "@markiro/db";
-import type { LabelTemplateSpec } from "@markiro/domain";
+import { inventorySnapshotContentDigest, type LabelTemplateSpec } from "@markiro/domain";
 
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -24,6 +24,45 @@ const ready = Boolean(
 
 const GTIN14 = "04680089900383";
 const DIGEST = "b".repeat(64);
+const SNAPSHOT_ITEMS = [
+  {
+    codeHash: "a".repeat(64),
+    canonicalRaw: "010468008990038321A",
+    gtin14: GTIN14,
+    serial: "A",
+    sourceStatus: "INTRODUCED" as const,
+    sourceState: null,
+    sourceProductionDate: "2026-08-10",
+    parentSscc: "046000000000000012",
+    expected: true,
+    protected: false,
+  },
+  {
+    codeHash: "b".repeat(64),
+    canonicalRaw: "010468008990038321B",
+    gtin14: GTIN14,
+    serial: "B",
+    sourceStatus: "INTRODUCED" as const,
+    sourceState: null,
+    sourceProductionDate: "2026-08-11",
+    parentSscc: null,
+    expected: true,
+    protected: false,
+  },
+  {
+    codeHash: "c".repeat(64),
+    canonicalRaw: "010468008990038321C",
+    gtin14: GTIN14,
+    serial: "C",
+    sourceStatus: "EMITTED" as const,
+    sourceState: null,
+    sourceProductionDate: null,
+    parentSscc: null,
+    expected: false,
+    protected: false,
+  },
+];
+const CONTENT_DIGEST = inventorySnapshotContentDigest(SNAPSHOT_ITEMS);
 const LABEL_SPEC = {
   widthMm: 58,
   heightMm: 40,
@@ -48,6 +87,7 @@ interface BundleFixture {
   tenantId: string;
   inventoryId: string;
   snapshotId: string;
+  snapshotFixedAt: string;
   productId: string;
   lineId: string;
   operatorId: string;
@@ -148,53 +188,20 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
         looseCount: 1,
         fixedByUserId: member.userId,
       })
-      .returning({ id: schema.inventorySnapshots.id });
+      .returning({ id: schema.inventorySnapshots.id, fixedAt: schema.inventorySnapshots.fixedAt });
     if (!snapshot) throw new Error("Expected snapshot");
-    await db.insert(schema.inventorySnapshotCodes).values([
-      {
-        tenantId,
-        snapshotId: snapshot.id,
-        canonicalRaw: "010468008990038321C",
-        codeHash: "c".repeat(64),
-        gtin14: GTIN14,
-        serial: "C",
-        sourceStatus: "EMITTED",
-        expected: false,
-        protected: false,
-      },
-      {
-        tenantId,
-        snapshotId: snapshot.id,
-        canonicalRaw: "010468008990038321A",
-        codeHash: "a".repeat(64),
-        gtin14: GTIN14,
-        serial: "A",
-        sourceStatus: "INTRODUCED",
-        sourceProductionDate: "2026-08-10",
-        parentSscc: "046000000000000012",
-        expected: true,
-        protected: false,
-      },
-      {
-        tenantId,
-        snapshotId: snapshot.id,
-        canonicalRaw: "010468008990038321B",
-        codeHash: "b".repeat(64),
-        gtin14: GTIN14,
-        serial: "B",
-        sourceStatus: "INTRODUCED",
-        sourceProductionDate: "2026-08-11",
-        expected: true,
-        protected: false,
-      },
-    ]);
+    await db
+      .insert(schema.inventorySnapshotCodes)
+      .values(SNAPSHOT_ITEMS.map((item) => ({ tenantId, snapshotId: snapshot.id, ...item })));
 
     const stationManifest = {
       inventoryId,
       inventoryNumber: `INV-${inventoryId.slice(0, 8)}`,
       snapshotId: snapshot.id,
       snapshotRevision: 1,
+      snapshotFixedAt: snapshot.fixedAt.toISOString(),
       combinedDigest: DIGEST,
+      contentDigest: CONTENT_DIGEST,
       codeCount: 3,
       productId,
       productName: "Bundle Water",
@@ -243,6 +250,7 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       tenantId,
       inventoryId,
       snapshotId: snapshot.id,
+      snapshotFixedAt: snapshot.fixedAt.toISOString(),
       productId,
       lineId,
       operatorId: operator.body.id as string,
@@ -298,7 +306,9 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       inventoryId: fixture.inventoryId,
       snapshotId: fixture.snapshotId,
       snapshotRevision: 1,
+      snapshotFixedAt: fixture.snapshotFixedAt,
       combinedDigest: DIGEST,
+      contentDigest: CONTENT_DIGEST,
       codeCount: 3,
       boxCapacity: 12,
       mode: "check",
@@ -316,7 +326,10 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
     expect(first.body).toEqual({
       snapshotId: fixture.snapshotId,
       snapshotRevision: 1,
+      snapshotFixedAt: fixture.snapshotFixedAt,
       combinedDigest: DIGEST,
+      contentDigest: CONTENT_DIGEST,
+      cursor: null,
       items: [
         {
           codeHash: "a".repeat(64),
@@ -344,6 +357,7 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
         },
       ],
       nextCursor: "b".repeat(64),
+      pageDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
 
     const second = await request(app!.getHttpServer())
@@ -355,6 +369,12 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       "c".repeat(64),
     ]);
     expect(second.body.nextCursor).toBeNull();
+    expect(second.body).toMatchObject({
+      snapshotFixedAt: fixture.snapshotFixedAt,
+      contentDigest: CONTENT_DIGEST,
+      cursor: "b".repeat(64),
+      pageDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
 
     await request(app!.getHttpServer())
       .get(`/station/inventories/${fixture.inventoryId}/bundle/codes`)

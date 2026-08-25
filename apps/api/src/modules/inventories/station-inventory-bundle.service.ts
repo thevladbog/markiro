@@ -8,6 +8,7 @@ import {
 import { and, asc, eq, gt, isNull } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
+import { inventorySnapshotPageDigest } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
@@ -48,6 +49,7 @@ interface StoredManifestFacts {
   startedAt: Date | null;
   snapshotId: string | null;
   snapshotRevision: number | null;
+  snapshotFixedAt: Date | null;
   snapshotCombinedDigest: string | null;
   emitted: number | null;
   introduced: number | null;
@@ -184,12 +186,25 @@ export class StationInventoryBundleService {
 
       const hasMore = rows.length > query.limit;
       const items = hasMore ? rows.slice(0, query.limit) : rows;
+      const cursor = query.cursor ?? null;
+      const nextCursor = hasMore ? (items.at(-1)?.codeHash ?? null) : null;
       return {
         snapshotId: manifest.snapshotId,
         snapshotRevision: manifest.snapshotRevision,
+        snapshotFixedAt: manifest.snapshotFixedAt,
         combinedDigest: manifest.combinedDigest,
+        contentDigest: manifest.contentDigest,
+        cursor,
         items,
-        nextCursor: hasMore ? (items.at(-1)?.codeHash ?? null) : null,
+        nextCursor,
+        pageDigest: inventorySnapshotPageDigest({
+          snapshotId: manifest.snapshotId,
+          snapshotFixedAt: manifest.snapshotFixedAt,
+          contentDigest: manifest.contentDigest,
+          cursor,
+          items,
+          nextCursor,
+        }),
       };
     });
   }
@@ -260,11 +275,13 @@ export class StationInventoryBundleService {
       inventory.activeSnapshotId === null ||
       inventory.snapshotId === null ||
       inventory.snapshotRevision !== 1 ||
+      inventory.snapshotFixedAt === null ||
       manifest.inventoryId !== inventory.id ||
       manifest.inventoryNumber !== inventory.number ||
       manifest.snapshotId !== inventory.snapshotId ||
       manifest.snapshotId !== inventory.activeSnapshotId ||
       manifest.snapshotRevision !== inventory.snapshotRevision ||
+      manifest.snapshotFixedAt !== inventory.snapshotFixedAt.toISOString() ||
       manifest.combinedDigest !== inventory.snapshotCombinedDigest ||
       manifest.codeCount !== codeCount ||
       manifest.mode !== inventory.mode ||
@@ -303,6 +320,7 @@ export class StationInventoryBundleService {
         startedAt: schema.inventories.startedAt,
         snapshotId: schema.inventorySnapshots.id,
         snapshotRevision: schema.inventorySnapshots.revision,
+        snapshotFixedAt: schema.inventorySnapshots.fixedAt,
         snapshotCombinedDigest: schema.inventorySnapshots.combinedDigest,
         emitted: schema.inventorySnapshots.emittedCount,
         introduced: schema.inventorySnapshots.introducedCount,

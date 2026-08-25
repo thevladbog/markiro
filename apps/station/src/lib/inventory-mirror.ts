@@ -1,66 +1,28 @@
 import {
   canonicalizeKm,
   classifyInventorySnapshotRow,
-  INVENTORY_CHZ_STATUSES,
+  inventorySnapshotContentDigest,
+  inventorySnapshotPageDigest,
   kmHash,
-  type InventoryChzStatus,
+  parseStationInventoryBundleManifest,
+  parseStationInventoryBundlePage,
+  type StationInventoryBundleCode,
+  type StationInventoryBundleManifest,
+  type StationInventoryBundlePage,
 } from "@markiro/domain";
 
 import type { SqlExecutor } from "./mirror.js";
 
-export interface InventoryBundleManifest {
-  inventoryId: string;
-  inventoryNumber: string;
-  snapshotId: string;
-  snapshotRevision: 1;
-  combinedDigest: string;
-  codeCount: number;
-  productId: string;
-  productName: string;
-  gtin14: string;
-  boxCapacity: number;
-  mode: "check" | "repack";
-  lineId: string;
-  lineName: string;
-  productionDateFrom: string;
-  productionDateTo: string;
-  boxLabelTemplate: { id: string; name: string; spec: unknown } | null;
-  limits: { codePageSize: 200; eventBatchSize: 100; progressPageSize: 200 };
-  sscc: {
-    issuerPrefix: string;
-    extensionDigit: number;
-    fromSerial: number;
-    toSerial: number;
-    consumedThroughSerial: number | null;
-  } | null;
-  ssccRevokedFrom: number[];
-}
-
-export interface InventoryBundleCode {
-  codeHash: string;
-  canonicalRaw: string;
-  gtin14: string;
-  serial: string;
-  sourceStatus: InventoryChzStatus;
-  sourceState: string | null;
-  sourceProductionDate: string | null;
-  parentSscc: string | null;
-  expected: boolean;
-  protected: boolean;
-}
-
-export interface InventoryBundlePage {
-  snapshotId: string;
-  snapshotRevision: 1;
-  combinedDigest: string;
-  items: readonly InventoryBundleCode[];
-  nextCursor: string | null;
-}
+export type InventoryBundleManifest = StationInventoryBundleManifest;
+export type InventoryBundleCode = StationInventoryBundleCode;
+export type InventoryBundlePage = StationInventoryBundlePage;
 
 export interface InventoryMirrorCandidate {
   inventoryId: string;
   snapshotId: string;
+  snapshotFixedAt: string;
   combinedDigest: string;
+  contentDigest: string;
   codeCount: number;
   generation: number;
   manifest: InventoryBundleManifest;
@@ -72,6 +34,8 @@ export interface InventoryMirrorState {
   stagedSnapshotId: string | null;
   nextCursor: string | null;
   verifiedDigest: string | null;
+  verifiedContentDigest: string | null;
+  lastPageDigest: string | null;
   stagedCodeCount: number;
   generation: number;
 }
@@ -79,14 +43,21 @@ export interface InventoryMirrorState {
 interface TaskStateRow {
   inventory_number: string;
   active_snapshot_id: string | null;
+  active_snapshot_fixed_at: string | null;
   active_combined_digest: string | null;
+  active_content_digest: string | null;
   active_code_count: number | null;
+  active_manifest_json: string | null;
   staged_snapshot_id: string | null;
+  staged_snapshot_fixed_at: string | null;
   staged_combined_digest: string | null;
+  staged_content_digest: string | null;
   staged_code_count: number | null;
   staged_manifest_json: string | null;
   staged_next_cursor: string | null;
   staged_verified_digest: string | null;
+  staged_verified_content_digest: string | null;
+  staged_last_page_digest: string | null;
   staging_generation: number;
 }
 
@@ -96,50 +67,12 @@ interface StoredCodeRow {
   canonical_raw: string;
   gtin14: string;
   serial: string;
-  source_status: string;
+  source_status: InventoryBundleCode["sourceStatus"];
   source_state: string | null;
   source_production_date: string | null;
   parent_sscc: string | null;
   expected: number;
   protected: number;
-}
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const SHA256 = /^[0-9a-f]{64}$/;
-const GTIN14 = /^[0-9]{14}$/;
-const CIVIL_DATE = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
-const SSCC18 = /^[0-9]{18}$/;
-const STATUS_SET = new Set<string>(INVENTORY_CHZ_STATUSES);
-
-function requireManifest(manifest: InventoryBundleManifest): void {
-  if (
-    !UUID.test(manifest.inventoryId) ||
-    !UUID.test(manifest.snapshotId) ||
-    manifest.snapshotRevision !== 1 ||
-    !SHA256.test(manifest.combinedDigest) ||
-    !Number.isSafeInteger(manifest.codeCount) ||
-    manifest.codeCount < 0 ||
-    !GTIN14.test(manifest.gtin14) ||
-    !CIVIL_DATE.test(manifest.productionDateFrom) ||
-    !CIVIL_DATE.test(manifest.productionDateTo) ||
-    manifest.productionDateFrom > manifest.productionDateTo ||
-    manifest.limits.codePageSize !== 200 ||
-    manifest.limits.eventBatchSize !== 100 ||
-    manifest.limits.progressPageSize !== 200 ||
-    (manifest.mode === "check" && manifest.boxLabelTemplate !== null) ||
-    (manifest.mode === "repack" && manifest.boxLabelTemplate === null)
-  ) {
-    throw new Error("invalid inventory bundle manifest");
-  }
-}
-
-function requirePageIdentity(candidate: InventoryMirrorCandidate, page: InventoryBundlePage): void {
-  if (page.snapshotId !== candidate.snapshotId || page.snapshotRevision !== 1) {
-    throw new Error("inventory bundle snapshot mismatch");
-  }
-  if (page.combinedDigest !== candidate.combinedDigest) {
-    throw new Error("inventory bundle digest mismatch");
-  }
 }
 
 function sameStoredCode(row: StoredCodeRow, item: InventoryBundleCode): boolean {
@@ -157,17 +90,22 @@ function sameStoredCode(row: StoredCodeRow, item: InventoryBundleCode): boolean 
   );
 }
 
-function validateCode(candidate: InventoryMirrorCandidate, item: InventoryBundleCode): void {
-  if (
-    !SHA256.test(item.codeHash) ||
-    !GTIN14.test(item.gtin14) ||
-    !STATUS_SET.has(item.sourceStatus) ||
-    (item.sourceProductionDate !== null && !CIVIL_DATE.test(item.sourceProductionDate)) ||
-    (item.parentSscc !== null && !SSCC18.test(item.parentSscc))
-  ) {
-    throw new Error("invalid inventory bundle code");
-  }
+function storedCode(row: StoredCodeRow): InventoryBundleCode {
+  return {
+    codeHash: row.code_hash,
+    canonicalRaw: row.canonical_raw,
+    gtin14: row.gtin14,
+    serial: row.serial,
+    sourceStatus: row.source_status,
+    sourceState: row.source_state,
+    sourceProductionDate: row.source_production_date,
+    parentSscc: row.parent_sscc,
+    expected: row.expected === 1,
+    protected: row.protected === 1,
+  };
+}
 
+function validateCode(candidate: InventoryMirrorCandidate, item: InventoryBundleCode): void {
   let km: ReturnType<typeof canonicalizeKm>;
   try {
     km = canonicalizeKm(item.canonicalRaw);
@@ -203,10 +141,13 @@ function validateCode(candidate: InventoryMirrorCandidate, item: InventoryBundle
 
 async function taskState(exec: SqlExecutor, inventoryId: string): Promise<TaskStateRow | null> {
   const rows = await exec.all<TaskStateRow>(
-    `SELECT inventory_number, active_snapshot_id, active_combined_digest, active_code_count,
-            staged_snapshot_id, staged_combined_digest, staged_code_count,
-            staged_manifest_json, staged_next_cursor, staged_verified_digest,
-            staging_generation
+    `SELECT inventory_number,
+            active_snapshot_id, active_snapshot_fixed_at, active_combined_digest,
+            active_content_digest, active_code_count, active_manifest_json,
+            staged_snapshot_id, staged_snapshot_fixed_at, staged_combined_digest,
+            staged_content_digest, staged_code_count, staged_manifest_json,
+            staged_next_cursor, staged_verified_digest, staged_verified_content_digest,
+            staged_last_page_digest, staging_generation
        FROM inventory_task_mirror
       WHERE inventory_id = ?`,
     [inventoryId],
@@ -214,227 +155,485 @@ async function taskState(exec: SqlExecutor, inventoryId: string): Promise<TaskSt
   return rows[0] ?? null;
 }
 
-/**
- * Starts or resumes one staged revision. One upsert selects a new monotonic
- * generation only when the candidate identity changes; this is the fence that
- * stops an older in-flight request from publishing after a newer download.
- */
-export async function beginInventoryMirror(
-  exec: SqlExecutor,
-  manifest: InventoryBundleManifest,
-): Promise<InventoryMirrorCandidate> {
-  requireManifest(manifest);
-  const manifestJson = JSON.stringify(manifest);
-  const before = await taskState(exec, manifest.inventoryId);
-  if (
-    before?.active_snapshot_id === manifest.snapshotId &&
-    before.active_combined_digest === manifest.combinedDigest &&
-    before.active_code_count === manifest.codeCount
-  ) {
-    return {
-      inventoryId: manifest.inventoryId,
-      snapshotId: manifest.snapshotId,
-      combinedDigest: manifest.combinedDigest,
-      codeCount: manifest.codeCount,
-      generation: before.staging_generation,
-      manifest,
-      alreadyActive: true,
-    };
+async function snapshotRows(exec: SqlExecutor, snapshotId: string): Promise<StoredCodeRow[]> {
+  return exec.all<StoredCodeRow>(
+    `SELECT snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+            source_state, source_production_date, parent_sscc, expected, protected
+       FROM inventory_snapshot_codes_mirror
+      WHERE snapshot_id = ?
+      ORDER BY code_hash`,
+    [snapshotId],
+  );
+}
+
+function immutableManifest(manifest: InventoryBundleManifest): unknown {
+  return Object.fromEntries(
+    Object.entries(manifest).filter(([key]) => key !== "sscc" && key !== "ssccRevokedFrom"),
+  );
+}
+
+function parseStoredManifest(
+  json: string | null,
+  incoming: InventoryBundleManifest,
+): InventoryBundleManifest {
+  if (json === null) throw new Error("active inventory manifest is missing");
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    throw new Error("active inventory manifest is invalid");
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("active inventory manifest is invalid");
   }
 
+  // Task 3 originally persisted manifests before these immutable proof fields
+  // existed. A same-snapshot server response may fix those two facts once;
+  // every other field still passes the current strict shared parser.
+  const legacy = value as Record<string, unknown>;
+  return parseStationInventoryBundleManifest({
+    ...legacy,
+    snapshotFixedAt: legacy.snapshotFixedAt ?? incoming.snapshotFixedAt,
+    contentDigest: legacy.contentDigest ?? incoming.contentDigest,
+  });
+}
+
+function sameImmutableManifest(
+  current: InventoryBundleManifest,
+  incoming: InventoryBundleManifest,
+): boolean {
+  return JSON.stringify(immutableManifest(current)) === JSON.stringify(immutableManifest(incoming));
+}
+
+function mergeSsccSafety(
+  current: InventoryBundleManifest,
+  incoming: InventoryBundleManifest,
+): InventoryBundleManifest {
+  if (!sameImmutableManifest(current, incoming)) {
+    throw new Error("inventory snapshot immutable manifest mismatch");
+  }
+  if (current.mode === "check") return current;
+  if (current.sscc === null || incoming.sscc === null) {
+    throw new Error("unsafe inventory SSCC transition");
+  }
+
+  const revoked = [...new Set([...current.ssccRevokedFrom, ...incoming.ssccRevokedFrom])].sort(
+    (left, right) => left - right,
+  );
+  const sameBlock =
+    current.sscc.issuerPrefix === incoming.sscc.issuerPrefix &&
+    current.sscc.extensionDigit === incoming.sscc.extensionDigit &&
+    current.sscc.fromSerial === incoming.sscc.fromSerial &&
+    current.sscc.toSerial === incoming.sscc.toSerial;
+
+  let sscc: InventoryBundleManifest["sscc"];
+  if (sameBlock) {
+    const consumed = [
+      current.sscc.consumedThroughSerial,
+      incoming.sscc.consumedThroughSerial,
+    ].filter((value): value is number => value !== null);
+    sscc = {
+      ...current.sscc,
+      consumedThroughSerial: consumed.length === 0 ? null : Math.max(...consumed),
+    };
+  } else if (
+    incoming.sscc.fromSerial > current.sscc.fromSerial &&
+    (incoming.ssccRevokedFrom.includes(current.sscc.fromSerial) ||
+      current.sscc.consumedThroughSerial === current.sscc.toSerial)
+  ) {
+    sscc = incoming.sscc;
+  } else if (
+    incoming.sscc.fromSerial < current.sscc.fromSerial &&
+    current.ssccRevokedFrom.includes(incoming.sscc.fromSerial)
+  ) {
+    sscc = current.sscc;
+  } else {
+    throw new Error("unsafe inventory SSCC transition");
+  }
+
+  return parseStationInventoryBundleManifest({ ...incoming, sscc, ssccRevokedFrom: revoked });
+}
+
+function candidateFrom(
+  manifest: InventoryBundleManifest,
+  generation: number,
+  alreadyActive: boolean,
+): InventoryMirrorCandidate {
+  return {
+    inventoryId: manifest.inventoryId,
+    snapshotId: manifest.snapshotId,
+    snapshotFixedAt: manifest.snapshotFixedAt,
+    combinedDigest: manifest.combinedDigest,
+    contentDigest: manifest.contentDigest,
+    codeCount: manifest.codeCount,
+    generation,
+    manifest,
+    alreadyActive,
+  };
+}
+
+function fixedAtMillis(value: string): number {
+  return new Date(value).getTime();
+}
+
+async function refreshActiveManifest(
+  exec: SqlExecutor,
+  before: TaskStateRow,
+  incoming: InventoryBundleManifest,
+): Promise<InventoryBundleManifest> {
+  let observed = before;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (
+      observed.active_snapshot_id !== incoming.snapshotId ||
+      observed.active_combined_digest !== incoming.combinedDigest ||
+      observed.active_code_count !== incoming.codeCount
+    ) {
+      throw new Error("inventory bundle active state changed");
+    }
+    const current = parseStoredManifest(observed.active_manifest_json, incoming);
+    const merged = mergeSsccSafety(current, incoming);
+    const currentJson = observed.active_manifest_json;
+    const mergedJson = JSON.stringify(merged);
+    await exec.run(
+      `UPDATE inventory_task_mirror
+          SET active_snapshot_fixed_at = ?, active_content_digest = ?,
+              active_manifest_json = ?, inventory_number = ?, updated_at = ?
+        WHERE inventory_id = ?
+          AND active_snapshot_id = ?
+          AND active_combined_digest = ?
+          AND active_code_count = ?
+          AND active_manifest_json IS ?`,
+      [
+        merged.snapshotFixedAt,
+        merged.contentDigest,
+        mergedJson,
+        merged.inventoryNumber,
+        new Date().toISOString(),
+        merged.inventoryId,
+        merged.snapshotId,
+        merged.combinedDigest,
+        merged.codeCount,
+        currentJson,
+      ],
+    );
+    const after = await taskState(exec, incoming.inventoryId);
+    if (after?.active_manifest_json === mergedJson) return merged;
+    if (after === null) throw new Error("inventory bundle active state changed");
+    observed = after;
+  }
+  throw new Error("inventory bundle active manifest refresh was superseded");
+}
+
+/** Starts/resumes one server-ordered revision or monotonically tightens active SSCC safety. */
+export async function beginInventoryMirror(
+  exec: SqlExecutor,
+  value: unknown,
+): Promise<InventoryMirrorCandidate> {
+  let manifest = parseStationInventoryBundleManifest(value);
+  const before = await taskState(exec, manifest.inventoryId);
+
+  if (before?.active_snapshot_id === manifest.snapshotId) {
+    if (
+      before.active_combined_digest !== manifest.combinedDigest ||
+      before.active_code_count !== manifest.codeCount ||
+      (before.active_snapshot_fixed_at !== null &&
+        before.active_snapshot_fixed_at !== manifest.snapshotFixedAt) ||
+      (before.active_content_digest !== null &&
+        before.active_content_digest !== manifest.contentDigest)
+    ) {
+      throw new Error("inventory snapshot immutable fixation mismatch");
+    }
+    manifest = await refreshActiveManifest(exec, before, manifest);
+    const active = await taskState(exec, manifest.inventoryId);
+    return candidateFrom(manifest, active?.staging_generation ?? before.staging_generation, true);
+  }
+
+  if (
+    before !== null &&
+    before.active_snapshot_id !== null &&
+    (before?.active_snapshot_fixed_at === null ||
+      fixedAtMillis(manifest.snapshotFixedAt) <= fixedAtMillis(before.active_snapshot_fixed_at))
+  ) {
+    throw new Error("inventory snapshot rollback rejected");
+  }
+  if (
+    before !== null &&
+    before.staged_snapshot_id !== null &&
+    before.staged_snapshot_id !== manifest.snapshotId &&
+    (before.staged_snapshot_fixed_at === null ||
+      fixedAtMillis(manifest.snapshotFixedAt) <= fixedAtMillis(before.staged_snapshot_fixed_at))
+  ) {
+    throw new Error("inventory snapshot rollback rejected");
+  }
+
+  if (before?.staged_snapshot_id === manifest.snapshotId) {
+    if (
+      before.staged_combined_digest !== manifest.combinedDigest ||
+      before.staged_code_count !== manifest.codeCount ||
+      before.staged_snapshot_fixed_at !== manifest.snapshotFixedAt ||
+      before.staged_content_digest !== manifest.contentDigest
+    ) {
+      throw new Error("inventory snapshot immutable fixation mismatch");
+    }
+    const current = parseStoredManifest(before.staged_manifest_json, manifest);
+    manifest = mergeSsccSafety(current, manifest);
+  }
+
+  const manifestJson = JSON.stringify(manifest);
   await exec.run(
     `INSERT INTO inventory_task_mirror (
        inventory_id, inventory_number,
-       staged_snapshot_id, staged_snapshot_revision, staged_combined_digest,
-       staged_code_count, staged_manifest_json, staged_next_cursor,
-       staged_verified_digest, staging_generation, updated_at
-     ) VALUES (?, ?, ?, 1, ?, ?, ?, NULL, NULL, 1, ?)
+       staged_snapshot_id, staged_snapshot_revision, staged_snapshot_fixed_at,
+       staged_combined_digest, staged_content_digest, staged_code_count,
+       staged_manifest_json, staged_next_cursor, staged_verified_digest,
+       staged_verified_content_digest, staged_last_page_digest, staged_page_json,
+       staging_generation, updated_at
+     ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, 1, ?)
      ON CONFLICT(inventory_id) DO UPDATE SET
        inventory_number = excluded.inventory_number,
        staged_snapshot_id = excluded.staged_snapshot_id,
        staged_snapshot_revision = excluded.staged_snapshot_revision,
+       staged_snapshot_fixed_at = excluded.staged_snapshot_fixed_at,
        staged_combined_digest = excluded.staged_combined_digest,
+       staged_content_digest = excluded.staged_content_digest,
        staged_code_count = excluded.staged_code_count,
        staged_manifest_json = excluded.staged_manifest_json,
-       staged_next_cursor = CASE
-         WHEN inventory_task_mirror.staged_snapshot_id = excluded.staged_snapshot_id
-          AND inventory_task_mirror.staged_combined_digest = excluded.staged_combined_digest
-          AND inventory_task_mirror.staged_code_count = excluded.staged_code_count
-          AND inventory_task_mirror.staged_manifest_json = excluded.staged_manifest_json
+       staged_next_cursor = CASE WHEN
+         inventory_task_mirror.staged_snapshot_id = excluded.staged_snapshot_id AND
+         inventory_task_mirror.staged_snapshot_fixed_at = excluded.staged_snapshot_fixed_at AND
+         inventory_task_mirror.staged_combined_digest = excluded.staged_combined_digest AND
+         inventory_task_mirror.staged_content_digest = excluded.staged_content_digest AND
+         inventory_task_mirror.staged_code_count = excluded.staged_code_count
          THEN inventory_task_mirror.staged_next_cursor ELSE NULL END,
-       staged_verified_digest = CASE
-         WHEN inventory_task_mirror.staged_snapshot_id = excluded.staged_snapshot_id
-          AND inventory_task_mirror.staged_combined_digest = excluded.staged_combined_digest
-          AND inventory_task_mirror.staged_code_count = excluded.staged_code_count
-          AND inventory_task_mirror.staged_manifest_json = excluded.staged_manifest_json
+       staged_verified_digest = CASE WHEN
+         inventory_task_mirror.staged_snapshot_id = excluded.staged_snapshot_id AND
+         inventory_task_mirror.staged_snapshot_fixed_at = excluded.staged_snapshot_fixed_at AND
+         inventory_task_mirror.staged_combined_digest = excluded.staged_combined_digest AND
+         inventory_task_mirror.staged_content_digest = excluded.staged_content_digest AND
+         inventory_task_mirror.staged_code_count = excluded.staged_code_count
          THEN inventory_task_mirror.staged_verified_digest ELSE NULL END,
-       staging_generation = CASE
-         WHEN inventory_task_mirror.staged_snapshot_id = excluded.staged_snapshot_id
-          AND inventory_task_mirror.staged_combined_digest = excluded.staged_combined_digest
-          AND inventory_task_mirror.staged_code_count = excluded.staged_code_count
-          AND inventory_task_mirror.staged_manifest_json = excluded.staged_manifest_json
+       staged_verified_content_digest = CASE WHEN
+         inventory_task_mirror.staged_snapshot_id = excluded.staged_snapshot_id AND
+         inventory_task_mirror.staged_snapshot_fixed_at = excluded.staged_snapshot_fixed_at AND
+         inventory_task_mirror.staged_combined_digest = excluded.staged_combined_digest AND
+         inventory_task_mirror.staged_content_digest = excluded.staged_content_digest AND
+         inventory_task_mirror.staged_code_count = excluded.staged_code_count
+         THEN inventory_task_mirror.staged_verified_content_digest ELSE NULL END,
+       staged_last_page_digest = CASE WHEN
+         inventory_task_mirror.staged_snapshot_id = excluded.staged_snapshot_id AND
+         inventory_task_mirror.staged_snapshot_fixed_at = excluded.staged_snapshot_fixed_at AND
+         inventory_task_mirror.staged_combined_digest = excluded.staged_combined_digest AND
+         inventory_task_mirror.staged_content_digest = excluded.staged_content_digest AND
+         inventory_task_mirror.staged_code_count = excluded.staged_code_count
+         THEN inventory_task_mirror.staged_last_page_digest ELSE NULL END,
+       staged_page_json = NULL,
+       staging_generation = CASE WHEN
+         inventory_task_mirror.staged_snapshot_id = excluded.staged_snapshot_id AND
+         inventory_task_mirror.staged_snapshot_fixed_at = excluded.staged_snapshot_fixed_at AND
+         inventory_task_mirror.staged_combined_digest = excluded.staged_combined_digest AND
+         inventory_task_mirror.staged_content_digest = excluded.staged_content_digest AND
+         inventory_task_mirror.staged_code_count = excluded.staged_code_count
          THEN inventory_task_mirror.staging_generation
          ELSE inventory_task_mirror.staging_generation + 1 END,
-       updated_at = excluded.updated_at`,
+       updated_at = excluded.updated_at
+     WHERE (inventory_task_mirror.active_snapshot_id IS NULL OR
+            inventory_task_mirror.active_snapshot_fixed_at < excluded.staged_snapshot_fixed_at)
+       AND (inventory_task_mirror.staged_snapshot_id IS NULL OR
+            inventory_task_mirror.staged_snapshot_id = excluded.staged_snapshot_id OR
+            inventory_task_mirror.staged_snapshot_fixed_at < excluded.staged_snapshot_fixed_at)`,
     [
       manifest.inventoryId,
       manifest.inventoryNumber,
       manifest.snapshotId,
+      manifest.snapshotFixedAt,
       manifest.combinedDigest,
+      manifest.contentDigest,
       manifest.codeCount,
       manifestJson,
       new Date().toISOString(),
     ],
   );
   const staged = await taskState(exec, manifest.inventoryId);
-  if (staged?.staged_snapshot_id !== manifest.snapshotId) {
+  if (
+    staged?.staged_snapshot_id !== manifest.snapshotId ||
+    staged.staged_snapshot_fixed_at !== manifest.snapshotFixedAt ||
+    staged.staged_combined_digest !== manifest.combinedDigest ||
+    staged.staged_content_digest !== manifest.contentDigest ||
+    staged.staged_code_count !== manifest.codeCount ||
+    staged.staged_manifest_json !== manifestJson
+  ) {
+    if (
+      staged?.active_snapshot_fixed_at === null ||
+      (staged?.active_snapshot_fixed_at !== undefined &&
+        fixedAtMillis(staged.active_snapshot_fixed_at) >=
+          fixedAtMillis(manifest.snapshotFixedAt)) ||
+      staged?.staged_snapshot_fixed_at === null ||
+      (staged?.staged_snapshot_fixed_at !== undefined &&
+        fixedAtMillis(staged.staged_snapshot_fixed_at) > fixedAtMillis(manifest.snapshotFixedAt))
+    ) {
+      throw new Error("inventory snapshot rollback rejected");
+    }
     throw new Error("inventory bundle staging was superseded");
   }
-  return {
-    inventoryId: manifest.inventoryId,
-    snapshotId: manifest.snapshotId,
-    combinedDigest: manifest.combinedDigest,
-    codeCount: manifest.codeCount,
-    generation: staged.staging_generation,
-    manifest,
-    alreadyActive: false,
-  };
+  return candidateFrom(manifest, staged.staging_generation, false);
 }
 
-async function exactDuplicatePage(
+function requirePageIdentity(
+  candidate: InventoryMirrorCandidate,
+  cursor: string | null,
+  page: InventoryBundlePage,
+): void {
+  if (
+    page.snapshotId !== candidate.snapshotId ||
+    page.snapshotRevision !== 1 ||
+    page.snapshotFixedAt !== candidate.snapshotFixedAt ||
+    page.contentDigest !== candidate.contentDigest
+  ) {
+    throw new Error("inventory bundle snapshot mismatch");
+  }
+  if (page.combinedDigest !== candidate.combinedDigest) {
+    throw new Error("inventory bundle digest mismatch");
+  }
+  if (page.cursor !== cursor) throw new Error("inventory bundle cursor mismatch");
+  const proof = inventorySnapshotPageDigest({
+    snapshotId: page.snapshotId,
+    snapshotFixedAt: page.snapshotFixedAt,
+    contentDigest: page.contentDigest,
+    cursor: page.cursor,
+    items: page.items,
+    nextCursor: page.nextCursor,
+  });
+  if (proof !== page.pageDigest) throw new Error("inventory bundle page digest mismatch");
+}
+
+function validatePageCodes(
+  candidate: InventoryMirrorCandidate,
+  cursor: string | null,
+  page: InventoryBundlePage,
+): void {
+  let previous = cursor;
+  for (const item of page.items) {
+    validateCode(candidate, item);
+    if (previous !== null && item.codeHash <= previous) {
+      throw new Error("inventory bundle code order mismatch");
+    }
+    previous = item.codeHash;
+  }
+  if (
+    page.nextCursor !== null &&
+    (page.items.length === 0 || page.nextCursor !== page.items.at(-1)?.codeHash)
+  ) {
+    throw new Error("inventory bundle next cursor mismatch");
+  }
+}
+
+async function verifyStoredPage(
   exec: SqlExecutor,
   candidate: InventoryMirrorCandidate,
   page: InventoryBundlePage,
-): Promise<boolean> {
+): Promise<void> {
   for (const item of page.items) {
-    const stored = await exec.all<StoredCodeRow>(
+    const rows = await exec.all<StoredCodeRow>(
       `SELECT snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
               source_state, source_production_date, parent_sscc, expected, protected
          FROM inventory_snapshot_codes_mirror
         WHERE snapshot_id = ? AND code_hash = ?`,
       [candidate.snapshotId, item.codeHash],
     );
-    if (!stored[0] || !sameStoredCode(stored[0], item)) return false;
+    if (!rows[0] || !sameStoredCode(rows[0], item)) {
+      throw new Error("inventory bundle duplicate code conflict");
+    }
   }
-  return page.items.length > 0;
 }
 
-/** Inserts one immutable page idempotently and advances only its fenced cursor. */
+async function requireProspectiveFinalContent(
+  exec: SqlExecutor,
+  candidate: InventoryMirrorCandidate,
+  page: InventoryBundlePage,
+): Promise<void> {
+  if (page.nextCursor !== null) return;
+  const existing = await snapshotRows(exec, candidate.snapshotId);
+  const combined = new Map(existing.map((row) => [row.code_hash, storedCode(row)]));
+  for (const item of page.items) {
+    const prior = existing.find((row) => row.code_hash === item.codeHash);
+    if (prior && !sameStoredCode(prior, item)) {
+      throw new Error("inventory bundle duplicate code conflict");
+    }
+    combined.set(item.codeHash, item);
+  }
+  const ordered = [...combined.values()].sort((left, right) =>
+    left.codeHash.localeCompare(right.codeHash),
+  );
+  if (
+    ordered.length !== candidate.codeCount ||
+    inventorySnapshotContentDigest(ordered) !== candidate.contentDigest
+  ) {
+    throw new Error("inventory bundle content digest mismatch");
+  }
+}
+
+/**
+ * Accepts one page with one guarded UPDATE. Its SQLite trigger inserts the
+ * page rows in the same statement transaction, so two responses sharing a
+ * cursor cannot combine through a pooled executor.
+ */
 export async function ingestInventoryPage(
   exec: SqlExecutor,
   candidate: InventoryMirrorCandidate,
   cursor: string | null,
-  page: InventoryBundlePage,
+  value: unknown,
 ): Promise<void> {
-  requirePageIdentity(candidate, page);
-  if (
-    (cursor !== null && !SHA256.test(cursor)) ||
-    (page.nextCursor !== null && !SHA256.test(page.nextCursor)) ||
-    page.items.length > candidate.manifest.limits.codePageSize
-  ) {
-    throw new Error("invalid inventory bundle page");
-  }
+  const page = parseStationInventoryBundlePage(value);
+  requirePageIdentity(candidate, cursor, page);
+  validatePageCodes(candidate, cursor, page);
+
   const current = await taskState(exec, candidate.inventoryId);
   if (
     current?.staged_snapshot_id !== candidate.snapshotId ||
+    current.staged_snapshot_fixed_at !== candidate.snapshotFixedAt ||
     current.staged_combined_digest !== candidate.combinedDigest ||
+    current.staged_content_digest !== candidate.contentDigest ||
     current.staging_generation !== candidate.generation
   ) {
     throw new Error("inventory bundle staging was superseded");
   }
-
-  if (cursor !== current.staged_next_cursor) {
-    if (await exactDuplicatePage(exec, candidate, page)) {
-      if (page.nextCursor !== current.staged_next_cursor) {
-        throw new Error("inventory bundle next cursor mismatch");
-      }
-      return;
-    }
-    throw new Error("inventory bundle cursor mismatch");
+  if (current.staged_last_page_digest === page.pageDigest) {
+    await verifyStoredPage(exec, candidate, page);
+    return;
   }
+  if (current.staged_next_cursor !== cursor) throw new Error("inventory bundle cursor mismatch");
 
-  let previous = cursor;
-  const seen = new Set<string>();
-  for (const item of page.items) {
-    validateCode(candidate, item);
-    if (seen.has(item.codeHash) || (previous !== null && item.codeHash <= previous)) {
-      throw new Error("inventory bundle code order mismatch");
-    }
-    seen.add(item.codeHash);
-    previous = item.codeHash;
-  }
-  if (
-    (page.nextCursor !== null &&
-      (page.items.length === 0 || page.nextCursor !== page.items.at(-1)?.codeHash)) ||
-    (page.nextCursor === null && page.items.length > 0 && previous === cursor)
-  ) {
-    throw new Error("inventory bundle next cursor mismatch");
-  }
-
-  for (const item of page.items) {
-    await exec.run(
-      `INSERT INTO inventory_snapshot_codes_mirror (
-         snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status, source_state,
-         source_production_date, parent_sscc, expected, protected
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(snapshot_id, code_hash) DO NOTHING`,
-      [
-        candidate.snapshotId,
-        item.codeHash,
-        item.canonicalRaw,
-        item.gtin14,
-        item.serial,
-        item.sourceStatus,
-        item.sourceState,
-        item.sourceProductionDate,
-        item.parentSscc,
-        item.expected ? 1 : 0,
-        item.protected ? 1 : 0,
-      ],
-    );
-    const stored = await exec.all<StoredCodeRow>(
-      `SELECT snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
-              source_state, source_production_date, parent_sscc, expected, protected
-         FROM inventory_snapshot_codes_mirror
-        WHERE snapshot_id = ? AND code_hash = ?`,
-      [candidate.snapshotId, item.codeHash],
-    );
-    if (!stored[0] || !sameStoredCode(stored[0], item)) {
-      throw new Error("inventory bundle duplicate code conflict");
-    }
-  }
-
-  // This one guarded UPDATE publishes the page cursor and, for the final
-  // page only, the count/digest verification marker. Individual code inserts
-  // may already exist after a crash; replay is harmless and reaches this same
-  // marker once the complete page is durable.
+  await requireProspectiveFinalContent(exec, candidate, page);
   await exec.run(
     `UPDATE inventory_task_mirror
-        SET staged_next_cursor = ?,
-            staged_verified_digest = CASE
-              WHEN ? IS NULL
-               AND (SELECT COUNT(*) FROM inventory_snapshot_codes_mirror
-                     WHERE snapshot_id = ?) = staged_code_count
-              THEN staged_combined_digest ELSE NULL END,
-            updated_at = ?
+        SET staged_next_cursor = ?, staged_last_page_digest = ?,
+            staged_page_json = ?, staged_verified_digest = NULL,
+            staged_verified_content_digest = NULL, updated_at = ?
       WHERE inventory_id = ?
         AND staged_snapshot_id = ?
         AND staged_snapshot_revision = 1
+        AND staged_snapshot_fixed_at = ?
         AND staged_combined_digest = ?
+        AND staged_content_digest = ?
         AND staging_generation = ?
-        AND staged_next_cursor IS ?`,
+        AND staged_next_cursor IS ?
+        AND staged_last_page_digest IS ?`,
     [
       page.nextCursor,
-      page.nextCursor,
-      candidate.snapshotId,
+      page.pageDigest,
+      JSON.stringify(page.items),
       new Date().toISOString(),
       candidate.inventoryId,
       candidate.snapshotId,
+      candidate.snapshotFixedAt,
       candidate.combinedDigest,
+      candidate.contentDigest,
       candidate.generation,
       cursor,
+      current.staged_last_page_digest,
     ],
   );
+
   const after = await taskState(exec, candidate.inventoryId);
   if (
     after?.staged_snapshot_id !== candidate.snapshotId ||
@@ -442,16 +641,50 @@ export async function ingestInventoryPage(
   ) {
     throw new Error("inventory bundle staging was superseded");
   }
-  if (after.staged_next_cursor !== page.nextCursor) {
-    throw new Error("inventory bundle cursor mismatch");
+  if (after.staged_last_page_digest !== page.pageDigest) {
+    throw new Error("inventory bundle page acceptance was superseded");
+  }
+  await verifyStoredPage(exec, candidate, page);
+
+  if (page.nextCursor === null) {
+    const allRows = (await snapshotRows(exec, candidate.snapshotId)).map(storedCode);
+    if (
+      allRows.length !== candidate.codeCount ||
+      inventorySnapshotContentDigest(allRows) !== candidate.contentDigest
+    ) {
+      throw new Error("inventory bundle content digest mismatch");
+    }
+    await exec.run(
+      `UPDATE inventory_task_mirror
+          SET staged_verified_digest = staged_combined_digest,
+              staged_verified_content_digest = staged_content_digest,
+              updated_at = ?
+        WHERE inventory_id = ?
+          AND staged_snapshot_id = ?
+          AND staged_snapshot_fixed_at = ?
+          AND staged_combined_digest = ?
+          AND staged_content_digest = ?
+          AND staging_generation = ?
+          AND staged_next_cursor IS NULL
+          AND staged_last_page_digest = ?
+          AND (SELECT COUNT(*) FROM inventory_snapshot_codes_mirror
+                WHERE snapshot_id = ?) = staged_code_count`,
+      [
+        new Date().toISOString(),
+        candidate.inventoryId,
+        candidate.snapshotId,
+        candidate.snapshotFixedAt,
+        candidate.combinedDigest,
+        candidate.contentDigest,
+        candidate.generation,
+        page.pageDigest,
+        candidate.snapshotId,
+      ],
+    );
   }
 }
 
-/**
- * Publishes active_snapshot_id with one SQLite statement. Its WHERE clause is
- * the atomic boundary: the exact generation, verified digest marker and
- * durable row count must all still match when SQLite executes the update.
- */
+/** Atomically publishes the exact ordered/content-verified staged revision. */
 export async function publishInventorySnapshot(
   exec: SqlExecutor,
   candidate: InventoryMirrorCandidate,
@@ -459,7 +692,9 @@ export async function publishInventorySnapshot(
   const before = await taskState(exec, candidate.inventoryId);
   if (
     before?.active_snapshot_id === candidate.snapshotId &&
+    before.active_snapshot_fixed_at === candidate.snapshotFixedAt &&
     before.active_combined_digest === candidate.combinedDigest &&
+    before.active_content_digest === candidate.contentDigest &&
     before.active_code_count === candidate.codeCount
   ) {
     return true;
@@ -469,47 +704,54 @@ export async function publishInventorySnapshot(
     `UPDATE inventory_task_mirror
         SET active_snapshot_id = staged_snapshot_id,
             active_snapshot_revision = staged_snapshot_revision,
+            active_snapshot_fixed_at = staged_snapshot_fixed_at,
             active_combined_digest = staged_combined_digest,
+            active_content_digest = staged_content_digest,
             active_code_count = staged_code_count,
             active_manifest_json = staged_manifest_json,
-            staged_snapshot_id = NULL,
-            staged_snapshot_revision = NULL,
-            staged_combined_digest = NULL,
-            staged_code_count = NULL,
-            staged_manifest_json = NULL,
-            staged_next_cursor = NULL,
-            staged_verified_digest = NULL,
+            staged_snapshot_id = NULL, staged_snapshot_revision = NULL,
+            staged_snapshot_fixed_at = NULL, staged_combined_digest = NULL,
+            staged_content_digest = NULL, staged_code_count = NULL,
+            staged_manifest_json = NULL, staged_next_cursor = NULL,
+            staged_verified_digest = NULL, staged_verified_content_digest = NULL,
+            staged_last_page_digest = NULL, staged_page_json = NULL,
             updated_at = ?
       WHERE inventory_id = ?
         AND staged_snapshot_id = ?
         AND staged_snapshot_revision = 1
+        AND staged_snapshot_fixed_at = ?
         AND staged_combined_digest = ?
+        AND staged_content_digest = ?
         AND staged_code_count = ?
         AND staging_generation = ?
         AND staged_verified_digest = ?
+        AND staged_verified_content_digest = ?
+        AND (active_snapshot_fixed_at IS NULL OR active_snapshot_fixed_at < staged_snapshot_fixed_at)
         AND (SELECT COUNT(*) FROM inventory_snapshot_codes_mirror
               WHERE snapshot_id = ?) = staged_code_count`,
     [
       new Date().toISOString(),
       candidate.inventoryId,
       candidate.snapshotId,
+      candidate.snapshotFixedAt,
       candidate.combinedDigest,
+      candidate.contentDigest,
       candidate.codeCount,
       candidate.generation,
       candidate.combinedDigest,
+      candidate.contentDigest,
       candidate.snapshotId,
     ],
   );
   const after = await taskState(exec, candidate.inventoryId);
   const published =
     after?.active_snapshot_id === candidate.snapshotId &&
+    after.active_snapshot_fixed_at === candidate.snapshotFixedAt &&
     after.active_combined_digest === candidate.combinedDigest &&
+    after.active_content_digest === candidate.contentDigest &&
     after.active_code_count === candidate.codeCount;
   if (!published) return false;
 
-  // Cleanup deliberately follows successful pointer publication. Keep every
-  // snapshot still active or staged by any task so concurrent inventories are
-  // never damaged by another task's revision switch.
   await exec.run(
     `DELETE FROM inventory_snapshot_codes_mirror
       WHERE snapshot_id NOT IN (
@@ -539,6 +781,8 @@ export async function readInventoryMirrorState(
     stagedSnapshotId: row.staged_snapshot_id,
     nextCursor: row.staged_next_cursor,
     verifiedDigest: row.staged_verified_digest,
+    verifiedContentDigest: row.staged_verified_content_digest,
+    lastPageDigest: row.staged_last_page_digest,
     stagedCodeCount: counts[0]?.count ?? 0,
     generation: row.staging_generation,
   };

@@ -243,6 +243,46 @@ describe("STATION_MIGRATIONS", () => {
     expect(() => applyStationMigrations(db)).not.toThrow();
   });
 
+  it("adds durable content/order/page fences to an existing inventory mirror", () => {
+    const firstInventoryMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("CREATE TABLE IF NOT EXISTS inventory_task_mirror"),
+    );
+    const contentFenceMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN active_snapshot_fixed_at"),
+    );
+    expect(contentFenceMigration).toBeGreaterThan(firstInventoryMigration);
+
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, contentFenceMigration));
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, active_snapshot_id, active_snapshot_revision,
+          active_combined_digest, active_code_count, active_manifest_json)
+       VALUES ('inventory-1', 'INV-1', 'snapshot-1', 1, ?, 0, '{}')`,
+    ).run("a".repeat(64));
+
+    applyStatements(db, STATION_MIGRATIONS.slice(contentFenceMigration));
+    expect(() => applyStationMigrations(db)).not.toThrow();
+    expect(
+      db
+        .prepare(
+          `SELECT active_snapshot_fixed_at, active_content_digest,
+                  staged_snapshot_fixed_at, staged_content_digest,
+                  staged_verified_content_digest, staged_last_page_digest, staged_page_json
+             FROM inventory_task_mirror`,
+        )
+        .get(),
+    ).toEqual({
+      active_snapshot_fixed_at: null,
+      active_content_digest: null,
+      staged_snapshot_fixed_at: null,
+      staged_content_digest: null,
+      staged_verified_content_digest: null,
+      staged_last_page_digest: null,
+      staged_page_json: null,
+    });
+  });
+
   it("creates the durable product image cache table", () => {
     const db = migratedDb();
     const rows = db

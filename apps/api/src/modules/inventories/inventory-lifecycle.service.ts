@@ -6,12 +6,13 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
 import {
   DomainError,
   INVENTORY_CHZ_STATUSES,
+  inventorySnapshotContentDigest,
   parseLabelTemplate,
   type LabelTemplateSpec,
 } from "@markiro/domain";
@@ -47,7 +48,9 @@ interface StartFacts {
   snapshot: {
     id: string;
     revision: number;
+    fixedAt: Date;
     combinedDigest: string;
+    contentDigest: string;
     counts: InventorySnapshotCountsDto;
   };
   product: { id: string; name: string; gtin14: string; boxCapacity: number };
@@ -172,6 +175,7 @@ export class InventoryLifecycleService {
         id: schema.inventorySnapshots.id,
         revision: schema.inventorySnapshots.revision,
         combinedDigest: schema.inventorySnapshots.combinedDigest,
+        fixedAt: schema.inventorySnapshots.fixedAt,
         emitted: schema.inventorySnapshots.emittedCount,
         introduced: schema.inventorySnapshots.introducedCount,
         applied: schema.inventorySnapshots.appliedCount,
@@ -211,6 +215,40 @@ export class InventoryLifecycleService {
     if (
       inputs.length !== INVENTORY_CHZ_STATUSES.length ||
       !INVENTORY_CHZ_STATUSES.every((status) => inputStatuses.has(status))
+    ) {
+      throw new ConflictException({ code: "INVENTORY_SNAPSHOT_INCOMPLETE" });
+    }
+
+    const contentRows = await tx
+      .select({
+        codeHash: schema.inventorySnapshotCodes.codeHash,
+        canonicalRaw: schema.inventorySnapshotCodes.canonicalRaw,
+        gtin14: schema.inventorySnapshotCodes.gtin14,
+        serial: schema.inventorySnapshotCodes.serial,
+        sourceStatus: schema.inventorySnapshotCodes.sourceStatus,
+        sourceState: schema.inventorySnapshotCodes.sourceState,
+        sourceProductionDate: schema.inventorySnapshotCodes.sourceProductionDate,
+        parentSscc: schema.inventorySnapshotCodes.parentSscc,
+        expected: schema.inventorySnapshotCodes.expected,
+        protected: schema.inventorySnapshotCodes.protected,
+      })
+      .from(schema.inventorySnapshotCodes)
+      .where(
+        and(
+          eq(schema.inventorySnapshotCodes.tenantId, tenantId),
+          eq(schema.inventorySnapshotCodes.snapshotId, snapshot.id),
+        ),
+      )
+      .orderBy(asc(schema.inventorySnapshotCodes.codeHash))
+      .for("share");
+    if (
+      contentRows.length !==
+      snapshot.emitted +
+        snapshot.introduced +
+        snapshot.applied +
+        snapshot.retired +
+        snapshot.writtenOff +
+        snapshot.disaggregation
     ) {
       throw new ConflictException({ code: "INVENTORY_SNAPSHOT_INCOMPLETE" });
     }
@@ -267,7 +305,9 @@ export class InventoryLifecycleService {
       snapshot: {
         id: snapshot.id,
         revision: snapshot.revision,
+        fixedAt: snapshot.fixedAt,
         combinedDigest: snapshot.combinedDigest,
+        contentDigest: inventorySnapshotContentDigest(contentRows),
         counts,
       },
       product: {
@@ -324,7 +364,9 @@ export class InventoryLifecycleService {
       inventoryNumber: inventory.number,
       snapshotId: snapshot.id,
       snapshotRevision: 1,
+      snapshotFixedAt: snapshot.fixedAt.toISOString(),
       combinedDigest: snapshot.combinedDigest,
+      contentDigest: snapshot.contentDigest,
       codeCount:
         snapshot.counts.emitted +
         snapshot.counts.introduced +
