@@ -22,21 +22,36 @@ import { StationInventoryBundleService } from "./station-inventory-bundle.servic
 import {
   joinStationInventoryOpenApiSchema,
   joinStationInventorySchema,
+  leaveStationInventoryOpenApiSchema,
+  leaveStationInventoryResponseOpenApiSchema,
+  leaveStationInventorySchema,
   resolveStationInventoryBarcodeOpenApiSchema,
   resolveStationInventoryBarcodeResponseOpenApiSchema,
   resolveStationInventoryBarcodeSchema,
   stationInventoryBundleCodesOpenApiSchema,
   stationInventoryBundleCodesQuerySchema,
   stationInventoryBundleManifestOpenApiSchema,
+  stationInventoryEventBatchOpenApiSchema,
+  stationInventoryEventBatchResponseOpenApiSchema,
+  stationInventoryEventBatchSchema,
+  stationInventoryProgressOpenApiSchema,
+  stationInventoryProgressQuerySchema,
   stationInventoryTaskListOpenApiSchema,
   type JoinStationInventoryDto,
+  type LeaveStationInventoryDto,
+  type LeaveStationInventoryResponseDto,
   type ResolveStationInventoryBarcodeDto,
   type ResolveStationInventoryBarcodeResponseDto,
   type StationInventoryBundleCodesDto,
   type StationInventoryBundleCodesQueryDto,
   type StationInventoryBundleManifestDto,
+  type StationInventoryEventBatchDto,
+  type StationInventoryEventBatchResponseDto,
+  type StationInventoryProgressDto,
+  type StationInventoryProgressQueryDto,
   type StationInventoryTaskListDto,
 } from "./station-inventory.dto";
+import { StationInventorySyncService } from "./station-inventory-sync.service";
 
 @ApiTags("station inventories")
 @Controller("station")
@@ -46,6 +61,7 @@ export class StationInventoriesController {
   constructor(
     private readonly access: StationInventoryAccessService,
     private readonly bundles: StationInventoryBundleService,
+    private readonly sync: StationInventorySyncService,
   ) {}
 
   @Get("inventory-tasks")
@@ -114,5 +130,57 @@ export class StationInventoriesController {
   ): Promise<StationInventoryBundleCodesDto> {
     if (!req.deviceId) throw new Error("Station device identity is missing");
     return this.bundles.getCodes(req.tenantId!, id, req.deviceId, query);
+  }
+
+  @Post("inventories/:id/event-batches")
+  @HttpCode(200)
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiBody({ schema: stationInventoryEventBatchOpenApiSchema })
+  @ApiOkResponse({ schema: stationInventoryEventBatchResponseOpenApiSchema })
+  eventBatch(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Body(new ZodValidationPipe(stationInventoryEventBatchSchema))
+    body: StationInventoryEventBatchDto,
+  ): Promise<StationInventoryEventBatchResponseDto> {
+    if (!req.deviceId) throw new Error("Station device identity is missing");
+    return this.sync.ingest(req.tenantId!, req.deviceId, id, body);
+  }
+
+  @Get("inventories/:id/progress")
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiQuery({
+    name: "cursor",
+    required: false,
+    schema: { type: "string", pattern: "^[1-9][0-9]*:[0-9a-f-]{36}$" },
+  })
+  @ApiQuery({
+    name: "limit",
+    required: false,
+    schema: { type: "integer", minimum: 1, maximum: 200, default: 200 },
+  })
+  @ApiOkResponse({ schema: stationInventoryProgressOpenApiSchema })
+  progress(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Query(new ZodValidationPipe(stationInventoryProgressQuerySchema))
+    query: StationInventoryProgressQueryDto,
+  ): Promise<StationInventoryProgressDto> {
+    if (!req.deviceId) throw new Error("Station device identity is missing");
+    return this.sync.progress(req.tenantId!, req.deviceId, id, query);
+  }
+
+  @Post("inventories/:id/leave")
+  @HttpCode(200)
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiBody({ schema: leaveStationInventoryOpenApiSchema })
+  @ApiOkResponse({ schema: leaveStationInventoryResponseOpenApiSchema })
+  leave(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Body(new ZodValidationPipe(leaveStationInventorySchema)) body: LeaveStationInventoryDto,
+  ): Promise<LeaveStationInventoryResponseDto> {
+    if (!req.deviceId) throw new Error("Station device identity is missing");
+    return this.sync.leave(req.tenantId!, req.deviceId, id, body);
   }
 }

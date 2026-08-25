@@ -96,6 +96,9 @@ export type InventoryCorrectionAction = (typeof INVENTORY_CORRECTION_ACTIONS)[nu
 export const INVENTORY_LATE_EVENT_RESOLUTIONS = ["pending", "replayed", "discarded"] as const;
 export type InventoryLateEventResolution = (typeof INVENTORY_LATE_EVENT_RESOLUTIONS)[number];
 
+export const INVENTORY_PROGRESS_CHANGE_KINDS = ["claim", "correction"] as const;
+export type InventoryProgressChangeKind = (typeof INVENTORY_PROGRESS_CHANGE_KINDS)[number];
+
 export const inventoryChzStatusEnum = pgEnum("inventory_chz_status", INVENTORY_CHZ_STATUSES);
 export const inventoryLifecycleStatusEnum = pgEnum(
   "inventory_lifecycle_status",
@@ -141,6 +144,10 @@ export const inventoryCorrectionActionEnum = pgEnum(
 export const inventoryLateEventResolutionEnum = pgEnum(
   "inventory_late_event_resolution",
   INVENTORY_LATE_EVENT_RESOLUTIONS,
+);
+export const inventoryProgressChangeKindEnum = pgEnum(
+  "inventory_progress_change_kind",
+  INVENTORY_PROGRESS_CHANGE_KINDS,
 );
 
 const tenantId = () =>
@@ -855,6 +862,74 @@ export const inventoryCodeResults = pgTable(
   ],
 );
 
+/** Monotonic, restart-safe delta stream for Station claim/correction polling. */
+export const inventoryProgressChanges = pgTable(
+  "inventory_progress_changes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    inventoryId: uuid("inventory_id").notNull(),
+    snapshotId: uuid("snapshot_id").notNull(),
+    resultRevision: integer("result_revision").notNull(),
+    kind: inventoryProgressChangeKindEnum("kind").notNull(),
+    codeHash: char("code_hash", { length: 64 }).notNull(),
+    classification: inventoryCodeClassificationEnum("classification").notNull(),
+    observedProductionDate: date("observed_production_date"),
+    winningEventId: uuid("winning_event_id"),
+    winningDeviceId: uuid("winning_device_id"),
+    winningScannedAt: timestamp("winning_scanned_at", { withTimezone: true }),
+    changedAt: timestamp("changed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("inventory_progress_changes_tenant_id_inventory_uq").on(
+      table.tenantId,
+      table.id,
+      table.inventoryId,
+    ),
+    foreignKey({
+      name: "inventory_progress_changes_tenant_inventory_fk",
+      columns: [table.tenantId, table.inventoryId],
+      foreignColumns: [inventories.tenantId, inventories.id],
+    }),
+    foreignKey({
+      name: "inventory_progress_changes_tenant_snapshot_inventory_fk",
+      columns: [table.tenantId, table.snapshotId, table.inventoryId],
+      foreignColumns: [
+        inventorySnapshots.tenantId,
+        inventorySnapshots.id,
+        inventorySnapshots.inventoryId,
+      ],
+    }),
+    foreignKey({
+      name: "inventory_progress_changes_tenant_winner_event_fk",
+      columns: [table.tenantId, table.inventoryId, table.winningEventId],
+      foreignColumns: [
+        inventoryScanEvents.tenantId,
+        inventoryScanEvents.inventoryId,
+        inventoryScanEvents.eventId,
+      ],
+    }),
+    foreignKey({
+      name: "inventory_progress_changes_tenant_winner_device_fk",
+      columns: [table.tenantId, table.winningDeviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
+    }),
+    index("inventory_progress_changes_cursor_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.resultRevision,
+      table.id,
+    ),
+    check("inventory_progress_changes_revision_check", sql`${table.resultRevision} > 0`),
+    check("inventory_progress_changes_hash_check", sql`${table.codeHash} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "inventory_progress_changes_winner_check",
+      sql`(${table.winningEventId} is null and ${table.winningDeviceId} is null and ${table.winningScannedAt} is null)
+        or (${table.winningEventId} is not null and ${table.winningDeviceId} is not null and ${table.winningScannedAt} is not null)`,
+    ),
+  ],
+);
+
 /** Durable repack box ownership, date, lifecycle and print work. */
 export const inventoryRepackBoxes = pgTable(
   "inventory_repack_boxes",
@@ -1223,6 +1298,8 @@ export type InventoryScanEvent = typeof inventoryScanEvents.$inferSelect;
 export type NewInventoryScanEvent = typeof inventoryScanEvents.$inferInsert;
 export type InventoryCodeResult = typeof inventoryCodeResults.$inferSelect;
 export type NewInventoryCodeResult = typeof inventoryCodeResults.$inferInsert;
+export type InventoryProgressChange = typeof inventoryProgressChanges.$inferSelect;
+export type NewInventoryProgressChange = typeof inventoryProgressChanges.$inferInsert;
 export type InventoryRepackBox = typeof inventoryRepackBoxes.$inferSelect;
 export type NewInventoryRepackBox = typeof inventoryRepackBoxes.$inferInsert;
 export type InventoryRepackItem = typeof inventoryRepackItems.$inferSelect;

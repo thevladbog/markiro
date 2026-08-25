@@ -418,6 +418,13 @@ export const inventoryScanEventsMirror = sqliteTable(
     duplicateWinnerEventId: text("duplicate_winner_event_id"),
     duplicateWinnerDeviceId: text("duplicate_winner_device_id"),
     duplicateWinnerScannedAt: text("duplicate_winner_scanned_at"),
+    authoritativeVerdict: text("authoritative_verdict"),
+    serverReasonCode: text("server_reason_code"),
+    serverResultRevision: integer("server_result_revision"),
+    serverWinnerCodeHash: text("server_winner_code_hash"),
+    serverWinnerEventId: text("server_winner_event_id"),
+    serverWinnerDeviceId: text("server_winner_device_id"),
+    serverWinnerScannedAt: text("server_winner_scanned_at"),
   },
   (table) => [
     primaryKey({ columns: [table.inventoryId, table.snapshotId, table.eventId] }),

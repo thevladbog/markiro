@@ -8,6 +8,7 @@ import { SsccModule } from "../sscc/sscc.module";
 import { StationInventoriesController } from "./station-inventories.controller";
 import { StationInventoryAccessService } from "./station-inventory-access.service";
 import { StationInventoryBundleService } from "./station-inventory-bundle.service";
+import { StationInventorySyncService } from "./station-inventory-sync.service";
 
 @Module({
   imports: [SsccModule],
@@ -18,6 +19,7 @@ import { StationInventoryBundleService } from "./station-inventory-bundle.servic
     InventoryLifecycleService,
     StationInventoryAccessService,
     StationInventoryBundleService,
+    StationInventorySyncService,
   ],
   exports: [InventoriesService],
 })

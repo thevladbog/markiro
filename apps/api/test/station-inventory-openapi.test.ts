@@ -15,6 +15,8 @@ type JsonSchema = {
   nullable?: boolean;
   minimum?: number;
   maximum?: number;
+  minItems?: number;
+  maxItems?: number;
   additionalProperties?: boolean;
   required?: string[];
   properties?: Record<string, JsonSchema>;
@@ -83,16 +85,77 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
     await app?.close();
   });
 
-  it("documents the five station-only inventory task and immutable bundle routes", () => {
+  it("documents station-only task, immutable bundle, sync, progress, and leave routes", () => {
     for (const [path, method] of [
       ["/station/inventory-tasks", "get"],
       ["/station/inventory-tasks/resolve-barcode", "post"],
       ["/station/inventories/{id}/join", "post"],
       ["/station/inventories/{id}/bundle/manifest", "get"],
       ["/station/inventories/{id}/bundle/codes", "get"],
+      ["/station/inventories/{id}/event-batches", "post"],
+      ["/station/inventories/{id}/progress", "get"],
+      ["/station/inventories/{id}/leave", "post"],
     ] as const) {
       operation(document, path, method);
     }
+  });
+
+  it("pins closed batch outcomes, progress changes, and the zero-work leave contract", () => {
+    const batch = requestSchema(document, "/station/inventories/{id}/event-batches");
+    exactClosedObject(batch, [
+      "batchId",
+      "payloadDigest",
+      "snapshotId",
+      "snapshotRevision",
+      "sequenceCeiling",
+      "pendingEventCount",
+      "openBoxCount",
+      "events",
+    ]);
+    expect(batch.properties?.events?.items?.additionalProperties).toBe(false);
+    expect(batch.properties?.events?.items?.required).toContain("operatorId");
+    expect(batch.properties?.events?.maxItems).toBe(100);
+
+    const batchResponse = responseSchema(
+      document,
+      "/station/inventories/{id}/event-batches",
+      "post",
+    );
+    const outcome = batchResponse.properties?.outcomes?.items ?? {};
+    expect(outcome.additionalProperties).toBe(false);
+    expect(outcome.required).toEqual(["eventId", "status", "reasonCode"]);
+    expect(outcome.properties?.status?.enum).toEqual([
+      "applied",
+      "replay",
+      "duplicate",
+      "rejected",
+      "quarantined",
+    ]);
+    expect(outcome.properties?.winner?.additionalProperties).toBe(false);
+
+    const progress = responseSchema(document, "/station/inventories/{id}/progress", "get");
+    const change = progress.properties?.items?.items ?? {};
+    expect(change.additionalProperties).toBe(false);
+    expect(change.required).toEqual([
+      "id",
+      "revision",
+      "kind",
+      "codeHash",
+      "classification",
+      "observedProductionDate",
+      "winner",
+      "correctedAt",
+    ]);
+    expect(change.properties?.kind?.enum).toEqual(["claim", "correction"]);
+    expect(progress.properties?.items?.maxItems).toBe(200);
+
+    const leave = requestSchema(document, "/station/inventories/{id}/leave");
+    exactClosedObject(leave, ["pendingEventCount", "openBoxCount"]);
+    expect(leave.properties?.pendingEventCount?.enum).toEqual([0]);
+    expect(leave.properties?.openBoxCount?.enum).toEqual([0]);
+    exactClosedObject(responseSchema(document, "/station/inventories/{id}/leave", "post"), [
+      "outcome",
+    ]);
   });
 
   it("pins strict barcode/join inputs and does not admit a caller-selected line or tenant", () => {

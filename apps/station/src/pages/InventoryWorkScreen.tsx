@@ -13,9 +13,13 @@ import {
   type RecordInventoryScanResult,
 } from "../lib/inventory-journal.js";
 import { loadInventoryProductionDate, setInventoryProductionDate } from "../lib/inventory-date.js";
+import type { StationClient } from "../lib/api-client.js";
+import type { CredentialGeneration } from "../lib/credential-recovery.js";
+import { leaveInventoryTask } from "../lib/inventory-sync.js";
 import type { SqlExecutor } from "../lib/mirror.js";
 import { createScanQueue, type ScanQueue } from "../lib/scan-queue.js";
 import type { ScanSource } from "../lib/scan-source.js";
+import { useInventorySyncEngine } from "../lib/use-inventory-sync-engine.js";
 import { InventoryProgress as InventoryProgressView } from "../ui/inventory/InventoryProgress.js";
 import { InventoryScanInstrument } from "../ui/inventory/InventoryScanInstrument.js";
 import { StationScreen } from "../ui/StationScreen.js";
@@ -26,6 +30,9 @@ export interface InventoryWorkScreenProps {
   deviceId: string;
   operatorId: string;
   source: ScanSource;
+  client?: Pick<StationClient, "get" | "post">;
+  credentialGeneration?: CredentialGeneration;
+  onLeft?: () => void;
   onScanQueueRegister?: (queue: ScanQueue) => () => void;
   createEventId?: () => string;
   now?: () => string;
@@ -61,6 +68,9 @@ export function InventoryWorkScreen({
   deviceId,
   operatorId,
   source,
+  client,
+  credentialGeneration,
+  onLeft,
   onScanQueueRegister,
   createEventId = defaultEventId,
   now = defaultNow,
@@ -73,7 +83,21 @@ export function InventoryWorkScreen({
   const [recent, setRecent] = useState<RecentInventoryOperation[]>([]);
   const [result, setResult] = useState<RecordInventoryScanResult | null>(null);
   const [writeFailed, setWriteFailed] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [leaveFailed, setLeaveFailed] = useState(false);
   const mounted = useRef(true);
+  const {
+    state: inventorySyncState,
+    nudge: nudgeInventorySync,
+    idle: inventorySyncIdle,
+  } = useInventorySyncEngine({
+    exec,
+    client: client ?? null,
+    inventoryId: inventory.inventoryId,
+    snapshotId: inventory.snapshotId,
+    active: true,
+    ...(credentialGeneration ? { credentialGeneration } : {}),
+  });
 
   const refresh = useCallback(async () => {
     const [nextProgress, nextRecent] = await Promise.all([
@@ -153,6 +177,7 @@ export function InventoryWorkScreen({
           if (!mounted.current) return;
           setWriteFailed(false);
           setResult(outcome);
+          nudgeInventorySync();
           void refresh().catch((error: unknown) => {
             console.error("station: inventory progress refresh failed", error);
           });
@@ -172,6 +197,7 @@ export function InventoryWorkScreen({
       now,
       operatorId,
       refresh,
+      nudgeInventorySync,
     ],
   );
 
@@ -226,6 +252,32 @@ export function InventoryWorkScreen({
       )
     : t("inventory.work.loadingDate");
 
+  const leave = async () => {
+    setLeaving(true);
+    setLeaveFailed(false);
+    try {
+      if (!client) throw new Error("inventory server client is unavailable");
+      await leaveInventoryTask({
+        exec,
+        client,
+        inventoryId: inventory.inventoryId,
+        snapshotId: inventory.snapshotId,
+        deviceId,
+        closeScanner: () => queue.close(),
+        scanQueueIdle: () => queue.idle(),
+        sync: { nudge: nudgeInventorySync, idle: inventorySyncIdle },
+      });
+      onLeft?.();
+    } catch (error) {
+      console.error("station: inventory leave failed", error);
+      queue.open();
+      if (mounted.current) {
+        setLeaveFailed(true);
+        setLeaving(false);
+      }
+    }
+  };
+
   return (
     <StationScreen
       title={t("inventory.work.title")}
@@ -252,7 +304,15 @@ export function InventoryWorkScreen({
           >
             {t("inventory.work.change")}
           </Button>
+          <Button variant="secondary" size="floor" disabled={leaving} onClick={() => void leave()}>
+            {leaving ? t("inventory.work.leaving") : t("inventory.work.leave")}
+          </Button>
         </section>
+        <div role="status" className="inventory-sync-status">
+          {leaveFailed
+            ? t("inventory.work.leaveFailed")
+            : t("inventory.work.pendingSync", { count: inventorySyncState.pending })}
+        </div>
         <div className="inventory-work-main">
           <div className="inventory-work-primary">
             <InventoryScanInstrument

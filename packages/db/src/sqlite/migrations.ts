@@ -1005,6 +1005,15 @@ export const STATION_MIGRATIONS: string[] = [
      ADD COLUMN duplicate_winner_device_id TEXT;`,
   `ALTER TABLE inventory_scan_events_mirror
      ADD COLUMN duplicate_winner_scanned_at TEXT;`,
+  // Task 6 keeps the complete server acknowledgement durable before the
+  // corresponding transport row can be removed.
+  `ALTER TABLE inventory_scan_events_mirror ADD COLUMN authoritative_verdict TEXT;`,
+  `ALTER TABLE inventory_scan_events_mirror ADD COLUMN server_reason_code TEXT;`,
+  `ALTER TABLE inventory_scan_events_mirror ADD COLUMN server_result_revision INTEGER;`,
+  `ALTER TABLE inventory_scan_events_mirror ADD COLUMN server_winner_code_hash TEXT;`,
+  `ALTER TABLE inventory_scan_events_mirror ADD COLUMN server_winner_event_id TEXT;`,
+  `ALTER TABLE inventory_scan_events_mirror ADD COLUMN server_winner_device_id TEXT;`,
+  `ALTER TABLE inventory_scan_events_mirror ADD COLUMN server_winner_scanned_at TEXT;`,
 ];
 
 export interface StationMigrationEntry {

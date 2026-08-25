@@ -512,6 +512,13 @@
       "when": 1787631214284,
       "tag": "0072_foamy_psynapse",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1787658524738,
+      "tag": "0073_lowly_sumo",
+      "breakpoints": true
     }
   ]
 }

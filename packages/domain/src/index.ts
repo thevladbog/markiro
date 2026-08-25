@@ -124,6 +124,33 @@ export {
   INVENTORY_CHZ_STATUSES,
 } from "./inventory/index.js";
 export {
+  INVENTORY_EVENT_BATCH_SIZE,
+  INVENTORY_EVENT_OUTCOMES,
+  INVENTORY_PROGRESS_PAGE_SIZE,
+  inventoryEventBatchDigest,
+  inventoryEventBatchPayloadSchema,
+  inventoryEventBatchResponseSchema,
+  inventoryEventBatchSchema,
+  inventoryEventOutcomeSchema,
+  inventoryEventSchema,
+  inventoryProgressChangeSchema,
+  inventoryProgressCursorSchema,
+  inventoryProgressPageSchema,
+  parseInventoryEventBatch,
+  parseInventoryEventBatchResponse,
+  parseInventoryProgressPage,
+} from "./inventory/index.js";
+export type {
+  InventoryClaimWinner,
+  InventoryEvent,
+  InventoryEventBatch,
+  InventoryEventBatchPayload,
+  InventoryEventBatchResponse,
+  InventoryEventOutcome,
+  InventoryProgressChange,
+  InventoryProgressPage,
+} from "./inventory/index.js";
+export {
   inventorySnapshotContentDigest,
   inventorySnapshotPageDigest,
   parseStationInventoryBundleManifest,

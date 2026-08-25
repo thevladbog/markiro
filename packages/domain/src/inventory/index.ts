@@ -34,3 +34,30 @@ export type {
   InventoryScanClassifierContext,
   InventoryScanSnapshotRow,
 } from "./scan.js";
+export {
+  INVENTORY_EVENT_BATCH_SIZE,
+  INVENTORY_EVENT_OUTCOMES,
+  INVENTORY_PROGRESS_PAGE_SIZE,
+  inventoryEventBatchDigest,
+  inventoryEventBatchPayloadSchema,
+  inventoryEventBatchResponseSchema,
+  inventoryEventBatchSchema,
+  inventoryEventOutcomeSchema,
+  inventoryEventSchema,
+  inventoryProgressChangeSchema,
+  inventoryProgressCursorSchema,
+  inventoryProgressPageSchema,
+  parseInventoryEventBatch,
+  parseInventoryEventBatchResponse,
+  parseInventoryProgressPage,
+} from "./station-sync.js";
+export type {
+  InventoryClaimWinner,
+  InventoryEvent,
+  InventoryEventBatch,
+  InventoryEventBatchPayload,
+  InventoryEventBatchResponse,
+  InventoryEventOutcome,
+  InventoryProgressChange,
+  InventoryProgressPage,
+} from "./station-sync.js";

@@ -1501,13 +1501,19 @@ export function App() {
               <h1 style={{ fontSize: "2rem" }}>{t("shifts.preparing")}</h1>
             </main>
           )
-        ) : config.deviceId && activeFloorTask.inventory.mode === "check" ? (
+        ) : config.deviceId && activeClient && activeFloorTask.inventory.mode === "check" ? (
           <InventoryWorkScreen
             exec={tauriExecutor}
             inventory={{ ...activeFloorTask.inventory, mode: "check" }}
             deviceId={config.deviceId}
             operatorId={operator.operatorId}
             source={scanSource}
+            client={activeClient}
+            {...(floorGeneration ? { credentialGeneration: floorGeneration } : {})}
+            onLeft={() => {
+              setActiveFloorTask(null);
+              setFloorView("select");
+            }}
             onScanQueueRegister={registerFloorWorkBarrier}
           />
         ) : activeFloorTask.inventory.mode === "repack" ? (

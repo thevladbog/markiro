@@ -3,8 +3,13 @@ import { z } from "zod";
 
 import {
   INVENTORY_CHZ_STATUSES,
+  inventoryEventBatchSchema,
+  inventoryProgressCursorSchema,
   LABEL_FIELDS,
   parseLabelTemplate,
+  type InventoryEventBatch,
+  type InventoryEventBatchResponse,
+  type InventoryProgressPage,
   type LabelTemplateSpec,
 } from "@markiro/domain";
 
@@ -22,6 +27,222 @@ export const STATION_INVENTORY_LIMITS = {
   eventBatchSize: STATION_INVENTORY_EVENT_BATCH_SIZE,
   progressPageSize: STATION_INVENTORY_PROGRESS_PAGE_SIZE,
 } as const;
+
+export const stationInventoryEventBatchSchema = inventoryEventBatchSchema;
+export type StationInventoryEventBatchDto = InventoryEventBatch;
+export type StationInventoryEventBatchResponseDto = InventoryEventBatchResponse;
+
+export const stationInventoryProgressQuerySchema = z.strictObject({
+  cursor: inventoryProgressCursorSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(STATION_INVENTORY_PROGRESS_PAGE_SIZE).default(200),
+});
+export type StationInventoryProgressQueryDto = z.infer<typeof stationInventoryProgressQuerySchema>;
+export type StationInventoryProgressDto = InventoryProgressPage;
+
+export const leaveStationInventorySchema = z.strictObject({
+  pendingEventCount: z.literal(0),
+  openBoxCount: z.literal(0),
+});
+export type LeaveStationInventoryDto = z.infer<typeof leaveStationInventorySchema>;
+export interface LeaveStationInventoryResponseDto {
+  readonly outcome: "left";
+}
+
+const inventoryEventOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "eventId",
+    "deviceSequence",
+    "operatorId",
+    "scannedAt",
+    "kind",
+    "normalizedIdentity",
+    "codeHash",
+    "canonicalRaw",
+    "activeProductionDate",
+    "localVerdict",
+  ],
+  properties: {
+    eventId: { type: "string", format: "uuid" },
+    deviceSequence: { type: "integer", minimum: 1 },
+    operatorId: { type: "string", format: "uuid" },
+    scannedAt: { type: "string", format: "date-time" },
+    kind: { type: "string", enum: ["item", "known_box", "old_box"] },
+    normalizedIdentity: { type: "string", minLength: 1, maxLength: 1024 },
+    codeHash: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true },
+    canonicalRaw: { type: "string", minLength: 1, maxLength: 2048, nullable: true },
+    activeProductionDate: { type: "string", format: "date", nullable: true },
+    localVerdict: {
+      type: "string",
+      enum: ["expected", "protected", "known-ineligible", "unknown", "duplicate"],
+    },
+  },
+};
+
+const inventoryClaimWinnerOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["codeHash", "eventId", "deviceId", "scannedAt"],
+  properties: {
+    codeHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    eventId: { type: "string", format: "uuid" },
+    deviceId: { type: "string", format: "uuid" },
+    scannedAt: { type: "string", format: "date-time" },
+  },
+};
+
+const inventoryEventOutcomeOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["eventId", "status", "reasonCode"],
+  properties: {
+    eventId: { type: "string", format: "uuid" },
+    status: {
+      type: "string",
+      enum: ["applied", "replay", "duplicate", "rejected", "quarantined"],
+    },
+    reasonCode: { type: "string", pattern: "^[A-Z][A-Z0-9_]{0,127}$" },
+    claimedCount: { type: "integer", minimum: 0 },
+    conflictCount: { type: "integer", minimum: 0 },
+    winner: inventoryClaimWinnerOpenApiSchema,
+  },
+};
+
+export const stationInventoryEventBatchOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "batchId",
+    "payloadDigest",
+    "snapshotId",
+    "snapshotRevision",
+    "sequenceCeiling",
+    "pendingEventCount",
+    "openBoxCount",
+    "events",
+  ],
+  properties: {
+    batchId: { type: "string", minLength: 1, maxLength: 128 },
+    payloadDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    snapshotId: { type: "string", format: "uuid" },
+    snapshotRevision: { type: "integer", enum: [1] },
+    sequenceCeiling: { type: "integer", minimum: 1 },
+    pendingEventCount: { type: "integer", minimum: 0 },
+    openBoxCount: { type: "integer", minimum: 0 },
+    events: { type: "array", minItems: 1, maxItems: 100, items: inventoryEventOpenApiSchema },
+  },
+};
+
+export const stationInventoryEventBatchResponseOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "inventoryId",
+    "snapshotId",
+    "snapshotRevision",
+    "batchId",
+    "payloadDigest",
+    "sequenceCeiling",
+    "resultRevision",
+    "outcomes",
+  ],
+  properties: {
+    inventoryId: { type: "string", format: "uuid" },
+    snapshotId: { type: "string", format: "uuid" },
+    snapshotRevision: { type: "integer", enum: [1] },
+    batchId: { type: "string" },
+    payloadDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    sequenceCeiling: { type: "integer", minimum: 1 },
+    resultRevision: { type: "integer", minimum: 0 },
+    outcomes: {
+      type: "array",
+      minItems: 1,
+      maxItems: STATION_INVENTORY_EVENT_BATCH_SIZE,
+      items: inventoryEventOutcomeOpenApiSchema,
+    },
+  },
+};
+
+const inventoryProgressChangeOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "revision",
+    "kind",
+    "codeHash",
+    "classification",
+    "observedProductionDate",
+    "winner",
+    "correctedAt",
+  ],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    revision: { type: "integer", minimum: 1 },
+    kind: { type: "string", enum: ["claim", "correction"] },
+    codeHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    classification: {
+      type: "string",
+      enum: ["expected", "protected", "ineligible", "unknown", "voided"],
+    },
+    observedProductionDate: { type: "string", format: "date", nullable: true },
+    winner: { ...inventoryClaimWinnerOpenApiSchema, nullable: true },
+    correctedAt: { type: "string", format: "date-time" },
+  },
+};
+
+export const stationInventoryProgressOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "inventoryId",
+    "snapshotId",
+    "snapshotRevision",
+    "cursor",
+    "resultRevision",
+    "items",
+    "nextCursor",
+  ],
+  properties: {
+    inventoryId: { type: "string", format: "uuid" },
+    snapshotId: { type: "string", format: "uuid" },
+    snapshotRevision: { type: "integer", enum: [1] },
+    cursor: {
+      type: "string",
+      pattern: "^[1-9][0-9]*:[0-9a-f-]{36}$",
+      nullable: true,
+    },
+    resultRevision: { type: "integer", minimum: 0 },
+    items: {
+      type: "array",
+      maxItems: STATION_INVENTORY_PROGRESS_PAGE_SIZE,
+      items: inventoryProgressChangeOpenApiSchema,
+    },
+    nextCursor: {
+      type: "string",
+      pattern: "^[1-9][0-9]*:[0-9a-f-]{36}$",
+      nullable: true,
+    },
+  },
+};
+
+export const leaveStationInventoryOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["pendingEventCount", "openBoxCount"],
+  properties: {
+    pendingEventCount: { type: "integer", enum: [0] },
+    openBoxCount: { type: "integer", enum: [0] },
+  },
+};
+
+export const leaveStationInventoryResponseOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["outcome"],
+  properties: { outcome: { type: "string", enum: ["left"] } },
+};
 
 export interface StationInventoryLabelTemplateDescriptor {
   readonly id: string;
