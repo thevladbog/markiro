@@ -41,9 +41,31 @@ afterEach(() => {
   document.body.innerHTML = "";
   window.localStorage.clear();
   delete (window as TestDataLayerWindow).dataLayer;
+  Reflect.deleteProperty(document, "fonts");
 });
 
 describe("consent panel", () => {
+  it("waits for document fonts before showing an undecided visitor the bottom panel", async () => {
+    renderConsentPanel();
+    let resolveFonts: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => {
+      resolveFonts = resolve;
+    });
+    Object.defineProperty(document, "fonts", {
+      configurable: true,
+      value: { ready },
+    });
+
+    initConsentPanel(document, window);
+
+    const panel = document.querySelector<HTMLElement>("[data-consent-panel]");
+    expect(panel?.hidden).toBe(true);
+    resolveFonts?.();
+    await ready;
+    await Promise.resolve();
+    expect(panel?.hidden).toBe(false);
+  });
+
   it("shows an undecided visitor an equal reject, settings, and accept choice", () => {
     renderConsentPanel();
 
