@@ -1,5 +1,6 @@
-import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Alert, Button, Card, PinPad, SignalOverlay } from "@markiro/ui";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
+import { Alert, Button, Card, FullScreenDialog, PinPad, SignalOverlay } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 
 import i18n from "../i18n/index.js";
@@ -8,13 +9,22 @@ import type { HardwareContract, UsbPrinterInfo } from "../lib/hardware.js";
 import type { HardwareConfig } from "../lib/hardware-config.js";
 import type { SqlExecutor } from "../lib/mirror.js";
 import type { RecentOperation } from "../lib/journal.js";
+import type { InventoryProgress, RecordInventoryScanResult } from "../lib/inventory-journal.js";
+import type {
+  InventoryRepackScanResult,
+  InventoryRepackStateView,
+} from "../lib/inventory-repacking.js";
 import type { ScanSource } from "../lib/scan-source.js";
+import type { StationClient } from "../lib/api-client.js";
+import type { ResolvedInventoryTask } from "../lib/floor-task.js";
 import type { SoundSettings } from "../lib/signal-sound.js";
 import type { StationUpdaterController } from "../lib/use-station-updater.js";
 import { updateSeverity, type KnownStationUpdate } from "../lib/update-state.js";
 import { ConflictList } from "../pages/ConflictList.js";
 import { Enrollment } from "../pages/Enrollment.js";
 import { ExceptionFlow } from "../pages/ExceptionFlow.js";
+import { InventoryTaskConfirmation } from "../pages/InventoryTaskConfirmation.js";
+import { TaskSelection } from "../pages/TaskSelection.js";
 import { UpdateCenter } from "../pages/UpdateCenter.js";
 import { WorkstationSetup } from "../pages/WorkstationSetup.js";
 import { BadgeScanIllustration } from "../ui/BadgeScanIllustration.js";
@@ -27,6 +37,11 @@ import { ShiftCard } from "../ui/ShiftCard.js";
 import { StationBrand } from "../ui/StationBrand.js";
 import { StationScreen } from "../ui/StationScreen.js";
 import { WindowModeControl } from "../ui/WindowModeControl.js";
+import { InventoryBoxPrintRecovery } from "../ui/inventory/InventoryBoxPrintRecovery.js";
+import { InventoryProgress as InventoryProgressView } from "../ui/inventory/InventoryProgress.js";
+import { InventoryScanInstrument } from "../ui/inventory/InventoryScanInstrument.js";
+import { RepackBoxInstrument } from "../ui/inventory/RepackBoxInstrument.js";
+import { RepackCorrections } from "../ui/inventory/RepackCorrections.js";
 import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
 import { RecentOperations } from "../ui/work/RecentOperations.js";
 import { ScanResultInstrument } from "../ui/work/ScanResultInstrument.js";
@@ -132,7 +147,10 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
   const rendersActiveShiftWorkScreen =
     fixture.kind === "work" ||
     (fixture.kind === "box" && fixture.variant === "full") ||
-    syncVariant === "offline";
+    syncVariant === "offline" ||
+    (fixture.kind === "inventory" &&
+      fixture.variant !== "task-selection" &&
+      fixture.variant !== "other-line-confirmation");
   const withActiveShiftControls =
     headerVariant !== null || fixture.kind === "shift" || rendersActiveShiftWorkScreen;
   const headerControls = !withActiveShiftControls
@@ -257,11 +275,554 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
       return <PrintFixture variant={fixture.variant} />;
     case "updates":
       return <UpdateFixture variant={fixture.variant} />;
+    case "inventory":
+      return <InventoryFixture variant={fixture.variant} />;
     case "floor-header":
       return <FloorHeaderFixture locale={locale} />;
     case "long-copy":
       return <LongCopyFixture locale={fixture.variant === "en" ? "en" : "ru"} />;
   }
+}
+
+const GALLERY_INVENTORY_DATE = "2026-08-19";
+const GALLERY_INVENTORY_SSCC = "046006820000000015";
+const GALLERY_INVENTORY_TASK = {
+  inventoryId: "11111111-1111-4111-8111-111111111111",
+  inventoryNumber: "INV-00047",
+  productName: "Вода питьевая 0,5 л / Drinking water 0.5 L",
+  mode: "check" as const,
+  lineId: "22222222-2222-4222-8222-222222222222",
+  lineName: "Линия розлива 2 / Filling line 2",
+  productionDateFrom: GALLERY_INVENTORY_DATE,
+  productionDateTo: "2026-09-19",
+};
+
+const galleryInventoryClient: StationClient = {
+  get<T>(path: string): Promise<T> {
+    if (path === "/shifts") return Promise.resolve({ items: [] } as T);
+    if (path === "/station/inventory-tasks") {
+      return Promise.resolve({ items: [GALLERY_INVENTORY_TASK] } as T);
+    }
+    return Promise.reject(new Error(`gallery: unexpected inventory GET ${path}`));
+  },
+  post<T>(path: string): Promise<T> {
+    return Promise.reject(new Error(`gallery: unexpected inventory POST ${path}`));
+  },
+  download(): Promise<Blob> {
+    return Promise.reject(new Error("gallery: inventory download is disabled"));
+  },
+  whoami() {
+    return Promise.resolve({ ok: true as const });
+  },
+};
+
+const galleryInventoryExecutor: SqlExecutor = {
+  all<T>(): Promise<T[]> {
+    return Promise.resolve([]);
+  },
+  run(): Promise<void> {
+    return Promise.resolve();
+  },
+};
+
+const galleryInventoryScanSource: ScanSource = {
+  start() {
+    return () => undefined;
+  },
+};
+
+function InventoryFixture({ variant }: { variant: string }) {
+  switch (variant) {
+    case "task-selection":
+      return <InventoryTaskSelectionFixture />;
+    case "other-line-confirmation":
+      return <InventoryOtherLineConfirmationFixture />;
+    case "simple-box-accepted":
+    case "duplicate-other-terminal":
+    case "known-ineligible":
+    case "protected-moving-by-ud":
+    case "not-in-snapshot":
+    case "production-date-change":
+      return <SimpleInventoryFixture variant={variant} />;
+    default:
+      return <RepackInventoryFixture variant={variant} />;
+  }
+}
+
+function InventoryTaskSelectionFixture() {
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    rootRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[1]?.click();
+  }, []);
+  return (
+    <div ref={rootRef} style={{ width: "100%", height: "100%", minHeight: 0 }}>
+      <TaskSelection
+        client={galleryInventoryClient}
+        exec={galleryInventoryExecutor}
+        source={galleryInventoryScanSource}
+        operatorId="gallery-operator"
+        currentLineName="Линия розлива 1 / Filling line 1"
+        onShiftSelected={() => undefined}
+        onInventorySelected={() => undefined}
+        onNew={() => undefined}
+      />
+    </div>
+  );
+}
+
+function InventoryOtherLineConfirmationFixture() {
+  const resolved: ResolvedInventoryTask = {
+    task: GALLERY_INVENTORY_TASK,
+    deviceLineId: "33333333-3333-4333-8333-333333333333",
+    requiresDifferentLineConfirmation: true,
+  };
+  return (
+    <InventoryTaskConfirmation
+      resolved={resolved}
+      currentLineName="Линия розлива 1 / Filling line 1"
+      busy={false}
+      onCancel={() => undefined}
+      onConfirm={() => undefined}
+    />
+  );
+}
+
+function SimpleInventoryFixture({ variant }: { variant: string }) {
+  const { t, i18n: translation } = useTranslation();
+  const result = galleryInventoryScanResult(variant);
+  const progress: InventoryProgress = {
+    verified: variant === "simple-box-accepted" ? 20 : 124,
+    discrepancies: variant === "known-ineligible" || variant === "not-in-snapshot" ? 1 : 3,
+    protected: variant === "protected-moving-by-ud" ? 1 : 2,
+    claimedByDevice: variant === "simple-box-accepted" ? 20 : 87,
+    acceptedBoxes: variant === "simple-box-accepted" ? 1 : 4,
+    acceptedItems: variant === "simple-box-accepted" ? 20 : 83,
+  };
+  const locale = translation.language === "ru" ? "ru-RU" : "en-US";
+  const showDateDialog = variant === "production-date-change";
+  return (
+    <StationScreen
+      title={t("inventory.work.title")}
+      header={
+        <div className="inventory-work-heading">
+          <span>INV-00047</span>
+          <strong>{GALLERY_INVENTORY_TASK.productName}</strong>
+          <span>{t("inventory.modeCheck")}</span>
+        </div>
+      }
+    >
+      <div className="inventory-work-screen" data-testid="inventory-simple-work">
+        <section className="inventory-active-date">
+          <div>
+            <span>{t("inventory.work.productionDate")}</span>
+            <strong>{GALLERY_INVENTORY_DATE}</strong>
+          </div>
+          <span>{t("inventory.work.futureOnly")}</span>
+          <Button variant="secondary" size="floor">
+            {t("inventory.work.change")}
+          </Button>
+          <Button variant="secondary" size="floor">
+            {t("inventory.work.leave")}
+          </Button>
+        </section>
+        <div role="status" className="inventory-sync-status">
+          {t("inventory.work.pendingSync", { count: 0 })}
+        </div>
+        <div className="inventory-work-main">
+          <div className="inventory-work-primary">
+            <InventoryScanInstrument
+              result={result}
+              writeFailed={false}
+              currentDeviceId="gallery-terminal-a"
+              labels={inventoryScanLabels(t)}
+            />
+            <InventoryProgressView
+              progress={progress}
+              recent={[]}
+              variant="summary"
+              gtin14="04600000000015"
+              locale={locale}
+              labels={inventoryProgressLabels(t)}
+            />
+          </div>
+          <aside className="inventory-work-recent">
+            <InventoryProgressView
+              progress={progress}
+              recent={[]}
+              variant="recent"
+              gtin14="04600000000015"
+              locale={locale}
+              labels={inventoryProgressLabels(t)}
+            />
+          </aside>
+        </div>
+      </div>
+      <FullScreenDialog
+        open={showDateDialog}
+        title={t("inventory.work.dateDialogTitle")}
+        backLabel={t("inventory.work.cancel")}
+        onClose={() => undefined}
+        footer={<Button size="floor">{t("inventory.work.applyDate")}</Button>}
+      >
+        <div className="inventory-date-dialog">
+          <label htmlFor="gallery-inventory-production-date">
+            {t("inventory.work.productionDate")}
+          </label>
+          <input
+            id="gallery-inventory-production-date"
+            type="date"
+            min={GALLERY_INVENTORY_DATE}
+            max="2026-09-19"
+            value={GALLERY_INVENTORY_DATE}
+            readOnly
+          />
+          <p>{t("inventory.work.futureOnly")}</p>
+        </div>
+      </FullScreenDialog>
+    </StationScreen>
+  );
+}
+
+function galleryInventoryScanResult(variant: string): RecordInventoryScanResult | null {
+  const common = {
+    serialSuffix: "…0019",
+    ssccSuffix: null,
+    boxChildCount: 0,
+  };
+  switch (variant) {
+    case "simple-box-accepted":
+      return {
+        ...common,
+        verdict: "expected",
+        scanKind: "known_box",
+        serialSuffix: null,
+        ssccSuffix: "…0015",
+        claimedCount: 20,
+        boxChildCount: 20,
+        firstWinning: null,
+      };
+    case "duplicate-other-terminal":
+      return {
+        ...common,
+        verdict: "duplicate",
+        scanKind: "item",
+        claimedCount: 0,
+        firstWinning: {
+          codeHash: "gallery-safe-code-hash",
+          eventId: "gallery-winning-event",
+          deviceId: "gallery-terminal-b",
+          scannedAt: "2026-08-19T10:00:00.000Z",
+        },
+      };
+    case "known-ineligible":
+      return {
+        ...common,
+        verdict: "known-ineligible",
+        scanKind: "item",
+        claimedCount: 0,
+        firstWinning: null,
+      };
+    case "protected-moving-by-ud":
+      return {
+        ...common,
+        verdict: "protected",
+        scanKind: "item",
+        claimedCount: 0,
+        firstWinning: null,
+      };
+    case "not-in-snapshot":
+      return {
+        ...common,
+        verdict: "unknown",
+        scanKind: "item",
+        claimedCount: 0,
+        firstWinning: null,
+      };
+    default:
+      return null;
+  }
+}
+
+function RepackInventoryFixture({ variant }: { variant: string }) {
+  const { t, i18n: translation } = useTranslation();
+  const state = galleryRepackState(variant);
+  const result = galleryRepackResult(variant);
+  const locale = translation.language === "ru" ? "ru-RU" : "en-US";
+  const corrections = variant === "repack-corrections";
+  const reprint = variant === "same-sscc-reprint-confirmation";
+  const printRecovery = variant === "print-recovery";
+  const leaveOpen = variant === "leave-open-box";
+  const labels = inventoryProgressLabels(t);
+  return (
+    <StationScreen
+      title={t("inventory.repack.title")}
+      header={
+        <div className="inventory-work-heading">
+          <span>INV-R-00012</span>
+          <strong>{GALLERY_INVENTORY_TASK.productName}</strong>
+          <span>{t("inventory.modeRepack")}</span>
+        </div>
+      }
+    >
+      <div className="repack-work-screen" data-testid="inventory-repack-work">
+        <div className="repack-toolbar">
+          <div>
+            <span>{t("inventory.work.productionDate")}</span>
+            <strong>{GALLERY_INVENTORY_DATE}</strong>
+          </div>
+          <span role="status">
+            {leaveOpen
+              ? t("inventory.work.leaveFailed")
+              : t("inventory.work.pendingSync", { count: 0 })}
+          </span>
+          <Button size="floor" variant="secondary">
+            {t("inventory.work.change")}
+          </Button>
+          <Button size="floor" variant="secondary">
+            {t("inventory.repack.corrections")}
+          </Button>
+          <Button size="floor" variant="secondary">
+            {t("inventory.work.leave")}
+          </Button>
+        </div>
+        <div className="repack-work-main">
+          {printRecovery ? (
+            <InventoryBoxPrintRecovery
+              state="failed"
+              facts={{
+                sscc: GALLERY_INVENTORY_SSCC,
+                quantity: 20,
+                productionDate: GALLERY_INVENTORY_DATE,
+              }}
+              errorCode="transport_failed"
+              busy={false}
+              onRetry={() => undefined}
+              onSetup={() => undefined}
+              labels={inventoryPrintLabels(t)}
+            />
+          ) : (
+            <RepackBoxInstrument
+              state={state}
+              result={result}
+              writeFailed={false}
+              capacity={20}
+              labels={inventoryRepackLabels(t)}
+            />
+          )}
+          <aside className="inventory-work-recent">
+            <InventoryProgressView
+              progress={{
+                verified: 12,
+                discrepancies: 0,
+                protected: 0,
+                claimedByDevice: 12,
+                acceptedBoxes: 0,
+                acceptedItems: 12,
+              }}
+              recent={[]}
+              variant="recent"
+              gtin14="04600000000015"
+              locale={locale}
+              labels={labels}
+            />
+          </aside>
+        </div>
+      </div>
+      <FullScreenDialog
+        open={corrections || reprint}
+        title={t("inventory.repack.corrections")}
+        backLabel={t("inventory.work.cancel")}
+        onClose={() => undefined}
+      >
+        <RepackCorrections
+          itemCount={7}
+          busy={false}
+          onRemoveLast={() => undefined}
+          onClear={() => undefined}
+          reprintSscc={reprint ? GALLERY_INVENTORY_SSCC : ""}
+          onReprintSsccChange={() => undefined}
+          onFindReprint={() => undefined}
+          reprintCandidate={
+            reprint
+              ? {
+                  sscc: GALLERY_INVENTORY_SSCC,
+                  quantity: 20,
+                  productionDate: GALLERY_INVENTORY_DATE,
+                }
+              : null
+          }
+          reprintError={false}
+          onReprint={() => undefined}
+          labels={inventoryCorrectionLabels(t)}
+        />
+      </FullScreenDialog>
+    </StationScreen>
+  );
+}
+
+function galleryRepackState(variant: string): InventoryRepackStateView {
+  if (variant === "repack-awaiting-old-box") return { phase: "awaiting-old-box", box: null };
+  const itemCount =
+    variant === "repack-capacity-20" || variant === "repack-box-ready"
+      ? variant === "repack-box-ready"
+        ? 20
+        : 12
+      : variant === "leave-open-box"
+        ? 4
+        : 7;
+  return {
+    phase: variant === "repack-box-ready" ? "closed-pending-print" : "scanning",
+    box: {
+      boxId: "gallery-repack-box",
+      oldSsccContext: "…0014",
+      newSscc: GALLERY_INVENTORY_SSCC,
+      productionDate: GALLERY_INVENTORY_DATE,
+      capacity: 20,
+      itemCount,
+      lastItemId: "gallery-repack-item",
+      state: variant === "repack-box-ready" ? "closed" : "open",
+      printState: variant === "repack-box-ready" ? "pending" : "not_ready",
+      printErrorCode: null,
+      ownerDeviceId: "gallery-terminal-a",
+    },
+  };
+}
+
+function galleryRepackResult(variant: string): InventoryRepackScanResult | null {
+  if (variant === "repack-scanning") {
+    return {
+      verdict: "old-box-selected",
+      boxId: "gallery-repack-box",
+      newSscc: GALLERY_INVENTORY_SSCC,
+      itemCount: 0,
+      printState: "not_ready",
+      sourceParentMismatch: false,
+    };
+  }
+  if (variant === "repack-capacity-20") {
+    return {
+      verdict: "expected",
+      boxId: "gallery-repack-box",
+      newSscc: GALLERY_INVENTORY_SSCC,
+      itemCount: 12,
+      printState: "not_ready",
+      sourceParentMismatch: false,
+    };
+  }
+  if (variant === "repack-box-ready") {
+    return {
+      verdict: "capacity-closed",
+      boxId: "gallery-repack-box",
+      newSscc: GALLERY_INVENTORY_SSCC,
+      itemCount: 20,
+      printState: "pending",
+      sourceParentMismatch: false,
+    };
+  }
+  return null;
+}
+
+type GalleryTranslation = ReturnType<typeof useTranslation>["t"];
+
+function inventoryScanLabels(t: GalleryTranslation) {
+  return {
+    prompt: t("inventory.work.prompt"),
+    hint: t("inventory.work.promptHint"),
+    expected: t("inventory.work.verdict.expected"),
+    protected: t("inventory.work.verdict.protected"),
+    ineligible: t("inventory.work.verdict.ineligible"),
+    unknown: t("inventory.work.verdict.unknown"),
+    duplicateHere: t("inventory.work.verdict.duplicateHere"),
+    duplicateOther: t("inventory.work.verdict.duplicateOther"),
+    invalid: t("inventory.work.verdict.invalid"),
+    writeFailed: t("inventory.work.verdict.writeFailed"),
+    boxAccepted: (count: number) => t("inventory.work.verdict.boxAccepted", { count }),
+    boxBadge: t("inventory.work.badge.box"),
+    duplicateBadge: t("inventory.work.badge.duplicate"),
+    protectedBadge: t("inventory.work.badge.protected"),
+    discrepancyBadge: t("inventory.work.badge.discrepancy"),
+    ineligibleBadge: t("inventory.work.badge.ineligible"),
+  };
+}
+
+function inventoryProgressLabels(t: GalleryTranslation) {
+  return {
+    verified: t("inventory.work.progress.verified"),
+    discrepancies: t("inventory.work.progress.discrepancies"),
+    protected: t("inventory.work.progress.protected"),
+    terminal: t("inventory.work.progress.terminal"),
+    boxes: t("inventory.work.progress.boxes"),
+    items: t("inventory.work.progress.items"),
+    recent: t("inventory.work.recent"),
+    empty: t("inventory.work.emptyRecent"),
+    invalidTime: t("inventory.work.invalidTime"),
+    gtin: "GTIN",
+    serial: t("inventory.work.serial"),
+    status: {
+      expected: t("inventory.work.status.expected"),
+      protected: t("inventory.work.status.protected"),
+      "known-ineligible": t("inventory.work.status.ineligible"),
+      unknown: t("inventory.work.status.unknown"),
+      duplicate: t("inventory.work.status.duplicate"),
+    },
+  };
+}
+
+function inventoryRepackLabels(t: GalleryTranslation) {
+  return {
+    oldBox: t("inventory.repack.oldBox"),
+    newBox: t("inventory.repack.newBox"),
+    productionDate: t("inventory.work.productionDate"),
+    awaiting: t("inventory.repack.awaiting"),
+    scanning: t("inventory.repack.scanning"),
+    pendingPrint: t("inventory.repack.pendingPrint"),
+    invalidated: t("inventory.repack.invalidated"),
+    oldSelected: t("inventory.repack.oldSelected"),
+    accepted: t("inventory.repack.accepted"),
+    discrepancy: t("inventory.repack.discrepancy"),
+    writeFailed: t("inventory.work.verdict.writeFailed"),
+    position: (position: number, filled: boolean) =>
+      t("inventory.repack.position", {
+        position,
+        status: filled ? "занято" : "свободно",
+      }),
+  };
+}
+
+function inventoryCorrectionLabels(t: GalleryTranslation) {
+  return {
+    removeLast: t("inventory.repack.removeLast"),
+    clear: t("inventory.repack.clear"),
+    empty: t("inventory.repack.empty"),
+    reprintTitle: t("inventory.repack.reprint.title"),
+    reprintSscc: t("inventory.repack.reprint.sscc"),
+    findReprint: t("inventory.repack.reprint.find"),
+    reprintCandidate: t("inventory.repack.reprint.candidate"),
+    reprintMissing: t("inventory.repack.reprint.missing"),
+    reprint: t("inventory.repack.reprint.action"),
+    quantity: t("inventory.repack.print.quantity"),
+    productionDate: t("inventory.work.productionDate"),
+  };
+}
+
+function inventoryPrintLabels(t: GalleryTranslation) {
+  return {
+    printing: t("inventory.repack.print.printing"),
+    printed: t("inventory.repack.print.printed"),
+    failed: t("inventory.repack.print.failed"),
+    sscc: "SSCC",
+    quantity: t("inventory.repack.print.quantity"),
+    productionDate: t("inventory.work.productionDate"),
+    retry: t("inventory.repack.print.retry"),
+    setup: t("inventory.repack.print.setup"),
+    errors: {
+      template_missing: t("inventory.repack.print.errors.templateMissing"),
+      printer_unconfigured: t("inventory.repack.print.errors.printerUnconfigured"),
+      render_failed: t("inventory.repack.print.errors.renderFailed"),
+      transport_failed: t("inventory.repack.print.errors.transportFailed"),
+      persistence_failed: t("inventory.repack.print.errors.persistenceFailed"),
+    },
+  };
 }
 
 function FloorHeaderFixture({ locale }: { locale: GalleryLocale }) {

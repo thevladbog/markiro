@@ -18,6 +18,25 @@ afterEach(() => {
 });
 
 describe("development screen gallery", () => {
+  const inventoryGalleryStateIds = [
+    "inventory-task-selection",
+    "inventory-other-line-confirmation",
+    "inventory-simple-box-accepted",
+    "inventory-duplicate-other-terminal",
+    "inventory-known-ineligible",
+    "inventory-protected-moving-by-ud",
+    "inventory-not-in-snapshot",
+    "inventory-repack-awaiting-old-box",
+    "inventory-repack-scanning",
+    "inventory-repack-capacity-20",
+    "inventory-repack-box-ready",
+    "inventory-repack-corrections",
+    "inventory-production-date-change",
+    "inventory-leave-open-box",
+    "inventory-print-recovery",
+    "inventory-same-sscc-reprint-confirmation",
+  ] as const;
+
   it("keeps the gallery unreachable outside development even when the query requests it", () => {
     expect(shouldRenderGallery(false, "?gallery=1&state=work-ok&locale=en")).toBe(false);
     expect(shouldRenderGallery(true, "?gallery=0&state=work-ok")).toBe(false);
@@ -85,6 +104,68 @@ describe("development screen gallery", () => {
         "box-print-skip-confirm",
       ]),
     );
+  });
+
+  it("registers every approved inventory handoff state as a deterministic fixture", () => {
+    expect(EXPECTED_GALLERY_STATE_IDS).toEqual(
+      expect.arrayContaining([...inventoryGalleryStateIds]),
+    );
+
+    for (const id of inventoryGalleryStateIds) {
+      expect(GALLERY_FIXTURES).toContainEqual({
+        id,
+        kind: "inventory",
+        variant: id.replace("inventory-", ""),
+        source: "synthetic",
+      });
+    }
+  });
+
+  it("renders approved inventory verdicts through production inventory instruments", async () => {
+    const cases = [
+      ["inventory-simple-box-accepted", "Короб принят: 20 кодов", "inventory-scan-instrument"],
+      [
+        "inventory-duplicate-other-terminal",
+        "Код уже проверен на другом терминале",
+        "inventory-scan-instrument",
+      ],
+      [
+        "inventory-known-ineligible",
+        "Код не участвует в инвентаризации",
+        "inventory-scan-instrument",
+      ],
+      [
+        "inventory-protected-moving-by-ud",
+        "Код не учтён: уже в отгрузке",
+        "inventory-scan-instrument",
+      ],
+      [
+        "inventory-not-in-snapshot",
+        "Код отсутствует в исходном снимке",
+        "inventory-scan-instrument",
+      ],
+      ["inventory-repack-capacity-20", "12 / 20", "repack-instrument"],
+      ["inventory-print-recovery", "Этикетка не напечатана", "inventory-box-print"],
+    ] as const;
+
+    for (const [state, copy, productionClass] of cases) {
+      const view = render(<StationScreenGallery request={{ state, locale: "ru" }} />);
+      await waitFor(() => expect(view.container.textContent).toContain(copy));
+      expect(view.container.querySelector(`.${productionClass}`)).not.toBeNull();
+      view.unmount();
+    }
+  });
+
+  it("freezes inventory gallery dates and exposes no raw marked code", async () => {
+    const view = render(
+      <StationScreenGallery
+        request={{ state: "inventory-production-date-change", locale: "ru" }}
+      />,
+    );
+
+    const date = await screen.findByLabelText("Дата производства");
+    expect(date.getAttribute("value")).toBe("2026-08-19");
+    expect(view.container.textContent).not.toContain("010460000000001521");
   });
 
   it("renders aggregation with the production scan, 10-place box, and six-row history instruments", () => {
