@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import process from "node:process";
+import { isDeepStrictEqual } from "node:util";
 
 const protectedAddresses = new Set([
   "module.compute.yandex_vpc_address.app",
@@ -58,6 +59,42 @@ const safeProductionActionScopes = new Map([
     "module.object_storage.yandex_storage_bucket_iam_binding.app_uploader",
     "safe-action-app-uploader-binding",
   ],
+]);
+const appComputeAddress = "module.compute.yandex_compute_instance.app";
+const appComputeFieldScopes = new Map([
+  ["allow_stopping_for_update", "allow-stopping"],
+  ["boot_disk", "boot-disk"],
+  ["deletion_protection", "deletion-protection"],
+  ["description", "description"],
+  ["dns_record", "dns-record"],
+  ["filesystem", "filesystem"],
+  ["folder_id", "folder"],
+  ["fqdn", "fqdn"],
+  ["gpu_cluster_id", "gpu-cluster"],
+  ["hardware_generation", "hardware-generation"],
+  ["hostname", "hostname"],
+  ["id", "id"],
+  ["labels", "labels"],
+  ["local_disk", "local-disk"],
+  ["maintenance_grace_period", "maintenance-grace-period"],
+  ["metadata", "metadata"],
+  ["name", "name"],
+  ["network_acceleration_type", "network-acceleration"],
+  ["network_interface", "network-interface"],
+  ["placement_policy", "placement-policy"],
+  ["platform_id", "platform"],
+  ["resources", "resources"],
+  ["scheduling_policy", "scheduling-policy"],
+  ["secondary_disk", "secondary-disk"],
+  ["service_account_id", "service-account"],
+  ["status", "status"],
+  ["zone", "zone"],
+]);
+const appComputeMetadataFieldScopes = new Map([
+  ["enable-oslogin", "enable-oslogin"],
+  ["serial-port-enable", "serial-port-enable"],
+  ["ssh-keys", "ssh-keys"],
+  ["user-data", "user-data"],
 ]);
 
 const retiredProductionResources = new Map([
@@ -172,6 +209,37 @@ function scoped(scope, callback) {
 
 function object(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function changedKeys(beforeValue, afterValue) {
+  if (!object(beforeValue) || !object(afterValue)) return null;
+  return [...new Set([...Object.keys(beforeValue), ...Object.keys(afterValue)])]
+    .sort()
+    .filter((key) => !isDeepStrictEqual(beforeValue[key], afterValue[key]));
+}
+
+function appComputeActionScope(resource) {
+  const beforeValue = resource.change?.before;
+  const afterValue = resource.change?.after;
+  const fields = changedKeys(beforeValue, afterValue);
+  if (!fields || fields.length === 0) return "safe-action-app-compute";
+
+  const scopes = fields.map((field) => {
+    if (field !== "metadata") return appComputeFieldScopes.get(field) ?? "other";
+    const metadataFields = changedKeys(beforeValue.metadata, afterValue.metadata);
+    if (!metadataFields || metadataFields.length === 0) return "metadata";
+    const metadataScopes = [
+      ...new Set(
+        metadataFields.map((metadataField) => {
+          return appComputeMetadataFieldScopes.get(metadataField) ?? "other";
+        }),
+      ),
+    ].sort();
+    return `metadata-${metadataScopes.join("-and-")}`;
+  });
+  const uniqueScopes = [...new Set(scopes)].sort();
+  if (uniqueScopes.length === 1 && uniqueScopes[0] === "other") return "safe-action-app-compute";
+  return `safe-action-app-compute-${uniqueScopes.join("-and-")}`;
 }
 
 function actions(resource) {
@@ -621,8 +689,13 @@ export function guardProductionPlan(plan) {
         : resource.address.includes(".data.")
           ? ["no-op", "read"]
           : ["no-op"];
-      if (!onlyAllowedAction(resourceActions, allowed))
-        rejected(safeProductionActionScopes.get(resource.address) ?? "safe-resource-action");
+      if (!onlyAllowedAction(resourceActions, allowed)) {
+        const scope =
+          resource.address === appComputeAddress
+            ? appComputeActionScope(resource)
+            : (safeProductionActionScopes.get(resource.address) ?? "safe-resource-action");
+        rejected(scope);
+      }
     }
     if (
       resource.address === "module.station_releases.data.yandex_cm_certificate.issued" &&
