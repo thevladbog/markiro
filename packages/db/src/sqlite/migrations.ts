@@ -615,4 +615,79 @@ export const STATION_MIGRATIONS: string[] = [
   // transport rows, so the compatibility default is deliberately committed.
   `ALTER TABLE inventory_scan_events_mirror
      ADD COLUMN commit_state TEXT NOT NULL DEFAULT 'committed';`,
+  // Forward audit for the original compatibility migration above. It is
+  // deliberately separate and rerunnable so devices that already applied the
+  // column still fail closed unless exact durable output can be proven.
+  `UPDATE inventory_scan_events_mirror AS event
+      SET commit_state = CASE WHEN EXISTS (
+        SELECT 1 FROM inventory_outbox queued
+         WHERE queued.inventory_id = event.inventory_id
+           AND queued.snapshot_id = event.snapshot_id
+           AND queued.event_id = event.event_id
+           AND queued.device_sequence = event.device_sequence
+           AND CASE WHEN json_valid(queued.payload_json) THEN
+             json_type(queued.payload_json, '$.eventId') IS NOT NULL
+             AND json_extract(queued.payload_json, '$.eventId') IS event.event_id
+             AND json_type(queued.payload_json, '$.deviceSequence') IS NOT NULL
+             AND json_extract(queued.payload_json, '$.deviceSequence') IS event.device_sequence
+             AND json_type(queued.payload_json, '$.operatorId') IS NOT NULL
+             AND json_extract(queued.payload_json, '$.operatorId') IS event.operator_id
+             AND json_type(queued.payload_json, '$.scannedAt') IS NOT NULL
+             AND json_extract(queued.payload_json, '$.scannedAt') IS event.scanned_at
+             AND json_type(queued.payload_json, '$.kind') IS NOT NULL
+             AND json_extract(queued.payload_json, '$.kind') IS event.kind
+             AND json_type(queued.payload_json, '$.normalizedIdentity') IS NOT NULL
+             AND json_extract(queued.payload_json, '$.normalizedIdentity')
+                   IS event.normalized_identity
+             AND json_type(queued.payload_json, '$.codeHash') IS NOT NULL
+             AND json_extract(queued.payload_json, '$.codeHash') IS event.code_hash
+             AND json_type(queued.payload_json, '$.canonicalRaw') IS NOT NULL
+             AND json_extract(queued.payload_json, '$.canonicalRaw') IS event.raw_payload
+             AND json_type(queued.payload_json, '$.activeProductionDate') IS NOT NULL
+             AND json_extract(queued.payload_json, '$.activeProductionDate')
+                   IS event.active_production_date
+             AND json_type(queued.payload_json, '$.localVerdict') IS NOT NULL
+             AND json_extract(queued.payload_json, '$.localVerdict') IS event.local_verdict
+           ELSE 0 END
+      )
+      AND (
+        (event.local_verdict = 'expected' AND EXISTS (
+          SELECT 1 FROM inventory_code_results_mirror result
+           WHERE result.inventory_id = event.inventory_id
+             AND result.snapshot_id = event.snapshot_id
+             AND result.first_accepted_event_id = event.event_id
+             AND result.origin_classification = 'expected'
+        ))
+        OR (event.local_verdict = 'protected' AND EXISTS (
+          SELECT 1 FROM inventory_code_results_mirror result
+           WHERE result.inventory_id = event.inventory_id
+             AND result.snapshot_id = event.snapshot_id
+             AND result.first_accepted_event_id = event.event_id
+             AND result.origin_classification = 'protected'
+        ))
+        OR (event.local_verdict = 'known-ineligible' AND EXISTS (
+          SELECT 1 FROM inventory_code_results_mirror result
+           WHERE result.inventory_id = event.inventory_id
+             AND result.snapshot_id = event.snapshot_id
+             AND result.first_accepted_event_id = event.event_id
+             AND result.origin_classification = 'known-ineligible'
+        ))
+        OR (event.local_verdict IN ('unknown', 'duplicate') AND NOT EXISTS (
+          SELECT 1 FROM inventory_code_results_mirror result
+           WHERE result.inventory_id = event.inventory_id
+             AND result.snapshot_id = event.snapshot_id
+             AND result.first_accepted_event_id = event.event_id
+        ))
+      ) THEN 'committed' ELSE 'failed' END
+    WHERE event.commit_state IN ('failed', 'committed');`,
+  // Rerunnable compensation is event-owned and can never remove another
+  // observation's winning projection.
+  `DELETE FROM inventory_code_results_mirror AS result
+    WHERE EXISTS (
+      SELECT 1 FROM inventory_scan_events_mirror event
+       WHERE event.inventory_id = result.inventory_id
+         AND event.snapshot_id = result.snapshot_id
+         AND event.event_id = result.first_accepted_event_id
+         AND event.commit_state = 'failed'
+    );`,
 ];

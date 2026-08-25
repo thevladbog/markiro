@@ -243,7 +243,7 @@ describe("STATION_MIGRATIONS", () => {
     expect(() => applyStationMigrations(db)).not.toThrow();
   });
 
-  it("adds a rerunnable event commit-state fence while treating legacy facts as committed", () => {
+  it("upgrades only exact legacy event/outbox pairs and compensates orphan projections", () => {
     const stateMigration = STATION_MIGRATIONS.findIndex((statement) =>
       statement.includes("ADD COLUMN commit_state"),
     );
@@ -251,22 +251,188 @@ describe("STATION_MIGRATIONS", () => {
 
     const db = new DatabaseSync(":memory:");
     applyStatements(db, STATION_MIGRATIONS.slice(0, stateMigration));
-    db.prepare(
+    const insertEvent = db.prepare(
       `INSERT INTO inventory_scan_events_mirror
          (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
-          scanned_at, kind, normalized_identity, local_verdict)
-       VALUES ('inventory-legacy', 'snapshot-legacy', 'event-legacy', 'device-legacy', 1,
-               'operator-legacy', '2026-08-25T08:00:00.000Z', 'item', 'item:legacy',
-               'expected')`,
-    ).run();
+          scanned_at, kind, normalized_identity, code_hash, raw_payload,
+          active_production_date, local_verdict)
+       VALUES ('inventory-legacy', 'snapshot-legacy', ?, 'device-legacy', ?,
+               'operator-legacy', ?, 'item', ?, ?, ?, '2026-08-20', ?)`,
+    );
+    insertEvent.run(
+      "event-orphan",
+      1,
+      "2026-08-25T08:00:00.000Z",
+      "item:orphan-hash",
+      "orphan-hash",
+      "orphan-raw",
+      "expected",
+    );
+    insertEvent.run(
+      "event-success",
+      2,
+      "2026-08-25T08:01:00.000Z",
+      "item:success-hash",
+      "success-hash",
+      "success-raw",
+      "expected",
+    );
+    insertEvent.run(
+      "event-unknown",
+      3,
+      "2026-08-25T08:02:00.000Z",
+      "item:unknown-hash",
+      "unknown-hash",
+      "unknown-raw",
+      "unknown",
+    );
+    insertEvent.run(
+      "event-mismatch",
+      4,
+      "2026-08-25T08:03:00.000Z",
+      "item:mismatch-hash",
+      "mismatch-hash",
+      "mismatch-raw",
+      "expected",
+    );
+
+    const insertProjection = db.prepare(
+      `INSERT INTO inventory_code_results_mirror
+         (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
+          winning_scanned_at, observed_production_date, classification,
+          origin_classification, updated_at)
+       VALUES ('inventory-legacy', 'snapshot-legacy', ?, ?, 'device-legacy', ?,
+               '2026-08-20', 'expected', 'expected', ?)`,
+    );
+    for (const [hash, eventId, scannedAt] of [
+      ["orphan-hash", "event-orphan", "2026-08-25T08:00:00.000Z"],
+      ["success-hash", "event-success", "2026-08-25T08:01:00.000Z"],
+      ["mismatch-hash", "event-mismatch", "2026-08-25T08:03:00.000Z"],
+    ] as const) {
+      insertProjection.run(hash, eventId, scannedAt, scannedAt);
+    }
+
+    const insertOutbox = db.prepare(
+      `INSERT INTO inventory_outbox
+         (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+       VALUES ('inventory-legacy', 'snapshot-legacy', ?, ?, ?, ?)`,
+    );
+    insertOutbox.run(
+      "event-success",
+      2,
+      JSON.stringify({
+        eventId: "event-success",
+        deviceSequence: 2,
+        operatorId: "operator-legacy",
+        scannedAt: "2026-08-25T08:01:00.000Z",
+        kind: "item",
+        normalizedIdentity: "item:success-hash",
+        codeHash: "success-hash",
+        canonicalRaw: "success-raw",
+        activeProductionDate: "2026-08-20",
+        localVerdict: "expected",
+      }),
+      "2026-08-25T08:01:00.000Z",
+    );
+    insertOutbox.run(
+      "event-unknown",
+      3,
+      JSON.stringify({
+        eventId: "event-unknown",
+        deviceSequence: 3,
+        operatorId: "operator-legacy",
+        scannedAt: "2026-08-25T08:02:00.000Z",
+        kind: "item",
+        normalizedIdentity: "item:unknown-hash",
+        codeHash: "unknown-hash",
+        canonicalRaw: "unknown-raw",
+        activeProductionDate: "2026-08-20",
+        localVerdict: "unknown",
+      }),
+      "2026-08-25T08:02:00.000Z",
+    );
+    insertOutbox.run(
+      "event-mismatch",
+      4,
+      JSON.stringify({
+        eventId: "event-mismatch",
+        deviceSequence: 4,
+        operatorId: "operator-legacy",
+        scannedAt: "2026-08-25T08:03:00.000Z",
+        kind: "item",
+        normalizedIdentity: "item:different-hash",
+        codeHash: "mismatch-hash",
+        canonicalRaw: "mismatch-raw",
+        activeProductionDate: "2026-08-20",
+        localVerdict: "expected",
+      }),
+      "2026-08-25T08:03:00.000Z",
+    );
 
     applyStatements(db, STATION_MIGRATIONS.slice(stateMigration));
     expect(() => applyStationMigrations(db)).not.toThrow();
     expect(
       db
-        .prepare("SELECT commit_state FROM inventory_scan_events_mirror WHERE event_id = ?")
-        .get("event-legacy"),
-    ).toEqual({ commit_state: "committed" });
+        .prepare(
+          `SELECT event_id, commit_state FROM inventory_scan_events_mirror ORDER BY device_sequence`,
+        )
+        .all(),
+    ).toEqual([
+      { event_id: "event-orphan", commit_state: "failed" },
+      { event_id: "event-success", commit_state: "committed" },
+      { event_id: "event-unknown", commit_state: "committed" },
+      { event_id: "event-mismatch", commit_state: "failed" },
+    ]);
+    expect(
+      db
+        .prepare(
+          `SELECT first_accepted_event_id FROM inventory_code_results_mirror
+           ORDER BY first_accepted_event_id`,
+        )
+        .all(),
+    ).toEqual([{ first_accepted_event_id: "event-success" }]);
+  });
+
+  it("re-audits orphan rows on devices that already applied the unsafe committed default", () => {
+    const stateMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN commit_state"),
+    );
+    expect(stateMigration).toBeGreaterThan(0);
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, stateMigration));
+    db.exec(
+      `ALTER TABLE inventory_scan_events_mirror
+         ADD COLUMN commit_state TEXT NOT NULL DEFAULT 'committed'`,
+    );
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
+          scanned_at, kind, normalized_identity, code_hash, raw_payload,
+          active_production_date, local_verdict)
+       VALUES ('inventory-installed', 'snapshot-installed', 'event-installed-orphan',
+               'device-installed', 1, 'operator-installed', '2026-08-25T08:00:00.000Z',
+               'item', 'item:installed-hash', 'installed-hash', 'installed-raw',
+               '2026-08-20', 'expected')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO inventory_code_results_mirror
+         (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
+          winning_scanned_at, observed_production_date, classification,
+          origin_classification, updated_at)
+       VALUES ('inventory-installed', 'snapshot-installed', 'installed-hash',
+               'event-installed-orphan', 'device-installed', '2026-08-25T08:00:00.000Z',
+               '2026-08-20', 'expected', 'expected', '2026-08-25T08:00:00.000Z')`,
+    ).run();
+
+    applyStatements(db, STATION_MIGRATIONS.slice(stateMigration));
+    expect(db.prepare("SELECT commit_state FROM inventory_scan_events_mirror").get()).toEqual({
+      commit_state: "failed",
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get()).toEqual(
+      {
+        count: 0,
+      },
+    );
   });
 
   it("adds durable content/order/page fences to an existing inventory mirror", () => {

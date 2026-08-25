@@ -263,7 +263,10 @@ describe("simple inventory work screen", () => {
     const suspended: SqlExecutor = {
       run: (sql, params) => exec.run(sql, params),
       all: async <T,>(sql: string, params?: unknown[]) => {
-        if (!held && /FROM inventory_snapshot_codes_mirror/i.test(sql)) {
+        if (
+          !held &&
+          /SELECT code_hash, canonical_raw[\s\S]*FROM inventory_snapshot_codes_mirror/i.test(sql)
+        ) {
           held = true;
           await gate.promise;
         }

@@ -539,9 +539,8 @@ async function firstUnknownObservation(
        FROM inventory_scan_events_mirror
       WHERE inventory_id = ? AND snapshot_id = ?
         AND normalized_identity = ?
-        AND local_verdict = 'unknown'
         AND commit_state IN ('pending', 'committed')
-      ORDER BY scanned_at, device_id, event_id
+      ORDER BY device_sequence, device_id, event_id
       LIMIT 1`,
     [inventoryId, snapshotId, event.normalized_identity],
   );
@@ -739,12 +738,25 @@ async function reconcilePendingInventoryEventsInternal(
     params,
   );
   let recoveredCommitted = 0;
-  let failed = 0;
   for (const event of pending) {
     const state = await reconcileOnePendingEvent(exec, event, inventoryId, snapshotId);
     if (state === "committed") recoveredCommitted += 1;
-    else failed += 1;
   }
+  const unresolved = await exec.all<{ failed_count: number }>(
+    `SELECT COUNT(*) AS failed_count
+       FROM inventory_scan_events_mirror failed
+      WHERE failed.inventory_id = ? AND failed.snapshot_id = ?
+        AND failed.commit_state = 'failed'
+        AND NOT EXISTS (
+          SELECT 1 FROM inventory_scan_events_mirror replacement
+           WHERE replacement.inventory_id = failed.inventory_id
+             AND replacement.snapshot_id = failed.snapshot_id
+             AND replacement.normalized_identity = failed.normalized_identity
+             AND replacement.commit_state = 'committed'
+        )`,
+    [inventoryId, snapshotId],
+  );
+  const failed = unresolved[0]?.failed_count ?? 0;
   return { requiresRescan: failed > 0, recoveredCommitted, failed };
 }
 
@@ -798,8 +810,13 @@ async function recordInventoryScanInternal(
         input.snapshotId,
         input.eventId,
       );
-      const winner =
-        verdict === "duplicate" ? await firstProjectionWinner(exec, input, classification) : null;
+      let winner: InventoryLocalClaim | null = null;
+      if (verdict === "duplicate") {
+        winner = await firstProjectionWinner(exec, input, classification);
+        if (!winner && classification.kind === "unknown") {
+          winner = await firstUnknownObservation(exec, event, input.inventoryId, input.snapshotId);
+        }
+      }
       return resultFrom(classification, verdict, summary.total, winner);
     }
   }
@@ -918,7 +935,7 @@ export async function readInventoryProgress(
     accepted_items: number;
   }>(
     `WITH committed_events AS (
-       SELECT event_id, device_id, kind, local_verdict
+       SELECT event_id, device_id, kind, normalized_identity, code_hash, local_verdict
          FROM inventory_scan_events_mirror
         WHERE inventory_id = ? AND snapshot_id = ? AND commit_state = 'committed'
      ), committed_results AS (
@@ -932,7 +949,23 @@ export async function readInventoryProgress(
          WHERE origin_classification = 'expected') AS verified,
        (SELECT COUNT(*) FROM committed_results
          WHERE origin_classification = 'known-ineligible')
-       + (SELECT COUNT(*) FROM committed_events WHERE local_verdict = 'unknown') AS discrepancies,
+       + (SELECT COUNT(*) FROM (
+            SELECT unknown_event.normalized_identity
+              FROM committed_events unknown_event
+             WHERE unknown_event.local_verdict IN ('unknown', 'duplicate')
+               AND (
+                 unknown_event.kind = 'old_box'
+                 OR (
+                   unknown_event.kind = 'item'
+                   AND NOT EXISTS (
+                     SELECT 1 FROM inventory_snapshot_codes_mirror snapshot
+                      WHERE snapshot.snapshot_id = ?
+                        AND snapshot.code_hash = unknown_event.code_hash
+                   )
+                 )
+               )
+             GROUP BY unknown_event.normalized_identity
+          )) AS discrepancies,
        (SELECT COUNT(*) FROM committed_results
          WHERE origin_classification = 'protected') AS protected_count,
        (SELECT COUNT(*) FROM committed_results WHERE winning_device_id = ?) AS claimed_by_device,
@@ -940,7 +973,7 @@ export async function readInventoryProgress(
          WHERE device_id = ? AND kind = 'known_box' AND local_verdict = 'expected') AS accepted_boxes,
        (SELECT COUNT(*) FROM committed_events
          WHERE device_id = ? AND kind = 'item' AND local_verdict = 'expected') AS accepted_items`,
-    [inventoryId, snapshotId, inventoryId, snapshotId, deviceId, deviceId, deviceId],
+    [inventoryId, snapshotId, inventoryId, snapshotId, snapshotId, deviceId, deviceId, deviceId],
   );
   const row = rows[0];
   return {
@@ -1050,9 +1083,20 @@ export async function listRecentInventoryOperations(
             WHERE source.inventory_id = e.inventory_id
               AND source.snapshot_id = e.snapshot_id
               AND source.normalized_identity = e.normalized_identity
-              AND source.local_verdict = 'unknown'
+              AND source.local_verdict IN ('unknown', 'duplicate')
               AND source.commit_state = 'committed'
-            ORDER BY source.scanned_at, source.device_id, source.event_id
+              AND (
+                source.kind = 'old_box'
+                OR (
+                  source.kind = 'item'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM inventory_snapshot_codes_mirror known
+                     WHERE known.snapshot_id = source.snapshot_id
+                       AND known.code_hash = source.code_hash
+                  )
+                )
+              )
+            ORDER BY source.device_sequence, source.device_id, source.event_id
             LIMIT 1
          )
       WHERE e.inventory_id = ? AND e.snapshot_id = ? AND e.commit_state = 'committed'
