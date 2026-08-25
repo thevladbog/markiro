@@ -513,6 +513,78 @@ test("guard CLI identifies every fixed safe resource without plan values", async
   }
 });
 
+test("guard CLI identifies changed VM fields without their values", async () => {
+  const cases = [
+    {
+      before: {
+        metadata: {
+          "enable-oslogin": "false",
+          "serial-port-enable": "false",
+          "user-data": "old-cloud-init",
+        },
+      },
+      after: {
+        metadata: {
+          "enable-oslogin": "false",
+          "serial-port-enable": "false",
+          "user-data": "do-not-print-this-plan-value",
+        },
+      },
+      scope: "metadata-user-data",
+    },
+    {
+      before: { labels: { environment: "old-label" } },
+      after: { labels: { environment: "do-not-print-this-plan-value" } },
+      scope: "labels",
+    },
+    {
+      before: { resources: [{ cores: 2, memory: 4 }] },
+      after: { resources: [{ cores: 4, memory: 4 }] },
+      scope: "resources",
+    },
+    {
+      before: { boot_disk: [{ device_name: "old-disk" }] },
+      after: { boot_disk: [{ device_name: "do-not-print-this-plan-value" }] },
+      scope: "boot-disk",
+    },
+    {
+      before: { network_interface: [{ subnet_id: "old-subnet" }] },
+      after: { network_interface: [{ subnet_id: "do-not-print-this-plan-value" }] },
+      scope: "network-interface",
+    },
+    {
+      before: { service_account_id: "old-service-account" },
+      after: { service_account_id: "do-not-print-this-plan-value" },
+      scope: "service-account",
+    },
+    {
+      before: { platform_id: "old-platform" },
+      after: { platform_id: "do-not-print-this-plan-value" },
+      scope: "platform",
+    },
+  ];
+
+  for (const { before, after, scope } of cases) {
+    const changed = await readFixture("safe");
+    const app = resource(changed, "module.compute.yandex_compute_instance.app");
+    app.change.actions = ["update"];
+    app.change.before = before;
+    app.change.after = after;
+
+    await withPlan(changed, (planPath) => {
+      let stderr = "";
+      try {
+        execFileSync(process.execPath, [script, planPath], { cwd: root, stdio: "pipe" });
+        assert.fail(`guard CLI unexpectedly accepted VM ${scope} update`);
+      } catch (error) {
+        stderr = String(error.stderr);
+      }
+      assert.equal(stderr, `production plan rejected (safe-action-app-compute-${scope})\n`);
+      assert.doesNotMatch(stderr, /old-|do-not-print-this-plan-value/);
+    });
+  }
+});
+
 test("production plan guard permits direct-VM DNS flag enable and disable transitions", async () => {
   const safe = await readFixture("safe");
   for (const address of directVmDnsAddresses) {
