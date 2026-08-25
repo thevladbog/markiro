@@ -29,43 +29,44 @@ const payload = {
   events: [event],
 };
 
+const openBoxPayload = {
+  ...payload,
+  events: [
+    {
+      ...event,
+      kind: "old_box" as const,
+      normalizedIdentity: "old_box:346006820000000014",
+      codeHash: null,
+      canonicalRaw: "346006820000000014",
+      repack: {
+        action: "open-box" as const,
+        boxId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        oldSscc: "346006820000000014",
+        newSscc: "046012345600000012",
+        capacity: 20,
+        productionDate: "2026-08-20",
+      },
+    },
+  ],
+};
+
 describe("inventory station sync contract", () => {
   it("covers strict repack mutations in the canonical digest while keeping legacy check batches replayable", () => {
-    const repackPayload = {
-      ...payload,
-      events: [
-        {
-          ...event,
-          kind: "old_box" as const,
-          normalizedIdentity: "old_box:346006820000000014",
-          codeHash: null,
-          canonicalRaw: "346006820000000014",
-          repack: {
-            action: "open-box" as const,
-            boxId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-            oldSscc: "346006820000000014",
-            newSscc: "046012345600000012",
-            capacity: 20,
-            productionDate: "2026-08-20",
-          },
-        },
-      ],
-    };
-    const digest = inventoryEventBatchDigest(repackPayload);
+    const digest = inventoryEventBatchDigest(openBoxPayload);
     expect(digest).toMatch(/^[0-9a-f]{64}$/);
     expect(
-      parseInventoryEventBatch({ batchId: "repack-1", payloadDigest: digest, ...repackPayload })
+      parseInventoryEventBatch({ batchId: "repack-1", payloadDigest: digest, ...openBoxPayload })
         .events[0]?.repack,
-    ).toEqual(repackPayload.events[0]?.repack);
+    ).toEqual(openBoxPayload.events[0]?.repack);
     expect(() =>
       parseInventoryEventBatch({
         batchId: "repack-forged",
         payloadDigest: digest,
-        ...repackPayload,
+        ...openBoxPayload,
         events: [
           {
-            ...repackPayload.events[0],
-            repack: { ...repackPayload.events[0]!.repack, capacity: 21 },
+            ...openBoxPayload.events[0],
+            repack: { ...openBoxPayload.events[0]!.repack, capacity: 21 },
           },
         ],
       }),
@@ -80,6 +81,29 @@ describe("inventory station sync contract", () => {
         payloadDigest: inventoryEventBatchDigest(payload),
       }).events[0],
     ).not.toHaveProperty("repack");
+  });
+
+  it("binds the scanned old-box identity to the repack context and its canonical digest", () => {
+    const forged = {
+      ...openBoxPayload,
+      events: [
+        {
+          ...openBoxPayload.events[0]!,
+          repack: { ...openBoxPayload.events[0]!.repack, oldSscc: "346006820000000022" },
+        },
+      ],
+    };
+
+    expect(() => inventoryEventBatchDigest(forged)).toThrow(
+      "Invalid inventory event batch payload",
+    );
+    expect(() =>
+      parseInventoryEventBatch({
+        batchId: "forged-old-context",
+        payloadDigest: "0".repeat(64),
+        ...forged,
+      }),
+    ).toThrow("Invalid inventory event batch");
   });
 
   it("rejects repack actions attached to the wrong immutable event kind", () => {

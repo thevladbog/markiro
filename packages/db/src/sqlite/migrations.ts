@@ -2124,6 +2124,63 @@ export const STATION_MIGRATIONS: string[] = [
                )
           );
      END;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_repack_invalidate_ack_v2
+     AFTER INSERT ON inventory_sync_ack_receipts
+     BEGIN
+       UPDATE inventory_repack_boxes_mirror AS box
+          SET state = 'invalidated',
+              print_state = CASE WHEN box.print_state = 'pending' THEN 'failed'
+                                 ELSE box.print_state END,
+              invalidated_at = NEW.applied_at, updated_at = NEW.applied_at
+        WHERE box.inventory_id = NEW.inventory_id
+          AND box.snapshot_id = NEW.snapshot_id
+          AND (box.state = 'open' OR (box.state = 'closed' AND box.print_state = 'pending'))
+          AND EXISTS (
+            SELECT 1
+              FROM inventory_repack_items_mirror item,
+                   json_each(NEW.response_json, '$.outcomes') outcome
+             WHERE item.inventory_id = box.inventory_id
+               AND item.snapshot_id = box.snapshot_id
+               AND item.box_id = box.box_id
+               AND item.removed_at IS NULL
+               AND item.source_event_id = json_extract(outcome.value, '$.eventId')
+               AND json_extract(outcome.value, '$.status') = 'duplicate'
+          );
+     END;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_repack_invalidate_progress_v2
+     AFTER INSERT ON inventory_progress_receipts_v2
+     BEGIN
+       UPDATE inventory_repack_boxes_mirror AS box
+          SET state = 'invalidated',
+              print_state = CASE WHEN box.print_state = 'pending' THEN 'failed'
+                                 ELSE box.print_state END,
+              invalidated_at = NEW.applied_at, updated_at = NEW.applied_at
+        WHERE box.inventory_id = NEW.inventory_id
+          AND box.snapshot_id = NEW.snapshot_id
+          AND (box.state = 'open' OR (box.state = 'closed' AND box.print_state = 'pending'))
+          AND EXISTS (
+            SELECT 1
+              FROM inventory_repack_items_mirror item,
+                   json_each(NEW.page_json, '$.items') progress
+             WHERE item.inventory_id = box.inventory_id
+               AND item.snapshot_id = box.snapshot_id
+               AND item.box_id = box.box_id
+               AND item.removed_at IS NULL
+               AND item.code_hash = json_extract(progress.value, '$.codeHash')
+               AND json_type(progress.value, '$.winner') = 'object'
+               AND json_extract(progress.value, '$.winner.eventId') <> item.source_event_id
+               AND NOT EXISTS (
+                 SELECT 1 FROM json_each(NEW.page_json, '$.items') later
+                  WHERE json_extract(later.value, '$.codeHash') = item.code_hash
+                    AND (json_extract(later.value, '$.revision') >
+                           json_extract(progress.value, '$.revision')
+                      OR (json_extract(later.value, '$.revision') =
+                            json_extract(progress.value, '$.revision')
+                        AND json_extract(later.value, '$.id') >
+                            json_extract(progress.value, '$.id')))
+               )
+          );
+     END;`,
 ];
 
 export interface StationMigrationEntry {

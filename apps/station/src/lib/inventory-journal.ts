@@ -1582,6 +1582,7 @@ export async function listRecentInventoryOperations(
                 AND claimed.first_accepted_event_id = e.event_id) AS claimed_count
        FROM inventory_scan_events_mirror e
       WHERE e.inventory_id = ? AND e.snapshot_id = ? AND e.commit_state = 'committed'
+        AND e.kind <> 'repack_action'
       ORDER BY e.device_sequence DESC, e.event_id DESC
       LIMIT ?`,
     [inventoryId, snapshotId, RECENT_LIMIT],

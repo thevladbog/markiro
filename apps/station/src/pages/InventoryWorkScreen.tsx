@@ -19,7 +19,6 @@ import { leaveInventoryTask } from "../lib/inventory-sync.js";
 import {
   clearOpenInventoryRepackBox,
   changeOpenInventoryRepackDate,
-  closeIncompleteInventoryRepackBox,
   readInventoryRepackState,
   recordInventoryRepackScan,
   removeLastInventoryRepackItem,
@@ -233,18 +232,16 @@ function CheckInventoryWorkScreen({
     if (productionDate === null) return undefined;
     queue.open();
     const unregister = onScanQueueRegister?.(queue);
-    const stop = source.start((raw) => queue.enqueue(raw));
     return () => {
-      stop();
       unregister?.();
       void queue.close();
     };
-  }, [onScanQueueRegister, productionDate, queue, source]);
+  }, [onScanQueueRegister, productionDate, queue]);
 
   useEffect(() => {
-    source.setManualTextEntryActive?.(dateDialog);
-    return () => source.setManualTextEntryActive?.(false);
-  }, [dateDialog, source]);
+    if (productionDate === null || dateDialog) return undefined;
+    return source.start((raw) => queue.enqueue(raw));
+  }, [dateDialog, productionDate, queue, source]);
 
   const applyDate = async () => {
     if (dateDraft < inventory.productionDateFrom || dateDraft > inventory.productionDateTo) return;
@@ -446,7 +443,10 @@ function CheckInventoryWorkScreen({
             onClick={() =>
               void applyDate().catch((error: unknown) => {
                 console.error("station: inventory date update failed", error);
-                if (mounted.current) setWriteFailed(true);
+                if (mounted.current) {
+                  setWriteFailed(true);
+                  setDateDialog(false);
+                }
               })
             }
           >
@@ -621,20 +621,18 @@ function RepackInventoryWorkScreen({
     if (productionDate === null) return undefined;
     queue.open();
     const unregister = onScanQueueRegister?.(queue);
-    const stopSource = source.start((raw) => queue.enqueue(raw));
     return () => {
-      stopSource();
       unregister?.();
       void queue.close();
     };
-  }, [onScanQueueRegister, productionDate, queue, source]);
+  }, [onScanQueueRegister, productionDate, queue]);
 
   useEffect(() => {
-    source.setManualTextEntryActive?.(dateDialog || correctionsDialog);
-    return () => source.setManualTextEntryActive?.(false);
-  }, [correctionsDialog, dateDialog, source]);
+    if (productionDate === null || dateDialog || correctionsDialog) return undefined;
+    return source.start((raw) => queue.enqueue(raw));
+  }, [correctionsDialog, dateDialog, productionDate, queue, source]);
 
-  const runCorrection = async (kind: "remove" | "clear" | "close") => {
+  const runCorrection = async (kind: "remove" | "clear") => {
     setBusy(true);
     try {
       await new Promise<void>((resolve, reject) => {
@@ -651,10 +649,8 @@ function RepackInventoryWorkScreen({
               };
               if (kind === "remove") {
                 await removeLastInventoryRepackItem(exec, input);
-              } else if (kind === "clear") {
-                await clearOpenInventoryRepackBox(exec, input);
               } else {
-                await closeIncompleteInventoryRepackBox(exec, { ...input, confirmed: true });
+                await clearOpenInventoryRepackBox(exec, input);
               }
               resolve();
             } catch (error) {
@@ -671,7 +667,10 @@ function RepackInventoryWorkScreen({
       if (mounted.current) setCorrectionsDialog(false);
     } catch (error) {
       console.error("station: repack correction failed", error);
-      if (mounted.current) setWriteFailed(true);
+      if (mounted.current) {
+        setWriteFailed(true);
+        setCorrectionsDialog(false);
+      }
     } finally {
       if (mounted.current) setBusy(false);
     }
@@ -861,11 +860,9 @@ function RepackInventoryWorkScreen({
           busy={busy}
           onRemoveLast={() => void runCorrection("remove")}
           onClear={() => void runCorrection("clear")}
-          onCloseIncomplete={() => void runCorrection("close")}
           labels={{
             removeLast: t("inventory.repack.removeLast"),
             clear: t("inventory.repack.clear"),
-            closeIncomplete: t("inventory.repack.closeIncomplete"),
             empty: t("inventory.repack.empty"),
           }}
         />
@@ -879,7 +876,15 @@ function RepackInventoryWorkScreen({
           <Button
             size="floor"
             disabled={Boolean(state.box && state.box.itemCount > 0)}
-            onClick={() => void applyDate()}
+            onClick={() =>
+              void applyDate().catch((error: unknown) => {
+                console.error("station: repack date change failed", error);
+                if (mounted.current) {
+                  setWriteFailed(true);
+                  setDateDialog(false);
+                }
+              })
+            }
           >
             {t("inventory.work.applyDate")}
           </Button>

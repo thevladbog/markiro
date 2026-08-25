@@ -5,8 +5,7 @@ export interface RepackCorrectionsProps {
   busy: boolean;
   onRemoveLast: () => void;
   onClear: () => void;
-  onCloseIncomplete: () => void;
-  labels: { removeLast: string; clear: string; closeIncomplete: string; empty: string };
+  labels: { removeLast: string; clear: string; empty: string };
 }
 
 export function RepackCorrections({
@@ -14,7 +13,6 @@ export function RepackCorrections({
   busy,
   onRemoveLast,
   onClear,
-  onCloseIncomplete,
   labels,
 }: RepackCorrectionsProps) {
   if (itemCount === 0) return <p>{labels.empty}</p>;
@@ -25,9 +23,6 @@ export function RepackCorrections({
       </Button>
       <Button size="floor" variant="secondary" disabled={busy} onClick={onClear}>
         {labels.clear}
-      </Button>
-      <Button size="floor" disabled={busy} onClick={onCloseIncomplete}>
-        {labels.closeIncomplete}
       </Button>
     </div>
   );

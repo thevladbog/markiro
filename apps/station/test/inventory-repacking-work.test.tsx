@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 
 import { DatabaseSync } from "node:sqlite";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { canonicalizeKm, kmHash, type StationInventoryBundleManifest } from "@markiro/domain";
 
 import i18n from "../src/i18n/index.js";
-import { applyMigrations } from "../src/lib/mirror.js";
+import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import { InventoryWorkScreen } from "../src/pages/InventoryWorkScreen.js";
 import { makeExec } from "./support/sqlite-exec.js";
@@ -57,15 +57,25 @@ const manifest: StationInventoryBundleManifest & { mode: "repack" } = {
 
 function scanner() {
   let listener: ScanListener | null = null;
+  let starts = 0;
+  let stops = 0;
   const source: ScanSource = {
     start(next) {
+      starts += 1;
       listener = next;
       return () => {
+        stops += 1;
         listener = null;
       };
     },
   };
-  return { source, emit: (raw: string) => act(() => listener?.(raw)) };
+  return {
+    source,
+    emit: (raw: string) => act(() => listener?.(raw)),
+    active: () => listener !== null,
+    starts: () => starts,
+    stops: () => stops,
+  };
 }
 
 beforeAll(async () => i18n.changeLanguage("ru"));
@@ -74,7 +84,17 @@ afterEach(cleanup);
 describe("repack inventory work screen", () => {
   it("shows twenty fixed positions, reserves the new box once, and scans every bottle", async () => {
     const db = new DatabaseSync(":memory:");
-    const exec = makeExec(db);
+    const baseExec = makeExec(db);
+    let failCorrection = false;
+    const exec: SqlExecutor = {
+      all: (sql, params) => baseExec.all(sql, params),
+      run: (sql, params) => {
+        if (failCorrection && sql.includes("INSERT INTO inventory_repack_journal")) {
+          throw new Error("simulated correction failure");
+        }
+        return baseExec.run(sql, params);
+      },
+    };
     await applyMigrations(exec);
     db.prepare(
       "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'ИНВ-Р-42', ?)",
@@ -113,6 +133,20 @@ describe("repack inventory work screen", () => {
     expect(screen.getByRole("button", { name: "Исправления" })).toBeDefined();
     await waitFor(() => expect(onScanQueueRegister).toHaveBeenCalledOnce());
 
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await screen.findByRole("dialog");
+    expect(scan.active()).toBe(false);
+    expect(scan.stops()).toBe(1);
+    scan.emit(OLD_SSCC);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_repack_boxes_mirror").get()).toEqual(
+      {
+        count: 0,
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    await waitFor(() => expect(scan.active()).toBe(true));
+    expect(scan.starts()).toBe(2);
+
     scan.emit(OLD_SSCC);
     expect(await screen.findByText("Старый короб выбран")).toBeDefined();
     expect(screen.getByText("Сканируйте каждую бутылку")).toBeDefined();
@@ -122,6 +156,17 @@ describe("repack inventory work screen", () => {
     await waitFor(() => expect(screen.getByTestId("repack-count").textContent).toBe("1 / 20"));
     expect(screen.getAllByTestId("repack-position")[0]?.getAttribute("data-filled")).toBe("true");
     expect(screen.queryByText(km.raw)).toBeNull();
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 2,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    expect(await screen.findByRole("button", { name: "Убрать последнюю бутылку" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Закрыть неполный короб" })).toBeNull();
+    failCorrection = true;
+    fireEvent.click(screen.getByRole("button", { name: "Очистить открытый короб" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(scan.active()).toBe(true));
     expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
       count: 2,
     });

@@ -1597,6 +1597,38 @@ function mutableReceiptResponse(fixture: ReturnType<typeof receiptDb>): MutableR
   return JSON.parse(fixture.responseJson) as MutableReceiptResponse;
 }
 
+function seedClosedPendingRepackBox(fixture: ReturnType<typeof receiptDb>) {
+  const boxId = "66666666-6666-4666-8666-666666666666";
+  fixture.db
+    .prepare(
+      `INSERT INTO inventory_repack_boxes_mirror
+         (inventory_id, snapshot_id, box_id, opened_event_id, closed_event_id,
+          old_sscc_context, new_sscc, owner_device_id, capacity, production_date,
+          state, print_state, opened_at, closed_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, '346006820000000014', '046006820000000018', ?, 1,
+               '2026-08-20', 'closed', 'pending', '2026-08-25T10:00:00.000Z',
+               '2026-08-25T10:00:00.000Z', '2026-08-25T10:00:00.000Z')`,
+    )
+    .run(
+      RECEIPT_INVENTORY_ID,
+      RECEIPT_SNAPSHOT_ID,
+      boxId,
+      RECEIPT_EVENT_ID,
+      RECEIPT_EVENT_ID,
+      RECEIPT_DEVICE_ID,
+    );
+  fixture.db
+    .prepare(
+      `INSERT INTO inventory_repack_items_mirror
+         (inventory_id, snapshot_id, item_id, source_event_id, box_id, code_hash,
+          position, production_date, added_at)
+       VALUES (?, ?, '77777777-7777-4777-8777-777777777777', ?, ?, ?, 1,
+               '2026-08-20', '2026-08-25T10:00:00.000Z')`,
+    )
+    .run(RECEIPT_INVENTORY_ID, RECEIPT_SNAPSHOT_ID, RECEIPT_EVENT_ID, boxId, "c".repeat(64));
+  return boxId;
+}
+
 function expectAcknowledgementStateUntouched(fixture: ReturnType<typeof receiptDb>): void {
   expect(fixture.db.prepare("SELECT count(*) AS count FROM inventory_outbox").get()).toEqual({
     count: 1,
@@ -1914,6 +1946,70 @@ describe("inventory receipt trigger admission", () => {
         .get(boxId),
     ).toEqual({ state: "invalidated", invalidated_at: "2026-08-25T10:00:01.000Z" });
   });
+
+  it.each(["acknowledgement", "progress"] as const)(
+    "atomically invalidates a closed pending-print box after a losing %s receipt",
+    (transport) => {
+      const fixture = receiptDb();
+      const boxId = seedClosedPendingRepackBox(fixture);
+
+      if (transport === "acknowledgement") {
+        const response = mutableReceiptResponse(fixture);
+        const outcome = response.outcomes[0]!;
+        outcome.status = "duplicate";
+        outcome.reasonCode = "CLAIM_LOST";
+        outcome.claimedCount = 0;
+        outcome.conflictCount = 1;
+        outcome.claims[0]!.status = "duplicate";
+        outcome.claims[0]!.winner.eventId = "55555555-5555-4555-8555-555555555555";
+        insertAckReceipt(fixture, { responseJson: JSON.stringify(response) });
+      } else {
+        const changeId = "99999999-9999-4999-8999-999999999999";
+        insertProgressReceipt(fixture, {
+          receiptId: `${RECEIPT_INVENTORY_ID}:${RECEIPT_SNAPSHOT_ID}:${RECEIPT_DEVICE_ID}:root:0:1:1:${changeId}`,
+          appliedAt: "2026-08-25T10:00:01.000Z",
+          pageJson: JSON.stringify({
+            inventoryId: RECEIPT_INVENTORY_ID,
+            snapshotId: RECEIPT_SNAPSHOT_ID,
+            snapshotRevision: 1,
+            cursor: null,
+            resultRevision: 1,
+            items: [
+              {
+                id: changeId,
+                revision: 1,
+                kind: "claim",
+                codeHash: "c".repeat(64),
+                classification: "expected",
+                observedProductionDate: "2026-08-20",
+                winner: {
+                  codeHash: "c".repeat(64),
+                  eventId: "55555555-5555-4555-8555-555555555555",
+                  deviceId: "88888888-8888-4888-8888-888888888888",
+                  scannedAt: "2026-08-25T09:00:00.000Z",
+                },
+                correctedAt: "2026-08-25T10:00:01.000Z",
+              },
+            ],
+            nextCursor: `1:${changeId}`,
+          }),
+        });
+      }
+
+      expect(
+        fixture.db
+          .prepare(
+            `SELECT state, print_state, invalidated_at
+               FROM inventory_repack_boxes_mirror WHERE box_id = ?`,
+          )
+          .get(boxId),
+      ).toEqual({
+        state: "invalidated",
+        print_state: "failed",
+        invalidated_at: "2026-08-25T10:00:01.000Z",
+      });
+    },
+  );
 
   it("rejects malformed or unowned progress receipts without any mutation", () => {
     const validPageJson = JSON.stringify({

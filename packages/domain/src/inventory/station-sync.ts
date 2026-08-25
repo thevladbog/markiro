@@ -80,10 +80,15 @@ export const inventoryEventSchema = z
     repack: inventoryRepackMutationSchema.optional(),
   })
   .superRefine((event, context) => {
-    const action = event.repack?.action;
+    const repack = event.repack;
+    const action = repack?.action;
     const valid =
       (action === undefined && event.kind !== "repack_action") ||
-      (action === "open-box" && event.kind === "old_box") ||
+      (repack?.action === "open-box" &&
+        event.kind === "old_box" &&
+        event.codeHash === null &&
+        event.canonicalRaw === repack.oldSscc &&
+        event.normalizedIdentity === `old_box:${repack.oldSscc}`) ||
       (action === "add-item" && event.kind === "item") ||
       ((action === "remove-last" ||
         action === "clear-box" ||

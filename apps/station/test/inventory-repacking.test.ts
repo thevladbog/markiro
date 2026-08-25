@@ -11,6 +11,7 @@ import {
   recordInventoryRepackScan,
   removeLastInventoryRepackItem,
 } from "../src/lib/inventory-repacking.js";
+import { listRecentInventoryOperations } from "../src/lib/inventory-journal.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { addRange } from "../src/lib/sscc-pool.js";
 import { makeExec } from "./support/sqlite-exec.js";
@@ -218,6 +219,73 @@ describe("durable inventory repacking", () => {
       n: 1,
     });
     expect(db.prepare("SELECT COUNT(*) AS n FROM inventory_outbox").get()).toEqual({ n: 2 });
+  });
+
+  it("restores recent scanner operations after a durable correction and restart", async () => {
+    const { db, exec, capacity, seed } = await setup();
+    const item = seed("RECENT-CORRECTION");
+    await recordInventoryRepackScan(
+      exec,
+      input(OLD_SSCC, "77777777-7777-4777-8777-777777777777", capacity),
+    );
+    await recordInventoryRepackScan(exec, {
+      ...input(item.km.raw, "88888888-8888-4888-8888-888888888888", capacity),
+      createItemId: () => ITEM_ID,
+    });
+    await removeLastInventoryRepackItem(exec, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      deviceId: DEVICE_ID,
+      operatorId: OPERATOR_ID,
+      eventId: "99999999-9999-4999-8999-999999999999",
+      changedAt: "2026-08-25T11:00:00.000Z",
+    });
+
+    const expected = expect.arrayContaining([
+      expect.objectContaining({ eventId: "77777777-7777-4777-8777-777777777777" }),
+      expect.objectContaining({ eventId: "88888888-8888-4888-8888-888888888888" }),
+    ]);
+    expect(await listRecentInventoryOperations(exec, INVENTORY_ID, SNAPSHOT_ID)).toEqual(expected);
+    expect(await listRecentInventoryOperations(makeExec(db), INVENTORY_ID, SNAPSHOT_ID)).toEqual(
+      expected,
+    );
+  });
+
+  it("rejects empty incomplete close before allocating a sequence or journalling", async () => {
+    const { db, exec, capacity } = await setup();
+    await recordInventoryRepackScan(
+      exec,
+      input(OLD_SSCC, "77777777-7777-4777-8777-777777777777", capacity),
+    );
+    const before = db
+      .prepare("SELECT next_device_sequence FROM inventory_terminal_state WHERE device_id = ?")
+      .get(DEVICE_ID);
+
+    await expect(
+      closeIncompleteInventoryRepackBox(exec, {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        deviceId: DEVICE_ID,
+        operatorId: OPERATOR_ID,
+        eventId: "88888888-8888-4888-8888-888888888888",
+        changedAt: "2026-08-25T11:00:00.000Z",
+        confirmed: true,
+      }),
+    ).rejects.toThrow("inventory repack box is empty");
+    expect(
+      db
+        .prepare("SELECT next_device_sequence FROM inventory_terminal_state WHERE device_id = ?")
+        .get(DEVICE_ID),
+    ).toEqual(before);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM inventory_repack_journal").get()).toEqual({
+      n: 1,
+    });
+    expect(
+      await readInventoryRepackState(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID),
+    ).toMatchObject({
+      phase: "scanning",
+      box: { itemCount: 0 },
+    });
   });
 
   it("records remove-last, clear, and explicit incomplete close without replacing the SSCC", async () => {

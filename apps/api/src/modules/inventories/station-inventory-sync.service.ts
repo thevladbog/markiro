@@ -967,6 +967,12 @@ export class StationInventorySyncService {
 
     if (mutation.action === "open-box") {
       if (
+        event.canonicalRaw !== mutation.oldSscc ||
+        event.normalizedIdentity !== `old_box:${mutation.oldSscc}`
+      ) {
+        throw new ConflictException({ code: "INVENTORY_EVENT_IDENTITY_INVALID" });
+      }
+      if (
         mutation.capacity !== inventory.capacity ||
         mutation.productionDate !== event.activeProductionDate
       ) {
@@ -977,7 +983,10 @@ export class StationInventorySyncService {
         throw new ConflictException({ code: "INVENTORY_REPACK_SSCC_NOT_RESERVED" });
       }
       const [block] = await tx
-        .select({ id: schema.ssccBlocks.id })
+        .select({
+          id: schema.ssccBlocks.id,
+          consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial,
+        })
         .from(schema.ssccBlocks)
         .where(
           and(
@@ -991,6 +1000,9 @@ export class StationInventorySyncService {
         )
         .for("update");
       if (!block) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_SSCC_NOT_RESERVED" });
+      }
+      if (block.consumedThroughSerial !== null && parsed.serial <= block.consumedThroughSerial) {
         throw new ConflictException({ code: "INVENTORY_REPACK_SSCC_NOT_RESERVED" });
       }
       const existingOpen = await tx

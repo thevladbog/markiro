@@ -676,13 +676,19 @@ export function clearOpenInventoryRepackBox(
   return correction(exec, input, "clear-box");
 }
 
-export function closeIncompleteInventoryRepackBox(
+export async function closeIncompleteInventoryRepackBox(
   exec: SqlExecutor,
   input: CorrectionInput & { confirmed: boolean },
 ): Promise<void> {
-  if (!input.confirmed)
-    return Promise.reject(new Error("inventory repack incomplete close requires confirmation"));
-  return correction(exec, input, "close-incomplete");
+  if (!input.confirmed) throw new Error("inventory repack incomplete close requires confirmation");
+  const state = await readInventoryRepackState(
+    exec,
+    input.inventoryId,
+    input.snapshotId,
+    input.deviceId,
+  );
+  if (!state.box || state.box.itemCount === 0) throw new Error("inventory repack box is empty");
+  await correction(exec, input, "close-incomplete");
 }
 
 export function changeOpenInventoryRepackDate(

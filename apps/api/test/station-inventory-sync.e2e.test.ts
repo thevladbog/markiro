@@ -1076,12 +1076,16 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
     await expect(
       service.ingest(tenantId, deviceAId, repackInventoryId, openARequest),
     ).resolves.toEqual(openAResponse);
-    await service.ingest(
+    const openBRequest = repackBatch("repack-open-b", [openedB], 1);
+    const openBResponse = await service.ingest(
       tenantId,
       deviceBId,
       repackInventoryId,
-      repackBatch("repack-open-b", [openedB], 1),
+      openBRequest,
     );
+    await expect(
+      service.ingest(tenantId, deviceBId, repackInventoryId, openBRequest),
+    ).resolves.toEqual(openBResponse);
     expect(
       await db
         .select({
@@ -1144,6 +1148,54 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         { id: boxBId, state: "invalidated" },
       ]),
     );
+
+    const staleReservedSerialBoxId = randomUUID();
+    const staleReservedSerial = open(
+      "b",
+      staleReservedSerialBoxId,
+      buildSscc(0, issuerPrefix, 200),
+    );
+    await expect(
+      service.ingest(
+        tenantId,
+        deviceBId,
+        repackInventoryId,
+        repackBatch("repack-stale-reserved-serial", [staleReservedSerial], 0),
+      ),
+    ).rejects.toSatisfy(
+      (error: unknown) => errorCode(error) === "INVENTORY_REPACK_SSCC_NOT_RESERVED",
+    );
+    expect(
+      await db
+        .select({ id: schema.inventoryRepackBoxes.id })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.id, staleReservedSerialBoxId)),
+    ).toEqual([]);
+
+    const forgedOldContextBoxId = randomUUID();
+    const forgedOldContext = open("b", forgedOldContextBoxId, buildSscc(0, issuerPrefix, 202));
+    if (forgedOldContext.repack?.action !== "open-box") {
+      throw new Error("test setup did not create an open-box mutation");
+    }
+    const forgedOldContextRequest = repackBatch("repack-forged-old-context", [forgedOldContext], 0);
+    // Exercise the service boundary independently of the DTO/domain parser.
+    // The shared contract test above proves the forged digest cannot be made
+    // canonical; the server must still refuse a bypassed/malformed caller.
+    forgedOldContext.repack = {
+      ...forgedOldContext.repack,
+      oldSscc: buildSscc(0, issuerPrefix, 901),
+    };
+    await expect(
+      service.ingest(tenantId, deviceBId, repackInventoryId, forgedOldContextRequest),
+    ).rejects.toSatisfy(
+      (error: unknown) => errorCode(error) === "INVENTORY_EVENT_IDENTITY_INVALID",
+    );
+    expect(
+      await db
+        .select({ id: schema.inventoryRepackBoxes.id })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.id, forgedOldContextBoxId)),
+    ).toEqual([]);
 
     const removedAt = "2026-08-25T12:00:03.000Z";
     const remove = repackEvent("a", {
