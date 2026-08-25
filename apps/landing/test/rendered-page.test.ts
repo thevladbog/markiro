@@ -180,6 +180,37 @@ describe("rendered landing page", () => {
     }
   });
 
+  it("publishes the current product-category boundary on the home and SSCC pages", () => {
+    const ruCategory = "Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки";
+    const enCategory = "Beer, beverages made from beer and low-alcohol beverages";
+
+    for (const route of ["/", "/sscc-i-agregatsiya/"] as const) {
+      const text = documents.get(route)?.body.textContent?.replace(/\s+/g, " ") ?? "";
+      expect(text).toContain(ruCategory);
+      expect(text.toLowerCase()).toContain("сидр");
+      expect(text).toContain("Новые товарные группы добавляются поэтапно");
+      expect(text).not.toContain("внедряется для производителей");
+    }
+
+    for (const route of ["/en/", "/en/sscc-and-aggregation/"] as const) {
+      const text = documents.get(route)?.body.textContent?.replace(/\s+/g, " ") ?? "";
+      expect(text).toContain(enCategory);
+      expect(text.toLowerCase()).toContain("cider");
+      expect(text).toContain("Additional product categories are being added gradually");
+      expect(text).not.toContain("is currently deployed");
+    }
+
+    const ruSscc = documents.get("/sscc-i-agregatsiya/")?.body.textContent ?? "";
+    expect(ruSscc).toContain("Текущий поддерживаемый уровень — цепочка «единица → короб»");
+    expect(ruSscc).toContain("Паллетная агрегация");
+    expect(ruSscc).toContain("будет добавлена отдельным следующим этапом");
+
+    const enSscc = documents.get("/en/sscc-and-aggregation/")?.body.textContent ?? "";
+    expect(enSscc).toContain("The currently supported level is the item-to-case chain");
+    expect(enSscc).toContain("Pallet aggregation");
+    expect(enSscc).toContain("will be added as a separate next stage");
+  });
+
   it("renders the four visible fields in the accessible order with optional phone copy", () => {
     const form = document.querySelector<HTMLFormElement>("form[data-demo-form]");
     expect(form).not.toBeNull();
