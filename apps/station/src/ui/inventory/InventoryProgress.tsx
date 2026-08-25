@@ -6,6 +6,7 @@ import type {
 export interface InventoryProgressLabels {
   verified: string;
   discrepancies: string;
+  protected: string;
   terminal: string;
   boxes: string;
   items: string;
@@ -48,6 +49,10 @@ export function InventoryProgress({
               <dd data-testid="inventory-discrepancies">
                 {progress.discrepancies.toLocaleString(locale)}
               </dd>
+            </div>
+            <div>
+              <dt>{labels.protected}</dt>
+              <dd data-testid="inventory-protected">{progress.protected.toLocaleString(locale)}</dd>
             </div>
           </dl>
         </section>

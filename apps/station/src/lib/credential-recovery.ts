@@ -8,6 +8,7 @@ import {
 
 export interface SealedWorkSummary {
   scans: number;
+  inventoryScans: number;
   boxes: number;
   exceptions: number;
   total: number;
@@ -335,17 +336,30 @@ export async function readSealedWorkSummary(
   timeoutMs = FLOOR_WORK_BARRIER_TIMEOUT_MS,
 ): Promise<SealedWorkSummary> {
   await waitForFloorWork(floorWork, timeoutMs);
-  const rows = await exec.all<{ scans: number; boxes: number; exceptions: number }>(
+  const rows = await exec.all<{
+    scans: number;
+    inventory_scans: number;
+    boxes: number;
+    exceptions: number;
+  }>(
     `SELECT
        (SELECT COUNT(*) FROM outbox) AS scans,
+       (SELECT COUNT(*) FROM inventory_outbox) AS inventory_scans,
        (SELECT COUNT(*) FROM boxes_mirror
          WHERE closed_at IS NOT NULL AND acked_at IS NULL) AS boxes,
        (SELECT COUNT(*) FROM box_exceptions_mirror) AS exceptions`,
   );
   const scans = rows[0]?.scans ?? 0;
+  const inventoryScans = rows[0]?.inventory_scans ?? 0;
   const boxes = rows[0]?.boxes ?? 0;
   const exceptions = rows[0]?.exceptions ?? 0;
-  return { scans, boxes, exceptions, total: scans + boxes + exceptions };
+  return {
+    scans,
+    inventoryScans,
+    boxes,
+    exceptions,
+    total: scans + inventoryScans + boxes + exceptions,
+  };
 }
 
 interface ClearRejectedCredentialStateDeps {

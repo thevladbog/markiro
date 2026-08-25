@@ -6,6 +6,7 @@ import type { StationInventoryBundleManifest } from "@markiro/domain";
 import {
   listRecentInventoryOperations,
   readInventoryProgress,
+  reconcilePendingInventoryEvents,
   recordInventoryScan,
   type InventoryProgress,
   type RecentInventoryOperation,
@@ -105,11 +106,17 @@ export function InventoryWorkScreen({
           updatedAt: now(),
         });
       }
+      const reconciliation = await reconcilePendingInventoryEvents(
+        exec,
+        inventory.inventoryId,
+        inventory.snapshotId,
+      );
+      await refresh();
       if (mounted.current) {
         setProductionDate(stored);
         setDateDraft(stored);
+        setWriteFailed(reconciliation.requiresRescan);
       }
-      await refresh();
     })().catch((error: unknown) => {
       console.error("station: inventory work hydration failed", error);
       if (mounted.current) setWriteFailed(true);
@@ -280,6 +287,7 @@ export function InventoryWorkScreen({
               labels={{
                 verified: t("inventory.work.progress.verified"),
                 discrepancies: t("inventory.work.progress.discrepancies"),
+                protected: t("inventory.work.progress.protected"),
                 terminal: t("inventory.work.progress.terminal"),
                 boxes: t("inventory.work.progress.boxes"),
                 items: t("inventory.work.progress.items"),
@@ -308,6 +316,7 @@ export function InventoryWorkScreen({
               labels={{
                 verified: t("inventory.work.progress.verified"),
                 discrepancies: t("inventory.work.progress.discrepancies"),
+                protected: t("inventory.work.progress.protected"),
                 terminal: t("inventory.work.progress.terminal"),
                 boxes: t("inventory.work.progress.boxes"),
                 items: t("inventory.work.progress.items"),

@@ -280,6 +280,7 @@ function mockInvokeForFloor(
   onInvoke?: (cmd: string, payload: unknown) => void,
   recoverySnapshotFailure?: Error,
   configWriteFailure?: Error,
+  inventoryOutboxCount = 0,
 ): OutboxSeedRow[] {
   const outbox = [...outboxRows];
   // Mutated by a real `recordConflicts`/`conflictCount` round-trip through
@@ -345,7 +346,14 @@ function mockInvokeForFloor(
       const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
       if (query.includes("AS scans")) {
         if (recoverySnapshotFailure) return Promise.reject(recoverySnapshotFailure);
-        return Promise.resolve([{ scans: outbox.length, boxes: 0, exceptions: 0 }]);
+        return Promise.resolve([
+          {
+            scans: outbox.length,
+            inventory_scans: inventoryOutboxCount,
+            boxes: 0,
+            exceptions: 0,
+          },
+        ]);
       }
       // Checked before every other branch: none of the other queries below
       // reference the outbox table, so matching on it first is just the
@@ -697,7 +705,7 @@ async function expectEmptyQueueCredentialRecovery(
 ): Promise<void> {
   await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
   expect(screen.getByTestId("sealed-work-summary").textContent).toBe(
-    "Unsynchronized work is sealed on this station: 0 scans, 0 boxes, 0 corrections.",
+    "Unsynchronized work is sealed on this station: 0 production scans, 0 inventory scans, 0 boxes, 0 corrections.",
   );
   expect(screen.queryByTestId("scanner-status")).toBeNull();
   expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(1);
@@ -3495,7 +3503,7 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
     expect(screen.getByTestId("sealed-work-summary").textContent).toBe(
-      "Unsynchronized work is sealed on this station: 1 scans, 0 boxes, 0 corrections.",
+      "Unsynchronized work is sealed on this station: 1 production scans, 0 inventory scans, 0 boxes, 0 corrections.",
     );
     expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(1);
     expect(outbox).toHaveLength(1);
@@ -3534,6 +3542,9 @@ describe("App", () => {
           checkedFloorExit = true;
         }
       },
+      undefined,
+      undefined,
+      1,
     );
     let rejectSync!: () => void;
     const rejectedResponse = new Promise<Response>((resolve) => {
@@ -3562,8 +3573,9 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
     expect(checkedFloorExit).toBe(true);
-    expect(screen.getByTestId("sealed-work-summary").textContent).toContain("1");
-    expect(screen.getByTestId("sealed-work-summary").textContent).toContain("0");
+    expect(screen.getByTestId("sealed-work-summary").textContent).toBe(
+      "Unsynchronized work is sealed on this station: 1 production scans, 1 inventory scans, 0 boxes, 0 corrections.",
+    );
     expect(invokeMock).toHaveBeenCalledWith("clear_credential");
     expect(outbox).toHaveLength(1);
     expect(persistedConfig).toEqual({

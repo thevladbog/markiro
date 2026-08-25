@@ -395,7 +395,7 @@ export const inventoryCodeResultsMirror = sqliteTable(
   (table) => [primaryKey({ columns: [table.inventoryId, table.snapshotId, table.codeHash] })],
 );
 
-/** Append-only local scan facts. Device sequence is unique within a snapshot revision. */
+/** Reserved local scan facts; immutable after commit. Sequence is unique within a revision. */
 export const inventoryScanEventsMirror = sqliteTable(
   "inventory_scan_events_mirror",
   {
@@ -412,6 +412,7 @@ export const inventoryScanEventsMirror = sqliteTable(
     rawPayload: text("raw_payload"),
     activeProductionDate: text("active_production_date"),
     localVerdict: text("local_verdict").notNull(),
+    commitState: text("commit_state").notNull().default("committed"),
   },
   (table) => [
     primaryKey({ columns: [table.inventoryId, table.snapshotId, table.eventId] }),

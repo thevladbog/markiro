@@ -243,6 +243,32 @@ describe("STATION_MIGRATIONS", () => {
     expect(() => applyStationMigrations(db)).not.toThrow();
   });
 
+  it("adds a rerunnable event commit-state fence while treating legacy facts as committed", () => {
+    const stateMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN commit_state"),
+    );
+    expect(stateMigration).toBeGreaterThan(0);
+
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, stateMigration));
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
+          scanned_at, kind, normalized_identity, local_verdict)
+       VALUES ('inventory-legacy', 'snapshot-legacy', 'event-legacy', 'device-legacy', 1,
+               'operator-legacy', '2026-08-25T08:00:00.000Z', 'item', 'item:legacy',
+               'expected')`,
+    ).run();
+
+    applyStatements(db, STATION_MIGRATIONS.slice(stateMigration));
+    expect(() => applyStationMigrations(db)).not.toThrow();
+    expect(
+      db
+        .prepare("SELECT commit_state FROM inventory_scan_events_mirror WHERE event_id = ?")
+        .get("event-legacy"),
+    ).toEqual({ commit_state: "committed" });
+  });
+
   it("adds durable content/order/page fences to an existing inventory mirror", () => {
     const firstInventoryMigration = STATION_MIGRATIONS.findIndex((statement) =>
       statement.includes("CREATE TABLE IF NOT EXISTS inventory_task_mirror"),

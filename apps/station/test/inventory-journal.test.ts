@@ -6,6 +6,7 @@ import { canonicalizeKm, kmHash } from "@markiro/domain";
 import {
   listRecentInventoryOperations,
   readInventoryProgress,
+  reconcilePendingInventoryEvents,
   recordInventoryScan,
 } from "../src/lib/inventory-journal.js";
 import {
@@ -109,6 +110,36 @@ function failOnce(base: SqlExecutor, pattern: RegExp): SqlExecutor {
       return base.all<T>(sql, params);
     },
   };
+}
+
+function suspendOnce(base: SqlExecutor, pattern: RegExp) {
+  let held = false;
+  let release!: () => void;
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const wait = async (sql: string) => {
+    if (!held && pattern.test(sql)) {
+      held = true;
+      markStarted();
+      await gate;
+    }
+  };
+  const exec: SqlExecutor = {
+    run: async (sql, params) => {
+      await wait(sql);
+      return base.run(sql, params);
+    },
+    all: async <T>(sql: string, params?: unknown[]) => {
+      await wait(sql);
+      return base.all<T>(sql, params);
+    },
+  };
+  return { exec, started, release };
 }
 
 describe("inventory journal", () => {
@@ -221,6 +252,34 @@ describe("inventory journal", () => {
     });
   });
 
+  it("does not accept protected-only or ineligible-only boxes as expected", async () => {
+    const protectedFixture = await setup();
+    seedCode(protectedFixture.db, "BOX-PROTECTED-ONLY", {
+      parentSscc: SSCC,
+      state: "MOVING_BY_UD",
+      expected: 1,
+    });
+    await expect(
+      recordInventoryScan(protectedFixture.exec, input(SSCC, "event-protected-box")),
+    ).resolves.toMatchObject({ verdict: "protected", claimedCount: 1 });
+    await expect(
+      readInventoryProgress(protectedFixture.exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID),
+    ).resolves.toMatchObject({ verified: 0, protected: 1, acceptedBoxes: 0 });
+
+    const ineligibleFixture = await setup();
+    seedCode(ineligibleFixture.db, "BOX-INELIGIBLE-ONLY", {
+      parentSscc: SSCC,
+      status: "WRITTEN_OFF",
+      expected: 0,
+    });
+    await expect(
+      recordInventoryScan(ineligibleFixture.exec, input(SSCC, "event-ineligible-box")),
+    ).resolves.toMatchObject({ verdict: "known-ineligible", claimedCount: 1 });
+    await expect(
+      readInventoryProgress(ineligibleFixture.exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID),
+    ).resolves.toMatchObject({ verified: 0, discrepancies: 1, acceptedBoxes: 0 });
+  });
+
   it("keeps a zero-child SSCC as a durable unknown discrepancy instead of an accepted box", async () => {
     const { db, exec } = await setup();
     const result = await recordInventoryScan(exec, input(SSCC, "event-unknown-box"));
@@ -236,54 +295,305 @@ describe("inventory journal", () => {
     });
   });
 
-  it("compensates only projections owned by a failed event and never reuses its sequence", async () => {
+  it("reconciles process loss after event reservation as failed and permits a fresh rescan", async () => {
     const { db, exec } = await setup();
-    const first = seedCode(db, "EVENT-FAIL");
+    const afterReservation = seedCode(db, "LOSS-AFTER-EVENT");
 
     await expect(
       recordInventoryScan(
-        failOnce(exec, /INSERT INTO inventory_scan_events_mirror/i),
-        input(first.km.raw, "event-failed"),
+        failOnce(exec, /INSERT INTO inventory_code_results_mirror/i),
+        input(afterReservation.km.raw, "event-loss-after-reservation"),
       ),
     ).rejects.toThrow("simulated durable write failure");
+    expect(
+      db.prepare("SELECT event_id, commit_state FROM inventory_scan_events_mirror").get(),
+    ).toEqual({
+      event_id: "event-loss-after-reservation",
+      commit_state: "pending",
+    });
+    expect(await listRecentInventoryOperations(exec, INVENTORY_ID, SNAPSHOT_ID)).toEqual([]);
+    expect(await readInventoryProgress(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID)).toMatchObject({
+      verified: 0,
+      acceptedItems: 0,
+    });
+
+    const restarted = makeExec(db);
+    await expect(
+      reconcilePendingInventoryEvents(restarted, INVENTORY_ID, SNAPSHOT_ID),
+    ).resolves.toEqual({ requiresRescan: true, recoveredCommitted: 0, failed: 1 });
+    expect(
+      db
+        .prepare(
+          `SELECT commit_state, COUNT(*) AS count FROM inventory_scan_events_mirror
+           GROUP BY commit_state`,
+        )
+        .all(),
+    ).toEqual([{ commit_state: "failed", count: 1 }]);
     expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get()).toEqual(
       {
         count: 0,
       },
     );
+    expect(await listRecentInventoryOperations(restarted, INVENTORY_ID, SNAPSHOT_ID)).toEqual([]);
 
-    await recordInventoryScan(exec, input(first.km.raw, "event-retry", "2026-08-25T10:01:00.000Z"));
-    expect(db.prepare("SELECT device_sequence FROM inventory_scan_events_mirror").get()).toEqual({
-      device_sequence: 2,
+    await expect(
+      recordInventoryScan(
+        restarted,
+        input(afterReservation.km.raw, "event-fresh-rescan", "2026-08-25T10:02:00.000Z"),
+      ),
+    ).resolves.toMatchObject({ verdict: "expected", claimedCount: 1 });
+  });
+
+  it("compensates only the orphan claim when process loss follows projection", async () => {
+    const { db, exec } = await setup();
+    const afterClaim = seedCode(db, "LOSS-AFTER-CLAIM");
+
+    await expect(
+      recordInventoryScan(
+        failOnce(exec, /SET local_verdict/i),
+        input(afterClaim.km.raw, "event-loss-after-claim"),
+      ),
+    ).rejects.toThrow("simulated durable write failure");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get()).toEqual(
+      {
+        count: 1,
+      },
+    );
+
+    const restarted = makeExec(db);
+    await expect(
+      reconcilePendingInventoryEvents(restarted, INVENTORY_ID, SNAPSHOT_ID),
+    ).resolves.toEqual({ requiresRescan: true, recoveredCommitted: 0, failed: 1 });
+    expect(db.prepare("SELECT commit_state FROM inventory_scan_events_mirror").get()).toEqual({
+      commit_state: "failed",
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get()).toEqual(
+      {
+        count: 0,
+      },
+    );
+  });
+
+  it("does not compensate a claim when an exact concurrent resume publishes its outbox", async () => {
+    const { db, exec } = await setup();
+    const code = seedCode(db, "COMPENSATION-RACE");
+    const event = input(code.km.raw, "event-compensation-race");
+
+    await expect(recordInventoryScan(failOnce(exec, /SET local_verdict/i), event)).rejects.toThrow(
+      "simulated durable write failure",
+    );
+    const payloadJson = JSON.stringify({
+      eventId: event.eventId,
+      deviceSequence: 1,
+      operatorId: event.operatorId,
+      scannedAt: event.scannedAt,
+      kind: "item",
+      normalizedIdentity: `item:${code.codeHash}`,
+      codeHash: code.codeHash,
+      canonicalRaw: code.km.raw,
+      activeProductionDate: "2026-08-20",
+      localVerdict: "expected",
+    });
+    let injected = false;
+    const concurrentResume: SqlExecutor = {
+      async run(sql, params) {
+        if (!injected && /DELETE FROM inventory_code_results_mirror/i.test(sql)) {
+          injected = true;
+          await exec.run(
+            `INSERT INTO inventory_outbox
+               (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [INVENTORY_ID, SNAPSHOT_ID, event.eventId, 1, payloadJson, event.scannedAt],
+          );
+        }
+        return exec.run(sql, params);
+      },
+      all: <T>(sql: string, params?: unknown[]) => exec.all<T>(sql, params),
+    };
+
+    await expect(
+      reconcilePendingInventoryEvents(concurrentResume, INVENTORY_ID, SNAPSHOT_ID),
+    ).resolves.toEqual({ requiresRescan: false, recoveredCommitted: 1, failed: 0 });
+    expect(db.prepare("SELECT commit_state FROM inventory_scan_events_mirror").get()).toEqual({
+      commit_state: "committed",
+    });
+    expect(
+      db.prepare("SELECT first_accepted_event_id FROM inventory_code_results_mirror").get(),
+    ).toEqual({ first_accepted_event_id: event.eventId });
+  });
+
+  it("resumes the exact pending event id without allocating another sequence", async () => {
+    const { db, exec } = await setup();
+    const code = seedCode(db, "PENDING-EXACT-RETRY");
+    const event = input(code.km.raw, "event-pending-exact");
+
+    await expect(
+      recordInventoryScan(failOnce(exec, /INSERT INTO inventory_code_results_mirror/i), event),
+    ).rejects.toThrow("simulated durable write failure");
+    await expect(recordInventoryScan(exec, event)).resolves.toMatchObject({
+      verdict: "expected",
+      claimedCount: 1,
+    });
+    expect(
+      db.prepare("SELECT device_sequence, commit_state FROM inventory_scan_events_mirror").get(),
+    ).toEqual({ device_sequence: 1, commit_state: "committed" });
+    expect(
+      db
+        .prepare("SELECT next_device_sequence FROM inventory_terminal_state WHERE device_id = ?")
+        .get(DEVICE_ID),
+    ).toEqual({ next_device_sequence: 2 });
+  });
+
+  it("finalizes a pending event after process loss once its exact projection and outbox exist", async () => {
+    const { db, exec } = await setup();
+    const code = seedCode(db, "LOSS-AFTER-OUTBOX");
+
+    await expect(
+      recordInventoryScan(
+        failOnce(exec, /SET commit_state = 'committed'/i),
+        input(code.km.raw, "event-loss-after-outbox"),
+      ),
+    ).rejects.toThrow("simulated durable write failure");
+    expect(db.prepare("SELECT commit_state FROM inventory_scan_events_mirror").get()).toEqual({
+      commit_state: "pending",
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 1,
+    });
+    expect(await listRecentInventoryOperations(exec, INVENTORY_ID, SNAPSHOT_ID)).toEqual([]);
+
+    const restarted = makeExec(db);
+    await expect(
+      reconcilePendingInventoryEvents(restarted, INVENTORY_ID, SNAPSHOT_ID),
+    ).resolves.toEqual({ requiresRescan: false, recoveredCommitted: 1, failed: 0 });
+    expect(await listRecentInventoryOperations(restarted, INVENTORY_ID, SNAPSHOT_ID)).toMatchObject(
+      [{ eventId: "event-loss-after-outbox", verdict: "expected" }],
+    );
+    expect(
+      await readInventoryProgress(restarted, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID),
+    ).toMatchObject({
+      verified: 1,
+      acceptedItems: 1,
     });
   });
 
-  it("preserves the honest event, compensates its claims on outbox failure, and permits retry", async () => {
+  it("rejects a concurrent same-event payload mismatch but safely resumes an exact replay", async () => {
     const { db, exec } = await setup();
-    const code = seedCode(db, "OUTBOX-FAIL");
-
-    await expect(
-      recordInventoryScan(
-        failOnce(exec, /INSERT INTO inventory_outbox/i),
-        input(code.km.raw, "event-outbox"),
-      ),
-    ).rejects.toThrow("simulated durable write failure");
-    expect(db.prepare("SELECT event_id FROM inventory_scan_events_mirror").get()).toEqual({
-      event_id: "event-outbox",
-    });
-    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get()).toEqual(
-      {
-        count: 0,
-      },
+    const first = seedCode(db, "SAME-EVENT-A");
+    const second = seedCode(db, "SAME-EVENT-B");
+    const suspended = suspendOnce(exec, /INSERT INTO inventory_scan_events_mirror/i);
+    const eventA = input(first.km.raw, "event-concurrent-same");
+    const firstCall = recordInventoryScan(suspended.exec, eventA);
+    await suspended.started;
+    const mismatchedCall = recordInventoryScan(
+      suspended.exec,
+      input(second.km.raw, "event-concurrent-same"),
     );
+    suspended.release();
 
-    const retry = await recordInventoryScan(exec, input(code.km.raw, "event-outbox"));
-    expect(retry).toMatchObject({ verdict: "expected", claimedCount: 1 });
+    const mismatchResults = await Promise.allSettled([firstCall, mismatchedCall]);
+    expect(mismatchResults.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(mismatchResults.filter((result) => result.status === "rejected")).toHaveLength(1);
+    await expect(recordInventoryScan(exec, eventA)).resolves.toMatchObject({ verdict: "expected" });
     expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror").get()).toEqual({
       count: 1,
     });
     expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
       count: 1,
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get()).toEqual(
+      {
+        count: 1,
+      },
+    );
+    expect(
+      db
+        .prepare("SELECT next_device_sequence FROM inventory_terminal_state WHERE device_id = ?")
+        .get(DEVICE_ID),
+    ).toEqual({ next_device_sequence: 2 });
+  });
+
+  it("coalesces concurrent exact same-event calls into one sequence, claim, and outbox", async () => {
+    const { db, exec } = await setup();
+    const code = seedCode(db, "SAME-EVENT-EXACT");
+    const suspended = suspendOnce(exec, /INSERT INTO inventory_scan_events_mirror/i);
+    const event = input(code.km.raw, "event-concurrent-exact");
+    const first = recordInventoryScan(suspended.exec, event);
+    await suspended.started;
+    const second = recordInventoryScan(suspended.exec, event);
+    suspended.release();
+
+    await expect(Promise.all([first, second])).resolves.toMatchObject([
+      { verdict: "expected" },
+      { verdict: "expected" },
+    ]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror").get()).toEqual({
+      count: 1,
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get()).toEqual(
+      {
+        count: 1,
+      },
+    );
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 1,
+    });
+    expect(
+      db
+        .prepare("SELECT next_device_sequence FROM inventory_terminal_state WHERE device_id = ?")
+        .get(DEVICE_ID),
+    ).toEqual({ next_device_sequence: 2 });
+  });
+
+  it("records the loser of a concurrent same-item race as duplicate without progress inflation", async () => {
+    const { db, exec } = await setup();
+    const code = seedCode(db, "CONCURRENT-ITEM");
+    const suspended = suspendOnce(exec, /INSERT INTO inventory_code_results_mirror/i);
+    const first = recordInventoryScan(suspended.exec, input(code.km.raw, "event-item-a"));
+    await suspended.started;
+    const second = recordInventoryScan(
+      suspended.exec,
+      input(code.km.raw, "event-item-b", "2026-08-25T10:00:01.000Z"),
+    );
+    suspended.release();
+
+    const results = await Promise.all([first, second]);
+    expect(results.map((result) => result.verdict).sort()).toEqual(["duplicate", "expected"]);
+    expect(await readInventoryProgress(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID)).toMatchObject({
+      verified: 1,
+      acceptedItems: 1,
+    });
+    expect(
+      db
+        .prepare(
+          `SELECT local_verdict, COUNT(*) AS count FROM inventory_scan_events_mirror
+           GROUP BY local_verdict ORDER BY local_verdict`,
+        )
+        .all(),
+    ).toEqual([
+      { local_verdict: "duplicate", count: 1 },
+      { local_verdict: "expected", count: 1 },
+    ]);
+  });
+
+  it("serializes concurrent known-box expansion and records exactly one accepted box", async () => {
+    const { db, exec } = await setup();
+    seedCode(db, "CONCURRENT-BOX-A", { parentSscc: SSCC });
+    seedCode(db, "CONCURRENT-BOX-B", { parentSscc: SSCC });
+    const suspended = suspendOnce(exec, /INSERT INTO inventory_code_results_mirror[\s\S]*SELECT/i);
+    const first = recordInventoryScan(suspended.exec, input(SSCC, "event-box-a"));
+    await suspended.started;
+    const second = recordInventoryScan(
+      suspended.exec,
+      input(SSCC, "event-box-b", "2026-08-25T10:00:01.000Z"),
+    );
+    suspended.release();
+
+    const results = await Promise.all([first, second]);
+    expect(results.map((result) => result.verdict).sort()).toEqual(["duplicate", "expected"]);
+    expect(await readInventoryProgress(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID)).toMatchObject({
+      verified: 2,
+      acceptedBoxes: 1,
     });
   });
 
@@ -322,7 +632,7 @@ describe("inventory journal", () => {
     });
     expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get()).toEqual(
       {
-        count: 1,
+        count: 0,
       },
     );
     const recent = await listRecentInventoryOperations(exec, INVENTORY_ID, SNAPSHOT_ID);
@@ -331,6 +641,96 @@ describe("inventory journal", () => {
     ]);
     expect(JSON.stringify(recent)).not.toContain("PHYSICAL-ONLY");
     expect(JSON.stringify(recent)).not.toContain("operator-pin");
+  });
+
+  it("counts unknown source observations once without a result projection and keeps protected explicit", async () => {
+    const { db, exec } = await setup();
+    const protectedCode = seedCode(db, "PROTECTED-COUNT", {
+      state: "MOVING_BY_UD",
+      expected: 1,
+    });
+    const ineligible = seedCode(db, "INELIGIBLE-COUNT", { status: "APPLIED", expected: 0 });
+    const unknownKm = raw("UNKNOWN-COUNT");
+
+    await recordInventoryScan(exec, input(protectedCode.km.raw, "event-protected"));
+    await recordInventoryScan(
+      exec,
+      input(ineligible.km.raw, "event-ineligible", "2026-08-25T10:00:01.000Z"),
+    );
+    await recordInventoryScan(
+      exec,
+      input(unknownKm, "event-unknown-km", "2026-08-25T10:00:02.000Z"),
+    );
+    await recordInventoryScan(exec, input(SSCC, "event-unknown-box", "2026-08-25T10:00:03.000Z"));
+    await expect(
+      recordInventoryScan(
+        exec,
+        input(unknownKm, "event-unknown-km-rescan", "2026-08-25T10:00:04.000Z"),
+      ),
+    ).resolves.toMatchObject({ verdict: "duplicate" });
+
+    expect(
+      db
+        .prepare(
+          `SELECT origin_classification, COUNT(*) AS count
+             FROM inventory_code_results_mirror GROUP BY origin_classification
+             ORDER BY origin_classification`,
+        )
+        .all(),
+    ).toEqual([
+      { origin_classification: "known-ineligible", count: 1 },
+      { origin_classification: "protected", count: 1 },
+    ]);
+    expect(await readInventoryProgress(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID)).toMatchObject({
+      verified: 0,
+      protected: 1,
+      discrepancies: 3,
+      acceptedBoxes: 0,
+      acceptedItems: 0,
+    });
+    const restartedRecent = await listRecentInventoryOperations(
+      makeExec(db),
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+    );
+    expect(restartedRecent[0]).toMatchObject({
+      eventId: "event-unknown-km-rescan",
+      verdict: "duplicate",
+      firstWinning: {
+        eventId: "event-unknown-km",
+        deviceId: DEVICE_ID,
+        scannedAt: "2026-08-25T10:00:02.000Z",
+      },
+    });
+  });
+
+  it("hydrates a duplicate known box with the exact first winning terminal and time", async () => {
+    const { db, exec } = await setup();
+    const child = seedCode(db, "BOX-WON-ELSEWHERE", { parentSscc: SSCC });
+    db.prepare(
+      `INSERT INTO inventory_code_results_mirror
+         (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
+          winning_scanned_at, observed_production_date, classification, origin_classification,
+          updated_at)
+       VALUES (?, ?, ?, 'remote-event', 'STA-REMOTE', '2026-08-25T08:30:00.000Z',
+               '2026-08-20', 'expected', 'expected', '2026-08-25T08:30:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, child.codeHash);
+
+    await recordInventoryScan(exec, input(SSCC, "event-box-duplicate"));
+    const restarted = makeExec(db);
+    expect(await listRecentInventoryOperations(restarted, INVENTORY_ID, SNAPSHOT_ID)).toMatchObject(
+      [
+        {
+          verdict: "duplicate",
+          scanKind: "known_box",
+          firstWinning: {
+            eventId: "remote-event",
+            deviceId: "STA-REMOTE",
+            scannedAt: "2026-08-25T08:30:00.000Z",
+          },
+        },
+      ],
+    );
   });
 
   it("does not derive a displayed box suffix from a corrupt legacy raw payload", async () => {

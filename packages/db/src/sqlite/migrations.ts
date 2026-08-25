@@ -609,4 +609,10 @@ export const STATION_MIGRATIONS: string[] = [
     WHERE credential_ownership IS NULL
       AND staged_snapshot_id IS NOT NULL
       AND (active_snapshot_id IS NULL OR staged_snapshot_id <> active_snapshot_id);`,
+  // Task 5 review: event reservation precedes the projection and outbox. A
+  // trailing state column makes that multi-statement protocol restart-safe.
+  // Existing append-only facts predate reservations and already have their
+  // transport rows, so the compatibility default is deliberately committed.
+  `ALTER TABLE inventory_scan_events_mirror
+     ADD COLUMN commit_state TEXT NOT NULL DEFAULT 'committed';`,
 ];

@@ -1413,7 +1413,7 @@ body,
 .inventory-progress-summary dl {
   display: grid;
   margin: 0;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .inventory-progress-summary dl > div {

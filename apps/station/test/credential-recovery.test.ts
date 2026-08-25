@@ -316,6 +316,12 @@ describe("credential rejection recovery", () => {
   it("reports exact unsynchronized scan, box, and exception counts", async () => {
     const base = await migratedExec();
     await seedRecoveryFixture(base);
+    await base.run(
+      `INSERT INTO inventory_outbox
+         (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      ["inventory-1", "snapshot-1", "inventory-event-1", 1, "{}", "2026-08-25T08:00:00Z"],
+    );
     let snapshotQueries = 0;
     let insertedAtSnapshot = false;
     const exec: SqlExecutor = {
@@ -346,9 +352,10 @@ describe("credential rejection recovery", () => {
 
     await expect(readSealedWorkSummary(exec)).resolves.toEqual({
       scans: 2,
+      inventoryScans: 1,
       boxes: 1,
       exceptions: 1,
-      total: 4,
+      total: 5,
     });
     expect(snapshotQueries).toBe(1);
   });
@@ -386,7 +393,13 @@ describe("credential rejection recovery", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     releaseWrite();
 
-    await expect(summary).resolves.toEqual({ scans: 1, boxes: 0, exceptions: 0, total: 1 });
+    await expect(summary).resolves.toEqual({
+      scans: 1,
+      inventoryScans: 0,
+      boxes: 0,
+      exceptions: 0,
+      total: 1,
+    });
   });
 
   it("fails safely instead of hanging forever when a floor work barrier never settles", async () => {

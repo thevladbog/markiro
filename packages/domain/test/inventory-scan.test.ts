@@ -161,6 +161,82 @@ describe("inventory scan classification", () => {
     ]);
   });
 
+  it("uses protected as the known-box verdict when no unclaimed expected child remains", () => {
+    const alreadyExpected = row("BOX-EXPECTED-DONE", { parentSscc: SSCC });
+    const protectedRow = row("BOX-PROTECTED-OPEN", {
+      parentSscc: SSCC,
+      sourceState: "MOVING_BY_UD",
+      expected: true,
+      protected: false,
+    });
+
+    expect(
+      classify(
+        SSCC,
+        [alreadyExpected, protectedRow],
+        [
+          {
+            codeHash: alreadyExpected.codeHash,
+            eventId: "event-expected-first",
+            deviceId: "STA-01",
+            scannedAt: "2026-08-25T09:00:00.000Z",
+          },
+        ],
+      ),
+    ).toMatchObject({
+      kind: "protected",
+      scanKind: "known_box",
+      originClassification: "protected",
+    });
+  });
+
+  it("uses known-ineligible as the known-box verdict when it is the only unclaimed origin", () => {
+    const alreadyExpected = row("BOX-EXPECTED-DONE-2", { parentSscc: SSCC });
+    const ineligible = row("BOX-INELIGIBLE-OPEN", {
+      parentSscc: SSCC,
+      sourceStatus: "APPLIED",
+      expected: false,
+    });
+
+    expect(
+      classify(
+        SSCC,
+        [alreadyExpected, ineligible],
+        [
+          {
+            codeHash: alreadyExpected.codeHash,
+            eventId: "event-expected-first",
+            deviceId: "STA-01",
+            scannedAt: "2026-08-25T09:00:00.000Z",
+          },
+        ],
+      ),
+    ).toMatchObject({
+      kind: "known-ineligible",
+      scanKind: "known_box",
+      originClassification: "known-ineligible",
+    });
+  });
+
+  it("lets an unclaimed expected child dominate protected and ineligible box children", () => {
+    const expected = row("BOX-EXPECTED-OPEN", { parentSscc: SSCC });
+    const protectedRow = row("BOX-PROTECTED-OPEN-2", {
+      parentSscc: SSCC,
+      sourceState: "MOVING_BY_UD",
+    });
+    const ineligible = row("BOX-INELIGIBLE-OPEN-2", {
+      parentSscc: SSCC,
+      sourceStatus: "RETIRED",
+      expected: false,
+    });
+
+    expect(classify(SSCC, [expected, protectedRow, ineligible])).toMatchObject({
+      kind: "expected",
+      scanKind: "known_box",
+      originClassification: "expected",
+    });
+  });
+
   it("treats a known-box rescan with no unclaimed child as duplicate", () => {
     const child = row("BOX-DUP", { parentSscc: SSCC });
     expect(

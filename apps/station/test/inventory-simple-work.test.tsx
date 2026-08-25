@@ -153,6 +153,9 @@ describe("simple inventory work screen", () => {
     expect(
       screen.getByText("2", { selector: "[data-testid='inventory-discrepancies']" }),
     ).toBeDefined();
+    expect(
+      screen.getByText("1", { selector: "[data-testid='inventory-protected']" }),
+    ).toBeDefined();
     expect(screen.queryByText("PHYSICAL-ONLY-SECRET")).toBeNull();
 
     view.unmount();
@@ -170,6 +173,59 @@ describe("simple inventory work screen", () => {
     );
     expect(await screen.findByText("Код уже проверен на этом терминале")).toBeDefined();
     expect(screen.queryByText("PHYSICAL-ONLY-SECRET")).toBeNull();
+  });
+
+  it("reconciles an orphan pending claim before scanner intake and asks for a rescan", async () => {
+    const { db, exec } = await fixture();
+    const expected = canonicalizeKm(raw("EXPECTED"));
+    const codeHash = kmHash(expected);
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
+          kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict,
+          commit_state)
+       VALUES (?, ?, 'orphan-event', ?, 1, ?, '2026-08-25T08:00:00.000Z', 'item', ?, ?, ?,
+               '2026-08-19', 'expected', 'pending')`,
+    ).run(
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+      DEVICE_ID,
+      OPERATOR_ID,
+      `item:${codeHash}`,
+      codeHash,
+      expected.raw,
+    );
+    db.prepare(
+      `INSERT INTO inventory_code_results_mirror
+         (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
+          winning_scanned_at, observed_production_date, classification, origin_classification,
+          updated_at)
+       VALUES (?, ?, ?, 'orphan-event', ?, '2026-08-25T08:00:00.000Z', '2026-08-19',
+               'expected', 'expected', '2026-08-25T08:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, codeHash, DEVICE_ID);
+    const scan = scanner();
+
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+
+    expect(await screen.findByText("Скан не сохранён — повторите сканирование")).toBeDefined();
+    expect(screen.queryByText("Код принят")).toBeNull();
+    expect(screen.getByText("0", { selector: "[data-testid='inventory-verified']" })).toBeDefined();
+    expect(db.prepare("SELECT commit_state FROM inventory_scan_events_mirror").get()).toEqual({
+      commit_state: "failed",
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get()).toEqual(
+      {
+        count: 0,
+      },
+    );
   });
 
   it("persists a changed date and applies it to the next accepted scan", async () => {

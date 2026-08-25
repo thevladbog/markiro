@@ -57,13 +57,15 @@ export type InventoryScanClassification =
   | ({
       kind: "protected";
       originClassification: "protected";
-      sourceStatus: InventoryChzStatus;
-    } & InventoryItemIdentity)
+    } & (
+      InventoryKnownBoxIdentity | (InventoryItemIdentity & { sourceStatus: InventoryChzStatus })
+    ))
   | ({
       kind: "known-ineligible";
       originClassification: "known-ineligible";
-      sourceStatus: InventoryChzStatus;
-    } & InventoryItemIdentity)
+    } & (
+      InventoryKnownBoxIdentity | (InventoryItemIdentity & { sourceStatus: InventoryChzStatus })
+    ))
   | ({ kind: "unknown" } & (InventoryItemIdentity | { scanKind: "old_box"; sscc: string }))
   | ({
       kind: "duplicate";
@@ -170,7 +172,13 @@ export function classifyInventoryScan(
         firstWinning: firstClaim(claims),
       };
     }
-    return { kind: "expected", ...identity, originClassification: "expected" };
+    if (unclaimed.some((child) => child.originClassification === "expected")) {
+      return { kind: "expected", ...identity, originClassification: "expected" };
+    }
+    if (unclaimed.some((child) => child.originClassification === "protected")) {
+      return { kind: "protected", ...identity, originClassification: "protected" };
+    }
+    return { kind: "known-ineligible", ...identity, originClassification: "known-ineligible" };
   }
   return {
     kind: "invalid",
