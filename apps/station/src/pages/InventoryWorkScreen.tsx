@@ -17,10 +17,14 @@ import {
   attemptInventoryBoxPrint,
   findInventoryPrintedBoxBySscc,
   listInventoryBoxPrintAttempts,
+  readInventoryBoxPrintFacts,
+  readUnresolvedInventoryReprint,
   recoverInterruptedInventoryPrint,
+  type InventoryBoxPrintFacts,
   type InventoryBoxPrintingTransport,
   type InventoryBoxPrintResult,
   type InventoryPrintErrorCode,
+  type UnresolvedInventoryReprint,
 } from "../lib/inventory-box-printing.js";
 import type { StationClient } from "../lib/api-client.js";
 import type { CredentialGeneration } from "../lib/credential-recovery.js";
@@ -85,6 +89,15 @@ function printErrorCode(value: string | null | undefined): InventoryPrintErrorCo
     default:
       return null;
   }
+}
+
+interface InventoryPrintDisplay extends InventoryBoxPrintFacts {
+  attemptId: string | null;
+  attemptNumber: number;
+  attemptState: "printing" | "failed" | null;
+  kind: "initial" | "reprint";
+  state: "printing" | "printed" | "failed";
+  errorCode: InventoryPrintErrorCode | null;
 }
 
 function restoredResult(operation: RecentInventoryOperation): RecordInventoryScanResult {
@@ -530,6 +543,11 @@ function RepackInventoryWorkScreen({
   const [leaveFailed, setLeaveFailed] = useState(false);
   const [printBusy, setPrintBusy] = useState(false);
   const [printResult, setPrintResult] = useState<InventoryBoxPrintResult | null>(null);
+  const [unresolvedReprint, setUnresolvedReprint] = useState<UnresolvedInventoryReprint | null>(
+    null,
+  );
+  const [provisionalPrintFailure, setProvisionalPrintFailure] =
+    useState<InventoryPrintDisplay | null>(null);
   const [reprintSscc, setReprintSscc] = useState("");
   const [reprintCandidate, setReprintCandidate] = useState<{
     boxId: string;
@@ -540,15 +558,22 @@ function RepackInventoryWorkScreen({
   const [reprintError, setReprintError] = useState(false);
   const mounted = useRef(true);
   const automaticPrints = useRef(new Set<string>());
+  const automaticRecoveries = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
-    const [nextState, nextRecent] = await Promise.all([
+    const [nextState, nextRecent, nextReprint] = await Promise.all([
       readInventoryRepackState(exec, inventory.inventoryId, inventory.snapshotId, deviceId),
       listRecentInventoryOperations(exec, inventory.inventoryId, inventory.snapshotId),
+      readUnresolvedInventoryReprint(exec, {
+        inventoryId: inventory.inventoryId,
+        snapshotId: inventory.snapshotId,
+        deviceId,
+      }),
     ]);
     if (mounted.current) {
       setState(nextState);
       setRecent(nextRecent);
+      setUnresolvedReprint(nextReprint);
     }
   }, [deviceId, exec, inventory.inventoryId, inventory.snapshotId]);
 
@@ -629,7 +654,10 @@ function RepackInventoryWorkScreen({
           }),
         onOutcome: (outcome) => {
           if (!mounted.current) return;
-          if (outcome.verdict === "old-box-selected") setPrintResult(null);
+          if (outcome.verdict === "old-box-selected") {
+            setPrintResult(null);
+            setProvisionalPrintFailure(null);
+          }
           if (outcome.verdict === "capacity-closed") setPrintBusy(true);
           setResult(outcome);
           setWriteFailed(false);
@@ -668,7 +696,11 @@ function RepackInventoryWorkScreen({
   }, [onScanQueueRegister, productionDate, queue]);
 
   const unresolvedPrint =
-    state.phase === "closed-pending-print" || state.box?.printState === "printing";
+    state.phase === "closed-pending-print" ||
+    state.box?.printState === "printing" ||
+    unresolvedReprint !== null ||
+    provisionalPrintFailure !== null ||
+    printResult?.state === "failed";
 
   useEffect(() => {
     if (
@@ -698,6 +730,8 @@ function RepackInventoryWorkScreen({
   const runPrint = useCallback(
     async (boxId: string, kind: "initial" | "reprint" = "initial") => {
       setPrintBusy(true);
+      setProvisionalPrintFailure(null);
+      const attemptId = createEventId();
       try {
         await queue.idle();
         const attemptedAt = now();
@@ -709,7 +743,7 @@ function RepackInventoryWorkScreen({
           deviceId,
           operatorId,
           boxId,
-          attemptId: createEventId(),
+          attemptId,
           eventId: createEventId(),
           attemptedAt,
           completedAt: now,
@@ -722,9 +756,62 @@ function RepackInventoryWorkScreen({
         }
         nudge();
         await refresh();
-      } catch (error) {
-        console.error("station: inventory box print failed", error);
-        if (mounted.current) setWriteFailed(true);
+        return outcome;
+      } catch {
+        console.error("station: inventory box print persistence failed");
+        let attempts = await listInventoryBoxPrintAttempts(
+          exec,
+          inventory.inventoryId,
+          inventory.snapshotId,
+          boxId,
+        );
+        let latest = attempts.find((attempt) => attempt.attemptId === attemptId) ?? null;
+        if (latest?.state === "printing") {
+          try {
+            await recoverInterruptedInventoryPrint(exec, {
+              inventoryId: inventory.inventoryId,
+              snapshotId: inventory.snapshotId,
+              deviceId,
+              operatorId,
+              boxId,
+              attemptId: latest.attemptId,
+              eventId: createEventId(),
+              completedAt: now(),
+            });
+            attempts = await listInventoryBoxPrintAttempts(
+              exec,
+              inventory.inventoryId,
+              inventory.snapshotId,
+              boxId,
+            );
+            latest = attempts.find((attempt) => attempt.attemptId === attemptId) ?? latest;
+          } catch {
+            console.error("station: inventory print recovery persistence failed");
+          }
+        }
+        const facts = await readInventoryBoxPrintFacts(exec, {
+          inventoryId: inventory.inventoryId,
+          snapshotId: inventory.snapshotId,
+          deviceId,
+          boxId,
+        });
+        if (mounted.current) {
+          setWriteFailed(true);
+          if (facts) {
+            setProvisionalPrintFailure({
+              ...facts,
+              attemptId: latest?.attemptId ?? null,
+              attemptNumber: latest?.attemptNumber ?? 0,
+              attemptState:
+                latest?.state === "printing" || latest?.state === "failed" ? latest.state : null,
+              kind,
+              state: "failed",
+              errorCode: latest?.errorCode ?? "persistence_failed",
+            });
+          }
+        }
+        await refresh();
+        return null;
       } finally {
         if (mounted.current) setPrintBusy(false);
       }
@@ -765,6 +852,9 @@ function RepackInventoryWorkScreen({
               completedAt: now(),
             });
             setPrintResult({
+              attemptId: interrupted.attemptId,
+              boxId: box.boxId,
+              kind: interrupted.kind,
               state: "failed",
               errorCode: "persistence_failed",
               sscc: box.newSscc,
@@ -775,8 +865,8 @@ function RepackInventoryWorkScreen({
           }
           nudge();
           await refresh();
-        } catch (error) {
-          console.error("station: inventory print recovery failed", error);
+        } catch {
+          console.error("station: inventory print recovery persistence failed");
           if (mounted.current) setWriteFailed(true);
         } finally {
           if (mounted.current) setPrintBusy(false);
@@ -795,6 +885,59 @@ function RepackInventoryWorkScreen({
     refresh,
     runPrint,
     state,
+  ]);
+
+  useEffect(() => {
+    if (!unresolvedReprint || unresolvedReprint.attemptState !== "printing" || printBusy) return;
+    if (automaticRecoveries.current.has(unresolvedReprint.attemptId)) return;
+    automaticRecoveries.current.add(unresolvedReprint.attemptId);
+    void (async () => {
+      setPrintBusy(true);
+      try {
+        await recoverInterruptedInventoryPrint(exec, {
+          inventoryId: inventory.inventoryId,
+          snapshotId: inventory.snapshotId,
+          deviceId,
+          operatorId,
+          boxId: unresolvedReprint.boxId,
+          attemptId: unresolvedReprint.attemptId,
+          eventId: createEventId(),
+          completedAt: now(),
+        });
+        setProvisionalPrintFailure({
+          ...unresolvedReprint,
+          state: "failed",
+          attemptState: "failed",
+          errorCode: "persistence_failed",
+        });
+        nudge();
+        await refresh();
+      } catch {
+        console.error("station: inventory reprint recovery persistence failed");
+        if (mounted.current) {
+          setProvisionalPrintFailure({
+            ...unresolvedReprint,
+            state: "failed",
+            errorCode: "persistence_failed",
+          });
+          setWriteFailed(true);
+        }
+      } finally {
+        if (mounted.current) setPrintBusy(false);
+      }
+    })();
+  }, [
+    createEventId,
+    deviceId,
+    exec,
+    inventory.inventoryId,
+    inventory.snapshotId,
+    now,
+    nudge,
+    operatorId,
+    printBusy,
+    refresh,
+    unresolvedReprint,
   ]);
 
   const runCorrection = async (kind: "remove" | "clear") => {
@@ -862,6 +1005,40 @@ function RepackInventoryWorkScreen({
       setReprintCandidate(null);
       setReprintSscc("");
     }
+  };
+
+  const retryPrint = async (recovery: InventoryPrintDisplay) => {
+    if (recovery.attemptState === "printing" && recovery.attemptId) {
+      setPrintBusy(true);
+      try {
+        await recoverInterruptedInventoryPrint(exec, {
+          inventoryId: inventory.inventoryId,
+          snapshotId: inventory.snapshotId,
+          deviceId,
+          operatorId,
+          boxId: recovery.boxId,
+          attemptId: recovery.attemptId,
+          eventId: createEventId(),
+          completedAt: now(),
+        });
+        nudge();
+        await refresh();
+      } catch {
+        console.error("station: inventory print retry recovery persistence failed");
+        if (mounted.current) {
+          setProvisionalPrintFailure({
+            ...recovery,
+            state: "failed",
+            errorCode: "persistence_failed",
+          });
+          setWriteFailed(true);
+        }
+        return;
+      } finally {
+        if (mounted.current) setPrintBusy(false);
+      }
+    }
+    await runPrint(recovery.boxId, recovery.kind);
   };
 
   const applyDate = async () => {
@@ -944,25 +1121,32 @@ function RepackInventoryWorkScreen({
         new Date(`${productionDate}T00:00:00Z`),
       )
     : t("inventory.work.loadingDate");
-  const printFacts =
-    printResult ??
-    (state.phase === "closed-pending-print" && state.box
+  const durableReprintDisplay: InventoryPrintDisplay | null = unresolvedReprint
+    ? {
+        ...unresolvedReprint,
+        state: unresolvedReprint.attemptState === "printing" ? "printing" : "failed",
+      }
+    : null;
+  const resultDisplay: InventoryPrintDisplay | null = printResult
+    ? { ...printResult, attemptState: null }
+    : null;
+  const initialDisplay: InventoryPrintDisplay | null =
+    state.phase === "closed-pending-print" && state.box
       ? {
-          state: state.box.printState === "failed" ? ("failed" as const) : ("printed" as const),
+          attemptId: null,
+          boxId: state.box.boxId,
+          kind: "initial",
+          state: state.box.printState === "failed" ? "failed" : "printing",
+          attemptState: state.box.printState === "printing" ? "printing" : null,
           errorCode: printErrorCode(state.box.printErrorCode),
           sscc: state.box.newSscc,
           quantity: state.box.itemCount,
           productionDate: state.box.productionDate,
           attemptNumber: 0,
         }
-      : null);
-  const printPanelState =
-    printResult?.state ??
-    (state.phase === "closed-pending-print"
-      ? state.box?.printState === "failed"
-        ? "failed"
-        : "printing"
-      : null);
+      : null;
+  const printDisplay =
+    provisionalPrintFailure ?? durableReprintDisplay ?? resultDisplay ?? initialDisplay;
   return (
     <StationScreen
       title={t("inventory.repack.title")}
@@ -1014,15 +1198,13 @@ function RepackInventoryWorkScreen({
           </Button>
         </div>
         <div className="repack-work-main">
-          {printFacts && printPanelState ? (
+          {printDisplay ? (
             <InventoryBoxPrintRecovery
-              state={printPanelState}
-              facts={printFacts}
-              errorCode={printFacts.errorCode}
+              state={printDisplay.state}
+              facts={printDisplay}
+              errorCode={printDisplay.errorCode}
               busy={printBusy}
-              onRetry={() => {
-                if (state.box) void runPrint(state.box.boxId);
-              }}
+              onRetry={() => void retryPrint(printDisplay)}
               {...(onOpenPrinterSetup ? { onSetup: onOpenPrinterSetup } : {})}
               labels={{
                 printing: t("inventory.repack.print.printing"),

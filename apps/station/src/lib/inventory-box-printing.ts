@@ -1,5 +1,6 @@
 import {
   inventoryEventSchema,
+  isValidSscc,
   type InventoryEvent,
   type LabelField,
   type LabelTemplateSpec,
@@ -66,12 +67,30 @@ export interface AttemptInventoryBoxPrintInput {
 }
 
 export interface InventoryBoxPrintResult {
+  attemptId: string;
+  boxId: string;
+  kind: "initial" | "reprint";
   state: "printed" | "failed";
   errorCode: InventoryPrintErrorCode | null;
   sscc: string;
   quantity: number;
   productionDate: string;
   attemptNumber: number;
+}
+
+export interface InventoryBoxPrintFacts {
+  boxId: string;
+  sscc: string;
+  quantity: number;
+  productionDate: string;
+}
+
+export interface UnresolvedInventoryReprint extends InventoryBoxPrintFacts {
+  attemptId: string;
+  attemptNumber: number;
+  attemptState: "printing" | "failed";
+  errorCode: InventoryPrintErrorCode | null;
+  kind: "reprint";
 }
 
 interface BoxFactsRow {
@@ -140,7 +159,7 @@ function requirePrintable(
     row.quantity > row.capacity ||
     row.min_date !== row.production_date ||
     row.max_date !== row.production_date ||
-    !/^[0-9]{18}$/.test(row.new_sscc)
+    !isValidSscc(row.new_sscc)
   ) {
     throw new Error("inventory box is not printable");
   }
@@ -331,6 +350,9 @@ async function attemptInternal(
     const row = await readBoxFacts(input.exec, input.inventoryId, input.snapshotId, input.boxId);
     if (!row) throw new Error("inventory box is not printable");
     return {
+      attemptId: existing.attemptId,
+      boxId: row.box_id,
+      kind: existing.kind,
       state: existing.state,
       errorCode: existing.errorCode,
       sscc: row.new_sscc,
@@ -401,6 +423,9 @@ async function attemptInternal(
   ).filter((attempt) => attempt.attemptId === input.attemptId);
   if (!stored || stored.state === "printing") throw new Error("inventory print persistence failed");
   return {
+    attemptId: input.attemptId,
+    boxId: row.box_id,
+    kind,
     state: stored.state,
     errorCode: stored.errorCode,
     sscc: row.new_sscc,
@@ -529,6 +554,82 @@ export async function findInventoryPrintedBoxBySscc(
   return row
     ? {
         boxId: row.box_id,
+        sscc: row.new_sscc,
+        quantity: row.quantity,
+        productionDate: row.production_date,
+      }
+    : null;
+}
+
+export async function readInventoryBoxPrintFacts(
+  exec: SqlExecutor,
+  input: {
+    inventoryId: string;
+    snapshotId: string;
+    deviceId: string;
+    boxId: string;
+  },
+): Promise<InventoryBoxPrintFacts | null> {
+  const row = await readBoxFacts(exec, input.inventoryId, input.snapshotId, input.boxId);
+  if (!row || row.owner_device_id !== input.deviceId || row.state !== "closed") return null;
+  return {
+    boxId: row.box_id,
+    sscc: row.new_sscc,
+    quantity: row.quantity,
+    productionDate: row.production_date,
+  };
+}
+
+export async function readUnresolvedInventoryReprint(
+  exec: SqlExecutor,
+  input: { inventoryId: string; snapshotId: string; deviceId: string },
+): Promise<UnresolvedInventoryReprint | null> {
+  const rows = await exec.all<{
+    attempt_id: string;
+    box_id: string;
+    attempt_number: number;
+    state: "printing" | "failed";
+    error_code: InventoryPrintErrorCode | null;
+    new_sscc: string;
+    production_date: string;
+    quantity: number;
+  }>(
+    `SELECT attempt.attempt_id, attempt.box_id, attempt.attempt_number, attempt.state,
+            attempt.error_code, box.new_sscc, box.production_date,
+            COUNT(item.item_id) AS quantity
+       FROM inventory_repack_print_attempts attempt
+       INNER JOIN inventory_repack_boxes_mirror box
+         ON box.inventory_id = attempt.inventory_id AND box.snapshot_id = attempt.snapshot_id
+        AND box.box_id = attempt.box_id
+       LEFT JOIN inventory_repack_items_mirror item
+         ON item.inventory_id = box.inventory_id AND item.snapshot_id = box.snapshot_id
+        AND item.box_id = box.box_id AND item.removed_at IS NULL
+      WHERE attempt.inventory_id = ? AND attempt.snapshot_id = ?
+        AND attempt.kind = 'reprint' AND attempt.state IN ('printing', 'failed')
+        AND box.owner_device_id = ? AND box.state = 'closed'
+        AND NOT EXISTS (
+          SELECT 1 FROM inventory_repack_print_attempts later
+           WHERE later.inventory_id = attempt.inventory_id
+             AND later.snapshot_id = attempt.snapshot_id
+             AND later.box_id = attempt.box_id
+             AND later.attempt_number > attempt.attempt_number
+        )
+      GROUP BY attempt.inventory_id, attempt.snapshot_id, attempt.attempt_id,
+               attempt.box_id, attempt.attempt_number, attempt.state, attempt.error_code,
+               box.new_sscc, box.production_date
+      ORDER BY attempt.attempted_at DESC, attempt.attempt_number DESC
+      LIMIT 1`,
+    [input.inventoryId, input.snapshotId, input.deviceId],
+  );
+  const row = rows[0];
+  return row
+    ? {
+        attemptId: row.attempt_id,
+        boxId: row.box_id,
+        kind: "reprint",
+        attemptNumber: row.attempt_number,
+        attemptState: row.state,
+        errorCode: row.error_code,
         sscc: row.new_sscc,
         quantity: row.quantity,
         productionDate: row.production_date,

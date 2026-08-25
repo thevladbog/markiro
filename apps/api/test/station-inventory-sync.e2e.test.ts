@@ -1343,23 +1343,49 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         repackBatch("repack-print-1", [forgedPrint], 0),
       ),
     ).rejects.toSatisfy((error: unknown) => errorCode(error) === "INVENTORY_BATCH_DIGEST_CONFLICT");
-    const reprinted = printEvent("reprint-outcome", 2, "printed");
+    const failedReprint = printEvent("reprint-outcome", 2, "failed");
     await service.ingest(
       tenantId,
       deviceAId,
       repackInventoryId,
-      repackBatch("repack-reprint-2", [reprinted], 0),
+      repackBatch("repack-reprint-2-failed", [failedReprint], 0),
     );
     expect(
       await db
         .select({
           printState: schema.inventoryRepackBoxes.printState,
+          printErrorCode: schema.inventoryRepackBoxes.printErrorCode,
+          printedAt: schema.inventoryRepackBoxes.printedAt,
+          attemptCount: schema.inventoryRepackBoxes.printAttemptCount,
+        })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.id, boxAId)),
+    ).toEqual([
+      {
+        printState: "printed",
+        printErrorCode: "TRANSPORT_FAILED",
+        printedAt: new Date("2026-08-25T12:00:06.000Z"),
+        attemptCount: 2,
+      },
+    ]);
+    const reprinted = printEvent("reprint-outcome", 3, "printed");
+    await service.ingest(
+      tenantId,
+      deviceAId,
+      repackInventoryId,
+      repackBatch("repack-reprint-3", [reprinted], 0),
+    );
+    expect(
+      await db
+        .select({
+          printState: schema.inventoryRepackBoxes.printState,
+          printErrorCode: schema.inventoryRepackBoxes.printErrorCode,
           attemptCount: schema.inventoryRepackBoxes.printAttemptCount,
           newSscc: schema.inventoryRepackBoxes.newSscc,
         })
         .from(schema.inventoryRepackBoxes)
         .where(eq(schema.inventoryRepackBoxes.id, boxAId)),
-    ).toEqual([{ printState: "printed", attemptCount: 2, newSscc: ssccA }]);
+    ).toEqual([{ printState: "printed", printErrorCode: null, attemptCount: 3, newSscc: ssccA }]);
     expect(
       await db
         .select({
@@ -1372,7 +1398,8 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         .orderBy(asc(schema.inventoryRepackPrintAttempts.attemptNumber)),
     ).toEqual([
       { kind: "initial", attemptNumber: 1, result: "printed" },
-      { kind: "reprint", attemptNumber: 2, result: "printed" },
+      { kind: "reprint", attemptNumber: 2, result: "failed" },
+      { kind: "reprint", attemptNumber: 3, result: "printed" },
     ]);
 
     const pauseBoxId = randomUUID();

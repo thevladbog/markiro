@@ -547,6 +547,13 @@
       "when": 1787682523390,
       "tag": "0077_inventory_repack_print_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1787686557733,
+      "tag": "0078_inventory_repack_reprint_recovery",
+      "breakpoints": true
     }
   ]
 }

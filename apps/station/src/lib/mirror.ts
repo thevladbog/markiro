@@ -151,6 +151,14 @@ const STATION_TRIGGER_REPLACEMENTS = new Map<
     "inventory_progress_apply_page",
     { dropId: "station-sqlite-105", createId: "station-sqlite-106" },
   ],
+  [
+    "inventory_repack_claim_print_v2",
+    { dropId: "station-sqlite-132", createId: "station-sqlite-133" },
+  ],
+  [
+    "inventory_repack_apply_print_v2",
+    { dropId: "station-sqlite-134", createId: "station-sqlite-135" },
+  ],
 ]);
 
 const canonicalTriggerSql = (value: string) => value.trim().replace(/;$/, "").replace(/\s+/g, " ");

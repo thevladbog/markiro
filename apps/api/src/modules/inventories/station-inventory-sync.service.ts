@@ -1145,8 +1145,7 @@ export class StationInventorySyncService {
         .set({
           printState: isInitial ? mutation.result : "printed",
           printAttemptCount: mutation.attemptNumber,
-          printErrorCode:
-            isInitial && mutation.result === "failed" ? mutation.errorCode?.toUpperCase() : null,
+          printErrorCode: mutation.result === "failed" ? mutation.errorCode?.toUpperCase() : null,
           printedAt:
             isInitial && mutation.result === "printed"
               ? new Date(mutation.completedAt)

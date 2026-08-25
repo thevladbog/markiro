@@ -2285,6 +2285,77 @@ export const STATION_MIGRATIONS: string[] = [
        VALUES (NEW.inventory_id, NEW.snapshot_id, NEW.event_id, NEW.device_sequence,
                NEW.payload_json, NEW.completed_at);
      END;`,
+  `DROP TRIGGER IF EXISTS inventory_repack_claim_print_v1;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_repack_claim_print_v2
+     AFTER INSERT ON inventory_repack_print_attempts
+     BEGIN
+       UPDATE inventory_repack_boxes_mirror
+          SET print_state = 'printing', print_attempt_count = NEW.attempt_number,
+              print_error_code = NULL, updated_at = NEW.attempted_at
+        WHERE NEW.kind = 'initial'
+          AND inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND box_id = NEW.box_id AND state = 'closed'
+          AND print_state IN ('pending', 'failed');
+       SELECT CASE WHEN NEW.kind = 'initial' AND changes() <> 1
+         THEN RAISE(ABORT, 'inventory print claim rejected') END;
+       UPDATE inventory_repack_boxes_mirror
+          SET print_attempt_count = NEW.attempt_number,
+              print_error_code = NULL, updated_at = NEW.attempted_at
+        WHERE NEW.kind = 'reprint'
+          AND inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND box_id = NEW.box_id AND state = 'closed' AND print_state = 'printed';
+       SELECT CASE WHEN NEW.kind = 'reprint' AND changes() <> 1
+         THEN RAISE(ABORT, 'inventory reprint claim rejected') END;
+     END;`,
+  `DROP TRIGGER IF EXISTS inventory_repack_apply_print_v1;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_repack_apply_print_v2
+     AFTER INSERT ON inventory_repack_print_journal
+     BEGIN
+       UPDATE inventory_repack_print_attempts
+          SET state = NEW.result, error_code = NEW.error_code,
+              completed_at = NEW.completed_at, event_id = NEW.event_id
+        WHERE inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND attempt_id = NEW.attempt_id AND box_id = NEW.box_id
+          AND kind = NEW.kind AND attempt_number = NEW.attempt_number
+          AND state = 'printing';
+       SELECT CASE WHEN changes() <> 1
+         THEN RAISE(ABORT, 'inventory print finalization rejected') END;
+       UPDATE inventory_repack_boxes_mirror
+          SET print_state = CASE WHEN NEW.result = 'printed' THEN 'printed' ELSE 'failed' END,
+              print_error_code = NEW.error_code,
+              printed_at = CASE WHEN NEW.result = 'printed' THEN NEW.completed_at ELSE NULL END,
+              updated_at = NEW.completed_at
+        WHERE NEW.kind = 'initial'
+          AND inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND box_id = NEW.box_id AND state = 'closed' AND print_state = 'printing';
+       SELECT CASE WHEN NEW.kind = 'initial' AND changes() <> 1
+         THEN RAISE(ABORT, 'inventory print box finalization rejected') END;
+       UPDATE inventory_repack_boxes_mirror
+          SET print_attempt_count = NEW.attempt_number,
+              print_error_code = NEW.error_code, updated_at = NEW.completed_at
+        WHERE NEW.kind = 'reprint'
+          AND inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND box_id = NEW.box_id AND state = 'closed' AND print_state = 'printed';
+       SELECT CASE WHEN NEW.kind = 'reprint' AND changes() <> 1
+         THEN RAISE(ABORT, 'inventory reprint box finalization rejected') END;
+       UPDATE inventory_terminal_state
+          SET open_repack_box_id = NULL, updated_at = NEW.completed_at
+        WHERE NEW.kind = 'initial' AND NEW.result = 'printed'
+          AND inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND device_id = NEW.device_id AND open_repack_box_id = NEW.box_id;
+       INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
+          scanned_at, kind, normalized_identity, code_hash, raw_payload,
+          active_production_date, local_verdict)
+       SELECT NEW.inventory_id, NEW.snapshot_id, NEW.event_id, NEW.device_id,
+              NEW.device_sequence, NEW.operator_id, NEW.completed_at, 'repack_action',
+              json_extract(NEW.payload_json, '$.normalizedIdentity'), NULL, NULL,
+              json_extract(NEW.payload_json, '$.activeProductionDate'), 'repack-action';
+       INSERT INTO inventory_outbox
+         (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+       VALUES (NEW.inventory_id, NEW.snapshot_id, NEW.event_id, NEW.device_sequence,
+               NEW.payload_json, NEW.completed_at);
+     END;`,
 ];
 
 export interface StationMigrationEntry {

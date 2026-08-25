@@ -126,13 +126,13 @@ describe("STATION_MIGRATIONS", () => {
       db
         .prepare(
           `SELECT name FROM sqlite_master WHERE type = 'trigger'
-            AND name IN ('inventory_repack_claim_print_v1', 'inventory_repack_apply_print_v1')
+            AND name IN ('inventory_repack_claim_print_v2', 'inventory_repack_apply_print_v2')
             ORDER BY name`,
         )
         .all(),
     ).toEqual([
-      { name: "inventory_repack_apply_print_v1" },
-      { name: "inventory_repack_claim_print_v1" },
+      { name: "inventory_repack_apply_print_v2" },
+      { name: "inventory_repack_claim_print_v2" },
     ]);
     expect(
       db

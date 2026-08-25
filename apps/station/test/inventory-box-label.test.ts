@@ -7,7 +7,7 @@ import {
 } from "../src/lib/inventory-box-label.js";
 
 const INPUT = {
-  sscc: "046006820000621519",
+  sscc: "046006820000621515",
   quantity: 6,
   productName: "Пиво светлое 0,45 л",
   productPrintName: "Пиво 0,45 л",
@@ -54,7 +54,7 @@ describe("inventory box label", () => {
       "product.gtin": "04680089900038",
       "product.egais": "0101234567890123456",
       "km.code": "",
-      sscc: "046006820000621519",
+      sscc: "046006820000621515",
       "shift.no": "",
       date: "19.08.2026",
       expiry: "19.02.2027",
@@ -75,10 +75,10 @@ describe("inventory box label", () => {
     const tspl = await renderInventoryBoxLabel(SPEC, INPUT, "tspl", rasterize);
 
     expect(new TextDecoder("latin1").decode(zpl)).toBe(
-      "^XA\n^PW464\n^LL320\n^FO16,16^GFA,1,1,1,A5^FS\n^FO16,96^BCN,64,N,N,N^FD>;>800046006820000621519^FS\n^FO16,192^A0N,23,23^FD19.08.2026^FS\n^FO176,192^A0N,23,23^FD19.02.2027^FS\n^FO384,192^GFA,1,1,1,A5^FS\n^XZ\n",
+      "^XA\n^PW464\n^LL320\n^FO16,16^GFA,1,1,1,A5^FS\n^FO16,96^BCN,64,N,N,N^FD>;>800046006820000621515^FS\n^FO16,192^A0N,23,23^FD19.08.2026^FS\n^FO176,192^A0N,23,23^FD19.02.2027^FS\n^FO384,192^GFA,1,1,1,A5^FS\n^XZ\n",
     );
     expect(new TextDecoder("latin1").decode(tspl)).toBe(
-      'SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBITMAP 16,16,1,1,0,Z\nBARCODE 16,96,"128",64,0,0,2,2,"!100046006820000621519"\nTEXT 16,192,"0",0,8,8,"19.08.2026"\nTEXT 176,192,"0",0,8,8,"19.02.2027"\nBITMAP 384,192,1,1,0,Z\nPRINT 1\n',
+      'SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBITMAP 16,16,1,1,0,Z\nBARCODE 16,96,"128",64,0,0,2,2,"!100046006820000621515"\nTEXT 16,192,"0",0,8,8,"19.08.2026"\nTEXT 176,192,"0",0,8,8,"19.02.2027"\nBITMAP 384,192,1,1,0,Z\nPRINT 1\n',
     );
     expect(rasterize).toHaveBeenCalledWith(
       "Пиво 0,45 л",
@@ -87,7 +87,13 @@ describe("inventory box label", () => {
   });
 
   it("rejects a presented or malformed SSCC instead of changing label identity", () => {
-    expect(() => inventoryBoxLabelFields({ ...INPUT, sscc: "(00)046006820000621519" })).toThrow(
+    expect(() => inventoryBoxLabelFields({ ...INPUT, sscc: "(00)046006820000621515" })).toThrow(
+      "inventory box SSCC is invalid",
+    );
+  });
+
+  it("rejects an 18-digit SSCC with an invalid GS1 check digit", () => {
+    expect(() => inventoryBoxLabelFields({ ...INPUT, sscc: "046006820000621519" })).toThrow(
       "inventory box SSCC is invalid",
     );
   });

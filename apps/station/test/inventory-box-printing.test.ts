@@ -17,7 +17,7 @@ const OPERATOR_ID = "44444444-4444-4444-8444-444444444444";
 const BOX_ID = "55555555-5555-4555-8555-555555555555";
 const ATTEMPT_ID = "66666666-6666-4666-8666-666666666666";
 const EVENT_ID = "77777777-7777-4777-8777-777777777777";
-const SSCC = "046006820000621519";
+const SSCC = "046006820000621515";
 const TEMPLATE: LabelTemplateSpec = {
   widthMm: 58,
   heightMm: 40,
@@ -135,6 +135,17 @@ function input(exec: SqlExecutor) {
 }
 
 describe("durable inventory box printing", () => {
+  it("rejects an invalid SSCC check digit before render or hardware", async () => {
+    const { db, exec } = await setup();
+    db.prepare("UPDATE inventory_repack_boxes_mirror SET new_sscc = '046006820000621519'").run();
+    const configured = input(exec);
+    await expect(attemptInventoryBoxPrint(configured)).rejects.toThrow(
+      "inventory box is not printable",
+    );
+    expect(configured.render).not.toHaveBeenCalled();
+    expect(configured.printing.print).not.toHaveBeenCalled();
+  });
+
   it("claims once before I/O, marks printed only after transport, and clears the pointer", async () => {
     const { db, exec } = await setup();
     const configured = input(exec);

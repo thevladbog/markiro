@@ -1117,7 +1117,8 @@ export const inventoryRepackBoxes = pgTable(
     check(
       "inventory_repack_boxes_print_state_check",
       sql`(${table.printState} = 'failed' and ${table.printErrorCode} is not null)
-        or (${table.printState} <> 'failed' and ${table.printErrorCode} is null)`,
+        or ${table.printState} = 'printed'
+        or (${table.printState} not in ('failed', 'printed') and ${table.printErrorCode} is null)`,
     ),
     check(
       "inventory_repack_boxes_print_error_code_check",

@@ -1,5 +1,6 @@
 import {
   formatLabelDate,
+  isValidSscc,
   type LabelField,
   type LabelTemplateSpec,
   type RasterizeTextFn,
@@ -20,10 +21,8 @@ export interface InventoryBoxLabelInput {
   productionDate: string;
 }
 
-const SSCC = /^[0-9]{18}$/;
-
 export function inventoryBoxLabelFields(input: InventoryBoxLabelInput): Record<LabelField, string> {
-  if (!SSCC.test(input.sscc)) throw new Error("inventory box SSCC is invalid");
+  if (!isValidSscc(input.sscc)) throw new Error("inventory box SSCC is invalid");
   const expiry =
     input.shelfLifeDays !== null && Number.isInteger(input.shelfLifeDays) && input.shelfLifeDays > 0
       ? addCalendarDays(input.productionDate, input.shelfLifeDays)
