@@ -322,6 +322,10 @@ describe("inventory journal", () => {
       code.codeHash,
       code.km.raw,
     );
+    db.prepare(
+      `UPDATE inventory_terminal_state SET next_device_sequence = 3
+        WHERE inventory_id = ? AND snapshot_id = ? AND device_id = ?`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID);
 
     await expect(reconcilePendingInventoryEvents(exec, INVENTORY_ID, SNAPSHOT_ID)).resolves.toEqual(
       { requiresRescan: true, recoveredCommitted: 0, failed: 1 },
@@ -342,6 +346,22 @@ describe("inventory journal", () => {
     expect(await readInventoryProgress(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID)).toMatchObject({
       verified: 0,
     });
+    await expect(
+      recordInventoryScan(exec, input(code.km.raw, "replacement-item", "2026-08-25T08:02:00.000Z")),
+    ).resolves.toMatchObject({ verdict: "expected", claimedCount: 1 });
+    await applyMigrations(exec);
+    const restarted = makeExec(db);
+    expect(
+      (await listRecentInventoryOperations(restarted, INVENTORY_ID, SNAPSHOT_ID)).find(
+        (operation) => operation.eventId === "dependent-duplicate",
+      ),
+    ).toMatchObject({ verdict: "duplicate", firstWinning: null });
+    await expect(
+      recordInventoryScan(
+        restarted,
+        input(code.km.raw, "dependent-duplicate", "2026-08-25T08:01:00.000Z"),
+      ),
+    ).resolves.toMatchObject({ verdict: "duplicate", firstWinning: null });
   });
 
   it("keeps a known-box duplicate immutable and requires a new accepted box scan", async () => {
@@ -399,6 +419,18 @@ describe("inventory journal", () => {
     expect(
       db.prepare("SELECT first_accepted_event_id FROM inventory_code_results_mirror").get(),
     ).toEqual({ first_accepted_event_id: "replacement-box" });
+    await applyMigrations(exec);
+    const restarted = makeExec(db);
+    const duplicateHistory = (
+      await listRecentInventoryOperations(restarted, INVENTORY_ID, SNAPSHOT_ID)
+    ).find((operation) => operation.eventId === "dependent-box-duplicate");
+    expect(duplicateHistory).toMatchObject({ verdict: "duplicate", firstWinning: null });
+    await expect(
+      recordInventoryScan(
+        restarted,
+        input(SSCC, "dependent-box-duplicate", "2026-08-25T08:01:00.000Z"),
+      ),
+    ).resolves.toMatchObject({ verdict: "duplicate", firstWinning: null });
   });
 
   it("requeues a legacy duplicate only when an exact prior winner remains valid", async () => {
@@ -1375,6 +1407,50 @@ describe("inventory journal", () => {
       verdict: "duplicate",
       firstWinning: { eventId: "event-clock-km-1" },
     });
+
+    db.prepare(
+      `UPDATE inventory_scan_events_mirror SET commit_state = 'failed'
+        WHERE event_id IN ('event-clock-km-1', 'event-clock-box-1')`,
+    ).run();
+    await expect(
+      recordInventoryScan(exec, input(unknownKm, "event-clock-km-3", "2026-08-25T09:00:00.000Z")),
+    ).resolves.toMatchObject({ verdict: "unknown" });
+    await expect(
+      recordInventoryScan(exec, input(SSCC, "event-clock-box-3", "2026-08-25T08:59:00.000Z")),
+    ).resolves.toMatchObject({ verdict: "unknown" });
+
+    await applyMigrations(exec);
+    const restarted = makeExec(db);
+    const immutableRecent = await listRecentInventoryOperations(
+      restarted,
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+    );
+    expect(
+      immutableRecent.find((operation) => operation.eventId === "event-clock-km-2"),
+    ).toMatchObject({
+      firstWinning: { eventId: "event-clock-km-1", scannedAt: "2026-08-25T11:00:00.000Z" },
+    });
+    expect(
+      immutableRecent.find((operation) => operation.eventId === "event-clock-box-2"),
+    ).toMatchObject({
+      firstWinning: { eventId: "event-clock-box-1", scannedAt: "2026-08-25T11:01:00.000Z" },
+    });
+    await expect(
+      recordInventoryScan(
+        restarted,
+        input(unknownKm, "event-clock-km-2", "2026-08-25T10:00:00.000Z"),
+      ),
+    ).resolves.toMatchObject({
+      verdict: "duplicate",
+      firstWinning: { eventId: "event-clock-km-1" },
+    });
+    await expect(
+      recordInventoryScan(restarted, input(SSCC, "event-clock-box-2", "2026-08-25T09:59:00.000Z")),
+    ).resolves.toMatchObject({
+      verdict: "duplicate",
+      firstWinning: { eventId: "event-clock-box-1" },
+    });
   });
 
   it("requires a new physical scan when an acknowledged duplicate's unknown predecessor failed", async () => {
@@ -1447,6 +1523,18 @@ describe("inventory journal", () => {
     expect(await readInventoryProgress(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID)).toMatchObject({
       discrepancies: 1,
     });
+    await applyMigrations(exec);
+    const restarted = makeExec(db);
+    const duplicateHistory = (
+      await listRecentInventoryOperations(restarted, INVENTORY_ID, SNAPSHOT_ID)
+    ).find((operation) => operation.eventId === "event-unknown-durable");
+    expect(duplicateHistory).toMatchObject({ verdict: "duplicate", firstWinning: null });
+    await expect(
+      recordInventoryScan(
+        restarted,
+        input(km.raw, "event-unknown-durable", "2026-08-25T10:00:00.000Z"),
+      ),
+    ).resolves.toMatchObject({ verdict: "duplicate", firstWinning: null });
   });
 
   it("never rewrites a committed duplicate verdict or payload during reconciliation", async () => {
@@ -1532,6 +1620,62 @@ describe("inventory journal", () => {
     ).toBeUndefined();
   });
 
+  it("stores a known-item duplicate winner independently of later projection ownership", async () => {
+    const { db, exec } = await setup();
+    const code = seedCode(db, "ITEM-CHRONOLOGY");
+    await recordInventoryScan(exec, input(code.km.raw, "item-owner", "2026-08-25T08:00:00.000Z"));
+    await expect(
+      recordInventoryScan(exec, input(code.km.raw, "item-duplicate", "2026-08-25T08:01:00.000Z")),
+    ).resolves.toMatchObject({
+      verdict: "duplicate",
+      firstWinning: {
+        eventId: "item-owner",
+        deviceId: DEVICE_ID,
+        scannedAt: "2026-08-25T08:00:00.000Z",
+      },
+    });
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
+          kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict,
+          commit_state, legacy_audit_version)
+       VALUES (?, ?, 'item-later-owner', 'STA-LATER', 1, ?, '2026-08-25T08:02:00.000Z',
+               'item', ?, ?, ?, '2026-08-20', 'expected', 'committed', 1)`,
+    ).run(
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+      OPERATOR_ID,
+      `item:${code.codeHash}`,
+      code.codeHash,
+      code.km.raw,
+    );
+    db.prepare(
+      `UPDATE inventory_code_results_mirror
+          SET first_accepted_event_id = 'item-later-owner', winning_device_id = 'STA-LATER',
+              winning_scanned_at = '2026-08-25T08:02:00.000Z'
+        WHERE inventory_id = ? AND snapshot_id = ? AND code_hash = ?`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, code.codeHash);
+
+    await applyMigrations(exec);
+    const restarted = makeExec(db);
+    const stored = {
+      eventId: "item-owner",
+      deviceId: DEVICE_ID,
+      scannedAt: "2026-08-25T08:00:00.000Z",
+    };
+    expect(
+      (await listRecentInventoryOperations(restarted, INVENTORY_ID, SNAPSHOT_ID)).find(
+        (operation) => operation.eventId === "item-duplicate",
+      ),
+    ).toMatchObject({ verdict: "duplicate", firstWinning: stored });
+    await expect(
+      recordInventoryScan(
+        restarted,
+        input(code.km.raw, "item-duplicate", "2026-08-25T08:01:00.000Z"),
+      ),
+    ).resolves.toMatchObject({ verdict: "duplicate", firstWinning: stored });
+  });
+
   it("hydrates a duplicate known box with the exact first winning terminal and time", async () => {
     const { db, exec } = await setup();
     const child = seedCode(db, "BOX-WON-ELSEWHERE", { parentSscc: SSCC });
@@ -1560,11 +1704,43 @@ describe("inventory journal", () => {
     ).run(INVENTORY_ID, SNAPSHOT_ID, child.codeHash);
 
     await recordInventoryScan(exec, input(SSCC, "event-box-duplicate"));
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
+          kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict,
+          commit_state, legacy_audit_version)
+       VALUES (?, ?, 'remote-event-later', 'STA-REMOTE', 2, ?, '2026-08-25T08:45:00.000Z',
+               'item', ?, ?, ?, '2026-08-20', 'expected', 'committed', 1)`,
+    ).run(
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+      OPERATOR_ID,
+      `item:${child.codeHash}`,
+      child.codeHash,
+      child.km.raw,
+    );
+    db.prepare(
+      `UPDATE inventory_code_results_mirror
+          SET first_accepted_event_id = 'remote-event-later', winning_device_id = 'STA-REMOTE',
+              winning_scanned_at = '2026-08-25T08:45:00.000Z'
+        WHERE inventory_id = ? AND snapshot_id = ? AND code_hash = ?`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, child.codeHash);
+    await applyMigrations(exec);
     const restarted = makeExec(db);
     const recent = await listRecentInventoryOperations(restarted, INVENTORY_ID, SNAPSHOT_ID);
     expect(recent.find((operation) => operation.eventId === "event-box-duplicate")).toMatchObject({
       verdict: "duplicate",
       scanKind: "known_box",
+      firstWinning: {
+        eventId: "remote-event",
+        deviceId: "STA-REMOTE",
+        scannedAt: "2026-08-25T08:30:00.000Z",
+      },
+    });
+    await expect(
+      recordInventoryScan(restarted, input(SSCC, "event-box-duplicate")),
+    ).resolves.toMatchObject({
+      verdict: "duplicate",
       firstWinning: {
         eventId: "remote-event",
         deviceId: "STA-REMOTE",

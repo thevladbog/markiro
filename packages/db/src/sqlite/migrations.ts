@@ -994,6 +994,17 @@ export const STATION_MIGRATIONS: string[] = [
   `UPDATE inventory_scan_events_mirror
       SET commit_state = 'pending'
     WHERE legacy_audit_version = 0 AND commit_state = 'committed';`,
+  // Duplicate chronology is evidence captured at reservation time. Existing
+  // rows intentionally remain null: a later projection must never be used to
+  // invent or backfill a legacy winner.
+  `ALTER TABLE inventory_scan_events_mirror
+     ADD COLUMN duplicate_winner_code_hash TEXT;`,
+  `ALTER TABLE inventory_scan_events_mirror
+     ADD COLUMN duplicate_winner_event_id TEXT;`,
+  `ALTER TABLE inventory_scan_events_mirror
+     ADD COLUMN duplicate_winner_device_id TEXT;`,
+  `ALTER TABLE inventory_scan_events_mirror
+     ADD COLUMN duplicate_winner_scanned_at TEXT;`,
 ];
 
 export interface StationMigrationEntry {

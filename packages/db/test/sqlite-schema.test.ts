@@ -276,6 +276,42 @@ describe("STATION_MIGRATIONS", () => {
     expect(() => applyStationMigrations(db)).not.toThrow();
   });
 
+  it("adds nullable duplicate chronology without inventing a legacy winner", () => {
+    const chronologyMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN duplicate_winner_code_hash"),
+    );
+    expect(chronologyMigration).toBeGreaterThan(0);
+
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, chronologyMigration));
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
+          scanned_at, kind, normalized_identity, code_hash, raw_payload,
+          active_production_date, local_verdict, commit_state, legacy_audit_version)
+       VALUES ('inventory-legacy', 'snapshot-legacy', 'duplicate-legacy', 'device-legacy', 1,
+               'operator-legacy', '2026-08-25T08:00:00.000Z', 'item', 'item:legacy-hash',
+               'legacy-hash', 'legacy-raw', '2026-08-20', 'duplicate', 'committed', 1)`,
+    ).run();
+
+    applyStatements(db, STATION_MIGRATIONS.slice(chronologyMigration));
+    expect(
+      db
+        .prepare(
+          `SELECT duplicate_winner_code_hash, duplicate_winner_event_id,
+                  duplicate_winner_device_id, duplicate_winner_scanned_at
+             FROM inventory_scan_events_mirror WHERE event_id = 'duplicate-legacy'`,
+        )
+        .get(),
+    ).toEqual({
+      duplicate_winner_code_hash: null,
+      duplicate_winner_event_id: null,
+      duplicate_winner_device_id: null,
+      duplicate_winner_scanned_at: null,
+    });
+    expect(() => applyStationMigrations(db)).not.toThrow();
+  });
+
   it("upgrades only exact legacy event/outbox pairs and compensates orphan projections", () => {
     const stateMigration = STATION_MIGRATIONS.findIndex((statement) =>
       statement.includes("ADD COLUMN commit_state"),

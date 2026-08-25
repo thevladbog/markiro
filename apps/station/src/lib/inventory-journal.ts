@@ -99,6 +99,10 @@ interface ExistingEventRow {
   local_verdict: string;
   commit_state: string;
   legacy_audit_version: number;
+  duplicate_winner_code_hash: string | null;
+  duplicate_winner_event_id: string | null;
+  duplicate_winner_device_id: string | null;
+  duplicate_winner_scanned_at: string | null;
 }
 
 interface OutboxDbRow {
@@ -299,7 +303,9 @@ async function existingEvent(
   const rows = await exec.all<ExistingEventRow>(
     `SELECT event_id, device_id, device_sequence, operator_id, scanned_at, kind,
             normalized_identity, code_hash, raw_payload, active_production_date,
-            local_verdict, commit_state, legacy_audit_version
+            local_verdict, commit_state, legacy_audit_version,
+            duplicate_winner_code_hash, duplicate_winner_event_id,
+            duplicate_winner_device_id, duplicate_winner_scanned_at
        FROM inventory_scan_events_mirror
       WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?`,
     [inventoryId, snapshotId, eventId],
@@ -307,10 +313,52 @@ async function existingEvent(
   return rows[0] ?? null;
 }
 
+function duplicateWinnerFromParts(
+  codeHash: string | null,
+  eventId: string | null,
+  deviceId: string | null,
+  scannedAt: string | null,
+): InventoryLocalClaim | null {
+  const values = [codeHash, eventId, deviceId, scannedAt];
+  if (values.every((value) => value === null)) return null;
+  if (codeHash === null || eventId === null || deviceId === null || scannedAt === null) {
+    throw new Error("inventory duplicate winner evidence is incomplete");
+  }
+  return { codeHash, eventId, deviceId, scannedAt };
+}
+
+function storedDuplicateWinner(row: ExistingEventRow): InventoryLocalClaim | null {
+  return duplicateWinnerFromParts(
+    row.duplicate_winner_code_hash,
+    row.duplicate_winner_event_id,
+    row.duplicate_winner_device_id,
+    row.duplicate_winner_scanned_at,
+  );
+}
+
+function classificationDuplicateWinner(
+  classification: Exclude<InventoryScanClassification, { kind: "invalid" }>,
+): InventoryLocalClaim | null {
+  return classification.kind === "duplicate" ? classification.firstWinning : null;
+}
+
+function sameClaim(left: InventoryLocalClaim | null, right: InventoryLocalClaim | null): boolean {
+  return (
+    left === right ||
+    (left !== null &&
+      right !== null &&
+      left.codeHash === right.codeHash &&
+      left.eventId === right.eventId &&
+      left.deviceId === right.deviceId &&
+      left.scannedAt === right.scannedAt)
+  );
+}
+
 function ensureExactReservation(
   row: ExistingEventRow,
   input: RecordInventoryScanInput,
   classification: Exclude<InventoryScanClassification, { kind: "invalid" }>,
+  expectedDuplicateWinner?: InventoryLocalClaim | null,
 ): void {
   const codeHash = classification.scanKind === "item" ? classification.codeHash : null;
   if (
@@ -320,7 +368,9 @@ function ensureExactReservation(
     row.kind !== eventKind(classification) ||
     row.normalized_identity !== normalizedIdentity(classification) ||
     row.code_hash !== codeHash ||
-    row.raw_payload !== validPayload(classification)
+    row.raw_payload !== validPayload(classification) ||
+    (expectedDuplicateWinner !== undefined &&
+      !sameClaim(storedDuplicateWinner(row), expectedDuplicateWinner))
   ) {
     throw new Error("inventory event id payload mismatch");
   }
@@ -372,12 +422,14 @@ async function reserveEvent(
 ): Promise<ExistingEventRow> {
   const productionDate = await activeDate(exec, input);
   const sequence = await allocateSequence(exec, input);
+  const duplicateWinner = classificationDuplicateWinner(classification);
   await exec.run(
     `INSERT INTO inventory_scan_events_mirror
        (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
         kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict,
-        commit_state, legacy_audit_version)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1)
+        commit_state, legacy_audit_version, duplicate_winner_code_hash,
+        duplicate_winner_event_id, duplicate_winner_device_id, duplicate_winner_scanned_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?, ?, ?, ?)
      ON CONFLICT(inventory_id, snapshot_id, event_id) DO NOTHING`,
     [
       input.inventoryId,
@@ -393,12 +445,53 @@ async function reserveEvent(
       validPayload(classification),
       productionDate,
       classification.kind,
+      duplicateWinner?.codeHash ?? null,
+      duplicateWinner?.eventId ?? null,
+      duplicateWinner?.deviceId ?? null,
+      duplicateWinner?.scannedAt ?? null,
     ],
   );
   const reserved = await existingEvent(exec, input.inventoryId, input.snapshotId, input.eventId);
   if (!reserved) throw new Error("inventory event reservation failed");
-  ensureExactReservation(reserved, input, classification);
+  ensureExactReservation(reserved, input, classification, duplicateWinner);
   return reserved;
+}
+
+async function persistDuplicateWinner(
+  exec: SqlExecutor,
+  input: RecordInventoryScanInput,
+  winner: InventoryLocalClaim,
+): Promise<void> {
+  await exec.run(
+    `UPDATE inventory_scan_events_mirror
+        SET duplicate_winner_code_hash = ?, duplicate_winner_event_id = ?,
+            duplicate_winner_device_id = ?, duplicate_winner_scanned_at = ?
+      WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ? AND commit_state = 'pending'
+        AND (
+          (duplicate_winner_code_hash IS NULL AND duplicate_winner_event_id IS NULL
+           AND duplicate_winner_device_id IS NULL AND duplicate_winner_scanned_at IS NULL)
+          OR
+          (duplicate_winner_code_hash = ? AND duplicate_winner_event_id = ?
+           AND duplicate_winner_device_id = ? AND duplicate_winner_scanned_at = ?)
+        )`,
+    [
+      winner.codeHash,
+      winner.eventId,
+      winner.deviceId,
+      winner.scannedAt,
+      input.inventoryId,
+      input.snapshotId,
+      input.eventId,
+      winner.codeHash,
+      winner.eventId,
+      winner.deviceId,
+      winner.scannedAt,
+    ],
+  );
+  const event = await existingEvent(exec, input.inventoryId, input.snapshotId, input.eventId);
+  if (!event || !sameClaim(storedDuplicateWinner(event), winner)) {
+    throw new Error("inventory duplicate winner evidence mismatch");
+  }
 }
 
 function originOf(classification: InventoryScanClassification): InventoryOriginClassification {
@@ -1141,7 +1234,9 @@ async function reconcilePendingInventoryEventsInternal(
   const legacy = await exec.all<ExistingEventRow>(
     `SELECT event_id, device_id, device_sequence, operator_id, scanned_at, kind,
             normalized_identity, code_hash, raw_payload, active_production_date,
-            local_verdict, commit_state, legacy_audit_version
+            local_verdict, commit_state, legacy_audit_version,
+            duplicate_winner_code_hash, duplicate_winner_event_id,
+            duplicate_winner_device_id, duplicate_winner_scanned_at
        FROM inventory_scan_events_mirror
       WHERE inventory_id = ? AND snapshot_id = ? AND legacy_audit_version = 0
         AND commit_state IN ('pending', 'committed')
@@ -1159,7 +1254,9 @@ async function reconcilePendingInventoryEventsInternal(
   const pending = await exec.all<ExistingEventRow>(
     `SELECT event_id, device_id, device_sequence, operator_id, scanned_at, kind,
             normalized_identity, code_hash, raw_payload, active_production_date,
-            local_verdict, commit_state, legacy_audit_version
+            local_verdict, commit_state, legacy_audit_version,
+            duplicate_winner_code_hash, duplicate_winner_event_id,
+            duplicate_winner_device_id, duplicate_winner_scanned_at
        FROM inventory_scan_events_mirror
       WHERE inventory_id = ? AND snapshot_id = ? AND commit_state = 'pending'${exclusion}
       ORDER BY device_id, device_sequence, event_id`,
@@ -1241,13 +1338,7 @@ async function recordInventoryScanInternal(
         input.snapshotId,
         input.eventId,
       );
-      let winner: InventoryLocalClaim | null = null;
-      if (verdict === "duplicate") {
-        winner = await firstProjectionWinner(exec, input, classification);
-        if (!winner && classification.kind === "unknown") {
-          winner = await firstUnknownObservation(exec, event, input.inventoryId, input.snapshotId);
-        }
-      }
+      const winner = verdict === "duplicate" ? storedDuplicateWinner(event) : null;
       return resultFrom(classification, verdict, summary.total, winner);
     }
   }
@@ -1296,6 +1387,11 @@ async function recordInventoryScanInternal(
     firstWinning = await firstProjectionWinner(exec, input, classification);
   }
 
+  if (verdict === "duplicate") {
+    if (!firstWinning) throw new Error("inventory duplicate has no immutable winning evidence");
+    await persistDuplicateWinner(exec, input, firstWinning);
+  }
+
   await exec.run(
     `UPDATE inventory_scan_events_mirror
         SET local_verdict = ?
@@ -1306,7 +1402,8 @@ async function recordInventoryScanInternal(
   if (
     !event ||
     inventoryVerdict(event.local_verdict) !== verdict ||
-    commitState(event.commit_state) !== "pending"
+    commitState(event.commit_state) !== "pending" ||
+    (verdict === "duplicate" && !sameClaim(storedDuplicateWinner(event), firstWinning))
   ) {
     throw new Error("inventory event verdict transition failed");
   }
@@ -1465,71 +1562,21 @@ export async function listRecentInventoryOperations(
     normalized_identity: string;
     raw_payload: string | null;
     local_verdict: string;
-    winning_code_hash: string | null;
-    winning_event_id: string | null;
-    winning_device_id: string | null;
-    winning_scanned_at: string | null;
+    duplicate_winner_code_hash: string | null;
+    duplicate_winner_event_id: string | null;
+    duplicate_winner_device_id: string | null;
+    duplicate_winner_scanned_at: string | null;
     claimed_count: number;
   }>(
     `SELECT e.event_id, e.scanned_at, e.kind, e.normalized_identity, e.raw_payload,
             e.local_verdict,
-            COALESCE(winner.code_hash, observation.code_hash,
-                     observation.normalized_identity) AS winning_code_hash,
-            COALESCE(winner.first_accepted_event_id,
-                     observation.event_id) AS winning_event_id,
-            COALESCE(winner.winning_device_id,
-                     observation.device_id) AS winning_device_id,
-            COALESCE(winner.winning_scanned_at,
-                     observation.scanned_at) AS winning_scanned_at,
+            e.duplicate_winner_code_hash, e.duplicate_winner_event_id,
+            e.duplicate_winner_device_id, e.duplicate_winner_scanned_at,
             (SELECT COUNT(*) FROM inventory_code_results_mirror claimed
               WHERE claimed.inventory_id = e.inventory_id
                 AND claimed.snapshot_id = e.snapshot_id
                 AND claimed.first_accepted_event_id = e.event_id) AS claimed_count
        FROM inventory_scan_events_mirror e
-       LEFT JOIN inventory_code_results_mirror winner
-         ON winner.rowid = (
-           SELECT candidate.rowid
-             FROM inventory_code_results_mirror candidate
-             LEFT JOIN inventory_snapshot_codes_mirror snapshot
-               ON snapshot.snapshot_id = candidate.snapshot_id
-              AND snapshot.code_hash = candidate.code_hash
-            WHERE candidate.inventory_id = e.inventory_id
-              AND candidate.snapshot_id = e.snapshot_id
-              AND (
-                (e.code_hash IS NOT NULL AND candidate.code_hash = e.code_hash)
-                OR (
-                  e.kind = 'known_box'
-                  AND e.normalized_identity LIKE 'known_box:%'
-                  AND snapshot.parent_sscc = substr(e.normalized_identity, 11)
-                )
-              )
-            ORDER BY candidate.winning_scanned_at, candidate.winning_device_id,
-                     candidate.first_accepted_event_id
-            LIMIT 1
-         )
-       LEFT JOIN inventory_scan_events_mirror observation
-         ON observation.rowid = (
-           SELECT source.rowid
-             FROM inventory_scan_events_mirror source
-            WHERE source.inventory_id = e.inventory_id
-              AND source.snapshot_id = e.snapshot_id
-              AND source.normalized_identity = e.normalized_identity
-              AND source.local_verdict = 'unknown'
-              AND source.commit_state = 'committed'
-              AND (
-                source.kind = 'old_box'
-                OR (
-                  source.kind = 'item'
-                  AND NOT EXISTS (
-                    SELECT 1 FROM inventory_snapshot_codes_mirror known
-                     WHERE known.snapshot_id = source.snapshot_id
-                       AND known.code_hash = source.code_hash
-                  )
-                )
-              )
-            ORDER BY source.device_sequence, source.device_id, source.event_id
-            LIMIT 1
-         )
       WHERE e.inventory_id = ? AND e.snapshot_id = ? AND e.commit_state = 'committed'
       ORDER BY e.device_sequence DESC, e.event_id DESC
       LIMIT ?`,
@@ -1538,18 +1585,14 @@ export async function listRecentInventoryOperations(
   return rows.map((row) => {
     const verdict = inventoryVerdict(row.local_verdict);
     if (verdict === "invalid") throw new Error("invalid inventory noise cannot be journalled");
-    const firstWinning: InventoryLocalClaim | null =
-      verdict === "duplicate" &&
-      row.winning_code_hash !== null &&
-      row.winning_event_id !== null &&
-      row.winning_device_id !== null &&
-      row.winning_scanned_at !== null
-        ? {
-            codeHash: row.winning_code_hash,
-            eventId: row.winning_event_id,
-            deviceId: row.winning_device_id,
-            scannedAt: row.winning_scanned_at,
-          }
+    const firstWinning =
+      verdict === "duplicate"
+        ? duplicateWinnerFromParts(
+            row.duplicate_winner_code_hash,
+            row.duplicate_winner_event_id,
+            row.duplicate_winner_device_id,
+            row.duplicate_winner_scanned_at,
+          )
         : null;
     return {
       eventId: row.event_id,

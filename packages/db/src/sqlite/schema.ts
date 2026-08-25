@@ -414,6 +414,10 @@ export const inventoryScanEventsMirror = sqliteTable(
     localVerdict: text("local_verdict").notNull(),
     commitState: text("commit_state").notNull().default("committed"),
     legacyAuditVersion: integer("legacy_audit_version").notNull().default(0),
+    duplicateWinnerCodeHash: text("duplicate_winner_code_hash"),
+    duplicateWinnerEventId: text("duplicate_winner_event_id"),
+    duplicateWinnerDeviceId: text("duplicate_winner_device_id"),
+    duplicateWinnerScannedAt: text("duplicate_winner_scanned_at"),
   },
   (table) => [
     primaryKey({ columns: [table.inventoryId, table.snapshotId, table.eventId] }),
