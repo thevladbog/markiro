@@ -918,10 +918,15 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     if (process.argv.length !== 3) throw new Error();
     guardProductionPlan(JSON.parse(await readFile(process.argv[2], "utf8")));
   } catch (error) {
-    const message =
-      error instanceof Error && /^production plan rejected(?: \([a-z0-9-]+\))?$/.test(error.message)
-        ? error.message
-        : "production plan rejected";
+    const safeRejection =
+      error instanceof Error
+        ? /^production plan rejected(?: \(([a-z0-9-]+)\))?$/.exec(error.message)
+        : null;
+    const message = safeRejection ? error.message : "production plan rejected";
+    const scope = safeRejection?.[1];
+    if (process.env.GITHUB_ACTIONS === "true" && scope) {
+      process.stdout.write(`::error title=Production plan rejected::${scope}\n`);
+    }
     process.stderr.write(`${message}\n`);
     process.exitCode = 1;
   }
