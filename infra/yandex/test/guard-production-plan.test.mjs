@@ -25,6 +25,68 @@ const directVmDnsAddresses = [
   "yandex_dns_recordset.kiosk_application[0]",
   "yandex_dns_recordset.landing_application[0]",
 ];
+const fixedSafeActionScopes = [
+  ["module.network.yandex_vpc_network.production", "yandex_vpc_network", "safe-action-network"],
+  ["module.network.yandex_vpc_gateway.nat", "yandex_vpc_gateway", "safe-action-nat-gateway"],
+  [
+    "module.network.yandex_vpc_route_table.private_egress",
+    "yandex_vpc_route_table",
+    "safe-action-private-egress",
+  ],
+  ["module.network.yandex_vpc_subnet.app", "yandex_vpc_subnet", "safe-action-app-subnet"],
+  ["module.network.yandex_vpc_subnet.data", "yandex_vpc_subnet", "safe-action-data-subnet"],
+  [
+    "module.network.yandex_vpc_security_group.app",
+    "yandex_vpc_security_group",
+    "safe-action-app-security-group",
+  ],
+  [
+    "module.network.yandex_vpc_security_group.data",
+    "yandex_vpc_security_group",
+    "safe-action-data-security-group",
+  ],
+  [
+    "module.compute.data.yandex_compute_image.ubuntu_lts",
+    "yandex_compute_image",
+    "safe-action-ubuntu-image",
+  ],
+  ["module.compute.yandex_vpc_address.app", "yandex_vpc_address", "safe-action-app-address"],
+  [
+    "module.compute.yandex_compute_instance.app",
+    "yandex_compute_instance",
+    "safe-action-app-compute",
+  ],
+  [
+    "module.postgres.yandex_mdb_postgresql_cluster.production",
+    "yandex_mdb_postgresql_cluster",
+    "safe-action-postgres-cluster",
+  ],
+  [
+    "module.postgres.yandex_mdb_postgresql_database.application",
+    "yandex_mdb_postgresql_database",
+    "safe-action-postgres-database",
+  ],
+  [
+    "module.object_storage.yandex_storage_bucket.media",
+    "yandex_storage_bucket",
+    "safe-action-media-bucket",
+  ],
+  [
+    "module.object_storage.yandex_storage_bucket.audit",
+    "yandex_storage_bucket",
+    "safe-action-audit-bucket",
+  ],
+  [
+    "module.object_storage.yandex_storage_bucket_policy.media_app",
+    "yandex_storage_bucket_policy",
+    "safe-action-media-policy",
+  ],
+  [
+    "module.object_storage.yandex_storage_bucket_iam_binding.app_uploader",
+    "yandex_storage_bucket_iam_binding",
+    "safe-action-app-uploader-binding",
+  ],
+];
 
 async function readFixture(name) {
   return JSON.parse(await readFile(fixture(name), "utf8"));
@@ -397,7 +459,7 @@ test("guard CLI reports only a fixed rejection scope without plan values", async
     } catch (error) {
       stderr = String(error.stderr);
     }
-    assert.equal(stderr, "production plan rejected (safe-resource-action)\n");
+    assert.equal(stderr, "production plan rejected (safe-action-app-compute)\n");
   });
 
   const invalidBucket = copy(safe);
@@ -416,6 +478,39 @@ test("guard CLI reports only a fixed rejection scope without plan values", async
     assert.equal(stderr, "production plan rejected (release-bucket)\n");
     assert.doesNotMatch(stderr, /do-not-print-this-plan-value/);
   });
+});
+
+test("guard CLI identifies every fixed safe resource without plan values", async () => {
+  const safe = await readFixture("safe");
+  for (const [address, type, expectedScope] of fixedSafeActionScopes) {
+    const changed = copy(safe);
+    let changedResource = changed.resource_changes.find(
+      (candidate) => candidate.address === address,
+    );
+    if (!changedResource) {
+      changedResource = {
+        address,
+        type,
+        change: { actions: ["update"], before: {}, after: {} },
+      };
+      changed.resource_changes.push(changedResource);
+    } else {
+      changedResource.change.actions = ["update"];
+    }
+    changedResource.change.after.diagnostic_value = "do-not-print-this-plan-value";
+
+    await withPlan(changed, (planPath) => {
+      let stderr = "";
+      try {
+        execFileSync(process.execPath, [script, planPath], { cwd: root, stdio: "pipe" });
+        assert.fail(`guard CLI unexpectedly accepted ${address}`);
+      } catch (error) {
+        stderr = String(error.stderr);
+      }
+      assert.equal(stderr, `production plan rejected (${expectedScope})\n`);
+      assert.doesNotMatch(stderr, /do-not-print-this-plan-value/);
+    });
+  }
 });
 
 test("production plan guard permits direct-VM DNS flag enable and disable transitions", async () => {
