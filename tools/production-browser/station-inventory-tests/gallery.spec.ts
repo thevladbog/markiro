@@ -61,7 +61,9 @@ interface BrowserRow {
   nestedScrollRegions: string[];
   interactiveCount: number;
   clippedInteractives: string[];
+  occludedInteractives: string[];
   overlappingInteractives: string[];
+  actionContentOverlaps: string[];
   targetsBelow64: Array<{ label: string; width: number; height: number }>;
   focus: { label: string; outline: string; visible: boolean } | null;
   statusSignals: Array<{ label: string; hasText: boolean; hasIcon: boolean }>;
@@ -110,8 +112,13 @@ test.afterAll(async () => {
       responseFailures: results.reduce((sum, row) => sum + row.responseFailures.length, 0),
       nestedScrollRegions: results.reduce((sum, row) => sum + row.nestedScrollRegions.length, 0),
       clippedInteractives: results.reduce((sum, row) => sum + row.clippedInteractives.length, 0),
+      occludedInteractives: results.reduce((sum, row) => sum + row.occludedInteractives.length, 0),
       overlappingInteractives: results.reduce(
         (sum, row) => sum + row.overlappingInteractives.length,
+        0,
+      ),
+      actionContentOverlaps: results.reduce(
+        (sum, row) => sum + row.actionContentOverlaps.length,
         0,
       ),
       targetsBelow64: results.reduce((sum, row) => sum + row.targetsBelow64.length, 0),
@@ -199,31 +206,42 @@ test("all inventory gallery fixtures satisfy the bilingual floor viewport contra
               element.getAttribute("aria-label") ?? element.textContent ?? element.tagName;
             return text.replace(/\s+/g, " ").trim().slice(0, 100);
           };
-          const visible = (element: HTMLElement) => {
+          const rendered = (element: HTMLElement) => {
             const style = getComputedStyle(element);
             const rect = element.getBoundingClientRect();
-            if (
+            return !(
               style.display === "none" ||
               style.visibility === "hidden" ||
               Number(style.opacity) === 0 ||
               rect.width <= 0 ||
               rect.height <= 0
-            )
-              return false;
+            );
+          };
+          const centerIsVisible = (element: HTMLElement) => {
+            if (!rendered(element)) return false;
+            const rect = element.getBoundingClientRect();
             const top = document.elementFromPoint(
               Math.min(viewportWidth - 1, Math.max(0, rect.left + rect.width / 2)),
               Math.min(viewportHeight - 1, Math.max(0, rect.top + rect.height / 2)),
             );
             return top !== null && (element.contains(top) || top.contains(element));
           };
+          const activeModal = Array.from(
+            root.querySelectorAll<HTMLElement>("[role='dialog'][aria-modal='true']"),
+          ).find(rendered);
           const candidates = Array.from(
             new Set(
               root.querySelectorAll<HTMLElement>(
                 "button, input, select, textarea, a[href], [role='button'], [role='tab']",
               ),
             ),
-          ).filter(visible);
+          ).filter(
+            (element) => rendered(element) && (!activeModal || activeModal.contains(element)),
+          );
           const clippedInteractives: string[] = [];
+          const occludedInteractives = candidates
+            .filter((element) => !centerIsVisible(element))
+            .map(label);
           const targetsBelow64: Array<{ label: string; width: number; height: number }> = [];
           const rects = candidates.map((element) => {
             const rect = element.getBoundingClientRect();
@@ -280,6 +298,29 @@ test("all inventory gallery fixtures satisfy the bilingual floor viewport contra
               }
             }
           }
+          const contentSignals = Array.from(
+            root.querySelectorAll<HTMLElement>(
+              ".mk-alert, .repack-prompt, .inventory-box-print__status, [role='status']",
+            ),
+          ).filter(
+            (element) => rendered(element) && (!activeModal || activeModal.contains(element)),
+          );
+          const actionContentOverlaps: string[] = [];
+          for (const action of rects) {
+            for (const content of contentSignals) {
+              if (action.element.contains(content) || content.contains(action.element)) continue;
+              const contentRect = content.getBoundingClientRect();
+              const overlapWidth =
+                Math.min(action.rect.right, contentRect.right) -
+                Math.max(action.rect.left, contentRect.left);
+              const overlapHeight =
+                Math.min(action.rect.bottom, contentRect.bottom) -
+                Math.max(action.rect.top, contentRect.top);
+              if (overlapWidth > 1 && overlapHeight > 1) {
+                actionContentOverlaps.push(`${action.label} <> ${label(content)}`);
+              }
+            }
+          }
           const nestedScrollRegions = Array.from(root.querySelectorAll<HTMLElement>("*"))
             .filter((element) => {
               const style = getComputedStyle(element);
@@ -292,12 +333,8 @@ test("all inventory gallery fixtures satisfy the bilingual floor viewport contra
               return x || y;
             })
             .map(label);
-          const statusSignals = Array.from(
-            root.querySelectorAll<HTMLElement>(
-              ".mk-alert, .repack-prompt, .inventory-box-print__status, [role='status']",
-            ),
-          )
-            .filter(visible)
+          const statusSignals = Array.from(contentSignals)
+            .filter(centerIsVisible)
             .map((element) => ({
               label: label(element),
               hasText: Boolean(element.textContent?.trim()),
@@ -325,6 +362,8 @@ test("all inventory gallery fixtures satisfy the bilingual floor viewport contra
                   outline: `${focusStyle.outlineWidth} ${focusStyle.outlineStyle} ${focusStyle.outlineColor}`,
                   visible:
                     active.matches(":focus-visible") &&
+                    (!activeModal || activeModal.contains(active)) &&
+                    centerIsVisible(active) &&
                     ((Number.parseFloat(focusStyle.outlineWidth) >= 2 &&
                       focusStyle.outlineStyle !== "none") ||
                       focusStyle.boxShadow !== "none") &&
@@ -356,7 +395,9 @@ test("all inventory gallery fixtures satisfy the bilingual floor viewport contra
             nestedScrollRegions,
             interactiveCount: candidates.length,
             clippedInteractives,
+            occludedInteractives,
             overlappingInteractives,
+            actionContentOverlaps,
             targetsBelow64,
             focus,
             statusSignals,
@@ -400,15 +441,25 @@ test("all inventory gallery fixtures satisfy the bilingual floor viewport contra
 });
 
 async function focusVisibleAction(page: Page): Promise<void> {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
     await page.keyboard.press("Tab");
     const visible = await page.evaluate(() => {
       const active = document.activeElement;
       if (!(active instanceof HTMLElement) || !active.matches(":focus-visible")) return false;
       const style = getComputedStyle(active);
+      const rect = active.getBoundingClientRect();
+      const top = document.elementFromPoint(
+        Math.min(window.innerWidth - 1, Math.max(0, rect.left + rect.width / 2)),
+        Math.min(window.innerHeight - 1, Math.max(0, rect.top + rect.height / 2)),
+      );
       return (
-        (Number.parseFloat(style.outlineWidth) >= 2 && style.outlineStyle !== "none") ||
-        style.boxShadow !== "none"
+        (top !== null &&
+          (active.contains(top) || top.contains(active)) &&
+          Number.parseFloat(style.outlineWidth) >= 2 &&
+          style.outlineStyle !== "none") ||
+        (top !== null &&
+          (active.contains(top) || top.contains(active)) &&
+          style.boxShadow !== "none")
       );
     });
     if (visible) return;
@@ -429,7 +480,9 @@ function rowPasses(row: BrowserRow): boolean {
     row.nestedScrollRegions.length === 0 &&
     row.interactiveCount > 0 &&
     row.clippedInteractives.length === 0 &&
+    row.occludedInteractives.length === 0 &&
     row.overlappingInteractives.length === 0 &&
+    row.actionContentOverlaps.length === 0 &&
     row.targetsBelow64.length === 0 &&
     row.focus?.visible === true &&
     row.statusDefects.length === 0 &&

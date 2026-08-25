@@ -66,7 +66,42 @@ export interface InventoryWorkScreenProps {
   onPrintRecoveryChange?: (blocked: boolean) => void;
   createEventId?: () => string;
   now?: () => string;
+  /** Development-only frozen input for driving the production render branches. */
+  galleryState?: InventoryWorkGalleryState;
 }
+
+export type InventoryWorkGalleryState =
+  | {
+      mode: "check";
+      productionDate: string;
+      pendingSync: number;
+      progress: InventoryProgress;
+      recent: RecentInventoryOperation[];
+      result: RecordInventoryScanResult | null;
+      writeFailed?: boolean;
+      leaveFailed?: boolean;
+      dateDialog?: boolean;
+    }
+  | {
+      mode: "repack";
+      productionDate: string;
+      pendingSync: number;
+      state: InventoryRepackStateView;
+      recent: RecentInventoryOperation[];
+      result: InventoryRepackScanResult | null;
+      writeFailed?: boolean;
+      leaveFailed?: boolean;
+      dateDialog?: boolean;
+      correctionsDialog?: boolean;
+      printDisplay?: InventoryPrintDisplay | null;
+      reprintSscc?: string;
+      reprintCandidate?: {
+        boxId: string;
+        sscc: string;
+        quantity: number;
+        productionDate: string;
+      } | null;
+    };
 
 const EMPTY_PROGRESS: InventoryProgress = {
   verified: 0,
@@ -93,7 +128,7 @@ function printErrorCode(value: string | null | undefined): InventoryPrintErrorCo
   }
 }
 
-interface InventoryPrintDisplay extends InventoryBoxPrintFacts {
+export interface InventoryPrintDisplay extends InventoryBoxPrintFacts {
   attemptId: string | null;
   attemptNumber: number;
   attemptState: "printing" | "failed" | null;
@@ -135,19 +170,25 @@ function CheckInventoryWorkScreen({
   onScanQueueRegister,
   createEventId = defaultEventId,
   now = defaultNow,
+  galleryState,
 }: InventoryWorkScreenProps & {
   inventory: StationInventoryBundleManifest & { mode: "check" };
 }) {
   const { t, i18n } = useTranslation();
-  const [productionDate, setProductionDate] = useState<string | null>(null);
-  const [dateDraft, setDateDraft] = useState(inventory.productionDateFrom);
-  const [dateDialog, setDateDialog] = useState(false);
-  const [progress, setProgress] = useState<InventoryProgress>(EMPTY_PROGRESS);
-  const [recent, setRecent] = useState<RecentInventoryOperation[]>([]);
-  const [result, setResult] = useState<RecordInventoryScanResult | null>(null);
-  const [writeFailed, setWriteFailed] = useState(false);
+  const gallery = galleryState?.mode === "check" ? galleryState : null;
+  const [productionDate, setProductionDate] = useState<string | null>(
+    gallery?.productionDate ?? null,
+  );
+  const [dateDraft, setDateDraft] = useState(
+    gallery?.productionDate ?? inventory.productionDateFrom,
+  );
+  const [dateDialog, setDateDialog] = useState(gallery?.dateDialog ?? false);
+  const [progress, setProgress] = useState<InventoryProgress>(gallery?.progress ?? EMPTY_PROGRESS);
+  const [recent, setRecent] = useState<RecentInventoryOperation[]>(gallery?.recent ?? []);
+  const [result, setResult] = useState<RecordInventoryScanResult | null>(gallery?.result ?? null);
+  const [writeFailed, setWriteFailed] = useState(gallery?.writeFailed ?? false);
   const [leaving, setLeaving] = useState(false);
-  const [leaveFailed, setLeaveFailed] = useState(false);
+  const [leaveFailed, setLeaveFailed] = useState(gallery?.leaveFailed ?? false);
   const mounted = useRef(true);
   const refresh = useCallback(async () => {
     const [nextProgress, nextRecent] = await Promise.all([
@@ -169,17 +210,21 @@ function CheckInventoryWorkScreen({
     resume: resumeInventorySync,
   } = useInventorySyncEngine({
     exec,
-    client: client ?? null,
+    client: gallery ? null : (client ?? null),
     inventoryId: inventory.inventoryId,
     snapshotId: inventory.snapshotId,
     ...(floorTaskPointerValue ? { floorTaskPointerValue } : {}),
-    active: true,
+    active: !gallery,
     onProgressApplied: refresh,
     ...(credentialGeneration ? { credentialGeneration } : {}),
   });
 
   useEffect(() => {
     mounted.current = true;
+    if (gallery)
+      return () => {
+        mounted.current = false;
+      };
     void (async () => {
       let stored = await loadInventoryProductionDate(exec, {
         inventoryId: inventory.inventoryId,
@@ -224,6 +269,7 @@ function CheckInventoryWorkScreen({
     now,
     operatorId,
     refresh,
+    gallery,
   ]);
 
   const queue = useMemo(
@@ -269,19 +315,19 @@ function CheckInventoryWorkScreen({
   );
 
   useEffect(() => {
-    if (productionDate === null) return undefined;
+    if (gallery || productionDate === null) return undefined;
     queue.open();
     const unregister = onScanQueueRegister?.(queue);
     return () => {
       unregister?.();
       void queue.close();
     };
-  }, [onScanQueueRegister, productionDate, queue]);
+  }, [gallery, onScanQueueRegister, productionDate, queue]);
 
   useEffect(() => {
-    if (productionDate === null || dateDialog) return undefined;
+    if (gallery || productionDate === null || dateDialog) return undefined;
     return source.start((raw) => queue.enqueue(raw));
-  }, [dateDialog, productionDate, queue, source]);
+  }, [dateDialog, gallery, productionDate, queue, source]);
 
   const applyDate = async () => {
     if (dateDraft < inventory.productionDateFrom || dateDraft > inventory.productionDateTo) return;
@@ -386,7 +432,9 @@ function CheckInventoryWorkScreen({
         <div role="status" className="inventory-sync-status">
           {leaveFailed
             ? t("inventory.work.leaveFailed")
-            : t("inventory.work.pendingSync", { count: inventorySyncState.pending })}
+            : t("inventory.work.pendingSync", {
+                count: gallery?.pendingSync ?? inventorySyncState.pending,
+              })}
         </div>
         <div className="inventory-work-main">
           <div className="inventory-work-primary">
@@ -529,36 +577,44 @@ function RepackInventoryWorkScreen({
   onPrintRecoveryChange,
   createEventId = defaultEventId,
   now = defaultNow,
+  galleryState,
 }: InventoryWorkScreenProps & {
   inventory: StationInventoryBundleManifest & { mode: "repack" };
 }) {
   const { t, i18n } = useTranslation();
-  const [productionDate, setProductionDate] = useState<string | null>(null);
-  const [dateDraft, setDateDraft] = useState(inventory.productionDateFrom);
-  const [state, setState] = useState<InventoryRepackStateView>(EMPTY_REPACK_STATE);
-  const [result, setResult] = useState<InventoryRepackScanResult | null>(null);
-  const [recent, setRecent] = useState<RecentInventoryOperation[]>([]);
-  const [writeFailed, setWriteFailed] = useState(false);
-  const [dateDialog, setDateDialog] = useState(false);
-  const [correctionsDialog, setCorrectionsDialog] = useState(false);
+  const gallery = galleryState?.mode === "repack" ? galleryState : null;
+  const [productionDate, setProductionDate] = useState<string | null>(
+    gallery?.productionDate ?? null,
+  );
+  const [dateDraft, setDateDraft] = useState(
+    gallery?.productionDate ?? inventory.productionDateFrom,
+  );
+  const [state, setState] = useState<InventoryRepackStateView>(
+    gallery?.state ?? EMPTY_REPACK_STATE,
+  );
+  const [result, setResult] = useState<InventoryRepackScanResult | null>(gallery?.result ?? null);
+  const [recent, setRecent] = useState<RecentInventoryOperation[]>(gallery?.recent ?? []);
+  const [writeFailed, setWriteFailed] = useState(gallery?.writeFailed ?? false);
+  const [dateDialog, setDateDialog] = useState(gallery?.dateDialog ?? false);
+  const [correctionsDialog, setCorrectionsDialog] = useState(gallery?.correctionsDialog ?? false);
   const [busy, setBusy] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const [leaveFailed, setLeaveFailed] = useState(false);
+  const [leaveFailed, setLeaveFailed] = useState(gallery?.leaveFailed ?? false);
   const [printBusy, setPrintBusy] = useState(false);
-  const [printRecoveryHydrated, setPrintRecoveryHydrated] = useState(false);
+  const [printRecoveryHydrated, setPrintRecoveryHydrated] = useState(Boolean(gallery));
   const [printResult, setPrintResult] = useState<InventoryBoxPrintResult | null>(null);
   const [unresolvedReprint, setUnresolvedReprint] = useState<UnresolvedInventoryReprint | null>(
     null,
   );
   const [provisionalPrintFailure, setProvisionalPrintFailure] =
-    useState<InventoryPrintDisplay | null>(null);
-  const [reprintSscc, setReprintSscc] = useState("");
+    useState<InventoryPrintDisplay | null>(gallery?.printDisplay ?? null);
+  const [reprintSscc, setReprintSscc] = useState(gallery?.reprintSscc ?? "");
   const [reprintCandidate, setReprintCandidate] = useState<{
     boxId: string;
     sscc: string;
     quantity: number;
     productionDate: string;
-  } | null>(null);
+  } | null>(gallery?.reprintCandidate ?? null);
   const [reprintError, setReprintError] = useState(false);
   const mounted = useRef(true);
   const automaticPrints = useRef(new Set<string>());
@@ -590,17 +646,21 @@ function RepackInventoryWorkScreen({
     resume,
   } = useInventorySyncEngine({
     exec,
-    client: client ?? null,
+    client: gallery ? null : (client ?? null),
     inventoryId: inventory.inventoryId,
     snapshotId: inventory.snapshotId,
     ...(floorTaskPointerValue ? { floorTaskPointerValue } : {}),
-    active: true,
+    active: !gallery,
     onProgressApplied: refresh,
     ...(credentialGeneration ? { credentialGeneration } : {}),
   });
 
   useEffect(() => {
     mounted.current = true;
+    if (gallery)
+      return () => {
+        mounted.current = false;
+      };
     void (async () => {
       let date = await loadInventoryProductionDate(exec, {
         inventoryId: inventory.inventoryId,
@@ -640,6 +700,7 @@ function RepackInventoryWorkScreen({
     now,
     operatorId,
     refresh,
+    gallery,
   ]);
 
   const queue = useMemo(
@@ -692,14 +753,14 @@ function RepackInventoryWorkScreen({
   );
 
   useEffect(() => {
-    if (productionDate === null) return undefined;
+    if (gallery || productionDate === null) return undefined;
     queue.open();
     const unregister = onScanQueueRegister?.(queue);
     return () => {
       unregister?.();
       void queue.close();
     };
-  }, [onScanQueueRegister, productionDate, queue]);
+  }, [gallery, onScanQueueRegister, productionDate, queue]);
 
   const unresolvedPrint =
     state.phase === "closed-pending-print" ||
@@ -722,6 +783,7 @@ function RepackInventoryWorkScreen({
 
   useEffect(() => {
     if (
+      gallery ||
       productionDate === null ||
       dateDialog ||
       correctionsDialog ||
@@ -731,10 +793,19 @@ function RepackInventoryWorkScreen({
       return undefined;
     }
     return source.start((raw) => queue.enqueue(raw));
-  }, [correctionsDialog, dateDialog, printBusy, productionDate, queue, source, unresolvedPrint]);
+  }, [
+    correctionsDialog,
+    dateDialog,
+    gallery,
+    printBusy,
+    productionDate,
+    queue,
+    source,
+    unresolvedPrint,
+  ]);
 
   useEffect(() => {
-    if (!correctionsDialog || printBusy) return undefined;
+    if (gallery || !correctionsDialog || printBusy) return undefined;
     return source.start((raw) => {
       const sscc = parseScannedSscc(raw);
       if (sscc !== null) {
@@ -743,7 +814,7 @@ function RepackInventoryWorkScreen({
         setReprintError(false);
       }
     });
-  }, [correctionsDialog, printBusy, source]);
+  }, [correctionsDialog, gallery, printBusy, source]);
 
   const runPrint = useCallback(
     async (
@@ -851,7 +922,7 @@ function RepackInventoryWorkScreen({
 
   useEffect(() => {
     const box = state.box;
-    if (!box || state.phase !== "closed-pending-print") return;
+    if (gallery || !box || state.phase !== "closed-pending-print") return;
     const key = `${box.boxId}:${box.printState}`;
     if (automaticPrints.current.has(key)) return;
     automaticPrints.current.add(key);
@@ -915,10 +986,12 @@ function RepackInventoryWorkScreen({
     refresh,
     runPrint,
     state,
+    gallery,
   ]);
 
   useEffect(() => {
-    if (!unresolvedReprint || unresolvedReprint.attemptState !== "printing" || printBusy) return;
+    if (gallery || !unresolvedReprint || unresolvedReprint.attemptState !== "printing" || printBusy)
+      return;
     if (automaticRecoveries.current.has(unresolvedReprint.attemptId)) return;
     automaticRecoveries.current.add(unresolvedReprint.attemptId);
     void (async () => {
@@ -968,6 +1041,7 @@ function RepackInventoryWorkScreen({
     printBusy,
     refresh,
     unresolvedReprint,
+    gallery,
   ]);
 
   const runCorrection = async (kind: "remove" | "clear") => {
@@ -1201,7 +1275,9 @@ function RepackInventoryWorkScreen({
           <span role="status">
             {leaveFailed
               ? t("inventory.work.leaveFailed")
-              : t("inventory.work.pendingSync", { count: syncState.pending })}
+              : t("inventory.work.pendingSync", {
+                  count: gallery?.pendingSync ?? syncState.pending,
+                })}
           </span>
           <Button
             size="floor"

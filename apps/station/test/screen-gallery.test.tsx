@@ -168,6 +168,28 @@ describe("development screen gallery", () => {
     expect(view.container.textContent).not.toContain("010460000000001521");
   });
 
+  it("drives the real check work branch with its production accessibility contract", async () => {
+    render(
+      <StationScreenGallery request={{ state: "inventory-simple-box-accepted", locale: "ru" }} />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Изменить дату производства" })).toBeDefined();
+  });
+
+  it("drives the real repack print-recovery branch with production disabled actions", async () => {
+    render(<StationScreenGallery request={{ state: "inventory-print-recovery", locale: "ru" }} />);
+
+    expect(await screen.findByRole("button", { name: "Изменить" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(screen.getByRole("button", { name: "Исправления" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Выйти из задания" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+  });
+
   it("renders aggregation with the production scan, 10-place box, and six-row history instruments", () => {
     const view = render(
       <StationScreenGallery request={{ state: "work-aggregation", locale: "ru" }} />,

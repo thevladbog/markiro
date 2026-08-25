@@ -23,6 +23,7 @@ import type {
   CreateInventoryDto,
   FixInventorySnapshotDto,
   InventoryDto,
+  InventoryDetailDto,
   InventoryImportDto,
   InventoryLifecycleStatus,
   InventoryMode,
@@ -159,6 +160,47 @@ export class InventoriesService {
       .limit(1);
     if (!row) throw new NotFoundException();
     return this.toInventoryDto(row);
+  }
+
+  async getDetail(tenantId: string, id: string): Promise<InventoryDetailDto> {
+    const inventory = await this.get(tenantId, id);
+    const [[participantBlockers], [boxBlockers]] = await Promise.all([
+      this.db
+        .select({
+          activeParticipantCount: sql<number>`count(*) filter (where ${schema.inventoryDeviceParticipants.leftAt} is null)::int`,
+          pendingEventCount: sql<number>`coalesce(sum(${schema.inventoryDeviceParticipants.pendingEventCount}), 0)::int`,
+          participantOpenBoxCount: sql<number>`coalesce(sum(${schema.inventoryDeviceParticipants.openBoxCount}), 0)::int`,
+        })
+        .from(schema.inventoryDeviceParticipants)
+        .where(
+          and(
+            eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
+            eq(schema.inventoryDeviceParticipants.inventoryId, id),
+          ),
+        ),
+      this.db
+        .select({
+          openRepackBoxCount: sql<number>`count(*) filter (where ${schema.inventoryRepackBoxes.state} = 'open')::int`,
+          unresolvedPrintBoxCount: sql<number>`count(*) filter (where ${schema.inventoryRepackBoxes.state} = 'closed' and ${schema.inventoryRepackBoxes.printState} in ('pending', 'printing', 'failed'))::int`,
+        })
+        .from(schema.inventoryRepackBoxes)
+        .where(
+          and(
+            eq(schema.inventoryRepackBoxes.tenantId, tenantId),
+            eq(schema.inventoryRepackBoxes.inventoryId, id),
+          ),
+        ),
+    ]);
+    return {
+      ...inventory,
+      blockers: {
+        activeParticipantCount: participantBlockers?.activeParticipantCount ?? 0,
+        pendingEventCount: participantBlockers?.pendingEventCount ?? 0,
+        participantOpenBoxCount: participantBlockers?.participantOpenBoxCount ?? 0,
+        openRepackBoxCount: boxBlockers?.openRepackBoxCount ?? 0,
+        unresolvedPrintBoxCount: boxBlockers?.unresolvedPrintBoxCount ?? 0,
+      },
+    };
   }
 
   async create(

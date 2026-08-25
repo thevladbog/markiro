@@ -45,6 +45,7 @@ import {
   createInventorySchema,
   fixInventorySnapshotOpenApiSchema,
   fixInventorySnapshotSchema,
+  inventoryDetailOpenApiSchema,
   inventoryIdSchema,
   inventoryImportOpenApiSchema,
   inventoryImportStatusSchema,
@@ -56,6 +57,7 @@ import {
   type CreateInventoryDto,
   type FixInventorySnapshotDto,
   type InventoryDto,
+  type InventoryDetailDto,
   type InventoryImportDto,
   type ListInventoriesResponseDto,
   type InventorySnapshotDto,
@@ -100,12 +102,12 @@ export class InventoriesController {
   @Get(":id")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
-  @ApiOkResponse({ schema: inventoryOpenApiSchema })
+  @ApiOkResponse({ schema: inventoryDetailOpenApiSchema })
   get(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
-  ): Promise<InventoryDto> {
-    return this.inventories.get(req.tenantId!, id);
+  ): Promise<InventoryDetailDto> {
+    return this.inventories.getDetail(req.tenantId!, id);
   }
 
   @Patch(":id")

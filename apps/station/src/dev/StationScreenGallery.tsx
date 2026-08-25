@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { useTranslation } from "react-i18next";
-import { Alert, Button, Card, FullScreenDialog, PinPad, SignalOverlay } from "@markiro/ui";
+import { Alert, Button, Card, PinPad, SignalOverlay } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
+import type { StationInventoryBundleManifest } from "@markiro/domain";
 
 import i18n from "../i18n/index.js";
 import type { BoxPrintErrorCode, ClosedBoxSummary } from "../lib/boxes.js";
@@ -24,6 +24,7 @@ import { ConflictList } from "../pages/ConflictList.js";
 import { Enrollment } from "../pages/Enrollment.js";
 import { ExceptionFlow } from "../pages/ExceptionFlow.js";
 import { InventoryTaskConfirmation } from "../pages/InventoryTaskConfirmation.js";
+import { InventoryWorkScreen } from "../pages/InventoryWorkScreen.js";
 import { TaskSelection } from "../pages/TaskSelection.js";
 import { UpdateCenter } from "../pages/UpdateCenter.js";
 import { WorkstationSetup } from "../pages/WorkstationSetup.js";
@@ -37,11 +38,6 @@ import { ShiftCard } from "../ui/ShiftCard.js";
 import { StationBrand } from "../ui/StationBrand.js";
 import { StationScreen } from "../ui/StationScreen.js";
 import { WindowModeControl } from "../ui/WindowModeControl.js";
-import { InventoryBoxPrintRecovery } from "../ui/inventory/InventoryBoxPrintRecovery.js";
-import { InventoryProgress as InventoryProgressView } from "../ui/inventory/InventoryProgress.js";
-import { InventoryScanInstrument } from "../ui/inventory/InventoryScanInstrument.js";
-import { RepackBoxInstrument } from "../ui/inventory/RepackBoxInstrument.js";
-import { RepackCorrections } from "../ui/inventory/RepackCorrections.js";
 import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
 import { RecentOperations } from "../ui/work/RecentOperations.js";
 import { ScanResultInstrument } from "../ui/work/ScanResultInstrument.js";
@@ -297,6 +293,47 @@ const GALLERY_INVENTORY_TASK = {
   productionDateTo: "2026-09-19",
 };
 
+const GALLERY_CHECK_MANIFEST: StationInventoryBundleManifest & { mode: "check" } = {
+  ...GALLERY_INVENTORY_TASK,
+  snapshotId: "44444444-4444-4444-8444-444444444444",
+  snapshotRevision: 1,
+  snapshotFixedAt: "2026-08-19T10:00:00.000Z",
+  combinedDigest: "a".repeat(64),
+  contentDigest: "b".repeat(64),
+  codeCount: 124,
+  productId: "55555555-5555-4555-8555-555555555555",
+  productPrintName: null,
+  egaisCode: null,
+  shelfLifeDays: null,
+  gtin14: "04600000000015",
+  boxCapacity: 20,
+  boxLabelTemplate: null,
+  limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
+  sscc: null,
+  ssccRevokedFrom: [],
+  ssccRevokedBlocks: [],
+};
+
+const GALLERY_REPACK_MANIFEST: StationInventoryBundleManifest & { mode: "repack" } = {
+  ...GALLERY_CHECK_MANIFEST,
+  inventoryNumber: "INV-R-00012",
+  mode: "repack",
+  productPrintName: GALLERY_INVENTORY_TASK.productName,
+  boxLabelTemplate: {
+    id: "66666666-6666-4666-8666-666666666666",
+    name: "Gallery box label",
+    spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+  },
+  sscc: {
+    allocationOrder: 1,
+    issuerPrefix: "460068200",
+    extensionDigit: 0,
+    fromSerial: 1,
+    toSerial: 100,
+    consumedThroughSerial: null,
+  },
+};
+
 const galleryInventoryClient: StationClient = {
   get<T>(path: string): Promise<T> {
     if (path === "/shifts") return Promise.resolve({ items: [] } as T);
@@ -388,7 +425,6 @@ function InventoryOtherLineConfirmationFixture() {
 }
 
 function SimpleInventoryFixture({ variant }: { variant: string }) {
-  const { t, i18n: translation } = useTranslation();
   const result = galleryInventoryScanResult(variant);
   const progress: InventoryProgress = {
     verified: variant === "simple-box-accepted" ? 20 : 124,
@@ -398,88 +434,23 @@ function SimpleInventoryFixture({ variant }: { variant: string }) {
     acceptedBoxes: variant === "simple-box-accepted" ? 1 : 4,
     acceptedItems: variant === "simple-box-accepted" ? 20 : 83,
   };
-  const locale = translation.language === "ru" ? "ru-RU" : "en-US";
-  const showDateDialog = variant === "production-date-change";
   return (
-    <StationScreen
-      title={t("inventory.work.title")}
-      header={
-        <div className="inventory-work-heading">
-          <span>INV-00047</span>
-          <strong>{GALLERY_INVENTORY_TASK.productName}</strong>
-          <span>{t("inventory.modeCheck")}</span>
-        </div>
-      }
-    >
-      <div className="inventory-work-screen" data-testid="inventory-simple-work">
-        <section className="inventory-active-date">
-          <div>
-            <span>{t("inventory.work.productionDate")}</span>
-            <strong>{GALLERY_INVENTORY_DATE}</strong>
-          </div>
-          <span>{t("inventory.work.futureOnly")}</span>
-          <Button variant="secondary" size="floor">
-            {t("inventory.work.change")}
-          </Button>
-          <Button variant="secondary" size="floor">
-            {t("inventory.work.leave")}
-          </Button>
-        </section>
-        <div role="status" className="inventory-sync-status">
-          {t("inventory.work.pendingSync", { count: 0 })}
-        </div>
-        <div className="inventory-work-main">
-          <div className="inventory-work-primary">
-            <InventoryScanInstrument
-              result={result}
-              writeFailed={false}
-              currentDeviceId="gallery-terminal-a"
-              labels={inventoryScanLabels(t)}
-            />
-            <InventoryProgressView
-              progress={progress}
-              recent={[]}
-              variant="summary"
-              gtin14="04600000000015"
-              locale={locale}
-              labels={inventoryProgressLabels(t)}
-            />
-          </div>
-          <aside className="inventory-work-recent">
-            <InventoryProgressView
-              progress={progress}
-              recent={[]}
-              variant="recent"
-              gtin14="04600000000015"
-              locale={locale}
-              labels={inventoryProgressLabels(t)}
-            />
-          </aside>
-        </div>
-      </div>
-      <FullScreenDialog
-        open={showDateDialog}
-        title={t("inventory.work.dateDialogTitle")}
-        backLabel={t("inventory.work.cancel")}
-        onClose={() => undefined}
-        footer={<Button size="floor">{t("inventory.work.applyDate")}</Button>}
-      >
-        <div className="inventory-date-dialog">
-          <label htmlFor="gallery-inventory-production-date">
-            {t("inventory.work.productionDate")}
-          </label>
-          <input
-            id="gallery-inventory-production-date"
-            type="date"
-            min={GALLERY_INVENTORY_DATE}
-            max="2026-09-19"
-            value={GALLERY_INVENTORY_DATE}
-            readOnly
-          />
-          <p>{t("inventory.work.futureOnly")}</p>
-        </div>
-      </FullScreenDialog>
-    </StationScreen>
+    <InventoryWorkScreen
+      exec={galleryInventoryExecutor}
+      inventory={GALLERY_CHECK_MANIFEST}
+      deviceId="gallery-terminal-a"
+      operatorId="gallery-operator"
+      source={galleryInventoryScanSource}
+      galleryState={{
+        mode: "check",
+        productionDate: GALLERY_INVENTORY_DATE,
+        pendingSync: 0,
+        progress,
+        recent: [],
+        result,
+        dateDialog: variant === "production-date-change",
+      }}
+    />
   );
 }
 
@@ -544,119 +515,53 @@ function galleryInventoryScanResult(variant: string): RecordInventoryScanResult 
 }
 
 function RepackInventoryFixture({ variant }: { variant: string }) {
-  const { t, i18n: translation } = useTranslation();
   const state = galleryRepackState(variant);
   const result = galleryRepackResult(variant);
-  const locale = translation.language === "ru" ? "ru-RU" : "en-US";
   const corrections = variant === "repack-corrections";
   const reprint = variant === "same-sscc-reprint-confirmation";
   const printRecovery = variant === "print-recovery";
   const leaveOpen = variant === "leave-open-box";
-  const labels = inventoryProgressLabels(t);
   return (
-    <StationScreen
-      title={t("inventory.repack.title")}
-      header={
-        <div className="inventory-work-heading">
-          <span>INV-R-00012</span>
-          <strong>{GALLERY_INVENTORY_TASK.productName}</strong>
-          <span>{t("inventory.modeRepack")}</span>
-        </div>
-      }
-    >
-      <div className="repack-work-screen" data-testid="inventory-repack-work">
-        <div className="repack-toolbar">
-          <div>
-            <span>{t("inventory.work.productionDate")}</span>
-            <strong>{GALLERY_INVENTORY_DATE}</strong>
-          </div>
-          <span role="status">
-            {leaveOpen
-              ? t("inventory.work.leaveFailed")
-              : t("inventory.work.pendingSync", { count: 0 })}
-          </span>
-          <Button size="floor" variant="secondary">
-            {t("inventory.work.change")}
-          </Button>
-          <Button size="floor" variant="secondary">
-            {t("inventory.repack.corrections")}
-          </Button>
-          <Button size="floor" variant="secondary">
-            {t("inventory.work.leave")}
-          </Button>
-        </div>
-        <div className="repack-work-main">
-          {printRecovery ? (
-            <InventoryBoxPrintRecovery
-              state="failed"
-              facts={{
-                sscc: GALLERY_INVENTORY_SSCC,
-                quantity: 20,
-                productionDate: GALLERY_INVENTORY_DATE,
-              }}
-              errorCode="transport_failed"
-              busy={false}
-              onRetry={() => undefined}
-              onSetup={() => undefined}
-              labels={inventoryPrintLabels(t)}
-            />
-          ) : (
-            <RepackBoxInstrument
-              state={state}
-              result={result}
-              writeFailed={false}
-              capacity={20}
-              labels={inventoryRepackLabels(t)}
-            />
-          )}
-          <aside className="inventory-work-recent">
-            <InventoryProgressView
-              progress={{
-                verified: 12,
-                discrepancies: 0,
-                protected: 0,
-                claimedByDevice: 12,
-                acceptedBoxes: 0,
-                acceptedItems: 12,
-              }}
-              recent={[]}
-              variant="recent"
-              gtin14="04600000000015"
-              locale={locale}
-              labels={labels}
-            />
-          </aside>
-        </div>
-      </div>
-      <FullScreenDialog
-        open={corrections || reprint}
-        title={t("inventory.repack.corrections")}
-        backLabel={t("inventory.work.cancel")}
-        onClose={() => undefined}
-      >
-        <RepackCorrections
-          itemCount={7}
-          busy={false}
-          onRemoveLast={() => undefined}
-          onClear={() => undefined}
-          reprintSscc={reprint ? GALLERY_INVENTORY_SSCC : ""}
-          onReprintSsccChange={() => undefined}
-          onFindReprint={() => undefined}
-          reprintCandidate={
-            reprint
-              ? {
-                  sscc: GALLERY_INVENTORY_SSCC,
-                  quantity: 20,
-                  productionDate: GALLERY_INVENTORY_DATE,
-                }
-              : null
-          }
-          reprintError={false}
-          onReprint={() => undefined}
-          labels={inventoryCorrectionLabels(t)}
-        />
-      </FullScreenDialog>
-    </StationScreen>
+    <InventoryWorkScreen
+      exec={galleryInventoryExecutor}
+      inventory={GALLERY_REPACK_MANIFEST}
+      deviceId="gallery-terminal-a"
+      operatorId="gallery-operator"
+      source={galleryInventoryScanSource}
+      galleryState={{
+        mode: "repack",
+        productionDate: GALLERY_INVENTORY_DATE,
+        pendingSync: 0,
+        state,
+        recent: [],
+        result,
+        leaveFailed: leaveOpen,
+        correctionsDialog: corrections || reprint,
+        printDisplay: printRecovery
+          ? {
+              attemptId: "gallery-print-attempt",
+              attemptNumber: 1,
+              attemptState: "failed",
+              kind: "initial",
+              state: "failed",
+              errorCode: "transport_failed",
+              boxId: "gallery-repack-box",
+              sscc: GALLERY_INVENTORY_SSCC,
+              quantity: 20,
+              productionDate: GALLERY_INVENTORY_DATE,
+            }
+          : null,
+        reprintSscc: reprint ? GALLERY_INVENTORY_SSCC : "",
+        reprintCandidate: reprint
+          ? {
+              boxId: "gallery-repack-box",
+              sscc: GALLERY_INVENTORY_SSCC,
+              quantity: 20,
+              productionDate: GALLERY_INVENTORY_DATE,
+            }
+          : null,
+      }}
+    />
   );
 }
 
@@ -720,109 +625,6 @@ function galleryRepackResult(variant: string): InventoryRepackScanResult | null 
     };
   }
   return null;
-}
-
-type GalleryTranslation = ReturnType<typeof useTranslation>["t"];
-
-function inventoryScanLabels(t: GalleryTranslation) {
-  return {
-    prompt: t("inventory.work.prompt"),
-    hint: t("inventory.work.promptHint"),
-    expected: t("inventory.work.verdict.expected"),
-    protected: t("inventory.work.verdict.protected"),
-    ineligible: t("inventory.work.verdict.ineligible"),
-    unknown: t("inventory.work.verdict.unknown"),
-    duplicateHere: t("inventory.work.verdict.duplicateHere"),
-    duplicateOther: t("inventory.work.verdict.duplicateOther"),
-    invalid: t("inventory.work.verdict.invalid"),
-    writeFailed: t("inventory.work.verdict.writeFailed"),
-    boxAccepted: (count: number) => t("inventory.work.verdict.boxAccepted", { count }),
-    boxBadge: t("inventory.work.badge.box"),
-    duplicateBadge: t("inventory.work.badge.duplicate"),
-    protectedBadge: t("inventory.work.badge.protected"),
-    discrepancyBadge: t("inventory.work.badge.discrepancy"),
-    ineligibleBadge: t("inventory.work.badge.ineligible"),
-  };
-}
-
-function inventoryProgressLabels(t: GalleryTranslation) {
-  return {
-    verified: t("inventory.work.progress.verified"),
-    discrepancies: t("inventory.work.progress.discrepancies"),
-    protected: t("inventory.work.progress.protected"),
-    terminal: t("inventory.work.progress.terminal"),
-    boxes: t("inventory.work.progress.boxes"),
-    items: t("inventory.work.progress.items"),
-    recent: t("inventory.work.recent"),
-    empty: t("inventory.work.emptyRecent"),
-    invalidTime: t("inventory.work.invalidTime"),
-    gtin: "GTIN",
-    serial: t("inventory.work.serial"),
-    status: {
-      expected: t("inventory.work.status.expected"),
-      protected: t("inventory.work.status.protected"),
-      "known-ineligible": t("inventory.work.status.ineligible"),
-      unknown: t("inventory.work.status.unknown"),
-      duplicate: t("inventory.work.status.duplicate"),
-    },
-  };
-}
-
-function inventoryRepackLabels(t: GalleryTranslation) {
-  return {
-    oldBox: t("inventory.repack.oldBox"),
-    newBox: t("inventory.repack.newBox"),
-    productionDate: t("inventory.work.productionDate"),
-    awaiting: t("inventory.repack.awaiting"),
-    scanning: t("inventory.repack.scanning"),
-    pendingPrint: t("inventory.repack.pendingPrint"),
-    invalidated: t("inventory.repack.invalidated"),
-    oldSelected: t("inventory.repack.oldSelected"),
-    accepted: t("inventory.repack.accepted"),
-    discrepancy: t("inventory.repack.discrepancy"),
-    writeFailed: t("inventory.work.verdict.writeFailed"),
-    position: (position: number, filled: boolean) =>
-      t("inventory.repack.position", {
-        position,
-        status: filled ? "занято" : "свободно",
-      }),
-  };
-}
-
-function inventoryCorrectionLabels(t: GalleryTranslation) {
-  return {
-    removeLast: t("inventory.repack.removeLast"),
-    clear: t("inventory.repack.clear"),
-    empty: t("inventory.repack.empty"),
-    reprintTitle: t("inventory.repack.reprint.title"),
-    reprintSscc: t("inventory.repack.reprint.sscc"),
-    findReprint: t("inventory.repack.reprint.find"),
-    reprintCandidate: t("inventory.repack.reprint.candidate"),
-    reprintMissing: t("inventory.repack.reprint.missing"),
-    reprint: t("inventory.repack.reprint.action"),
-    quantity: t("inventory.repack.print.quantity"),
-    productionDate: t("inventory.work.productionDate"),
-  };
-}
-
-function inventoryPrintLabels(t: GalleryTranslation) {
-  return {
-    printing: t("inventory.repack.print.printing"),
-    printed: t("inventory.repack.print.printed"),
-    failed: t("inventory.repack.print.failed"),
-    sscc: "SSCC",
-    quantity: t("inventory.repack.print.quantity"),
-    productionDate: t("inventory.work.productionDate"),
-    retry: t("inventory.repack.print.retry"),
-    setup: t("inventory.repack.print.setup"),
-    errors: {
-      template_missing: t("inventory.repack.print.errors.templateMissing"),
-      printer_unconfigured: t("inventory.repack.print.errors.printerUnconfigured"),
-      render_failed: t("inventory.repack.print.errors.renderFailed"),
-      transport_failed: t("inventory.repack.print.errors.transportFailed"),
-      persistence_failed: t("inventory.repack.print.errors.persistenceFailed"),
-    },
-  };
 }
 
 function FloorHeaderFixture({ locale }: { locale: GalleryLocale }) {

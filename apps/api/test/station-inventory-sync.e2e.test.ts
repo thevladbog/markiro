@@ -1026,10 +1026,16 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
       },
     ]);
 
+    const terminalDateA = "2026-08-20";
+    let terminalDateB = "2026-08-21";
     const repackEvent = (
       device: "a" | "b",
       values: Partial<InventoryEvent> & Pick<InventoryEvent, "scannedAt">,
-    ): InventoryEvent => event(device, values);
+    ): InventoryEvent =>
+      event(device, {
+        activeProductionDate: device === "a" ? terminalDateA : terminalDateB,
+        ...values,
+      });
     const repackBatch = (
       batchId: string,
       events: InventoryEvent[],
@@ -1045,14 +1051,14 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
       };
       return { batchId, payloadDigest: inventoryEventBatchDigest(payload), ...payload };
     };
-    const open = (device: "a" | "b", boxId: string, newSscc: string) =>
-      repackEvent(device, {
+    const open = (device: "a" | "b", boxId: string, newSscc: string) => {
+      const productionDate = device === "a" ? terminalDateA : terminalDateB;
+      return repackEvent(device, {
         scannedAt: "2026-08-25T12:00:00.000Z",
         kind: "old_box",
         normalizedIdentity: `old_box:${oldSscc}`,
         codeHash: null,
         canonicalRaw: oldSscc,
-        activeProductionDate: "2026-08-20",
         localVerdict: "unknown",
         repack: {
           action: "open-box",
@@ -1060,9 +1066,10 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
           oldSscc,
           newSscc,
           capacity: 2,
-          productionDate: "2026-08-20",
+          productionDate,
         },
       });
+    };
 
     const openedA = open("a", boxAId, ssccA);
     const openedB = open("b", boxBId, ssccB);
@@ -1100,9 +1107,67 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
     ).toEqual(
       expect.arrayContaining([
         { id: boxAId, owner: deviceAId, capacity: 2, productionDate: "2026-08-20" },
-        { id: boxBId, owner: deviceBId, capacity: 2, productionDate: "2026-08-20" },
+        { id: boxBId, owner: deviceBId, capacity: 2, productionDate: "2026-08-21" },
       ]),
     );
+
+    const changedDateAt = "2026-08-25T12:00:00.250Z";
+    const changedDate = repackEvent("b", {
+      scannedAt: changedDateAt,
+      kind: "repack_action",
+      normalizedIdentity: `repack_action:change-date:${boxBId}`,
+      codeHash: null,
+      canonicalRaw: null,
+      activeProductionDate: "2026-08-22",
+      localVerdict: "repack-action",
+      repack: {
+        action: "change-date",
+        boxId: boxBId,
+        productionDate: "2026-08-22",
+        changedAt: changedDateAt,
+      },
+    });
+    await service.ingest(
+      tenantId,
+      deviceBId,
+      repackInventoryId,
+      repackBatch("repack-change-date-b", [changedDate], 1),
+    );
+    terminalDateB = "2026-08-22";
+    expect(
+      await db
+        .select({
+          id: schema.inventoryRepackBoxes.id,
+          productionDate: schema.inventoryRepackBoxes.productionDate,
+        })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.inventoryId, repackInventoryId)),
+    ).toEqual(
+      expect.arrayContaining([
+        { id: boxAId, productionDate: terminalDateA },
+        { id: boxBId, productionDate: terminalDateB },
+      ]),
+    );
+
+    const crossDeviceMutationAt = "2026-08-25T12:00:00.500Z";
+    const crossDeviceMutation = repackEvent("b", {
+      scannedAt: crossDeviceMutationAt,
+      kind: "repack_action",
+      normalizedIdentity: `repack_action:clear-box:${boxAId}`,
+      codeHash: null,
+      canonicalRaw: null,
+      activeProductionDate: terminalDateB,
+      localVerdict: "repack-action",
+      repack: { action: "clear-box", boxId: boxAId, changedAt: crossDeviceMutationAt },
+    });
+    await expect(
+      service.ingest(
+        tenantId,
+        deviceBId,
+        repackInventoryId,
+        repackBatch("repack-cross-device-mutation", [crossDeviceMutation], 1),
+      ),
+    ).rejects.toSatisfy((error: unknown) => errorCode(error) === "INVENTORY_REPACK_BOX_NOT_OWNED");
 
     const add = (device: "a" | "b", boxId: string, itemId: string, scannedAt: string) =>
       repackEvent(device, {

@@ -1305,7 +1305,7 @@ body,
   min-height: 0;
   overflow: hidden;
   gap: var(--sp-2);
-  grid-template-rows: 80px minmax(0, 1fr);
+  grid-template-rows: 80px auto minmax(0, 1fr);
 }
 
 .inventory-active-date {
@@ -1317,7 +1317,7 @@ body,
   border: 1px solid var(--info-border);
   border-radius: var(--r-2);
   background: var(--info-bg);
-  grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto auto;
   align-items: center;
 }
 

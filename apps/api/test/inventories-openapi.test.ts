@@ -289,7 +289,15 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
     if (!template) throw new Error("Missing boxLabelTemplate projection");
     exactObject(template, ["id", "name"]);
     expect(template.nullable).toBe(true);
-    exactObject(responseSchema(document, "/inventories/{id}", "get", "200"), fields);
+    const inventoryDetail = responseSchema(document, "/inventories/{id}", "get", "200");
+    exactObject(inventoryDetail, [...fields, "blockers"]);
+    exactObject(inventoryDetail.properties!.blockers!, [
+      "activeParticipantCount",
+      "pendingEventCount",
+      "participantOpenBoxCount",
+      "openRepackBoxCount",
+      "unresolvedPrintBoxCount",
+    ]);
     exactObject(responseSchema(document, "/inventories/{id}", "patch", "200"), fields);
     const list = responseSchema(document, "/inventories", "get", "200");
     exactObject(list, ["items"]);
