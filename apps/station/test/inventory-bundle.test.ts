@@ -122,7 +122,85 @@ function executor(): SqlExecutor {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 describe("mirrorInventoryBundle", () => {
+  it("does not stage a manifest that arrives after its selection lease retires", async () => {
+    const exec = executor();
+    await applyMigrations(exec);
+    const pendingManifest = deferred<InventoryBundleManifest>();
+    let current = true;
+    const request = mirrorInventoryBundle(
+      {
+        get: async <T>(path: string) => {
+          if (path.endsWith("/manifest")) return pendingManifest.promise as Promise<T>;
+          return (path.includes("cursor=") ? pages[1] : pages[0]) as T;
+        },
+      },
+      exec,
+      inventoryId,
+      { isCurrent: () => current },
+    );
+
+    current = false;
+    pendingManifest.resolve(manifest);
+
+    await expect(request).resolves.toBe(false);
+    await expect(readInventoryMirrorState(exec, inventoryId)).resolves.toBeNull();
+  });
+
+  it("does not ingest or publish a final page that arrives after its selection lease retires", async () => {
+    const exec = executor();
+    await applyMigrations(exec);
+    const pendingPage = deferred<InventoryBundlePage>();
+    const finalPage: InventoryBundlePage = {
+      ...pages[0]!,
+      items: pageItems,
+      nextCursor: null,
+      pageDigest: inventorySnapshotPageDigest({
+        snapshotId,
+        snapshotFixedAt: fixedAt,
+        contentDigest,
+        cursor: null,
+        items: pageItems,
+        nextCursor: null,
+      }),
+    };
+    let current = true;
+    let pageRequested!: () => void;
+    const pageStarted = new Promise<void>((resolve) => {
+      pageRequested = resolve;
+    });
+    const request = mirrorInventoryBundle(
+      {
+        get: async <T>(path: string) => {
+          if (path.endsWith("/manifest")) return manifest as T;
+          pageRequested();
+          return pendingPage.promise as Promise<T>;
+        },
+      },
+      exec,
+      inventoryId,
+      { isCurrent: () => current },
+    );
+    await pageStarted;
+
+    current = false;
+    pendingPage.resolve(finalPage);
+
+    await expect(request).resolves.toBe(false);
+    await expect(readInventoryMirrorState(exec, inventoryId)).resolves.toMatchObject({
+      activeSnapshotId: null,
+      stagedCodeCount: 0,
+    });
+  });
+
   it("continues from the durable cursor after a process restart and publishes only at completion", async () => {
     const exec = executor();
     await applyMigrations(exec);

@@ -11,6 +11,14 @@ import {
 } from "./inventory-mirror.js";
 import type { SqlExecutor } from "./mirror.js";
 
+export interface InventoryMirrorLease {
+  isCurrent: () => boolean;
+}
+
+function leaseIsCurrent(lease: InventoryMirrorLease | undefined): boolean {
+  return lease?.isCurrent() ?? true;
+}
+
 /**
  * Downloads the immutable Task 2 bundle into snapshot-scoped rows. Every
  * restart reuses the persisted cursor and generation. Publication itself is
@@ -21,14 +29,17 @@ export async function mirrorInventoryBundle(
   client: Pick<StationClient, "get">,
   exec: SqlExecutor,
   inventoryId: string,
+  lease?: InventoryMirrorLease,
 ): Promise<boolean> {
   const manifest = parseStationInventoryBundleManifest(
     await client.get<unknown>(`/station/inventories/${inventoryId}/bundle/manifest`),
   );
+  if (!leaseIsCurrent(lease)) return false;
   if (manifest.inventoryId !== inventoryId) {
     throw new Error("inventory bundle requested inventory mismatch");
   }
   const candidate = await beginInventoryMirror(exec, manifest);
+  if (!leaseIsCurrent(lease)) return false;
   if (candidate.alreadyActive) return true;
 
   let state = await readInventoryMirrorState(exec, inventoryId);
@@ -36,11 +47,13 @@ export async function mirrorInventoryBundle(
     state?.verifiedDigest === candidate.combinedDigest &&
     state.verifiedContentDigest === candidate.contentDigest
   ) {
+    if (!leaseIsCurrent(lease)) return false;
     return publishInventorySnapshot(exec, candidate);
   }
 
   let cursor = state?.nextCursor ?? null;
   for (;;) {
+    if (!leaseIsCurrent(lease)) return false;
     const query = new URLSearchParams({ limit: String(manifest.limits.codePageSize) });
     if (cursor !== null) query.set("cursor", cursor);
     const page = parseStationInventoryBundlePage(
@@ -48,7 +61,9 @@ export async function mirrorInventoryBundle(
         `/station/inventories/${inventoryId}/bundle/codes?${query.toString()}`,
       ),
     );
+    if (!leaseIsCurrent(lease)) return false;
     await ingestInventoryPage(exec, candidate, cursor, page);
+    if (!leaseIsCurrent(lease)) return false;
     if (page.nextCursor === null) return publishInventorySnapshot(exec, candidate);
     cursor = page.nextCursor;
     state = await readInventoryMirrorState(exec, inventoryId);

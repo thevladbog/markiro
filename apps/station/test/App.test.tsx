@@ -411,6 +411,8 @@ async function signInAsOperator(login = OPERATOR_LOGIN, pin = OPERATOR_PIN) {
   clickDigits(pin);
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
   await waitFor(() => expect(screen.getByTestId("scanner-status")).toBeDefined());
+  await waitFor(() => expect(screen.queryByText("Operator sign-in")).toBeNull());
+  await waitFor(() => expect(screen.queryByTestId("floor-route-loading")).toBeNull());
 }
 
 /**
@@ -1880,8 +1882,13 @@ describe("App", () => {
     const initialShifts = new Promise<Response>((_resolve, reject) => {
       rejectInitialShifts = reject;
     });
+    let rejectInitialInventory!: (reason?: unknown) => void;
+    const initialInventory = new Promise<Response>((_resolve, reject) => {
+      rejectInitialInventory = reject;
+    });
     let operatorRequests = 0;
     let shiftRequests = 0;
+    let inventoryRequests = 0;
     const fetchMock = vi.fn((url: string) => {
       const path = new URL(url).pathname;
       if (path === "/station/operators") {
@@ -1896,7 +1903,12 @@ describe("App", () => {
           ? initialShifts
           : Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
       }
-      if (path === "/station/inventory-tasks") return new Promise<Response>(() => {});
+      if (path === "/station/inventory-tasks") {
+        inventoryRequests += 1;
+        return inventoryRequests === 1
+          ? initialInventory
+          : Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      }
       return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1913,7 +1925,10 @@ describe("App", () => {
     expect(screen.getByTestId("server-status").textContent).toBe("No connection");
 
     act(() => window.dispatchEvent(new Event("offline")));
-    act(() => rejectInitialShifts(new TypeError("network")));
+    act(() => {
+      rejectInitialShifts(new TypeError("network"));
+      rejectInitialInventory(new TypeError("network"));
+    });
     fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
     await waitFor(() => expect(screen.getByTestId("server-status").textContent).toBe("Available"));
   });

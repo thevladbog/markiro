@@ -19,6 +19,8 @@ import { InventoryTaskConfirmation } from "./InventoryTaskConfirmation.js";
 import { ShiftSelection, type ShiftSelectionProps } from "./ShiftSelection.js";
 
 const INVENTORY_PAGE_SIZE = 1;
+type TaskCategory = "production" | "warehouse";
+let inventoryAttemptSequence = 0;
 
 export interface TaskSelectionProps {
   client: StationClient;
@@ -64,6 +66,7 @@ export function TaskSelection({
   isCurrent,
 }: TaskSelectionProps) {
   const { t } = useTranslation();
+  const [category, setCategory] = useState<TaskCategory>("production");
   const [tasks, setTasks] = useState<StationInventoryTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -74,8 +77,16 @@ export function TaskSelection({
     barcode: string;
   } | null>(null);
   const mounted = useRef(true);
+  const lifecycleGeneration = useRef(0);
   const busyRef = useRef(false);
   const isCurrentRef = useRef(isCurrent);
+  const inventoryRequest = useRef<{
+    client: StationClient;
+    id: number;
+    promise: Promise<void>;
+  } | null>(null);
+  const inventoryRequestId = useRef(0);
+  const loadedInventoryClient = useRef<StationClient | null>(null);
 
   useEffect(() => {
     isCurrentRef.current = isCurrent;
@@ -85,34 +96,60 @@ export function TaskSelection({
     mounted.current = true;
     return () => {
       mounted.current = false;
+      lifecycleGeneration.current += 1;
     };
   }, []);
 
-  const refreshInventoryTasks = useCallback(() => {
-    setLoading(true);
+  const retireSelectionAttempts = useCallback(() => {
+    lifecycleGeneration.current += 1;
+  }, []);
+
+  const refreshInventoryTasks = useCallback((): Promise<void> => {
+    if (inventoryRequest.current?.client === client) return inventoryRequest.current.promise;
+    const id = ++inventoryRequestId.current;
+    const initialForClient = loadedInventoryClient.current !== client;
+    if (initialForClient) setLoading(true);
     setError(null);
-    void client
+    const promise = client
       .get<unknown>("/station/inventory-tasks")
       .then((value) => {
-        if (!mounted.current || isCurrentRef.current?.() === false) return;
+        if (
+          !mounted.current ||
+          inventoryRequest.current?.id !== id ||
+          isCurrentRef.current?.() === false
+        )
+          return;
         setTasks(parseInventoryTaskList(value));
+        loadedInventoryClient.current = client;
       })
       .catch(() => {
-        if (!mounted.current || isCurrentRef.current?.() === false) return;
+        if (
+          !mounted.current ||
+          inventoryRequest.current?.id !== id ||
+          isCurrentRef.current?.() === false
+        )
+          return;
         setError(t("inventory.loadFailed"));
       })
       .finally(() => {
+        if (inventoryRequest.current?.id === id) inventoryRequest.current = null;
         if (mounted.current && isCurrentRef.current?.() !== false) setLoading(false);
       });
+    inventoryRequest.current = { client, id, promise };
+    return promise;
   }, [client, t]);
-
-  useEffect(() => {
-    refreshInventoryTasks();
-  }, [refreshInventoryTasks]);
 
   const joinTask = useCallback(
     async (task: StationInventoryTask, barcode?: string, confirmDifferentLine?: true) => {
       if (busyRef.current || isCurrentRef.current?.() === false) return;
+      const originGeneration = lifecycleGeneration.current;
+      const lease = {
+        token: `inventory-entry-${++inventoryAttemptSequence}`,
+        isCurrent: () =>
+          mounted.current &&
+          lifecycleGeneration.current === originGeneration &&
+          isCurrentRef.current?.() !== false,
+      };
       busyRef.current = true;
       setBusy(true);
       setError(null);
@@ -125,11 +162,12 @@ export function TaskSelection({
         const joined = parseStationInventoryBundleManifest(
           await client.post<unknown>(`/station/inventories/${task.inventoryId}/join`, body),
         );
+        if (!lease.isCurrent()) return;
         if (!taskMatchesManifest(task, joined)) throw new Error("inventory join task mismatch");
-        const published = await mirrorInventoryBundle(client, exec, task.inventoryId);
-        if (!published) throw new Error("inventory bundle publication was superseded");
-        const active = await activateVerifiedInventoryFloorTask(exec, task.inventoryId);
-        if (!mounted.current || isCurrentRef.current?.() === false) return;
+        const published = await mirrorInventoryBundle(client, exec, task.inventoryId, lease);
+        if (!published || !lease.isCurrent()) return;
+        const active = await activateVerifiedInventoryFloorTask(exec, task.inventoryId, lease);
+        if (!lease.isCurrent()) return;
         setConfirmation(null);
         onInventorySelected(active);
       } catch {
@@ -264,8 +302,40 @@ export function TaskSelection({
         {...(onSetup ? { onSetup } : {})}
         {...(onConflicts ? { onConflicts } : {})}
         {...(isCurrent ? { isCurrent } : {})}
-        {...(tasks.length > 0 ? { title: t("inventory.warehouseTitle") } : {})}
-        beforeList={inventoryPanel}
+        onRouteIntent={retireSelectionAttempts}
+        onCoordinatedRefresh={refreshInventoryTasks}
+        title={category === "warehouse" ? t("inventory.warehouseTitle") : t("shifts.title")}
+        actionsLabel={category === "warehouse" ? t("inventory.actions") : t("shifts.actions")}
+        refreshLabel={category === "warehouse" ? t("inventory.refresh") : t("shifts.refresh")}
+        productionActionsVisible={category === "production"}
+        alternateActive={category === "warehouse"}
+        alternateContent={inventoryPanel}
+        categoryNavigation={(openShiftCount) => (
+          <div
+            className="floor-task-categories"
+            role="tablist"
+            aria-label={t("inventory.categories.label")}
+          >
+            <Button
+              size="floor"
+              variant={category === "production" ? "primary" : "secondary"}
+              role="tab"
+              aria-selected={category === "production"}
+              onClick={() => setCategory("production")}
+            >
+              {t("inventory.categories.production", { count: openShiftCount })}
+            </Button>
+            <Button
+              size="floor"
+              variant={category === "warehouse" ? "primary" : "secondary"}
+              role="tab"
+              aria-selected={category === "warehouse"}
+              onClick={() => setCategory("warehouse")}
+            >
+              {t("inventory.categories.warehouse", { count: tasks.length })}
+            </Button>
+          </div>
+        )}
       />
       {confirmation ? (
         <InventoryTaskConfirmation

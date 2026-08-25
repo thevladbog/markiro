@@ -37,6 +37,11 @@ export type InventoryFloorTask = {
 };
 export type ActiveFloorTask = ProductionFloorTask | InventoryFloorTask;
 
+export interface FloorTaskCommitLease {
+  token: string;
+  isCurrent: () => boolean;
+}
+
 export const ACTIVE_INVENTORY_FLOOR_TASK_KEY = "active_inventory_floor_task_v1";
 
 const civilDateSchema = z.iso.date();
@@ -68,10 +73,18 @@ const resolvedInventoryTaskSchema = z
       (resolved.deviceLineId !== resolved.task.lineId),
     { message: "inventory task line confirmation fact is inconsistent" },
   );
-const activeInventoryPointerSchema = z.strictObject({
+const legacyActiveInventoryPointerSchema = z.strictObject({
   inventoryId: z.uuid(),
   snapshotId: z.uuid(),
 });
+const activeInventoryPointerSchema = z.union([
+  z.strictObject({
+    inventoryId: z.uuid(),
+    snapshotId: z.uuid(),
+    activationToken: z.string().min(1),
+  }),
+  legacyActiveInventoryPointerSchema,
+]);
 
 interface ActiveInventoryRow {
   inventory_id: string;
@@ -154,16 +167,30 @@ async function activeInventoryRow(
 export async function activateVerifiedInventoryFloorTask(
   exec: SqlExecutor,
   inventoryId: string,
+  lease?: FloorTaskCommitLease,
 ): Promise<InventoryFloorTask> {
+  if (lease?.isCurrent() === false) throw new Error("inventory floor task activation retired");
   const row = await activeInventoryRow(exec, inventoryId);
   if (!row) throw new Error("inventory bundle is not published");
   const inventory = parseActiveManifest(row);
-  const pointer = JSON.stringify({ inventoryId, snapshotId: inventory.snapshotId });
+  if (lease?.isCurrent() === false) throw new Error("inventory floor task activation retired");
+  const pointer = JSON.stringify({
+    inventoryId,
+    snapshotId: inventory.snapshotId,
+    ...(lease ? { activationToken: lease.token } : {}),
+  });
   await exec.run(
     `INSERT INTO station_meta (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     [ACTIVE_INVENTORY_FLOOR_TASK_KEY, pointer],
   );
+  if (lease?.isCurrent() === false) {
+    await exec.run("DELETE FROM station_meta WHERE key = ? AND value = ?", [
+      ACTIVE_INVENTORY_FLOOR_TASK_KEY,
+      pointer,
+    ]);
+    throw new Error("inventory floor task activation retired");
+  }
   return { kind: "inventory", inventory };
 }
 

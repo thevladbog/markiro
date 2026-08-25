@@ -64,9 +64,18 @@ export interface ShiftSelectionProps {
   onConflicts?: () => void;
   /** False once this credential generation is sealed or this floor is retired. */
   isCurrent?: () => boolean;
-  /** Generic floor-task selection inserts assigned inventory work above the unchanged shift grid. */
-  beforeList?: ReactNode;
+  /** Retires work owned by the selection surface before another route starts. */
+  onRouteIntent?: () => void;
+  /** Runs under the same initial/manual/poll request lock as the shift list. */
+  onCoordinatedRefresh?: () => Promise<void>;
+  /** Fixed category navigation receives the current visible production count. */
+  categoryNavigation?: (openShiftCount: number) => ReactNode;
+  alternateContent?: ReactNode;
+  alternateActive?: boolean;
+  productionActionsVisible?: boolean;
   title?: string;
+  actionsLabel?: string;
+  refreshLabel?: string;
 }
 
 export type ShiftSelectionPersistentState =
@@ -92,8 +101,15 @@ export function ShiftSelection({
   onSetup,
   onConflicts,
   isCurrent,
-  beforeList,
+  onRouteIntent,
+  onCoordinatedRefresh,
+  categoryNavigation,
+  alternateContent,
+  alternateActive = false,
+  productionActionsVisible = true,
   title,
+  actionsLabel,
+  refreshLabel,
 }: ShiftSelectionProps) {
   const { t, i18n } = useTranslation();
   const [items, setItems] = useState<ShiftListItem[]>([]);
@@ -142,7 +158,7 @@ export function ShiftSelection({
       if (manual) setManualRefreshing(true);
       setLoadFailed(false);
       setError(null);
-      void client
+      const shiftRequest = client
         .get<{ items: ShiftListItem[] }>("/shifts")
         .then(async (response) => {
           let visibleItems = response.items;
@@ -179,14 +195,19 @@ export function ShiftSelection({
             setLoadFailed(true);
             setLoading(false);
           }
-        })
-        .finally(() => {
-          if (!mounted.current || listRequest.current?.id !== id) return;
-          listRequest.current = null;
-          setManualRefreshing(false);
         });
+      const coordinatedRequest = Promise.resolve()
+        .then(() => onCoordinatedRefresh?.())
+        .catch((err: unknown) => {
+          console.error("station: coordinated floor-task refresh failed", err);
+        });
+      void Promise.all([shiftRequest, coordinatedRequest]).finally(() => {
+        if (!mounted.current || listRequest.current?.id !== id) return;
+        listRequest.current = null;
+        setManualRefreshing(false);
+      });
     },
-    [client, exec, t],
+    [client, exec, onCoordinatedRefresh, t],
   );
 
   useEffect(() => {
@@ -215,6 +236,7 @@ export function ShiftSelection({
 
   async function open(shift: ShiftListItem) {
     if (busy) return;
+    onRouteIntent?.();
     setError(null);
     setBusy(true);
     try {
@@ -233,6 +255,7 @@ export function ShiftSelection({
 
   function rejoin(shift: ShiftListItem) {
     if (busy || isCurrent?.() === false) return;
+    onRouteIntent?.();
     onSelected(shift);
   }
 
@@ -243,10 +266,20 @@ export function ShiftSelection({
       title={title ?? t("shifts.title")}
       header={<div className="shift-selection__message">{message}</div>}
       actions={
-        <FloorFooter ariaLabel={t("shifts.actions")}>
-          <Button size="floor" onClick={onNew}>
-            {t("shifts.new")}
-          </Button>
+        <FloorFooter ariaLabel={actionsLabel ?? t("shifts.actions")}>
+          {productionActionsVisible ? (
+            <Button
+              size="floor"
+              onClick={() => {
+                onRouteIntent?.();
+                onNew();
+              }}
+            >
+              {t("shifts.new")}
+            </Button>
+          ) : (
+            <span aria-hidden="true" />
+          )}
           <div className="shift-selection__secondary-actions">
             <Button
               size="floor"
@@ -254,15 +287,30 @@ export function ShiftSelection({
               disabled={manualRefreshing}
               onClick={() => refreshShifts({ manual: true })}
             >
-              {t("shifts.refresh")}
+              {refreshLabel ?? t("shifts.refresh")}
             </Button>
             {onSetup ? (
-              <Button size="floor" variant="secondary" onClick={onSetup}>
+              <Button
+                size="floor"
+                variant="secondary"
+                onClick={() => {
+                  onRouteIntent?.();
+                  onSetup();
+                }}
+              >
                 {t("shell.setup")}
               </Button>
             ) : null}
             {onConflicts ? (
-              <Button size="floor" variant="secondary" disabled={busy} onClick={onConflicts}>
+              <Button
+                size="floor"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  onRouteIntent?.();
+                  onConflicts();
+                }}
+              >
                 {t("shell.conflicts")}
               </Button>
             ) : null}
@@ -271,11 +319,13 @@ export function ShiftSelection({
       }
     >
       <div
-        className={`shift-selection__content${beforeList ? " shift-selection__content--with-task" : ""}`}
+        className={`shift-selection__content${categoryNavigation ? " shift-selection__content--categorized" : ""}${alternateActive ? " shift-selection__content--alternate" : ""}`}
       >
-        {beforeList}
+        {categoryNavigation?.(openItems.length)}
         <div className="shift-selection__slot">
-          {persistentState === "loading" ? (
+          {alternateActive ? (
+            alternateContent
+          ) : persistentState === "loading" ? (
             <p className="shift-selection__state" role="status">
               {t("shifts.loading")}
             </p>
@@ -334,16 +384,18 @@ export function ShiftSelection({
             </div>
           )}
         </div>
-        <Pager
-          page={currentPage.page}
-          pageCount={currentPage.pageCount}
-          onPageChange={setRequestedPage}
-          ariaLabel={t("shifts.pagination")}
-          previousLabel={t("shifts.previousPage")}
-          nextLabel={t("shifts.nextPage")}
-          pageLabel={(page, pageCount) => t("shifts.page", { page, pageCount })}
-          className="shift-selection__pager"
-        />
+        {alternateActive ? null : (
+          <Pager
+            page={currentPage.page}
+            pageCount={currentPage.pageCount}
+            onPageChange={setRequestedPage}
+            ariaLabel={t("shifts.pagination")}
+            previousLabel={t("shifts.previousPage")}
+            nextLabel={t("shifts.nextPage")}
+            pageLabel={(page, pageCount) => t("shifts.page", { page, pageCount })}
+            className="shift-selection__pager"
+          />
+        )}
       </div>
     </StationScreen>
   );
