@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-25T20:57:09.358Z",
-  "testedCommit": "320be2fcc3a1aa8b036854513102e661a441ce03",
+  "generatedAt": "2026-08-25T21:54:55.332Z",
+  "testedCommit": "6af7be25895bf16b06e162632f3f39a4453abbb6",
   "browser": "Chromium 151.0.7922.34",
   "server": "isolated local Station Vite on 127.0.0.1:43179",
   "fixtureDate": "2026-08-19",
@@ -32,7 +32,9 @@
     "responseFailures": 0,
     "nestedScrollRegions": 0,
     "clippedInteractives": 0,
+    "occludedInteractives": 0,
     "overlappingInteractives": 0,
+    "actionContentOverlaps": 0,
     "targetsBelow64": 0,
     "focusPassed": 96,
     "statusDefects": 0,
@@ -71,7 +73,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Производственные смены 0",
@@ -113,7 +117,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 2,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Отмена",
@@ -159,9 +165,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -212,9 +220,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -265,9 +275,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -318,9 +330,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -371,9 +385,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -426,7 +442,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -479,7 +497,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -537,7 +557,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -595,7 +617,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -609,14 +633,9 @@
           "hasIcon": false
         },
         {
-          "label": "⌗Короб закрыт. Печать этикетки ожидаетсяБутылка добавлена в новый короб",
+          "label": "⌁Печатаем этикетку",
           "hasText": true,
           "hasIcon": true
-        },
-        {
-          "label": "Бутылка добавлена в новый короб",
-          "hasText": true,
-          "hasIcon": false
         }
       ],
       "statusDefects": [],
@@ -653,7 +672,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 5,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Убрать последнюю бутылку",
@@ -695,7 +716,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Применить дату",
@@ -737,7 +760,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -788,9 +813,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 6,
+      "interactiveCount": 5,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -843,7 +870,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 6,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Убрать последнюю бутылку",
@@ -885,7 +914,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Production shifts 0",
@@ -927,7 +958,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 2,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Cancel",
@@ -973,9 +1006,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -1026,9 +1061,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -1079,9 +1116,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -1132,9 +1171,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -1185,9 +1226,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -1240,7 +1283,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -1293,7 +1338,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -1351,7 +1398,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -1409,7 +1458,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -1423,14 +1474,9 @@
           "hasIcon": false
         },
         {
-          "label": "⌗Box closed. Label printing is pendingBottle added to the new box",
+          "label": "⌁Printing label",
           "hasText": true,
           "hasIcon": true
-        },
-        {
-          "label": "Bottle added to the new box",
-          "hasText": true,
-          "hasIcon": false
         }
       ],
       "statusDefects": [],
@@ -1467,7 +1513,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 5,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Remove last bottle",
@@ -1509,7 +1557,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Apply date",
@@ -1551,7 +1601,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -1602,9 +1654,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 6,
+      "interactiveCount": 5,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -1657,7 +1711,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 6,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Remove last bottle",
@@ -1699,7 +1755,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Производственные смены 0",
@@ -1741,7 +1799,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 2,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Отмена",
@@ -1787,9 +1847,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -1840,9 +1902,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -1893,9 +1957,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -1946,9 +2012,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -1999,9 +2067,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -2054,7 +2124,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -2107,7 +2179,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -2165,7 +2239,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -2223,7 +2299,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -2237,14 +2315,9 @@
           "hasIcon": false
         },
         {
-          "label": "⌗Короб закрыт. Печать этикетки ожидаетсяБутылка добавлена в новый короб",
+          "label": "⌁Печатаем этикетку",
           "hasText": true,
           "hasIcon": true
-        },
-        {
-          "label": "Бутылка добавлена в новый короб",
-          "hasText": true,
-          "hasIcon": false
         }
       ],
       "statusDefects": [],
@@ -2281,7 +2354,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 5,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Убрать последнюю бутылку",
@@ -2323,7 +2398,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Применить дату",
@@ -2365,7 +2442,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -2416,9 +2495,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 6,
+      "interactiveCount": 5,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -2471,7 +2552,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 6,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Убрать последнюю бутылку",
@@ -2513,7 +2596,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Production shifts 0",
@@ -2555,7 +2640,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 2,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Cancel",
@@ -2601,9 +2688,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -2654,9 +2743,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -2707,9 +2798,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -2760,9 +2853,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -2813,9 +2908,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -2868,7 +2965,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -2921,7 +3020,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -2979,7 +3080,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -3037,7 +3140,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -3051,14 +3156,9 @@
           "hasIcon": false
         },
         {
-          "label": "⌗Box closed. Label printing is pendingBottle added to the new box",
+          "label": "⌁Printing label",
           "hasText": true,
           "hasIcon": true
-        },
-        {
-          "label": "Bottle added to the new box",
-          "hasText": true,
-          "hasIcon": false
         }
       ],
       "statusDefects": [],
@@ -3095,7 +3195,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 5,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Remove last bottle",
@@ -3137,7 +3239,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Apply date",
@@ -3179,7 +3283,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -3230,9 +3336,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 6,
+      "interactiveCount": 5,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -3285,7 +3393,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 6,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Remove last bottle",
@@ -3327,7 +3437,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Производственные смены 0",
@@ -3369,7 +3481,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 2,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Отмена",
@@ -3415,9 +3529,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -3468,9 +3584,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -3521,9 +3639,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -3574,9 +3694,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -3627,9 +3749,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -3682,7 +3806,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -3735,7 +3861,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -3793,7 +3921,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -3851,7 +3981,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -3865,14 +3997,9 @@
           "hasIcon": false
         },
         {
-          "label": "⌗Короб закрыт. Печать этикетки ожидаетсяБутылка добавлена в новый короб",
+          "label": "⌁Печатаем этикетку",
           "hasText": true,
           "hasIcon": true
-        },
-        {
-          "label": "Бутылка добавлена в новый короб",
-          "hasText": true,
-          "hasIcon": false
         }
       ],
       "statusDefects": [],
@@ -3909,7 +4036,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 5,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Убрать последнюю бутылку",
@@ -3951,7 +4080,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Применить дату",
@@ -3993,7 +4124,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -4044,9 +4177,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 6,
+      "interactiveCount": 5,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Развернуть панель состояния",
@@ -4099,7 +4234,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 6,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Убрать последнюю бутылку",
@@ -4141,7 +4278,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Production shifts 0",
@@ -4183,7 +4322,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 2,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Cancel",
@@ -4229,9 +4370,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -4282,9 +4425,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -4335,9 +4480,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -4388,9 +4535,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -4441,9 +4590,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 2,
+      "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -4496,7 +4647,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -4549,7 +4702,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -4607,7 +4762,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -4665,7 +4822,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -4679,14 +4838,9 @@
           "hasIcon": false
         },
         {
-          "label": "⌗Box closed. Label printing is pendingBottle added to the new box",
+          "label": "⌁Printing label",
           "hasText": true,
           "hasIcon": true
-        },
-        {
-          "label": "Bottle added to the new box",
-          "hasText": true,
-          "hasIcon": false
         }
       ],
       "statusDefects": [],
@@ -4723,7 +4877,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 5,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Remove last bottle",
@@ -4765,7 +4921,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 3,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Apply date",
@@ -4807,7 +4965,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 4,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -4858,9 +5018,11 @@
       },
       "documentScroll": false,
       "nestedScrollRegions": [],
-      "interactiveCount": 6,
+      "interactiveCount": 5,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Expand status panel",
@@ -4913,7 +5075,9 @@
       "nestedScrollRegions": [],
       "interactiveCount": 6,
       "clippedInteractives": [],
+      "occludedInteractives": [],
       "overlappingInteractives": [],
+      "actionContentOverlaps": [],
       "targetsBelow64": [],
       "focus": {
         "label": "Remove last bottle",
