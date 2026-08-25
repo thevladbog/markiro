@@ -646,6 +646,21 @@ test("guard CLI identifies changed app security-group fields without their value
       scope: "ingress-from-port-and-to-port",
     },
     {
+      before: {
+        ingress: [{ id: "old-rule-id", labels: { source: "old-label" }, port: 8080 }],
+      },
+      after: {
+        ingress: [
+          {
+            id: "do-not-print-this-plan-value",
+            labels: { source: "do-not-print-this-plan-value" },
+            port: 80,
+          },
+        ],
+      },
+      scope: "ingress-id-and-labels-and-port",
+    },
+    {
       before: { ingress: [{ security_group_id: "old-security-group" }] },
       after: { ingress: [{ v4_cidr_blocks: ["do-not-print-this-plan-value"] }] },
       scope: "ingress-security-group-and-v4-cidrs",
