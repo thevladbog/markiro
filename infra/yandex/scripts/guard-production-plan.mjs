@@ -369,6 +369,43 @@ function securityGroupRuleSemanticDifferenceScopes(leftRule, rightRule) {
   return fields.map((field) => securityGroupRuleSemanticFieldScopes.get(field) ?? "other");
 }
 
+function ipv4CidrScope(value) {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/.exec(value);
+  if (!match) return null;
+  const octets = match.slice(1, 5).map(Number);
+  const prefix = Number(match[5]);
+  if (octets.some((octet) => !Number.isInteger(octet) || octet > 255) || prefix > 32) return null;
+
+  const address = octets.reduce((result, octet) => result * 256n + BigInt(octet), 0n);
+  const blockSize = 1n << BigInt(32 - prefix);
+  const start = address - (address % blockSize);
+  const end = start + blockSize - 1n;
+  if (start === 0n && end === 4294967295n) return "world";
+
+  const privateRanges = [
+    [167772160n, 184549375n],
+    [2886729728n, 2887778303n],
+    [3232235520n, 3232301055n],
+  ];
+  if (
+    privateRanges.some(([privateStart, privateEnd]) => start >= privateStart && end <= privateEnd)
+  )
+    return "private";
+  return "other";
+}
+
+function unmatchedSecurityGroupSourceScope(rule) {
+  const value = securityGroupRuleSemanticValue(rule);
+  if (value === null) return null;
+  const v4Scopes = value.v4Cidrs.map((cidr) => ipv4CidrScope(cidr));
+  if (v4Scopes.some((scope) => scope === null)) return null;
+  const uniqueV4Scopes = [...new Set(v4Scopes)].sort();
+  const v4Scope = uniqueV4Scopes.length === 0 ? "none" : uniqueV4Scopes.join("-and-");
+  const securityGroupScope = value.securityGroupId === "" ? "empty" : "present";
+  return `security-group-${securityGroupScope}-v4-cidrs-count-${value.v4Cidrs.length}-v4-scopes-${v4Scope}`;
+}
+
 function appComputeActionScope(resource) {
   const beforeValue = resource.change?.before;
   const afterValue = resource.change?.after;
@@ -446,6 +483,10 @@ function securityGroupActionScope(resource, baseScope) {
                 );
                 if (differenceScopes?.length) {
                   desiredMatches += `-unmatched-diff-${differenceScopes.join("-and-")}`;
+                }
+                const sourceScope = unmatchedSecurityGroupSourceScope(unmatchedRule);
+                if (sourceScope !== null) {
+                  desiredMatches += `-unmatched-source-${sourceScope}`;
                 }
               }
             }
