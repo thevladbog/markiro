@@ -116,8 +116,8 @@ Windows.
   коммитить или копировать на станцию. Значение private key храните в исходном
   base64-формате, который выдаёт `tauri signer generate`, байт-в-байт: не
   декодируйте, не перекодируйте и не нормализуйте его.
-- Отдельный защищённый Environment `station-release` разрешён только для ветки
-  `main`, требует approval release owner и содержит точный инвентарь:
+- Отдельный Environment `station-release` разрешён только для ветки `main` и
+  содержит точный инвентарь:
   secret `STATION_RELEASE_REPOSITORY_TOKEN`, ограниченный только публичным
   binary-only репозиторием `thevladbog/markiro-station-releases` и правом
   Contents read/write, secrets `YANDEX_STATION_RELEASE_ACCESS_KEY_ID` и
@@ -128,6 +128,13 @@ Windows.
   аргументы, логи или artifacts. Обычный `${{ github.token }}` используется
   только для CI и сохранения source tag в приватном `thevladbog/markiro`; он не
   публикует бинарные releases.
+- На текущем GitHub plan нативные required reviewers недоступны для private
+  repository. Поэтому до build/sign и до доступа к `station-release` workflow
+  запускает отдельный job без Environment и secrets: владелец репозитория должен
+  передать `owner_confirmation=PUBLISH-STATION-BETA`, а `github.actor` должен
+  точно совпасть с `github.repository_owner`. Это одно-владельческое ручное
+  подтверждение, а не двухпользовательский approval; нативный reviewer потребует
+  подходящего GitHub Enterprise plan.
 - `STATION_ORIGIN` — production runtime secret, а не signing secret environment:
   перед beta он обязан быть равен `http://tauri.localhost`. Значение
   `tauri://localhost` не является Windows origin для этой сборки.
@@ -321,6 +328,7 @@ backup/promotion без rebuild, signing или immutable upload. Transaction ro
 ```bash
 gh workflow run station-beta-release.yml --ref main \
   -f mode=promote-existing \
+  -f owner_confirmation=PUBLISH-STATION-BETA \
   -f repair_tag="$BOOTSTRAP_BETA_TAG"
 ```
 
@@ -334,6 +342,7 @@ bootstrap immutable beta и сохраните workflow URL/evidence hash как
 ```bash
 gh workflow run station-beta-release.yml --ref main \
   -f mode=promote-existing \
+  -f owner_confirmation=PUBLISH-STATION-BETA \
   -f repair_tag="$VALIDATION_BETA_TAG"
 ```
 

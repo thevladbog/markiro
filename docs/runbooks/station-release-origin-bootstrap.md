@@ -173,9 +173,14 @@ test -s "$secret_key_file"
 
 ## 5. Остановиться перед записью GitHub secrets
 
-Сначала вручную убедитесь, что GitHub Environment `station-release` уже создан,
-защищён approval и ограничен веткой `main`. Эта задача Environment и secrets не
-создаёт.
+Сначала вручную убедитесь, что GitHub Environment `station-release` уже создан и
+ограничен веткой `main`. На текущем GitHub plan required reviewers для private
+repository недоступны, поэтому release workflow до build/sign и publisher
+secrets проверяет владельца репозитория и точный dispatch input:
+`owner_confirmation=PUBLISH-STATION-BETA` либо
+`owner_confirmation=PUBLISH-STATION-STABLE`. Это одно-владельческое
+подтверждение, не двухпользовательский approval. Эта задача Environment и secrets
+не создаёт.
 
 До release dispatch отдельно создайте fine-grained token с Contents read/write
 только для публичного binary-only repository

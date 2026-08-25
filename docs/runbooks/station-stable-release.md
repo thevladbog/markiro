@@ -13,17 +13,24 @@ dual-origin beta. Workflow не выбирает newest beta, не добавл�
    исходном base64-формате из `tauri signer generate` байт-в-байт: не
    декодируйте, не перекодируйте и не нормализуйте его. Не печатайте значение и
    не переносите его в publisher job.
-2. Защищённый Environment `station-release` требует approval release owner и
-   содержит fine-grained secret `STATION_RELEASE_REPOSITORY_TOKEN` с Contents
+2. Environment `station-release` разрешён только для `main` и содержит
+   fine-grained secret `STATION_RELEASE_REPOSITORY_TOKEN` с Contents
    read/write только для публичного binary-only repository
    `thevladbog/markiro-station-releases`, secrets `YANDEX_STATION_RELEASE_ACCESS_KEY_ID`,
    `YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY`, variables
    `YANDEX_STATION_RELEASE_BUCKET`, `YANDEX_STATION_RELEASE_ENDPOINT`. Signing
    secrets туда не копируются; publisher credentials не попадают в build job,
    аргументы, artifacts или логи.
-3. Production API должен принимать `http://tauri.localhost`. До обычной
+3. На текущем GitHub plan нативные required reviewers недоступны для private
+   repository. До build/sign и до доступа к `station-release` отдельный job без
+   Environment и secrets требует от владельца репозитория
+   `owner_confirmation=PUBLISH-STATION-STABLE` и точного совпадения
+   `github.actor` с `github.repository_owner`. Это одно-владельческое ручное
+   подтверждение, а не двухпользовательский approval; нативный reviewer потребует
+   подходящего GitHub Enterprise plan.
+4. Production API должен принимать `http://tauri.localhost`. До обычной
    публикации или repair выполните `pnpm verify:station-production-cors`.
-4. Для normal flow уже существует полный Yandex stable rollback baseline:
+5. Для normal flow уже существует полный Yandex stable rollback baseline:
    `station/stable/latest.json` и `station/download`. Отсутствующий или
    неполный baseline останавливает workflow до первой mutable mutation.
 
@@ -68,7 +75,8 @@ immutable keys. Повтор разрешён только с тем же exact 
    `BETA_SIGN_OFF` относятся именно к строго более новому candidate. Stable-строки,
    `PUBLISH-01` и stable rollback ещё остаются `NOT_RUN` и не блокируют саму
    первую stable publication, потому что проверяются после неё.
-2. Откройте `Publish station stable` из `main`, выберите `mode=publish`.
+2. Откройте `Publish station stable` из `main`, выберите `mode=publish` и введите
+   `owner_confirmation=PUBLISH-STATION-STABLE`.
 3. В `source_beta_tag` укажите точный immutable validation/candidate beta tag из
    принятой identity table и установите `acceptance_confirmed=true`. Он обязан
    совпасть с записанным candidate tag, `baseSha`, `releaseSha` и двумя origin
@@ -192,6 +200,7 @@ trees, stable tag/target и evidence hashes для обоих releases. Снач
 ```bash
 gh workflow run station-stable-release.yml --ref main \
   -f mode=promote-existing \
+  -f owner_confirmation=PUBLISH-STATION-STABLE \
   -f source_beta_tag="$PREVIOUS_STABLE_SOURCE_BETA_TAG" \
   -f acceptance_confirmed=true
 ```
@@ -206,6 +215,7 @@ previous immutable stable и сохраните workflow URL/evidence hashes к�
 ```bash
 gh workflow run station-stable-release.yml --ref main \
   -f mode=promote-existing \
+  -f owner_confirmation=PUBLISH-STATION-STABLE \
   -f source_beta_tag="$CANDIDATE_STABLE_SOURCE_BETA_TAG" \
   -f acceptance_confirmed=true
 ```

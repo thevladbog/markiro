@@ -896,6 +896,8 @@ test("station beta docs cover manual promotion and recovery", async () => {
 test("station beta docs define dual-origin baseline, repair and restricted-network operations", async () => {
   const runbook = await read("docs/runbooks/station-beta-release.md");
   assert.match(runbook, /Environment `station-release`/);
+  assert.match(runbook, /owner_confirmation.*PUBLISH-STATION-BETA/is);
+  assert.match(runbook, /владел.*репозитор.*github\.actor.*github\.repository_owner/is);
   for (const name of [
     "YANDEX_STATION_RELEASE_ACCESS_KEY_ID",
     "YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY",
@@ -934,6 +936,8 @@ test("station stable docs separate automated release proof from physical accepta
   assert.match(stableRunbook, /acceptance_confirmed/);
   assert.match(stableRunbook, /promote-existing/);
   assert.match(stableRunbook, /Environment `station-release`/);
+  assert.match(stableRunbook, /owner_confirmation.*PUBLISH-STATION-STABLE/is);
+  assert.match(stableRunbook, /владел.*репозитор.*github\.actor.*github\.repository_owner/is);
   assert.match(stableRunbook, /mode=seed-baseline/);
   assert.match(stableRunbook, /seed_stable_tag/);
   assert.match(stableRunbook, /enableStationReleasePublicDns.*false/is);
@@ -1303,6 +1307,9 @@ test("Station release origin bootstrap separates protected credentials and appro
   }
   assert.match(secrets, /GitHub Environment `station-release`/);
   assert.match(secrets, /защит.*environment|environment.*защит/is);
+  assert.match(secrets, /private.*required\s+reviewers.*недоступ/is);
+  assert.match(secrets, /одно.*владел.*не.*двух.*approval/is);
+  assert.match(bootstrap, /owner_confirmation.*PUBLISH-STATION-(?:BETA|STABLE)/is);
   assert.match(secrets, /не созда(?:е|ё|ю)т.*Environment|Environment.*созда(?:е|ё|ю)т/is);
   const stationReleaseInventory = secrets.match(
     /## GitHub Environment `station-release`([\s\S]*?)## Ротация/,
