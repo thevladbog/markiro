@@ -487,6 +487,33 @@ export const inventorySyncAckReceipts = sqliteTable(
   ],
 );
 
+/** Fail-closed acknowledgement reducer input; v1 remains immutable evidence. */
+export const inventorySyncAckReceiptsV2 = sqliteTable(
+  "inventory_sync_ack_receipts_v2",
+  {
+    receiptId: text("receipt_id").primaryKey(),
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    batchId: text("batch_id").notNull(),
+    payloadDigest: text("payload_digest").notNull(),
+    responseJson: text("response_json").notNull(),
+    outboxRowsJson: text("outbox_rows_json").notNull(),
+    pinKey: text("pin_key").notNull(),
+    pinValue: text("pin_value").notNull(),
+    appliedAt: text("applied_at").notNull(),
+  },
+  (table) => [
+    check(
+      "inventory_sync_ack_receipts_v2_response_size_check",
+      sql`json_valid(${table.responseJson}) and length(${table.responseJson}) <= 8388608`,
+    ),
+    check(
+      "inventory_sync_ack_receipts_v2_rows_size_check",
+      sql`json_valid(${table.outboxRowsJson}) and length(${table.outboxRowsJson}) <= 524288`,
+    ),
+  ],
+);
+
 /** Durable input to the single-statement progress projection reducer. */
 export const inventoryProgressReceipts = sqliteTable(
   "inventory_progress_receipts",
@@ -503,6 +530,30 @@ export const inventoryProgressReceipts = sqliteTable(
   (table) => [
     check(
       "inventory_progress_receipts_page_size_check",
+      sql`json_valid(${table.pageJson}) and length(${table.pageJson}) <= 8388608`,
+    ),
+  ],
+);
+
+/** Progress reducer input bound to one exact floor-task activation. */
+export const inventoryProgressReceiptsV2 = sqliteTable(
+  "inventory_progress_receipts_v2",
+  {
+    receiptId: text("receipt_id").primaryKey(),
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    requestedCursor: text("requested_cursor"),
+    priorResultRevision: integer("prior_result_revision").notNull(),
+    pageJson: text("page_json").notNull(),
+    pointerKey: text("pointer_key").notNull(),
+    pointerValue: text("pointer_value").notNull(),
+    credentialOwnership: text("credential_ownership").notNull(),
+    appliedAt: text("applied_at").notNull(),
+  },
+  (table) => [
+    check(
+      "inventory_progress_receipts_v2_page_size_check",
       sql`json_valid(${table.pageJson}) and length(${table.pageJson}) <= 8388608`,
     ),
   ],

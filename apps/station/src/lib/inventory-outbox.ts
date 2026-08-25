@@ -241,18 +241,45 @@ export async function acknowledgeInventoryOutboxBatch(
   await verifyPinnedRows(exec, batch);
   const receiptId = `${response.inventoryId}:${response.snapshotId}:${response.batchId}:${response.payloadDigest}`;
   const responseJson = JSON.stringify(response);
-  const existingReceipts = await exec.all<{ response_json: string }>(
-    "SELECT response_json FROM inventory_sync_ack_receipts WHERE receipt_id = ?",
+  const outboxRowsJson = JSON.stringify(batch.outboxRows);
+  const expectedPinKey = pinKey(response.inventoryId, response.snapshotId);
+  const existingReceipts = await exec.all<{
+    inventory_id: string;
+    snapshot_id: string;
+    batch_id: string;
+    payload_digest: string;
+    response_json: string;
+    outbox_rows_json: string;
+    pin_key: string;
+    pin_value: string;
+    applied_at: string;
+  }>(
+    `SELECT inventory_id, snapshot_id, batch_id, payload_digest, response_json,
+            outbox_rows_json, pin_key, pin_value, applied_at
+       FROM inventory_sync_ack_receipts_v2 WHERE receipt_id = ?`,
     [receiptId],
   );
+  const appliedAt = batch.request.events.at(-1)?.scannedAt;
+  if (!appliedAt) throw new Error("inventory acknowledgement batch is empty");
   if (existingReceipts[0]) {
-    if (existingReceipts[0].response_json !== responseJson) {
+    const receipt = existingReceipts[0];
+    if (
+      receipt.inventory_id !== response.inventoryId ||
+      receipt.snapshot_id !== response.snapshotId ||
+      receipt.batch_id !== response.batchId ||
+      receipt.payload_digest !== response.payloadDigest ||
+      receipt.response_json !== responseJson ||
+      receipt.outbox_rows_json !== outboxRowsJson ||
+      receipt.pin_key !== expectedPinKey ||
+      receipt.pin_value !== batch.pinValue ||
+      receipt.applied_at !== appliedAt
+    ) {
       throw new Error("inventory acknowledgement receipt changed");
     }
     return response;
   }
   await exec.run(
-    `INSERT INTO inventory_sync_ack_receipts
+    `INSERT INTO inventory_sync_ack_receipts_v2
        (receipt_id, inventory_id, snapshot_id, batch_id, payload_digest,
         response_json, outbox_rows_json, pin_key, pin_value, applied_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -264,17 +291,45 @@ export async function acknowledgeInventoryOutboxBatch(
       response.batchId,
       response.payloadDigest,
       responseJson,
-      JSON.stringify(batch.outboxRows),
-      pinKey(response.inventoryId, response.snapshotId),
+      outboxRowsJson,
+      expectedPinKey,
       batch.pinValue,
-      new Date().toISOString(),
+      appliedAt,
     ],
   );
-  const receipts = await exec.all<{ receipt_id: string }>(
-    "SELECT receipt_id FROM inventory_sync_ack_receipts WHERE receipt_id = ?",
+  const receipts = await exec.all<{
+    receipt_id: string;
+    inventory_id: string;
+    snapshot_id: string;
+    batch_id: string;
+    payload_digest: string;
+    response_json: string;
+    outbox_rows_json: string;
+    pin_key: string;
+    pin_value: string;
+    applied_at: string;
+  }>(
+    `SELECT receipt_id, inventory_id, snapshot_id, batch_id, payload_digest, response_json,
+            outbox_rows_json, pin_key, pin_value, applied_at
+       FROM inventory_sync_ack_receipts_v2 WHERE receipt_id = ?`,
     [receiptId],
   );
-  if (receipts.length !== 1) throw new Error("inventory acknowledgement persistence failed");
+  const stored = receipts[0];
+  if (
+    receipts.length !== 1 ||
+    stored?.receipt_id !== receiptId ||
+    stored.inventory_id !== response.inventoryId ||
+    stored.snapshot_id !== response.snapshotId ||
+    stored.batch_id !== response.batchId ||
+    stored.payload_digest !== response.payloadDigest ||
+    stored.response_json !== responseJson ||
+    stored.outbox_rows_json !== outboxRowsJson ||
+    stored.pin_key !== expectedPinKey ||
+    stored.pin_value !== batch.pinValue ||
+    stored.applied_at !== appliedAt
+  ) {
+    throw new Error("inventory acknowledgement persistence failed");
+  }
   return response;
 }
 

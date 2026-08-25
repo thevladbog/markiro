@@ -104,11 +104,14 @@ export function InventoryWorkScreen({
     state: inventorySyncState,
     nudge: nudgeInventorySync,
     idle: inventorySyncIdle,
+    stop: stopInventorySync,
+    resume: resumeInventorySync,
   } = useInventorySyncEngine({
     exec,
     client: client ?? null,
     inventoryId: inventory.inventoryId,
     snapshotId: inventory.snapshotId,
+    ...(floorTaskPointerValue ? { floorTaskPointerValue } : {}),
     active: true,
     onProgressApplied: refresh,
     ...(credentialGeneration ? { credentialGeneration } : {}),
@@ -273,7 +276,12 @@ export function InventoryWorkScreen({
         credentialGeneration,
         closeScanner: () => queue.close(),
         scanQueueIdle: () => queue.idle(),
-        sync: { nudge: nudgeInventorySync, idle: inventorySyncIdle },
+        sync: {
+          nudge: nudgeInventorySync,
+          idle: inventorySyncIdle,
+          stop: stopInventorySync,
+          resume: resumeInventorySync,
+        },
       });
       onLeft?.();
     } catch (error) {

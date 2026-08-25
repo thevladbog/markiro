@@ -28,6 +28,7 @@ export interface InventorySyncEngineDeps {
   };
   inventoryId: string;
   snapshotId: string;
+  floorTaskPointerValue?: string;
   credentialGeneration?: CredentialGeneration;
   onState(state: InventorySyncState): void;
   now?: () => number;
@@ -52,6 +53,8 @@ export async function applyInventoryProgressPage(
     deviceId: string;
     requestedCursor?: string | null;
     minimumResultRevision?: number;
+    pointerValue?: string;
+    credentialOwnership?: string | null;
     canCommit?: () => boolean;
   },
   value: unknown,
@@ -59,8 +62,9 @@ export async function applyInventoryProgressPage(
   const terminalRows = await exec.all<{
     progress_cursor: string | null;
     progress_result_revision: number;
+    updated_at: string;
   }>(
-    `SELECT progress_cursor, progress_result_revision FROM inventory_terminal_state
+    `SELECT progress_cursor, progress_result_revision, updated_at FROM inventory_terminal_state
       WHERE inventory_id = ? AND snapshot_id = ? AND device_id = ?`,
     [expected.inventoryId, expected.snapshotId, expected.deviceId],
   );
@@ -81,12 +85,49 @@ export async function applyInventoryProgressPage(
   if (expected.canCommit && !expected.canCommit()) {
     throw new Error("inventory progress generation retired");
   }
+  const pointerKey = "active_inventory_floor_task_v1";
+  const pointerRows = expected.pointerValue
+    ? [{ value: expected.pointerValue }]
+    : await exec.all<{ value: string }>("SELECT value FROM station_meta WHERE key = ?", [
+        pointerKey,
+      ]);
+  const pointerValue = pointerRows[0]?.value;
+  if (!pointerValue) throw new Error("inventory floor task ownership changed");
+  let pointer: unknown;
+  try {
+    pointer = JSON.parse(pointerValue);
+  } catch {
+    throw new Error("inventory floor task ownership changed");
+  }
+  if (
+    typeof pointer !== "object" ||
+    pointer === null ||
+    Array.isArray(pointer) ||
+    !("inventoryId" in pointer) ||
+    pointer.inventoryId !== expected.inventoryId ||
+    !("snapshotId" in pointer) ||
+    pointer.snapshotId !== expected.snapshotId ||
+    !("credentialOwnership" in pointer) ||
+    typeof pointer.credentialOwnership !== "string" ||
+    !/^[0-9a-f]{64}$/.test(pointer.credentialOwnership) ||
+    (expected.credentialOwnership !== undefined &&
+      expected.credentialOwnership !== pointer.credentialOwnership) ||
+    !("activationId" in pointer) ||
+    typeof pointer.activationId !== "string" ||
+    pointer.activationId.length === 0 ||
+    Object.keys(pointer).length !== 4
+  ) {
+    throw new Error("inventory floor task ownership changed");
+  }
   const receiptId = `${expected.inventoryId}:${expected.snapshotId}:${expected.deviceId}:${requestedCursor ?? "root"}:${priorResultRevision}:${page.resultRevision}:${page.nextCursor ?? "end"}`;
+  const pageJson = JSON.stringify(page);
+  const appliedAt = page.items.at(-1)?.correctedAt ?? terminal.updated_at;
   await exec.run(
-    `INSERT INTO inventory_progress_receipts
+    `INSERT INTO inventory_progress_receipts_v2
        (receipt_id, inventory_id, snapshot_id, device_id, requested_cursor,
-        prior_result_revision, page_json, applied_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        prior_result_revision, page_json, pointer_key, pointer_value,
+        credential_ownership, applied_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(receipt_id) DO NOTHING`,
     [
       receiptId,
@@ -95,10 +136,46 @@ export async function applyInventoryProgressPage(
       expected.deviceId,
       requestedCursor,
       priorResultRevision,
-      JSON.stringify(page),
-      new Date().toISOString(),
+      pageJson,
+      pointerKey,
+      pointerValue,
+      pointer.credentialOwnership,
+      appliedAt,
     ],
   );
+  const receipts = await exec.all<{
+    inventory_id: string;
+    snapshot_id: string;
+    device_id: string;
+    requested_cursor: string | null;
+    prior_result_revision: number;
+    page_json: string;
+    pointer_key: string | null;
+    pointer_value: string | null;
+    credential_ownership: string | null;
+    applied_at: string;
+  }>(
+    `SELECT inventory_id, snapshot_id, device_id, requested_cursor, prior_result_revision,
+            page_json, pointer_key, pointer_value, credential_ownership, applied_at
+       FROM inventory_progress_receipts_v2 WHERE receipt_id = ?`,
+    [receiptId],
+  );
+  const receipt = receipts[0];
+  if (
+    receipts.length !== 1 ||
+    receipt?.inventory_id !== expected.inventoryId ||
+    receipt.snapshot_id !== expected.snapshotId ||
+    receipt.device_id !== expected.deviceId ||
+    receipt.requested_cursor !== requestedCursor ||
+    receipt.prior_result_revision !== priorResultRevision ||
+    receipt.page_json !== pageJson ||
+    receipt.pointer_key !== pointerKey ||
+    receipt.pointer_value !== pointerValue ||
+    receipt.credential_ownership !== pointer.credentialOwnership ||
+    receipt.applied_at !== appliedAt
+  ) {
+    throw new Error("inventory progress receipt changed");
+  }
   const committed = await exec.all<{
     progress_cursor: string | null;
     progress_result_revision: number;
@@ -254,6 +331,8 @@ export function createInventorySyncEngine(deps: InventorySyncEngineDeps): Invent
               deviceId: terminal.device_id,
               requestedCursor: terminal.progress_cursor,
               minimumResultRevision: terminal.progress_result_revision,
+              ...(deps.floorTaskPointerValue ? { pointerValue: deps.floorTaskPointerValue } : {}),
+              credentialOwnership: await credentialGenerationOwnership(generation),
               canCommit: () => !stopped && !paused && !generation.sealed && epoch === startedEpoch,
             },
             value,
@@ -276,6 +355,7 @@ export function createInventorySyncEngine(deps: InventorySyncEngineDeps): Invent
       retryTimer = null;
     },
     resume() {
+      stopped = false;
       paused = false;
       epoch += 1;
       start();
@@ -287,8 +367,11 @@ export function createInventorySyncEngine(deps: InventorySyncEngineDeps): Invent
       retryTimer = null;
     },
     idle() {
-      if (!draining) return Promise.resolve();
-      return new Promise<void>((resolve) => idleResolvers.push(resolve));
+      const drain = draining
+        ? new Promise<void>((resolve) => idleResolvers.push(resolve))
+        : Promise.resolve();
+      const progress = progressFlight?.then(() => undefined) ?? Promise.resolve();
+      return Promise.all([drain, progress]).then(() => undefined);
     },
   };
 }
@@ -303,7 +386,7 @@ export interface LeaveInventoryTaskDeps {
   credentialGeneration: CredentialGeneration;
   closeScanner(): Promise<void>;
   scanQueueIdle(): Promise<void>;
-  sync: Pick<InventorySyncEngine, "idle" | "nudge">;
+  sync: Pick<InventorySyncEngine, "idle" | "nudge" | "resume" | "stop">;
 }
 
 export async function leaveInventoryTask(deps: LeaveInventoryTaskDeps): Promise<void> {
@@ -340,46 +423,60 @@ export async function leaveInventoryTask(deps: LeaveInventoryTaskDeps): Promise<
   await deps.scanQueueIdle();
   deps.sync.nudge();
   await deps.sync.idle();
-  const pending = await inventoryOutboxDepth(deps.exec, deps.inventoryId, deps.snapshotId);
-  const openRows = await deps.exec.all<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM inventory_repack_boxes_mirror
-      WHERE inventory_id = ? AND snapshot_id = ? AND owner_device_id = ? AND state = 'open'`,
-    [deps.inventoryId, deps.snapshotId, deps.deviceId],
-  );
-  if (pending !== 0 || (openRows[0]?.count ?? 0) !== 0) {
-    throw new Error("inventory task still has pending work");
-  }
-  const response = await deps.client.post(`/station/inventories/${deps.inventoryId}/leave`, {
-    pendingEventCount: 0,
-    openBoxCount: 0,
-  });
-  if (
-    typeof response !== "object" ||
-    response === null ||
-    !("outcome" in response) ||
-    response.outcome !== "left" ||
-    Object.keys(response).length !== 1
-  ) {
-    throw new Error("invalid inventory leave response");
-  }
-  const lease = acquireCredentialCommitLease(deps.credentialGeneration);
-  if (!lease) throw new Error("inventory floor task credential retired");
+  deps.sync.stop();
   try {
-    const current = await deps.exec.all<{ value: string }>(
+    await deps.sync.idle();
+    const currentBeforeLeave = await deps.exec.all<{ value: string }>(
       "SELECT value FROM station_meta WHERE key = ? AND value = ?",
       ["active_inventory_floor_task_v1", deps.pointerValue],
     );
-    if (current.length !== 1) throw new Error("inventory floor task ownership changed");
-    await deps.exec.run(
-      `DELETE FROM station_meta WHERE key = 'active_inventory_floor_task_v1'
-        AND value = ?`,
-      [deps.pointerValue],
+    if (currentBeforeLeave.length !== 1 || deps.credentialGeneration.sealed) {
+      throw new Error("inventory floor task ownership changed");
+    }
+    const pending = await inventoryOutboxDepth(deps.exec, deps.inventoryId, deps.snapshotId);
+    const openRows = await deps.exec.all<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM inventory_repack_boxes_mirror
+        WHERE inventory_id = ? AND snapshot_id = ? AND owner_device_id = ? AND state = 'open'`,
+      [deps.inventoryId, deps.snapshotId, deps.deviceId],
     );
-    const remaining = await deps.exec.all<{ value: string }>(
-      "SELECT value FROM station_meta WHERE key = 'active_inventory_floor_task_v1'",
-    );
-    if (remaining.length !== 0) throw new Error("inventory floor task ownership changed");
-  } finally {
-    lease.release();
+    if (pending !== 0 || (openRows[0]?.count ?? 0) !== 0) {
+      throw new Error("inventory task still has pending work");
+    }
+    const response = await deps.client.post(`/station/inventories/${deps.inventoryId}/leave`, {
+      pendingEventCount: 0,
+      openBoxCount: 0,
+    });
+    if (
+      typeof response !== "object" ||
+      response === null ||
+      !("outcome" in response) ||
+      response.outcome !== "left" ||
+      Object.keys(response).length !== 1
+    ) {
+      throw new Error("invalid inventory leave response");
+    }
+    const lease = acquireCredentialCommitLease(deps.credentialGeneration);
+    if (!lease) throw new Error("inventory floor task credential retired");
+    try {
+      const current = await deps.exec.all<{ value: string }>(
+        "SELECT value FROM station_meta WHERE key = ? AND value = ?",
+        ["active_inventory_floor_task_v1", deps.pointerValue],
+      );
+      if (current.length !== 1) throw new Error("inventory floor task ownership changed");
+      await deps.exec.run(
+        `DELETE FROM station_meta WHERE key = 'active_inventory_floor_task_v1'
+          AND value = ?`,
+        [deps.pointerValue],
+      );
+      const remaining = await deps.exec.all<{ value: string }>(
+        "SELECT value FROM station_meta WHERE key = 'active_inventory_floor_task_v1'",
+      );
+      if (remaining.length !== 0) throw new Error("inventory floor task ownership changed");
+    } finally {
+      lease.release();
+    }
+  } catch (error) {
+    deps.sync.resume();
+    throw error;
   }
 }

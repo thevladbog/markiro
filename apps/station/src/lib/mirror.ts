@@ -128,6 +128,33 @@ function isDuplicateColumnError(err: unknown): boolean {
   return /duplicate column name/i.test(err instanceof Error ? err.message : String(err));
 }
 
+const STATION_TRIGGER_REPLACEMENTS = new Map<
+  string,
+  { readonly dropId: string; readonly createId: string }
+>([
+  ["box_exception_undo_local", { dropId: "station-sqlite-035", createId: "station-sqlite-036" }],
+  [
+    "inventory_task_mirror_accept_page",
+    { dropId: "station-sqlite-069", createId: "station-sqlite-070" },
+  ],
+  [
+    "inventory_task_mirror_reset_snapshot",
+    { dropId: "station-sqlite-072", createId: "station-sqlite-073" },
+  ],
+  ["inventory_sync_validate_ack", { dropId: "station-sqlite-098", createId: "station-sqlite-099" }],
+  ["inventory_sync_apply_ack", { dropId: "station-sqlite-100", createId: "station-sqlite-101" }],
+  [
+    "inventory_progress_validate_page",
+    { dropId: "station-sqlite-103", createId: "station-sqlite-104" },
+  ],
+  [
+    "inventory_progress_apply_page",
+    { dropId: "station-sqlite-105", createId: "station-sqlite-106" },
+  ],
+]);
+
+const canonicalTriggerSql = (value: string) => value.trim().replace(/;$/, "").replace(/\s+/g, " ");
+
 export async function applyMigrations(exec: SqlExecutor): Promise<void> {
   const inventoryEventColumns = await exec.all<{ name: string }>(
     "PRAGMA table_info(inventory_scan_events_mirror)",
@@ -140,6 +167,21 @@ export async function applyMigrations(exec: SqlExecutor): Promise<void> {
   );
   const skipLegacyAudits = finalLegacyAuditExists || commitStateAlreadyExisted;
   const supersededIds = new Set<string>(SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATION_IDS);
+  const existingTriggers = await exec.all<{ name: string; sql: string }>(
+    "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND sql IS NOT NULL",
+  );
+  const existingTriggerSql = new Map(
+    existingTriggers.map((trigger) => [trigger.name, canonicalTriggerSql(trigger.sql)]),
+  );
+  const installedTriggerMigrationIds = new Set<string>();
+  for (const [name, ids] of STATION_TRIGGER_REPLACEMENTS) {
+    const create = STATION_MIGRATION_ENTRIES.find((migration) => migration.id === ids.createId);
+    if (!create || existingTriggerSql.get(name) !== canonicalTriggerSql(create.sql)) {
+      continue;
+    }
+    installedTriggerMigrationIds.add(ids.dropId);
+    installedTriggerMigrationIds.add(ids.createId);
+  }
   for (const migration of STATION_MIGRATION_ENTRIES) {
     // A database that already had commit_state may be either round 1 or round
     // 2. Do not guess from a now-drained outbox: skip both destructive audit
@@ -149,6 +191,12 @@ export async function applyMigrations(exec: SqlExecutor): Promise<void> {
     if (skipLegacyAudits && supersededIds.has(migration.id)) {
       continue;
     }
+    // DROP and CREATE issued as separate calls can land on different pooled
+    // SQLite connections. If the final trigger already exists, rerunning that
+    // replacement pair is unnecessary and a stale schema cache can make the
+    // CREATE fail with "already exists". Missing triggers still execute both
+    // statements and repair a crash between the historical DROP and CREATE.
+    if (installedTriggerMigrationIds.has(migration.id)) continue;
     try {
       await exec.run(migration.sql);
     } catch (err) {

@@ -133,19 +133,21 @@ export const inventoryEventClaimOutcomeSchema = z
 
 export type InventoryEventClaimOutcome = z.infer<typeof inventoryEventClaimOutcomeSchema>;
 
-export const INVENTORY_EVENT_OUTCOMES = [
-  "applied",
-  "replay",
-  "duplicate",
-  "rejected",
-  "quarantined",
+export const INVENTORY_EVENT_OUTCOMES = ["applied", "replay", "duplicate", "quarantined"] as const;
+
+export const INVENTORY_EVENT_REASON_CODES = [
+  "CLAIM_APPLIED",
+  "CLAIM_LOST",
+  "BATCH_REPLAY",
+  "INVENTORY_CLOSED",
+  "INVENTORY_COMPLETED",
 ] as const;
 
 export const inventoryEventOutcomeSchema = z
   .strictObject({
     eventId: uuidSchema,
     status: z.enum(INVENTORY_EVENT_OUTCOMES),
-    reasonCode: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/),
+    reasonCode: z.enum(INVENTORY_EVENT_REASON_CODES),
     claimedCount: z.number().int().nonnegative().safe(),
     conflictCount: z.number().int().nonnegative().safe(),
     claims: z.array(inventoryEventClaimOutcomeSchema).max(INVENTORY_EVENT_CLAIM_OUTCOME_SIZE),
@@ -191,8 +193,11 @@ export const inventoryEventOutcomeSchema = z
       (value.status === "applied" &&
         ((carriesClaims && value.claimedCount === 0) || value.reasonCode !== "CLAIM_APPLIED")) ||
       (value.status === "replay" && value.reasonCode !== "BATCH_REPLAY") ||
-      ((value.status === "rejected" || value.status === "quarantined") &&
-        (value.claimedCount !== 0 || value.conflictCount !== 0 || carriesClaims))
+      (value.status === "quarantined" &&
+        (value.claimedCount !== 0 ||
+          value.conflictCount !== 0 ||
+          carriesClaims ||
+          (value.reasonCode !== "INVENTORY_CLOSED" && value.reasonCode !== "INVENTORY_COMPLETED")))
     ) {
       context.addIssue({ code: "custom", path: ["status"], message: "outcome contradiction" });
     }

@@ -8,6 +8,10 @@ import { canonicalizeKm, kmHash, type StationInventoryBundleManifest } from "@ma
 
 import i18n from "../src/i18n/index.js";
 import type { StationClient } from "../src/lib/api-client.js";
+import {
+  createCredentialGeneration,
+  credentialGenerationOwnership,
+} from "../src/lib/credential-recovery.js";
 import { applyMigrations } from "../src/lib/mirror.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
@@ -126,6 +130,18 @@ describe("simple inventory work screen", () => {
        VALUES (?, ?, ?, ?, 1, '2026-08-25T10:00:00.000Z')`,
     ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
     const scan = scanner();
+    const credentialGeneration = createCredentialGeneration("remote-progress");
+    const credentialOwnership = await credentialGenerationOwnership(credentialGeneration);
+    if (!credentialOwnership) throw new Error("expected credential ownership");
+    const floorTaskPointerValue = JSON.stringify({
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      credentialOwnership,
+      activationId: "remote-progress",
+    });
+    db.prepare(
+      "INSERT INTO station_meta (key, value) VALUES ('active_inventory_floor_task_v1', ?)",
+    ).run(floorTaskPointerValue);
     const expected = canonicalizeKm(raw("EXPECTED"));
     const codeHash = kmHash(expected);
     const changeId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -173,6 +189,8 @@ describe("simple inventory work screen", () => {
         operatorId={OPERATOR_ID}
         source={scan.source}
         client={client}
+        credentialGeneration={credentialGeneration}
+        floorTaskPointerValue={floorTaskPointerValue}
       />,
     );
 

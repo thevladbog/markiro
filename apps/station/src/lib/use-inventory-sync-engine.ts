@@ -19,6 +19,7 @@ export interface UseInventorySyncEngineDeps {
   } | null;
   inventoryId: string;
   snapshotId: string;
+  floorTaskPointerValue?: string;
   active: boolean;
   credentialGeneration?: CredentialGeneration;
   onProgressApplied?: (page: InventoryProgressPage) => void | Promise<void>;
@@ -28,13 +29,23 @@ export interface UseInventorySyncEngineResult {
   state: InventorySyncState;
   nudge: () => void;
   idle: () => Promise<void>;
+  stop: () => void;
+  resume: () => void;
 }
 
 export function useInventorySyncEngine(
   deps: UseInventorySyncEngineDeps,
 ): UseInventorySyncEngineResult {
-  const { exec, client, inventoryId, snapshotId, active, credentialGeneration, onProgressApplied } =
-    deps;
+  const {
+    exec,
+    client,
+    inventoryId,
+    snapshotId,
+    floorTaskPointerValue,
+    active,
+    credentialGeneration,
+    onProgressApplied,
+  } = deps;
   const [state, setState] = useState<InventorySyncState>({
     pending: 0,
     draining: false,
@@ -53,6 +64,7 @@ export function useInventorySyncEngine(
       client,
       inventoryId,
       snapshotId,
+      ...(floorTaskPointerValue ? { floorTaskPointerValue } : {}),
       onState: setState,
       ...(onProgressApplied ? { onProgressApplied } : {}),
       ...(credentialGeneration ? { credentialGeneration } : {}),
@@ -71,9 +83,20 @@ export function useInventorySyncEngine(
       engine.stop();
       if (engineRef.current === engine) engineRef.current = null;
     };
-  }, [exec, client, inventoryId, snapshotId, active, credentialGeneration, onProgressApplied]);
+  }, [
+    exec,
+    client,
+    inventoryId,
+    snapshotId,
+    floorTaskPointerValue,
+    active,
+    credentialGeneration,
+    onProgressApplied,
+  ]);
 
   const nudge = useCallback(() => engineRef.current?.nudge(), []);
   const idle = useCallback(() => engineRef.current?.idle() ?? Promise.resolve(), []);
-  return { state, nudge, idle };
+  const stop = useCallback(() => engineRef.current?.stop(), []);
+  const resume = useCallback(() => engineRef.current?.resume(), []);
+  return { state, nudge, idle, stop, resume };
 }

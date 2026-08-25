@@ -135,8 +135,14 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
       "applied",
       "replay",
       "duplicate",
-      "rejected",
       "quarantined",
+    ]);
+    expect(outcome.properties?.reasonCode?.enum).toEqual([
+      "CLAIM_APPLIED",
+      "CLAIM_LOST",
+      "BATCH_REPLAY",
+      "INVENTORY_CLOSED",
+      "INVENTORY_COMPLETED",
     ]);
     const claim = outcome.properties?.claims?.items ?? {};
     expect(claim.additionalProperties).toBe(false);

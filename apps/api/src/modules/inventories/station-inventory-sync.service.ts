@@ -160,7 +160,7 @@ export class StationInventorySyncService {
           outcomes: prior.outcomes.map((outcome) => ({
             ...outcome,
             status: "replay" as const,
-            reasonCode: "BATCH_REPLAY",
+            reasonCode: "BATCH_REPLAY" as const,
           })),
         };
         await tx.insert(schema.inventoryScanBatches).values({

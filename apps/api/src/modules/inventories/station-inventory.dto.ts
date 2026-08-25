@@ -5,6 +5,8 @@ import {
   INVENTORY_CHZ_STATUSES,
   INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE,
   INVENTORY_EVENT_CLAIM_OUTCOME_SIZE,
+  INVENTORY_EVENT_OUTCOMES,
+  INVENTORY_EVENT_REASON_CODES,
   INVENTORY_PROGRESS_CURSOR_PATTERN,
   inventoryEventBatchSchema,
   inventoryProgressCursorSchema,
@@ -130,9 +132,9 @@ const inventoryEventOutcomeOpenApiSchema: SchemaObject = {
     eventId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
     status: {
       type: "string",
-      enum: ["applied", "replay", "duplicate", "rejected", "quarantined"],
+      enum: [...INVENTORY_EVENT_OUTCOMES],
     },
-    reasonCode: { type: "string", pattern: "^[A-Z][A-Z0-9_]{0,127}$" },
+    reasonCode: { type: "string", enum: [...INVENTORY_EVENT_REASON_CODES] },
     claimedCount: { type: "integer", minimum: 0 },
     conflictCount: { type: "integer", minimum: 0 },
     claims: {

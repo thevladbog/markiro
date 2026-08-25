@@ -264,6 +264,55 @@ describe("inventory station sync contract", () => {
     }
   });
 
+  it("accepts only the closed status-specific acknowledgement vocabulary", () => {
+    const digest = inventoryEventBatchDigest(payload);
+    const request = { batchId: "reason-batch", payloadDigest: digest, ...payload };
+    const response = (status: string, reasonCode: string) => ({
+      inventoryId: "44444444-4444-4444-8444-444444444444",
+      snapshotId: payload.snapshotId,
+      snapshotRevision: 1,
+      batchId: request.batchId,
+      payloadDigest: digest,
+      sequenceCeiling: 7,
+      resultRevision: 2,
+      outcomes: [
+        {
+          eventId: event.eventId,
+          status,
+          reasonCode,
+          claimedCount: 0,
+          conflictCount: 0,
+          claims: [],
+        },
+      ],
+    });
+
+    for (const [status, reasonCode] of [
+      ["quarantined", "CLAIM_APPLIED"],
+      ["quarantined", "BATCH_REPLAY"],
+      ["rejected", "INVENTORY_CLOSED"],
+      ["rejected", "INVENTORY_EVENT_REJECTED"],
+    ] as const) {
+      expect(() =>
+        parseInventoryEventBatchResponse(
+          response(status, reasonCode),
+          request,
+          "44444444-4444-4444-8444-444444444444",
+        ),
+      ).toThrow("Invalid inventory event batch response");
+    }
+
+    for (const reasonCode of ["INVENTORY_CLOSED", "INVENTORY_COMPLETED"] as const) {
+      expect(
+        parseInventoryEventBatchResponse(
+          response("quarantined", reasonCode),
+          request,
+          "44444444-4444-4444-8444-444444444444",
+        ).outcomes[0]?.reasonCode,
+      ).toBe(reasonCode);
+    }
+  });
+
   it("recognizes the explicit zero-claim old-box acknowledgement exception", () => {
     const oldBoxEvent = {
       ...event,

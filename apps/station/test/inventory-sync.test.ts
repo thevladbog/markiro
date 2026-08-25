@@ -64,6 +64,16 @@ async function setup(): Promise<{ db: DatabaseSync; exec: SqlExecutor }> {
        (inventory_id, snapshot_id, device_id, operator_id, next_device_sequence, updated_at)
      VALUES (?, ?, ?, ?, 2, '2026-08-25T10:00:00.000Z')`,
   ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+  db.prepare(
+    "INSERT INTO station_meta (key, value) VALUES ('active_inventory_floor_task_v1', ?)",
+  ).run(
+    JSON.stringify({
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      credentialOwnership: "b".repeat(64),
+      activationId: "test-activation",
+    }),
+  );
   const event = {
     eventId: EVENT_ID,
     deviceSequence: 1,
@@ -119,6 +129,16 @@ async function rotatingProgressSetup(hooks: Parameters<typeof makeRotatingExec>[
      VALUES (?, ?, ?, ?, 2, '2026-08-25T10:00:00.000Z')`,
   ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
   db.prepare(
+    "INSERT INTO station_meta (key, value) VALUES ('active_inventory_floor_task_v1', ?)",
+  ).run(
+    JSON.stringify({
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      credentialOwnership: "b".repeat(64),
+      activationId: "test-activation",
+    }),
+  );
+  db.prepare(
     `INSERT INTO inventory_scan_events_mirror
        (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
         kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict,
@@ -145,6 +165,36 @@ async function rotatingProgressSetup(hooks: Parameters<typeof makeRotatingExec>[
 }
 
 describe("inventory sync engine", () => {
+  it("reruns receipt migrations through rotating pooled SQLite connections", async () => {
+    const directory = mkdtempSync(join(tmpdir(), `inventory-migration-${randomUUID()}-`));
+    const path = join(directory, "mirror.sqlite");
+    const databases = [new DatabaseSync(path), new DatabaseSync(path)];
+    try {
+      const exec = makeRotatingExec(databases);
+      await applyMigrations(exec);
+      await expect(applyMigrations(exec)).resolves.toBeUndefined();
+      expect(
+        databases[0]!
+          .prepare(
+            `SELECT name FROM sqlite_master
+              WHERE type = 'trigger' AND name IN (
+                'inventory_sync_validate_ack_v2', 'inventory_sync_apply_ack_v2',
+                'inventory_progress_validate_page_v2', 'inventory_progress_apply_page_v2'
+              ) ORDER BY name`,
+          )
+          .all(),
+      ).toEqual([
+        { name: "inventory_progress_apply_page_v2" },
+        { name: "inventory_progress_validate_page_v2" },
+        { name: "inventory_sync_apply_ack_v2" },
+        { name: "inventory_sync_validate_ack_v2" },
+      ]);
+    } finally {
+      for (const database of databases) database.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("uses bounded exponential retry and resets the delay after a successful acknowledgement", async () => {
     vi.useFakeTimers();
     try {
@@ -623,6 +673,360 @@ describe("inventory progress and leave", () => {
     ).toEqual({ progress_cursor: null, progress_result_revision: 0 });
   });
 
+  it("keeps idle pending until the stopped progress flight has settled", async () => {
+    const { exec } = await setup();
+    let release!: (value: unknown) => void;
+    const response = new Promise((resolve) => {
+      release = resolve;
+    });
+    const get = vi.fn(async () => response);
+    const engine = createInventorySyncEngine({
+      exec,
+      client: { get, post: vi.fn(async () => ({})) },
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      onState: () => undefined,
+      retry: false,
+    });
+    const poll = engine.pollProgress();
+    await vi.waitFor(() => expect(get).toHaveBeenCalledOnce());
+    engine.stop();
+    let idleSettled = false;
+    const idle = engine.idle().then(() => {
+      idleSettled = true;
+    });
+    await Promise.resolve();
+    expect(idleSettled).toBe(false);
+    release({
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      snapshotRevision: 1,
+      cursor: null,
+      resultRevision: 1,
+      items: [],
+      nextCursor: null,
+    });
+    await Promise.all([poll, idle]);
+    expect(idleSettled).toBe(true);
+  });
+
+  it("stops and drains an admitted progress write before posting leave", async () => {
+    const { db, exec: baseExec } = await setup();
+    db.prepare("DELETE FROM inventory_outbox").run();
+    const generation = createCredentialGeneration("leave-progress-race");
+    const ownership = await credentialGenerationOwnership(generation);
+    if (!ownership) throw new Error("expected ownership");
+    const pointerValue = JSON.stringify({
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      credentialOwnership: ownership,
+      activationId: "leave-progress-race",
+    });
+    db.prepare(
+      "INSERT OR REPLACE INTO station_meta (key, value) VALUES ('active_inventory_floor_task_v1', ?)",
+    ).run(pointerValue);
+    let admit!: () => void;
+    const admitted = new Promise<void>((resolve) => {
+      admit = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const order: string[] = [];
+    const exec: SqlExecutor = {
+      all: (sql, params) => baseExec.all(sql, params),
+      async run(sql, params) {
+        if (sql.includes("INSERT INTO inventory_progress_receipts")) {
+          admit();
+          await gate;
+          order.push("progress");
+        }
+        await baseExec.run(sql, params);
+      },
+    };
+    const progressId = "10000000-0000-4000-8000-000000000001";
+    const engine = createInventorySyncEngine({
+      exec,
+      client: {
+        get: vi.fn(async () => ({
+          inventoryId: INVENTORY_ID,
+          snapshotId: SNAPSHOT_ID,
+          snapshotRevision: 1,
+          cursor: null,
+          resultRevision: 1,
+          items: [
+            {
+              id: progressId,
+              revision: 1,
+              kind: "claim",
+              codeHash: "b".repeat(64),
+              classification: "expected",
+              observedProductionDate: "2026-08-20",
+              winner: {
+                codeHash: "b".repeat(64),
+                eventId: "77777777-7777-4777-8777-777777777777",
+                deviceId: "88888888-8888-4888-8888-888888888888",
+                scannedAt: "2026-08-25T09:00:00.000Z",
+              },
+              correctedAt: "2026-08-25T10:01:00.000Z",
+            },
+          ],
+          nextCursor: `1:${progressId}`,
+        })),
+        post: vi.fn(async () => ({})),
+      },
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      floorTaskPointerValue: pointerValue,
+      credentialGeneration: generation,
+      onState: () => undefined,
+      retry: false,
+    });
+    const poll = engine.pollProgress();
+    await admitted;
+    const post = vi.fn(async () => {
+      order.push("leave");
+      return { outcome: "left" };
+    });
+    const leaving = leaveInventoryTask({
+      exec,
+      client: { post },
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      deviceId: DEVICE_ID,
+      pointerValue,
+      credentialGeneration: generation,
+      closeScanner: async () => undefined,
+      scanQueueIdle: async () => undefined,
+      sync: {
+        nudge: () => undefined,
+        idle: () => engine.idle(),
+        stop: () => engine.stop(),
+        resume: () => engine.resume(),
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const callsBeforeRelease = post.mock.calls.length;
+    release();
+    await Promise.all([poll, leaving]);
+    expect(callsBeforeRelease).toBe(0);
+    expect(order).toEqual(["progress", "leave"]);
+    const afterLeave = db.prepare("SELECT progress_cursor FROM inventory_terminal_state").get() as {
+      progress_cursor: string | null;
+    };
+    await Promise.resolve();
+    expect(db.prepare("SELECT progress_cursor FROM inventory_terminal_state").get()).toEqual(
+      afterLeave,
+    );
+  });
+
+  it("reduces a same-page claim then correction in authoritative revision/id order", async () => {
+    const { db, exec } = await setup();
+    const claimId = "10000000-0000-4000-8000-000000000001";
+    const correctionId = "10000000-0000-4000-8000-000000000002";
+    const winnerEventId = "77777777-7777-4777-8777-777777777777";
+    await applyInventoryProgressPage(
+      exec,
+      { inventoryId: INVENTORY_ID, snapshotId: SNAPSHOT_ID, deviceId: DEVICE_ID },
+      {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        snapshotRevision: 1,
+        cursor: null,
+        resultRevision: 1,
+        items: [
+          {
+            id: claimId,
+            revision: 1,
+            kind: "claim",
+            codeHash: "b".repeat(64),
+            classification: "expected",
+            observedProductionDate: "2026-08-20",
+            winner: {
+              codeHash: "b".repeat(64),
+              eventId: winnerEventId,
+              deviceId: "88888888-8888-4888-8888-888888888888",
+              scannedAt: "2026-08-25T09:00:00.000Z",
+            },
+            correctedAt: "2026-08-25T10:01:00.000Z",
+          },
+          {
+            id: correctionId,
+            revision: 1,
+            kind: "correction",
+            codeHash: "b".repeat(64),
+            classification: "voided",
+            observedProductionDate: null,
+            winner: null,
+            correctedAt: "2026-08-25T10:02:00.000Z",
+          },
+        ],
+        nextCursor: `1:${correctionId}`,
+      },
+    );
+    expect(
+      db
+        .prepare(
+          `SELECT first_accepted_event_id, classification, observed_production_date, updated_at
+             FROM inventory_code_results_mirror WHERE code_hash = ?`,
+        )
+        .get("b".repeat(64)),
+    ).toEqual({
+      first_accepted_event_id: winnerEventId,
+      classification: "voided",
+      observed_production_date: null,
+      updated_at: "2026-08-25T10:02:00.000Z",
+    });
+  });
+
+  it("reduces a same-page correction then claim in authoritative revision/id order", async () => {
+    const { db, exec } = await setup();
+    const correctionId = "10000000-0000-4000-8000-000000000001";
+    const claimId = "10000000-0000-4000-8000-000000000002";
+    const winnerEventId = "77777777-7777-4777-8777-777777777777";
+    db.prepare(
+      `INSERT INTO inventory_code_results_mirror
+         (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
+          winning_scanned_at, observed_production_date, classification, origin_classification,
+          updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+      "b".repeat(64),
+      "66666666-6666-4666-8666-666666666666",
+      DEVICE_ID,
+      "2026-08-25T08:00:00.000Z",
+      "2026-08-19",
+      "protected",
+      "protected",
+      "2026-08-25T08:00:00.000Z",
+    );
+    await applyInventoryProgressPage(
+      exec,
+      { inventoryId: INVENTORY_ID, snapshotId: SNAPSHOT_ID, deviceId: DEVICE_ID },
+      {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        snapshotRevision: 1,
+        cursor: null,
+        resultRevision: 1,
+        items: [
+          {
+            id: correctionId,
+            revision: 1,
+            kind: "correction",
+            codeHash: "b".repeat(64),
+            classification: "voided",
+            observedProductionDate: null,
+            winner: null,
+            correctedAt: "2026-08-25T10:01:00.000Z",
+          },
+          {
+            id: claimId,
+            revision: 1,
+            kind: "claim",
+            codeHash: "b".repeat(64),
+            classification: "expected",
+            observedProductionDate: "2026-08-20",
+            winner: {
+              codeHash: "b".repeat(64),
+              eventId: winnerEventId,
+              deviceId: "88888888-8888-4888-8888-888888888888",
+              scannedAt: "2026-08-25T09:00:00.000Z",
+            },
+            correctedAt: "2026-08-25T10:02:00.000Z",
+          },
+        ],
+        nextCursor: `1:${claimId}`,
+      },
+    );
+    expect(
+      db
+        .prepare(
+          `SELECT first_accepted_event_id, classification, observed_production_date, updated_at
+             FROM inventory_code_results_mirror WHERE code_hash = ?`,
+        )
+        .get("b".repeat(64)),
+    ).toEqual({
+      first_accepted_event_id: winnerEventId,
+      classification: "expected",
+      observed_production_date: "2026-08-20",
+      updated_at: "2026-08-25T10:02:00.000Z",
+    });
+  });
+
+  it("reduces multiple same-page corrections to the last authoritative revision/id", async () => {
+    const { db, exec } = await setup();
+    const firstId = "10000000-0000-4000-8000-000000000001";
+    const secondId = "10000000-0000-4000-8000-000000000002";
+    db.prepare(
+      `INSERT INTO inventory_code_results_mirror
+         (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
+          winning_scanned_at, observed_production_date, classification, origin_classification,
+          updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+      "b".repeat(64),
+      "66666666-6666-4666-8666-666666666666",
+      DEVICE_ID,
+      "2026-08-25T08:00:00.000Z",
+      "2026-08-19",
+      "expected",
+      "expected",
+      "2026-08-25T08:00:00.000Z",
+    );
+    await applyInventoryProgressPage(
+      exec,
+      { inventoryId: INVENTORY_ID, snapshotId: SNAPSHOT_ID, deviceId: DEVICE_ID },
+      {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        snapshotRevision: 1,
+        cursor: null,
+        resultRevision: 2,
+        items: [
+          {
+            id: firstId,
+            revision: 1,
+            kind: "correction",
+            codeHash: "b".repeat(64),
+            classification: "protected",
+            observedProductionDate: "2026-08-20",
+            winner: null,
+            correctedAt: "2026-08-25T10:01:00.000Z",
+          },
+          {
+            id: secondId,
+            revision: 2,
+            kind: "correction",
+            codeHash: "b".repeat(64),
+            classification: "voided",
+            observedProductionDate: null,
+            winner: null,
+            correctedAt: "2026-08-25T10:02:00.000Z",
+          },
+        ],
+        nextCursor: `2:${secondId}`,
+      },
+    );
+    expect(
+      db
+        .prepare(
+          `SELECT classification, observed_production_date, updated_at
+             FROM inventory_code_results_mirror WHERE code_hash = ?`,
+        )
+        .get("b".repeat(64)),
+    ).toEqual({
+      classification: "voided",
+      observed_production_date: null,
+      updated_at: "2026-08-25T10:02:00.000Z",
+    });
+  });
+
   it("persists a remote winner before its cursor and replays a correction idempotently", async () => {
     const { db, exec } = await setup();
     const winnerEventId = "77777777-7777-4777-8777-777777777777";
@@ -879,7 +1283,7 @@ describe("inventory progress and leave", () => {
       activationId: "leave-activation",
     });
     db.prepare(
-      "INSERT INTO station_meta (key, value) VALUES ('active_inventory_floor_task_v1', ?)",
+      "INSERT OR REPLACE INTO station_meta (key, value) VALUES ('active_inventory_floor_task_v1', ?)",
     ).run(pointerValue);
     const post = vi.fn(async () => ({ outcome: "left" }));
     const order: string[] = [];
@@ -902,6 +1306,8 @@ describe("inventory progress and leave", () => {
           order.push("outbox");
         },
         idle: async () => undefined,
+        stop: () => undefined,
+        resume: () => undefined,
       },
     };
     await expect(leaveInventoryTask(deps)).rejects.toThrow("inventory task still has pending work");
@@ -949,7 +1355,7 @@ describe("inventory progress and leave", () => {
       });
       db.prepare("DELETE FROM inventory_outbox").run();
       db.prepare(
-        "INSERT INTO station_meta (key, value) VALUES ('active_inventory_floor_task_v1', ?)",
+        "INSERT OR REPLACE INTO station_meta (key, value) VALUES ('active_inventory_floor_task_v1', ?)",
       ).run(pointerValue);
       await expect(
         leaveInventoryTask({
@@ -962,7 +1368,12 @@ describe("inventory progress and leave", () => {
           credentialGeneration: generation,
           closeScanner: async () => undefined,
           scanQueueIdle: async () => undefined,
-          sync: { nudge: () => undefined, idle: async () => undefined },
+          sync: {
+            nudge: () => undefined,
+            idle: async () => undefined,
+            stop: () => undefined,
+            resume: () => undefined,
+          },
         }),
       ).rejects.toThrow();
       expect(
@@ -994,7 +1405,7 @@ describe("inventory progress and leave", () => {
       activationId: "new",
     });
     db.prepare(
-      "INSERT INTO station_meta (key, value) VALUES ('active_inventory_floor_task_v1', ?)",
+      "INSERT OR REPLACE INTO station_meta (key, value) VALUES ('active_inventory_floor_task_v1', ?)",
     ).run(oldPointer);
     let release!: (value: unknown) => void;
     const response = new Promise((resolve) => {
@@ -1010,7 +1421,12 @@ describe("inventory progress and leave", () => {
       credentialGeneration: generation,
       closeScanner: async () => undefined,
       scanQueueIdle: async () => undefined,
-      sync: { nudge: () => undefined, idle: async () => undefined },
+      sync: {
+        nudge: () => undefined,
+        idle: async () => undefined,
+        stop: () => undefined,
+        resume: () => undefined,
+      },
     });
     await vi.waitFor(() =>
       expect(
@@ -1045,7 +1461,7 @@ describe("inventory progress and leave", () => {
       activationId: "retired-in-flight",
     });
     db.prepare(
-      "INSERT INTO station_meta (key, value) VALUES ('active_inventory_floor_task_v1', ?)",
+      "INSERT OR REPLACE INTO station_meta (key, value) VALUES ('active_inventory_floor_task_v1', ?)",
     ).run(pointerValue);
     let release!: (value: unknown) => void;
     const response = new Promise((resolve) => {
@@ -1062,7 +1478,12 @@ describe("inventory progress and leave", () => {
       credentialGeneration: generation,
       closeScanner: async () => undefined,
       scanQueueIdle: async () => undefined,
-      sync: { nudge: () => undefined, idle: async () => undefined },
+      sync: {
+        nudge: () => undefined,
+        idle: async () => undefined,
+        stop: () => undefined,
+        resume: () => undefined,
+      },
     });
     await vi.waitFor(() => expect(post).toHaveBeenCalledOnce());
     await sealCredentialGeneration(generation);
