@@ -96,9 +96,13 @@ summary.
 автоматически. Получите явное подтверждение владельца инфраструктуры на
 применение именно проверенного saved plan. После подтверждения запустите
 отдельный dispatch `mode=apply` с теми же точными SHA и обоими DNS flags, а также
-обеими точными тройками и `plan_review_confirmed=true`. Одобренный reviewer
-вручную разрешает apply в отдельном GitHub Environment
-`production-infrastructure-apply`. Изменение кода не заменяет этот approval.
+обеими точными тройками, `plan_review_confirmed=true` и
+`owner_confirmation=APPLY-YANDEX-INFRASTRUCTURE`. Dispatch выполняет владелец
+репозитория из `main`; workflow проверяет `github.actor ==
+github.repository_owner`, ref и точную фразу до входа в Environment, OIDC и
+Terraform. На текущем GitHub plan это одно-владельческое подтверждение, не
+двухпользовательский approval. Изменение кода не заменяет явное подтверждение на
+точный reviewed plan.
 
 Workflow не печатает и не сохраняет Terraform outputs. Дождитесь успешного apply
 до локального доступа к защищённому state.
