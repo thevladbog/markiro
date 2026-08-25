@@ -179,6 +179,14 @@ describe("development screen gallery", () => {
   it("drives the real repack print-recovery branch with production disabled actions", async () => {
     render(<StationScreenGallery request={{ state: "inventory-print-recovery", locale: "ru" }} />);
 
+    expect(await screen.findByRole("button", { name: "Повторить печать" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    expect(screen.getByRole("button", { name: "Настроить принтер" })).toHaveProperty(
+      "disabled",
+      false,
+    );
     expect(await screen.findByRole("button", { name: "Изменить" })).toHaveProperty(
       "disabled",
       true,

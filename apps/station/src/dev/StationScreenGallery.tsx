@@ -528,6 +528,7 @@ function RepackInventoryFixture({ variant }: { variant: string }) {
       deviceId="gallery-terminal-a"
       operatorId="gallery-operator"
       source={galleryInventoryScanSource}
+      onOpenPrinterSetup={() => undefined}
       galleryState={{
         mode: "repack",
         productionDate: GALLERY_INVENTORY_DATE,
