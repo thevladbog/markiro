@@ -137,8 +137,16 @@ const cdnReference = [
   "yandex_cdn_resource.releases",
 ];
 
-function rejected() {
-  throw new Error("production plan rejected");
+function rejected(scope) {
+  throw new Error(scope ? `production plan rejected (${scope})` : "production plan rejected");
+}
+
+function scoped(scope, callback) {
+  try {
+    return callback();
+  } catch {
+    rejected(scope);
+  }
 }
 
 function object(value) {
@@ -556,44 +564,49 @@ function validateDirectVmDns(resource) {
 }
 
 export function guardProductionPlan(plan) {
-  if (!plan || typeof plan !== "object" || !Array.isArray(plan.resource_changes)) rejected();
+  if (!plan || typeof plan !== "object" || !Array.isArray(plan.resource_changes))
+    rejected("plan-shape");
 
-  const expectedTerraformId = planVariable(plan, "terraform_service_account_id");
-  const appRuntimeId = planVariable(plan, "app_service_account_id");
-  if (expectedTerraformId === appRuntimeId) rejected();
+  const expectedTerraformId = scoped("terraform-identity-variable", () =>
+    planVariable(plan, "terraform_service_account_id"),
+  );
+  const appRuntimeId = scoped("app-identity-variable", () =>
+    planVariable(plan, "app_service_account_id"),
+  );
+  if (expectedTerraformId === appRuntimeId) rejected("shared-runtime-identity");
 
   const seen = new Set();
   const resources = new Map();
   for (const resource of plan.resource_changes) {
     if (!resource || typeof resource !== "object" || typeof resource.address !== "string")
-      rejected();
-    if (seen.has(resource.address)) rejected();
+      rejected("resource-shape");
+    if (seen.has(resource.address)) rejected("duplicate-resource");
     const expectedType =
       releaseResourceTypes.get(resource.address) ??
       safeProductionResources.get(resource.address) ??
       retiredProductionResources.get(resource.address);
-    if (!expectedType || resource.type !== expectedType) rejected();
-    const resourceActions = actions(resource);
+    if (!expectedType || resource.type !== expectedType) rejected("resource-classification");
+    const resourceActions = scoped("resource-actions", () => actions(resource));
     if (
       retiredProductionResources.has(resource.address) &&
       (resourceActions.length !== 1 ||
         resourceActions[0] !== "delete" ||
         resource.change?.after !== null)
     )
-      rejected();
+      rejected("retired-resource-action");
     if (safeProductionResources.has(resource.address)) {
       const allowed = directVmDnsAddresses.has(resource.address)
         ? ["no-op", "create", "update", "delete"]
         : resource.address.includes(".data.")
           ? ["no-op", "read"]
           : ["no-op"];
-      if (!onlyAllowedAction(resourceActions, allowed)) rejected();
+      if (!onlyAllowedAction(resourceActions, allowed)) rejected("safe-resource-action");
     }
     if (
       resource.address === "module.station_releases.data.yandex_cm_certificate.issued" &&
       !onlyAllowedAction(resourceActions, ["no-op", "read"])
     )
-      rejected();
+      rejected("release-data-action");
     if (
       releaseResourceTypes.has(resource.address) &&
       resource.address !== "module.station_releases.data.yandex_cm_certificate.issued"
@@ -602,73 +615,97 @@ export function guardProductionPlan(plan) {
         resource.address === "module.station_releases.yandex_dns_recordset.public_release[0]"
           ? ["no-op", "create", "update", "delete"]
           : ["no-op", "create", "update"];
-      if (!onlyAllowedAction(resourceActions, allowed)) rejected();
+      if (!onlyAllowedAction(resourceActions, allowed)) rejected("release-resource-action");
     }
     if (
       releaseResourceTypes.has(resource.address) &&
       resource.address !== "module.station_releases.yandex_dns_recordset.public_release[0]" &&
       resourceActions.includes("delete")
     )
-      rejected();
-    if (protectedAddresses.has(resource.address) && resourceActions.includes("delete")) rejected();
+      rejected("release-resource-delete");
+    if (protectedAddresses.has(resource.address) && resourceActions.includes("delete"))
+      rejected("protected-resource-delete");
     seen.add(resource.address);
     resources.set(resource.address, resource);
   }
 
-  for (const address of protectedAddresses) if (!seen.has(address)) rejected();
-  for (const address of requiredReleaseAddresses) if (!seen.has(address)) rejected();
+  for (const address of protectedAddresses)
+    if (!seen.has(address)) rejected("missing-protected-resource");
+  for (const address of requiredReleaseAddresses)
+    if (!seen.has(address)) rejected("missing-release-resource");
   for (const address of directVmDnsAddresses) {
     const resource = resources.get(address);
-    if (resource) validateDirectVmDns(resource);
+    if (resource) scoped("direct-vm-dns", () => validateDirectVmDns(resource));
   }
 
   const bucket = resources.get("module.station_releases.yandex_storage_bucket.releases");
-  const bucketName = validateReleaseBucket(bucket);
+  const bucketName = scoped("release-bucket", () => validateReleaseBucket(bucket));
   const publisher = resources.get(
     "module.station_releases.yandex_iam_service_account.station_release_publisher",
   );
-  validatePublisher(publisher);
-  const publisherIdValue = knownOrComputed(publisher, "id");
-  if (publisherIdValue !== null) nonblank(publisherIdValue);
-  validatePublisherKey(
-    plan,
-    resources.get("module.station_releases.yandex_iam_service_account_static_access_key.publisher"),
-    publisherIdValue,
+  const publisherIdValue = scoped("release-publisher", () => {
+    validatePublisher(publisher);
+    const value = knownOrComputed(publisher, "id");
+    if (value !== null) nonblank(value);
+    return value;
+  });
+  scoped("release-publisher-key", () =>
+    validatePublisherKey(
+      plan,
+      resources.get(
+        "module.station_releases.yandex_iam_service_account_static_access_key.publisher",
+      ),
+      publisherIdValue,
+    ),
   );
-  validatePublisherBinding(
-    plan,
-    resources.get("module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader"),
-    bucketName,
-    publisherIdValue,
+  scoped("release-publisher-binding", () =>
+    validatePublisherBinding(
+      plan,
+      resources.get("module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader"),
+      bucketName,
+      publisherIdValue,
+    ),
   );
-  validateReleasePolicy(
-    plan,
-    resources.get("module.station_releases.yandex_storage_bucket_policy.releases"),
-    bucketName,
-    expectedTerraformId,
-    appRuntimeId,
+  scoped("release-policy", () =>
+    validateReleasePolicy(
+      plan,
+      resources.get("module.station_releases.yandex_storage_bucket_policy.releases"),
+      bucketName,
+      expectedTerraformId,
+      appRuntimeId,
+    ),
   );
-  const releaseOriginGroupId = validateOriginGroup(
-    resources.get("module.station_releases.yandex_cdn_origin_group.releases"),
-    bucketName,
+  const releaseOriginGroupId = scoped("release-origin-group", () =>
+    validateOriginGroup(
+      resources.get("module.station_releases.yandex_cdn_origin_group.releases"),
+      bucketName,
+    ),
   );
-  validateCertificate(resources.get("module.station_releases.yandex_cm_certificate.releases"));
-  validateCertificateRecord(
-    resources.get("module.station_releases.yandex_dns_recordset.certificate_validation[0]"),
+  scoped("release-certificate", () =>
+    validateCertificate(resources.get("module.station_releases.yandex_cm_certificate.releases")),
+  );
+  scoped("release-certificate-dns", () =>
+    validateCertificateRecord(
+      resources.get("module.station_releases.yandex_dns_recordset.certificate_validation[0]"),
+    ),
   );
   const cdn = resources.get("module.station_releases.yandex_cdn_resource.releases");
   const publicDns = resources.get("module.station_releases.yandex_dns_recordset.public_release[0]");
   const publicDnsLive =
     publicDns && (publicDns.change?.before !== null || publicDns.change?.after !== null);
-  if (includesDelete(cdn) && publicDnsLive) rejected();
-  const providerCname =
-    cdn.change?.after !== null ? validateCdn(plan, cdn, releaseOriginGroupId) : null;
+  if (scoped("release-cdn-actions", () => includesDelete(cdn)) && publicDnsLive)
+    rejected("release-cdn-delete");
+  const providerCname = scoped("release-cdn", () =>
+    cdn.change?.after !== null ? validateCdn(plan, cdn, releaseOriginGroupId) : null,
+  );
   if (publicDns && publicDns.change?.after !== null) {
-    validatePublicDns(plan, publicDns, providerCname);
+    scoped("release-public-dns", () => validatePublicDns(plan, publicDns, providerCname));
   }
 
   for (const resource of plan.resource_changes) {
-    rejectApplicationStorageGrants(resource, appRuntimeId, bucketName);
+    scoped("application-storage-grant", () =>
+      rejectApplicationStorageGrants(resource, appRuntimeId, bucketName),
+    );
     if (
       resource.address ===
         "module.station_releases.yandex_storage_bucket_iam_binding.publisher_uploader" ||
@@ -684,7 +721,7 @@ export function guardProductionPlan(plan) {
         "yandex_storage_bucket_policy",
       ].includes(resource.type)
     )
-      rejected();
+      rejected("duplicate-release-bucket-control");
   }
 }
 
@@ -692,8 +729,12 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   try {
     if (process.argv.length !== 3) throw new Error();
     guardProductionPlan(JSON.parse(await readFile(process.argv[2], "utf8")));
-  } catch {
-    process.stderr.write("production plan rejected\n");
+  } catch (error) {
+    const message =
+      error instanceof Error && /^production plan rejected(?: \([a-z0-9-]+\))?$/.test(error.message)
+        ? error.message
+        : "production plan rejected";
+    process.stderr.write(`${message}\n`);
     process.exitCode = 1;
   }
 }
