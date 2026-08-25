@@ -56,6 +56,11 @@ on:
         required: true
         default: false
         type: boolean
+      owner_confirmation:
+        description: Apply only - exact repository-owner confirmation phrase
+        required: false
+        default: ""
+        type: string
       enable_station_release_public_dns:
         description: Publish releases.markiro.app only after the Station release baseline is verified
         required: true
@@ -119,6 +124,23 @@ jobs:
           terraform -chdir=infra/yandex/production validate
           pnpm test:yandex-infra:contract
           node --test deploy/yandex/test/remote-deploy.test.mjs deploy/yandex/test/hosted-deploy-workflow.test.mjs
+
+  authorize-apply:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'apply'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Authorize Yandex infrastructure apply owner
+        env:
+          OWNER_CONFIRMATION: ${{ inputs.owner_confirmation }}
+          INFRASTRUCTURE_ACTOR: ${{ github.actor }}
+          INFRASTRUCTURE_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$INFRASTRUCTURE_ACTOR" = "$INFRASTRUCTURE_OWNER"
+          test "$OWNER_CONFIRMATION" = "APPLY-YANDEX-INFRASTRUCTURE"
 
   plan:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'plan'
@@ -348,6 +370,7 @@ jobs:
 
   apply:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'apply'
+    needs: authorize-apply
     runs-on: ubuntu-latest
     timeout-minutes: 40
     environment: production-infrastructure-apply

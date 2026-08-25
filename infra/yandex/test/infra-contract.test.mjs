@@ -574,6 +574,13 @@ test("infrastructure workflow escrows one reviewed plan between separately prote
   assert.match(workflow, /plan_json_sha256:[\s\S]*type:\s*string/);
   assert.match(workflow, /plan_json_version_id:[\s\S]*type:\s*string/);
   assert.match(workflow, /plan_review_confirmed:[\s\S]*type:\s*boolean/);
+  const ownerConfirmationInput = workflow.match(
+    /owner_confirmation:([\s\S]*?)\n      enable_station_release_public_dns:/,
+  )?.[1];
+  assert.ok(ownerConfirmationInput);
+  assert.match(ownerConfirmationInput, /required:\s*false/);
+  assert.match(ownerConfirmationInput, /default:\s*""/);
+  assert.match(ownerConfirmationInput, /type:\s*string/);
   const releaseDnsInput = workflow.match(
     /enable_station_release_public_dns:([\s\S]*?)\n\npermissions:/,
   )?.[1];
@@ -582,16 +589,44 @@ test("infrastructure workflow escrows one reviewed plan between separately prote
   assert.match(releaseDnsInput, /default:\s*false/);
   assert.match(releaseDnsInput, /type:\s*boolean/);
 
+  const authorizeStart = workflow.indexOf("  authorize-apply:\n");
   const planStart = workflow.indexOf("  plan:\n");
   const applyStart = workflow.indexOf("  apply:\n");
-  assert.ok(planStart > -1 && applyStart > planStart);
+  assert.ok(authorizeStart > -1 && planStart > authorizeStart && applyStart > planStart);
+  const authorizeJob = workflow.slice(authorizeStart, planStart);
   const planJob = workflow.slice(planStart, applyStart);
   const applyJob = workflow.slice(applyStart);
 
+  assert.match(authorizeJob, /if:.*workflow_dispatch.*inputs\.mode == 'apply'/);
+  assert.match(authorizeJob, /permissions:\s*\{\}/);
+  assert.doesNotMatch(authorizeJob, /environment:|id-token:/);
+  assert.doesNotMatch(planJob, /needs:\s*authorize-apply/);
   assert.match(planJob, /if:.*inputs\.mode == 'plan'/);
   assert.match(planJob, /environment:\s*production-infrastructure/);
+  assert.match(applyJob, /needs:\s*authorize-apply/);
   assert.match(applyJob, /if:.*inputs\.mode == 'apply'/);
   assert.match(applyJob, /environment:\s*production-infrastructure-apply/);
+
+  const authorizationScript = authorizeJob.match(
+    /- name: Authorize Yandex infrastructure apply owner[\s\S]*?run: \|\n([\s\S]*?)\n\n/,
+  )?.[1];
+  assert.ok(authorizationScript, "owner authorization shell step must exist");
+  const runAuthorization = (environment = {}) =>
+    execFileSync("bash", ["-c", authorizationScript], {
+      env: {
+        ...process.env,
+        GITHUB_REF: "refs/heads/main",
+        OWNER_CONFIRMATION: "APPLY-YANDEX-INFRASTRUCTURE",
+        INFRASTRUCTURE_ACTOR: "thevladbog",
+        INFRASTRUCTURE_OWNER: "thevladbog",
+        ...environment,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  assert.doesNotThrow(() => runAuthorization());
+  assert.throws(() => runAuthorization({ INFRASTRUCTURE_ACTOR: "another-user" }));
+  assert.throws(() => runAuthorization({ OWNER_CONFIRMATION: "apply-yandex-infrastructure" }));
+  assert.throws(() => runAuthorization({ GITHUB_REF: "refs/heads/feature" }));
 
   assert.match(planJob, /terraform[^\n]+plan[^\n]+-out="\$plan"/);
   assert.doesNotMatch(planJob, /terraform[^\n]+\sapply(?:\s|$)/);

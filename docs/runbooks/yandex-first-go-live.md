@@ -63,12 +63,15 @@ plan_json_key=<exact-json-key-from-reviewed-plan-run>
 plan_json_sha256=<exact-json-64-hex-from-reviewed-plan-run>
 plan_json_version_id=<exact-json-version-id-from-reviewed-plan-run>
 plan_review_confirmed=true
+owner_confirmation=APPLY-YANDEX-INFRASTRUCTURE
 ```
 
-Approve отдельный Environment `production-infrastructure-apply` только после
-review. Workflow повторно проверит binding, оба SHA-256 и byte/semantic
+Dispatch выполняет владелец репозитория из `main`. До входа в отдельный
+Environment `production-infrastructure-apply` workflow проверит владельца и
+точную фразу, затем повторно проверит binding, оба SHA-256 и byte/semantic
 совпадение полного JSON, применит точный escrowed plan и удалит обе точные
-версии после успеха.
+версии после успеха. На текущем GitHub plan это одно-владельческая защита, а не
+двухпользовательский approval.
 
 ## 4. Проверить прямой DNS
 
