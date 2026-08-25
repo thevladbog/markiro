@@ -315,6 +315,66 @@ describe("durable inventory box printing", () => {
     expect(configured.printing.print).toHaveBeenCalledOnce();
   });
 
+  it("durably consumes one exact failed reprint recovery across concurrent callers", async () => {
+    const { db, exec } = await setup({ printState: "printed" });
+    db.prepare(
+      `INSERT INTO inventory_repack_print_attempts
+        (inventory_id, snapshot_id, attempt_id, box_id, kind, attempt_number, state, attempted_at)
+       VALUES (?, ?, ?, ?, 'reprint', 1, 'printing', '2026-08-25T10:01:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, ATTEMPT_ID, BOX_ID);
+    db.prepare(
+      `UPDATE inventory_repack_print_attempts
+          SET state = 'failed', error_code = 'transport_failed',
+              completed_at = '2026-08-25T10:01:01.000Z', event_id = ?
+        WHERE attempt_id = ?`,
+    ).run(EVENT_ID, ATTEMPT_ID);
+    db.prepare(
+      `UPDATE inventory_repack_boxes_mirror
+          SET print_error_code = 'transport_failed'
+        WHERE box_id = ?`,
+    ).run(BOX_ID);
+
+    const configured = input(exec);
+    let release!: () => void;
+    configured.printing.print.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const first = attemptInventoryBoxPrint({
+      ...configured,
+      attemptId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      eventId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      kind: "reprint",
+      recoveryOfAttemptId: ATTEMPT_ID,
+    });
+    await vi.waitFor(() => expect(configured.printing.print).toHaveBeenCalledOnce());
+    const stale = attemptInventoryBoxPrint({
+      ...configured,
+      attemptId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      eventId: "12121212-1212-4212-8212-121212121212",
+      kind: "reprint",
+      recoveryOfAttemptId: ATTEMPT_ID,
+    });
+    release();
+
+    await expect(first).resolves.toMatchObject({ state: "printed", attemptNumber: 2 });
+    await expect(stale).rejects.toThrow("inventory print recovery is stale");
+    expect(configured.render).toHaveBeenCalledOnce();
+    expect(configured.printing.print).toHaveBeenCalledOnce();
+    expect(
+      db
+        .prepare(
+          "SELECT kind, attempt_number, state FROM inventory_repack_print_attempts ORDER BY attempt_number",
+        )
+        .all(),
+    ).toEqual([
+      { kind: "reprint", attempt_number: 1, state: "failed" },
+      { kind: "reprint", attempt_number: 2, state: "printed" },
+    ]);
+  });
+
   it("recovers an interrupted printing claim as a durable retryable failure", async () => {
     const { db, exec } = await setup();
     db.prepare(
@@ -367,8 +427,19 @@ describe("durable inventory box printing", () => {
       quantity: 2,
       attemptNumber: 2,
     });
-    expect(fields).toHaveLength(2);
+    await expect(
+      attemptInventoryBoxPrint({
+        ...configured,
+        attemptId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        eventId: "12121212-1212-4212-8212-121212121212",
+        attemptedAt: "2026-08-25T10:03:00.000Z",
+        completedAt: () => "2026-08-25T10:03:01.000Z",
+        kind: "reprint",
+      }),
+    ).resolves.toMatchObject({ state: "printed", attemptNumber: 3, sscc: SSCC });
+    expect(fields).toHaveLength(3);
     expect(fields[1]).toEqual(fields[0]);
+    expect(fields[2]).toEqual(fields[0]);
     expect(
       db
         .prepare(
@@ -378,6 +449,7 @@ describe("durable inventory box printing", () => {
     ).toEqual([
       { kind: "initial", attempt_number: 1 },
       { kind: "reprint", attempt_number: 2 },
+      { kind: "reprint", attempt_number: 3 },
     ]);
     expect(db.prepare("SELECT new_sscc FROM inventory_repack_boxes_mirror").get()).toEqual({
       new_sscc: SSCC,

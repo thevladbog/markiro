@@ -1376,11 +1376,17 @@ describe("App", () => {
     }
   });
 
-  it("routes a published repack inventory into the real work screen", async () => {
+  it("keeps inventory print recovery latched through setup and releases global actions after retry", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+    lockdownMock.subscribe.mockImplementation((listener) => {
+      lockdownMock.listeners.add(listener);
+      return () => lockdownMock.listeners.delete(listener);
+    });
     const pinHash = await hashSecret(OPERATOR_PIN);
     const inventoryId = "11111111-1111-4111-8111-111111111111";
     const snapshotId = "22222222-2222-4222-8222-222222222222";
+    const inventoryOperatorId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
     const snapshotFixedAt = "2026-08-25T05:00:00.000Z";
     const contentDigest = inventorySnapshotContentDigest([]);
     const manifest = {
@@ -1439,7 +1445,11 @@ describe("App", () => {
         nextCursor: null,
       }),
     };
-    await mockInventoryEntryDatabase(pinHash, () => false);
+    const database = await mockInventoryEntryDatabase(pinHash, () => false);
+    await database.exec.run(
+      "UPDATE operators_mirror SET operator_id = ? WHERE operator_id = 'op1'",
+      [inventoryOperatorId],
+    );
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -1477,9 +1487,131 @@ describe("App", () => {
       render(<App />);
       await signInAsOperator();
       fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
-      fireEvent.click(await screen.findByRole("button", { name: "Continue INV-REPACK-1" }));
+      const continueTask = await screen.findByRole("button", { name: "Continue INV-REPACK-1" });
+      await database.exec.run(
+        `INSERT INTO inventory_terminal_state
+           (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+            open_repack_box_id, next_device_sequence, updated_at)
+         VALUES (?, ?, 'device-1', ?, '2026-08-19', NULL, 1,
+                 '2026-08-25T10:00:00.000Z')`,
+        [inventoryId, snapshotId, inventoryOperatorId],
+      );
+      await database.exec.run(
+        `INSERT INTO inventory_repack_boxes_mirror
+           (inventory_id, snapshot_id, box_id, opened_event_id, closed_event_id,
+            old_sscc_context, new_sscc, owner_device_id, capacity, production_date,
+            state, print_state, print_attempt_count, opened_at, closed_at, updated_at)
+         VALUES (?, ?, '55555555-5555-4555-8555-555555555555',
+                 '66666666-6666-4666-8666-666666666666',
+                 '77777777-7777-4777-8777-777777777777',
+                 '346006820000000014', '046006820000621515', 'device-1', 12,
+                 '2026-08-19', 'closed', 'pending', 0,
+                 '2026-08-25T09:00:00.000Z', '2026-08-25T10:00:00.000Z',
+                 '2026-08-25T10:00:00.000Z')`,
+        [inventoryId, snapshotId],
+      );
+      await database.exec.run(
+        `INSERT INTO inventory_repack_items_mirror
+           (inventory_id, snapshot_id, item_id, source_event_id, box_id, code_hash,
+            position, production_date, added_at)
+         VALUES (?, ?, '88888888-8888-4888-8888-888888888888',
+                 '99999999-9999-4999-8999-999999999999',
+                 '55555555-5555-4555-8555-555555555555', ?, 1,
+                 '2026-08-19', '2026-08-25T09:30:00.000Z')`,
+        [inventoryId, snapshotId, "d".repeat(64)],
+      );
+      await database.exec.run(
+        `INSERT INTO inventory_repack_print_attempts
+           (inventory_id, snapshot_id, attempt_id, box_id, kind, attempt_number,
+            state, attempted_at)
+         VALUES (?, ?, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                 '55555555-5555-4555-8555-555555555555', 'initial', 1, 'printing',
+                 '2026-08-25T10:00:00.000Z')`,
+        [inventoryId, snapshotId],
+      );
+      await database.exec.run(
+        `UPDATE inventory_repack_print_attempts
+            SET state = 'printed', completed_at = '2026-08-25T10:00:01.000Z',
+                event_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+          WHERE attempt_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
+      );
+      await database.exec.run(
+        `UPDATE inventory_repack_boxes_mirror
+            SET print_state = 'printed', print_attempt_count = 1,
+                printed_at = '2026-08-25T10:00:01.000Z'
+          WHERE box_id = '55555555-5555-4555-8555-555555555555'`,
+      );
+      await database.exec.run(
+        `INSERT INTO inventory_repack_print_attempts
+           (inventory_id, snapshot_id, attempt_id, box_id, kind, attempt_number,
+            state, attempted_at)
+         VALUES (?, ?, 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+                 '55555555-5555-4555-8555-555555555555', 'reprint', 2, 'printing',
+                 '2026-08-25T10:02:00.000Z')`,
+        [inventoryId, snapshotId],
+      );
+      await database.exec.run(
+        `UPDATE inventory_repack_print_attempts
+            SET state = 'failed', error_code = 'printer_unconfigured',
+                completed_at = '2026-08-25T10:02:01.000Z',
+                event_id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+          WHERE attempt_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'`,
+      );
+      await database.exec.run(
+        `UPDATE inventory_repack_boxes_mirror
+            SET print_attempt_count = 2, print_error_code = 'printer_unconfigured'
+          WHERE box_id = '55555555-5555-4555-8555-555555555555'`,
+      );
+
+      fireEvent.click(continueTask);
       expect(await screen.findByTestId("inventory-repack-work")).toBeDefined();
       expect(screen.queryByTestId("inventory-entry-ready")).toBeNull();
+      expect(await screen.findByText("Label was not printed")).toBeDefined();
+      expect(
+        (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "Saving the current operation…" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "Exit fullscreen" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: "Configure printer" }));
+      expect(await screen.findByRole("heading", { name: "Workstation setup" })).toBeDefined();
+      fireEvent.click(await screen.findByRole("tab", { name: "Printer" }));
+      const tcp = await screen.findByRole("radio", { name: "Network (TCP)" });
+      await waitFor(() => expect((tcp as HTMLInputElement).disabled).toBe(false));
+      fireEvent.click(tcp);
+      fireEvent.change(screen.getByLabelText("Printer address"), {
+        target: { value: "10.0.0.7" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+      expect(await screen.findByText("Label was not printed")).toBeDefined();
+      fireEvent.click(screen.getByRole("button", { name: "Retry printing" }));
+      await waitFor(() => expect(hardwareMock.print).toHaveBeenCalledOnce());
+      await waitFor(async () => {
+        expect(
+          await database.exec.all<{ state: string; kind: string }>(
+            `SELECT state, kind FROM inventory_repack_print_attempts
+              WHERE box_id = '55555555-5555-4555-8555-555555555555'
+              ORDER BY attempt_number DESC LIMIT 1`,
+          ),
+        ).toEqual([{ state: "printed", kind: "reprint" }]);
+      });
+      await waitFor(() =>
+        expect(
+          (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
+        ).toBe(false),
+      );
+      expect(
+        (screen.getByRole("button", { name: "Change operator" }) as HTMLButtonElement).disabled,
+      ).toBe(false);
+      expect(
+        (screen.getByRole("button", { name: "Exit fullscreen" }) as HTMLButtonElement).disabled,
+      ).toBe(false);
     } finally {
       consoleErrorSpy.mockRestore();
     }

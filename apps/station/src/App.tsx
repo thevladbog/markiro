@@ -1526,6 +1526,7 @@ export function App() {
                 : null
             }
             onOpenPrinterSetup={openPrintRecoverySetup}
+            onPrintRecoveryChange={handlePrintRecoveryChange}
           />
         ) : (
           <main className="station-centered-screen">

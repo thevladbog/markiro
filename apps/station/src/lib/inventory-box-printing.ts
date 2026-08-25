@@ -64,6 +64,14 @@ export interface AttemptInventoryBoxPrintInput {
   ) => Promise<Uint8Array>;
   rasterizeText?: RasterizeTextFn;
   kind?: "initial" | "reprint";
+  recoveryOfAttemptId?: string;
+}
+
+export class InventoryPrintRecoveryStaleError extends Error {
+  constructor() {
+    super("inventory print recovery is stale");
+    this.name = "InventoryPrintRecoveryStaleError";
+  }
 }
 
 export interface InventoryBoxPrintResult {
@@ -187,16 +195,22 @@ async function claimAttempt(
   exec: SqlExecutor,
   input: Pick<
     AttemptInventoryBoxPrintInput,
-    "inventoryId" | "snapshotId" | "boxId" | "attemptId" | "attemptedAt"
+    "inventoryId" | "snapshotId" | "boxId" | "attemptId" | "attemptedAt" | "recoveryOfAttemptId"
   > & { kind: "initial" | "reprint" },
 ): Promise<number> {
+  if (input.recoveryOfAttemptId && input.kind !== "reprint") {
+    throw new InventoryPrintRecoveryStaleError();
+  }
   await exec.run(
     `INSERT INTO inventory_repack_print_attempts
        (inventory_id, snapshot_id, attempt_id, box_id, kind, attempt_number, state, attempted_at)
      SELECT ?, ?, ?, ?, ?,
             COALESCE(MAX(attempt_number), 0) + 1, 'printing', ?
        FROM inventory_repack_print_attempts
-      WHERE inventory_id = ? AND snapshot_id = ? AND box_id = ?`,
+      WHERE inventory_id = ? AND snapshot_id = ? AND box_id = ?
+     HAVING ? IS NULL
+         OR MAX(CASE WHEN attempt_id = ? AND kind = 'reprint' AND state = 'failed'
+                     THEN attempt_number END) = MAX(attempt_number)`,
     [
       input.inventoryId,
       input.snapshotId,
@@ -207,6 +221,8 @@ async function claimAttempt(
       input.inventoryId,
       input.snapshotId,
       input.boxId,
+      input.recoveryOfAttemptId ?? null,
+      input.recoveryOfAttemptId ?? null,
     ],
   );
   const [attempt] = await exec.all<{ attempt_number: number }>(
@@ -214,7 +230,10 @@ async function claimAttempt(
       WHERE inventory_id = ? AND snapshot_id = ? AND attempt_id = ?`,
     [input.inventoryId, input.snapshotId, input.attemptId],
   );
-  if (!attempt) throw new Error("inventory print claim failed");
+  if (!attempt) {
+    if (input.recoveryOfAttemptId) throw new InventoryPrintRecoveryStaleError();
+    throw new Error("inventory print claim failed");
+  }
   return attempt.attempt_number;
 }
 

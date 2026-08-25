@@ -20,6 +20,7 @@ import {
   readInventoryBoxPrintFacts,
   readUnresolvedInventoryReprint,
   recoverInterruptedInventoryPrint,
+  InventoryPrintRecoveryStaleError,
   type InventoryBoxPrintFacts,
   type InventoryBoxPrintingTransport,
   type InventoryBoxPrintResult,
@@ -62,6 +63,7 @@ export interface InventoryWorkScreenProps {
   onScanQueueRegister?: (queue: ScanQueue) => () => void;
   printing?: InventoryBoxPrintingTransport | null;
   onOpenPrinterSetup?: () => void;
+  onPrintRecoveryChange?: (blocked: boolean) => void;
   createEventId?: () => string;
   now?: () => string;
 }
@@ -524,6 +526,7 @@ function RepackInventoryWorkScreen({
   onScanQueueRegister,
   printing = null,
   onOpenPrinterSetup,
+  onPrintRecoveryChange,
   createEventId = defaultEventId,
   now = defaultNow,
 }: InventoryWorkScreenProps & {
@@ -542,6 +545,7 @@ function RepackInventoryWorkScreen({
   const [leaving, setLeaving] = useState(false);
   const [leaveFailed, setLeaveFailed] = useState(false);
   const [printBusy, setPrintBusy] = useState(false);
+  const [printRecoveryHydrated, setPrintRecoveryHydrated] = useState(false);
   const [printResult, setPrintResult] = useState<InventoryBoxPrintResult | null>(null);
   const [unresolvedReprint, setUnresolvedReprint] = useState<UnresolvedInventoryReprint | null>(
     null,
@@ -559,6 +563,7 @@ function RepackInventoryWorkScreen({
   const mounted = useRef(true);
   const automaticPrints = useRef(new Set<string>());
   const automaticRecoveries = useRef(new Set<string>());
+  const printInvocationBusy = useRef(false);
 
   const refresh = useCallback(async () => {
     const [nextState, nextRecent, nextReprint] = await Promise.all([
@@ -617,6 +622,7 @@ function RepackInventoryWorkScreen({
       if (mounted.current) {
         setProductionDate(date);
         setDateDraft(date);
+        setPrintRecoveryHydrated(true);
       }
     })().catch((error: unknown) => {
       console.error("station: repack hydration failed", error);
@@ -701,6 +707,18 @@ function RepackInventoryWorkScreen({
     unresolvedReprint !== null ||
     provisionalPrintFailure !== null ||
     printResult?.state === "failed";
+  const printRecoveryBlocked = !printRecoveryHydrated || unresolvedPrint || printBusy;
+  const recoveryCallbackRef = useRef(onPrintRecoveryChange);
+  recoveryCallbackRef.current = onPrintRecoveryChange;
+  useEffect(() => {
+    recoveryCallbackRef.current?.(printRecoveryBlocked);
+  }, [printRecoveryBlocked]);
+  useEffect(
+    () => () => {
+      recoveryCallbackRef.current?.(false);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (
@@ -728,7 +746,13 @@ function RepackInventoryWorkScreen({
   }, [correctionsDialog, printBusy, source]);
 
   const runPrint = useCallback(
-    async (boxId: string, kind: "initial" | "reprint" = "initial") => {
+    async (
+      boxId: string,
+      kind: "initial" | "reprint" = "initial",
+      recoveryOfAttemptId?: string,
+    ) => {
+      if (printInvocationBusy.current) return null;
+      printInvocationBusy.current = true;
       setPrintBusy(true);
       setProvisionalPrintFailure(null);
       const attemptId = createEventId();
@@ -749,6 +773,7 @@ function RepackInventoryWorkScreen({
           completedAt: now,
           printing,
           kind,
+          ...(recoveryOfAttemptId ? { recoveryOfAttemptId } : {}),
         });
         if (mounted.current) {
           setPrintResult(outcome);
@@ -757,7 +782,11 @@ function RepackInventoryWorkScreen({
         nudge();
         await refresh();
         return outcome;
-      } catch {
+      } catch (error) {
+        if (error instanceof InventoryPrintRecoveryStaleError) {
+          await refresh();
+          return null;
+        }
         console.error("station: inventory box print persistence failed");
         let attempts = await listInventoryBoxPrintAttempts(
           exec,
@@ -800,7 +829,7 @@ function RepackInventoryWorkScreen({
           if (facts) {
             setProvisionalPrintFailure({
               ...facts,
-              attemptId: latest?.attemptId ?? null,
+              attemptId: latest?.attemptId ?? recoveryOfAttemptId ?? null,
               attemptNumber: latest?.attemptNumber ?? 0,
               attemptState:
                 latest?.state === "printing" || latest?.state === "failed" ? latest.state : null,
@@ -813,6 +842,7 @@ function RepackInventoryWorkScreen({
         await refresh();
         return null;
       } finally {
+        printInvocationBusy.current = false;
         if (mounted.current) setPrintBusy(false);
       }
     },
@@ -1038,7 +1068,11 @@ function RepackInventoryWorkScreen({
         if (mounted.current) setPrintBusy(false);
       }
     }
-    await runPrint(recovery.boxId, recovery.kind);
+    await runPrint(
+      recovery.boxId,
+      recovery.kind,
+      recovery.kind === "reprint" ? (recovery.attemptId ?? undefined) : undefined,
+    );
   };
 
   const applyDate = async () => {
