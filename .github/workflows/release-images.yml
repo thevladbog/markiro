@@ -340,6 +340,7 @@ jobs:
             printf -- '- Edge: `ghcr.io/thevladbog/markiro-edge@%s`\n' "$edge_digest"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Delete the verified images artifact after publish
+        if: ${{ always() && steps.published-images.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT_ID: ${{ needs.production-bundle.outputs.verified-images-artifact-id }}
