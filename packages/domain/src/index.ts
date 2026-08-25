@@ -136,6 +136,7 @@ export {
   inventoryEventBatchResponseSchema,
   inventoryEventBatchSchema,
   inventoryEventOutcomeSchema,
+  inventoryRepackMutationSchema,
   inventoryEventClaimOutcomeSchema,
   inventoryEventSchema,
   inventoryProgressChangeSchema,
@@ -156,6 +157,7 @@ export type {
   ExpectedInventoryProgressPage,
   InventoryProgressChange,
   InventoryProgressPage,
+  InventoryRepackMutation,
 } from "./inventory/index.js";
 export {
   inventorySnapshotContentDigest,
@@ -181,6 +183,18 @@ export type {
   InventorySnapshotSourceRow,
 } from "./inventory/index.js";
 export { classifyInventoryScan } from "./inventory/index.js";
+export { createInventoryRepackingState, reduceInventoryRepacking } from "./inventory/index.js";
+export type {
+  InventoryRepackBoxState,
+  InventoryRepackMembership,
+  InventoryRepackObservationClassification,
+  InventoryRepackingAction,
+  InventoryRepackingEffect,
+  InventoryRepackingFailureReason,
+  InventoryRepackingPhase,
+  InventoryRepackingResult,
+  InventoryRepackingState,
+} from "./inventory/index.js";
 export type {
   InventoryBoxChildClassification,
   InventoryLocalClaim,

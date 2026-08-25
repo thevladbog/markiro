@@ -1934,6 +1934,196 @@ export const STATION_MIGRATIONS: string[] = [
      BEGIN
        SELECT RAISE(ABORT, 'inventory acknowledgement item facts invalid');
      END;`,
+  // Task 7 repack journal is append-only. Existing deployed tables receive
+  // source-event anchors through trailing ALTERs; no historical DDL is rewritten.
+  `ALTER TABLE inventory_repack_boxes_mirror ADD COLUMN opened_event_id TEXT NOT NULL DEFAULT '';`,
+  `ALTER TABLE inventory_repack_boxes_mirror ADD COLUMN closed_event_id TEXT;`,
+  `ALTER TABLE inventory_repack_items_mirror ADD COLUMN source_event_id TEXT NOT NULL DEFAULT '';`,
+  `ALTER TABLE inventory_repack_items_mirror ADD COLUMN position INTEGER NOT NULL DEFAULT 1;`,
+  `ALTER TABLE inventory_repack_items_mirror ADD COLUMN source_parent_mismatch INTEGER NOT NULL DEFAULT 0;`,
+  `CREATE TABLE IF NOT EXISTS inventory_repack_journal (
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     event_id TEXT NOT NULL,
+     device_id TEXT NOT NULL,
+     device_sequence INTEGER NOT NULL,
+     operator_id TEXT NOT NULL,
+     occurred_at TEXT NOT NULL,
+     event_kind TEXT NOT NULL,
+     normalized_identity TEXT NOT NULL,
+     code_hash TEXT,
+     canonical_raw TEXT,
+     active_production_date TEXT,
+     local_verdict TEXT NOT NULL,
+     action TEXT NOT NULL,
+     box_id TEXT NOT NULL,
+     item_id TEXT,
+     old_sscc TEXT,
+     new_sscc TEXT,
+     capacity INTEGER,
+     production_date TEXT,
+     position INTEGER,
+     close_box INTEGER NOT NULL DEFAULT 0,
+     source_parent_mismatch INTEGER NOT NULL DEFAULT 0,
+     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+     PRIMARY KEY (inventory_id, snapshot_id, event_id)
+   );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS inventory_repack_journal_device_sequence_uq
+     ON inventory_repack_journal (inventory_id, snapshot_id, device_id, device_sequence);`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_repack_apply_journal_v1
+     AFTER INSERT ON inventory_repack_journal
+     BEGIN
+       INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
+          scanned_at, kind, normalized_identity, code_hash, raw_payload,
+          active_production_date, local_verdict, commit_state, legacy_audit_version)
+       VALUES
+         (NEW.inventory_id, NEW.snapshot_id, NEW.event_id, NEW.device_id,
+          NEW.device_sequence, NEW.operator_id, NEW.occurred_at, NEW.event_kind,
+          NEW.normalized_identity, NEW.code_hash, NEW.canonical_raw,
+          NEW.active_production_date, NEW.local_verdict, 'committed', 1);
+
+       INSERT INTO inventory_code_results_mirror
+         (inventory_id, snapshot_id, code_hash, first_accepted_event_id,
+          winning_device_id, winning_scanned_at, observed_production_date,
+          classification, origin_classification, updated_at)
+       SELECT NEW.inventory_id, NEW.snapshot_id, NEW.code_hash, NEW.event_id,
+              NEW.device_id, NEW.occurred_at, NEW.active_production_date,
+              CASE NEW.local_verdict
+                WHEN 'known-ineligible' THEN 'ineligible' ELSE NEW.local_verdict END,
+              CASE NEW.local_verdict
+                WHEN 'known-ineligible' THEN 'ineligible' ELSE NEW.local_verdict END,
+              NEW.occurred_at
+        WHERE NEW.event_kind = 'item'
+          AND NEW.local_verdict IN ('expected', 'protected', 'known-ineligible', 'unknown')
+       ON CONFLICT(inventory_id, snapshot_id, code_hash) DO NOTHING;
+
+       INSERT INTO inventory_repack_boxes_mirror
+         (inventory_id, snapshot_id, box_id, opened_event_id, closed_event_id,
+          old_sscc_context, new_sscc, owner_device_id, capacity, production_date,
+          state, print_state, print_attempt_count, opened_at, updated_at)
+       SELECT NEW.inventory_id, NEW.snapshot_id, NEW.box_id, NEW.event_id, NULL,
+              NEW.old_sscc, NEW.new_sscc, NEW.device_id, NEW.capacity,
+              NEW.production_date, 'open', 'not_ready', 0, NEW.occurred_at, NEW.occurred_at
+        WHERE NEW.action = 'open-box';
+
+       UPDATE inventory_terminal_state
+          SET source_parent_sscc = NEW.old_sscc, open_repack_box_id = NEW.box_id,
+              updated_at = NEW.occurred_at
+        WHERE NEW.action = 'open-box' AND inventory_id = NEW.inventory_id
+          AND snapshot_id = NEW.snapshot_id AND device_id = NEW.device_id;
+
+       INSERT INTO inventory_repack_items_mirror
+         (inventory_id, snapshot_id, item_id, source_event_id, box_id, code_hash,
+          position, source_parent_mismatch, production_date, added_at, removed_at)
+       SELECT NEW.inventory_id, NEW.snapshot_id, NEW.item_id, NEW.event_id,
+              NEW.box_id, NEW.code_hash, NEW.position, NEW.source_parent_mismatch,
+              NEW.production_date, NEW.occurred_at, NULL
+        WHERE NEW.action = 'add-item'
+          AND EXISTS (
+            SELECT 1 FROM inventory_code_results_mirror result
+             WHERE result.inventory_id = NEW.inventory_id
+               AND result.snapshot_id = NEW.snapshot_id
+               AND result.code_hash = NEW.code_hash
+               AND result.classification = 'expected'
+               AND result.winning_device_id = NEW.device_id
+          );
+
+       UPDATE inventory_repack_items_mirror
+          SET removed_at = NEW.occurred_at
+        WHERE NEW.action = 'remove-last' AND inventory_id = NEW.inventory_id
+          AND snapshot_id = NEW.snapshot_id AND box_id = NEW.box_id
+          AND item_id = NEW.item_id AND removed_at IS NULL;
+
+       UPDATE inventory_repack_items_mirror
+          SET removed_at = NEW.occurred_at
+        WHERE NEW.action = 'clear-box' AND inventory_id = NEW.inventory_id
+          AND snapshot_id = NEW.snapshot_id AND box_id = NEW.box_id
+          AND removed_at IS NULL;
+
+       UPDATE inventory_repack_boxes_mirror
+          SET state = 'closed', print_state = 'pending', closed_at = NEW.occurred_at,
+              closed_event_id = NEW.event_id, updated_at = NEW.occurred_at
+        WHERE (NEW.action = 'close-incomplete'
+              OR (NEW.action = 'add-item' AND NEW.close_box = 1))
+          AND inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND box_id = NEW.box_id AND owner_device_id = NEW.device_id AND state = 'open';
+
+       UPDATE inventory_repack_boxes_mirror
+          SET production_date = NEW.production_date, updated_at = NEW.occurred_at
+        WHERE NEW.action = 'change-date' AND inventory_id = NEW.inventory_id
+          AND snapshot_id = NEW.snapshot_id AND box_id = NEW.box_id
+          AND owner_device_id = NEW.device_id AND state = 'open'
+          AND NOT EXISTS (
+            SELECT 1 FROM inventory_repack_items_mirror item
+             WHERE item.inventory_id = NEW.inventory_id
+               AND item.snapshot_id = NEW.snapshot_id
+               AND item.box_id = NEW.box_id AND item.removed_at IS NULL
+          );
+
+       UPDATE inventory_terminal_state
+          SET active_production_date = NEW.production_date, updated_at = NEW.occurred_at
+        WHERE NEW.action = 'change-date' AND inventory_id = NEW.inventory_id
+          AND snapshot_id = NEW.snapshot_id AND device_id = NEW.device_id;
+
+       INSERT INTO inventory_outbox
+         (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+       VALUES (NEW.inventory_id, NEW.snapshot_id, NEW.event_id,
+               NEW.device_sequence, NEW.payload_json, NEW.occurred_at);
+     END;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_repack_invalidate_ack_v1
+     AFTER INSERT ON inventory_sync_ack_receipts
+     BEGIN
+       UPDATE inventory_repack_boxes_mirror AS box
+          SET state = 'invalidated', invalidated_at = NEW.applied_at,
+              updated_at = NEW.applied_at
+        WHERE box.inventory_id = NEW.inventory_id
+          AND box.snapshot_id = NEW.snapshot_id
+          AND box.state = 'open'
+          AND EXISTS (
+            SELECT 1
+              FROM inventory_repack_items_mirror item,
+                   json_each(NEW.response_json, '$.outcomes') outcome
+             WHERE item.inventory_id = box.inventory_id
+               AND item.snapshot_id = box.snapshot_id
+               AND item.box_id = box.box_id
+               AND item.removed_at IS NULL
+               AND item.source_event_id = json_extract(outcome.value, '$.eventId')
+               AND json_extract(outcome.value, '$.status') = 'duplicate'
+          );
+     END;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_repack_invalidate_progress_v1
+     AFTER INSERT ON inventory_progress_receipts_v2
+     BEGIN
+       UPDATE inventory_repack_boxes_mirror AS box
+          SET state = 'invalidated', invalidated_at = NEW.applied_at,
+              updated_at = NEW.applied_at
+        WHERE box.inventory_id = NEW.inventory_id
+          AND box.snapshot_id = NEW.snapshot_id
+          AND box.state = 'open'
+          AND EXISTS (
+            SELECT 1
+              FROM inventory_repack_items_mirror item,
+                   json_each(NEW.page_json, '$.items') progress
+             WHERE item.inventory_id = box.inventory_id
+               AND item.snapshot_id = box.snapshot_id
+               AND item.box_id = box.box_id
+               AND item.removed_at IS NULL
+               AND item.code_hash = json_extract(progress.value, '$.codeHash')
+               AND json_type(progress.value, '$.winner') = 'object'
+               AND json_extract(progress.value, '$.winner.eventId') <> item.source_event_id
+               AND NOT EXISTS (
+                 SELECT 1 FROM json_each(NEW.page_json, '$.items') later
+                  WHERE json_extract(later.value, '$.codeHash') = item.code_hash
+                    AND (json_extract(later.value, '$.revision') >
+                           json_extract(progress.value, '$.revision')
+                      OR (json_extract(later.value, '$.revision') =
+                            json_extract(progress.value, '$.revision')
+                        AND json_extract(later.value, '$.id') >
+                            json_extract(progress.value, '$.id')))
+               )
+          );
+     END;`,
 ];
 
 export interface StationMigrationEntry {

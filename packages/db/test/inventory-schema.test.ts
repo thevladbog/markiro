@@ -408,7 +408,12 @@ describe("inventory execution schema", () => {
       "rejected",
       "quarantined",
     ]);
-    expect(enumValues("inventoryScanEventKindEnum")).toEqual(["item", "known_box", "old_box"]);
+    expect(enumValues("inventoryScanEventKindEnum")).toEqual([
+      "item",
+      "known_box",
+      "old_box",
+      "repack_action",
+    ]);
     expect(enumValues("inventoryRepackBoxStateEnum")).toEqual(["open", "closed", "invalidated"]);
     expect(enumValues("inventoryRepackPrintStateEnum")).toEqual([
       "not_ready",

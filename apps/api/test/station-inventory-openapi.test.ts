@@ -21,6 +21,7 @@ type JsonSchema = {
   required?: string[];
   properties?: Record<string, JsonSchema>;
   items?: JsonSchema;
+  oneOf?: JsonSchema[];
 };
 
 function operation(document: OpenAPIObject, path: string, method: "get" | "post") {
@@ -115,6 +116,8 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
     expect(batch.properties?.events?.items?.additionalProperties).toBe(false);
     expect(batch.properties?.events?.items?.required).toContain("operatorId");
     expect(batch.properties?.events?.maxItems).toBe(100);
+    expect(batch.properties?.events?.items?.properties?.kind?.enum).toContain("repack_action");
+    expect(batch.properties?.events?.items?.properties?.repack?.oneOf).toHaveLength(6);
 
     const batchResponse = responseSchema(
       document,
@@ -172,7 +175,8 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
     const leave = requestSchema(document, "/station/inventories/{id}/leave");
     exactClosedObject(leave, ["pendingEventCount", "openBoxCount"]);
     expect(leave.properties?.pendingEventCount?.enum).toEqual([0]);
-    expect(leave.properties?.openBoxCount?.enum).toEqual([0]);
+    expect(leave.properties?.openBoxCount?.minimum).toBe(0);
+    expect(leave.properties?.openBoxCount?.enum).toBeUndefined();
     exactClosedObject(responseSchema(document, "/station/inventories/{id}/leave", "post"), [
       "outcome",
     ]);

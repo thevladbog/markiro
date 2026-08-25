@@ -51,7 +51,7 @@ export type StationInventoryProgressDto = InventoryProgressPage;
 
 export const leaveStationInventorySchema = z.strictObject({
   pendingEventCount: z.literal(0),
-  openBoxCount: z.literal(0),
+  openBoxCount: z.number().int().nonnegative().safe(),
 });
 export type LeaveStationInventoryDto = z.infer<typeof leaveStationInventorySchema>;
 export interface LeaveStationInventoryResponseDto {
@@ -60,6 +60,63 @@ export interface LeaveStationInventoryResponseDto {
 
 const CANONICAL_UUID_PATTERN =
   "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
+
+const repackMutationOpenApiSchema: SchemaObject = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["action", "boxId", "oldSscc", "newSscc", "capacity", "productionDate"],
+      properties: {
+        action: { type: "string", enum: ["open-box"] },
+        boxId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+        oldSscc: { type: "string", pattern: "^[0-9]{18}$" },
+        newSscc: { type: "string", pattern: "^[0-9]{18}$" },
+        capacity: { type: "integer", minimum: 1 },
+        productionDate: { type: "string", format: "date" },
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["action", "boxId", "itemId", "position", "closeBox"],
+      properties: {
+        action: { type: "string", enum: ["add-item"] },
+        boxId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+        itemId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+        position: { type: "integer", minimum: 1 },
+        closeBox: { type: "boolean" },
+      },
+    },
+    ...["remove-last", "clear-box", "close-incomplete"].map((action): SchemaObject => ({
+      type: "object",
+      additionalProperties: false,
+      required:
+        action === "remove-last"
+          ? ["action", "boxId", "itemId", "changedAt"]
+          : ["action", "boxId", "changedAt"],
+      properties: {
+        action: { type: "string", enum: [action] },
+        boxId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+        ...(action === "remove-last"
+          ? { itemId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN } }
+          : {}),
+        changedAt: { type: "string", format: "date-time" },
+      },
+    })),
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["action", "boxId", "productionDate", "changedAt"],
+      properties: {
+        action: { type: "string", enum: ["change-date"] },
+        boxId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+        productionDate: { type: "string", format: "date" },
+        changedAt: { type: "string", format: "date-time" },
+      },
+    },
+  ],
+};
 
 const inventoryEventOpenApiSchema: SchemaObject = {
   type: "object",
@@ -89,15 +146,16 @@ const inventoryEventOpenApiSchema: SchemaObject = {
       pattern: CANONICAL_UUID_PATTERN,
     },
     scannedAt: { type: "string", format: "date-time" },
-    kind: { type: "string", enum: ["item", "known_box", "old_box"] },
+    kind: { type: "string", enum: ["item", "known_box", "old_box", "repack_action"] },
     normalizedIdentity: { type: "string", minLength: 1, maxLength: 1024 },
     codeHash: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true },
     canonicalRaw: { type: "string", minLength: 1, maxLength: 2048, nullable: true },
     activeProductionDate: { type: "string", format: "date", nullable: true },
     localVerdict: {
       type: "string",
-      enum: ["expected", "protected", "known-ineligible", "unknown", "duplicate"],
+      enum: ["expected", "protected", "known-ineligible", "unknown", "duplicate", "repack-action"],
     },
+    repack: repackMutationOpenApiSchema,
   },
 };
 
@@ -274,7 +332,7 @@ export const leaveStationInventoryOpenApiSchema: SchemaObject = {
   required: ["pendingEventCount", "openBoxCount"],
   properties: {
     pendingEventCount: { type: "integer", enum: [0] },
-    openBoxCount: { type: "integer", enum: [0] },
+    openBoxCount: { type: "integer", minimum: 0 },
   },
 };
 

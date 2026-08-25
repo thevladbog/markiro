@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { ConflictException, NotFoundException } from "@nestjs/common";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createDb, schema } from "@markiro/db";
@@ -909,6 +909,337 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
       );
     expect(inventory?.status).toBe("running");
+  });
+
+  it("owns repack boxes and membership on the server across real competing devices", async () => {
+    const repackInventoryId = randomUUID();
+    const repackSnapshotId = randomUUID();
+    const raceCode = code(`REPACK-${randomUUID()}`);
+    const issuerPrefix = "460068200";
+    const oldSscc = buildSscc(0, issuerPrefix, 900);
+    const ssccA = buildSscc(0, issuerPrefix, 101);
+    const ssccB = buildSscc(0, issuerPrefix, 201);
+    const boxLabelTemplateId = randomUUID();
+    const boxAId = randomUUID();
+    const boxBId = randomUUID();
+
+    await db.insert(schema.labelTemplates).values({
+      id: boxLabelTemplateId,
+      tenantId,
+      name: "Frozen repack box",
+      spec: {},
+    });
+    await db.insert(schema.inventories).values({
+      id: repackInventoryId,
+      tenantId,
+      number: `INV-REPACK-${randomUUID()}`,
+      productId,
+      gtin14Snapshot: GTIN,
+      lineId,
+      mode: "repack",
+      boxLabelTemplateId,
+      productionDateFrom: "2026-08-01",
+      productionDateTo: "2026-08-31",
+      createdByUserId: userId,
+    });
+    await db.insert(schema.inventorySnapshots).values({
+      id: repackSnapshotId,
+      tenantId,
+      inventoryId: repackInventoryId,
+      combinedDigest: "1".repeat(64),
+      emittedCount: 0,
+      introducedCount: 1,
+      appliedCount: 0,
+      retiredCount: 0,
+      writtenOffCount: 0,
+      disaggregationCount: 0,
+      protectedCount: 0,
+      expectedCount: 1,
+      packageCount: 1,
+      looseCount: 0,
+      fixedByUserId: userId,
+    });
+    await db.insert(schema.inventorySnapshotCodes).values({
+      tenantId,
+      snapshotId: repackSnapshotId,
+      canonicalRaw: raceCode.canonical.raw,
+      codeHash: raceCode.codeHash,
+      gtin14: GTIN,
+      serial: raceCode.canonical.serial,
+      sourceStatus: "INTRODUCED",
+      sourceProductionDate: "2026-08-20",
+      parentSscc: oldSscc,
+      expected: true,
+      protected: false,
+    });
+    await db
+      .update(schema.inventories)
+      .set({
+        status: "running",
+        activeSnapshotId: repackSnapshotId,
+        stationManifest: { snapshotRevision: 1, mode: "repack", boxCapacity: 2 },
+        startedAt: new Date(),
+        startedByUserId: userId,
+      })
+      .where(
+        and(
+          eq(schema.inventories.tenantId, tenantId),
+          eq(schema.inventories.id, repackInventoryId),
+        ),
+      );
+    await db.insert(schema.inventoryDeviceParticipants).values([
+      {
+        tenantId,
+        inventoryId: repackInventoryId,
+        deviceId: deviceAId,
+        operatorId,
+        configuredLineId: lineId,
+        joinMethod: "assigned_line",
+      },
+      {
+        tenantId,
+        inventoryId: repackInventoryId,
+        deviceId: deviceBId,
+        operatorId,
+        configuredLineId: lineId,
+        joinMethod: "assigned_line",
+      },
+    ]);
+    await db.insert(schema.ssccBlocks).values([
+      {
+        tenantId,
+        deviceId: deviceAId,
+        issuerPrefix,
+        extensionDigit: 0,
+        allocationOrder: 101,
+        fromSerial: 100,
+        toSerial: 199,
+      },
+      {
+        tenantId,
+        deviceId: deviceBId,
+        issuerPrefix,
+        extensionDigit: 0,
+        allocationOrder: 102,
+        fromSerial: 200,
+        toSerial: 299,
+      },
+    ]);
+
+    const repackEvent = (
+      device: "a" | "b",
+      values: Partial<InventoryEvent> & Pick<InventoryEvent, "scannedAt">,
+    ): InventoryEvent => event(device, values);
+    const repackBatch = (
+      batchId: string,
+      events: InventoryEvent[],
+      openBoxCount: number,
+    ): InventoryEventBatch => {
+      const payload: InventoryEventBatchPayload = {
+        snapshotId: repackSnapshotId,
+        snapshotRevision: 1,
+        sequenceCeiling: events.at(-1)!.deviceSequence,
+        pendingEventCount: 0,
+        openBoxCount,
+        events,
+      };
+      return { batchId, payloadDigest: inventoryEventBatchDigest(payload), ...payload };
+    };
+    const open = (device: "a" | "b", boxId: string, newSscc: string) =>
+      repackEvent(device, {
+        scannedAt: "2026-08-25T12:00:00.000Z",
+        kind: "old_box",
+        normalizedIdentity: `old_box:${oldSscc}`,
+        codeHash: null,
+        canonicalRaw: oldSscc,
+        activeProductionDate: "2026-08-20",
+        localVerdict: "unknown",
+        repack: {
+          action: "open-box",
+          boxId,
+          oldSscc,
+          newSscc,
+          capacity: 2,
+          productionDate: "2026-08-20",
+        },
+      });
+
+    const openedA = open("a", boxAId, ssccA);
+    const openedB = open("b", boxBId, ssccB);
+    const openARequest = repackBatch("repack-open-a", [openedA], 1);
+    const openAResponse = await service.ingest(
+      tenantId,
+      deviceAId,
+      repackInventoryId,
+      openARequest,
+    );
+    await expect(
+      service.ingest(tenantId, deviceAId, repackInventoryId, openARequest),
+    ).resolves.toEqual(openAResponse);
+    await service.ingest(
+      tenantId,
+      deviceBId,
+      repackInventoryId,
+      repackBatch("repack-open-b", [openedB], 1),
+    );
+    expect(
+      await db
+        .select({
+          id: schema.inventoryRepackBoxes.id,
+          owner: schema.inventoryRepackBoxes.ownerDeviceId,
+          capacity: schema.inventoryRepackBoxes.capacity,
+          productionDate: schema.inventoryRepackBoxes.productionDate,
+        })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.inventoryId, repackInventoryId))
+        .orderBy(asc(schema.inventoryRepackBoxes.ownerDeviceId)),
+    ).toEqual(
+      expect.arrayContaining([
+        { id: boxAId, owner: deviceAId, capacity: 2, productionDate: "2026-08-20" },
+        { id: boxBId, owner: deviceBId, capacity: 2, productionDate: "2026-08-20" },
+      ]),
+    );
+
+    const add = (device: "a" | "b", boxId: string, itemId: string, scannedAt: string) =>
+      repackEvent(device, {
+        scannedAt,
+        canonicalRaw: raceCode.canonical.raw,
+        codeHash: raceCode.codeHash,
+        normalizedIdentity: `item:${raceCode.codeHash}`,
+        repack: { action: "add-item", boxId, itemId, position: 1, closeBox: false },
+      });
+    const winningItemId = randomUUID();
+    const losingItemId = randomUUID();
+    const winner = add("a", boxAId, winningItemId, "2026-08-25T12:00:01.000Z");
+    const loser = add("b", boxBId, losingItemId, "2026-08-25T12:00:02.000Z");
+    await Promise.all([
+      service.ingest(
+        tenantId,
+        deviceAId,
+        repackInventoryId,
+        repackBatch("repack-race-a", [winner], 1),
+      ),
+      service.ingest(
+        tenantId,
+        deviceBId,
+        repackInventoryId,
+        repackBatch("repack-race-b", [loser], 1),
+      ),
+    ]);
+    expect(
+      await db
+        .select({ id: schema.inventoryRepackItems.id, boxId: schema.inventoryRepackItems.boxId })
+        .from(schema.inventoryRepackItems)
+        .where(eq(schema.inventoryRepackItems.inventoryId, repackInventoryId)),
+    ).toEqual([{ id: winningItemId, boxId: boxAId }]);
+    expect(
+      await db
+        .select({ id: schema.inventoryRepackBoxes.id, state: schema.inventoryRepackBoxes.state })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.inventoryId, repackInventoryId))
+        .orderBy(asc(schema.inventoryRepackBoxes.id)),
+    ).toEqual(
+      expect.arrayContaining([
+        { id: boxAId, state: "open" },
+        { id: boxBId, state: "invalidated" },
+      ]),
+    );
+
+    const removedAt = "2026-08-25T12:00:03.000Z";
+    const remove = repackEvent("a", {
+      scannedAt: removedAt,
+      kind: "repack_action",
+      normalizedIdentity: `repack_action:remove-last:${boxAId}`,
+      codeHash: null,
+      canonicalRaw: null,
+      localVerdict: "repack-action",
+      repack: { action: "remove-last", boxId: boxAId, itemId: winningItemId, changedAt: removedAt },
+    });
+    await service.ingest(
+      tenantId,
+      deviceAId,
+      repackInventoryId,
+      repackBatch("repack-remove", [remove], 1),
+    );
+    const replacementItemId = randomUUID();
+    const replacement = add("a", boxAId, replacementItemId, "2026-08-25T12:00:04.000Z");
+    replacement.localVerdict = "duplicate";
+    await service.ingest(
+      tenantId,
+      deviceAId,
+      repackInventoryId,
+      repackBatch("repack-reattach", [replacement], 1),
+    );
+    expect(
+      await db
+        .select({ id: schema.inventoryRepackItems.id })
+        .from(schema.inventoryRepackItems)
+        .where(
+          and(
+            eq(schema.inventoryRepackItems.inventoryId, repackInventoryId),
+            eq(schema.inventoryRepackItems.boxId, boxAId),
+            isNull(schema.inventoryRepackItems.removedAt),
+          ),
+        ),
+    ).toEqual([{ id: replacementItemId }]);
+    expect(
+      await db
+        .select({ state: schema.inventoryRepackBoxes.state })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.id, boxAId)),
+    ).toEqual([{ state: "open" }]);
+
+    const forgedCapacity = open("b", randomUUID(), buildSscc(0, issuerPrefix, 202));
+    if (forgedCapacity.repack?.action !== "open-box") {
+      throw new Error("test setup did not create an open-box mutation");
+    }
+    forgedCapacity.repack = {
+      ...forgedCapacity.repack,
+      action: "open-box",
+      capacity: 999,
+    };
+    await expect(
+      service.ingest(
+        tenantId,
+        deviceBId,
+        repackInventoryId,
+        repackBatch("repack-forged-capacity", [forgedCapacity], 0),
+      ),
+    ).rejects.toSatisfy(
+      (error: unknown) => errorCode(error) === "INVENTORY_REPACK_FROZEN_FACT_MISMATCH",
+    );
+
+    const foreignReservationBoxId = randomUUID();
+    const foreignReservation = open("b", foreignReservationBoxId, buildSscc(0, issuerPrefix, 102));
+    await expect(
+      service.ingest(
+        tenantId,
+        deviceBId,
+        repackInventoryId,
+        repackBatch("repack-foreign-reservation", [foreignReservation], 0),
+      ),
+    ).rejects.toSatisfy(
+      (error: unknown) => errorCode(error) === "INVENTORY_REPACK_SSCC_NOT_RESERVED",
+    );
+    expect(
+      await db
+        .select({ id: schema.inventoryRepackBoxes.id })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.id, foreignReservationBoxId)),
+    ).toEqual([]);
+
+    await expect(
+      service.leave(tenantId, deviceAId, repackInventoryId, {
+        pendingEventCount: 0,
+        openBoxCount: 1,
+      }),
+    ).resolves.toEqual({ outcome: "left" });
+    expect(
+      await db
+        .select({ state: schema.inventoryRepackBoxes.state })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.id, boxAId)),
+    ).toEqual([{ state: "open" }]);
   });
 
   it("quarantines a recognized late batch exactly once after close and rejects malformed late facts", async () => {

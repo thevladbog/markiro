@@ -86,6 +86,7 @@ describe("STATION_MIGRATIONS", () => {
       "inventory_outbox",
       "inventory_repack_boxes_mirror",
       "inventory_repack_items_mirror",
+      "inventory_repack_journal",
       "inventory_conflicts_mirror",
       "inventory_event_claim_outcomes_mirror",
       "inventory_sync_ack_receipts",
@@ -101,6 +102,24 @@ describe("STATION_MIGRATIONS", () => {
       )
       .all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual([...expectedTables].sort());
+    expect(db.prepare("PRAGMA table_info(inventory_repack_boxes_mirror)").all()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "opened_event_id", notnull: 1 }),
+        expect.objectContaining({ name: "closed_event_id", notnull: 0 }),
+      ]),
+    );
+    expect(db.prepare("PRAGMA table_info(inventory_repack_items_mirror)").all()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "source_event_id", notnull: 1 }),
+        expect.objectContaining({ name: "position", notnull: 1 }),
+        expect.objectContaining({ name: "source_parent_mismatch", notnull: 1 }),
+      ]),
+    );
+    expect(
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = ?")
+        .all("inventory_repack_apply_journal_v1"),
+    ).toEqual([{ name: "inventory_repack_apply_journal_v1" }]);
     expect(
       db
         .prepare(
@@ -279,7 +298,8 @@ describe("STATION_MIGRATIONS", () => {
       .filter(
         (table) =>
           !table.startsWith("inventory_sync_ack_receipts") &&
-          !table.startsWith("inventory_progress_receipts"),
+          !table.startsWith("inventory_progress_receipts") &&
+          table !== "inventory_repack_journal",
       )) {
       expect(
         db.prepare(`SELECT snapshot_id FROM ${table} LIMIT 1`).get(),
@@ -1844,6 +1864,55 @@ describe("inventory receipt trigger admission", () => {
     expect(
       fixture.db.prepare("SELECT count(*) AS count FROM inventory_sync_ack_receipts_v2").get(),
     ).toEqual({ count: 1 });
+  });
+
+  it("invalidates the losing local repack box in the atomic Task 6 acknowledgement transport", () => {
+    const fixture = receiptDb();
+    const boxId = "66666666-6666-4666-8666-666666666666";
+    const itemId = "77777777-7777-4777-8777-777777777777";
+    fixture.db
+      .prepare(
+        `INSERT INTO inventory_repack_boxes_mirror
+           (inventory_id, snapshot_id, box_id, opened_event_id, old_sscc_context,
+            new_sscc, owner_device_id, capacity, production_date, state, print_state,
+            opened_at, updated_at)
+         VALUES (?, ?, ?, ?, '346006820000000014', '046006820000000018', ?, 20,
+                 '2026-08-20', 'open', 'not_ready', '2026-08-25T10:00:00.000Z',
+                 '2026-08-25T10:00:00.000Z')`,
+      )
+      .run(RECEIPT_INVENTORY_ID, RECEIPT_SNAPSHOT_ID, boxId, RECEIPT_EVENT_ID, RECEIPT_DEVICE_ID);
+    fixture.db
+      .prepare(
+        `INSERT INTO inventory_repack_items_mirror
+           (inventory_id, snapshot_id, item_id, source_event_id, box_id, code_hash,
+            position, production_date, added_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, '2026-08-20', '2026-08-25T10:00:01.000Z')`,
+      )
+      .run(
+        RECEIPT_INVENTORY_ID,
+        RECEIPT_SNAPSHOT_ID,
+        itemId,
+        RECEIPT_EVENT_ID,
+        boxId,
+        "c".repeat(64),
+      );
+    const response = mutableReceiptResponse(fixture);
+    const outcome = response.outcomes[0]!;
+    const claim = outcome.claims[0]!;
+    outcome.status = "duplicate";
+    outcome.reasonCode = "CLAIM_LOST";
+    outcome.claimedCount = 0;
+    outcome.conflictCount = 1;
+    claim.status = "duplicate";
+    claim.winner.eventId = "55555555-5555-4555-8555-555555555555";
+
+    insertAckReceipt(fixture, { responseJson: JSON.stringify(response) });
+
+    expect(
+      fixture.db
+        .prepare("SELECT state, invalidated_at FROM inventory_repack_boxes_mirror WHERE box_id = ?")
+        .get(boxId),
+    ).toEqual({ state: "invalidated", invalidated_at: "2026-08-25T10:00:01.000Z" });
   });
 
   it("rejects malformed or unowned progress receipts without any mutation", () => {

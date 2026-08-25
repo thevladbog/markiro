@@ -47,6 +47,7 @@ export {
   inventoryEventBatchResponseSchema,
   inventoryEventBatchSchema,
   inventoryEventOutcomeSchema,
+  inventoryRepackMutationSchema,
   inventoryEventClaimOutcomeSchema,
   inventoryEventSchema,
   inventoryProgressChangeSchema,
@@ -56,6 +57,18 @@ export {
   parseInventoryEventBatchResponse,
   parseInventoryProgressPage,
 } from "./station-sync.js";
+export { createInventoryRepackingState, reduceInventoryRepacking } from "./repacking.js";
+export type {
+  InventoryRepackBoxState,
+  InventoryRepackMembership,
+  InventoryRepackObservationClassification,
+  InventoryRepackingAction,
+  InventoryRepackingEffect,
+  InventoryRepackingFailureReason,
+  InventoryRepackingPhase,
+  InventoryRepackingResult,
+  InventoryRepackingState,
+} from "./repacking.js";
 export type {
   InventoryClaimWinner,
   InventoryEvent,
@@ -67,4 +80,5 @@ export type {
   ExpectedInventoryProgressPage,
   InventoryProgressChange,
   InventoryProgressPage,
+  InventoryRepackMutation,
 } from "./station-sync.js";

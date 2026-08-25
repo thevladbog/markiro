@@ -439,12 +439,13 @@ export async function leaveInventoryTask(deps: LeaveInventoryTaskDeps): Promise<
         WHERE inventory_id = ? AND snapshot_id = ? AND owner_device_id = ? AND state = 'open'`,
       [deps.inventoryId, deps.snapshotId, deps.deviceId],
     );
-    if (pending !== 0 || (openRows[0]?.count ?? 0) !== 0) {
+    const openBoxCount = openRows[0]?.count ?? 0;
+    if (pending !== 0) {
       throw new Error("inventory task still has pending work");
     }
     const response = await deps.client.post(`/station/inventories/${deps.inventoryId}/leave`, {
       pendingEventCount: 0,
-      openBoxCount: 0,
+      openBoxCount,
     });
     if (
       typeof response !== "object" ||

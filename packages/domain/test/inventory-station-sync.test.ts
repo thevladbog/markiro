@@ -30,6 +30,84 @@ const payload = {
 };
 
 describe("inventory station sync contract", () => {
+  it("covers strict repack mutations in the canonical digest while keeping legacy check batches replayable", () => {
+    const repackPayload = {
+      ...payload,
+      events: [
+        {
+          ...event,
+          kind: "old_box" as const,
+          normalizedIdentity: "old_box:346006820000000014",
+          codeHash: null,
+          canonicalRaw: "346006820000000014",
+          repack: {
+            action: "open-box" as const,
+            boxId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            oldSscc: "346006820000000014",
+            newSscc: "046012345600000012",
+            capacity: 20,
+            productionDate: "2026-08-20",
+          },
+        },
+      ],
+    };
+    const digest = inventoryEventBatchDigest(repackPayload);
+    expect(digest).toMatch(/^[0-9a-f]{64}$/);
+    expect(
+      parseInventoryEventBatch({ batchId: "repack-1", payloadDigest: digest, ...repackPayload })
+        .events[0]?.repack,
+    ).toEqual(repackPayload.events[0]?.repack);
+    expect(() =>
+      parseInventoryEventBatch({
+        batchId: "repack-forged",
+        payloadDigest: digest,
+        ...repackPayload,
+        events: [
+          {
+            ...repackPayload.events[0],
+            repack: { ...repackPayload.events[0]!.repack, capacity: 21 },
+          },
+        ],
+      }),
+    ).toThrow("Invalid inventory event batch");
+    expect(() =>
+      parseInventoryEventBatch({ batchId: "legacy", ...payload, payloadDigest: "0" }),
+    ).toThrow();
+    expect(
+      parseInventoryEventBatch({
+        batchId: "legacy",
+        ...payload,
+        payloadDigest: inventoryEventBatchDigest(payload),
+      }).events[0],
+    ).not.toHaveProperty("repack");
+  });
+
+  it("rejects repack actions attached to the wrong immutable event kind", () => {
+    const invalid = {
+      ...payload,
+      events: [
+        {
+          ...event,
+          repack: {
+            action: "open-box" as const,
+            boxId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            oldSscc: "346006820000000014",
+            newSscc: "046012345600000012",
+            capacity: 20,
+            productionDate: "2026-08-20",
+          },
+        },
+      ],
+    };
+    expect(() =>
+      parseInventoryEventBatch({
+        batchId: "wrong-kind",
+        payloadDigest: inventoryEventBatchDigest(invalid),
+        ...invalid,
+      }),
+    ).toThrow("Invalid inventory event batch");
+  });
+
   it("uses one deterministic canonical digest independent of a batch id", () => {
     expect(inventoryEventBatchDigest(payload)).toBe(
       "833603f1d134151319c41bdf7a1d8eb9ac38858db3d530dd3a5c7696e18f8535",

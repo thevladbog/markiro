@@ -59,7 +59,12 @@ export type InventoryParticipantJoinMethod = (typeof INVENTORY_PARTICIPANT_JOIN_
 export const INVENTORY_SCAN_BATCH_OUTCOMES = ["applied", "rejected", "quarantined"] as const;
 export type InventoryScanBatchOutcome = (typeof INVENTORY_SCAN_BATCH_OUTCOMES)[number];
 
-export const INVENTORY_SCAN_EVENT_KINDS = ["item", "known_box", "old_box"] as const;
+export const INVENTORY_SCAN_EVENT_KINDS = [
+  "item",
+  "known_box",
+  "old_box",
+  "repack_action",
+] as const;
 export type InventoryScanEventKind = (typeof INVENTORY_SCAN_EVENT_KINDS)[number];
 
 export const INVENTORY_CODE_CLASSIFICATIONS = [
@@ -1023,6 +1028,8 @@ export const inventoryRepackBoxes = pgTable(
     oldSsccContext: char("old_sscc_context", { length: 18 }),
     newSscc: char("new_sscc", { length: 18 }).notNull(),
     ownerDeviceId: uuid("owner_device_id").notNull(),
+    openedEventId: uuid("opened_event_id"),
+    closedEventId: uuid("closed_event_id"),
     capacity: integer("capacity").notNull(),
     productionDate: date("production_date").notNull(),
     state: inventoryRepackBoxStateEnum("state").notNull().default("open"),
@@ -1057,6 +1064,24 @@ export const inventoryRepackBoxes = pgTable(
       name: "inventory_repack_boxes_tenant_owner_device_fk",
       columns: [table.tenantId, table.ownerDeviceId],
       foreignColumns: [stationDevices.tenantId, stationDevices.id],
+    }),
+    foreignKey({
+      name: "inventory_repack_boxes_tenant_opened_event_fk",
+      columns: [table.tenantId, table.inventoryId, table.openedEventId],
+      foreignColumns: [
+        inventoryScanEvents.tenantId,
+        inventoryScanEvents.inventoryId,
+        inventoryScanEvents.eventId,
+      ],
+    }),
+    foreignKey({
+      name: "inventory_repack_boxes_tenant_closed_event_fk",
+      columns: [table.tenantId, table.inventoryId, table.closedEventId],
+      foreignColumns: [
+        inventoryScanEvents.tenantId,
+        inventoryScanEvents.inventoryId,
+        inventoryScanEvents.eventId,
+      ],
     }),
     index("inventory_repack_boxes_owner_open_idx").on(
       table.tenantId,
@@ -1122,6 +1147,9 @@ export const inventoryRepackItems = pgTable(
     inventoryId: uuid("inventory_id").notNull(),
     boxId: uuid("box_id").notNull(),
     resultId: uuid("result_id").notNull(),
+    sourceEventId: uuid("source_event_id"),
+    position: integer("position"),
+    sourceParentMismatch: boolean("source_parent_mismatch").notNull().default(false),
     productionDate: date("production_date").notNull(),
     // Non-null only while active, so removed history does not block a later date correction.
     activeObservedProductionDate: date("active_observed_production_date"),
@@ -1134,11 +1162,9 @@ export const inventoryRepackItems = pgTable(
       table.id,
       table.inventoryId,
     ),
-    unique("inventory_repack_items_tenant_box_result_uq").on(
-      table.tenantId,
-      table.boxId,
-      table.resultId,
-    ),
+    uniqueIndex("inventory_repack_items_tenant_box_result_uq")
+      .on(table.tenantId, table.boxId, table.resultId)
+      .where(sql`${table.removedAt} is null`),
     uniqueIndex("inventory_repack_items_active_result_uq")
       .on(table.tenantId, table.inventoryId, table.resultId)
       .where(sql`${table.removedAt} is null`),
@@ -1161,6 +1187,18 @@ export const inventoryRepackItems = pgTable(
         inventoryCodeResults.inventoryId,
       ],
     }),
+    foreignKey({
+      name: "inventory_repack_items_tenant_source_event_fk",
+      columns: [table.tenantId, table.inventoryId, table.sourceEventId],
+      foreignColumns: [
+        inventoryScanEvents.tenantId,
+        inventoryScanEvents.inventoryId,
+        inventoryScanEvents.eventId,
+      ],
+    }),
+    uniqueIndex("inventory_repack_items_active_box_position_uq")
+      .on(table.tenantId, table.inventoryId, table.boxId, table.position)
+      .where(sql`${table.removedAt} is null`),
     foreignKey({
       name: "inventory_repack_items_tenant_result_active_date_fk",
       columns: [
@@ -1193,6 +1231,10 @@ export const inventoryRepackItems = pgTable(
           and ${table.activeObservedProductionDate} = ${table.productionDate})
         or (${table.removedAt} is not null
           and ${table.activeObservedProductionDate} is null)`,
+    ),
+    check(
+      "inventory_repack_items_position_check",
+      sql`${table.position} is null or ${table.position} > 0`,
     ),
   ],
 );

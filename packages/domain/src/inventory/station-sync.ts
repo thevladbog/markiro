@@ -16,18 +16,88 @@ const hashSchema = z.string().regex(/^[0-9a-f]{64}$/);
 const civilDateSchema = z.iso.date();
 const instantSchema = z.iso.datetime({ offset: true });
 
-export const inventoryEventSchema = z.strictObject({
-  eventId: uuidSchema,
-  deviceSequence: z.number().int().positive().safe(),
-  operatorId: uuidSchema,
-  scannedAt: instantSchema,
-  kind: z.enum(["item", "known_box", "old_box"]),
-  normalizedIdentity: z.string().min(1).max(1024),
-  codeHash: hashSchema.nullable(),
-  canonicalRaw: z.string().min(1).max(2048).nullable(),
-  activeProductionDate: civilDateSchema.nullable(),
-  localVerdict: z.enum(["expected", "protected", "known-ineligible", "unknown", "duplicate"]),
-});
+export const inventoryRepackMutationSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    action: z.literal("open-box"),
+    boxId: uuidSchema,
+    oldSscc: z.string().regex(/^[0-9]{18}$/),
+    newSscc: z.string().regex(/^[0-9]{18}$/),
+    capacity: z.number().int().positive().safe(),
+    productionDate: civilDateSchema,
+  }),
+  z.strictObject({
+    action: z.literal("add-item"),
+    boxId: uuidSchema,
+    itemId: uuidSchema,
+    position: z.number().int().positive().safe(),
+    closeBox: z.boolean(),
+  }),
+  z.strictObject({
+    action: z.literal("remove-last"),
+    boxId: uuidSchema,
+    itemId: uuidSchema,
+    changedAt: instantSchema,
+  }),
+  z.strictObject({
+    action: z.literal("clear-box"),
+    boxId: uuidSchema,
+    changedAt: instantSchema,
+  }),
+  z.strictObject({
+    action: z.literal("close-incomplete"),
+    boxId: uuidSchema,
+    changedAt: instantSchema,
+  }),
+  z.strictObject({
+    action: z.literal("change-date"),
+    boxId: uuidSchema,
+    productionDate: civilDateSchema,
+    changedAt: instantSchema,
+  }),
+]);
+
+export type InventoryRepackMutation = z.infer<typeof inventoryRepackMutationSchema>;
+
+export const inventoryEventSchema = z
+  .strictObject({
+    eventId: uuidSchema,
+    deviceSequence: z.number().int().positive().safe(),
+    operatorId: uuidSchema,
+    scannedAt: instantSchema,
+    kind: z.enum(["item", "known_box", "old_box", "repack_action"]),
+    normalizedIdentity: z.string().min(1).max(1024),
+    codeHash: hashSchema.nullable(),
+    canonicalRaw: z.string().min(1).max(2048).nullable(),
+    activeProductionDate: civilDateSchema.nullable(),
+    localVerdict: z.enum([
+      "expected",
+      "protected",
+      "known-ineligible",
+      "unknown",
+      "duplicate",
+      "repack-action",
+    ]),
+    repack: inventoryRepackMutationSchema.optional(),
+  })
+  .superRefine((event, context) => {
+    const action = event.repack?.action;
+    const valid =
+      (action === undefined && event.kind !== "repack_action") ||
+      (action === "open-box" && event.kind === "old_box") ||
+      (action === "add-item" && event.kind === "item") ||
+      ((action === "remove-last" ||
+        action === "clear-box" ||
+        action === "close-incomplete" ||
+        action === "change-date") &&
+        event.kind === "repack_action" &&
+        event.codeHash === null &&
+        event.canonicalRaw === null &&
+        event.localVerdict === "repack-action" &&
+        event.normalizedIdentity === `repack_action:${action}:${event.repack?.boxId}`);
+    if (!valid) {
+      context.addIssue({ code: "custom", path: ["repack"], message: "repack mutation mismatch" });
+    }
+  });
 
 export type InventoryEvent = z.infer<typeof inventoryEventSchema>;
 
@@ -272,6 +342,7 @@ function canonicalPayload(payload: InventoryEventBatchPayload): Record<string, u
       canonicalRaw: event.canonicalRaw,
       activeProductionDate: event.activeProductionDate,
       localVerdict: event.localVerdict,
+      ...(event.repack === undefined ? {} : { repack: event.repack }),
     })),
   };
 }
@@ -331,7 +402,8 @@ export function parseInventoryEventBatchResponse(
     if (
       outcome.status === "applied" &&
       outcome.claimedCount === 0 &&
-      requestEvent.kind !== "old_box"
+      requestEvent.kind !== "old_box" &&
+      requestEvent.kind !== "repack_action"
     ) {
       throw new Error("Invalid inventory event batch response");
     }

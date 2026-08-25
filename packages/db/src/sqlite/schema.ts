@@ -588,6 +588,8 @@ export const inventoryRepackBoxesMirror = sqliteTable(
     inventoryId: text("inventory_id").notNull(),
     snapshotId: text("snapshot_id").notNull(),
     boxId: text("box_id").notNull(),
+    openedEventId: text("opened_event_id").notNull(),
+    closedEventId: text("closed_event_id"),
     oldSsccContext: text("old_sscc_context"),
     newSscc: text("new_sscc").notNull(),
     ownerDeviceId: text("owner_device_id").notNull(),
@@ -621,8 +623,13 @@ export const inventoryRepackItemsMirror = sqliteTable(
     inventoryId: text("inventory_id").notNull(),
     snapshotId: text("snapshot_id").notNull(),
     itemId: text("item_id").notNull(),
+    sourceEventId: text("source_event_id").notNull(),
     boxId: text("box_id").notNull(),
     codeHash: text("code_hash").notNull(),
+    position: integer("position").notNull(),
+    sourceParentMismatch: integer("source_parent_mismatch", { mode: "boolean" })
+      .notNull()
+      .default(false),
     productionDate: text("production_date").notNull(),
     addedAt: text("added_at").notNull(),
     removedAt: text("removed_at"),
@@ -635,6 +642,49 @@ export const inventoryRepackItemsMirror = sqliteTable(
       table.boxId,
       table.removedAt,
     ),
+  ],
+);
+
+/** One-statement trigger input for exact repack event, box/item mutation, and outbox facts. */
+export const inventoryRepackJournal = sqliteTable(
+  "inventory_repack_journal",
+  {
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    eventId: text("event_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    deviceSequence: integer("device_sequence").notNull(),
+    operatorId: text("operator_id").notNull(),
+    occurredAt: text("occurred_at").notNull(),
+    eventKind: text("event_kind").notNull(),
+    normalizedIdentity: text("normalized_identity").notNull(),
+    codeHash: text("code_hash"),
+    canonicalRaw: text("canonical_raw"),
+    activeProductionDate: text("active_production_date"),
+    localVerdict: text("local_verdict").notNull(),
+    action: text("action").notNull(),
+    boxId: text("box_id").notNull(),
+    itemId: text("item_id"),
+    oldSscc: text("old_sscc"),
+    newSscc: text("new_sscc"),
+    capacity: integer("capacity"),
+    productionDate: text("production_date"),
+    position: integer("position"),
+    closeBox: integer("close_box", { mode: "boolean" }).notNull().default(false),
+    sourceParentMismatch: integer("source_parent_mismatch", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    payloadJson: text("payload_json").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.inventoryId, table.snapshotId, table.eventId] }),
+    uniqueIndex("inventory_repack_journal_device_sequence_uq").on(
+      table.inventoryId,
+      table.snapshotId,
+      table.deviceId,
+      table.deviceSequence,
+    ),
+    check("inventory_repack_journal_payload_check", sql`json_valid(${table.payloadJson})`),
   ],
 );
 

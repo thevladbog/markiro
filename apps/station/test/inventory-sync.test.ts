@@ -1321,11 +1321,19 @@ describe("inventory progress and leave", () => {
     ).toEqual({ count: 1 });
 
     db.prepare("DELETE FROM inventory_outbox").run();
+    db.prepare(
+      `INSERT INTO inventory_repack_boxes_mirror
+         (inventory_id, snapshot_id, box_id, old_sscc_context, new_sscc, owner_device_id,
+          capacity, production_date, state, print_state, opened_at, updated_at)
+       VALUES (?, ?, ?, '346006820000000014', '046006820000000018', ?, 20,
+               '2026-08-20', 'open', 'not_ready', '2026-08-25T10:00:00.000Z',
+               '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, randomUUID(), DEVICE_ID);
     await leaveInventoryTask(deps);
     expect(order).toEqual(["scanner", "queue", "outbox", "scanner", "queue", "outbox"]);
     expect(post).toHaveBeenCalledWith(`/station/inventories/${INVENTORY_ID}/leave`, {
       pendingEventCount: 0,
-      openBoxCount: 0,
+      openBoxCount: 1,
     });
     expect(
       db

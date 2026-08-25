@@ -1,5 +1,5 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
 import {
@@ -10,6 +10,7 @@ import {
   kmHash,
   parseInventoryEventBatchResponse,
   parseScannedSscc,
+  parseSscc,
   type InventoryClaimWinner,
   type InventoryEvent,
   type InventoryEventBatchResponse,
@@ -31,6 +32,22 @@ interface ClaimTarget {
   codeHash: string;
   snapshotId: string | null;
   classification: "expected" | "protected" | "ineligible" | "unknown";
+}
+
+interface RepackInventoryFacts {
+  mode: "check" | "repack";
+  capacity: number | null;
+}
+
+function repackInventoryFacts(mode: "check" | "repack", manifest: unknown): RepackInventoryFacts {
+  if (typeof manifest !== "object" || manifest === null || !("boxCapacity" in manifest)) {
+    return { mode, capacity: null };
+  }
+  const capacity = Reflect.get(manifest, "boxCapacity");
+  return {
+    mode,
+    capacity: Number.isSafeInteger(capacity) && Number(capacity) > 0 ? Number(capacity) : null,
+  };
 }
 
 function winnerPrecedes(left: InventoryClaimWinner, right: InventoryClaimWinner): boolean {
@@ -77,6 +94,8 @@ export class StationInventorySyncService {
           gtin14: schema.inventories.gtin14Snapshot,
           productionDateFrom: schema.inventories.productionDateFrom,
           productionDateTo: schema.inventories.productionDateTo,
+          mode: schema.inventories.mode,
+          stationManifest: schema.inventories.stationManifest,
         })
         .from(schema.inventories)
         .where(
@@ -481,7 +500,10 @@ export class StationInventorySyncService {
         });
         const applied = claims.filter((claim) => claim.status === "claimed").length;
         const lost = claims.length - applied;
-        const status = applied > 0 || event.kind === "old_box" ? "applied" : "duplicate";
+        const status =
+          applied > 0 || event.kind === "old_box" || event.kind === "repack_action"
+            ? "applied"
+            : "duplicate";
         if (claims.length > 0) {
           await tx.insert(schema.inventoryEventClaimOutcomes).values(
             claims.map((claim) => ({
@@ -511,6 +533,21 @@ export class StationInventorySyncService {
           conflictCount: lost,
           claims,
         });
+      }
+
+      const repackFacts = repackInventoryFacts(inventory.mode, inventory.stationManifest);
+      for (const [index, event] of input.events.entries()) {
+        if (!event.repack) continue;
+        await this.applyRepackMutation(
+          tx,
+          tenantId,
+          deviceId,
+          inventoryId,
+          input.snapshotId,
+          repackFacts,
+          event,
+          outcomes[index]!,
+        );
       }
 
       for (const displacedEventId of displacedEvents) {
@@ -730,16 +767,32 @@ export class StationInventorySyncService {
       if (!participant) throw new NotFoundException();
       if (
         input.pendingEventCount !== 0 ||
-        input.openBoxCount !== 0 ||
         participant.pendingEventCount !== 0 ||
-        participant.openBoxCount !== 0
+        input.openBoxCount !== participant.openBoxCount
       ) {
+        throw new ConflictException({ code: "INVENTORY_LEAVE_PENDING_WORK" });
+      }
+      const [ownedOpen] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.inventoryRepackBoxes)
+        .where(
+          and(
+            eq(schema.inventoryRepackBoxes.tenantId, tenantId),
+            eq(schema.inventoryRepackBoxes.inventoryId, inventoryId),
+            eq(schema.inventoryRepackBoxes.ownerDeviceId, deviceId),
+            eq(schema.inventoryRepackBoxes.state, "open"),
+          ),
+        );
+      if ((ownedOpen?.count ?? 0) !== input.openBoxCount) {
         throw new ConflictException({ code: "INVENTORY_LEAVE_PENDING_WORK" });
       }
       if (participant.leftAt === null) {
         await tx
           .update(schema.inventoryDeviceParticipants)
-          .set({ leftAt: new Date(), heartbeatAt: new Date() })
+          .set({
+            leftAt: sql`GREATEST(now(), ${schema.inventoryDeviceParticipants.joinedAt})`,
+            heartbeatAt: sql`GREATEST(now(), ${schema.inventoryDeviceParticipants.joinedAt})`,
+          })
           .where(
             and(
               eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
@@ -760,7 +813,7 @@ export class StationInventorySyncService {
             deviceId,
             operatorId: participant.operatorId,
             pendingEventCount: 0,
-            openBoxCount: 0,
+            openBoxCount: input.openBoxCount,
           },
         });
       }
@@ -794,6 +847,16 @@ export class StationInventorySyncService {
     productionDateTo: string,
     event: InventoryEvent,
   ): Promise<ClaimTarget[]> {
+    if (event.kind === "repack_action") {
+      if (
+        event.activeProductionDate === null ||
+        event.activeProductionDate < productionDateFrom ||
+        event.activeProductionDate > productionDateTo
+      ) {
+        throw new ConflictException({ code: "INVENTORY_EVENT_PRODUCTION_DATE_MISMATCH" });
+      }
+      return [];
+    }
     if (!event.canonicalRaw) {
       throw new ConflictException({ code: "INVENTORY_EVENT_IDENTITY_INVALID" });
     }
@@ -851,6 +914,7 @@ export class StationInventorySyncService {
     if (!sscc || event.codeHash !== null || event.normalizedIdentity !== `${event.kind}:${sscc}`) {
       throw new ConflictException({ code: "INVENTORY_EVENT_IDENTITY_INVALID" });
     }
+    if (event.repack?.action === "open-box") return [];
     const rows = await tx
       .select({
         codeHash: schema.inventorySnapshotCodes.codeHash,
@@ -883,6 +947,332 @@ export class StationInventorySyncService {
       snapshotId,
       classification: row.protected ? "protected" : row.expected ? "expected" : "ineligible",
     }));
+  }
+
+  private async applyRepackMutation(
+    tx: Transaction,
+    tenantId: string,
+    deviceId: string,
+    inventoryId: string,
+    snapshotId: string,
+    inventory: RepackInventoryFacts,
+    event: InventoryEvent,
+    outcome: InventoryEventBatchResponse["outcomes"][number],
+  ): Promise<void> {
+    const mutation = event.repack;
+    if (!mutation) return;
+    if (inventory.mode !== "repack" || inventory.capacity === null) {
+      throw new ConflictException({ code: "INVENTORY_REPACK_CONFIGURATION_INVALID" });
+    }
+
+    if (mutation.action === "open-box") {
+      if (
+        mutation.capacity !== inventory.capacity ||
+        mutation.productionDate !== event.activeProductionDate
+      ) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_FROZEN_FACT_MISMATCH" });
+      }
+      const parsed = parseSscc(mutation.newSscc, 9);
+      if (!parsed || parsed.extensionDigit !== 0) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_SSCC_NOT_RESERVED" });
+      }
+      const [block] = await tx
+        .select({ id: schema.ssccBlocks.id })
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, tenantId),
+            eq(schema.ssccBlocks.deviceId, deviceId),
+            eq(schema.ssccBlocks.issuerPrefix, parsed.gs1Prefix),
+            eq(schema.ssccBlocks.extensionDigit, parsed.extensionDigit),
+            lte(schema.ssccBlocks.fromSerial, parsed.serial),
+            gte(schema.ssccBlocks.toSerial, parsed.serial),
+          ),
+        )
+        .for("update");
+      if (!block) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_SSCC_NOT_RESERVED" });
+      }
+      const existingOpen = await tx
+        .select({ id: schema.inventoryRepackBoxes.id })
+        .from(schema.inventoryRepackBoxes)
+        .where(
+          and(
+            eq(schema.inventoryRepackBoxes.tenantId, tenantId),
+            eq(schema.inventoryRepackBoxes.inventoryId, inventoryId),
+            eq(schema.inventoryRepackBoxes.ownerDeviceId, deviceId),
+            eq(schema.inventoryRepackBoxes.state, "open"),
+          ),
+        )
+        .for("update");
+      if (existingOpen.length > 0) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_OPEN_BOX_EXISTS" });
+      }
+      await tx.insert(schema.inventoryRepackBoxes).values({
+        id: mutation.boxId,
+        tenantId,
+        inventoryId,
+        oldSsccContext: mutation.oldSscc,
+        newSscc: mutation.newSscc,
+        ownerDeviceId: deviceId,
+        openedEventId: event.eventId,
+        capacity: inventory.capacity,
+        productionDate: mutation.productionDate,
+        openedAt: new Date(event.scannedAt),
+      });
+      await tx
+        .update(schema.ssccBlocks)
+        .set({
+          consumedThroughSerial: sql`GREATEST(COALESCE(${schema.ssccBlocks.consumedThroughSerial}, -1), ${parsed.serial})`,
+        })
+        .where(eq(schema.ssccBlocks.id, block.id));
+      return;
+    }
+
+    const [box] = await tx
+      .select({
+        id: schema.inventoryRepackBoxes.id,
+        ownerDeviceId: schema.inventoryRepackBoxes.ownerDeviceId,
+        state: schema.inventoryRepackBoxes.state,
+        capacity: schema.inventoryRepackBoxes.capacity,
+        productionDate: schema.inventoryRepackBoxes.productionDate,
+        oldSsccContext: schema.inventoryRepackBoxes.oldSsccContext,
+      })
+      .from(schema.inventoryRepackBoxes)
+      .where(
+        and(
+          eq(schema.inventoryRepackBoxes.tenantId, tenantId),
+          eq(schema.inventoryRepackBoxes.inventoryId, inventoryId),
+          eq(schema.inventoryRepackBoxes.id, mutation.boxId),
+        ),
+      )
+      .for("update");
+    if (!box || box.ownerDeviceId !== deviceId) {
+      throw new ConflictException({ code: "INVENTORY_REPACK_BOX_NOT_OWNED" });
+    }
+    if (box.state !== "open") {
+      throw new ConflictException({ code: "INVENTORY_REPACK_BOX_NOT_OPEN" });
+    }
+    if (
+      box.capacity !== inventory.capacity ||
+      (mutation.action !== "change-date" && box.productionDate !== event.activeProductionDate)
+    ) {
+      throw new ConflictException({ code: "INVENTORY_REPACK_FROZEN_FACT_MISMATCH" });
+    }
+
+    if (mutation.action === "add-item") {
+      if (!event.codeHash) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_ITEM_INVALID" });
+      }
+      const ownedReattach =
+        outcome.status === "duplicate" &&
+        outcome.claims.length === 1 &&
+        outcome.claims[0]?.codeHash === event.codeHash &&
+        outcome.claims[0].winner.deviceId === deviceId;
+      if (outcome.status !== "applied" && !ownedReattach) {
+        await tx
+          .update(schema.inventoryRepackBoxes)
+          .set({ state: "invalidated", invalidatedAt: new Date(), updatedAt: new Date() })
+          .where(eq(schema.inventoryRepackBoxes.id, box.id));
+        return;
+      }
+      const [result] = await tx
+        .select({ id: schema.inventoryCodeResults.id })
+        .from(schema.inventoryCodeResults)
+        .where(
+          and(
+            eq(schema.inventoryCodeResults.tenantId, tenantId),
+            eq(schema.inventoryCodeResults.inventoryId, inventoryId),
+            eq(schema.inventoryCodeResults.codeHash, event.codeHash),
+            eq(schema.inventoryCodeResults.classification, "expected"),
+            ownedReattach
+              ? eq(schema.inventoryCodeResults.winningDeviceId, deviceId)
+              : eq(schema.inventoryCodeResults.firstAcceptedEventId, event.eventId),
+          ),
+        )
+        .for("update");
+      if (!result) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_ITEM_INELIGIBLE" });
+      }
+      const displaced = await tx
+        .select({ id: schema.inventoryRepackItems.id, boxId: schema.inventoryRepackItems.boxId })
+        .from(schema.inventoryRepackItems)
+        .where(
+          and(
+            eq(schema.inventoryRepackItems.tenantId, tenantId),
+            eq(schema.inventoryRepackItems.inventoryId, inventoryId),
+            eq(schema.inventoryRepackItems.resultId, result.id),
+            isNull(schema.inventoryRepackItems.removedAt),
+          ),
+        )
+        .for("update");
+      if (ownedReattach && displaced.length > 0) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_ITEM_ALREADY_MEMBER" });
+      }
+      if (displaced.length > 0) {
+        await tx
+          .update(schema.inventoryRepackItems)
+          .set({ removedAt: new Date(), activeObservedProductionDate: null })
+          .where(
+            inArray(
+              schema.inventoryRepackItems.id,
+              displaced.map((row) => row.id),
+            ),
+          );
+        await tx
+          .update(schema.inventoryRepackBoxes)
+          .set({ state: "invalidated", invalidatedAt: new Date(), updatedAt: new Date() })
+          .where(
+            inArray(
+              schema.inventoryRepackBoxes.id,
+              displaced.map((row) => row.boxId),
+            ),
+          );
+      }
+      const [activeCount] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.inventoryRepackItems)
+        .where(
+          and(
+            eq(schema.inventoryRepackItems.tenantId, tenantId),
+            eq(schema.inventoryRepackItems.inventoryId, inventoryId),
+            eq(schema.inventoryRepackItems.boxId, box.id),
+            isNull(schema.inventoryRepackItems.removedAt),
+          ),
+        );
+      const position = (activeCount?.count ?? 0) + 1;
+      const shouldClose = position === box.capacity;
+      if (
+        position > box.capacity ||
+        mutation.position !== position ||
+        mutation.closeBox !== shouldClose
+      ) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_CAPACITY_MISMATCH" });
+      }
+      const [snapshotCode] = await tx
+        .select({ parentSscc: schema.inventorySnapshotCodes.parentSscc })
+        .from(schema.inventorySnapshotCodes)
+        .where(
+          and(
+            eq(schema.inventorySnapshotCodes.tenantId, tenantId),
+            eq(schema.inventorySnapshotCodes.snapshotId, snapshotId),
+            eq(schema.inventorySnapshotCodes.codeHash, event.codeHash),
+          ),
+        );
+      await tx.insert(schema.inventoryRepackItems).values({
+        id: mutation.itemId,
+        tenantId,
+        inventoryId,
+        boxId: box.id,
+        resultId: result.id,
+        sourceEventId: event.eventId,
+        position,
+        sourceParentMismatch: snapshotCode?.parentSscc !== box.oldSsccContext,
+        productionDate: box.productionDate,
+        activeObservedProductionDate: box.productionDate,
+        addedAt: new Date(event.scannedAt),
+      });
+      if (shouldClose) {
+        await tx
+          .update(schema.inventoryRepackBoxes)
+          .set({
+            state: "closed",
+            printState: "pending",
+            closedEventId: event.eventId,
+            closedAt: new Date(event.scannedAt),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.inventoryRepackBoxes.id, box.id));
+      }
+      return;
+    }
+
+    if (mutation.action === "remove-last") {
+      const [last] = await tx
+        .select({ id: schema.inventoryRepackItems.id })
+        .from(schema.inventoryRepackItems)
+        .where(
+          and(
+            eq(schema.inventoryRepackItems.tenantId, tenantId),
+            eq(schema.inventoryRepackItems.inventoryId, inventoryId),
+            eq(schema.inventoryRepackItems.boxId, box.id),
+            isNull(schema.inventoryRepackItems.removedAt),
+          ),
+        )
+        .orderBy(desc(schema.inventoryRepackItems.position))
+        .limit(1)
+        .for("update");
+      if (!last || last.id !== mutation.itemId) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_LAST_ITEM_MISMATCH" });
+      }
+      await tx
+        .update(schema.inventoryRepackItems)
+        .set({ removedAt: new Date(mutation.changedAt), activeObservedProductionDate: null })
+        .where(eq(schema.inventoryRepackItems.id, last.id));
+      return;
+    }
+
+    if (mutation.action === "clear-box") {
+      await tx
+        .update(schema.inventoryRepackItems)
+        .set({ removedAt: new Date(mutation.changedAt), activeObservedProductionDate: null })
+        .where(
+          and(
+            eq(schema.inventoryRepackItems.tenantId, tenantId),
+            eq(schema.inventoryRepackItems.inventoryId, inventoryId),
+            eq(schema.inventoryRepackItems.boxId, box.id),
+            isNull(schema.inventoryRepackItems.removedAt),
+          ),
+        );
+      return;
+    }
+
+    if (mutation.action === "change-date") {
+      const [activeCount] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.inventoryRepackItems)
+        .where(
+          and(
+            eq(schema.inventoryRepackItems.tenantId, tenantId),
+            eq(schema.inventoryRepackItems.inventoryId, inventoryId),
+            eq(schema.inventoryRepackItems.boxId, box.id),
+            isNull(schema.inventoryRepackItems.removedAt),
+          ),
+        );
+      if ((activeCount?.count ?? 0) !== 0) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_DATE_FROZEN" });
+      }
+      await tx
+        .update(schema.inventoryRepackBoxes)
+        .set({ productionDate: mutation.productionDate, updatedAt: new Date(mutation.changedAt) })
+        .where(eq(schema.inventoryRepackBoxes.id, box.id));
+      return;
+    }
+
+    const [activeCount] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.inventoryRepackItems)
+      .where(
+        and(
+          eq(schema.inventoryRepackItems.tenantId, tenantId),
+          eq(schema.inventoryRepackItems.inventoryId, inventoryId),
+          eq(schema.inventoryRepackItems.boxId, box.id),
+          isNull(schema.inventoryRepackItems.removedAt),
+        ),
+      );
+    if ((activeCount?.count ?? 0) === 0 || (activeCount?.count ?? 0) >= box.capacity) {
+      throw new ConflictException({ code: "INVENTORY_REPACK_INCOMPLETE_CLOSE_INVALID" });
+    }
+    await tx
+      .update(schema.inventoryRepackBoxes)
+      .set({
+        state: "closed",
+        printState: "pending",
+        closedEventId: event.eventId,
+        closedAt: new Date(mutation.changedAt),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.inventoryRepackBoxes.id, box.id));
   }
 
   private async normalizeStoredResponse(
