@@ -10,6 +10,11 @@ import {
   type InventoryBundlePage,
 } from "../src/lib/inventory-mirror.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
+import {
+  acquireCredentialCommitLease,
+  createCredentialGeneration,
+  sealCredentialGeneration,
+} from "../src/lib/credential-recovery.js";
 
 const inventoryId = "11111111-1111-4111-8111-111111111111";
 const snapshotId = "22222222-2222-4222-8222-222222222222";
@@ -199,6 +204,76 @@ describe("mirrorInventoryBundle", () => {
       activeSnapshotId: null,
       stagedCodeCount: 0,
     });
+  });
+
+  it("holds a real credential commit lease across active snapshot publication", async () => {
+    const base = executor();
+    await applyMigrations(base);
+    let releasePublication!: () => void;
+    const publicationGate = new Promise<void>((resolve) => {
+      releasePublication = resolve;
+    });
+    let markPublicationStarted!: () => void;
+    const publicationStarted = new Promise<void>((resolve) => {
+      markPublicationStarted = resolve;
+    });
+    const exec: SqlExecutor = {
+      async run(sql, params = []) {
+        if (sql.includes("SET active_snapshot_id = staged_snapshot_id")) {
+          markPublicationStarted();
+          await publicationGate;
+        }
+        await base.run(sql, params);
+      },
+      all: <T>(sql: string, params?: unknown[]) => base.all<T>(sql, params),
+    };
+    const generation = createCredentialGeneration("credential-a");
+    const request = mirrorInventoryBundle(
+      {
+        get: async <T>(path: string) =>
+          (path.endsWith("/manifest")
+            ? manifest
+            : {
+                ...pages[0]!,
+                items: pageItems,
+                nextCursor: null,
+                pageDigest: inventorySnapshotPageDigest({
+                  snapshotId,
+                  snapshotFixedAt: fixedAt,
+                  contentDigest,
+                  cursor: null,
+                  items: pageItems,
+                  nextCursor: null,
+                }),
+              }) as T,
+      },
+      exec,
+      inventoryId,
+      {
+        isCurrent: () => true,
+        commitPublication: async (publishSnapshot: () => Promise<boolean>) => {
+          const lease = acquireCredentialCommitLease(generation);
+          if (!lease) return false;
+          try {
+            return await publishSnapshot();
+          } finally {
+            lease.release();
+          }
+        },
+      },
+    );
+    await publicationStarted;
+
+    let sealed = false;
+    const sealing = sealCredentialGeneration(generation).then(() => {
+      sealed = true;
+    });
+    await Promise.resolve();
+    expect(sealed).toBe(false);
+
+    releasePublication();
+    await expect(request).resolves.toBe(true);
+    await sealing;
   });
 
   it("continues from the durable cursor after a process restart and publishes only at completion", async () => {

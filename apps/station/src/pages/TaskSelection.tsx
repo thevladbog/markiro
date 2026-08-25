@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button } from "@markiro/ui";
 
@@ -14,13 +14,17 @@ import {
 import type { StationClient } from "../lib/api-client.js";
 import type { SqlExecutor } from "../lib/mirror.js";
 import type { ScanSource } from "../lib/scan-source.js";
+import {
+  acquireCredentialCommitLease,
+  type CredentialGeneration,
+  type FloorWorkBarrier,
+} from "../lib/credential-recovery.js";
 import { parseStationInventoryBundleManifest } from "@markiro/domain";
 import { InventoryTaskConfirmation } from "./InventoryTaskConfirmation.js";
 import { ShiftSelection, type ShiftSelectionProps } from "./ShiftSelection.js";
 
 const INVENTORY_PAGE_SIZE = 1;
 type TaskCategory = "production" | "warehouse";
-let inventoryAttemptSequence = 0;
 
 export interface TaskSelectionProps {
   client: StationClient;
@@ -34,6 +38,8 @@ export interface TaskSelectionProps {
   onSetup?: () => void;
   onConflicts?: () => void;
   isCurrent?: () => boolean;
+  credentialGeneration?: CredentialGeneration;
+  onFloorWorkRegister?: (barrier: FloorWorkBarrier) => () => void;
 }
 
 function taskMatchesManifest(
@@ -64,6 +70,8 @@ export function TaskSelection({
   onSetup,
   onConflicts,
   isCurrent,
+  credentialGeneration,
+  onFloorWorkRegister,
 }: TaskSelectionProps) {
   const { t } = useTranslation();
   const [category, setCategory] = useState<TaskCategory>("production");
@@ -78,6 +86,10 @@ export function TaskSelection({
   } | null>(null);
   const mounted = useRef(true);
   const lifecycleGeneration = useRef(0);
+  const renderedClient = useRef(client);
+  const intakeOpen = useRef(true);
+  const floorRetirementClosing = useRef(false);
+  const inventoryOperation = useRef<Promise<void> | null>(null);
   const busyRef = useRef(false);
   const isCurrentRef = useRef(isCurrent);
   const inventoryRequest = useRef<{
@@ -88,6 +100,24 @@ export function TaskSelection({
   const inventoryRequestId = useRef(0);
   const loadedInventoryClient = useRef<StationClient | null>(null);
 
+  useLayoutEffect(() => {
+    if (renderedClient.current === client) return;
+    renderedClient.current = client;
+    lifecycleGeneration.current += 1;
+    intakeOpen.current = true;
+    floorRetirementClosing.current = false;
+    inventoryRequestId.current += 1;
+    inventoryRequest.current = null;
+    loadedInventoryClient.current = null;
+    busyRef.current = false;
+    setTasks([]);
+    setError(null);
+    setConfirmation(null);
+    setPage(1);
+    setLoading(true);
+    setBusy(false);
+  }, [client]);
+
   useEffect(() => {
     isCurrentRef.current = isCurrent;
   }, [isCurrent]);
@@ -96,13 +126,30 @@ export function TaskSelection({
     mounted.current = true;
     return () => {
       mounted.current = false;
-      lifecycleGeneration.current += 1;
+      if (!floorRetirementClosing.current) lifecycleGeneration.current += 1;
     };
   }, []);
 
   const retireSelectionAttempts = useCallback(() => {
+    intakeOpen.current = false;
     lifecycleGeneration.current += 1;
   }, []);
+
+  const floorWorkBarrier = useMemo<FloorWorkBarrier>(
+    () => ({
+      close() {
+        intakeOpen.current = false;
+        floorRetirementClosing.current = true;
+        return inventoryOperation.current ?? Promise.resolve();
+      },
+      idle() {
+        return inventoryOperation.current ?? Promise.resolve();
+      },
+    }),
+    [],
+  );
+
+  useEffect(() => onFloorWorkRegister?.(floorWorkBarrier), [floorWorkBarrier, onFloorWorkRegister]);
 
   const refreshInventoryTasks = useCallback((): Promise<void> => {
     if (inventoryRequest.current?.client === client) return inventoryRequest.current.promise;
@@ -132,21 +179,21 @@ export function TaskSelection({
         setError(t("inventory.loadFailed"));
       })
       .finally(() => {
-        if (inventoryRequest.current?.id === id) inventoryRequest.current = null;
+        if (inventoryRequest.current?.id !== id) return;
+        inventoryRequest.current = null;
         if (mounted.current && isCurrentRef.current?.() !== false) setLoading(false);
       });
     inventoryRequest.current = { client, id, promise };
     return promise;
   }, [client, t]);
 
-  const joinTask = useCallback(
+  const performJoinTask = useCallback(
     async (task: StationInventoryTask, barcode?: string, confirmDifferentLine?: true) => {
-      if (busyRef.current || isCurrentRef.current?.() === false) return;
+      if (!intakeOpen.current || busyRef.current || isCurrentRef.current?.() === false) return;
       const originGeneration = lifecycleGeneration.current;
       const lease = {
-        token: `inventory-entry-${++inventoryAttemptSequence}`,
         isCurrent: () =>
-          mounted.current &&
+          (mounted.current || floorRetirementClosing.current) &&
           lifecycleGeneration.current === originGeneration &&
           isCurrentRef.current?.() !== false,
       };
@@ -164,26 +211,72 @@ export function TaskSelection({
         );
         if (!lease.isCurrent()) return;
         if (!taskMatchesManifest(task, joined)) throw new Error("inventory join task mismatch");
-        const published = await mirrorInventoryBundle(client, exec, task.inventoryId, lease);
+        let active: InventoryFloorTask | null = null;
+        const published = await mirrorInventoryBundle(client, exec, task.inventoryId, {
+          ...lease,
+          commitPublication: async (publishSnapshot) => {
+            if (!lease.isCurrent()) return false;
+            if (!credentialGeneration) return publishSnapshot();
+            const commitLease = acquireCredentialCommitLease(credentialGeneration);
+            if (!commitLease) return false;
+            try {
+              if (!lease.isCurrent()) return false;
+              if (!(await publishSnapshot()) || !lease.isCurrent()) return false;
+              active = await activateVerifiedInventoryFloorTask(
+                exec,
+                task.inventoryId,
+                commitLease,
+              );
+              return true;
+            } finally {
+              commitLease.release();
+            }
+          },
+        });
         if (!published || !lease.isCurrent()) return;
-        const active = await activateVerifiedInventoryFloorTask(exec, task.inventoryId, lease);
+        if (!credentialGeneration) {
+          active = await activateVerifiedInventoryFloorTask(exec, task.inventoryId);
+        }
+        if (!active) throw new Error("inventory floor task activation unavailable");
         if (!lease.isCurrent()) return;
-        setConfirmation(null);
-        onInventorySelected(active);
+        if (mounted.current) {
+          setConfirmation(null);
+          onInventorySelected(active);
+        }
       } catch {
-        if (mounted.current && isCurrentRef.current?.() !== false)
+        if (
+          mounted.current &&
+          lifecycleGeneration.current === originGeneration &&
+          isCurrentRef.current?.() !== false
+        )
           setError(t("inventory.joinFailed"));
       } finally {
-        busyRef.current = false;
-        if (mounted.current && isCurrentRef.current?.() !== false) setBusy(false);
+        if (lifecycleGeneration.current === originGeneration) {
+          busyRef.current = false;
+          if (mounted.current && isCurrentRef.current?.() !== false) setBusy(false);
+        }
       }
     },
-    [client, exec, onInventorySelected, operatorId, t],
+    [client, credentialGeneration, exec, onInventorySelected, operatorId, t],
+  );
+
+  const joinTask = useCallback(
+    (task: StationInventoryTask, barcode?: string, confirmDifferentLine?: true): Promise<void> => {
+      if (inventoryOperation.current) return inventoryOperation.current;
+      const operation = performJoinTask(task, barcode, confirmDifferentLine);
+      inventoryOperation.current = operation;
+      void operation.finally(() => {
+        if (inventoryOperation.current === operation) inventoryOperation.current = null;
+      });
+      return operation;
+    },
+    [performJoinTask],
   );
 
   useEffect(() => {
     return source.start((barcode) => {
-      if (busyRef.current || isCurrentRef.current?.() === false) return;
+      if (!intakeOpen.current || busyRef.current || isCurrentRef.current?.() === false) return;
+      const originGeneration = lifecycleGeneration.current;
       busyRef.current = true;
       setBusy(true);
       setError(null);
@@ -193,7 +286,12 @@ export function TaskSelection({
           const resolved = parseResolvedInventoryTask(
             await client.post<unknown>("/station/inventory-tasks/resolve-barcode", { barcode }),
           );
-          if (!mounted.current || isCurrentRef.current?.() === false) return;
+          if (
+            !mounted.current ||
+            lifecycleGeneration.current !== originGeneration ||
+            isCurrentRef.current?.() === false
+          )
+            return;
           if (resolved.requiresDifferentLineConfirmation) {
             setConfirmation({ resolved, barcode });
             return;
@@ -203,12 +301,21 @@ export function TaskSelection({
           handedToJoin = true;
           await joinTask(resolved.task, barcode);
         } catch {
-          if (mounted.current && isCurrentRef.current?.() !== false)
+          if (
+            mounted.current &&
+            lifecycleGeneration.current === originGeneration &&
+            isCurrentRef.current?.() !== false
+          )
             setError(t("inventory.barcodeFailed"));
         } finally {
-          if (!handedToJoin) {
+          if (!handedToJoin && lifecycleGeneration.current === originGeneration) {
             busyRef.current = false;
-            if (mounted.current && isCurrentRef.current?.() !== false) setBusy(false);
+            if (
+              mounted.current &&
+              lifecycleGeneration.current === originGeneration &&
+              isCurrentRef.current?.() !== false
+            )
+              setBusy(false);
           }
         }
       })();

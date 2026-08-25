@@ -6,6 +6,12 @@ import {
 } from "@markiro/domain";
 
 import type { SqlExecutor } from "./mirror.js";
+import {
+  acquireCredentialCommitLease,
+  credentialGenerationOwnership,
+  type CredentialCommitLease,
+  type CredentialGeneration,
+} from "./credential-recovery.js";
 
 export interface ProductionShiftTask {
   id: string;
@@ -36,11 +42,6 @@ export type InventoryFloorTask = {
   inventory: StationInventoryBundleManifest;
 };
 export type ActiveFloorTask = ProductionFloorTask | InventoryFloorTask;
-
-export interface FloorTaskCommitLease {
-  token: string;
-  isCurrent: () => boolean;
-}
 
 export const ACTIVE_INVENTORY_FLOOR_TASK_KEY = "active_inventory_floor_task_v1";
 
@@ -78,6 +79,11 @@ const legacyActiveInventoryPointerSchema = z.strictObject({
   snapshotId: z.uuid(),
 });
 const activeInventoryPointerSchema = z.union([
+  z.strictObject({
+    inventoryId: z.uuid(),
+    snapshotId: z.uuid(),
+    credentialOwnership: z.string().regex(/^[0-9a-f]{64}$/),
+  }),
   z.strictObject({
     inventoryId: z.uuid(),
     snapshotId: z.uuid(),
@@ -167,53 +173,68 @@ async function activeInventoryRow(
 export async function activateVerifiedInventoryFloorTask(
   exec: SqlExecutor,
   inventoryId: string,
-  lease?: FloorTaskCommitLease,
+  lease?: CredentialCommitLease,
 ): Promise<InventoryFloorTask> {
-  if (lease?.isCurrent() === false) throw new Error("inventory floor task activation retired");
+  if (lease && !lease.active) throw new Error("inventory floor task activation retired");
   const row = await activeInventoryRow(exec, inventoryId);
   if (!row) throw new Error("inventory bundle is not published");
   const inventory = parseActiveManifest(row);
-  if (lease?.isCurrent() === false) throw new Error("inventory floor task activation retired");
+  if (lease && !lease.active) throw new Error("inventory floor task activation retired");
+  const credentialOwnership = lease ? await credentialGenerationOwnership(lease.generation) : null;
+  if (lease && (!lease.active || credentialOwnership === null)) {
+    throw new Error("inventory floor task credential ownership unavailable");
+  }
   const pointer = JSON.stringify({
     inventoryId,
     snapshotId: inventory.snapshotId,
-    ...(lease ? { activationToken: lease.token } : {}),
+    ...(credentialOwnership === null ? {} : { credentialOwnership }),
   });
   await exec.run(
     `INSERT INTO station_meta (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     [ACTIVE_INVENTORY_FLOOR_TASK_KEY, pointer],
   );
-  if (lease?.isCurrent() === false) {
-    await exec.run("DELETE FROM station_meta WHERE key = ? AND value = ?", [
-      ACTIVE_INVENTORY_FLOOR_TASK_KEY,
-      pointer,
-    ]);
-    throw new Error("inventory floor task activation retired");
-  }
   return { kind: "inventory", inventory };
 }
 
 export async function readPersistedInventoryFloorTask(
   exec: SqlExecutor,
+  generation?: CredentialGeneration,
 ): Promise<InventoryFloorTask | null> {
-  const rows = await exec.all<{ value: unknown }>("SELECT value FROM station_meta WHERE key = ?", [
-    ACTIVE_INVENTORY_FLOOR_TASK_KEY,
-  ]);
-  if (rows.length === 0) return null;
-  const raw = rows[0]?.value;
-  if (typeof raw !== "string") throw new Error("active inventory floor task is invalid");
-  let value: unknown;
+  const lease = generation ? acquireCredentialCommitLease(generation) : null;
+  if (generation && !lease) return null;
   try {
-    value = JSON.parse(raw);
-  } catch {
-    throw new Error("active inventory floor task is invalid");
+    const rows = await exec.all<{ value: unknown }>(
+      "SELECT value FROM station_meta WHERE key = ?",
+      [ACTIVE_INVENTORY_FLOOR_TASK_KEY],
+    );
+    if (rows.length === 0) return null;
+    const raw = rows[0]?.value;
+    if (typeof raw !== "string") throw new Error("active inventory floor task is invalid");
+    let value: unknown;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      throw new Error("active inventory floor task is invalid");
+    }
+    const parsed = activeInventoryPointerSchema.safeParse(value);
+    if (!parsed.success) throw new Error("active inventory floor task is invalid");
+    if (generation) {
+      const expectedOwnership = await credentialGenerationOwnership(generation);
+      if (
+        expectedOwnership === null ||
+        !("credentialOwnership" in parsed.data) ||
+        parsed.data.credentialOwnership !== expectedOwnership
+      ) {
+        return null;
+      }
+    }
+    const row = await activeInventoryRow(exec, parsed.data.inventoryId);
+    if (!row || row.active_snapshot_id !== parsed.data.snapshotId) {
+      throw new Error("active inventory floor task is not published");
+    }
+    return { kind: "inventory", inventory: parseActiveManifest(row) };
+  } finally {
+    lease?.release();
   }
-  const parsed = activeInventoryPointerSchema.safeParse(value);
-  if (!parsed.success) throw new Error("active inventory floor task is invalid");
-  const row = await activeInventoryRow(exec, parsed.data.inventoryId);
-  if (!row || row.active_snapshot_id !== parsed.data.snapshotId) {
-    throw new Error("active inventory floor task is not published");
-  }
-  return { kind: "inventory", inventory: parseActiveManifest(row) };
 }

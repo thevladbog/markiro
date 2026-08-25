@@ -359,7 +359,12 @@ export function App() {
     }
     let cancelled = false;
     setFloorRouteReady(false);
-    void readPersistedInventoryFloorTask(tauriExecutor)
+    const generation = currentCredentialGeneration.current;
+    void (
+      generation
+        ? readPersistedInventoryFloorTask(tauriExecutor, generation)
+        : readPersistedInventoryFloorTask(tauriExecutor)
+    )
       .then((persisted) => {
         if (!cancelled && persisted) setActiveFloorTask(persisted);
       })
@@ -710,8 +715,8 @@ export function App() {
   // This makes React StrictMode overlap and any late async response obey the
   // same terminal seal. A newly provisioned apiKey creates a fresh generation.
   const credentialGeneration = useMemo(
-    () => (verifiedClient ? createCredentialGeneration() : null),
-    [verifiedClient],
+    () => (verifiedClient && config?.apiKey ? createCredentialGeneration(config.apiKey) : null),
+    [config?.apiKey, verifiedClient],
   );
   const currentCredentialGeneration = useRef<CredentialGeneration | null>(null);
   currentCredentialGeneration.current = credentialGeneration;
@@ -1513,6 +1518,8 @@ export function App() {
           isCurrent={() =>
             floorGeneration ? credentialGenerationIsCurrent(floorGeneration) : false
           }
+          {...(floorGeneration ? { credentialGeneration: floorGeneration } : {})}
+          onFloorWorkRegister={registerFloorWorkBarrier}
           onNew={() => setFloorView("new")}
           onSetup={() => setShowSetup(true)}
           onConflicts={() => setShowConflicts(true)}

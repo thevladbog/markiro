@@ -109,7 +109,7 @@ import {
   pickScanSource,
   scannerIndicator,
 } from "../src/App.js";
-import { productionFloorTask } from "../src/lib/floor-task.js";
+import { productionFloorTask, readPersistedInventoryFloorTask } from "../src/lib/floor-task.js";
 import type { StationConfig } from "../src/lib/config.js";
 import { hashSecret } from "../src/lib/crypto.js";
 import type { HardwareConfig } from "../src/lib/hardware-config.js";
@@ -122,6 +122,7 @@ import { BACKOFF_START_MS } from "../src/lib/sync.js";
 import { OPERATOR_IDLE_TIMEOUT_MS } from "../src/lib/operator-idle-lock.js";
 import * as WorkScreenModule from "../src/pages/WorkScreen.js";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
+import { inventorySnapshotContentDigest, inventorySnapshotPageDigest } from "@markiro/domain";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -611,6 +612,79 @@ async function mockBackfilledActiveShiftRecovery(pinHash: string) {
     return undefined;
   });
   return { exec, executed };
+}
+
+async function mockInventoryEntryDatabase(pinHash: string) {
+  const db = new DatabaseSync(":memory:");
+  const exec = {
+    async run(sql: string, values: unknown[] = []) {
+      db.prepare(sql).run(...(values as never[]));
+    },
+    async all<T>(sql: string, values: unknown[] = []): Promise<T[]> {
+      return db.prepare(sql).all(...(values as never[])) as T[];
+    },
+  };
+  await applyMigrations(exec);
+  await exec.run(
+    `INSERT INTO operators_mirror
+       (operator_id, name, login, role, pin_hash, badge_hash, active)
+     VALUES (?,?,?,?,?,?,?)`,
+    ["op1", "Ivan", OPERATOR_LOGIN, "operator", pinHash, null, 1],
+  );
+  await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [
+    "hardware_config",
+    JSON.stringify({
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    }),
+  ]);
+  await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [
+    "install_id",
+    "test-install-id",
+  ]);
+  const persistedConfig: Record<string, unknown> = {
+    machine_id: "m1",
+    device_id: "device-1",
+    line_id: "33333333-3333-4333-8333-333333333333",
+    line_name: "Line 1",
+    api_key: "mk_inventory_key",
+    server_url: "https://api.factory.example",
+  };
+  let releasePublication!: () => void;
+  const publicationGate = new Promise<void>((resolve) => {
+    releasePublication = resolve;
+  });
+  let markPublicationStarted!: () => void;
+  const publicationStarted = new Promise<void>((resolve) => {
+    markPublicationStarted = resolve;
+  });
+  const executed: Array<{ query: string; values: unknown[] }> = [];
+  invokeMock.mockImplementation(async (cmd: string, payload?: unknown): Promise<unknown> => {
+    if (cmd === "read_config") return persistedConfig;
+    if (cmd === "clear_credential") {
+      delete persistedConfig.api_key;
+      return undefined;
+    }
+    if (cmd === "plugin:sql|load") return "sqlite:station-mirror.db";
+    if (cmd === "plugin:sql|execute") {
+      const { query, values = [] } = (payload ?? {}) as { query: string; values?: unknown[] };
+      executed.push({ query, values });
+      if (query.includes("SET active_snapshot_id = staged_snapshot_id")) {
+        markPublicationStarted();
+        await publicationGate;
+      }
+      db.prepare(query).run(...(values as never[]));
+      return [0, 0];
+    }
+    if (cmd === "plugin:sql|select") {
+      const { query, values = [] } = (payload ?? {}) as { query: string; values?: unknown[] };
+      return db.prepare(query).all(...(values as never[]));
+    }
+    return undefined;
+  });
+  return { exec, executed, persistedConfig, publicationStarted, releasePublication };
 }
 
 async function expectEmptyQueueCredentialRecovery(
@@ -1151,6 +1225,139 @@ describe("App", () => {
       expect(queued).toHaveLength(1);
       expect(invokeMock.mock.calls.some(([cmd]) => cmd === "clear_credential")).toBe(false);
     } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("waits the real inventory publication barrier before completing operator switch", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+    lockdownMock.subscribe.mockImplementation((listener) => {
+      lockdownMock.listeners.add(listener);
+      return () => lockdownMock.listeners.delete(listener);
+    });
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const inventoryId = "11111111-1111-4111-8111-111111111111";
+    const snapshotId = "22222222-2222-4222-8222-222222222222";
+    const snapshotFixedAt = "2026-08-25T05:00:00.000Z";
+    const contentDigest = inventorySnapshotContentDigest([]);
+    const manifest = {
+      inventoryId,
+      inventoryNumber: "INV-00047",
+      productId: "44444444-4444-4444-8444-444444444444",
+      productName: "Water",
+      gtin14: "04600000000015",
+      mode: "check",
+      lineId: "33333333-3333-4333-8333-333333333333",
+      lineName: "Line 1",
+      productionDateFrom: "2026-08-01",
+      productionDateTo: "2026-08-31",
+      boxCapacity: 12,
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: "a".repeat(64),
+      contentDigest,
+      codeCount: 0,
+      boxLabelTemplate: null,
+      limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
+      sscc: null,
+      ssccRevokedFrom: [],
+      ssccRevokedBlocks: [],
+    };
+    const page = {
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: manifest.combinedDigest,
+      contentDigest,
+      cursor: null,
+      items: [],
+      nextCursor: null,
+      pageDigest: inventorySnapshotPageDigest({
+        snapshotId,
+        snapshotFixedAt,
+        contentDigest,
+        cursor: null,
+        items: [],
+        nextCursor: null,
+      }),
+    };
+    const database = await mockInventoryEntryDatabase(pinHash);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/operators") throw new Error("keep cached operator");
+        if (path === "/shifts") return new Response(JSON.stringify({ items: [] }));
+        if (path === "/station/inventory-tasks") {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  inventoryId,
+                  inventoryNumber: manifest.inventoryNumber,
+                  productName: manifest.productName,
+                  mode: manifest.mode,
+                  lineId: manifest.lineId,
+                  lineName: manifest.lineName,
+                  productionDateFrom: manifest.productionDateFrom,
+                  productionDateTo: manifest.productionDateTo,
+                },
+              ],
+            }),
+          );
+        }
+        if (path === `/station/inventories/${inventoryId}/join`) {
+          return new Response(JSON.stringify(manifest));
+        }
+        if (path.endsWith("/bundle/manifest")) return new Response(JSON.stringify(manifest));
+        if (path.endsWith("/bundle/codes")) return new Response(JSON.stringify(page));
+        return new Response(JSON.stringify({ items: [] }));
+      }),
+    );
+
+    try {
+      render(<App />);
+      await signInAsOperator();
+      fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
+      await database.publicationStarted;
+
+      fireEvent.click(screen.getByRole("button", { name: "Change operator" }));
+
+      await act(async () => {});
+
+      expect(screen.queryByText("Operator sign-in")).toBeNull();
+      expect(screen.getByTestId("operator-switch-settling").textContent).toContain(
+        "Saving the current operation…",
+      );
+
+      database.releasePublication();
+      expect(await screen.findByText("Operator sign-in")).toBeDefined();
+      expect(
+        await database.exec.all(
+          "SELECT active_snapshot_id FROM inventory_task_mirror WHERE inventory_id = ?",
+          [inventoryId],
+        ),
+      ).toEqual([{ active_snapshot_id: snapshotId }]);
+      expect(
+        database.executed.some(({ query, values }) => {
+          return (
+            query.includes("INSERT INTO station_meta") &&
+            query.includes("ON CONFLICT(key) DO UPDATE") &&
+            values[0] === "active_inventory_floor_task_v1"
+          );
+        }),
+      ).toBe(true);
+      expect(
+        await database.exec.all("SELECT value FROM station_meta WHERE key = ?", [
+          "active_inventory_floor_task_v1",
+        ]),
+      ).toHaveLength(1);
+      expect(await readPersistedInventoryFloorTask(database.exec)).not.toBeNull();
+    } finally {
+      database.releasePublication();
       consoleErrorSpy.mockRestore();
     }
   });

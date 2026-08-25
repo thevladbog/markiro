@@ -10,6 +10,10 @@ import {
   productionFloorTask,
   readPersistedInventoryFloorTask,
 } from "../src/lib/floor-task.js";
+import {
+  acquireCredentialCommitLease,
+  createCredentialGeneration,
+} from "../src/lib/credential-recovery.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import type { InventoryBundleManifest } from "../src/lib/inventory-mirror.js";
 
@@ -162,10 +166,10 @@ describe("floor task contracts", () => {
     ).toEqual([]);
   });
 
-  it("removes only its own pointer when its lease retires during the pointer commit", async () => {
-    const base = executor();
-    await applyMigrations(base);
-    await base.run(
+  it("rejects a crash-left pointer when restart uses a replacement credential owner", async () => {
+    const exec = executor();
+    await applyMigrations(exec);
+    await exec.run(
       `INSERT INTO inventory_task_mirror (
          inventory_id, inventory_number, active_snapshot_id, active_snapshot_revision,
          active_snapshot_fixed_at, active_combined_digest, active_content_digest,
@@ -182,39 +186,17 @@ describe("floor task contracts", () => {
         "2026-08-25T02:00:00.000Z",
       ],
     );
-    let releasePointer!: () => void;
-    const pointerGate = new Promise<void>((resolve) => {
-      releasePointer = resolve;
-    });
-    let pointerStarted!: () => void;
-    const pointerStart = new Promise<void>((resolve) => {
-      pointerStarted = resolve;
-    });
-    const exec: SqlExecutor = {
-      async run(sql, params = []) {
-        if (sql.includes("INSERT INTO station_meta")) {
-          pointerStarted();
-          await pointerGate;
-        }
-        await base.run(sql, params);
-      },
-      all: <T>(sql: string, params?: unknown[]) => base.all<T>(sql, params),
-    };
-    let current = true;
-    const activation = activateVerifiedInventoryFloorTask(exec, inventoryId, {
-      token: "inventory-attempt-1",
-      isCurrent: () => current,
-    });
-    await pointerStart;
+    const originalGeneration = createCredentialGeneration("credential-a");
+    const commitLease = acquireCredentialCommitLease(originalGeneration);
+    expect(commitLease).not.toBeNull();
+    await activateVerifiedInventoryFloorTask(exec, inventoryId, commitLease!);
+    commitLease!.release();
 
-    current = false;
-    releasePointer();
-
-    await expect(activation).rejects.toThrow("retired");
-    expect(
-      await base.all("SELECT value FROM station_meta WHERE key = ?", [
-        "active_inventory_floor_task_v1",
-      ]),
-    ).toEqual([]);
+    await expect(
+      readPersistedInventoryFloorTask(exec, createCredentialGeneration("credential-a")),
+    ).resolves.toEqual({ kind: "inventory", inventory: manifest });
+    await expect(
+      readPersistedInventoryFloorTask(exec, createCredentialGeneration("credential-b")),
+    ).resolves.toBeNull();
   });
 });

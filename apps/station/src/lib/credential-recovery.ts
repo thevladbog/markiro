@@ -59,6 +59,7 @@ interface CredentialGenerationLifecycle {
   phase: CredentialGeneration["phase"];
   activeCommits: number;
   rejectionPublished: boolean;
+  ownership: Promise<string> | null;
   settle: Promise<void> | null;
   resolveSettle: (() => void) | null;
 }
@@ -68,11 +69,18 @@ const credentialGenerationLifecycles = new WeakMap<
   CredentialGenerationLifecycle
 >();
 
-export function createCredentialGeneration(): CredentialGeneration {
+async function digestCredentialOwnership(credential: string): Promise<string> {
+  const source = new TextEncoder().encode(`markiro:station-credential-owner:v1\0${credential}`);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", source));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export function createCredentialGeneration(credential?: string): CredentialGeneration {
   const lifecycle: CredentialGenerationLifecycle = {
     phase: "active",
     activeCommits: 0,
     rejectionPublished: false,
+    ownership: credential === undefined ? null : digestCredentialOwnership(credential),
     settle: null,
     resolveSettle: null,
   };
@@ -90,6 +98,13 @@ export function credentialGenerationIsCurrent(generation: CredentialGeneration):
   return !generation.sealed;
 }
 
+/** Stable, non-secret ownership proof for durable work written by one device key. */
+export function credentialGenerationOwnership(
+  generation: CredentialGeneration,
+): Promise<string> | null {
+  return credentialLifecycle(generation).ownership;
+}
+
 function credentialLifecycle(generation: CredentialGeneration): CredentialGenerationLifecycle {
   const lifecycle = credentialGenerationLifecycles.get(generation);
   if (!lifecycle) throw new Error("unknown credential generation");
@@ -97,6 +112,8 @@ function credentialLifecycle(generation: CredentialGeneration): CredentialGenera
 }
 
 export interface CredentialCommitLease {
+  readonly generation: CredentialGeneration;
+  readonly active: boolean;
   release(): void;
 }
 
@@ -109,6 +126,10 @@ export function acquireCredentialCommitLease(
   lifecycle.activeCommits += 1;
   let released = false;
   return {
+    generation,
+    get active() {
+      return !released;
+    },
     release() {
       if (released) return;
       released = true;
@@ -289,6 +310,7 @@ interface ClearRejectedCredentialStateDeps {
  *
  * - both operator slots and their selector contain only a downloaded roster;
  * - shift/product rows contain only downloaded API reference bundles;
+ * - inventory task/code rows and the floor pointer can be downloaded again;
  * - outbox, codes, scan events, boxes, exceptions, conflicts, SSCC ranges,
  *   install identity, and every sync ceiling/batch id are deliberately absent.
  */
@@ -309,4 +331,7 @@ export async function clearRejectedCredentialState({
   await exec.run("DELETE FROM shift_mirror");
   await exec.run("DELETE FROM product_mirror");
   await clearStationProductImages(exec);
+  await exec.run("DELETE FROM station_meta WHERE key = ?", ["active_inventory_floor_task_v1"]);
+  await exec.run("DELETE FROM inventory_snapshot_codes_mirror");
+  await exec.run("DELETE FROM inventory_task_mirror");
 }

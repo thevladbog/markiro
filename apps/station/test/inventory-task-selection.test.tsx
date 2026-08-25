@@ -146,6 +146,7 @@ function client(
     requiresConfirmation?: boolean;
     shifts?: readonly (typeof shifts)[number][];
     inventoryLists?: unknown[];
+    inventoryListResponse?: Promise<unknown>;
     joinResponse?: Promise<unknown>;
     manifestResponse?: Promise<unknown>;
     pageResponse?: Promise<unknown>;
@@ -159,9 +160,11 @@ function client(
       gets.push(path);
       let value: unknown;
       if (path === "/station/inventory-tasks") {
-        value = input.inventoryLists?.[
-          Math.min(inventoryListIndex++, input.inventoryLists.length - 1)
-        ] ?? { items: input.listed === false ? [] : [task] };
+        value = input.inventoryListResponse
+          ? await input.inventoryListResponse
+          : (input.inventoryLists?.[
+              Math.min(inventoryListIndex++, input.inventoryLists.length - 1)
+            ] ?? { items: input.listed === false ? [] : [task] });
         if (value instanceof Error) throw value;
       } else if (path === "/shifts") {
         value = { items: input.shifts ?? [] };
@@ -216,6 +219,72 @@ afterEach(() => {
 });
 
 describe("TaskSelection inventory entry", () => {
+  it("clears prior-client rows and barcode confirmation while the replacement client is pending", async () => {
+    const exec = executor();
+    await applyMigrations(exec);
+    const scan = scanner();
+    const old = client();
+    const replacementList = deferred<unknown>();
+    const replacement = client({ inventoryListResponse: replacementList.promise });
+    const props = {
+      exec,
+      source: scan.source,
+      operatorId: "66666666-6666-4666-8666-666666666666",
+      currentLineName: "Розлив №2",
+      onShiftSelected: () => {},
+      onInventorySelected: () => {},
+      onNew: () => {},
+    };
+    const view = render(<TaskSelection {...props} client={old.api} />);
+    openWarehouseCategoryIfPresent();
+    expect(await screen.findByText("INV-00047")).toBeDefined();
+    act(() => scan.scan(barcode));
+    expect(
+      await screen.findByRole("dialog", { name: "Task is assigned to another line" }),
+    ).toBeDefined();
+
+    view.rerender(<TaskSelection {...props} client={replacement.api} />);
+
+    expect(screen.queryByText("INV-00047")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Task is assigned to another line" })).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("Loading inventory tasks");
+    expect(screen.queryByRole("button", { name: "Continue INV-00047" })).toBeNull();
+    expect(replacement.posts).toEqual([]);
+  });
+
+  it("keeps replacement loading fenced from an old request finally and exposes no old rows on replacement failure", async () => {
+    const exec = executor();
+    await applyMigrations(exec);
+    const scan = scanner();
+    const oldList = deferred<unknown>();
+    const replacementList = deferred<unknown>();
+    const old = client({ inventoryListResponse: oldList.promise });
+    const replacement = client({ inventoryListResponse: replacementList.promise });
+    const props = {
+      exec,
+      source: scan.source,
+      operatorId: "66666666-6666-4666-8666-666666666666",
+      currentLineName: "Розлив №2",
+      onShiftSelected: () => {},
+      onInventorySelected: () => {},
+      onNew: () => {},
+    };
+    const view = render(<TaskSelection {...props} client={old.api} />);
+    openWarehouseCategoryIfPresent();
+    view.rerender(<TaskSelection {...props} client={replacement.api} />);
+
+    oldList.resolve({ items: [task] });
+    await act(async () => {});
+    expect(screen.queryByText("INV-00047")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("Loading inventory tasks");
+
+    replacementList.resolve(new Error("replacement offline"));
+    expect(await screen.findByText(/Could not load inventory tasks/)).toBeDefined();
+    expect(screen.queryByText("INV-00047")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue INV-00047" })).toBeNull();
+    expect(replacement.posts).toEqual([]);
+  });
+
   it.each(["production shift", "new shift", "setup", "selection unmount"] as const)(
     "does not publish a retired join after routing to %s",
     async (destination) => {
@@ -537,10 +606,9 @@ describe("TaskSelection inventory entry", () => {
       ["active_inventory_floor_task_v1"],
     );
     expect(pointerRows).toHaveLength(1);
-    expect(JSON.parse(pointerRows[0]!.value)).toMatchObject({
+    expect(JSON.parse(pointerRows[0]!.value)).toEqual({
       inventoryId,
       snapshotId,
-      activationToken: expect.stringMatching(/^inventory-entry-/),
     });
   });
 

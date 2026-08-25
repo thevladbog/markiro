@@ -13,10 +13,18 @@ import type { SqlExecutor } from "./mirror.js";
 
 export interface InventoryMirrorLease {
   isCurrent: () => boolean;
+  commitPublication?: (publishSnapshot: () => Promise<boolean>) => Promise<boolean>;
 }
 
 function leaseIsCurrent(lease: InventoryMirrorLease | undefined): boolean {
   return lease?.isCurrent() ?? true;
+}
+
+function commitPublication(
+  lease: InventoryMirrorLease | undefined,
+  publishSnapshot: () => Promise<boolean>,
+): Promise<boolean> {
+  return lease?.commitPublication?.(publishSnapshot) ?? publishSnapshot();
 }
 
 /**
@@ -40,7 +48,9 @@ export async function mirrorInventoryBundle(
   }
   const candidate = await beginInventoryMirror(exec, manifest);
   if (!leaseIsCurrent(lease)) return false;
-  if (candidate.alreadyActive) return true;
+  if (candidate.alreadyActive) {
+    return commitPublication(lease, () => Promise.resolve(true));
+  }
 
   let state = await readInventoryMirrorState(exec, inventoryId);
   if (
@@ -48,7 +58,7 @@ export async function mirrorInventoryBundle(
     state.verifiedContentDigest === candidate.contentDigest
   ) {
     if (!leaseIsCurrent(lease)) return false;
-    return publishInventorySnapshot(exec, candidate);
+    return commitPublication(lease, () => publishInventorySnapshot(exec, candidate));
   }
 
   let cursor = state?.nextCursor ?? null;
@@ -64,7 +74,9 @@ export async function mirrorInventoryBundle(
     if (!leaseIsCurrent(lease)) return false;
     await ingestInventoryPage(exec, candidate, cursor, page);
     if (!leaseIsCurrent(lease)) return false;
-    if (page.nextCursor === null) return publishInventorySnapshot(exec, candidate);
+    if (page.nextCursor === null) {
+      return commitPublication(lease, () => publishInventorySnapshot(exec, candidate));
+    }
     cursor = page.nextCursor;
     state = await readInventoryMirrorState(exec, inventoryId);
     if (

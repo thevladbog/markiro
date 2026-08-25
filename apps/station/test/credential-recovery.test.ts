@@ -356,6 +356,35 @@ describe("credential rejection recovery", () => {
       },
     };
     await seedRecoveryFixture(exec);
+    await exec.run(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, staging_generation, updated_at)
+       VALUES (?, ?, 0, ?)`,
+      ["inventory-1", "INV-0001", "2026-08-25T08:00:00.000Z"],
+    );
+    await exec.run(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+          source_state, source_production_date, parent_sscc, expected, protected)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        "snapshot-1",
+        "inventory-hash-1",
+        "010460000000001521SERIAL-1",
+        "04600000000015",
+        "SERIAL-1",
+        "available",
+        null,
+        "2026-08-25",
+        null,
+        1,
+        0,
+      ],
+    );
+    await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [
+      "active_inventory_floor_task_v1",
+      '{"inventoryId":"inventory-1","snapshotId":"snapshot-1"}',
+    ]);
 
     const preservedTables = [
       ["outbox", "id"],
@@ -389,6 +418,8 @@ describe("credential rejection recovery", () => {
     expect(await exec.all("SELECT * FROM operators_mirror_b")).toEqual([]);
     expect(await exec.all("SELECT * FROM shift_mirror")).toEqual([]);
     expect(await exec.all("SELECT * FROM product_mirror")).toEqual([]);
+    expect(await exec.all("SELECT * FROM inventory_task_mirror")).toEqual([]);
+    expect(await exec.all("SELECT * FROM inventory_snapshot_codes_mirror")).toEqual([]);
     expect(deletes).toEqual([
       { sql: "DELETE FROM operators_mirror", params: [] },
       { sql: "DELETE FROM operators_mirror_b", params: [] },
@@ -396,6 +427,12 @@ describe("credential rejection recovery", () => {
       { sql: "DELETE FROM shift_mirror", params: [] },
       { sql: "DELETE FROM product_mirror", params: [] },
       { sql: "DELETE FROM station_product_images", params: [] },
+      {
+        sql: "DELETE FROM station_meta WHERE key = ?",
+        params: ["active_inventory_floor_task_v1"],
+      },
+      { sql: "DELETE FROM inventory_snapshot_codes_mirror", params: [] },
+      { sql: "DELETE FROM inventory_task_mirror", params: [] },
     ]);
 
     const retainedMeta = await exec.all<{ key: string; value: string }>(
