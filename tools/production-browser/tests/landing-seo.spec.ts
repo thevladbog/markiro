@@ -83,6 +83,24 @@ test("cookie panel reveals granular controls only after an explicit settings act
   await expect(details).toBeVisible();
 });
 
+test("cookie panel stays anchored to the bottom edge without entering document flow", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const panel = page.locator("[data-consent-panel]");
+  await expect(panel).toBeVisible();
+
+  expect(
+    await panel.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return {
+        bottomGap: Math.round(window.innerHeight - box.bottom),
+        position: getComputedStyle(element).position,
+      };
+    }),
+  ).toEqual({ bottomGap: 0, position: "fixed" });
+});
+
 test("GTM stays offline until analytics consent and loads only once after permission", async ({
   page,
 }) => {
@@ -97,6 +115,11 @@ test("GTM stays offline until analytics consent and loads only once after permis
   await expect(page.locator("iframe[src*='googletagmanager.com']")).toHaveCount(0);
 
   await page.locator("[data-consent-customize]").click();
+  await page.locator("[data-consent-marketing]").check();
+  await page.locator("[data-consent-save]").click();
+  expect(gtmRequests).toEqual([]);
+
+  await page.locator("[data-consent-settings]").click();
   await page.locator("[data-consent-analytics]").check();
   await page.locator("[data-consent-save]").click();
   await expect.poll(() => gtmRequests).toHaveLength(1);
@@ -104,6 +127,52 @@ test("GTM stays offline until analytics consent and loads only once after permis
 
   await page.evaluate(() => window.dispatchEvent(new Event("markiro:consent-changed")));
   await expect.poll(() => gtmRequests).toHaveLength(1);
+});
+
+test("a successful demo request emits one submit attempt and one lead event", async ({ page }) => {
+  await page.route("https://www.googletagmanager.com/**", async (route) => {
+    await route.fulfill({ body: "", contentType: "application/javascript", status: 200 });
+  });
+  await page.route("**/api/demo-requests", async (route) => {
+    const request = route.request().postDataJSON() as { requestId?: string };
+    await route.fulfill({
+      body: JSON.stringify({ accepted: true, requestId: request.requestId }),
+      contentType: "application/json",
+      status: 202,
+    });
+  });
+
+  await page.goto("/");
+  await page.locator("[data-consent-accept]").click();
+  const form = page.locator("[data-demo-form]");
+  await form.evaluate((element) => {
+    const token = document.createElement("input");
+    token.name = "smart-token";
+    token.type = "hidden";
+    element.append(token);
+  });
+  await form.locator('input[name="name"]').fill("Анна");
+  await form.locator('input[name="company"]').fill("Завод Север");
+  await form.locator('input[name="email"]').fill("anna@example.test");
+  await form.locator('input[name="consent"]').check();
+  await form.locator('input[name="smart-token"]').evaluate((input) => {
+    (input as HTMLInputElement).value = "captcha-token";
+  });
+  await form.locator('button[type="submit"]').click();
+  await expect(page.locator("[data-demo-success]")).toBeVisible();
+
+  expect(
+    await page.evaluate(() => {
+      const layer = (window as Window & { dataLayer?: unknown[] }).dataLayer ?? [];
+      return layer
+        .filter(
+          (item): item is Record<string, unknown> =>
+            typeof item === "object" && item !== null && "event" in item,
+        )
+        .map((item) => item.event)
+        .filter((event) => event === "landing_form_submit" || event === "landing_form_success");
+    }),
+  ).toEqual(["landing_form_submit", "landing_form_success"]);
 });
 
 const demoCases = [
@@ -277,6 +346,13 @@ for (const route of ["/", "/en/"] as const) {
     const expectedHref = "tel:+79343551490";
 
     await expect(page.locator(`a[href="${expectedHref}"]`)).toHaveCount(3);
+    expect(
+      await page
+        .locator(`a[href="${expectedHref}"][data-analytics="landing_phone_click"]`)
+        .evaluateAll((links) =>
+          links.map((link) => (link as HTMLElement).dataset.placement).sort(),
+        ),
+    ).toEqual(["demo", "header", "hero"]);
     for (const phone of [
       page.locator("#hero").getByRole("link", { name: expectedPhone, exact: true }),
       page.locator("#demo").getByRole("link", { name: expectedPhone, exact: true }),

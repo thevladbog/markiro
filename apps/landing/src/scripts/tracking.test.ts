@@ -41,9 +41,31 @@ afterEach(() => {
   document.body.innerHTML = "";
   window.localStorage.clear();
   delete (window as TestDataLayerWindow).dataLayer;
+  Reflect.deleteProperty(document, "fonts");
 });
 
 describe("consent panel", () => {
+  it("waits for document fonts before showing an undecided visitor the bottom panel", async () => {
+    renderConsentPanel();
+    let resolveFonts: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => {
+      resolveFonts = resolve;
+    });
+    Object.defineProperty(document, "fonts", {
+      configurable: true,
+      value: { ready },
+    });
+
+    initConsentPanel(document, window);
+
+    const panel = document.querySelector<HTMLElement>("[data-consent-panel]");
+    expect(panel?.hidden).toBe(true);
+    resolveFonts?.();
+    await ready;
+    await Promise.resolve();
+    expect(panel?.hidden).toBe(false);
+  });
+
   it("shows an undecided visitor an equal reject, settings, and accept choice", () => {
     renderConsentPanel();
 
@@ -152,6 +174,25 @@ describe("Google Tag Manager consent bridge", () => {
         analytics_storage: "granted",
       },
     ]);
+  });
+
+  it("keeps GTM offline for marketing-only consent and loads it after analytics is granted", () => {
+    initTagManager(document, window, GTM_CONTAINER_ID);
+    window.localStorage.setItem(
+      CONSENT_STORAGE_KEY,
+      serializeConsent({ version: 1, analytics: false, marketing: true }),
+    );
+    window.dispatchEvent(new CustomEvent("markiro:consent-changed"));
+
+    expect(document.querySelector("script[data-markiro-gtm]")).toBeNull();
+
+    window.localStorage.setItem(
+      CONSENT_STORAGE_KEY,
+      serializeConsent({ version: 1, analytics: true, marketing: true }),
+    );
+    window.dispatchEvent(new CustomEvent("markiro:consent-changed"));
+
+    expect(document.querySelectorAll("script[data-markiro-gtm]")).toHaveLength(1);
   });
 
   it("forwards landing events only while analytics consent is granted", () => {
