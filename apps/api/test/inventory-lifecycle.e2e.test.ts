@@ -516,6 +516,41 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
     expect(audits).toHaveLength(1);
   });
 
+  it("idempotently backfills proof fields on a legacy running manifest", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedReadyInventory(agent);
+    const started = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+    const legacy = structuredClone(started.body) as Record<string, unknown>;
+    delete legacy.snapshotFixedAt;
+    delete legacy.contentDigest;
+    await overwriteStoredManifest(fixture, legacy);
+
+    const upgraded = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+    expect(upgraded.body).toEqual(started.body);
+    const repeated = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+    expect(repeated.body).toEqual(started.body);
+    const [stored] = await db
+      .select({ manifest: schema.inventories.stationManifest })
+      .from(schema.inventories)
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+    expect(stored?.manifest).toEqual(started.body);
+  });
+
+  it("rejects a legacy running manifest whose immutable snapshot anchor is corrupt", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedReadyInventory(agent);
+    const started = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+    const legacy = structuredClone(started.body) as Record<string, unknown>;
+    delete legacy.snapshotFixedAt;
+    delete legacy.contentDigest;
+    legacy.combinedDigest = "f".repeat(64);
+    await overwriteStoredManifest(fixture, legacy);
+
+    await agent
+      .post(`/inventories/${fixture.inventoryId}/start`)
+      .expect(409, { code: "INVENTORY_STORED_MANIFEST_INVALID" });
+  });
+
   it("rejects an invalid newly generated manifest before persisting running state", async () => {
     const agent = request.agent(app!.getHttpServer());
     const fixture = await seedReadyInventory(agent);

@@ -62,6 +62,11 @@ export interface StationInventoryManifest {
   readonly limits: typeof STATION_INVENTORY_LIMITS;
 }
 
+export type LegacyStationInventoryManifest = Omit<
+  StationInventoryManifest,
+  "snapshotFixedAt" | "contentDigest"
+>;
+
 const storedLabelElementBaseShape = {
   id: z.string().min(1),
   xMm: z.number(),
@@ -198,6 +203,36 @@ export function parseStationInventoryManifest(value: unknown): StationInventoryM
   const result = storedStationInventoryManifestSchema.safeParse(value);
   if (!result.success) throw new Error("Invalid stored station inventory manifest");
   return result.data;
+}
+
+/**
+ * Parses only the exact pre-proof durable shape. It is intentionally separate
+ * from the network parser: proof fields may be reconstructed only from trusted
+ * immutable snapshot rows, never supplied by an untrusted caller.
+ */
+export function parseLegacyStationInventoryManifest(
+  value: unknown,
+): LegacyStationInventoryManifest {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Invalid legacy stored station inventory manifest");
+  }
+  const record = value as Record<string, unknown>;
+  if ("snapshotFixedAt" in record || "contentDigest" in record) {
+    throw new Error("Invalid legacy stored station inventory manifest");
+  }
+  const upgraded = parseStationInventoryManifest({
+    ...record,
+    snapshotFixedAt: "2000-01-01T00:00:00.000Z",
+    contentDigest: "0".repeat(64),
+  });
+  const {
+    snapshotFixedAt: ignoredSnapshotFixedAt,
+    contentDigest: ignoredContentDigest,
+    ...legacy
+  } = upgraded;
+  void ignoredSnapshotFixedAt;
+  void ignoredContentDigest;
+  return legacy;
 }
 
 const labelElementBaseProperties = {

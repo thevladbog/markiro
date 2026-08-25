@@ -20,11 +20,15 @@ import {
 import { DB } from "../../auth/auth.module";
 import type { InventorySnapshotCountsDto } from "./dto";
 import {
-  parseStationInventoryManifest,
   STATION_INVENTORY_LIMITS,
+  parseStationInventoryManifest,
   type StationInventoryLabelTemplateDescriptor,
   type StationInventoryManifest,
 } from "./station-inventory.dto";
+import {
+  resolveStoredStationInventoryManifest,
+  type StoredStationManifestFacts,
+} from "./station-inventory-manifest-upgrade";
 
 type InventoryTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -75,7 +79,8 @@ export class InventoryLifecycleService {
 
       if (inventory.status === "running") {
         try {
-          return parseStationInventoryManifest(inventory.stationManifest);
+          const facts = await this.loadStoredManifestFacts(tx, tenantId, inventory);
+          return await resolveStoredStationInventoryManifest(tx, tenantId, facts);
         } catch {
           throw new ConflictException({ code: "INVENTORY_STORED_MANIFEST_INVALID" });
         }
@@ -318,6 +323,63 @@ export class InventoryLifecycleService {
       },
       line,
       boxLabelTemplate: await this.resolveBoxLabelTemplate(tx, tenantId, inventory),
+    };
+  }
+
+  private async loadStoredManifestFacts(
+    tx: InventoryTx,
+    tenantId: string,
+    inventory: LockedInventory,
+  ): Promise<StoredStationManifestFacts> {
+    if (inventory.activeSnapshotId === null) {
+      throw new Error("Running inventory has no active snapshot");
+    }
+    const [snapshot] = await tx
+      .select({
+        id: schema.inventorySnapshots.id,
+        revision: schema.inventorySnapshots.revision,
+        fixedAt: schema.inventorySnapshots.fixedAt,
+        combinedDigest: schema.inventorySnapshots.combinedDigest,
+        emitted: schema.inventorySnapshots.emittedCount,
+        introduced: schema.inventorySnapshots.introducedCount,
+        applied: schema.inventorySnapshots.appliedCount,
+        retired: schema.inventorySnapshots.retiredCount,
+        writtenOff: schema.inventorySnapshots.writtenOffCount,
+        disaggregation: schema.inventorySnapshots.disaggregationCount,
+      })
+      .from(schema.inventorySnapshots)
+      .where(
+        and(
+          eq(schema.inventorySnapshots.tenantId, tenantId),
+          eq(schema.inventorySnapshots.inventoryId, inventory.id),
+          eq(schema.inventorySnapshots.id, inventory.activeSnapshotId),
+        ),
+      )
+      .for("share");
+    if (!snapshot) throw new Error("Running inventory snapshot is missing");
+
+    return {
+      id: inventory.id,
+      number: inventory.number,
+      mode: inventory.mode,
+      productId: inventory.productId,
+      gtin14Snapshot: inventory.gtin14Snapshot,
+      lineId: inventory.lineId,
+      productionDateFrom: inventory.productionDateFrom,
+      productionDateTo: inventory.productionDateTo,
+      boxLabelTemplateId: inventory.boxLabelTemplateId,
+      activeSnapshotId: inventory.activeSnapshotId,
+      stationManifest: inventory.stationManifest,
+      snapshotId: snapshot.id,
+      snapshotRevision: snapshot.revision,
+      snapshotFixedAt: snapshot.fixedAt,
+      snapshotCombinedDigest: snapshot.combinedDigest,
+      emitted: snapshot.emitted,
+      introduced: snapshot.introduced,
+      applied: snapshot.applied,
+      retired: snapshot.retired,
+      writtenOff: snapshot.writtenOff,
+      disaggregation: snapshot.disaggregation,
     };
   }
 

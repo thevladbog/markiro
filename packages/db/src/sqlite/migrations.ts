@@ -491,4 +491,18 @@ export const STATION_MIGRATIONS: string[] = [
        WHERE 1
        ON CONFLICT(snapshot_id, code_hash) DO NOTHING;
      END;`,
+  // Safe recovery from a pre-proof staged/active revision needs the task-row
+  // reset and removal of that revision's immutable rows to be one SQLite
+  // statement. This transient target column drives that statement-local
+  // trigger; it never deletes the row currently named by the active pointer.
+  `ALTER TABLE inventory_task_mirror ADD COLUMN staged_reset_snapshot_id TEXT;`,
+  `DROP TRIGGER IF EXISTS inventory_task_mirror_reset_snapshot;`,
+  `CREATE TRIGGER inventory_task_mirror_reset_snapshot
+     AFTER UPDATE OF staged_reset_snapshot_id ON inventory_task_mirror
+     WHEN NEW.staged_reset_snapshot_id IS NOT NULL
+     BEGIN
+       DELETE FROM inventory_snapshot_codes_mirror
+        WHERE snapshot_id = NEW.staged_reset_snapshot_id
+          AND (NEW.active_snapshot_id IS NULL OR snapshot_id <> NEW.active_snapshot_id);
+     END;`,
 ];

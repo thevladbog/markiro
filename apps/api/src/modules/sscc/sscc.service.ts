@@ -806,7 +806,7 @@ export class SsccService {
         ),
       )
       .orderBy(schema.ssccBlocks.fromSerial);
-    return rows.map((row) => Number(row.fromSerial));
+    return [...new Set(rows.map((row) => Number(row.fromSerial)))];
   }
 
   /**

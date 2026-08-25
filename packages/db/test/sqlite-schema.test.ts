@@ -268,7 +268,8 @@ describe("STATION_MIGRATIONS", () => {
         .prepare(
           `SELECT active_snapshot_fixed_at, active_content_digest,
                   staged_snapshot_fixed_at, staged_content_digest,
-                  staged_verified_content_digest, staged_last_page_digest, staged_page_json
+                  staged_verified_content_digest, staged_last_page_digest, staged_page_json,
+                  staged_reset_snapshot_id
              FROM inventory_task_mirror`,
         )
         .get(),
@@ -280,7 +281,39 @@ describe("STATION_MIGRATIONS", () => {
       staged_verified_content_digest: null,
       staged_last_page_digest: null,
       staged_page_json: null,
+      staged_reset_snapshot_id: null,
     });
+  });
+
+  it("atomically removes only an explicitly reset inactive snapshot", () => {
+    const db = migratedDb();
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, active_snapshot_id, staged_snapshot_id)
+       VALUES ('inventory-1', 'INV-1', 'active-1', 'legacy-stage')`,
+    ).run();
+    for (const snapshotId of ["active-1", "legacy-stage"]) {
+      db.prepare(
+        `INSERT INTO inventory_snapshot_codes_mirror
+           (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+            expected, protected)
+         VALUES (?, ?, 'raw', '04600000000015', 'S', 'EMITTED', 0, 0)`,
+      ).run(snapshotId, snapshotId === "active-1" ? "a".repeat(64) : "b".repeat(64));
+    }
+
+    db.prepare(
+      `UPDATE inventory_task_mirror
+          SET staged_snapshot_id = NULL, staged_reset_snapshot_id = 'legacy-stage'
+        WHERE inventory_id = 'inventory-1'`,
+    ).run();
+
+    expect(
+      db
+        .prepare(
+          "SELECT DISTINCT snapshot_id FROM inventory_snapshot_codes_mirror ORDER BY snapshot_id",
+        )
+        .all(),
+    ).toEqual([{ snapshot_id: "active-1" }]);
   });
 
   it("creates the durable product image cache table", () => {

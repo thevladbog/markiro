@@ -24,39 +24,21 @@ import {
   SsccService,
 } from "../sscc/sscc.service";
 import {
-  parseStationInventoryManifest,
   type StationInventoryBundleCodesDto,
   type StationInventoryBundleCodesQueryDto,
   type StationInventoryBundleManifestDto,
   type StationInventoryManifest,
 } from "./station-inventory.dto";
+import {
+  resolveStoredStationInventoryManifest,
+  type StoredStationManifestFacts,
+} from "./station-inventory-manifest-upgrade";
 
 type InventoryTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type InventoryExecutor = EntitlementsExecutor;
 
-interface StoredManifestFacts {
-  id: string;
-  number: string;
-  mode: "check" | "repack";
-  productId: string;
-  gtin14Snapshot: string;
-  lineId: string;
-  productionDateFrom: string;
-  productionDateTo: string;
-  boxLabelTemplateId: string | null;
-  activeSnapshotId: string | null;
-  stationManifest: unknown;
+interface StoredManifestFacts extends StoredStationManifestFacts {
   startedAt: Date | null;
-  snapshotId: string | null;
-  snapshotRevision: number | null;
-  snapshotFixedAt: Date | null;
-  snapshotCombinedDigest: string | null;
-  emitted: number | null;
-  introduced: number | null;
-  applied: number | null;
-  retired: number | null;
-  writtenOff: number | null;
-  disaggregation: number | null;
 }
 
 const INVENTORY_BOX_BLOCK_SIZE = 2000;
@@ -83,9 +65,11 @@ export class StationInventoryBundleService {
         ),
       )
       .orderBy(asc(schema.inventories.number), asc(schema.inventories.id));
-    return rows
-      .filter((row) => this.isRecoveryEligible(access, row.startedAt))
-      .map((row) => this.validateStoredManifest(row));
+    return Promise.all(
+      rows
+        .filter((row) => this.isRecoveryEligible(access, row.startedAt))
+        .map((row) => this.resolveStoredManifest(this.db, tenantId, row)),
+    );
   }
 
   getManifest(
@@ -247,54 +231,19 @@ export class StationInventoryBundleService {
     if (!this.isRecoveryEligible(access, inventory.startedAt)) {
       throw new SubscriptionReadOnlyException();
     }
-    return this.validateStoredManifest(inventory);
+    return this.resolveStoredManifest(executor, tenantId, inventory);
   }
 
-  private validateStoredManifest(inventory: StoredManifestFacts): StationInventoryManifest {
-    let manifest: StationInventoryManifest;
+  private async resolveStoredManifest(
+    executor: InventoryExecutor,
+    tenantId: string,
+    inventory: StoredManifestFacts,
+  ): Promise<StationInventoryManifest> {
     try {
-      manifest = parseStationInventoryManifest(inventory.stationManifest);
+      return await resolveStoredStationInventoryManifest(executor, tenantId, inventory);
     } catch {
       throw new ConflictException({ code: "INVENTORY_BUNDLE_INVALID" });
     }
-    const codeCount =
-      inventory.emitted !== null &&
-      inventory.introduced !== null &&
-      inventory.applied !== null &&
-      inventory.retired !== null &&
-      inventory.writtenOff !== null &&
-      inventory.disaggregation !== null
-        ? inventory.emitted +
-          inventory.introduced +
-          inventory.applied +
-          inventory.retired +
-          inventory.writtenOff +
-          inventory.disaggregation
-        : -1;
-    if (
-      inventory.activeSnapshotId === null ||
-      inventory.snapshotId === null ||
-      inventory.snapshotRevision !== 1 ||
-      inventory.snapshotFixedAt === null ||
-      manifest.inventoryId !== inventory.id ||
-      manifest.inventoryNumber !== inventory.number ||
-      manifest.snapshotId !== inventory.snapshotId ||
-      manifest.snapshotId !== inventory.activeSnapshotId ||
-      manifest.snapshotRevision !== inventory.snapshotRevision ||
-      manifest.snapshotFixedAt !== inventory.snapshotFixedAt.toISOString() ||
-      manifest.combinedDigest !== inventory.snapshotCombinedDigest ||
-      manifest.codeCount !== codeCount ||
-      manifest.mode !== inventory.mode ||
-      manifest.productId !== inventory.productId ||
-      manifest.gtin14 !== inventory.gtin14Snapshot ||
-      manifest.lineId !== inventory.lineId ||
-      manifest.productionDateFrom !== inventory.productionDateFrom ||
-      manifest.productionDateTo !== inventory.productionDateTo ||
-      (manifest.boxLabelTemplate?.id ?? null) !== inventory.boxLabelTemplateId
-    ) {
-      throw new ConflictException({ code: "INVENTORY_BUNDLE_INVALID" });
-    }
-    return manifest;
   }
 
   private isRecoveryEligible(access: EffectiveEntitlements, startedAt: Date | null): boolean {

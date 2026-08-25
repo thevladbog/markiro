@@ -388,6 +388,63 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       .expect(400);
   });
 
+  it("backfills and serves a legacy running manifest from verified snapshot rows", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedBundle(agent);
+    await join(fixture);
+    const [inventory] = await db
+      .select({ manifest: schema.inventories.stationManifest })
+      .from(schema.inventories)
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+    const legacy = structuredClone(inventory!.manifest) as Record<string, unknown>;
+    delete legacy.snapshotFixedAt;
+    delete legacy.contentDigest;
+    await db
+      .update(schema.inventories)
+      .set({ stationManifest: legacy })
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+
+    const response = await request(app!.getHttpServer())
+      .get(`/station/inventories/${fixture.inventoryId}/bundle/manifest`)
+      .set("x-api-key", fixture.apiKey)
+      .expect(200);
+    expect(response.body).toMatchObject({
+      snapshotFixedAt: fixture.snapshotFixedAt,
+      contentDigest: CONTENT_DIGEST,
+    });
+    const [stored] = await db
+      .select({ manifest: schema.inventories.stationManifest })
+      .from(schema.inventories)
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+    expect(stored?.manifest).toMatchObject({
+      snapshotFixedAt: fixture.snapshotFixedAt,
+      contentDigest: CONTENT_DIGEST,
+    });
+  });
+
+  it("rejects a legacy running manifest with a corrupt immutable anchor", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedBundle(agent);
+    await join(fixture);
+    const [inventory] = await db
+      .select({ manifest: schema.inventories.stationManifest })
+      .from(schema.inventories)
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+    const legacy = structuredClone(inventory!.manifest) as Record<string, unknown>;
+    delete legacy.snapshotFixedAt;
+    delete legacy.contentDigest;
+    legacy.snapshotId = randomUUID();
+    await db
+      .update(schema.inventories)
+      .set({ stationManifest: legacy })
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+
+    await request(app!.getHttpServer())
+      .get(`/station/inventories/${fixture.inventoryId}/bundle/manifest`)
+      .set("x-api-key", fixture.apiKey)
+      .expect(409, { code: "INVENTORY_BUNDLE_INVALID" });
+  });
+
   it("reuses a device's existing SSCC block with original bounds and consumed cursor without creating a shift", async () => {
     const agent = request.agent(app!.getHttpServer());
     const fixture = await seedBundle(agent, "repack");

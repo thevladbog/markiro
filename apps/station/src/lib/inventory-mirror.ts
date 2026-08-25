@@ -175,7 +175,7 @@ function immutableManifest(manifest: InventoryBundleManifest): unknown {
 function parseStoredManifest(
   json: string | null,
   incoming: InventoryBundleManifest,
-): InventoryBundleManifest {
+): { manifest: InventoryBundleManifest; hasProof: boolean } {
   if (json === null) throw new Error("active inventory manifest is missing");
   let value: unknown;
   try {
@@ -191,11 +191,31 @@ function parseStoredManifest(
   // existed. A same-snapshot server response may fix those two facts once;
   // every other field still passes the current strict shared parser.
   const legacy = value as Record<string, unknown>;
-  return parseStationInventoryBundleManifest({
-    ...legacy,
-    snapshotFixedAt: legacy.snapshotFixedAt ?? incoming.snapshotFixedAt,
-    contentDigest: legacy.contentDigest ?? incoming.contentDigest,
-  });
+  return {
+    manifest: parseStationInventoryBundleManifest({
+      ...legacy,
+      snapshotFixedAt: legacy.snapshotFixedAt ?? incoming.snapshotFixedAt,
+      contentDigest: legacy.contentDigest ?? incoming.contentDigest,
+    }),
+    hasProof:
+      typeof legacy.snapshotFixedAt === "string" && typeof legacy.contentDigest === "string",
+  };
+}
+
+function storedManifestHasProof(json: string | null): boolean {
+  if (json === null) return false;
+  try {
+    const value: unknown = JSON.parse(json);
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      typeof (value as Record<string, unknown>).snapshotFixedAt === "string" &&
+      typeof (value as Record<string, unknown>).contentDigest === "string"
+    );
+  } catch {
+    return false;
+  }
 }
 
 function sameImmutableManifest(
@@ -237,15 +257,12 @@ function mergeSsccSafety(
       consumedThroughSerial: consumed.length === 0 ? null : Math.max(...consumed),
     };
   } else if (
-    incoming.sscc.fromSerial > current.sscc.fromSerial &&
     (incoming.ssccRevokedFrom.includes(current.sscc.fromSerial) ||
-      current.sscc.consumedThroughSerial === current.sscc.toSerial)
+      current.sscc.consumedThroughSerial === current.sscc.toSerial) &&
+    !revoked.includes(incoming.sscc.fromSerial)
   ) {
     sscc = incoming.sscc;
-  } else if (
-    incoming.sscc.fromSerial < current.sscc.fromSerial &&
-    current.ssccRevokedFrom.includes(incoming.sscc.fromSerial)
-  ) {
+  } else if (current.ssccRevokedFrom.includes(incoming.sscc.fromSerial)) {
     sscc = current.sscc;
   } else {
     throw new Error("unsafe inventory SSCC transition");
@@ -290,7 +307,7 @@ async function refreshActiveManifest(
     ) {
       throw new Error("inventory bundle active state changed");
     }
-    const current = parseStoredManifest(observed.active_manifest_json, incoming);
+    const current = parseStoredManifest(observed.active_manifest_json, incoming).manifest;
     const merged = mergeSsccSafety(current, incoming);
     const currentJson = observed.active_manifest_json;
     const mergedJson = JSON.stringify(merged);
@@ -324,6 +341,98 @@ async function refreshActiveManifest(
   throw new Error("inventory bundle active manifest refresh was superseded");
 }
 
+async function resetLegacyStage(
+  exec: SqlExecutor,
+  inventoryId: string,
+  before: TaskStateRow,
+): Promise<void> {
+  if (before.staged_snapshot_id === null) return;
+  await exec.run(
+    `UPDATE inventory_task_mirror
+        SET staged_reset_snapshot_id = staged_snapshot_id,
+            staged_snapshot_id = NULL, staged_snapshot_revision = NULL,
+            staged_snapshot_fixed_at = NULL, staged_combined_digest = NULL,
+            staged_content_digest = NULL, staged_code_count = NULL,
+            staged_manifest_json = NULL, staged_next_cursor = NULL,
+            staged_verified_digest = NULL, staged_verified_content_digest = NULL,
+            staged_last_page_digest = NULL, staged_page_json = NULL,
+            staging_generation = staging_generation + 1, updated_at = ?
+      WHERE inventory_id = ?
+        AND staged_snapshot_id = ?
+        AND staged_snapshot_fixed_at IS ?
+        AND staged_content_digest IS ?
+        AND staged_manifest_json IS ?`,
+    [
+      new Date().toISOString(),
+      inventoryId,
+      before.staged_snapshot_id,
+      before.staged_snapshot_fixed_at,
+      before.staged_content_digest,
+      before.staged_manifest_json,
+    ],
+  );
+}
+
+async function resetLegacyActive(
+  exec: SqlExecutor,
+  inventoryId: string,
+  before: TaskStateRow,
+): Promise<void> {
+  if (before.active_snapshot_id === null) return;
+  await exec.run(
+    `UPDATE inventory_task_mirror
+        SET staged_reset_snapshot_id = active_snapshot_id,
+            active_snapshot_id = NULL, active_snapshot_revision = NULL,
+            active_snapshot_fixed_at = NULL, active_combined_digest = NULL,
+            active_content_digest = NULL, active_code_count = NULL,
+            active_manifest_json = NULL,
+            staged_snapshot_id = CASE WHEN staged_snapshot_id = active_snapshot_id
+              THEN NULL ELSE staged_snapshot_id END,
+            staged_snapshot_revision = CASE WHEN staged_snapshot_id = active_snapshot_id
+              THEN NULL ELSE staged_snapshot_revision END,
+            staged_snapshot_fixed_at = CASE WHEN staged_snapshot_id = active_snapshot_id
+              THEN NULL ELSE staged_snapshot_fixed_at END,
+            staged_combined_digest = CASE WHEN staged_snapshot_id = active_snapshot_id
+              THEN NULL ELSE staged_combined_digest END,
+            staged_content_digest = CASE WHEN staged_snapshot_id = active_snapshot_id
+              THEN NULL ELSE staged_content_digest END,
+            staged_code_count = CASE WHEN staged_snapshot_id = active_snapshot_id
+              THEN NULL ELSE staged_code_count END,
+            staged_manifest_json = CASE WHEN staged_snapshot_id = active_snapshot_id
+              THEN NULL ELSE staged_manifest_json END,
+            staged_next_cursor = CASE WHEN staged_snapshot_id = active_snapshot_id
+              THEN NULL ELSE staged_next_cursor END,
+            staged_verified_digest = CASE WHEN staged_snapshot_id = active_snapshot_id
+              THEN NULL ELSE staged_verified_digest END,
+            staged_verified_content_digest = CASE WHEN staged_snapshot_id = active_snapshot_id
+              THEN NULL ELSE staged_verified_content_digest END,
+            staged_last_page_digest = CASE WHEN staged_snapshot_id = active_snapshot_id
+              THEN NULL ELSE staged_last_page_digest END,
+            staged_page_json = CASE WHEN staged_snapshot_id = active_snapshot_id
+              THEN NULL ELSE staged_page_json END,
+            staging_generation = CASE WHEN staged_snapshot_id = active_snapshot_id
+              THEN staging_generation + 1 ELSE staging_generation END,
+            updated_at = ?
+      WHERE inventory_id = ?
+        AND active_snapshot_id = ?
+        AND active_snapshot_fixed_at IS ?
+        AND active_combined_digest IS ?
+        AND active_content_digest IS ?
+        AND active_code_count IS ?
+        AND active_manifest_json IS ?`,
+    [
+      new Date().toISOString(),
+      inventoryId,
+      before.active_snapshot_id,
+      before.active_snapshot_fixed_at,
+      before.active_combined_digest,
+      before.active_content_digest,
+      before.active_code_count,
+      before.active_manifest_json,
+    ],
+  );
+}
+
 /** Starts/resumes one server-ordered revision or monotonically tightens active SSCC safety. */
 export async function beginInventoryMirror(
   exec: SqlExecutor,
@@ -343,9 +452,34 @@ export async function beginInventoryMirror(
     ) {
       throw new Error("inventory snapshot immutable fixation mismatch");
     }
+    const legacyActive =
+      before.active_snapshot_fixed_at === null ||
+      before.active_content_digest === null ||
+      !storedManifestHasProof(before.active_manifest_json);
+    if (legacyActive) {
+      const rows = (await snapshotRows(exec, manifest.snapshotId)).map(storedCode);
+      if (
+        rows.length !== manifest.codeCount ||
+        inventorySnapshotContentDigest(rows) !== manifest.contentDigest
+      ) {
+        await resetLegacyActive(exec, manifest.inventoryId, before);
+        return beginInventoryMirror(exec, manifest);
+      }
+    }
     manifest = await refreshActiveManifest(exec, before, manifest);
     const active = await taskState(exec, manifest.inventoryId);
     return candidateFrom(manifest, active?.staging_generation ?? before.staging_generation, true);
+  }
+
+  if (
+    before?.staged_snapshot_id !== null &&
+    before?.staged_snapshot_id !== undefined &&
+    (before.staged_snapshot_fixed_at === null ||
+      before.staged_content_digest === null ||
+      !storedManifestHasProof(before.staged_manifest_json))
+  ) {
+    await resetLegacyStage(exec, manifest.inventoryId, before);
+    return beginInventoryMirror(exec, manifest);
   }
 
   if (
@@ -375,7 +509,7 @@ export async function beginInventoryMirror(
     ) {
       throw new Error("inventory snapshot immutable fixation mismatch");
     }
-    const current = parseStoredManifest(before.staged_manifest_json, manifest);
+    const current = parseStoredManifest(before.staged_manifest_json, manifest).manifest;
     manifest = mergeSsccSafety(current, manifest);
   }
 
@@ -572,6 +706,47 @@ async function requireProspectiveFinalContent(
   }
 }
 
+async function verifyAndMarkFinalSnapshot(
+  exec: SqlExecutor,
+  candidate: InventoryMirrorCandidate,
+  pageDigest: string,
+): Promise<void> {
+  const allRows = (await snapshotRows(exec, candidate.snapshotId)).map(storedCode);
+  if (
+    allRows.length !== candidate.codeCount ||
+    inventorySnapshotContentDigest(allRows) !== candidate.contentDigest
+  ) {
+    throw new Error("inventory bundle content digest mismatch");
+  }
+  await exec.run(
+    `UPDATE inventory_task_mirror
+        SET staged_verified_digest = staged_combined_digest,
+            staged_verified_content_digest = staged_content_digest,
+            updated_at = ?
+      WHERE inventory_id = ?
+        AND staged_snapshot_id = ?
+        AND staged_snapshot_fixed_at = ?
+        AND staged_combined_digest = ?
+        AND staged_content_digest = ?
+        AND staging_generation = ?
+        AND staged_next_cursor IS NULL
+        AND staged_last_page_digest = ?
+        AND (SELECT COUNT(*) FROM inventory_snapshot_codes_mirror
+              WHERE snapshot_id = ?) = staged_code_count`,
+    [
+      new Date().toISOString(),
+      candidate.inventoryId,
+      candidate.snapshotId,
+      candidate.snapshotFixedAt,
+      candidate.combinedDigest,
+      candidate.contentDigest,
+      candidate.generation,
+      pageDigest,
+      candidate.snapshotId,
+    ],
+  );
+}
+
 /**
  * Accepts one page with one guarded UPDATE. Its SQLite trigger inserts the
  * page rows in the same statement transaction, so two responses sharing a
@@ -599,6 +774,9 @@ export async function ingestInventoryPage(
   }
   if (current.staged_last_page_digest === page.pageDigest) {
     await verifyStoredPage(exec, candidate, page);
+    if (page.nextCursor === null) {
+      await verifyAndMarkFinalSnapshot(exec, candidate, page.pageDigest);
+    }
     return;
   }
   if (current.staged_next_cursor !== cursor) throw new Error("inventory bundle cursor mismatch");
@@ -647,40 +825,7 @@ export async function ingestInventoryPage(
   await verifyStoredPage(exec, candidate, page);
 
   if (page.nextCursor === null) {
-    const allRows = (await snapshotRows(exec, candidate.snapshotId)).map(storedCode);
-    if (
-      allRows.length !== candidate.codeCount ||
-      inventorySnapshotContentDigest(allRows) !== candidate.contentDigest
-    ) {
-      throw new Error("inventory bundle content digest mismatch");
-    }
-    await exec.run(
-      `UPDATE inventory_task_mirror
-          SET staged_verified_digest = staged_combined_digest,
-              staged_verified_content_digest = staged_content_digest,
-              updated_at = ?
-        WHERE inventory_id = ?
-          AND staged_snapshot_id = ?
-          AND staged_snapshot_fixed_at = ?
-          AND staged_combined_digest = ?
-          AND staged_content_digest = ?
-          AND staging_generation = ?
-          AND staged_next_cursor IS NULL
-          AND staged_last_page_digest = ?
-          AND (SELECT COUNT(*) FROM inventory_snapshot_codes_mirror
-                WHERE snapshot_id = ?) = staged_code_count`,
-      [
-        new Date().toISOString(),
-        candidate.inventoryId,
-        candidate.snapshotId,
-        candidate.snapshotFixedAt,
-        candidate.combinedDigest,
-        candidate.contentDigest,
-        candidate.generation,
-        page.pageDigest,
-        candidate.snapshotId,
-      ],
-    );
+    await verifyAndMarkFinalSnapshot(exec, candidate, page.pageDigest);
   }
 }
 

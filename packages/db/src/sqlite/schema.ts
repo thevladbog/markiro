@@ -326,6 +326,7 @@ export const inventoryTaskMirror = sqliteTable("inventory_task_mirror", {
   stagedVerifiedContentDigest: text("staged_verified_content_digest"),
   stagedLastPageDigest: text("staged_last_page_digest"),
   stagedPageJson: text("staged_page_json"),
+  stagedResetSnapshotId: text("staged_reset_snapshot_id"),
   stagingGeneration: integer("staging_generation").notNull().default(0),
   updatedAt: text("updated_at"),
 });

@@ -201,6 +201,35 @@ describe.skipIf(!ready)("sscc e2e", () => {
     expect(rows[0]!.fromSerial).toBe(block.fromSerial);
   });
 
+  it("deduplicates duplicate historical revoked block starts in bundle safety output", async () => {
+    const prefix = freshPrefix();
+    const deviceId = await registerDevice("Duplicate revoked start device");
+    await db.insert(schema.ssccBlocks).values([
+      {
+        tenantId,
+        issuerPrefix: prefix,
+        extensionDigit: 0,
+        deviceId,
+        fromSerial: 50,
+        toSerial: 99,
+        revokedAt: new Date(),
+      },
+      {
+        tenantId,
+        issuerPrefix: prefix,
+        extensionDigit: 0,
+        deviceId,
+        fromSerial: 50,
+        toSerial: 149,
+        revokedAt: new Date(),
+      },
+    ]);
+
+    await expect(
+      app!.get(SsccService).revokedFromSerials(tenantId, prefix, 0, deviceId),
+    ).resolves.toEqual([50]);
+  });
+
   it("resolves a shift's issuer to the counterparty's issuer prefix when one is set", async () => {
     const prefix = await app!.get(SsccService).resolveIssuerPrefix(tenantId, shiftWithIssuerId);
     expect(prefix).toBe(COUNTERPARTY_GLN.slice(0, 9));
