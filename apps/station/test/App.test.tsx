@@ -3145,7 +3145,9 @@ describe("App", () => {
     // port/baud did not change, and that reconciling run is what must
     // close before it opens.
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Done" }));
+    const done = await screen.findByRole("button", { name: "Done" });
+    await waitFor(() => expect((done as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(done);
 
     await waitFor(() => expect(calls).toContain("open"));
     expect(calls).toEqual(["close", "open"]);
