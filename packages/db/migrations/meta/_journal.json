@@ -505,6 +505,13 @@
       "when": 1787628564661,
       "tag": "0071_fantastic_hellion",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1787631214284,
+      "tag": "0072_foamy_psynapse",
+      "breakpoints": true
     }
   ]
 }

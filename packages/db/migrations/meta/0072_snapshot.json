@@ -1,6 +1,6 @@
 {
-  "id": "9b30617a-582f-4bd9-ba83-2ca49aa0af99",
-  "prevId": "a5e30cba-26a6-40ed-a688-a9e5c9c5877c",
+  "id": "4d735098-25a4-435a-8409-14337372daae",
+  "prevId": "9b30617a-582f-4bd9-ba83-2ca49aa0af99",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2683,8 +2683,7 @@
           "name": "allocation_order",
           "type": "bigint",
           "primaryKey": false,
-          "notNull": true,
-          "default": "nextval('sscc_blocks_allocation_order_seq'::regclass)"
+          "notNull": true
         },
         "tenant_id": {
           "name": "tenant_id",
@@ -2743,9 +2742,33 @@
         }
       },
       "indexes": {
-        "sscc_blocks_allocation_order_uq": {
-          "name": "sscc_blocks_allocation_order_uq",
+        "sscc_blocks_stream_allocation_order_uq": {
+          "name": "sscc_blocks_stream_allocation_order_uq",
           "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "issuer_prefix",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "extension_digit",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
             {
               "expression": "allocation_order",
               "isExpression": false,

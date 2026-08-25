@@ -225,6 +225,48 @@ describe.skipIf(!ready)("sscc e2e", () => {
     ).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
   });
 
+  it("continues scoped allocation order after migrated blocks", async () => {
+    const svc = app!.get(SsccService);
+    const prefix = freshPrefix();
+    const deviceId = await registerDevice("Migrated scoped order device");
+    await db.insert(schema.ssccCounters).values({
+      tenantId,
+      issuerPrefix: prefix,
+      extensionDigit: 0,
+      nextSerial: 11,
+    });
+    await db.insert(schema.ssccBlocks).values({
+      allocationOrder: 1,
+      tenantId,
+      issuerPrefix: prefix,
+      extensionDigit: 0,
+      deviceId,
+      fromSerial: 1,
+      toSerial: 10,
+      issuedAt: new Date("2026-08-25T00:00:00.000Z"),
+    });
+
+    await expect(svc.allocate(tenantId, prefix, 0, deviceId, 10)).resolves.toMatchObject({
+      fromSerial: 11,
+      toSerial: 20,
+    });
+
+    const rows = await db
+      .select({ allocationOrder: schema.ssccBlocks.allocationOrder })
+      .from(schema.ssccBlocks)
+      .where(
+        and(
+          eq(schema.ssccBlocks.tenantId, tenantId),
+          eq(schema.ssccBlocks.issuerPrefix, prefix),
+          eq(schema.ssccBlocks.extensionDigit, 0),
+          eq(schema.ssccBlocks.deviceId, deviceId),
+        ),
+      );
+    expect(
+      rows.map((row) => Number(row.allocationOrder)).sort((left, right) => left - right),
+    ).toEqual([1, 2]);
+  });
+
   it("starts a fresh box range at serial one", async () => {
     const deviceId = await registerDevice("First serial device");
     const block = await app!.get(SsccService).allocate(tenantId, "555555555", 0, deviceId, 3);
