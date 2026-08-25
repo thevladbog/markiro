@@ -111,6 +111,9 @@ const appSecurityGroupFieldScopes = new Map([
 const appSecurityGroupRuleFieldScopes = new Map([
   ["description", "description"],
   ["from_port", "from-port"],
+  ["id", "id"],
+  ["labels", "labels"],
+  ["port", "port"],
   ["predefined_target", "predefined-target"],
   ["protocol", "protocol"],
   ["security_group_id", "security-group"],
