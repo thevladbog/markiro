@@ -320,6 +320,7 @@ function securityGroupActionScope(resource, baseScope) {
     ...new Set(
       fields.map((field) => {
         if (field !== "ingress") return securityGroupFieldScopes.get(field) ?? "other";
+        if (resource.change?.after_unknown?.ingress === true) return "ingress-after-unknown";
         const ingressFields = changedArrayObjectKeys(beforeValue.ingress, afterValue.ingress);
         if (!ingressFields || ingressFields.length === 0) return "ingress";
         const ingressScopes = [
