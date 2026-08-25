@@ -480,6 +480,54 @@ test("guard CLI reports only a fixed rejection scope without plan values", async
   });
 });
 
+test("guard CLI exposes a fixed rejection scope as a GitHub annotation", async () => {
+  const safe = await readFixture("safe");
+  const protectedUpdate = copy(safe);
+  resource(protectedUpdate, "module.compute.yandex_compute_instance.app").change.actions = [
+    "update",
+  ];
+  resource(protectedUpdate, "module.compute.yandex_compute_instance.app").change.after.name =
+    "do-not-print-this-plan-value";
+
+  await withPlan(protectedUpdate, (planPath) => {
+    let stdout = "";
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [script, planPath], {
+        cwd: root,
+        env: { ...process.env, GITHUB_ACTIONS: "true" },
+        stdio: "pipe",
+      });
+      assert.fail("guard CLI unexpectedly accepted protected update");
+    } catch (error) {
+      stdout = String(error.stdout);
+      stderr = String(error.stderr);
+    }
+    assert.equal(stdout, "::error title=Production plan rejected::safe-action-app-compute-name\n");
+    assert.equal(stderr, "production plan rejected (safe-action-app-compute-name)\n");
+    assert.doesNotMatch(stdout, /do-not-print-this-plan-value/);
+    assert.doesNotMatch(stderr, /do-not-print-this-plan-value/);
+  });
+});
+
+test("guard CLI does not annotate unscoped errors in GitHub Actions", () => {
+  let stdout = "";
+  let stderr = "";
+  try {
+    execFileSync(process.execPath, [script], {
+      cwd: root,
+      env: { ...process.env, GITHUB_ACTIONS: "true" },
+      stdio: "pipe",
+    });
+    assert.fail("guard CLI unexpectedly accepted a missing plan path");
+  } catch (error) {
+    stdout = String(error.stdout);
+    stderr = String(error.stderr);
+  }
+  assert.equal(stdout, "");
+  assert.equal(stderr, "production plan rejected\n");
+});
+
 test("guard CLI identifies every fixed safe resource without plan values", async () => {
   const safe = await readFixture("safe");
   for (const [address, type, expectedScope] of fixedSafeActionScopes) {
