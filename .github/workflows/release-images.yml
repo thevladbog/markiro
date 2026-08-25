@@ -217,6 +217,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      actions: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -338,3 +339,11 @@ jobs:
             printf -- '- API: `ghcr.io/thevladbog/markiro-api@%s`\n' "$api_digest"
             printf -- '- Edge: `ghcr.io/thevladbog/markiro-edge@%s`\n' "$edge_digest"
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Delete the verified images artifact after publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.production-bundle.outputs.verified-images-artifact-id }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}"
