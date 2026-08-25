@@ -144,6 +144,23 @@ describe("rendered landing page", () => {
     );
   });
 
+  it("renders localized cookie choices and a persistent settings control", () => {
+    for (const [route, labels] of [
+      ["/", ["Отклонить", "Настроить", "Принять все", "Настройки cookies"]],
+      ["/en/", ["Reject", "Customize", "Accept all", "Cookie settings"]],
+    ] as const) {
+      const localizedDocument = documents.get(route);
+      const panel = localizedDocument?.querySelector("[data-consent-panel]");
+      expect(panel?.hasAttribute("hidden")).toBe(true);
+      expect(panel?.querySelector("[data-consent-reject]")?.textContent?.trim()).toBe(labels[0]);
+      expect(panel?.querySelector("[data-consent-customize]")?.textContent?.trim()).toBe(labels[1]);
+      expect(panel?.querySelector("[data-consent-accept]")?.textContent?.trim()).toBe(labels[2]);
+      expect(
+        localizedDocument?.querySelector("footer [data-consent-settings]")?.textContent?.trim(),
+      ).toBe(labels[3]);
+    }
+  });
+
   it("renders the approved semantic section hierarchy", () => {
     expect(document.querySelectorAll("h1")).toHaveLength(1);
     expect(document.querySelector("nav[aria-label]")).not.toBeNull();
