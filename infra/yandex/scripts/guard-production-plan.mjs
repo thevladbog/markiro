@@ -354,6 +354,13 @@ function securityGroupActionScope(resource, baseScope) {
           ].sort();
           return `ingress-after-unknown-${unknownIngressScopes.join("-and-")}`;
         }
+        if (
+          Array.isArray(beforeValue.ingress) &&
+          Array.isArray(afterValue.ingress) &&
+          beforeValue.ingress.length !== afterValue.ingress.length
+        ) {
+          return `ingress-cardinality-before-${beforeValue.ingress.length}-after-${afterValue.ingress.length}`;
+        }
         const ingressFields = changedArrayObjectKeys(beforeValue.ingress, afterValue.ingress);
         if (!ingressFields || ingressFields.length === 0) return "ingress";
         const ingressScopes = [
