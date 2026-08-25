@@ -1,0 +1,4935 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-25T20:57:09.358Z",
+  "testedCommit": "320be2fcc3a1aa8b036854513102e661a441ce03",
+  "browser": "Chromium 151.0.7922.34",
+  "server": "isolated local Station Vite on 127.0.0.1:43179",
+  "fixtureDate": "2026-08-19",
+  "summary": {
+    "rows": 96,
+    "passed": 96,
+    "failed": 0,
+    "states": 16,
+    "locales": ["ru", "en"],
+    "viewports": [
+      {
+        "width": 1024,
+        "height": 768
+      },
+      {
+        "width": 1280,
+        "height": 800
+      },
+      {
+        "width": 1280,
+        "height": 1024
+      }
+    ],
+    "consoleErrors": 0,
+    "consoleWarnings": 0,
+    "pageErrors": 0,
+    "networkFailures": 0,
+    "responseFailures": 0,
+    "nestedScrollRegions": 0,
+    "clippedInteractives": 0,
+    "overlappingInteractives": 0,
+    "targetsBelow64": 0,
+    "focusPassed": 96,
+    "statusDefects": 0,
+    "sensitiveLeaks": 0
+  },
+  "screenshots": {
+    "inventory-repack-capacity-20:ru:1024x768": "inventory-repack-capacity-20-1024x768-ru.png",
+    "inventory-repack-corrections:ru:1024x768": "inventory-repack-corrections-1024x768-ru.png",
+    "inventory-print-recovery:ru:1024x768": "inventory-print-recovery-1024x768-ru.png",
+    "inventory-protected-moving-by-ud:ru:1024x768": "inventory-protected-moving-by-ud-1024x768-ru.png",
+    "inventory-other-line-confirmation:ru:1024x768": "inventory-other-line-confirmation-1024x768-ru.png",
+    "inventory-simple-box-accepted:ru:1280x800": "inventory-simple-box-accepted-1280x800-ru.png"
+  },
+  "results": [
+    {
+      "state": "inventory-task-selection",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-task-selection",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Производственные смены 0",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-other-line-confirmation",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-other-line-confirmation",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Отмена",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "⧉После подтверждения сканы этой станции попадут в данную инвентаризацию и будут отмечены как выполне",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": "inventory-other-line-confirmation-1024x768-ru.png",
+      "passed": true
+    },
+    {
+      "state": "inventory-simple-box-accepted",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-simple-box-accepted",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "✓Короб принят: 20 кодовКОРОБ",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-duplicate-other-terminal",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-duplicate-other-terminal",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⟳Код уже проверен на другом терминалеgallery-terminal-b · 13:00:00ДУБЛЬ",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-known-ineligible",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-known-ineligible",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⟳Код не участвует в инвентаризацииНЕ УЧАСТВУЕТ",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-protected-moving-by-ud",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-protected-moving-by-ud",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "✕Код не учтён: уже в отгрузкеНЕ УЧТЁН",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": "inventory-protected-moving-by-ud-1024x768-ru.png",
+      "passed": true
+    },
+    {
+      "state": "inventory-not-in-snapshot",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-not-in-snapshot",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⧉Код отсутствует в исходном снимкеРАСХОЖДЕНИЕ",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-awaiting-old-box",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-repack-awaiting-old-box",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Отсканируйте старый короб",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-scanning",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-repack-scanning",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Сканируйте каждую бутылкуСтарый короб выбран",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Старый короб выбран",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-capacity-20",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-repack-capacity-20",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Сканируйте каждую бутылкуБутылка добавлена в новый короб",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Бутылка добавлена в новый короб",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": "inventory-repack-capacity-20-1024x768-ru.png",
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-box-ready",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-repack-box-ready",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Короб закрыт. Печать этикетки ожидаетсяБутылка добавлена в новый короб",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Бутылка добавлена в новый короб",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-corrections",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-repack-corrections",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 5,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Убрать последнюю бутылку",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": "inventory-repack-corrections-1024x768-ru.png",
+      "passed": true
+    },
+    {
+      "state": "inventory-production-date-change",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-production-date-change",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 3,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Применить дату",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-leave-open-box",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-leave-open-box",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Не удалось выйти. Задание и неотправленные сканы сохранены.",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Сканируйте каждую бутылку",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-print-recovery",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-print-recovery",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 6,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "!Этикетка не напечатанаПринтер не подтвердил печать.",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": "inventory-print-recovery-1024x768-ru.png",
+      "passed": true
+    },
+    {
+      "state": "inventory-same-sscc-reprint-confirmation",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-same-sscc-reprint-confirmation",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 6,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Убрать последнюю бутылку",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-task-selection",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-task-selection",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Production shifts 0",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-other-line-confirmation",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-other-line-confirmation",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Cancel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "⧉After confirmation, scans from this station will belong to this inventory and will be identified as",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-simple-box-accepted",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-simple-box-accepted",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "✓Box accepted: 20 codesBOX",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-duplicate-other-terminal",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-duplicate-other-terminal",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⟳Code was already checked on another terminalgallery-terminal-b · 13:00:00DUPLICATE",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-known-ineligible",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-known-ineligible",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⟳Code is not part of this inventoryINELIGIBLE",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-protected-moving-by-ud",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-protected-moving-by-ud",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "✕Code not counted: already in shipmentNOT COUNTED",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-not-in-snapshot",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-not-in-snapshot",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⧉Code is absent from the source snapshotDISCREPANCY",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-awaiting-old-box",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-repack-awaiting-old-box",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Scan the source box",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-scanning",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-repack-scanning",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Scan every bottleSource box selected",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Source box selected",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-capacity-20",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-repack-capacity-20",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Scan every bottleBottle added to the new box",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Bottle added to the new box",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-box-ready",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-repack-box-ready",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Box closed. Label printing is pendingBottle added to the new box",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Bottle added to the new box",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-corrections",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-repack-corrections",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 5,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Remove last bottle",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-production-date-change",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-production-date-change",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 3,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Apply date",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-leave-open-box",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-leave-open-box",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Could not leave. The task and pending scans are preserved.",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Scan every bottle",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-print-recovery",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-print-recovery",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 6,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "!Label was not printedThe printer did not confirm printing.",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-same-sscc-reprint-confirmation",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "actualState": "inventory-same-sscc-reprint-confirmation",
+      "actualLocale": "en",
+      "window": {
+        "width": 1024,
+        "height": 768,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1024,
+        "height": 768,
+        "bodyWidth": 1024,
+        "bodyHeight": 768
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 6,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Remove last bottle",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-task-selection",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-task-selection",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Производственные смены 0",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-other-line-confirmation",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-other-line-confirmation",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Отмена",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "⧉После подтверждения сканы этой станции попадут в данную инвентаризацию и будут отмечены как выполне",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-simple-box-accepted",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-simple-box-accepted",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "✓Короб принят: 20 кодовКОРОБ",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": "inventory-simple-box-accepted-1280x800-ru.png",
+      "passed": true
+    },
+    {
+      "state": "inventory-duplicate-other-terminal",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-duplicate-other-terminal",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⟳Код уже проверен на другом терминалеgallery-terminal-b · 13:00:00ДУБЛЬ",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-known-ineligible",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-known-ineligible",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⟳Код не участвует в инвентаризацииНЕ УЧАСТВУЕТ",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-protected-moving-by-ud",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-protected-moving-by-ud",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "✕Код не учтён: уже в отгрузкеНЕ УЧТЁН",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-not-in-snapshot",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-not-in-snapshot",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⧉Код отсутствует в исходном снимкеРАСХОЖДЕНИЕ",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-awaiting-old-box",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-repack-awaiting-old-box",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Отсканируйте старый короб",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-scanning",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-repack-scanning",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Сканируйте каждую бутылкуСтарый короб выбран",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Старый короб выбран",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-capacity-20",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-repack-capacity-20",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Сканируйте каждую бутылкуБутылка добавлена в новый короб",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Бутылка добавлена в новый короб",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-box-ready",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-repack-box-ready",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Короб закрыт. Печать этикетки ожидаетсяБутылка добавлена в новый короб",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Бутылка добавлена в новый короб",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-corrections",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-repack-corrections",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 5,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Убрать последнюю бутылку",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-production-date-change",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-production-date-change",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 3,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Применить дату",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-leave-open-box",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-leave-open-box",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Не удалось выйти. Задание и неотправленные сканы сохранены.",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Сканируйте каждую бутылку",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-print-recovery",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-print-recovery",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 6,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "!Этикетка не напечатанаПринтер не подтвердил печать.",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-same-sscc-reprint-confirmation",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-same-sscc-reprint-confirmation",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 6,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Убрать последнюю бутылку",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-task-selection",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-task-selection",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Production shifts 0",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-other-line-confirmation",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-other-line-confirmation",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Cancel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "⧉After confirmation, scans from this station will belong to this inventory and will be identified as",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-simple-box-accepted",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-simple-box-accepted",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "✓Box accepted: 20 codesBOX",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-duplicate-other-terminal",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-duplicate-other-terminal",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⟳Code was already checked on another terminalgallery-terminal-b · 13:00:00DUPLICATE",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-known-ineligible",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-known-ineligible",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⟳Code is not part of this inventoryINELIGIBLE",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-protected-moving-by-ud",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-protected-moving-by-ud",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "✕Code not counted: already in shipmentNOT COUNTED",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-not-in-snapshot",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-not-in-snapshot",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⧉Code is absent from the source snapshotDISCREPANCY",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-awaiting-old-box",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-repack-awaiting-old-box",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Scan the source box",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-scanning",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-repack-scanning",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Scan every bottleSource box selected",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Source box selected",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-capacity-20",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-repack-capacity-20",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Scan every bottleBottle added to the new box",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Bottle added to the new box",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-box-ready",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-repack-box-ready",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Box closed. Label printing is pendingBottle added to the new box",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Bottle added to the new box",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-corrections",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-repack-corrections",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 5,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Remove last bottle",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-production-date-change",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-production-date-change",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 3,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Apply date",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-leave-open-box",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-leave-open-box",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Could not leave. The task and pending scans are preserved.",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Scan every bottle",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-print-recovery",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-print-recovery",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 6,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "!Label was not printedThe printer did not confirm printing.",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-same-sscc-reprint-confirmation",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "actualState": "inventory-same-sscc-reprint-confirmation",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 800,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 800,
+        "bodyWidth": 1280,
+        "bodyHeight": 800
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 6,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Remove last bottle",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-task-selection",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-task-selection",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Производственные смены 0",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-other-line-confirmation",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-other-line-confirmation",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Отмена",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "⧉После подтверждения сканы этой станции попадут в данную инвентаризацию и будут отмечены как выполне",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-simple-box-accepted",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-simple-box-accepted",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "✓Короб принят: 20 кодовКОРОБ",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-duplicate-other-terminal",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-duplicate-other-terminal",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⟳Код уже проверен на другом терминалеgallery-terminal-b · 13:00:00ДУБЛЬ",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-known-ineligible",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-known-ineligible",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⟳Код не участвует в инвентаризацииНЕ УЧАСТВУЕТ",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-protected-moving-by-ud",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-protected-moving-by-ud",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "✕Код не учтён: уже в отгрузкеНЕ УЧТЁН",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-not-in-snapshot",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-not-in-snapshot",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⧉Код отсутствует в исходном снимкеРАСХОЖДЕНИЕ",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-awaiting-old-box",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-repack-awaiting-old-box",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Отсканируйте старый короб",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-scanning",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-repack-scanning",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Сканируйте каждую бутылкуСтарый короб выбран",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Старый короб выбран",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-capacity-20",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-repack-capacity-20",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Сканируйте каждую бутылкуБутылка добавлена в новый короб",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Бутылка добавлена в новый короб",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-box-ready",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-repack-box-ready",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Короб закрыт. Печать этикетки ожидаетсяБутылка добавлена в новый короб",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Бутылка добавлена в новый короб",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-corrections",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-repack-corrections",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 5,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Убрать последнюю бутылку",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-production-date-change",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-production-date-change",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 3,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Применить дату",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-leave-open-box",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-leave-open-box",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Не удалось выйти. Задание и неотправленные сканы сохранены.",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Сканируйте каждую бутылку",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-print-recovery",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-print-recovery",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 6,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Развернуть панель состояния",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Неотправленных событий: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "!Этикетка не напечатанаПринтер не подтвердил печать.",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-same-sscc-reprint-confirmation",
+      "locale": "ru",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-same-sscc-reprint-confirmation",
+      "actualLocale": "ru",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 6,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Убрать последнюю бутылку",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-task-selection",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-task-selection",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Production shifts 0",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-other-line-confirmation",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-other-line-confirmation",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Cancel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "⧉After confirmation, scans from this station will belong to this inventory and will be identified as",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-simple-box-accepted",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-simple-box-accepted",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "✓Box accepted: 20 codesBOX",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-duplicate-other-terminal",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-duplicate-other-terminal",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⟳Code was already checked on another terminalgallery-terminal-b · 13:00:00DUPLICATE",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-known-ineligible",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-known-ineligible",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⟳Code is not part of this inventoryINELIGIBLE",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-protected-moving-by-ud",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-protected-moving-by-ud",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "✕Code not counted: already in shipmentNOT COUNTED",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-not-in-snapshot",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-not-in-snapshot",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 2,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⧉Code is absent from the source snapshotDISCREPANCY",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-awaiting-old-box",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-repack-awaiting-old-box",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Scan the source box",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-scanning",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-repack-scanning",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Scan every bottleSource box selected",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Source box selected",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-capacity-20",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-repack-capacity-20",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Scan every bottleBottle added to the new box",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Bottle added to the new box",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-box-ready",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-repack-box-ready",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Box closed. Label printing is pendingBottle added to the new box",
+          "hasText": true,
+          "hasIcon": true
+        },
+        {
+          "label": "Bottle added to the new box",
+          "hasText": true,
+          "hasIcon": false
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-repack-corrections",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-repack-corrections",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 5,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Remove last bottle",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-production-date-change",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-production-date-change",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 3,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Apply date",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-leave-open-box",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-leave-open-box",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 4,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Could not leave. The task and pending scans are preserved.",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "⌗Scan every bottle",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-print-recovery",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-print-recovery",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 6,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Expand status panel",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [
+        {
+          "label": "Pending events: 0",
+          "hasText": true,
+          "hasIcon": false
+        },
+        {
+          "label": "!Label was not printedThe printer did not confirm printing.",
+          "hasText": true,
+          "hasIcon": true
+        }
+      ],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    },
+    {
+      "state": "inventory-same-sscc-reprint-confirmation",
+      "locale": "en",
+      "requestedViewport": {
+        "width": 1280,
+        "height": 1024
+      },
+      "actualState": "inventory-same-sscc-reprint-confirmation",
+      "actualLocale": "en",
+      "window": {
+        "width": 1280,
+        "height": 1024,
+        "devicePixelRatio": 1
+      },
+      "document": {
+        "width": 1280,
+        "height": 1024,
+        "bodyWidth": 1280,
+        "bodyHeight": 1024
+      },
+      "documentScroll": false,
+      "nestedScrollRegions": [],
+      "interactiveCount": 6,
+      "clippedInteractives": [],
+      "overlappingInteractives": [],
+      "targetsBelow64": [],
+      "focus": {
+        "label": "Remove last bottle",
+        "outline": "2px solid rgb(109, 178, 255)",
+        "visible": true
+      },
+      "statusSignals": [],
+      "statusDefects": [],
+      "sensitiveLeaks": [],
+      "consoleErrors": [],
+      "consoleWarnings": [],
+      "pageErrors": [],
+      "networkFailures": [],
+      "responseFailures": [],
+      "screenshot": null,
+      "passed": true
+    }
+  ]
+}
