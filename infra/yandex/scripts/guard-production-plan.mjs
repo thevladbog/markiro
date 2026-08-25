@@ -38,6 +38,27 @@ const safeProductionResources = new Map([
   ],
   ...[...directVmDnsAddresses].map((address) => [address, "yandex_dns_recordset"]),
 ]);
+const safeProductionActionScopes = new Map([
+  ["module.network.yandex_vpc_network.production", "safe-action-network"],
+  ["module.network.yandex_vpc_gateway.nat", "safe-action-nat-gateway"],
+  ["module.network.yandex_vpc_route_table.private_egress", "safe-action-private-egress"],
+  ["module.network.yandex_vpc_subnet.app", "safe-action-app-subnet"],
+  ["module.network.yandex_vpc_subnet.data", "safe-action-data-subnet"],
+  ["module.network.yandex_vpc_security_group.app", "safe-action-app-security-group"],
+  ["module.network.yandex_vpc_security_group.data", "safe-action-data-security-group"],
+  ["module.compute.data.yandex_compute_image.ubuntu_lts", "safe-action-ubuntu-image"],
+  ["module.compute.yandex_vpc_address.app", "safe-action-app-address"],
+  ["module.compute.yandex_compute_instance.app", "safe-action-app-compute"],
+  ["module.postgres.yandex_mdb_postgresql_cluster.production", "safe-action-postgres-cluster"],
+  ["module.postgres.yandex_mdb_postgresql_database.application", "safe-action-postgres-database"],
+  ["module.object_storage.yandex_storage_bucket.media", "safe-action-media-bucket"],
+  ["module.object_storage.yandex_storage_bucket.audit", "safe-action-audit-bucket"],
+  ["module.object_storage.yandex_storage_bucket_policy.media_app", "safe-action-media-policy"],
+  [
+    "module.object_storage.yandex_storage_bucket_iam_binding.app_uploader",
+    "safe-action-app-uploader-binding",
+  ],
+]);
 
 const retiredProductionResources = new Map([
   ["yandex_logging_group.application", "yandex_logging_group"],
@@ -600,7 +621,8 @@ export function guardProductionPlan(plan) {
         : resource.address.includes(".data.")
           ? ["no-op", "read"]
           : ["no-op"];
-      if (!onlyAllowedAction(resourceActions, allowed)) rejected("safe-resource-action");
+      if (!onlyAllowedAction(resourceActions, allowed))
+        rejected(safeProductionActionScopes.get(resource.address) ?? "safe-resource-action");
     }
     if (
       resource.address === "module.station_releases.data.yandex_cm_certificate.issued" &&
