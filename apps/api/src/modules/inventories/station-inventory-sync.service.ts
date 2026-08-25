@@ -4,7 +4,11 @@ import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   canonicalizeKm,
+  INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE,
+  INVENTORY_EVENT_CLAIM_OUTCOME_SIZE,
+  inventoryEventBatchResponseSchema,
   kmHash,
+  parseInventoryEventBatchResponse,
   parseScannedSscc,
   type InventoryClaimWinner,
   type InventoryEvent,
@@ -115,10 +119,22 @@ export class StationInventorySyncService {
         if (sameBatch.payloadDigest !== input.payloadDigest) {
           throw new ConflictException({ code: "INVENTORY_BATCH_DIGEST_CONFLICT" });
         }
-        return sameBatch.result as unknown as StationInventoryEventBatchResponseDto;
+        return this.normalizeStoredResponse(
+          tx,
+          tenantId,
+          deviceId,
+          inventoryId,
+          input,
+          sameBatch.result,
+          inventory.resultRevision,
+        );
       }
       const [sameDigest] = await tx
-        .select({ result: schema.inventoryScanBatches.result })
+        .select({
+          batchId: schema.inventoryScanBatches.batchId,
+          outcome: schema.inventoryScanBatches.outcome,
+          result: schema.inventoryScanBatches.result,
+        })
         .from(schema.inventoryScanBatches)
         .where(
           and(
@@ -129,8 +145,16 @@ export class StationInventorySyncService {
           ),
         );
       if (sameDigest) {
-        const prior = sameDigest.result as unknown as InventoryEventBatchResponse;
-        return {
+        const prior = await this.normalizeStoredResponse(
+          tx,
+          tenantId,
+          deviceId,
+          inventoryId,
+          { ...input, batchId: sameDigest.batchId },
+          sameDigest.result,
+          inventory.resultRevision,
+        );
+        const replay = {
           ...prior,
           batchId: input.batchId,
           outcomes: prior.outcomes.map((outcome) => ({
@@ -139,6 +163,17 @@ export class StationInventorySyncService {
             reasonCode: "BATCH_REPLAY",
           })),
         };
+        await tx.insert(schema.inventoryScanBatches).values({
+          tenantId,
+          inventoryId,
+          deviceId,
+          batchId: input.batchId,
+          payloadDigest: input.payloadDigest,
+          sequenceCeiling: BigInt(input.sequenceCeiling),
+          outcome: sameDigest.outcome,
+          result: replay,
+        });
+        return replay;
       }
 
       if (inventory.activeSnapshotId !== input.snapshotId || input.snapshotRevision !== 1) {
@@ -149,20 +184,26 @@ export class StationInventorySyncService {
       }
 
       const targets = new Map<string, ClaimTarget[]>();
+      let expandedClaimCount = 0;
       for (const event of input.events) {
-        targets.set(
-          event.eventId,
-          await this.validateAndExpand(
-            tx,
-            tenantId,
-            inventoryId,
-            input.snapshotId,
-            inventory.gtin14,
-            inventory.productionDateFrom,
-            inventory.productionDateTo,
-            event,
-          ),
+        const expanded = await this.validateAndExpand(
+          tx,
+          tenantId,
+          inventoryId,
+          input.snapshotId,
+          inventory.gtin14,
+          inventory.productionDateFrom,
+          inventory.productionDateTo,
+          event,
         );
+        if (expanded.length > INVENTORY_EVENT_CLAIM_OUTCOME_SIZE) {
+          throw new ConflictException({ code: "INVENTORY_EVENT_CLAIM_LIMIT_EXCEEDED" });
+        }
+        expandedClaimCount += expanded.length;
+        if (expandedClaimCount > INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE) {
+          throw new ConflictException({ code: "INVENTORY_BATCH_CLAIM_LIMIT_EXCEEDED" });
+        }
+        targets.set(event.eventId, expanded);
       }
 
       if (inventory.status !== "running") {
@@ -832,7 +873,8 @@ export class StationInventorySyncService {
           eq(schema.inventorySnapshotCodes.parentSscc, sscc),
         ),
       )
-      .orderBy(asc(schema.inventorySnapshotCodes.codeHash));
+      .orderBy(asc(schema.inventorySnapshotCodes.codeHash))
+      .limit(INVENTORY_EVENT_CLAIM_OUTCOME_SIZE + 1);
     if ((event.kind === "known_box") !== rows.length > 0) {
       throw new ConflictException({ code: "INVENTORY_EVENT_KIND_MISMATCH" });
     }
@@ -841,6 +883,153 @@ export class StationInventorySyncService {
       snapshotId,
       classification: row.protected ? "protected" : row.expected ? "expected" : "ineligible",
     }));
+  }
+
+  private async normalizeStoredResponse(
+    tx: Transaction,
+    tenantId: string,
+    deviceId: string,
+    inventoryId: string,
+    input: StationInventoryEventBatchDto,
+    stored: unknown,
+    resultRevision: number,
+  ): Promise<StationInventoryEventBatchResponseDto> {
+    if (inventoryEventBatchResponseSchema.safeParse(stored).success) {
+      try {
+        return parseInventoryEventBatchResponse(stored, input, inventoryId, deviceId);
+      } catch {
+        // A pre-hardening stored result can be structurally valid but not bound to this ledger row.
+      }
+    }
+
+    const outcomes: InventoryEventBatchResponse["outcomes"] = [];
+    for (const event of input.events) {
+      let evidence = await tx
+        .select({
+          codeHash: schema.inventoryEventClaimOutcomes.codeHash,
+          status: schema.inventoryEventClaimOutcomes.status,
+          winningEventId: schema.inventoryEventClaimOutcomes.winningEventId,
+          winningDeviceId: schema.inventoryEventClaimOutcomes.winningDeviceId,
+          winningScannedAt: schema.inventoryEventClaimOutcomes.winningScannedAt,
+        })
+        .from(schema.inventoryEventClaimOutcomes)
+        .where(
+          and(
+            eq(schema.inventoryEventClaimOutcomes.tenantId, tenantId),
+            eq(schema.inventoryEventClaimOutcomes.inventoryId, inventoryId),
+            eq(schema.inventoryEventClaimOutcomes.sourceEventId, event.eventId),
+          ),
+        )
+        .orderBy(asc(schema.inventoryEventClaimOutcomes.codeHash));
+
+      if (evidence.length === 0 && event.kind !== "old_box") {
+        let codeHashes: string[] = [];
+        if (event.kind === "item" && event.codeHash) {
+          codeHashes = [event.codeHash];
+        } else if (event.kind === "known_box") {
+          const sscc = event.normalizedIdentity.slice("known_box:".length);
+          const rows = await tx
+            .select({ codeHash: schema.inventorySnapshotCodes.codeHash })
+            .from(schema.inventorySnapshotCodes)
+            .where(
+              and(
+                eq(schema.inventorySnapshotCodes.tenantId, tenantId),
+                eq(schema.inventorySnapshotCodes.snapshotId, input.snapshotId),
+                eq(schema.inventorySnapshotCodes.parentSscc, sscc),
+              ),
+            )
+            .orderBy(asc(schema.inventorySnapshotCodes.codeHash))
+            .limit(INVENTORY_EVENT_CLAIM_OUTCOME_SIZE + 1);
+          codeHashes = rows.map((row) => row.codeHash);
+        }
+        if (codeHashes.length > 0) {
+          const winners = await tx
+            .select({
+              codeHash: schema.inventoryCodeResults.codeHash,
+              eventId: schema.inventoryCodeResults.firstAcceptedEventId,
+              deviceId: schema.inventoryCodeResults.winningDeviceId,
+              scannedAt: schema.inventoryCodeResults.winningScannedAt,
+            })
+            .from(schema.inventoryCodeResults)
+            .where(
+              and(
+                eq(schema.inventoryCodeResults.tenantId, tenantId),
+                eq(schema.inventoryCodeResults.inventoryId, inventoryId),
+                inArray(schema.inventoryCodeResults.codeHash, codeHashes),
+              ),
+            );
+          if (winners.length !== codeHashes.length) {
+            throw new Error("inventory legacy claim winner missing");
+          }
+          await tx
+            .insert(schema.inventoryEventClaimOutcomes)
+            .values(
+              winners.map((winner) => ({
+                tenantId,
+                inventoryId,
+                sourceEventId: event.eventId,
+                codeHash: winner.codeHash,
+                status: winner.eventId === event.eventId ? "claimed" : "duplicate",
+                winningEventId: winner.eventId,
+                winningDeviceId: winner.deviceId,
+                winningScannedAt: winner.scannedAt,
+              })),
+            )
+            .onConflictDoNothing();
+          evidence = await tx
+            .select({
+              codeHash: schema.inventoryEventClaimOutcomes.codeHash,
+              status: schema.inventoryEventClaimOutcomes.status,
+              winningEventId: schema.inventoryEventClaimOutcomes.winningEventId,
+              winningDeviceId: schema.inventoryEventClaimOutcomes.winningDeviceId,
+              winningScannedAt: schema.inventoryEventClaimOutcomes.winningScannedAt,
+            })
+            .from(schema.inventoryEventClaimOutcomes)
+            .where(
+              and(
+                eq(schema.inventoryEventClaimOutcomes.tenantId, tenantId),
+                eq(schema.inventoryEventClaimOutcomes.inventoryId, inventoryId),
+                eq(schema.inventoryEventClaimOutcomes.sourceEventId, event.eventId),
+              ),
+            )
+            .orderBy(asc(schema.inventoryEventClaimOutcomes.codeHash));
+        }
+      }
+      const claims = evidence.map((claim) => ({
+        codeHash: claim.codeHash,
+        status: claim.status === "claimed" ? ("claimed" as const) : ("duplicate" as const),
+        winner: {
+          codeHash: claim.codeHash,
+          eventId: claim.winningEventId,
+          deviceId: claim.winningDeviceId,
+          scannedAt: claim.winningScannedAt.toISOString(),
+        },
+      }));
+      const claimedCount = claims.filter((claim) => claim.status === "claimed").length;
+      const conflictCount = claims.length - claimedCount;
+      const status = claimedCount > 0 || event.kind === "old_box" ? "applied" : "duplicate";
+      outcomes.push({
+        eventId: event.eventId,
+        status,
+        reasonCode: status === "applied" ? "CLAIM_APPLIED" : "CLAIM_LOST",
+        claimedCount,
+        conflictCount,
+        claims,
+      });
+    }
+    const normalized = this.response(inventoryId, input, resultRevision, outcomes);
+    await tx
+      .update(schema.inventoryScanBatches)
+      .set({ result: normalized })
+      .where(
+        and(
+          eq(schema.inventoryScanBatches.tenantId, tenantId),
+          eq(schema.inventoryScanBatches.inventoryId, inventoryId),
+          eq(schema.inventoryScanBatches.deviceId, deviceId),
+          eq(schema.inventoryScanBatches.batchId, input.batchId),
+        ),
+      );
+    return normalized;
   }
 
   private response(

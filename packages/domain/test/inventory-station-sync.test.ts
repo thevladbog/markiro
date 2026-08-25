@@ -186,6 +186,119 @@ describe("inventory station sync contract", () => {
     ).toThrow("Invalid inventory event batch response");
   });
 
+  it("rejects aggregate status, reason, count, and claim contradictions", () => {
+    const digest = inventoryEventBatchDigest(payload);
+    const request = { batchId: "semantic-batch", payloadDigest: digest, ...payload };
+    const claimed = {
+      codeHash: "a".repeat(64),
+      status: "claimed" as const,
+      winner: {
+        codeHash: "a".repeat(64),
+        eventId: event.eventId,
+        deviceId: "55555555-5555-4555-8555-555555555555",
+        scannedAt: event.scannedAt,
+      },
+    };
+    const duplicate = {
+      ...claimed,
+      status: "duplicate" as const,
+      winner: {
+        ...claimed.winner,
+        eventId: "66666666-6666-4666-8666-666666666666",
+      },
+    };
+    const response = (outcome: Record<string, unknown>) => ({
+      inventoryId: "44444444-4444-4444-8444-444444444444",
+      snapshotId: payload.snapshotId,
+      snapshotRevision: 1,
+      batchId: request.batchId,
+      payloadDigest: digest,
+      sequenceCeiling: 7,
+      resultRevision: 2,
+      outcomes: [{ eventId: event.eventId, ...outcome }],
+    });
+    for (const contradiction of [
+      {
+        status: "duplicate",
+        reasonCode: "CLAIM_LOST",
+        claimedCount: 1,
+        conflictCount: 0,
+        claims: [claimed],
+      },
+      {
+        status: "applied",
+        reasonCode: "CLAIM_APPLIED",
+        claimedCount: 0,
+        conflictCount: 1,
+        claims: [duplicate],
+      },
+      {
+        status: "rejected",
+        reasonCode: "INVENTORY_EVENT_REJECTED",
+        claimedCount: 1,
+        conflictCount: 0,
+        claims: [claimed],
+      },
+      {
+        status: "quarantined",
+        reasonCode: "INVENTORY_CLOSED",
+        claimedCount: 1,
+        conflictCount: 0,
+        claims: [claimed],
+      },
+      {
+        status: "applied",
+        reasonCode: "CLAIM_LOST",
+        claimedCount: 1,
+        conflictCount: 0,
+        claims: [claimed],
+      },
+    ]) {
+      expect(() =>
+        parseInventoryEventBatchResponse(
+          response(contradiction),
+          request,
+          "44444444-4444-4444-8444-444444444444",
+        ),
+      ).toThrow("Invalid inventory event batch response");
+    }
+  });
+
+  it("recognizes the explicit zero-claim old-box acknowledgement exception", () => {
+    const oldBoxEvent = {
+      ...event,
+      kind: "old_box" as const,
+      normalizedIdentity: "old_box:346006820000000014",
+      codeHash: null,
+      canonicalRaw: "346006820000000014",
+    };
+    const oldBoxPayload = { ...payload, events: [oldBoxEvent] };
+    const digest = inventoryEventBatchDigest(oldBoxPayload);
+    const request = { batchId: "old-box", payloadDigest: digest, ...oldBoxPayload };
+    const response = {
+      inventoryId: "44444444-4444-4444-8444-444444444444",
+      snapshotId: payload.snapshotId,
+      snapshotRevision: 1,
+      batchId: request.batchId,
+      payloadDigest: digest,
+      sequenceCeiling: 7,
+      resultRevision: 2,
+      outcomes: [
+        {
+          eventId: oldBoxEvent.eventId,
+          status: "applied",
+          reasonCode: "CLAIM_APPLIED",
+          claimedCount: 0,
+          conflictCount: 0,
+          claims: [],
+        },
+      ],
+    };
+    expect(
+      parseInventoryEventBatchResponse(response, request, "44444444-4444-4444-8444-444444444444"),
+    ).toEqual(response);
+  });
+
   it("binds progress to the requested cursor and rejects contradictory winner/revision facts", () => {
     const cursor = "1:77777777-7777-4777-8777-777777777777";
     const item = {

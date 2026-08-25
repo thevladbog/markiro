@@ -11,6 +11,8 @@ import {
 } from "@nestjs/common";
 import { ApiBody, ApiOkResponse, ApiParam, ApiQuery, ApiTags } from "@nestjs/swagger";
 
+import { INVENTORY_PROGRESS_CURSOR_PATTERN } from "@markiro/domain";
+
 import { AllowSubscriptionRecovery } from "../../subscriptions/subscription-access-policy";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { StationOnlyGuard } from "../../tenancy/station-only.guard";
@@ -134,6 +136,7 @@ export class StationInventoriesController {
 
   @Post("inventories/:id/event-batches")
   @HttpCode(200)
+  @AllowSubscriptionRecovery("station")
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: stationInventoryEventBatchOpenApiSchema })
   @ApiOkResponse({ schema: stationInventoryEventBatchResponseOpenApiSchema })
@@ -152,7 +155,7 @@ export class StationInventoriesController {
   @ApiQuery({
     name: "cursor",
     required: false,
-    schema: { type: "string", pattern: "^[1-9][0-9]*:[0-9a-f-]{36}$" },
+    schema: { type: "string", pattern: INVENTORY_PROGRESS_CURSOR_PATTERN },
   })
   @ApiQuery({
     name: "limit",
@@ -172,6 +175,7 @@ export class StationInventoriesController {
 
   @Post("inventories/:id/leave")
   @HttpCode(200)
+  @AllowSubscriptionRecovery("station")
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: leaveStationInventoryOpenApiSchema })
   @ApiOkResponse({ schema: leaveStationInventoryResponseOpenApiSchema })

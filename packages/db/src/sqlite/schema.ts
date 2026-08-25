@@ -460,6 +460,54 @@ export const inventoryEventClaimOutcomesMirror = sqliteTable(
   ],
 );
 
+/** Durable input to the single-statement acknowledgement reducer. */
+export const inventorySyncAckReceipts = sqliteTable(
+  "inventory_sync_ack_receipts",
+  {
+    receiptId: text("receipt_id").primaryKey(),
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    batchId: text("batch_id").notNull(),
+    payloadDigest: text("payload_digest").notNull(),
+    responseJson: text("response_json").notNull(),
+    outboxRowsJson: text("outbox_rows_json").notNull(),
+    pinKey: text("pin_key").notNull(),
+    pinValue: text("pin_value").notNull(),
+    appliedAt: text("applied_at").notNull(),
+  },
+  (table) => [
+    check(
+      "inventory_sync_ack_receipts_response_size_check",
+      sql`json_valid(${table.responseJson}) and length(${table.responseJson}) <= 8388608`,
+    ),
+    check(
+      "inventory_sync_ack_receipts_rows_size_check",
+      sql`json_valid(${table.outboxRowsJson}) and length(${table.outboxRowsJson}) <= 524288`,
+    ),
+  ],
+);
+
+/** Durable input to the single-statement progress projection reducer. */
+export const inventoryProgressReceipts = sqliteTable(
+  "inventory_progress_receipts",
+  {
+    receiptId: text("receipt_id").primaryKey(),
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    requestedCursor: text("requested_cursor"),
+    priorResultRevision: integer("prior_result_revision").notNull(),
+    pageJson: text("page_json").notNull(),
+    appliedAt: text("applied_at").notNull(),
+  },
+  (table) => [
+    check(
+      "inventory_progress_receipts_page_size_check",
+      sql`json_valid(${table.pageJson}) and length(${table.pageJson}) <= 8388608`,
+    ),
+  ],
+);
+
 /** Monotonic inventory transport queue; hard deletion is the acknowledgement boundary. */
 export const inventoryOutbox = sqliteTable(
   "inventory_outbox",

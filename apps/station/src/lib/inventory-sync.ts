@@ -50,149 +50,73 @@ export async function applyInventoryProgressPage(
     inventoryId: string;
     snapshotId: string;
     deviceId: string;
+    requestedCursor?: string | null;
+    minimumResultRevision?: number;
     canCommit?: () => boolean;
   },
   value: unknown,
 ): Promise<InventoryProgressPage> {
-  await exec.run("BEGIN IMMEDIATE");
-  try {
-    const terminalRows = await exec.all<{
-      progress_cursor: string | null;
-      progress_result_revision: number;
-    }>(
-      `SELECT progress_cursor, progress_result_revision FROM inventory_terminal_state
-        WHERE inventory_id = ? AND snapshot_id = ? AND device_id = ?`,
-      [expected.inventoryId, expected.snapshotId, expected.deviceId],
-    );
-    const terminal = terminalRows[0];
-    if (!terminal) throw new Error("inventory progress terminal is missing");
-    const page = parseInventoryProgressPage(value, {
-      inventoryId: expected.inventoryId,
-      snapshotId: expected.snapshotId,
-      cursor: terminal.progress_cursor,
-      minimumResultRevision: terminal.progress_result_revision,
-    });
-    for (const item of page.items) {
-      if (item.winner) {
-        await exec.run(
-          `INSERT INTO inventory_code_results_mirror
-           (inventory_id, snapshot_id, code_hash, first_accepted_event_id,
-            winning_device_id, winning_scanned_at, observed_production_date,
-            classification, origin_classification, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(inventory_id, snapshot_id, code_hash) DO UPDATE SET
-           first_accepted_event_id = excluded.first_accepted_event_id,
-           winning_device_id = excluded.winning_device_id,
-           winning_scanned_at = excluded.winning_scanned_at,
-           observed_production_date = excluded.observed_production_date,
-           classification = excluded.classification,
-           origin_classification = CASE
-             WHEN inventory_code_results_mirror.origin_classification = 'voided'
-               THEN excluded.origin_classification
-             ELSE inventory_code_results_mirror.origin_classification
-           END,
-           updated_at = excluded.updated_at`,
-          [
-            expected.inventoryId,
-            expected.snapshotId,
-            item.codeHash,
-            item.winner.eventId,
-            item.winner.deviceId,
-            item.winner.scannedAt,
-            item.observedProductionDate,
-            item.classification === "ineligible" ? "known-ineligible" : item.classification,
-            item.classification === "ineligible" ? "known-ineligible" : item.classification,
-            item.correctedAt,
-          ],
-        );
-        if (item.winner.deviceId !== expected.deviceId) {
-          const local = await exec.all<{ event_id: string }>(
-            `SELECT event_id FROM inventory_scan_events_mirror
-            WHERE inventory_id = ? AND snapshot_id = ? AND code_hash = ? AND device_id = ?
-            ORDER BY scanned_at, device_id, event_id LIMIT 1`,
-            [expected.inventoryId, expected.snapshotId, item.codeHash, expected.deviceId],
-          );
-          const losingEventId = local[0]?.event_id ?? null;
-          if (losingEventId) {
-            await exec.run(
-              `INSERT INTO inventory_conflicts_mirror
-               (inventory_id, snapshot_id, conflict_id, code_hash, losing_event_id,
-                winning_event_id, winning_device_id, winning_scanned_at, detected_at, state)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
-             ON CONFLICT(inventory_id, snapshot_id, conflict_id) DO NOTHING`,
-              [
-                expected.inventoryId,
-                expected.snapshotId,
-                `${losingEventId}:${item.winner.eventId}`,
-                item.codeHash,
-                losingEventId,
-                item.winner.eventId,
-                item.winner.deviceId,
-                item.winner.scannedAt,
-                item.correctedAt,
-              ],
-            );
-          }
-        }
-      } else {
-        await exec.run(
-          `UPDATE inventory_code_results_mirror
-            SET classification = ?, observed_production_date = ?, updated_at = ?
-          WHERE inventory_id = ? AND snapshot_id = ? AND code_hash = ?`,
-          [
-            item.classification === "ineligible" ? "known-ineligible" : item.classification,
-            item.observedProductionDate,
-            item.correctedAt,
-            expected.inventoryId,
-            expected.snapshotId,
-            item.codeHash,
-          ],
-        );
-      }
-    }
-    if (expected.canCommit && !expected.canCommit()) {
-      throw new Error("inventory progress generation retired");
-    }
-    await exec.run(
-      `UPDATE inventory_terminal_state
-          SET progress_cursor = COALESCE(?, progress_cursor),
-              progress_result_revision = ?, updated_at = ?
-        WHERE inventory_id = ? AND snapshot_id = ? AND device_id = ?
-          AND progress_cursor IS ? AND progress_result_revision = ?`,
-      [
-        page.nextCursor,
-        page.resultRevision,
-        new Date().toISOString(),
-        expected.inventoryId,
-        expected.snapshotId,
-        expected.deviceId,
-        terminal.progress_cursor,
-        terminal.progress_result_revision,
-      ],
-    );
-    const committed = await exec.all<{
-      progress_cursor: string | null;
-      progress_result_revision: number;
-    }>(
-      `SELECT progress_cursor, progress_result_revision FROM inventory_terminal_state
-        WHERE inventory_id = ? AND snapshot_id = ? AND device_id = ?`,
-      [expected.inventoryId, expected.snapshotId, expected.deviceId],
-    );
-    if (
-      committed[0]?.progress_cursor !== (page.nextCursor ?? terminal.progress_cursor) ||
-      committed[0]?.progress_result_revision !== page.resultRevision
-    ) {
-      throw new Error("inventory progress cursor changed");
-    }
-    if (expected.canCommit && !expected.canCommit()) {
-      throw new Error("inventory progress generation retired");
-    }
-    await exec.run("COMMIT");
-    return page;
-  } catch (error) {
-    await exec.run("ROLLBACK");
-    throw error;
+  const terminalRows = await exec.all<{
+    progress_cursor: string | null;
+    progress_result_revision: number;
+  }>(
+    `SELECT progress_cursor, progress_result_revision FROM inventory_terminal_state
+      WHERE inventory_id = ? AND snapshot_id = ? AND device_id = ?`,
+    [expected.inventoryId, expected.snapshotId, expected.deviceId],
+  );
+  const terminal = terminalRows[0];
+  if (!terminal) throw new Error("inventory progress terminal is missing");
+  const requestedCursor =
+    expected.requestedCursor === undefined ? terminal.progress_cursor : expected.requestedCursor;
+  const priorResultRevision =
+    expected.minimumResultRevision === undefined
+      ? terminal.progress_result_revision
+      : expected.minimumResultRevision;
+  const page = parseInventoryProgressPage(value, {
+    inventoryId: expected.inventoryId,
+    snapshotId: expected.snapshotId,
+    cursor: requestedCursor,
+    minimumResultRevision: priorResultRevision,
+  });
+  if (expected.canCommit && !expected.canCommit()) {
+    throw new Error("inventory progress generation retired");
   }
+  const receiptId = `${expected.inventoryId}:${expected.snapshotId}:${expected.deviceId}:${requestedCursor ?? "root"}:${priorResultRevision}:${page.resultRevision}:${page.nextCursor ?? "end"}`;
+  await exec.run(
+    `INSERT INTO inventory_progress_receipts
+       (receipt_id, inventory_id, snapshot_id, device_id, requested_cursor,
+        prior_result_revision, page_json, applied_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(receipt_id) DO NOTHING`,
+    [
+      receiptId,
+      expected.inventoryId,
+      expected.snapshotId,
+      expected.deviceId,
+      requestedCursor,
+      priorResultRevision,
+      JSON.stringify(page),
+      new Date().toISOString(),
+    ],
+  );
+  const committed = await exec.all<{
+    progress_cursor: string | null;
+    progress_result_revision: number;
+  }>(
+    `SELECT progress_cursor, progress_result_revision FROM inventory_terminal_state
+      WHERE inventory_id = ? AND snapshot_id = ? AND device_id = ?`,
+    [expected.inventoryId, expected.snapshotId, expected.deviceId],
+  );
+  if (
+    committed[0]?.progress_cursor !== (page.nextCursor ?? requestedCursor) ||
+    committed[0]?.progress_result_revision !== page.resultRevision
+  ) {
+    throw new Error("inventory progress cursor changed");
+  }
+  if (expected.canCommit && !expected.canCommit()) {
+    throw new Error("inventory progress generation retired");
+  }
+  return page;
 }
 
 export function createInventorySyncEngine(deps: InventorySyncEngineDeps): InventorySyncEngine {
@@ -301,8 +225,12 @@ export function createInventorySyncEngine(deps: InventorySyncEngineDeps): Invent
       if (stopped || paused || generation.sealed || !deps.client.get) return Promise.resolve();
       const startedEpoch = epoch;
       progressFlight = (async () => {
-        const rows = await deps.exec.all<{ device_id: string; progress_cursor: string | null }>(
-          `SELECT device_id, progress_cursor FROM inventory_terminal_state
+        const rows = await deps.exec.all<{
+          device_id: string;
+          progress_cursor: string | null;
+          progress_result_revision: number;
+        }>(
+          `SELECT device_id, progress_cursor, progress_result_revision FROM inventory_terminal_state
             WHERE inventory_id = ? AND snapshot_id = ?`,
           [deps.inventoryId, deps.snapshotId],
         );
@@ -324,6 +252,8 @@ export function createInventorySyncEngine(deps: InventorySyncEngineDeps): Invent
               inventoryId: deps.inventoryId,
               snapshotId: deps.snapshotId,
               deviceId: terminal.device_id,
+              requestedCursor: terminal.progress_cursor,
+              minimumResultRevision: terminal.progress_result_revision,
               canCommit: () => !stopped && !paused && !generation.sealed && epoch === startedEpoch,
             },
             value,

@@ -484,6 +484,26 @@ describe("inventory execution schema", () => {
         "inventory_scan_batches",
       ],
       [
+        "inventoryEventClaimOutcomes",
+        "inventory_event_claim_outcomes_winner_device_fk",
+        ["tenant_id", "winning_device_id"],
+        ["tenant_id", "id"],
+        "station_devices",
+      ],
+      [
+        "inventoryEventClaimOutcomes",
+        "inventory_event_claim_outcomes_winner_identity_fk",
+        [
+          "tenant_id",
+          "inventory_id",
+          "winning_event_id",
+          "winning_device_id",
+          "winning_scanned_at",
+        ],
+        ["tenant_id", "inventory_id", "event_id", "device_id", "scanned_at"],
+        "inventory_scan_events",
+      ],
+      [
         "inventoryCodeResults",
         "inventory_code_results_tenant_inventory_fk",
         ["tenant_id", "inventory_id"],
@@ -536,7 +556,7 @@ describe("inventory execution schema", () => {
     }
   });
 
-  it("makes participants, replay keys, event ids, device sequences, and current claims unique", () => {
+  it("makes batch ids, winner identities, event ids, device sequences, and current claims unique", () => {
     expect(
       constraintColumns(
         "inventoryDeviceParticipants",
@@ -547,11 +567,17 @@ describe("inventory execution schema", () => {
       constraintColumns("inventoryScanBatches", "inventory_scan_batches_scope_batch_uq"),
     ).toEqual(["tenant_id", "inventory_id", "device_id", "batch_id"]);
     expect(
-      constraintColumns("inventoryScanBatches", "inventory_scan_batches_scope_digest_uq"),
-    ).toEqual(["tenant_id", "inventory_id", "device_id", "payload_digest"]);
+      getTableConfig(table("inventoryScanBatches")).uniqueConstraints.map((item) => item.getName()),
+    ).not.toContain("inventory_scan_batches_scope_digest_uq");
     expect(
       constraintColumns("inventoryScanEvents", "inventory_scan_events_tenant_inventory_event_uq"),
     ).toEqual(["tenant_id", "inventory_id", "event_id"]);
+    expect(
+      constraintColumns(
+        "inventoryScanEvents",
+        "inventory_scan_events_tenant_inventory_winner_identity_uq",
+      ),
+    ).toEqual(["tenant_id", "inventory_id", "event_id", "device_id", "scanned_at"]);
     expect(
       constraintColumns(
         "inventoryScanEvents",
@@ -603,6 +629,14 @@ describe("inventory execution schema", () => {
     expect(
       checkExpression("inventoryScanEvents", "inventory_scan_events_normalized_identity_check"),
     ).toContain("between 1 and 1024");
+    const claimIdentity = checkExpression(
+      "inventoryEventClaimOutcomes",
+      "inventory_event_claim_outcomes_identity_check",
+    );
+    expect(claimIdentity).toContain("\"status\" = 'claimed'");
+    expect(claimIdentity).toContain('"source_event_id" = "winning_event_id"');
+    expect(claimIdentity).toContain("\"status\" = 'duplicate'");
+    expect(claimIdentity).toContain('"source_event_id" <> "winning_event_id"');
     expect(Object.keys(schema.inventoryCodeResults)).toContain("originClassification");
     const snapshotOrigin = checkExpression(
       "inventoryCodeResults",

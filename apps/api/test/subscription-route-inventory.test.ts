@@ -267,8 +267,11 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     routes: [
       "GET /station/inventories/:id/bundle/codes (StationInventoriesController.codes)",
       "GET /station/inventories/:id/bundle/manifest (StationInventoriesController.manifest)",
+      "GET /station/inventories/:id/progress (StationInventoriesController.progress)",
       "GET /station/inventory-tasks (StationInventoriesController.list)",
+      "POST /station/inventories/:id/event-batches (StationInventoriesController.eventBatch)",
       "POST /station/inventories/:id/join (StationInventoriesController.join)",
+      "POST /station/inventories/:id/leave (StationInventoriesController.leave)",
       "POST /station/inventory-tasks/resolve-barcode (StationInventoriesController.resolveBarcode)",
       "POST /station/conflicts/status (StationScansController.conflictStatus)",
       "POST /station/codes/releases (StationScansController.codeReleases)",

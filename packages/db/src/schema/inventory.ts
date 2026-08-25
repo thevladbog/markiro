@@ -649,12 +649,6 @@ export const inventoryScanBatches = pgTable(
       table.deviceId,
       table.batchId,
     ),
-    unique("inventory_scan_batches_scope_digest_uq").on(
-      table.tenantId,
-      table.inventoryId,
-      table.deviceId,
-      table.payloadDigest,
-    ),
     foreignKey({
       name: "inventory_scan_batches_tenant_inventory_fk",
       columns: [table.tenantId, table.inventoryId],
@@ -717,6 +711,13 @@ export const inventoryScanEvents = pgTable(
       table.inventoryId,
       table.deviceId,
       table.deviceSequence,
+    ),
+    unique("inventory_scan_events_tenant_inventory_winner_identity_uq").on(
+      table.tenantId,
+      table.inventoryId,
+      table.eventId,
+      table.deviceId,
+      table.scannedAt,
     ),
     foreignKey({
       name: "inventory_scan_events_tenant_batch_fk",
@@ -811,6 +812,28 @@ export const inventoryEventClaimOutcomes = pgTable(
         inventoryScanEvents.eventId,
       ],
     }),
+    foreignKey({
+      name: "inventory_event_claim_outcomes_winner_device_fk",
+      columns: [table.tenantId, table.winningDeviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
+    }),
+    foreignKey({
+      name: "inventory_event_claim_outcomes_winner_identity_fk",
+      columns: [
+        table.tenantId,
+        table.inventoryId,
+        table.winningEventId,
+        table.winningDeviceId,
+        table.winningScannedAt,
+      ],
+      foreignColumns: [
+        inventoryScanEvents.tenantId,
+        inventoryScanEvents.inventoryId,
+        inventoryScanEvents.eventId,
+        inventoryScanEvents.deviceId,
+        inventoryScanEvents.scannedAt,
+      ],
+    }),
     index("inventory_event_claim_outcomes_winner_idx").on(
       table.tenantId,
       table.inventoryId,
@@ -823,6 +846,11 @@ export const inventoryEventClaimOutcomes = pgTable(
     check(
       "inventory_event_claim_outcomes_status_check",
       sql`${table.status} in ('claimed', 'duplicate')`,
+    ),
+    check(
+      "inventory_event_claim_outcomes_identity_check",
+      sql`(${table.status} = 'claimed' and ${table.sourceEventId} = ${table.winningEventId})
+        or (${table.status} = 'duplicate' and ${table.sourceEventId} <> ${table.winningEventId})`,
     ),
   ],
 );

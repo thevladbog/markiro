@@ -21,6 +21,7 @@ export interface PreparedInventoryOutboxBatch {
   readonly inventoryId: string;
   readonly snapshotId: string;
   readonly deviceId: string;
+  readonly pinValue: string;
   readonly request: InventoryEventBatch;
   readonly outboxRows: ReadonlyArray<{
     readonly id: number;
@@ -84,6 +85,7 @@ function parsePinned(
   });
   return {
     ...expected,
+    pinValue: value,
     request,
     outboxRows,
   };
@@ -203,7 +205,7 @@ export async function prepareInventoryOutboxBatch(
     payloadDigest: inventoryEventBatchDigest(payload),
     ...payload,
   });
-  const batch: PreparedInventoryOutboxBatch = {
+  const batch = {
     inventoryId: input.inventoryId,
     snapshotId: input.snapshotId,
     deviceId: terminal.device_id,
@@ -237,117 +239,42 @@ export async function acknowledgeInventoryOutboxBatch(
     batch.deviceId,
   );
   await verifyPinnedRows(exec, batch);
-  await exec.run("BEGIN IMMEDIATE");
-  try {
-    const outcomeByEvent = new Map(response.outcomes.map((outcome) => [outcome.eventId, outcome]));
-    for (const row of batch.outboxRows) {
-      const outcome = outcomeByEvent.get(row.eventId);
-      if (!outcome) throw new Error("Invalid inventory event batch response");
-      const firstConflict = outcome.claims.find((claim) => claim.status === "duplicate");
-      await exec.run(
-        `UPDATE inventory_scan_events_mirror SET
-         authoritative_verdict = ?, server_reason_code = ?, server_result_revision = ?,
-         server_winner_code_hash = ?, server_winner_event_id = ?,
-         server_winner_device_id = ?, server_winner_scanned_at = ?
-       WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?
-         AND authoritative_verdict IS NULL`,
-        [
-          outcome.status,
-          outcome.reasonCode,
-          response.resultRevision,
-          firstConflict?.codeHash ?? null,
-          firstConflict?.winner.eventId ?? null,
-          firstConflict?.winner.deviceId ?? null,
-          firstConflict?.winner.scannedAt ?? null,
-          response.inventoryId,
-          response.snapshotId,
-          row.eventId,
-        ],
-      );
-      const stored = await exec.all<{ authoritative_verdict: string; server_reason_code: string }>(
-        `SELECT authoritative_verdict, server_reason_code FROM inventory_scan_events_mirror
-        WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?`,
-        [response.inventoryId, response.snapshotId, row.eventId],
-      );
-      if (
-        stored[0]?.authoritative_verdict !== outcome.status ||
-        stored[0]?.server_reason_code !== outcome.reasonCode
-      ) {
-        throw new Error("inventory acknowledgement persistence failed");
-      }
-      for (const claim of outcome.claims) {
-        await exec.run(
-          `INSERT INTO inventory_event_claim_outcomes_mirror
-             (inventory_id, snapshot_id, source_event_id, code_hash, status,
-              winning_event_id, winning_device_id, winning_scanned_at,
-              result_revision, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(inventory_id, snapshot_id, source_event_id, code_hash) DO UPDATE SET
-             status = excluded.status,
-             winning_event_id = excluded.winning_event_id,
-             winning_device_id = excluded.winning_device_id,
-             winning_scanned_at = excluded.winning_scanned_at,
-             result_revision = excluded.result_revision,
-             updated_at = excluded.updated_at`,
-          [
-            response.inventoryId,
-            response.snapshotId,
-            row.eventId,
-            claim.codeHash,
-            claim.status,
-            claim.winner.eventId,
-            claim.winner.deviceId,
-            claim.winner.scannedAt,
-            response.resultRevision,
-            new Date().toISOString(),
-          ],
-        );
-        if (claim.status !== "duplicate") continue;
-        await exec.run(
-          `INSERT INTO inventory_conflicts_mirror
-           (inventory_id, snapshot_id, conflict_id, code_hash, losing_event_id,
-            winning_event_id, winning_device_id, winning_scanned_at, detected_at, state)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
-         ON CONFLICT(inventory_id, snapshot_id, conflict_id) DO UPDATE SET
-           code_hash = excluded.code_hash, losing_event_id = excluded.losing_event_id,
-           winning_event_id = excluded.winning_event_id,
-           winning_device_id = excluded.winning_device_id,
-           winning_scanned_at = excluded.winning_scanned_at`,
-          [
-            response.inventoryId,
-            response.snapshotId,
-            `${row.eventId}:${claim.codeHash}:${claim.winner.eventId}`,
-            claim.codeHash,
-            row.eventId,
-            claim.winner.eventId,
-            claim.winner.deviceId,
-            claim.winner.scannedAt,
-            new Date().toISOString(),
-          ],
-        );
-      }
+  const receiptId = `${response.inventoryId}:${response.snapshotId}:${response.batchId}:${response.payloadDigest}`;
+  const responseJson = JSON.stringify(response);
+  const existingReceipts = await exec.all<{ response_json: string }>(
+    "SELECT response_json FROM inventory_sync_ack_receipts WHERE receipt_id = ?",
+    [receiptId],
+  );
+  if (existingReceipts[0]) {
+    if (existingReceipts[0].response_json !== responseJson) {
+      throw new Error("inventory acknowledgement receipt changed");
     }
-    for (const row of batch.outboxRows) {
-      await exec.run(
-        `DELETE FROM inventory_outbox
-        WHERE id = ? AND inventory_id = ? AND snapshot_id = ?
-          AND event_id = ? AND payload_json = ?`,
-        [row.id, response.inventoryId, response.snapshotId, row.eventId, row.payloadJson],
-      );
-      const remaining = await exec.all<{ id: number }>(
-        "SELECT id FROM inventory_outbox WHERE id = ?",
-        [row.id],
-      );
-      if (remaining.length > 0) throw new Error("inventory outbox payload changed");
-    }
-    await exec.run("DELETE FROM station_meta WHERE key = ?", [
-      pinKey(response.inventoryId, response.snapshotId),
-    ]);
-    await exec.run("COMMIT");
-  } catch (error) {
-    await exec.run("ROLLBACK");
-    throw error;
+    return response;
   }
+  await exec.run(
+    `INSERT INTO inventory_sync_ack_receipts
+       (receipt_id, inventory_id, snapshot_id, batch_id, payload_digest,
+        response_json, outbox_rows_json, pin_key, pin_value, applied_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(receipt_id) DO NOTHING`,
+    [
+      receiptId,
+      response.inventoryId,
+      response.snapshotId,
+      response.batchId,
+      response.payloadDigest,
+      responseJson,
+      JSON.stringify(batch.outboxRows),
+      pinKey(response.inventoryId, response.snapshotId),
+      batch.pinValue,
+      new Date().toISOString(),
+    ],
+  );
+  const receipts = await exec.all<{ receipt_id: string }>(
+    "SELECT receipt_id FROM inventory_sync_ack_receipts WHERE receipt_id = ?",
+    [receiptId],
+  );
+  if (receipts.length !== 1) throw new Error("inventory acknowledgement persistence failed");
   return response;
 }
 

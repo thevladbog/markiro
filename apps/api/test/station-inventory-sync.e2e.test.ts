@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createDb, schema } from "@markiro/db";
 import {
+  buildSscc,
   canonicalizeKm,
   inventoryEventBatchDigest,
   kmHash,
@@ -98,6 +99,19 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
       ...overrides,
     };
     return { batchId, payloadDigest: inventoryEventBatchDigest(payload), ...payload };
+  }
+
+  function serviceWithExpandedClaimCounts(counts: readonly number[]) {
+    const candidate = new StationInventorySyncService(db);
+    let index = 0;
+    Object.defineProperty(candidate, "validateAndExpand", {
+      value: async () => {
+        const claims: unknown[] = [];
+        claims.length = counts[index++] ?? 0;
+        return claims;
+      },
+    });
+    return candidate;
   }
 
   beforeAll(async () => {
@@ -266,6 +280,23 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         .where(eq(schema.inventoryScanEvents.eventId, request.events[0]!.eventId)),
     ).toHaveLength(1);
 
+    const replacementScan = code("REPLAY-RENAMED-MUTATION");
+    const rebound = batch("replay-renamed", [
+      event("a", {
+        scannedAt: "2026-08-25T08:00:01.000Z",
+        canonicalRaw: replacementScan.canonical.raw,
+      }),
+    ]);
+    await expect(service.ingest(tenantId, deviceAId, inventoryId, rebound)).rejects.toSatisfy(
+      (error: unknown) => errorCode(error) === "INVENTORY_BATCH_DIGEST_CONFLICT",
+    );
+    expect(
+      await db
+        .select()
+        .from(schema.inventoryScanEvents)
+        .where(eq(schema.inventoryScanEvents.eventId, rebound.events[0]!.eventId)),
+    ).toHaveLength(0);
+
     const mutated = { ...request, payloadDigest: "f".repeat(64) };
     await expect(service.ingest(tenantId, deviceAId, inventoryId, mutated)).rejects.toSatisfy(
       (error: unknown) => errorCode(error) === "INVENTORY_BATCH_DIGEST_CONFLICT",
@@ -273,6 +304,57 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
     await expect(service.ingest(tenantId, deviceAId, inventoryId, mutated)).rejects.toSatisfy(
       (error: unknown) => errorCode(error) === "INVENTORY_BATCH_DIGEST_CONFLICT",
     );
+  });
+
+  it("rejects 10,001 expanded claims for one known box before any business write", async () => {
+    const oversized = serviceWithExpandedClaimCounts([10_001]);
+    const request = batch("oversized-known-box", [
+      event("a", {
+        scannedAt: "2026-08-25T08:10:00.000Z",
+        kind: "known_box",
+        normalizedIdentity: `known_box:${SSCC}`,
+        codeHash: null,
+        canonicalRaw: SSCC,
+      }),
+    ]);
+    await expect(oversized.ingest(tenantId, deviceAId, inventoryId, request)).rejects.toSatisfy(
+      (error: unknown) => errorCode(error) === "INVENTORY_EVENT_CLAIM_LIMIT_EXCEEDED",
+    );
+    expect(
+      await db
+        .select()
+        .from(schema.inventoryScanBatches)
+        .where(eq(schema.inventoryScanBatches.batchId, request.batchId)),
+    ).toHaveLength(0);
+  });
+
+  it("rejects aggregate expanded claims above the frozen batch cap before any business write", async () => {
+    const oversized = serviceWithExpandedClaimCounts([6_000, 6_000]);
+    const request = batch("oversized-claim-batch", [
+      event("a", {
+        scannedAt: "2026-08-25T08:11:00.000Z",
+        kind: "known_box",
+        normalizedIdentity: `known_box:${SSCC}`,
+        codeHash: null,
+        canonicalRaw: SSCC,
+      }),
+      event("a", {
+        scannedAt: "2026-08-25T08:11:01.000Z",
+        kind: "known_box",
+        normalizedIdentity: `known_box:${SSCC}`,
+        codeHash: null,
+        canonicalRaw: SSCC,
+      }),
+    ]);
+    await expect(oversized.ingest(tenantId, deviceAId, inventoryId, request)).rejects.toSatisfy(
+      (error: unknown) => errorCode(error) === "INVENTORY_BATCH_CLAIM_LIMIT_EXCEEDED",
+    );
+    expect(
+      await db
+        .select()
+        .from(schema.inventoryScanBatches)
+        .where(eq(schema.inventoryScanBatches.batchId, request.batchId)),
+    ).toHaveLength(0);
   });
 
   it("resolves a reversed pair inside one batch by scannedAt and reports its final authoritative outcomes", async () => {
@@ -350,6 +432,72 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         left.deviceId.localeCompare(right.deviceId) || left.eventId.localeCompare(right.eventId),
     )[0];
     expect(result).toEqual(expected);
+  });
+
+  it("rejects per-code evidence attributed to a winner device from another tenant", async () => {
+    const scan = code("FOREIGN-WINNER-DEVICE");
+    const request = batch("foreign-winner-device", [
+      event("a", { scannedAt: "2026-08-25T08:20:00.000Z", canonicalRaw: scan.canonical.raw }),
+    ]);
+    await service.ingest(tenantId, deviceAId, inventoryId, request);
+    const codeHash = "e".repeat(64);
+    try {
+      await expect(
+        db.insert(schema.inventoryEventClaimOutcomes).values({
+          tenantId,
+          inventoryId,
+          sourceEventId: request.events[0]!.eventId,
+          codeHash,
+          status: "claimed",
+          winningEventId: request.events[0]!.eventId,
+          winningDeviceId: foreignDeviceId,
+          winningScannedAt: new Date(request.events[0]!.scannedAt),
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await db
+        .delete(schema.inventoryEventClaimOutcomes)
+        .where(
+          and(
+            eq(schema.inventoryEventClaimOutcomes.tenantId, tenantId),
+            eq(schema.inventoryEventClaimOutcomes.inventoryId, inventoryId),
+            eq(schema.inventoryEventClaimOutcomes.codeHash, codeHash),
+          ),
+        );
+    }
+  });
+
+  it("rejects evidence whose duplicated winner device disagrees with its winning event", async () => {
+    const scan = code("INCONSISTENT-WINNER-DEVICE");
+    const request = batch("inconsistent-winner-device", [
+      event("a", { scannedAt: "2026-08-25T08:21:00.000Z", canonicalRaw: scan.canonical.raw }),
+    ]);
+    await service.ingest(tenantId, deviceAId, inventoryId, request);
+    const codeHash = "d".repeat(64);
+    try {
+      await expect(
+        db.insert(schema.inventoryEventClaimOutcomes).values({
+          tenantId,
+          inventoryId,
+          sourceEventId: request.events[0]!.eventId,
+          codeHash,
+          status: "claimed",
+          winningEventId: request.events[0]!.eventId,
+          winningDeviceId: deviceBId,
+          winningScannedAt: new Date(request.events[0]!.scannedAt),
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await db
+        .delete(schema.inventoryEventClaimOutcomes)
+        .where(
+          and(
+            eq(schema.inventoryEventClaimOutcomes.tenantId, tenantId),
+            eq(schema.inventoryEventClaimOutcomes.inventoryId, inventoryId),
+            eq(schema.inventoryEventClaimOutcomes.codeHash, codeHash),
+          ),
+        );
+    }
   });
 
   it("expands a known box on the server and returns a mixed applied/conflict result without losing evidence", async () => {
@@ -485,6 +633,125 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
       .from(schema.inventoryScanEvents)
       .where(eq(schema.inventoryScanEvents.eventId, box.eventId));
     expect(boxEvidence).toEqual({ verdict: "duplicate" });
+  });
+
+  it("lazily reconstructs strict pre-0074 item and partial-box evidence before later displacement", async () => {
+    const legacySscc = buildSscc(3, "4600682", 41);
+    const legacyA = code("LEGACY-BOX-A");
+    const legacyB = code("LEGACY-BOX-B");
+    const legacyC = code("LEGACY-BOX-C");
+    await db.insert(schema.inventorySnapshotCodes).values(
+      [legacyA, legacyB, legacyC].map((item) => ({
+        tenantId,
+        snapshotId,
+        canonicalRaw: item.canonical.raw,
+        codeHash: item.codeHash,
+        gtin14: GTIN,
+        serial: item.canonical.serial,
+        sourceStatus: "INTRODUCED" as const,
+        sourceProductionDate: "2026-08-20",
+        parentSscc: legacySscc,
+        expected: true,
+        protected: false,
+      })),
+    );
+    const itemRequest = batch("legacy-item", [
+      event("a", {
+        scannedAt: "2026-08-25T08:30:00.000Z",
+        canonicalRaw: legacyA.canonical.raw,
+      }),
+    ]);
+    await service.ingest(tenantId, deviceAId, inventoryId, itemRequest);
+    const boxRequest = batch("legacy-partial-box", [
+      event("b", {
+        scannedAt: "2026-08-25T09:30:00.000Z",
+        kind: "known_box",
+        normalizedIdentity: `known_box:${legacySscc}`,
+        codeHash: null,
+        canonicalRaw: legacySscc,
+      }),
+    ]);
+    const boxResponse = await service.ingest(tenantId, deviceBId, inventoryId, boxRequest);
+    expect(boxResponse.outcomes[0]).toMatchObject({ claimedCount: 2, conflictCount: 1 });
+
+    await db
+      .delete(schema.inventoryEventClaimOutcomes)
+      .where(
+        and(
+          eq(schema.inventoryEventClaimOutcomes.tenantId, tenantId),
+          eq(schema.inventoryEventClaimOutcomes.inventoryId, inventoryId),
+          eq(schema.inventoryEventClaimOutcomes.sourceEventId, boxRequest.events[0]!.eventId),
+        ),
+      );
+    await db
+      .update(schema.inventoryScanEvents)
+      .set({ firstWinningEventId: boxRequest.events[0]!.eventId })
+      .where(eq(schema.inventoryScanEvents.eventId, boxRequest.events[0]!.eventId));
+    await db
+      .update(schema.inventoryScanBatches)
+      .set({
+        result: {
+          ...boxResponse,
+          outcomes: boxResponse.outcomes.map((outcome) => ({
+            eventId: outcome.eventId,
+            status: outcome.status,
+            reasonCode: outcome.reasonCode,
+            firstWinningEventId: boxRequest.events[0]!.eventId,
+          })),
+        },
+      })
+      .where(
+        and(
+          eq(schema.inventoryScanBatches.tenantId, tenantId),
+          eq(schema.inventoryScanBatches.inventoryId, inventoryId),
+          eq(schema.inventoryScanBatches.deviceId, deviceBId),
+          eq(schema.inventoryScanBatches.batchId, boxRequest.batchId),
+        ),
+      );
+
+    const upgradedReplay = await service.ingest(tenantId, deviceBId, inventoryId, boxRequest);
+    expect(upgradedReplay.outcomes[0]).toMatchObject({
+      status: "applied",
+      claimedCount: 2,
+      conflictCount: 1,
+    });
+    expect(upgradedReplay.outcomes[0]!.claims).toHaveLength(3);
+
+    const displacement = batch("legacy-child-displacement", [
+      event("a", {
+        scannedAt: "2026-08-25T09:00:00.000Z",
+        canonicalRaw: legacyB.canonical.raw,
+      }),
+    ]);
+    await service.ingest(tenantId, deviceAId, inventoryId, displacement);
+    expect(
+      await db
+        .select({
+          codeHash: schema.inventoryEventClaimOutcomes.codeHash,
+          status: schema.inventoryEventClaimOutcomes.status,
+        })
+        .from(schema.inventoryEventClaimOutcomes)
+        .where(
+          and(
+            eq(schema.inventoryEventClaimOutcomes.tenantId, tenantId),
+            eq(schema.inventoryEventClaimOutcomes.inventoryId, inventoryId),
+            eq(schema.inventoryEventClaimOutcomes.sourceEventId, boxRequest.events[0]!.eventId),
+          ),
+        )
+        .orderBy(asc(schema.inventoryEventClaimOutcomes.codeHash)),
+    ).toEqual(
+      [
+        { codeHash: legacyA.codeHash, status: "duplicate" },
+        { codeHash: legacyB.codeHash, status: "duplicate" },
+        { codeHash: legacyC.codeHash, status: "claimed" },
+      ].sort((left, right) => left.codeHash.localeCompare(right.codeHash)),
+    );
+    expect(
+      await db
+        .select({ verdict: schema.inventoryScanEvents.authoritativeVerdict })
+        .from(schema.inventoryScanEvents)
+        .where(eq(schema.inventoryScanEvents.eventId, boxRequest.events[0]!.eventId)),
+    ).toEqual([{ verdict: "applied" }]);
   });
 
   it("enforces a monotonic accepted device sequence high-water while allowing gaps", async () => {

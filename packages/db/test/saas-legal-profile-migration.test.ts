@@ -57,20 +57,7 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
     };
-    journal.entries = journal.entries.filter(
-      (entry) =>
-        entry.tag !== "0060_saas_legal_profiles" &&
-        entry.tag !== "0061_saas_bank_accounts" &&
-        entry.tag !== "0062_document_account_snapshots" &&
-        entry.tag !== "0063_payment_account_evidence" &&
-        entry.tag !== "0064_normalize_operator_billing_profile_kind" &&
-        entry.tag !== "0065_saas_party_actual_addresses" &&
-        entry.tag !== "0066_panoramic_hemingway" &&
-        entry.tag !== "0067_flashy_outlaw_kid" &&
-        entry.tag !== "0068_inventory_protected_date_precedence" &&
-        entry.tag !== "0069_inventory_station_manifest" &&
-        entry.tag !== "0070_curious_big_bertha",
-    );
+    journal.entries = journal.entries.filter((entry) => Number(entry.tag.slice(0, 4)) < 60);
     await writeFile(journalPath, JSON.stringify(journal));
 
     await migrate(drizzle(pool), { migrationsFolder: legacyMigrations });

@@ -208,14 +208,21 @@ describe.skipIf(!databaseUrl)("inventory sync PostgreSQL facts", () => {
       [tenantId, inventoryId, deviceAId, "b".repeat(64)],
       "23505",
     );
-    await expectConstraintViolation(
+    await client.query(
       `insert into inventory_scan_batches
          (tenant_id, inventory_id, device_id, batch_id, payload_digest, sequence_ceiling, outcome,
           result)
        values ($1, $2, $3, 'batch-b', $4, 2, 'applied', '{"accepted":0}'::jsonb)`,
       [tenantId, inventoryId, deviceAId, "a".repeat(64)],
-      "23505",
     );
+    expect(
+      await client.query(
+        `select count(*)::int as count from inventory_scan_batches
+          where tenant_id = $1 and inventory_id = $2 and device_id = $3
+            and payload_digest = $4`,
+        [tenantId, inventoryId, deviceAId, "a".repeat(64)],
+      ),
+    ).toMatchObject({ rows: [{ count: 2 }] });
     await client.query(
       `insert into inventory_scan_events
          (event_id, tenant_id, inventory_id, batch_id, device_id, device_sequence, operator_id,

@@ -1,4 +1,8 @@
+import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
@@ -12,7 +16,7 @@ import {
   credentialGenerationOwnership,
   sealCredentialGeneration,
 } from "../src/lib/credential-recovery.js";
-import { makeExec } from "./support/sqlite-exec.js";
+import { makeExec, makeRotatingExec } from "./support/sqlite-exec.js";
 
 const INVENTORY_ID = "11111111-1111-4111-8111-111111111111";
 const SNAPSHOT_ID = "22222222-2222-4222-8222-222222222222";
@@ -95,6 +99,49 @@ async function setup(): Promise<{ db: DatabaseSync; exec: SqlExecutor }> {
      VALUES (?, ?, ?, 1, ?, '2026-08-25T10:00:01.000Z')`,
   ).run(INVENTORY_ID, SNAPSHOT_ID, EVENT_ID, JSON.stringify(event));
   return { db, exec };
+}
+
+async function rotatingProgressSetup(hooks: Parameters<typeof makeRotatingExec>[1] = {}) {
+  const directory = mkdtempSync(join(tmpdir(), `inventory-progress-${randomUUID()}-`));
+  const path = join(directory, "mirror.sqlite");
+  const databases = [new DatabaseSync(path), new DatabaseSync(path)];
+  const exec = makeRotatingExec(databases, hooks);
+  await applyMigrations(exec);
+  const db = databases[0]!;
+  db.prepare(
+    `INSERT INTO inventory_task_mirror
+       (inventory_id, inventory_number, active_snapshot_id, active_snapshot_revision)
+     VALUES (?, 'INV-1', ?, 1)`,
+  ).run(INVENTORY_ID, SNAPSHOT_ID);
+  db.prepare(
+    `INSERT INTO inventory_terminal_state
+       (inventory_id, snapshot_id, device_id, operator_id, next_device_sequence, updated_at)
+     VALUES (?, ?, ?, ?, 2, '2026-08-25T10:00:00.000Z')`,
+  ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+  db.prepare(
+    `INSERT INTO inventory_scan_events_mirror
+       (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
+        kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict,
+        commit_state, legacy_audit_version)
+     VALUES (?, ?, ?, ?, 1, ?, '2026-08-25T10:00:01.000Z', 'item', ?, ?,
+       '010460000000001521SERIAL', '2026-08-20', 'expected', 'committed', 1)`,
+  ).run(
+    INVENTORY_ID,
+    SNAPSHOT_ID,
+    EVENT_ID,
+    DEVICE_ID,
+    OPERATOR_ID,
+    `item:${"a".repeat(64)}`,
+    "a".repeat(64),
+  );
+  return {
+    db,
+    exec,
+    dispose() {
+      for (const database of databases) database.close();
+      rmSync(directory, { recursive: true, force: true });
+    },
+  };
 }
 
 describe("inventory sync engine", () => {
@@ -427,7 +474,7 @@ describe("inventory sync engine", () => {
     const failingExec: SqlExecutor = {
       all: (sql, params) => exec.all(sql, params),
       run: async (sql, params) => {
-        if (sql.includes("UPDATE inventory_scan_events_mirror SET")) {
+        if (sql.includes("INSERT INTO inventory_sync_ack_receipts")) {
           throw new Error("sqlite unavailable");
         }
         await exec.run(sql, params);
@@ -609,7 +656,9 @@ describe("inventory progress and leave", () => {
     const cursorFailingExec: SqlExecutor = {
       all: (sql, params) => exec.all(sql, params),
       run: async (sql, params) => {
-        if (sql.includes("SET progress_cursor")) throw new Error("cursor write failed");
+        if (sql.includes("INSERT INTO inventory_progress_receipts")) {
+          throw new Error("cursor write failed");
+        }
         await exec.run(sql, params);
       },
     };
@@ -692,6 +741,130 @@ describe("inventory progress and leave", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_conflicts_mirror").get()).toEqual({
       count: 1,
     });
+  });
+
+  it("atomically applies a projection and cursor through rotating pooled connections", async () => {
+    const fixture = await rotatingProgressSetup();
+    try {
+      const claimId = "99999999-9999-4999-8999-999999999999";
+      await applyInventoryProgressPage(
+        fixture.exec,
+        { inventoryId: INVENTORY_ID, snapshotId: SNAPSHOT_ID, deviceId: DEVICE_ID },
+        {
+          inventoryId: INVENTORY_ID,
+          snapshotId: SNAPSHOT_ID,
+          snapshotRevision: 1,
+          cursor: null,
+          resultRevision: 1,
+          items: [
+            {
+              id: claimId,
+              revision: 1,
+              kind: "claim",
+              codeHash: "a".repeat(64),
+              classification: "expected",
+              observedProductionDate: "2026-08-20",
+              winner: {
+                codeHash: "a".repeat(64),
+                eventId: "77777777-7777-4777-8777-777777777777",
+                deviceId: "88888888-8888-4888-8888-888888888888",
+                scannedAt: "2026-08-25T09:00:00.000Z",
+              },
+              correctedAt: "2026-08-25T10:01:00.000Z",
+            },
+          ],
+          nextCursor: `1:${claimId}`,
+        },
+      );
+      expect(
+        fixture.db
+          .prepare(
+            `SELECT result.code_hash, terminal.progress_cursor
+               FROM inventory_code_results_mirror result
+               JOIN inventory_terminal_state terminal
+                 ON terminal.inventory_id = result.inventory_id
+                AND terminal.snapshot_id = result.snapshot_id`,
+          )
+          .get(),
+      ).toEqual({ code_hash: "a".repeat(64), progress_cursor: `1:${claimId}` });
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("cannot advance the cursor on a pre-apply fault and repairs the whole page on retry", async () => {
+    let armed = false;
+    const fixture = await rotatingProgressSetup({
+      beforeRun() {
+        if (!armed) return;
+        armed = false;
+        throw new Error("simulated storage fault before progress apply");
+      },
+    });
+    try {
+      const claimId = "99999999-9999-4999-8999-999999999999";
+      const page = {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        snapshotRevision: 1,
+        cursor: null,
+        resultRevision: 1,
+        items: [
+          {
+            id: claimId,
+            revision: 1,
+            kind: "claim",
+            codeHash: "a".repeat(64),
+            classification: "expected",
+            observedProductionDate: "2026-08-20",
+            winner: {
+              codeHash: "a".repeat(64),
+              eventId: "77777777-7777-4777-8777-777777777777",
+              deviceId: "88888888-8888-4888-8888-888888888888",
+              scannedAt: "2026-08-25T09:00:00.000Z",
+            },
+            correctedAt: "2026-08-25T10:01:00.000Z",
+          },
+        ],
+        nextCursor: `1:${claimId}`,
+      };
+      armed = true;
+      await expect(
+        applyInventoryProgressPage(
+          fixture.exec,
+          { inventoryId: INVENTORY_ID, snapshotId: SNAPSHOT_ID, deviceId: DEVICE_ID },
+          page,
+        ),
+      ).rejects.toThrow("simulated storage fault before progress apply");
+      expect(
+        fixture.db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get(),
+      ).toEqual({
+        count: 0,
+      });
+      expect(
+        fixture.db.prepare("SELECT progress_cursor FROM inventory_terminal_state").get(),
+      ).toEqual({
+        progress_cursor: null,
+      });
+
+      await applyInventoryProgressPage(
+        fixture.exec,
+        { inventoryId: INVENTORY_ID, snapshotId: SNAPSHOT_ID, deviceId: DEVICE_ID },
+        page,
+      );
+      expect(
+        fixture.db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get(),
+      ).toEqual({
+        count: 1,
+      });
+      expect(
+        fixture.db.prepare("SELECT progress_cursor FROM inventory_terminal_state").get(),
+      ).toEqual({
+        progress_cursor: `1:${claimId}`,
+      });
+    } finally {
+      fixture.dispose();
+    }
   });
 
   it("never calls leave with pending local work and deletes only the exact pointer after success", async () => {

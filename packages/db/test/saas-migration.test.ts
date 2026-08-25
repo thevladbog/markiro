@@ -117,50 +117,7 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
     };
-    journal.entries = journal.entries.filter(
-      (entry) =>
-        entry.tag !== "0030_saas_catalog_subscriptions" &&
-        entry.tag !== "0031_platform_auth_runtime_fields" &&
-        entry.tag !== "0032_cute_frank_castle" &&
-        entry.tag !== "0033_common_magdalene" &&
-        entry.tag !== "0034_overconfident_harrier" &&
-        entry.tag !== "0035_stormy_ser_duncan" &&
-        entry.tag !== "0036_neat_quasar" &&
-        entry.tag !== "0037_kiosk_pickup_policy" &&
-        entry.tag !== "0038_organization_branding" &&
-        entry.tag !== "0039_kiosk_sscc_orders" &&
-        entry.tag !== "0040_sscc_counter_start_one" &&
-        entry.tag !== "0041_product_images" &&
-        entry.tag !== "0042_default_box_label_template" &&
-        entry.tag !== "0043_station_shift_close_presence" &&
-        entry.tag !== "0044_landing_demo_email" &&
-        entry.tag !== "0045_flawless_overlord" &&
-        entry.tag !== "0046_yummy_morph" &&
-        entry.tag !== "0047_late_blue_blade" &&
-        entry.tag !== "0048_product_shelf_life_days" &&
-        entry.tag !== "0049_default_label_templates" &&
-        entry.tag !== "0050_reseed_default_label_templates" &&
-        entry.tag !== "0051_glorious_hydra" &&
-        entry.tag !== "0052_center_sscc_and_fit_label_templates" &&
-        entry.tag !== "0053_date_free_label_templates" &&
-        entry.tag !== "0054_shift_production_date" &&
-        entry.tag !== "0055_brief_mole_man" &&
-        entry.tag !== "0056_align_dated_label_quantity" &&
-        entry.tag !== "0057_product_print_name" &&
-        entry.tag !== "0058_remarkable_pyro" &&
-        entry.tag !== "0059_print_name_label_templates" &&
-        entry.tag !== "0060_saas_legal_profiles" &&
-        entry.tag !== "0061_saas_bank_accounts" &&
-        entry.tag !== "0062_document_account_snapshots" &&
-        entry.tag !== "0063_payment_account_evidence" &&
-        entry.tag !== "0064_normalize_operator_billing_profile_kind" &&
-        entry.tag !== "0065_saas_party_actual_addresses" &&
-        entry.tag !== "0066_panoramic_hemingway" &&
-        entry.tag !== "0067_flashy_outlaw_kid" &&
-        entry.tag !== "0068_inventory_protected_date_precedence" &&
-        entry.tag !== "0069_inventory_station_manifest" &&
-        entry.tag !== "0070_curious_big_bertha",
-    );
+    journal.entries = journal.entries.filter((entry) => Number(entry.tag.slice(0, 4)) <= 29);
     expect(journal.entries.at(-1)?.tag).toBe("0029_loving_triathlon");
     await writeFile(journalPath, JSON.stringify(journal));
 

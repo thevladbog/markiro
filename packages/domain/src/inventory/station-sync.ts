@@ -5,6 +5,7 @@ import { z } from "zod";
 export const INVENTORY_EVENT_BATCH_SIZE = 100;
 export const INVENTORY_PROGRESS_PAGE_SIZE = 200;
 export const INVENTORY_EVENT_CLAIM_OUTCOME_SIZE = 10_000;
+export const INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE = 10_000;
 export const INVENTORY_PROGRESS_CURSOR_PATTERN =
   "^[1-9][0-9]*:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
 
@@ -181,20 +182,41 @@ export const inventoryEventOutcomeSchema = z
     ) {
       context.addIssue({ code: "custom", path: ["claims"], message: "claim counts mismatch" });
     }
+    const carriesClaims = value.claims.length > 0;
+    if (
+      (value.status === "duplicate" &&
+        (value.claimedCount !== 0 ||
+          value.conflictCount === 0 ||
+          value.reasonCode !== "CLAIM_LOST")) ||
+      (value.status === "applied" &&
+        ((carriesClaims && value.claimedCount === 0) || value.reasonCode !== "CLAIM_APPLIED")) ||
+      (value.status === "replay" && value.reasonCode !== "BATCH_REPLAY") ||
+      ((value.status === "rejected" || value.status === "quarantined") &&
+        (value.claimedCount !== 0 || value.conflictCount !== 0 || carriesClaims))
+    ) {
+      context.addIssue({ code: "custom", path: ["status"], message: "outcome contradiction" });
+    }
   });
 
 export type InventoryEventOutcome = z.infer<typeof inventoryEventOutcomeSchema>;
 
-export const inventoryEventBatchResponseSchema = z.strictObject({
-  inventoryId: uuidSchema,
-  snapshotId: uuidSchema,
-  snapshotRevision: z.literal(1),
-  batchId: z.string().min(1).max(128),
-  payloadDigest: hashSchema,
-  sequenceCeiling: z.number().int().positive().safe(),
-  resultRevision: z.number().int().nonnegative().safe(),
-  outcomes: z.array(inventoryEventOutcomeSchema).min(1).max(INVENTORY_EVENT_BATCH_SIZE),
-});
+export const inventoryEventBatchResponseSchema = z
+  .strictObject({
+    inventoryId: uuidSchema,
+    snapshotId: uuidSchema,
+    snapshotRevision: z.literal(1),
+    batchId: z.string().min(1).max(128),
+    payloadDigest: hashSchema,
+    sequenceCeiling: z.number().int().positive().safe(),
+    resultRevision: z.number().int().nonnegative().safe(),
+    outcomes: z.array(inventoryEventOutcomeSchema).min(1).max(INVENTORY_EVENT_BATCH_SIZE),
+  })
+  .superRefine((value, context) => {
+    const claimCount = value.outcomes.reduce((total, outcome) => total + outcome.claims.length, 0);
+    if (claimCount > INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE) {
+      context.addIssue({ code: "custom", path: ["outcomes"], message: "too many claims" });
+    }
+  });
 
 export type InventoryEventBatchResponse = z.infer<typeof inventoryEventBatchResponseSchema>;
 
@@ -299,6 +321,13 @@ export function parseInventoryEventBatchResponse(
       throw new Error("Invalid inventory event batch response");
     }
     if (claimBearing && requestEvent.kind === "old_box" && outcome.claims.length !== 0) {
+      throw new Error("Invalid inventory event batch response");
+    }
+    if (
+      outcome.status === "applied" &&
+      outcome.claimedCount === 0 &&
+      requestEvent.kind !== "old_box"
+    ) {
       throw new Error("Invalid inventory event batch response");
     }
     for (const claim of outcome.claims) {

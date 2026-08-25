@@ -526,6 +526,13 @@
       "when": 1787662594798,
       "tag": "0074_inventory_event_claim_outcomes",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1787666767226,
+      "tag": "0075_lowly_pride",
+      "breakpoints": true
     }
   ]
 }

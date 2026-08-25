@@ -75,7 +75,7 @@ describe("STATION_MIGRATIONS", () => {
     ]);
   });
 
-  it("creates and round-trips all ten inventory mirror tables with scanner indexes", () => {
+  it("creates inventory mirrors and single-statement acknowledgement/progress receipts", () => {
     const db = migratedDb();
     const expectedTables = [
       "inventory_task_mirror",
@@ -88,6 +88,8 @@ describe("STATION_MIGRATIONS", () => {
       "inventory_repack_items_mirror",
       "inventory_conflicts_mirror",
       "inventory_event_claim_outcomes_mirror",
+      "inventory_sync_ack_receipts",
+      "inventory_progress_receipts",
     ];
     const tables = db
       .prepare(
@@ -97,6 +99,16 @@ describe("STATION_MIGRATIONS", () => {
       )
       .all() as Array<{ name: string }>;
     expect(tables.map((row) => row.name)).toEqual([...expectedTables].sort());
+    expect(
+      db
+        .prepare(
+          `SELECT name FROM sqlite_master
+            WHERE type = 'trigger'
+              AND name IN ('inventory_sync_apply_ack', 'inventory_progress_apply_page')
+            ORDER BY name`,
+        )
+        .all(),
+    ).toEqual([{ name: "inventory_progress_apply_page" }, { name: "inventory_sync_apply_ack" }]);
 
     db.prepare(
       `INSERT INTO inventory_task_mirror
@@ -252,7 +264,12 @@ describe("STATION_MIGRATIONS", () => {
     expect(
       db.prepare("SELECT inventory_id, active_snapshot_id FROM inventory_task_mirror").get(),
     ).toEqual({ inventory_id: "inventory-1", active_snapshot_id: "snapshot-1" });
-    for (const table of expectedTables.slice(1)) {
+    for (const table of expectedTables
+      .slice(1)
+      .filter(
+        (table) =>
+          table !== "inventory_sync_ack_receipts" && table !== "inventory_progress_receipts",
+      )) {
       expect(
         db.prepare(`SELECT snapshot_id FROM ${table} LIMIT 1`).get(),
         `${table} must retain its snapshot revision`,

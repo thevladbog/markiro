@@ -1029,6 +1029,282 @@ export const STATION_MIGRATIONS: string[] = [
      updated_at TEXT NOT NULL,
      PRIMARY KEY (inventory_id, snapshot_id, source_event_id, code_hash)
    );`,
+  // Acknowledgement and progress are each reduced by one SQLite statement.
+  // The receipt insert, its trigger writes, and the exact delete/cursor CAS are
+  // one implicit SQLite transaction even when SqlExecutor rotates pooled connections.
+  `CREATE TABLE IF NOT EXISTS inventory_sync_ack_receipts (
+     receipt_id TEXT PRIMARY KEY,
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     batch_id TEXT NOT NULL,
+     payload_digest TEXT NOT NULL,
+     response_json TEXT NOT NULL,
+     outbox_rows_json TEXT NOT NULL,
+     pin_key TEXT NOT NULL,
+     pin_value TEXT NOT NULL,
+     applied_at TEXT NOT NULL,
+     CHECK (json_valid(response_json) AND length(response_json) <= 8388608),
+     CHECK (json_valid(outbox_rows_json) AND length(outbox_rows_json) <= 524288)
+   );`,
+  `DROP TRIGGER IF EXISTS inventory_sync_validate_ack;`,
+  `CREATE TRIGGER inventory_sync_validate_ack
+     BEFORE INSERT ON inventory_sync_ack_receipts
+     WHEN NOT EXISTS (
+       SELECT 1 FROM inventory_sync_ack_receipts receipt
+        WHERE receipt.receipt_id = NEW.receipt_id
+     ) AND (
+       json_extract(NEW.response_json, '$.inventoryId') <> NEW.inventory_id
+       OR json_extract(NEW.response_json, '$.snapshotId') <> NEW.snapshot_id
+       OR json_extract(NEW.response_json, '$.batchId') <> NEW.batch_id
+       OR json_extract(NEW.response_json, '$.payloadDigest') <> NEW.payload_digest
+       OR json_array_length(NEW.outbox_rows_json) NOT BETWEEN 1 AND 100
+       OR json_array_length(NEW.response_json, '$.outcomes') <>
+            json_array_length(NEW.outbox_rows_json)
+       OR NOT EXISTS (
+       SELECT 1 FROM station_meta pin
+        WHERE pin.key = NEW.pin_key AND pin.value = NEW.pin_value
+     ) OR EXISTS (
+       SELECT 1 FROM json_each(NEW.outbox_rows_json) pinned
+        WHERE NOT EXISTS (
+          SELECT 1 FROM inventory_outbox queued
+           WHERE queued.id = json_extract(pinned.value, '$.id')
+             AND queued.inventory_id = NEW.inventory_id
+             AND queued.snapshot_id = NEW.snapshot_id
+             AND queued.event_id = json_extract(pinned.value, '$.eventId')
+             AND queued.payload_json = json_extract(pinned.value, '$.payloadJson')
+        )
+     ))
+     BEGIN
+       SELECT RAISE(ABORT, 'inventory outbox payload changed');
+     END;`,
+  `DROP TRIGGER IF EXISTS inventory_sync_apply_ack;`,
+  `CREATE TRIGGER inventory_sync_apply_ack
+     AFTER INSERT ON inventory_sync_ack_receipts
+     BEGIN
+       UPDATE inventory_scan_events_mirror AS event
+          SET authoritative_verdict = (
+                SELECT json_extract(outcome.value, '$.status')
+                  FROM json_each(NEW.response_json, '$.outcomes') outcome
+                 WHERE json_extract(outcome.value, '$.eventId') = event.event_id
+              ),
+              server_reason_code = (
+                SELECT json_extract(outcome.value, '$.reasonCode')
+                  FROM json_each(NEW.response_json, '$.outcomes') outcome
+                 WHERE json_extract(outcome.value, '$.eventId') = event.event_id
+              ),
+              server_result_revision = json_extract(NEW.response_json, '$.resultRevision'),
+              server_winner_code_hash = (
+                SELECT json_extract(claim.value, '$.codeHash')
+                  FROM json_each(NEW.response_json, '$.outcomes') outcome,
+                       json_each(outcome.value, '$.claims') claim
+                 WHERE json_extract(outcome.value, '$.eventId') = event.event_id
+                   AND json_extract(claim.value, '$.status') = 'duplicate'
+                 ORDER BY json_extract(claim.value, '$.codeHash') LIMIT 1
+              ),
+              server_winner_event_id = (
+                SELECT json_extract(claim.value, '$.winner.eventId')
+                  FROM json_each(NEW.response_json, '$.outcomes') outcome,
+                       json_each(outcome.value, '$.claims') claim
+                 WHERE json_extract(outcome.value, '$.eventId') = event.event_id
+                   AND json_extract(claim.value, '$.status') = 'duplicate'
+                 ORDER BY json_extract(claim.value, '$.codeHash') LIMIT 1
+              ),
+              server_winner_device_id = (
+                SELECT json_extract(claim.value, '$.winner.deviceId')
+                  FROM json_each(NEW.response_json, '$.outcomes') outcome,
+                       json_each(outcome.value, '$.claims') claim
+                 WHERE json_extract(outcome.value, '$.eventId') = event.event_id
+                   AND json_extract(claim.value, '$.status') = 'duplicate'
+                 ORDER BY json_extract(claim.value, '$.codeHash') LIMIT 1
+              ),
+              server_winner_scanned_at = (
+                SELECT json_extract(claim.value, '$.winner.scannedAt')
+                  FROM json_each(NEW.response_json, '$.outcomes') outcome,
+                       json_each(outcome.value, '$.claims') claim
+                 WHERE json_extract(outcome.value, '$.eventId') = event.event_id
+                   AND json_extract(claim.value, '$.status') = 'duplicate'
+                 ORDER BY json_extract(claim.value, '$.codeHash') LIMIT 1
+              )
+        WHERE event.inventory_id = NEW.inventory_id
+          AND event.snapshot_id = NEW.snapshot_id
+          AND EXISTS (
+            SELECT 1 FROM json_each(NEW.response_json, '$.outcomes') outcome
+             WHERE json_extract(outcome.value, '$.eventId') = event.event_id
+          );
+
+       INSERT INTO inventory_event_claim_outcomes_mirror (
+         inventory_id, snapshot_id, source_event_id, code_hash, status,
+         winning_event_id, winning_device_id, winning_scanned_at,
+         result_revision, updated_at
+       )
+       SELECT NEW.inventory_id, NEW.snapshot_id,
+              json_extract(outcome.value, '$.eventId'),
+              json_extract(claim.value, '$.codeHash'),
+              json_extract(claim.value, '$.status'),
+              json_extract(claim.value, '$.winner.eventId'),
+              json_extract(claim.value, '$.winner.deviceId'),
+              json_extract(claim.value, '$.winner.scannedAt'),
+              json_extract(NEW.response_json, '$.resultRevision'), NEW.applied_at
+         FROM json_each(NEW.response_json, '$.outcomes') outcome,
+              json_each(outcome.value, '$.claims') claim
+        WHERE true
+       ON CONFLICT(inventory_id, snapshot_id, source_event_id, code_hash) DO UPDATE SET
+         status = excluded.status,
+         winning_event_id = excluded.winning_event_id,
+         winning_device_id = excluded.winning_device_id,
+         winning_scanned_at = excluded.winning_scanned_at,
+         result_revision = excluded.result_revision,
+         updated_at = excluded.updated_at;
+
+       INSERT INTO inventory_conflicts_mirror (
+         inventory_id, snapshot_id, conflict_id, code_hash, losing_event_id,
+         winning_event_id, winning_device_id, winning_scanned_at, detected_at, state
+       )
+       SELECT NEW.inventory_id, NEW.snapshot_id,
+              json_extract(outcome.value, '$.eventId') || ':' ||
+                json_extract(claim.value, '$.codeHash') || ':' ||
+                json_extract(claim.value, '$.winner.eventId'),
+              json_extract(claim.value, '$.codeHash'),
+              json_extract(outcome.value, '$.eventId'),
+              json_extract(claim.value, '$.winner.eventId'),
+              json_extract(claim.value, '$.winner.deviceId'),
+              json_extract(claim.value, '$.winner.scannedAt'), NEW.applied_at, 'open'
+         FROM json_each(NEW.response_json, '$.outcomes') outcome,
+              json_each(outcome.value, '$.claims') claim
+        WHERE json_extract(claim.value, '$.status') = 'duplicate'
+       ON CONFLICT(inventory_id, snapshot_id, conflict_id) DO UPDATE SET
+         code_hash = excluded.code_hash,
+         losing_event_id = excluded.losing_event_id,
+         winning_event_id = excluded.winning_event_id,
+         winning_device_id = excluded.winning_device_id,
+         winning_scanned_at = excluded.winning_scanned_at;
+
+       DELETE FROM inventory_outbox
+        WHERE inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND EXISTS (
+            SELECT 1 FROM json_each(NEW.outbox_rows_json) pinned
+             WHERE inventory_outbox.id = json_extract(pinned.value, '$.id')
+               AND inventory_outbox.event_id = json_extract(pinned.value, '$.eventId')
+               AND inventory_outbox.payload_json = json_extract(pinned.value, '$.payloadJson')
+          );
+       DELETE FROM station_meta WHERE key = NEW.pin_key AND value = NEW.pin_value;
+     END;`,
+  `CREATE TABLE IF NOT EXISTS inventory_progress_receipts (
+     receipt_id TEXT PRIMARY KEY,
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     device_id TEXT NOT NULL,
+     requested_cursor TEXT,
+     prior_result_revision INTEGER NOT NULL,
+     page_json TEXT NOT NULL,
+     applied_at TEXT NOT NULL,
+     CHECK (json_valid(page_json) AND length(page_json) <= 8388608)
+   );`,
+  `DROP TRIGGER IF EXISTS inventory_progress_validate_page;`,
+  `CREATE TRIGGER inventory_progress_validate_page
+     BEFORE INSERT ON inventory_progress_receipts
+     WHEN json_extract(NEW.page_json, '$.inventoryId') <> NEW.inventory_id
+       OR json_extract(NEW.page_json, '$.snapshotId') <> NEW.snapshot_id
+       OR json_extract(NEW.page_json, '$.cursor') IS NOT NEW.requested_cursor
+       OR json_array_length(NEW.page_json, '$.items') > 200
+       OR NOT EXISTS (
+       SELECT 1 FROM inventory_terminal_state terminal
+        WHERE terminal.inventory_id = NEW.inventory_id
+          AND terminal.snapshot_id = NEW.snapshot_id
+          AND terminal.device_id = NEW.device_id
+          AND terminal.progress_cursor IS NEW.requested_cursor
+          AND terminal.progress_result_revision = NEW.prior_result_revision
+     )
+     BEGIN
+       SELECT RAISE(ABORT, 'inventory progress cursor changed');
+     END;`,
+  `DROP TRIGGER IF EXISTS inventory_progress_apply_page;`,
+  `CREATE TRIGGER inventory_progress_apply_page
+     AFTER INSERT ON inventory_progress_receipts
+     BEGIN
+       INSERT INTO inventory_code_results_mirror (
+         inventory_id, snapshot_id, code_hash, first_accepted_event_id,
+         winning_device_id, winning_scanned_at, observed_production_date,
+         classification, origin_classification, updated_at
+       )
+       SELECT NEW.inventory_id, NEW.snapshot_id,
+              json_extract(item.value, '$.codeHash'),
+              json_extract(item.value, '$.winner.eventId'),
+              json_extract(item.value, '$.winner.deviceId'),
+              json_extract(item.value, '$.winner.scannedAt'),
+              json_extract(item.value, '$.observedProductionDate'),
+              CASE json_extract(item.value, '$.classification')
+                WHEN 'ineligible' THEN 'known-ineligible'
+                ELSE json_extract(item.value, '$.classification') END,
+              CASE json_extract(item.value, '$.classification')
+                WHEN 'ineligible' THEN 'known-ineligible'
+                ELSE json_extract(item.value, '$.classification') END,
+              json_extract(item.value, '$.correctedAt')
+         FROM json_each(NEW.page_json, '$.items') item
+        WHERE json_type(item.value, '$.winner') = 'object'
+       ON CONFLICT(inventory_id, snapshot_id, code_hash) DO UPDATE SET
+         first_accepted_event_id = excluded.first_accepted_event_id,
+         winning_device_id = excluded.winning_device_id,
+         winning_scanned_at = excluded.winning_scanned_at,
+         observed_production_date = excluded.observed_production_date,
+         classification = excluded.classification,
+         origin_classification = CASE
+           WHEN inventory_code_results_mirror.origin_classification = 'voided'
+             THEN excluded.origin_classification
+           ELSE inventory_code_results_mirror.origin_classification END,
+         updated_at = excluded.updated_at;
+
+       UPDATE inventory_code_results_mirror AS result
+          SET classification = CASE json_extract(item.value, '$.classification')
+                WHEN 'ineligible' THEN 'known-ineligible'
+                ELSE json_extract(item.value, '$.classification') END,
+              observed_production_date = json_extract(item.value, '$.observedProductionDate'),
+              updated_at = json_extract(item.value, '$.correctedAt')
+         FROM json_each(NEW.page_json, '$.items') item
+        WHERE json_type(item.value, '$.winner') = 'null'
+          AND result.inventory_id = NEW.inventory_id
+          AND result.snapshot_id = NEW.snapshot_id
+          AND result.code_hash = json_extract(item.value, '$.codeHash');
+
+       INSERT INTO inventory_conflicts_mirror (
+         inventory_id, snapshot_id, conflict_id, code_hash, losing_event_id,
+         winning_event_id, winning_device_id, winning_scanned_at, detected_at, state
+       )
+       SELECT NEW.inventory_id, NEW.snapshot_id,
+              local.event_id || ':' || json_extract(item.value, '$.winner.eventId'),
+              json_extract(item.value, '$.codeHash'), local.event_id,
+              json_extract(item.value, '$.winner.eventId'),
+              json_extract(item.value, '$.winner.deviceId'),
+              json_extract(item.value, '$.winner.scannedAt'),
+              json_extract(item.value, '$.correctedAt'), 'open'
+         FROM json_each(NEW.page_json, '$.items') item
+         JOIN inventory_scan_events_mirror local
+           ON local.inventory_id = NEW.inventory_id
+          AND local.snapshot_id = NEW.snapshot_id
+          AND local.code_hash = json_extract(item.value, '$.codeHash')
+          AND local.device_id = NEW.device_id
+        WHERE json_type(item.value, '$.winner') = 'object'
+          AND json_extract(item.value, '$.winner.deviceId') <> NEW.device_id
+          AND NOT EXISTS (
+            SELECT 1 FROM inventory_scan_events_mirror earlier
+             WHERE earlier.inventory_id = local.inventory_id
+               AND earlier.snapshot_id = local.snapshot_id
+               AND earlier.code_hash = local.code_hash
+               AND earlier.device_id = local.device_id
+               AND (earlier.scanned_at < local.scanned_at
+                 OR (earlier.scanned_at = local.scanned_at AND earlier.event_id < local.event_id))
+          )
+       ON CONFLICT(inventory_id, snapshot_id, conflict_id) DO NOTHING;
+
+       UPDATE inventory_terminal_state
+          SET progress_cursor = COALESCE(json_extract(NEW.page_json, '$.nextCursor'), progress_cursor),
+              progress_result_revision = json_extract(NEW.page_json, '$.resultRevision'),
+              updated_at = NEW.applied_at
+        WHERE inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND device_id = NEW.device_id
+          AND progress_cursor IS NEW.requested_cursor
+          AND progress_result_revision = NEW.prior_result_revision;
+     END;`,
 ];
 
 export interface StationMigrationEntry {

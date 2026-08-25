@@ -131,9 +131,7 @@ try {
   }
   await rm(join(legacyMigrationsFolder, scopedOrderMigration.tag + ".sql"));
   await rm(join(legacyMigrationsFolder, "meta", "0072_snapshot.json"));
-  journal.entries = journal.entries.filter(
-    (entry) => entry.tag !== scopedOrderMigration.tag,
-  );
+  journal.entries = journal.entries.filter((entry) => Number(entry.tag.slice(0, 4)) < 72);
   await writeFile(journalPath, JSON.stringify(journal));
 
   await cp(migrationsFolder, stationMigrationsFolder, { recursive: true });
@@ -147,9 +145,9 @@ try {
   const stationJournal = JSON.parse(await readFile(stationJournalPath, "utf8"));
   stationJournal.entries = stationJournal.entries.filter(
     (entry) =>
-      !["0029_loving_triathlon", "0071_fantastic_hellion", scopedOrderMigration.tag].includes(
-        entry.tag,
-      ),
+      entry.tag !== "0029_loving_triathlon" &&
+      entry.tag !== "0071_fantastic_hellion" &&
+      Number(entry.tag.slice(0, 4)) < 72,
   );
   await writeFile(stationJournalPath, JSON.stringify(stationJournal));
 

@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import {
   INVENTORY_CHZ_STATUSES,
+  INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE,
+  INVENTORY_EVENT_CLAIM_OUTCOME_SIZE,
   INVENTORY_PROGRESS_CURSOR_PATTERN,
   inventoryEventBatchSchema,
   inventoryProgressCursorSchema,
@@ -27,6 +29,11 @@ export const STATION_INVENTORY_LIMITS = {
   codePageSize: STATION_INVENTORY_CODE_PAGE_SIZE,
   eventBatchSize: STATION_INVENTORY_EVENT_BATCH_SIZE,
   progressPageSize: STATION_INVENTORY_PROGRESS_PAGE_SIZE,
+} as const;
+
+export const STATION_INVENTORY_CLAIM_LIMITS = {
+  perEvent: INVENTORY_EVENT_CLAIM_OUTCOME_SIZE,
+  perBatch: INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE,
 } as const;
 
 export const stationInventoryEventBatchSchema = inventoryEventBatchSchema;
@@ -130,7 +137,7 @@ const inventoryEventOutcomeOpenApiSchema: SchemaObject = {
     conflictCount: { type: "integer", minimum: 0 },
     claims: {
       type: "array",
-      maxItems: 10_000,
+      maxItems: INVENTORY_EVENT_CLAIM_OUTCOME_SIZE,
       items: inventoryEventClaimOutcomeOpenApiSchema,
     },
   },
@@ -190,6 +197,7 @@ export const stationInventoryEventBatchResponseOpenApiSchema: SchemaObject = {
       type: "array",
       minItems: 1,
       maxItems: STATION_INVENTORY_EVENT_BATCH_SIZE,
+      description: `At most ${INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE} claim entries across all outcomes.`,
       items: inventoryEventOutcomeOpenApiSchema,
     },
   },

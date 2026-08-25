@@ -1,4 +1,8 @@
+import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
@@ -8,7 +12,7 @@ import {
   prepareInventoryOutboxBatch,
 } from "../src/lib/inventory-outbox.js";
 import { applyMigrations } from "../src/lib/mirror.js";
-import { makeExec } from "./support/sqlite-exec.js";
+import { makeExec, makeRotatingExec } from "./support/sqlite-exec.js";
 
 const INVENTORY_ID = "11111111-1111-4111-8111-111111111111";
 const SNAPSHOT_ID = "22222222-2222-4222-8222-222222222222";
@@ -45,6 +49,33 @@ async function setup() {
      VALUES (?, ?, ?, ?, 3, '2026-08-25T10:00:00.000Z')`,
   ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
   return { db, exec };
+}
+
+async function rotatingSetup(hooks: Parameters<typeof makeRotatingExec>[1] = {}) {
+  const directory = mkdtempSync(join(tmpdir(), `inventory-outbox-${randomUUID()}-`));
+  const path = join(directory, "mirror.sqlite");
+  const databases = [new DatabaseSync(path), new DatabaseSync(path)];
+  const exec = makeRotatingExec(databases, hooks);
+  await applyMigrations(exec);
+  const db = databases[0]!;
+  db.prepare(
+    `INSERT INTO inventory_task_mirror
+       (inventory_id, inventory_number, active_snapshot_id, active_snapshot_revision)
+     VALUES (?, 'INV-1', ?, 1)`,
+  ).run(INVENTORY_ID, SNAPSHOT_ID);
+  db.prepare(
+    `INSERT INTO inventory_terminal_state
+       (inventory_id, snapshot_id, device_id, operator_id, next_device_sequence, updated_at)
+     VALUES (?, ?, ?, ?, 3, '2026-08-25T10:00:00.000Z')`,
+  ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+  return {
+    db,
+    exec,
+    dispose() {
+      for (const database of databases) database.close();
+      rmSync(directory, { recursive: true, force: true });
+    },
+  };
 }
 
 function queue(db: DatabaseSync, eventId: string, sequence: number) {
@@ -213,6 +244,199 @@ describe("inventory outbox transport", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
       count: 0,
     });
+  });
+
+  it("atomically persists evidence and exact acknowledgement through rotating pooled connections", async () => {
+    const fixture = await rotatingSetup();
+    try {
+      const eventId = "55555555-5555-4555-8555-555555555555";
+      queue(fixture.db, eventId, 1);
+      const batch = await prepareInventoryOutboxBatch(fixture.exec, {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        createBatchId: () => "rotating-ack",
+      });
+      if (!batch) throw new Error("expected batch");
+      await acknowledgeInventoryOutboxBatch(fixture.exec, batch, {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        snapshotRevision: 1,
+        batchId: batch.request.batchId,
+        payloadDigest: batch.request.payloadDigest,
+        sequenceCeiling: 1,
+        resultRevision: 1,
+        outcomes: [
+          {
+            eventId,
+            status: "duplicate",
+            reasonCode: "CLAIM_LOST",
+            claimedCount: 0,
+            conflictCount: 1,
+            claims: [
+              {
+                codeHash: "1".repeat(64),
+                status: "duplicate",
+                winner: {
+                  codeHash: "1".repeat(64),
+                  eventId: "77777777-7777-4777-8777-777777777777",
+                  deviceId: "88888888-8888-4888-8888-888888888888",
+                  scannedAt: "2026-08-25T09:00:00.000Z",
+                },
+              },
+            ],
+          },
+        ],
+      });
+      expect(
+        fixture.db.prepare("SELECT winning_event_id FROM inventory_conflicts_mirror").get(),
+      ).toEqual({
+        winning_event_id: "77777777-7777-4777-8777-777777777777",
+      });
+      expect(fixture.db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
+        count: 0,
+      });
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("keeps rows intact on a fault before atomic acknowledgement and repairs on retry", async () => {
+    let armed = false;
+    const fixture = await rotatingSetup({
+      beforeRun() {
+        if (!armed) return;
+        armed = false;
+        throw new Error("simulated storage fault before acknowledgement");
+      },
+    });
+    try {
+      const eventId = "55555555-5555-4555-8555-555555555555";
+      queue(fixture.db, eventId, 1);
+      const batch = await prepareInventoryOutboxBatch(fixture.exec, {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        createBatchId: () => "faulted-ack",
+      });
+      if (!batch) throw new Error("expected batch");
+      const response = {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        snapshotRevision: 1,
+        batchId: batch.request.batchId,
+        payloadDigest: batch.request.payloadDigest,
+        sequenceCeiling: 1,
+        resultRevision: 1,
+        outcomes: [
+          {
+            eventId,
+            status: "applied",
+            reasonCode: "CLAIM_APPLIED",
+            claimedCount: 1,
+            conflictCount: 0,
+            claims: [
+              {
+                codeHash: "1".repeat(64),
+                status: "claimed",
+                winner: {
+                  codeHash: "1".repeat(64),
+                  eventId,
+                  deviceId: DEVICE_ID,
+                  scannedAt: "2026-08-25T10:00:01.000Z",
+                },
+              },
+            ],
+          },
+        ],
+      };
+      armed = true;
+      await expect(acknowledgeInventoryOutboxBatch(fixture.exec, batch, response)).rejects.toThrow(
+        "simulated storage fault before acknowledgement",
+      );
+      expect(fixture.db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
+        count: 1,
+      });
+      expect(
+        fixture.db.prepare("SELECT authoritative_verdict FROM inventory_scan_events_mirror").get(),
+      ).toEqual({ authoritative_verdict: null });
+
+      await acknowledgeInventoryOutboxBatch(fixture.exec, batch, response);
+      expect(fixture.db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
+        count: 0,
+      });
+      expect(
+        fixture.db.prepare("SELECT authoritative_verdict FROM inventory_scan_events_mirror").get(),
+      ).toEqual({ authoritative_verdict: "applied" });
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("reconciles an acknowledgement retry after the receipt committed before the caller observed it", async () => {
+    let armed = false;
+    const fixture = await rotatingSetup({
+      afterRun(sql) {
+        if (!armed || !sql.includes("INSERT INTO inventory_sync_ack_receipts")) return;
+        armed = false;
+        throw new Error("simulated crash after acknowledgement commit");
+      },
+    });
+    try {
+      const eventId = "55555555-5555-4555-8555-555555555555";
+      queue(fixture.db, eventId, 1);
+      const batch = await prepareInventoryOutboxBatch(fixture.exec, {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        createBatchId: () => "committed-ack",
+      });
+      if (!batch) throw new Error("expected batch");
+      const response = {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        snapshotRevision: 1,
+        batchId: batch.request.batchId,
+        payloadDigest: batch.request.payloadDigest,
+        sequenceCeiling: 1,
+        resultRevision: 1,
+        outcomes: [
+          {
+            eventId,
+            status: "applied",
+            reasonCode: "CLAIM_APPLIED",
+            claimedCount: 1,
+            conflictCount: 0,
+            claims: [
+              {
+                codeHash: "1".repeat(64),
+                status: "claimed",
+                winner: {
+                  codeHash: "1".repeat(64),
+                  eventId,
+                  deviceId: DEVICE_ID,
+                  scannedAt: "2026-08-25T10:00:01.000Z",
+                },
+              },
+            ],
+          },
+        ],
+      };
+      armed = true;
+      await expect(acknowledgeInventoryOutboxBatch(fixture.exec, batch, response)).rejects.toThrow(
+        "simulated crash after acknowledgement commit",
+      );
+      expect(fixture.db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
+        count: 0,
+      });
+      expect(
+        fixture.db
+          .prepare("SELECT COUNT(*) AS count FROM inventory_event_claim_outcomes_mirror")
+          .get(),
+      ).toEqual({ count: 1 });
+      await expect(acknowledgeInventoryOutboxBatch(fixture.exec, batch, response)).resolves.toEqual(
+        response,
+      );
+    } finally {
+      fixture.dispose();
+    }
   });
 
   it("persists every per-code outcome from a mixed known-box acknowledgement", async () => {
