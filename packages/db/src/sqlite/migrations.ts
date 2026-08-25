@@ -1888,6 +1888,52 @@ export const STATION_MIGRATIONS: string[] = [
      BEGIN
        SELECT RAISE(ABORT, 'inventory progress civil date invalid');
      END;`,
+  // Forward item acknowledgement binding: claim-bearing item outcomes must
+  // reproduce the exact pinned event and device facts accepted by Domain.
+  `CREATE TRIGGER IF NOT EXISTS inventory_sync_validate_ack_item_facts_v4
+     BEFORE INSERT ON inventory_sync_ack_receipts_v2
+     WHEN NOT EXISTS (
+       SELECT 1 FROM inventory_sync_ack_receipts_v2 receipt
+        WHERE receipt.receipt_id = NEW.receipt_id
+          AND receipt.inventory_id IS NEW.inventory_id
+          AND receipt.snapshot_id IS NEW.snapshot_id
+          AND receipt.batch_id IS NEW.batch_id
+          AND receipt.payload_digest IS NEW.payload_digest
+          AND receipt.response_json IS NEW.response_json
+          AND receipt.outbox_rows_json IS NEW.outbox_rows_json
+          AND receipt.pin_key IS NEW.pin_key
+          AND receipt.pin_value IS NEW.pin_value
+          AND receipt.applied_at IS NEW.applied_at
+     ) AND EXISTS (
+       SELECT 1
+         FROM json_each(NEW.response_json, '$.outcomes') outcome
+         JOIN json_each(NEW.pin_value, '$.request.events') event
+           ON json_extract(event.value, '$.eventId') =
+              json_extract(outcome.value, '$.eventId')
+        WHERE json_extract(event.value, '$.kind') = 'item'
+          AND json_extract(outcome.value, '$.status') IN ('applied', 'replay', 'duplicate')
+          AND (
+            json_type(event.value, '$.codeHash') <> 'text'
+            OR json_array_length(outcome.value, '$.claims') <> 1
+            OR json_extract(outcome.value, '$.claims[0].codeHash') IS NOT
+                 json_extract(event.value, '$.codeHash')
+            OR EXISTS (
+              SELECT 1 FROM json_each(outcome.value, '$.claims') claim
+               WHERE json_extract(claim.value, '$.status') = 'claimed'
+                 AND (
+                   json_extract(claim.value, '$.winner.eventId') IS NOT
+                     json_extract(event.value, '$.eventId')
+                   OR json_extract(claim.value, '$.winner.deviceId') IS NOT
+                     json_extract(NEW.pin_value, '$.deviceId')
+                   OR json_extract(claim.value, '$.winner.scannedAt') IS NOT
+                     json_extract(event.value, '$.scannedAt')
+                 )
+            )
+          )
+     )
+     BEGIN
+       SELECT RAISE(ABORT, 'inventory acknowledgement item facts invalid');
+     END;`,
 ];
 
 export interface StationMigrationEntry {

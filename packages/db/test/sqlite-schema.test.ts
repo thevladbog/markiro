@@ -1554,6 +1554,55 @@ function insertAckReceipt(
     );
 }
 
+interface MutableReceiptResponse {
+  outcomes: Array<{
+    status: string;
+    reasonCode: string;
+    claimedCount: number;
+    conflictCount: number;
+    claims: Array<{
+      codeHash: string;
+      status: string;
+      winner: {
+        codeHash: string;
+        eventId: string;
+        deviceId: string;
+        scannedAt: string;
+      };
+    }>;
+  }>;
+}
+
+function mutableReceiptResponse(fixture: ReturnType<typeof receiptDb>): MutableReceiptResponse {
+  return JSON.parse(fixture.responseJson) as MutableReceiptResponse;
+}
+
+function expectAcknowledgementStateUntouched(fixture: ReturnType<typeof receiptDb>): void {
+  expect(fixture.db.prepare("SELECT count(*) AS count FROM inventory_outbox").get()).toEqual({
+    count: 1,
+  });
+  expect(
+    fixture.db.prepare("SELECT value FROM station_meta WHERE key = ?").get(fixture.pinKey),
+  ).toEqual({ value: fixture.pinValue });
+  expect(
+    fixture.db
+      .prepare(
+        `SELECT authoritative_verdict, server_reason_code
+           FROM inventory_scan_events_mirror WHERE event_id = ?`,
+      )
+      .get(RECEIPT_EVENT_ID),
+  ).toEqual({ authoritative_verdict: null, server_reason_code: null });
+  for (const table of [
+    "inventory_sync_ack_receipts_v2",
+    "inventory_event_claim_outcomes_mirror",
+    "inventory_conflicts_mirror",
+  ]) {
+    expect(fixture.db.prepare(`SELECT count(*) AS count FROM ${table}`).get()).toEqual({
+      count: 0,
+    });
+  }
+}
+
 function insertProgressReceipt(
   fixture: ReturnType<typeof receiptDb>,
   input: {
@@ -1707,6 +1756,91 @@ describe("inventory receipt trigger admission", () => {
         )
         .get(RECEIPT_EVENT_ID),
     ).toEqual({ authoritative_verdict: "applied", server_reason_code: "CLAIM_APPLIED" });
+    expect(
+      fixture.db.prepare("SELECT count(*) AS count FROM inventory_sync_ack_receipts_v2").get(),
+    ).toEqual({ count: 1 });
+  });
+
+  it.each([
+    [
+      "replay with no item claim",
+      (response: MutableReceiptResponse) => {
+        const outcome = response.outcomes[0]!;
+        outcome.status = "replay";
+        outcome.reasonCode = "BATCH_REPLAY";
+        outcome.claimedCount = 0;
+        outcome.claims = [];
+      },
+    ],
+    [
+      "claimed winner from another device",
+      (response: MutableReceiptResponse) => {
+        response.outcomes[0]!.claims[0]!.winner.deviceId = "55555555-5555-4555-8555-555555555555";
+      },
+    ],
+    [
+      "claimed winner from another event",
+      (response: MutableReceiptResponse) => {
+        response.outcomes[0]!.claims[0]!.winner.eventId = "55555555-5555-4555-8555-555555555555";
+      },
+    ],
+    [
+      "claimed winner with another scan time",
+      (response: MutableReceiptResponse) => {
+        response.outcomes[0]!.claims[0]!.winner.scannedAt = "2026-08-25T10:00:02.000Z";
+      },
+    ],
+    [
+      "claim for another code",
+      (response: MutableReceiptResponse) => {
+        const claim = response.outcomes[0]!.claims[0]!;
+        claim.codeHash = "d".repeat(64);
+        claim.winner.codeHash = "d".repeat(64);
+      },
+    ],
+  ])("rejects a forged item %s without any acknowledgement mutation", (_name, forge) => {
+    const fixture = receiptDb();
+    const response = mutableReceiptResponse(fixture);
+    forge(response);
+
+    expect(() => insertAckReceipt(fixture, { responseJson: JSON.stringify(response) })).toThrow();
+    expectAcknowledgementStateUntouched(fixture);
+  });
+
+  it.each([
+    ["applied", (response: MutableReceiptResponse) => response],
+    [
+      "replay",
+      (response: MutableReceiptResponse) => {
+        response.outcomes[0]!.status = "replay";
+        response.outcomes[0]!.reasonCode = "BATCH_REPLAY";
+        return response;
+      },
+    ],
+    [
+      "duplicate",
+      (response: MutableReceiptResponse) => {
+        const outcome = response.outcomes[0]!;
+        const claim = outcome.claims[0]!;
+        outcome.status = "duplicate";
+        outcome.reasonCode = "CLAIM_LOST";
+        outcome.claimedCount = 0;
+        outcome.conflictCount = 1;
+        claim.status = "duplicate";
+        claim.winner.eventId = "55555555-5555-4555-8555-555555555555";
+        return response;
+      },
+    ],
+  ])("accepts a canonical %s item acknowledgement", (_name, canonicalize) => {
+    const fixture = receiptDb();
+    const response = canonicalize(mutableReceiptResponse(fixture));
+
+    expect(() =>
+      insertAckReceipt(fixture, { responseJson: JSON.stringify(response) }),
+    ).not.toThrow();
+    expect(fixture.db.prepare("SELECT count(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 0,
+    });
     expect(
       fixture.db.prepare("SELECT count(*) AS count FROM inventory_sync_ack_receipts_v2").get(),
     ).toEqual({ count: 1 });
