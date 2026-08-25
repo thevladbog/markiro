@@ -7,7 +7,7 @@ import { inventorySnapshotContentDigest, inventorySnapshotPageDigest } from "@ma
 import i18n from "../src/i18n/index.js";
 import type { StationClient } from "../src/lib/api-client.js";
 import { createCredentialGeneration } from "../src/lib/credential-recovery.js";
-import type { InventoryFloorTask } from "../src/lib/floor-task.js";
+import { readPersistedInventoryFloorTask, type InventoryFloorTask } from "../src/lib/floor-task.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import type { InventoryBundleManifest, InventoryBundlePage } from "../src/lib/inventory-mirror.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
@@ -248,6 +248,49 @@ afterEach(() => {
 });
 
 describe("TaskSelection inventory entry", () => {
+  it("drains a pointer write on unmount, deletes only its exact activation, then unregisters", async () => {
+    const suspended = suspendedExecutor(
+      (kind, sql, params) =>
+        kind === "run" &&
+        sql.includes("INSERT INTO station_meta") &&
+        params[0] === "active_inventory_floor_task_v1",
+    );
+    await applyMigrations(suspended.exec);
+    const scan = scanner();
+    const { api } = client();
+    const generation = createCredentialGeneration("credential-a");
+    const unregister = vi.fn();
+    const view = render(
+      <TaskSelection
+        client={api}
+        exec={suspended.exec}
+        source={scan.source}
+        operatorId="66666666-6666-4666-8666-666666666666"
+        currentLineName="Розлив №2"
+        onShiftSelected={() => {}}
+        onInventorySelected={() => {}}
+        onNew={() => {}}
+        credentialGeneration={generation}
+        onFloorWorkRegister={() => unregister}
+      />,
+    );
+    openWarehouseCategoryIfPresent();
+    fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
+    await suspended.started;
+
+    view.unmount();
+    expect(unregister).not.toHaveBeenCalled();
+    suspended.release();
+
+    await waitFor(() => expect(unregister).toHaveBeenCalledOnce());
+    expect(
+      await suspended.exec.all("SELECT value FROM station_meta WHERE key = ?", [
+        "active_inventory_floor_task_v1",
+      ]),
+    ).toEqual([]);
+    await expect(readPersistedInventoryFloorTask(suspended.exec, generation)).resolves.toBeNull();
+  });
+
   it("retires an old client activation suspended in its pointer write before replacement can continue", async () => {
     const suspended = suspendedExecutor(
       (kind, sql, params) =>
@@ -402,7 +445,10 @@ describe("TaskSelection inventory entry", () => {
       await screen.findByRole("dialog", { name: "Task is assigned to another line" }),
     ).toBeDefined();
 
-    view.rerender(<TaskSelection {...props} client={replacement.api} />);
+    await act(async () => {
+      view.rerender(<TaskSelection {...props} client={replacement.api} />);
+      await Promise.resolve();
+    });
 
     expect(screen.queryByText("INV-00047")).toBeNull();
     expect(screen.queryByRole("dialog", { name: "Task is assigned to another line" })).toBeNull();
@@ -430,7 +476,10 @@ describe("TaskSelection inventory entry", () => {
     };
     const view = render(<TaskSelection {...props} client={old.api} />);
     openWarehouseCategoryIfPresent();
-    view.rerender(<TaskSelection {...props} client={replacement.api} />);
+    await act(async () => {
+      view.rerender(<TaskSelection {...props} client={replacement.api} />);
+      await Promise.resolve();
+    });
 
     oldList.resolve({ items: [task] });
     await act(async () => {});
@@ -775,12 +824,14 @@ describe("TaskSelection inventory entry", () => {
     });
   });
 
-  it("publishes an assigned task only after the verified bundle and releases barcode interception on unmount", async () => {
+  it("transfers a successful inventory pointer to the floor before selection unmount", async () => {
     const exec = executor();
     await applyMigrations(exec);
     const scan = scanner();
     const { api, posts } = client();
     const onInventorySelected = vi.fn<(task: InventoryFloorTask) => void>();
+    const generation = createCredentialGeneration("credential-a");
+    const unregister = vi.fn();
 
     const view = render(
       <TaskSelection
@@ -792,6 +843,8 @@ describe("TaskSelection inventory entry", () => {
         onShiftSelected={() => {}}
         onInventorySelected={onInventorySelected}
         onNew={() => {}}
+        credentialGeneration={generation}
+        onFloorWorkRegister={() => unregister}
       />,
     );
 
@@ -804,6 +857,11 @@ describe("TaskSelection inventory entry", () => {
 
     view.unmount();
     expect(scan.stopped()).toBe(true);
+    await waitFor(() => expect(unregister).toHaveBeenCalledOnce());
+    await expect(readPersistedInventoryFloorTask(exec, generation)).resolves.toEqual({
+      kind: "inventory",
+      inventory: manifest,
+    });
     const postCount = posts.length;
     act(() => scan.scan(barcode));
     expect(posts).toHaveLength(postCount);

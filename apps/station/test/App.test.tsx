@@ -616,7 +616,7 @@ async function mockBackfilledActiveShiftRecovery(pinHash: string) {
 
 async function mockInventoryEntryDatabase(
   pinHash: string,
-  suspendQuery: (query: string) => boolean = (query) =>
+  suspendQuery: (query: string, values: unknown[]) => boolean = (query) =>
     query.includes("SET active_snapshot_id = staged_snapshot_id"),
 ) {
   const db = new DatabaseSync(":memory:");
@@ -675,7 +675,7 @@ async function mockInventoryEntryDatabase(
     if (cmd === "plugin:sql|execute") {
       const { query, values = [] } = (payload ?? {}) as { query: string; values?: unknown[] };
       executed.push({ query, values });
-      if (suspendQuery(query)) {
+      if (suspendQuery(query, values)) {
         markPublicationStarted();
         await publicationGate;
       }
@@ -1233,7 +1233,7 @@ describe("App", () => {
     }
   });
 
-  it("waits the real inventory publication barrier before completing operator switch", async () => {
+  it("waits and retires the real inventory publication barrier before completing operator switch", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
     lockdownMock.subscribe.mockImplementation((listener) => {
@@ -1358,8 +1358,126 @@ describe("App", () => {
         await database.exec.all("SELECT value FROM station_meta WHERE key = ?", [
           "active_inventory_floor_task_v1",
         ]),
-      ).toHaveLength(1);
-      expect(await readPersistedInventoryFloorTask(database.exec)).not.toBeNull();
+      ).toEqual([]);
+      expect(await readPersistedInventoryFloorTask(database.exec)).toBeNull();
+    } finally {
+      database.releasePublication();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("drains and retires a suspended inventory pointer when Update Center unmounts selection", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+    lockdownMock.subscribe.mockImplementation((listener) => {
+      lockdownMock.listeners.add(listener);
+      return () => lockdownMock.listeners.delete(listener);
+    });
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const inventoryId = "11111111-1111-4111-8111-111111111111";
+    const snapshotId = "22222222-2222-4222-8222-222222222222";
+    const snapshotFixedAt = "2026-08-25T05:00:00.000Z";
+    const contentDigest = inventorySnapshotContentDigest([]);
+    const manifest = {
+      inventoryId,
+      inventoryNumber: "INV-00047",
+      productId: "44444444-4444-4444-8444-444444444444",
+      productName: "Water",
+      gtin14: "04600000000015",
+      mode: "check",
+      lineId: "33333333-3333-4333-8333-333333333333",
+      lineName: "Line 1",
+      productionDateFrom: "2026-08-01",
+      productionDateTo: "2026-08-31",
+      boxCapacity: 12,
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: "a".repeat(64),
+      contentDigest,
+      codeCount: 0,
+      boxLabelTemplate: null,
+      limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
+      sscc: null,
+      ssccRevokedFrom: [],
+      ssccRevokedBlocks: [],
+    };
+    const page = {
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: manifest.combinedDigest,
+      contentDigest,
+      cursor: null,
+      items: [],
+      nextCursor: null,
+      pageDigest: inventorySnapshotPageDigest({
+        snapshotId,
+        snapshotFixedAt,
+        contentDigest,
+        cursor: null,
+        items: [],
+        nextCursor: null,
+      }),
+    };
+    const database = await mockInventoryEntryDatabase(
+      pinHash,
+      (query, values) =>
+        query.includes("INSERT INTO station_meta") &&
+        values[0] === "active_inventory_floor_task_v1",
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/operators") throw new Error("keep cached operator");
+        if (path === "/shifts") return new Response(JSON.stringify({ items: [] }));
+        if (path === "/station/inventory-tasks") {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  inventoryId,
+                  inventoryNumber: manifest.inventoryNumber,
+                  productName: manifest.productName,
+                  mode: manifest.mode,
+                  lineId: manifest.lineId,
+                  lineName: manifest.lineName,
+                  productionDateFrom: manifest.productionDateFrom,
+                  productionDateTo: manifest.productionDateTo,
+                },
+              ],
+            }),
+          );
+        }
+        if (path === `/station/inventories/${inventoryId}/join`) {
+          return new Response(JSON.stringify(manifest));
+        }
+        if (path.endsWith("/bundle/manifest")) return new Response(JSON.stringify(manifest));
+        if (path.endsWith("/bundle/codes")) return new Response(JSON.stringify(page));
+        return new Response(JSON.stringify({ items: [] }));
+      }),
+    );
+
+    try {
+      render(<App />);
+      await signInAsOperator();
+      fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
+      await database.publicationStarted;
+
+      fireEvent.click(screen.getByRole("button", { name: "↻ Updates" }));
+      expect(await screen.findByRole("heading", { name: "Station updates" })).toBeDefined();
+      database.releasePublication();
+
+      await waitFor(async () =>
+        expect(
+          await database.exec.all("SELECT value FROM station_meta WHERE key = ?", [
+            "active_inventory_floor_task_v1",
+          ]),
+        ).toEqual([]),
+      );
+      await expect(readPersistedInventoryFloorTask(database.exec)).resolves.toBeNull();
     } finally {
       database.releasePublication();
       consoleErrorSpy.mockRestore();

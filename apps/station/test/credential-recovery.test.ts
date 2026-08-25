@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
+import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
 import {
   beginFloorWorkRetirement,
   clearRejectedCredentialState,
@@ -37,6 +38,21 @@ async function migratedExec(
   };
   await applyMigrations(exec);
   return exec;
+}
+
+async function applyMigrationStatements(
+  exec: SqlExecutor,
+  statements: readonly string[],
+): Promise<void> {
+  for (const statement of statements) {
+    try {
+      await exec.run(statement);
+    } catch (error) {
+      if (!/duplicate column name/i.test(error instanceof Error ? error.message : String(error))) {
+        throw error;
+      }
+    }
+  }
 }
 
 async function seedRecoveryFixture(exec: SqlExecutor): Promise<void> {
@@ -174,6 +190,60 @@ async function snapshot(exec: SqlExecutor, table: string, orderBy: string): Prom
 }
 
 describe("credential rejection recovery", () => {
+  it("attributes a pre-ownership active mirror from its strict pointer before rejected-owner cleanup", async () => {
+    const ownershipMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN credential_ownership"),
+    );
+    expect(ownershipMigration).toBeGreaterThan(0);
+    const db = new DatabaseSync(":memory:");
+    const exec: SqlExecutor = {
+      async run(sql, params = []) {
+        db.prepare(sql).run(...(params as never[]));
+      },
+      async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+        return db.prepare(sql).all(...(params as never[])) as T[];
+      },
+    };
+    await applyMigrationStatements(exec, STATION_MIGRATIONS.slice(0, ownershipMigration));
+    const generation = createCredentialGeneration("credential-a");
+    const owner = await credentialGenerationOwnership(generation);
+    expect(owner).not.toBeNull();
+    const inventoryId = "11111111-1111-4111-8111-111111111111";
+    const snapshotId = "22222222-2222-4222-8222-222222222222";
+    await exec.run(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, active_snapshot_id)
+       VALUES (?, ?, ?)`,
+      [inventoryId, "INV-OLD", snapshotId],
+    );
+    await exec.run(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+          expected, protected)
+       VALUES (?, ?, ?, ?, ?, ?, 1, 0)`,
+      [snapshotId, "a".repeat(64), "raw-old", "04600000000015", "SERIAL", "available"],
+    );
+    await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [
+      "active_inventory_floor_task_v1",
+      JSON.stringify({ inventoryId, snapshotId, credentialOwnership: owner }),
+    ]);
+
+    await applyMigrationStatements(exec, STATION_MIGRATIONS.slice(ownershipMigration));
+    await clearRejectedCredentialState({
+      exec,
+      clearCredential: async () => {},
+      credentialGeneration: generation,
+    });
+
+    expect(await exec.all("SELECT * FROM inventory_task_mirror")).toEqual([]);
+    expect(await exec.all("SELECT * FROM inventory_snapshot_codes_mirror")).toEqual([]);
+    expect(
+      await exec.all("SELECT value FROM station_meta WHERE key = ?", [
+        "active_inventory_floor_task_v1",
+      ]),
+    ).toEqual([]);
+  });
+
   it("removes only the rejected credential inventory mirror and preserves a newer owner pointer", async () => {
     const exec = await migratedExec();
     const rejectedGeneration = createCredentialGeneration("credential-a");

@@ -94,6 +94,7 @@ export function TaskSelection({
   const inventoryOperation = useRef<Promise<void> | null>(null);
   const ownedPointer = useRef<string | null>(null);
   const routeRetirement = useRef<Promise<void> | null>(null);
+  const lifecycleRetirement = useRef<Promise<void> | null>(null);
   const commitLifecycle = useMemo(() => createFloorCommitLifecycle(), []);
   const busyRef = useRef(false);
   const isCurrentRef = useRef(isCurrent);
@@ -105,19 +106,25 @@ export function TaskSelection({
   const inventoryRequestId = useRef(0);
   const loadedInventoryClient = useRef<StationClient | null>(null);
 
+  const retireSelectionLifecycle = useCallback((): Promise<void> => {
+    intakeOpen.current = false;
+    lifecycleGeneration.current += 1;
+    if (lifecycleRetirement.current) return lifecycleRetirement.current;
+    const operation = inventoryOperation.current ?? Promise.resolve();
+    const retirement = Promise.all([operation, commitLifecycle.close()]).then(async () => {
+      const pointer = ownedPointer.current;
+      if (pointer === null) return;
+      await clearOwnedInventoryFloorTask(exec, pointer);
+      if (ownedPointer.current === pointer) ownedPointer.current = null;
+    });
+    lifecycleRetirement.current = retirement;
+    return retirement;
+  }, [commitLifecycle, exec]);
+
   useLayoutEffect(() => {
     if (renderedClient.current === client) return;
     renderedClient.current = client;
-    lifecycleGeneration.current += 1;
-    intakeOpen.current = false;
-    const priorOperation = inventoryOperation.current ?? Promise.resolve();
-    const retirement = Promise.all([priorOperation, commitLifecycle.close()]).then(async () => {
-      const pointer = ownedPointer.current;
-      if (pointer !== null) {
-        await clearOwnedInventoryFloorTask(exec, pointer);
-        if (ownedPointer.current === pointer) ownedPointer.current = null;
-      }
-    });
+    const retirement = retireSelectionLifecycle();
     routeRetirement.current = null;
     inventoryRequestId.current += 1;
     inventoryRequest.current = null;
@@ -132,6 +139,7 @@ export function TaskSelection({
     void retirement.then(
       () => {
         if (renderedClient.current !== client || !mounted.current) return;
+        lifecycleRetirement.current = null;
         commitLifecycle.open();
         intakeOpen.current = true;
         busyRef.current = false;
@@ -143,7 +151,7 @@ export function TaskSelection({
         }
       },
     );
-  }, [client, commitLifecycle, exec, t]);
+  }, [client, commitLifecycle, retireSelectionLifecycle, t]);
 
   useEffect(() => {
     isCurrentRef.current = isCurrent;
@@ -160,34 +168,27 @@ export function TaskSelection({
   const floorWorkBarrier = useMemo<FloorWorkBarrier>(
     () => ({
       close() {
-        intakeOpen.current = false;
-        lifecycleGeneration.current += 1;
-        const operation = inventoryOperation.current ?? Promise.resolve();
-        return Promise.all([operation, commitLifecycle.close()]).then(() => undefined);
+        return retireSelectionLifecycle();
       },
       idle() {
+        if (lifecycleRetirement.current) return lifecycleRetirement.current;
         const operation = inventoryOperation.current ?? Promise.resolve();
         return Promise.all([operation, commitLifecycle.idle()]).then(() => undefined);
       },
     }),
-    [commitLifecycle],
+    [commitLifecycle, retireSelectionLifecycle],
   );
 
   const retireSelectionAttempts = useCallback(() => {
     const hasInventoryWork = inventoryOperation.current !== null || ownedPointer.current !== null;
-    const retirement = (floorWorkBarrier.close?.() ?? floorWorkBarrier.idle()).then(async () => {
-      const pointer = ownedPointer.current;
-      if (pointer === null) return;
-      await clearOwnedInventoryFloorTask(exec, pointer);
-      if (ownedPointer.current === pointer) ownedPointer.current = null;
-    });
+    const retirement = floorWorkBarrier.close?.() ?? floorWorkBarrier.idle();
     routeRetirement.current = hasInventoryWork ? retirement : null;
     if (!hasInventoryWork) {
       void retirement.catch(() => {
         if (mounted.current) setError(t("inventory.joinFailed"));
       });
     }
-  }, [exec, floorWorkBarrier, t]);
+  }, [floorWorkBarrier, t]);
 
   const enterRetiredRoute = useCallback(
     (enter: () => void) => {
@@ -204,13 +205,29 @@ export function TaskSelection({
   );
 
   useEffect(() => {
-    commitLifecycle.open();
+    const priorRetirement = lifecycleRetirement.current;
+    if (priorRetirement === null) {
+      commitLifecycle.open();
+    } else {
+      void priorRetirement.then(
+        () => {
+          if (!mounted.current) return;
+          lifecycleRetirement.current = null;
+          commitLifecycle.open();
+          intakeOpen.current = true;
+        },
+        (error: unknown) => {
+          console.error("station: inventory selection retirement failed", error);
+        },
+      );
+    }
     const unregister = onFloorWorkRegister?.(floorWorkBarrier);
     return () => {
-      void (floorWorkBarrier.close?.() ?? floorWorkBarrier.idle()).then(
-        () => unregister?.(),
-        () => unregister?.(),
-      );
+      void (floorWorkBarrier.close?.() ?? floorWorkBarrier.idle())
+        .catch((error: unknown) => {
+          console.error("station: inventory selection retirement failed", error);
+        })
+        .finally(() => unregister?.());
     };
   }, [commitLifecycle, floorWorkBarrier, onFloorWorkRegister]);
 
@@ -315,7 +332,14 @@ export function TaskSelection({
         if (!lease.isCurrent()) return;
         if (mounted.current) {
           setConfirmation(null);
-          onInventorySelected(active);
+          const transferredPointer = ownedPointer.current;
+          ownedPointer.current = null;
+          try {
+            onInventorySelected(active);
+          } catch (error) {
+            ownedPointer.current = transferredPointer;
+            throw error;
+          }
         }
       } catch {
         if (

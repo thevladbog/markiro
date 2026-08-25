@@ -294,6 +294,174 @@ describe("STATION_MIGRATIONS", () => {
     expect(columns.map(({ name }) => name)).toContain("credential_ownership");
   });
 
+  it("attributes a legacy staged mirror only when the strict active pointer matches its identity", () => {
+    const ownershipMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN credential_ownership"),
+    );
+    expect(ownershipMigration).toBeGreaterThan(0);
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, ownershipMigration));
+    const owner = "a".repeat(64);
+    const inventoryId = "11111111-1111-4111-8111-111111111111";
+    const snapshotId = "22222222-2222-4222-8222-222222222222";
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, staged_snapshot_id)
+       VALUES (?, ?, ?)`,
+    ).run(inventoryId, "INV-STAGED", snapshotId);
+    db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+          expected, protected)
+       VALUES (?, ?, 'raw', '04600000000015', 'SERIAL', 'available', 1, 0)`,
+    ).run(snapshotId, "c".repeat(64));
+    db.prepare("INSERT INTO station_meta (key, value) VALUES (?, ?)").run(
+      "active_inventory_floor_task_v1",
+      JSON.stringify({ inventoryId, snapshotId, credentialOwnership: owner }),
+    );
+
+    applyStatements(db, STATION_MIGRATIONS.slice(ownershipMigration));
+
+    expect(
+      db
+        .prepare(
+          `SELECT staged_snapshot_id, credential_ownership
+             FROM inventory_task_mirror WHERE inventory_id = ?`,
+        )
+        .get(inventoryId),
+    ).toEqual({ staged_snapshot_id: snapshotId, credential_ownership: owner });
+    expect(db.prepare("SELECT snapshot_id FROM inventory_snapshot_codes_mirror").all()).toEqual([
+      { snapshot_id: snapshotId },
+    ]);
+  });
+
+  it("does not attribute a shaped pointer whose task identities are not strict UUIDs", () => {
+    const ownershipMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN credential_ownership"),
+    );
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, ownershipMigration));
+    const inventoryId = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx";
+    const snapshotId = "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy";
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, staged_snapshot_id)
+       VALUES (?, 'INV-INVALID', ?)`,
+    ).run(inventoryId, snapshotId);
+    db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+          expected, protected)
+       VALUES (?, ?, 'raw', '04600000000015', 'SERIAL', 'available', 1, 0)`,
+    ).run(snapshotId, "f".repeat(64));
+    db.prepare("INSERT INTO station_meta (key, value) VALUES (?, ?)").run(
+      "active_inventory_floor_task_v1",
+      JSON.stringify({
+        inventoryId,
+        snapshotId,
+        credentialOwnership: "a".repeat(64),
+      }),
+    );
+
+    applyStatements(db, STATION_MIGRATIONS.slice(ownershipMigration));
+
+    expect(
+      db
+        .prepare(
+          `SELECT staged_snapshot_id, credential_ownership
+             FROM inventory_task_mirror WHERE inventory_id = ?`,
+        )
+        .get(inventoryId),
+    ).toEqual({ staged_snapshot_id: null, credential_ownership: null });
+    expect(db.prepare("SELECT * FROM inventory_snapshot_codes_mirror").all()).toEqual([]);
+  });
+
+  it("purges only unowned inactive staging while preserving active and newer-owner data", () => {
+    const ownershipMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN credential_ownership"),
+    );
+    expect(ownershipMigration).toBeGreaterThan(0);
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, ownershipMigration));
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, active_snapshot_id, staged_snapshot_id)
+       VALUES ('inventory-legacy', 'INV-LEGACY', 'snapshot-active', 'snapshot-orphan')`,
+    ).run();
+    for (const [snapshotId, codeHash] of [
+      ["snapshot-active", "a".repeat(64)],
+      ["snapshot-orphan", "b".repeat(64)],
+    ] as const) {
+      db.prepare(
+        `INSERT INTO inventory_snapshot_codes_mirror
+           (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+            expected, protected)
+         VALUES (?, ?, 'raw', '04600000000015', 'SERIAL', 'available', 1, 0)`,
+      ).run(snapshotId, codeHash);
+    }
+    applyStatements(db, STATION_MIGRATIONS.slice(ownershipMigration, ownershipMigration + 1));
+    const newerOwner = "d".repeat(64);
+    const newerInventoryId = "33333333-3333-4333-8333-333333333333";
+    const newerSnapshotId = "44444444-4444-4444-8444-444444444444";
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, active_snapshot_id, credential_ownership)
+       VALUES (?, 'INV-NEW', ?, ?)`,
+    ).run(newerInventoryId, newerSnapshotId, newerOwner);
+    db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+          expected, protected)
+       VALUES (?, ?, 'raw', '04600000000015', 'SERIAL', 'available', 1, 0)`,
+    ).run(newerSnapshotId, "e".repeat(64));
+    const newerPointer = JSON.stringify({
+      inventoryId: newerInventoryId,
+      snapshotId: newerSnapshotId,
+      credentialOwnership: newerOwner,
+      activationId: "newer-activation",
+    });
+    db.prepare("INSERT INTO station_meta (key, value) VALUES (?, ?)").run(
+      "active_inventory_floor_task_v1",
+      newerPointer,
+    );
+
+    const recoveryMigrations = STATION_MIGRATIONS.slice(ownershipMigration + 1);
+    applyStatements(db, recoveryMigrations);
+    applyStatements(db, recoveryMigrations);
+
+    expect(
+      db
+        .prepare(
+          `SELECT inventory_id, active_snapshot_id, staged_snapshot_id, credential_ownership
+             FROM inventory_task_mirror ORDER BY inventory_id`,
+        )
+        .all(),
+    ).toEqual([
+      {
+        inventory_id: newerInventoryId,
+        active_snapshot_id: newerSnapshotId,
+        staged_snapshot_id: null,
+        credential_ownership: newerOwner,
+      },
+      {
+        inventory_id: "inventory-legacy",
+        active_snapshot_id: "snapshot-active",
+        staged_snapshot_id: null,
+        credential_ownership: null,
+      },
+    ]);
+    expect(
+      db
+        .prepare("SELECT snapshot_id FROM inventory_snapshot_codes_mirror ORDER BY snapshot_id")
+        .all(),
+    ).toEqual([{ snapshot_id: newerSnapshotId }, { snapshot_id: "snapshot-active" }]);
+    expect(
+      db
+        .prepare("SELECT value FROM station_meta WHERE key = ?")
+        .get("active_inventory_floor_task_v1"),
+    ).toEqual({ value: newerPointer });
+  });
+
   it("atomically removes only an explicitly reset inactive snapshot", () => {
     const db = migratedDb();
     db.prepare(

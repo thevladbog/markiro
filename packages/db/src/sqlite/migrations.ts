@@ -508,4 +508,105 @@ export const STATION_MIGRATIONS: string[] = [
   // Task 4 recovery cleanup must distinguish reproducible inventory data
   // downloaded by a rejected credential from a newer credential's mirror.
   `ALTER TABLE inventory_task_mirror ADD COLUMN credential_ownership TEXT;`,
+  // Forward-upgrade the Task 4 round-2 cache. The pointer was already bound
+  // to a credential, but its matching mirror row predated the owner column.
+  // Attribute only a strict pointer whose task and snapshot identity agree.
+  `WITH pointer_json AS (
+     SELECT CASE WHEN json_valid(value) = 1 THEN value ELSE '{}' END AS value
+       FROM station_meta
+      WHERE key = 'active_inventory_floor_task_v1'
+   ), pointer_fields AS (
+     SELECT
+       value,
+       json_extract(value, '$.inventoryId') AS inventory_id,
+       json_extract(value, '$.snapshotId') AS snapshot_id,
+       json_extract(value, '$.credentialOwnership') AS credential_ownership
+       FROM pointer_json
+   ), active_pointer AS (
+     SELECT inventory_id, snapshot_id, credential_ownership
+       FROM pointer_fields
+      WHERE json_type(value, '$.inventoryId') = 'text'
+        AND length(inventory_id) = 36
+        AND substr(inventory_id, 9, 1) = '-'
+        AND substr(inventory_id, 14, 1) = '-'
+        AND substr(inventory_id, 19, 1) = '-'
+        AND substr(inventory_id, 24, 1) = '-'
+        AND length(replace(inventory_id, '-', '')) = 32
+        AND replace(lower(inventory_id), '-', '') NOT GLOB '*[^0-9a-f]*'
+        AND (
+          lower(inventory_id) IN (
+            '00000000-0000-0000-0000-000000000000',
+            'ffffffff-ffff-ffff-ffff-ffffffffffff'
+          )
+          OR (
+            substr(lower(inventory_id), 15, 1) GLOB '[1-8]'
+            AND substr(lower(inventory_id), 20, 1) GLOB '[89ab]'
+          )
+        )
+        AND json_type(value, '$.snapshotId') = 'text'
+        AND length(snapshot_id) = 36
+        AND substr(snapshot_id, 9, 1) = '-'
+        AND substr(snapshot_id, 14, 1) = '-'
+        AND substr(snapshot_id, 19, 1) = '-'
+        AND substr(snapshot_id, 24, 1) = '-'
+        AND length(replace(snapshot_id, '-', '')) = 32
+        AND replace(lower(snapshot_id), '-', '') NOT GLOB '*[^0-9a-f]*'
+        AND (
+          lower(snapshot_id) IN (
+            '00000000-0000-0000-0000-000000000000',
+            'ffffffff-ffff-ffff-ffff-ffffffffffff'
+          )
+          OR (
+            substr(lower(snapshot_id), 15, 1) GLOB '[1-8]'
+            AND substr(lower(snapshot_id), 20, 1) GLOB '[89ab]'
+          )
+        )
+        AND json_type(value, '$.credentialOwnership') = 'text'
+        AND length(credential_ownership) = 64
+        AND credential_ownership = lower(credential_ownership)
+        AND credential_ownership NOT GLOB '*[^0-9a-f]*'
+        AND NOT EXISTS (
+          SELECT 1 FROM json_each(pointer_fields.value) AS pointer_field
+           WHERE pointer_field.key NOT IN (
+             'inventoryId', 'snapshotId', 'credentialOwnership', 'activationId'
+           )
+        )
+        AND (
+          ((SELECT COUNT(*) FROM json_each(pointer_fields.value)) = 3
+            AND json_type(value, '$.activationId') IS NULL)
+          OR
+          ((SELECT COUNT(*) FROM json_each(pointer_fields.value)) = 4
+            AND json_type(value, '$.activationId') = 'text'
+            AND length(json_extract(value, '$.activationId')) > 0)
+        )
+   )
+   UPDATE inventory_task_mirror
+      SET credential_ownership = (
+        SELECT credential_ownership FROM active_pointer LIMIT 1
+      )
+    WHERE credential_ownership IS NULL
+      AND EXISTS (
+        SELECT 1 FROM active_pointer
+         WHERE active_pointer.inventory_id = inventory_task_mirror.inventory_id
+           AND (
+             active_pointer.snapshot_id = inventory_task_mirror.active_snapshot_id
+             OR active_pointer.snapshot_id = inventory_task_mirror.staged_snapshot_id
+           )
+      );`,
+  // An unowned staged revision that is not the published active revision has
+  // no durable proof of who downloaded it. It is reproducible, so fail closed
+  // by resetting only that inactive stage; the existing trigger removes only
+  // its immutable snapshot-code rows and explicitly protects active rows.
+  `UPDATE inventory_task_mirror
+      SET staged_reset_snapshot_id = staged_snapshot_id,
+          staged_snapshot_id = NULL, staged_snapshot_revision = NULL,
+          staged_snapshot_fixed_at = NULL, staged_combined_digest = NULL,
+          staged_content_digest = NULL, staged_code_count = NULL,
+          staged_manifest_json = NULL, staged_next_cursor = NULL,
+          staged_verified_digest = NULL, staged_verified_content_digest = NULL,
+          staged_last_page_digest = NULL, staged_page_json = NULL,
+          staging_generation = staging_generation + 1
+    WHERE credential_ownership IS NULL
+      AND staged_snapshot_id IS NOT NULL
+      AND (active_snapshot_id IS NULL OR staged_snapshot_id <> active_snapshot_id);`,
 ];
