@@ -919,6 +919,69 @@ test("guard CLI counts semantically duplicate desired ingress rules without plan
   });
 });
 
+test("guard CLI identifies only semantic fields that differ in an unmatched ingress rule", async () => {
+  const changed = await readFixture("safe");
+  const desiredRule = {
+    description: "desired-description",
+    from_port: -1,
+    id: "new-rule-id",
+    labels: { source: "new-label" },
+    port: 6432,
+    predefined_target: "",
+    protocol: "TCP",
+    security_group_id: "desired-security-group",
+    to_port: -1,
+    v4_cidr_blocks: [],
+    v6_cidr_blocks: [],
+  };
+  const matchingLiveRule = {
+    ...desiredRule,
+    from_port: 6432,
+    id: "matching-old-rule-id",
+    labels: { source: "matching-old-label" },
+    port: -1,
+    protocol: "tcp",
+    to_port: 6432,
+  };
+  const unmatchedLiveRule = {
+    ...desiredRule,
+    description: "unmatched-description",
+    id: "unmatched-old-rule-id",
+    labels: { source: "unmatched-old-label" },
+    port: 6433,
+    protocol: "udp",
+    security_group_id: "unmatched-security-group",
+    v4_cidr_blocks: ["unmatched-v4-cidr"],
+  };
+  changed.resource_changes.push({
+    address: "module.network.yandex_vpc_security_group.data",
+    type: "yandex_vpc_security_group",
+    change: {
+      actions: ["update"],
+      before: { ingress: [matchingLiveRule, unmatchedLiveRule] },
+      after: { ingress: [desiredRule] },
+    },
+  });
+
+  await withPlan(changed, (planPath) => {
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [script, planPath], { cwd: root, stdio: "pipe" });
+      assert.fail("guard CLI unexpectedly accepted an unmatched security-group ingress rule");
+    } catch (error) {
+      stderr = String(error.stderr);
+    }
+    assert.equal(
+      stderr,
+      "production plan rejected (safe-action-data-security-group-ingress-cardinality-before-2-after-1-desired-matches-before-1-unmatched-diff-description-and-port-range-and-protocol-and-security-group-and-v4-cidrs)\n",
+    );
+    assert.doesNotMatch(
+      stderr,
+      /desired-description|unmatched-description|matching-old|unmatched-old|desired-security-group|unmatched-security-group|643[23]|TCP|tcp|udp/,
+    );
+  });
+});
+
 test("production plan guard permits direct-VM DNS flag enable and disable transitions", async () => {
   const safe = await readFixture("safe");
   for (const address of directVmDnsAddresses) {
