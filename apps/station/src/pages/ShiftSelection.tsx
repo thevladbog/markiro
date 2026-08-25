@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Pager } from "@markiro/ui";
 import { StationApiError, type StationClient } from "../lib/api-client.js";
@@ -64,6 +64,9 @@ export interface ShiftSelectionProps {
   onConflicts?: () => void;
   /** False once this credential generation is sealed or this floor is retired. */
   isCurrent?: () => boolean;
+  /** Generic floor-task selection inserts assigned inventory work above the unchanged shift grid. */
+  beforeList?: ReactNode;
+  title?: string;
 }
 
 export type ShiftSelectionPersistentState =
@@ -89,6 +92,8 @@ export function ShiftSelection({
   onSetup,
   onConflicts,
   isCurrent,
+  beforeList,
+  title,
 }: ShiftSelectionProps) {
   const { t, i18n } = useTranslation();
   const [items, setItems] = useState<ShiftListItem[]>([]);
@@ -235,7 +240,7 @@ export function ShiftSelection({
 
   return (
     <StationScreen
-      title={t("shifts.title")}
+      title={title ?? t("shifts.title")}
       header={<div className="shift-selection__message">{message}</div>}
       actions={
         <FloorFooter ariaLabel={t("shifts.actions")}>
@@ -265,7 +270,10 @@ export function ShiftSelection({
         </FloorFooter>
       }
     >
-      <div className="shift-selection__content">
+      <div
+        className={`shift-selection__content${beforeList ? " shift-selection__content--with-task" : ""}`}
+      >
+        {beforeList}
         <div className="shift-selection__slot">
           {persistentState === "loading" ? (
             <p className="shift-selection__state" role="status">

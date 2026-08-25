@@ -109,6 +109,7 @@ import {
   pickScanSource,
   scannerIndicator,
 } from "../src/App.js";
+import { productionFloorTask } from "../src/lib/floor-task.js";
 import type { StationConfig } from "../src/lib/config.js";
 import { hashSecret } from "../src/lib/crypto.js";
 import type { HardwareConfig } from "../src/lib/hardware-config.js";
@@ -155,6 +156,12 @@ afterEach(() => {
     lockdownMock.publish({ ...lockdownMock.snapshot, error: null });
   });
   lockdownMock.whenSettled.mockReset().mockResolvedValue(undefined);
+});
+
+it("adapts the unchanged shift callback payload into the closed floor-task route", () => {
+  const shift = { id: "shift-1", status: "active", mode: "validation" };
+
+  expect(productionFloorTask(shift)).toEqual({ kind: "production", shift });
 });
 
 // No `tenantId` here on purpose: `Enrollment` never persists one (the
@@ -959,7 +966,7 @@ describe("App", () => {
 
     expect(lockdownMock.start).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Exit fullscreen" })).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Workstation setup" }));
     expect(await screen.findByRole("heading", { name: "Workstation setup" })).toBeDefined();
     expect(lockdownMock.exit).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Exit fullscreen" })).toBeDefined();
@@ -1889,6 +1896,7 @@ describe("App", () => {
           ? initialShifts
           : Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
       }
+      if (path === "/station/inventory-tasks") return new Promise<Response>(() => {});
       return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
     });
     vi.stubGlobal("fetch", fetchMock);
