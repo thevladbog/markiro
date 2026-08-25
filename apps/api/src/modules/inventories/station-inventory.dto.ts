@@ -464,6 +464,7 @@ export const joinStationInventorySchema = z.strictObject({
 });
 
 export interface StationInventorySsccBlockDto {
+  allocationOrder: number;
   issuerPrefix: string;
   extensionDigit: number;
   fromSerial: number;
@@ -471,9 +472,16 @@ export interface StationInventorySsccBlockDto {
   consumedThroughSerial: number | null;
 }
 
+export interface StationInventoryRevokedSsccBlockDto {
+  allocationOrder: number;
+  fromSerial: number;
+  toSerial: number;
+}
+
 export interface StationInventoryBundleManifestDto extends StationInventoryManifest {
   sscc: StationInventorySsccBlockDto | null;
   ssccRevokedFrom: number[];
+  ssccRevokedBlocks: StationInventoryRevokedSsccBlockDto[];
 }
 
 export interface StationInventoryBundleCodeDto {
@@ -583,8 +591,16 @@ const stationInventorySsccOpenApiSchema: SchemaObject = {
   type: "object",
   nullable: true,
   additionalProperties: false,
-  required: ["issuerPrefix", "extensionDigit", "fromSerial", "toSerial", "consumedThroughSerial"],
+  required: [
+    "allocationOrder",
+    "issuerPrefix",
+    "extensionDigit",
+    "fromSerial",
+    "toSerial",
+    "consumedThroughSerial",
+  ],
   properties: {
+    allocationOrder: { type: "integer", minimum: 1 },
     issuerPrefix: { type: "string", pattern: "^[0-9]{9}$" },
     extensionDigit: { type: "integer", minimum: 0, maximum: 9 },
     fromSerial: { type: "integer", minimum: 0 },
@@ -593,14 +609,34 @@ const stationInventorySsccOpenApiSchema: SchemaObject = {
   },
 };
 
+const stationInventoryRevokedSsccBlockOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["allocationOrder", "fromSerial", "toSerial"],
+  properties: {
+    allocationOrder: { type: "integer", minimum: 1 },
+    fromSerial: { type: "integer", minimum: 0 },
+    toSerial: { type: "integer", minimum: 0 },
+  },
+};
+
 export const stationInventoryBundleManifestOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: [...(stationInventoryManifestOpenApiSchema.required ?? []), "sscc", "ssccRevokedFrom"],
+  required: [
+    ...(stationInventoryManifestOpenApiSchema.required ?? []),
+    "sscc",
+    "ssccRevokedFrom",
+    "ssccRevokedBlocks",
+  ],
   properties: {
     ...(stationInventoryManifestOpenApiSchema.properties ?? {}),
     sscc: stationInventorySsccOpenApiSchema,
     ssccRevokedFrom: { type: "array", items: { type: "integer", minimum: 0 } },
+    ssccRevokedBlocks: {
+      type: "array",
+      items: stationInventoryRevokedSsccBlockOpenApiSchema,
+    },
   },
 };
 

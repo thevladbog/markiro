@@ -75,10 +75,12 @@ describe("platform schema", () => {
 
   it("lets an sscc block be revoked without being deleted", () => {
     const cols = Object.keys(ssccBlocks);
-    expect(cols).toEqual(expect.arrayContaining(["revokedAt"]));
+    expect(cols).toEqual(expect.arrayContaining(["revokedAt", "allocationOrder"]));
     // Nullable: null IS the live state, and a revoked block must survive as
     // the only record of where a gap in the numbering came from.
     expect(ssccBlocks.revokedAt.notNull).toBe(false);
+    expect(ssccBlocks.allocationOrder.notNull).toBe(true);
+    expect(ssccBlocks.allocationOrder.hasDefault).toBe(true);
   });
 
   it("gives boxes a tenant-unique sscc", () => {

@@ -697,7 +697,7 @@ describe("inventory execution schema", () => {
         "public.inventory_late_events",
       ]),
     );
-    expect(journal.entries.at(-1)?.tag).toBe("0070_curious_big_bertha");
+    expect(journal.entries.map((entry) => entry.tag)).toContain("0070_curious_big_bertha");
   });
 });
 

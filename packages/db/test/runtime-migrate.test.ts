@@ -142,7 +142,7 @@ try {
   await runRuntimeMigrations({ databaseUrl: scratchUrl.toString(), migrationsFolder, log: () => {} });
 
   const result = await pool.query(
-    "SELECT d.id, d.api_key_id, d.enrolled_at, b.device_id FROM station_devices d JOIN sscc_blocks b ON b.tenant_id = d.tenant_id AND b.device_id = d.id WHERE d.id = $1",
+    "SELECT d.id, d.api_key_id, d.enrolled_at, b.device_id, b.allocation_order FROM station_devices d JOIN sscc_blocks b ON b.tenant_id = d.tenant_id AND b.device_id = d.id WHERE d.id = $1",
     ["00000000-0000-0000-0000-000000000001"],
   );
   process.stdout.write(
@@ -329,6 +329,7 @@ describe("runRuntimeMigrations", () => {
           api_key_id: "legacy-api-key",
           enrolled_at: "2026-08-06T00:00:00.000Z",
           device_id: "00000000-0000-0000-0000-000000000001",
+          allocation_order: "1",
         },
         databaseUrlArguments: [],
       });

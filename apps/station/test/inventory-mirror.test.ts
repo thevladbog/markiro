@@ -100,6 +100,7 @@ function manifest(snapshotId = SNAPSHOT_A, combinedDigest = DIGEST_A): Inventory
     limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
     sscc: null,
     ssccRevokedFrom: [],
+    ssccRevokedBlocks: [],
   };
 }
 
@@ -321,6 +322,7 @@ describe("inventory mirror staging", () => {
         },
       },
       sscc: {
+        allocationOrder: 10,
         issuerPrefix: "460000009",
         extensionDigit: 0,
         fromSerial: 1,
@@ -328,6 +330,7 @@ describe("inventory mirror staging", () => {
         consumedThroughSerial: 10,
       },
       ssccRevokedFrom: [] as number[],
+      ssccRevokedBlocks: [],
     };
     const first = await beginInventoryMirror(exec, base);
     await ingestInventoryPage(
@@ -342,6 +345,7 @@ describe("inventory mirror staging", () => {
       ...base,
       sscc: { ...base.sscc, consumedThroughSerial: 20 },
       ssccRevokedFrom: [3000],
+      ssccRevokedBlocks: [{ allocationOrder: 3, fromSerial: 3000, toSerial: 3999 }],
     };
     const refreshed = await beginInventoryMirror(exec, advanced);
     expect(refreshed.alreadyActive).toBe(true);
@@ -354,6 +358,7 @@ describe("inventory mirror staging", () => {
     expect(JSON.parse(stored.active_manifest_json)).toMatchObject({
       sscc: { consumedThroughSerial: 20 },
       ssccRevokedFrom: [3000],
+      ssccRevokedBlocks: [{ allocationOrder: 3 }],
     });
     expect(
       db.prepare("SELECT COUNT(*) AS count FROM inventory_snapshot_codes_mirror").get(),
@@ -580,6 +585,7 @@ describe("inventory mirror staging", () => {
         },
       },
       sscc: {
+        allocationOrder: 10,
         issuerPrefix: "460000009",
         extensionDigit: 0,
         fromSerial: 1000,
@@ -587,6 +593,7 @@ describe("inventory mirror staging", () => {
         consumedThroughSerial: 1999,
       },
       ssccRevokedFrom: [] as number[],
+      ssccRevokedBlocks: [],
     };
     const first = await beginInventoryMirror(exec, initial);
     await ingestInventoryPage(
@@ -601,11 +608,13 @@ describe("inventory mirror staging", () => {
       ...initial,
       sscc: {
         ...initial.sscc,
+        allocationOrder: 11,
         fromSerial: 1,
         toSerial: 999,
         consumedThroughSerial: null,
       },
       ssccRevokedFrom: [1000],
+      ssccRevokedBlocks: [{ allocationOrder: 10, fromSerial: 1000, toSerial: 1999 }],
     };
     const refreshed = await beginInventoryMirror(exec, reseeded);
     expect(refreshed.alreadyActive).toBe(true);
@@ -615,6 +624,163 @@ describe("inventory mirror staging", () => {
     expect(JSON.parse(stored.active_manifest_json)).toMatchObject({
       sscc: { fromSerial: 1, toSerial: 999, consumedThroughSerial: null },
       ssccRevokedFrom: [1000],
+      ssccRevokedBlocks: [{ allocationOrder: 10 }],
+    });
+  });
+
+  it("accepts a newer allocation reusing the same serial range and ignores delayed older state", async () => {
+    const base = {
+      ...manifest(),
+      mode: "repack" as const,
+      boxLabelTemplate: {
+        id: "66666666-6666-4666-8666-666666666666",
+        name: "Короб",
+        spec: {
+          widthMm: 58,
+          heightMm: 40,
+          dpi: 203 as const,
+          language: "zpl" as const,
+          elements: [],
+        },
+      },
+      sscc: {
+        allocationOrder: 20,
+        issuerPrefix: "460000009",
+        extensionDigit: 0,
+        fromSerial: 1000,
+        toSerial: 1999,
+        consumedThroughSerial: 1999,
+      },
+      ssccRevokedFrom: [] as number[],
+      ssccRevokedBlocks: [],
+    };
+    const first = await beginInventoryMirror(exec, base);
+    await ingestInventoryPage(
+      exec,
+      first,
+      null,
+      page(SNAPSHOT_A, DIGEST_A, rows, null, null, base),
+    );
+    expect(await publishInventorySnapshot(exec, first)).toBe(true);
+
+    const replacement = {
+      ...base,
+      sscc: { ...base.sscc, allocationOrder: 21, consumedThroughSerial: 1010 },
+      ssccRevokedBlocks: [{ allocationOrder: 20, fromSerial: 1000, toSerial: 1999 }],
+    };
+    expect((await beginInventoryMirror(exec, replacement)).alreadyActive).toBe(true);
+    expect((await beginInventoryMirror(exec, base)).alreadyActive).toBe(true);
+
+    const stored = db.prepare("SELECT active_manifest_json FROM inventory_task_mirror").get() as {
+      active_manifest_json: string;
+    };
+    expect(JSON.parse(stored.active_manifest_json)).toMatchObject({
+      sscc: { allocationOrder: 21, consumedThroughSerial: 1010 },
+      ssccRevokedBlocks: [{ allocationOrder: 20 }],
+    });
+  });
+
+  it("rejects an unproven newer allocation even when it reuses the same serial range", async () => {
+    const base = {
+      ...manifest(),
+      mode: "repack" as const,
+      boxLabelTemplate: {
+        id: "66666666-6666-4666-8666-666666666666",
+        name: "Короб",
+        spec: {
+          widthMm: 58,
+          heightMm: 40,
+          dpi: 203 as const,
+          language: "zpl" as const,
+          elements: [],
+        },
+      },
+      sscc: {
+        allocationOrder: 30,
+        issuerPrefix: "460000009",
+        extensionDigit: 0,
+        fromSerial: 1000,
+        toSerial: 1999,
+        consumedThroughSerial: 1010,
+      },
+      ssccRevokedFrom: [] as number[],
+      ssccRevokedBlocks: [],
+    };
+    const first = await beginInventoryMirror(exec, base);
+    await ingestInventoryPage(
+      exec,
+      first,
+      null,
+      page(SNAPSHOT_A, DIGEST_A, rows, null, null, base),
+    );
+    expect(await publishInventorySnapshot(exec, first)).toBe(true);
+
+    await expect(
+      beginInventoryMirror(exec, {
+        ...base,
+        sscc: { ...base.sscc, allocationOrder: 31, consumedThroughSerial: null },
+      }),
+    ).rejects.toThrow("unsafe inventory SSCC transition");
+  });
+
+  it("upgrades a pre-allocation-order active manifest from authoritative live facts", async () => {
+    const base = {
+      ...manifest(),
+      mode: "repack" as const,
+      boxLabelTemplate: {
+        id: "66666666-6666-4666-8666-666666666666",
+        name: "Короб",
+        spec: {
+          widthMm: 58,
+          heightMm: 40,
+          dpi: 203 as const,
+          language: "zpl" as const,
+          elements: [],
+        },
+      },
+      sscc: {
+        allocationOrder: 40,
+        issuerPrefix: "460000009",
+        extensionDigit: 0,
+        fromSerial: 1000,
+        toSerial: 1999,
+        consumedThroughSerial: 1010,
+      },
+      ssccRevokedFrom: [] as number[],
+      ssccRevokedBlocks: [],
+    };
+    const first = await beginInventoryMirror(exec, base);
+    await ingestInventoryPage(
+      exec,
+      first,
+      null,
+      page(SNAPSHOT_A, DIGEST_A, rows, null, null, base),
+    );
+    expect(await publishInventorySnapshot(exec, first)).toBe(true);
+
+    const stored = db.prepare("SELECT active_manifest_json FROM inventory_task_mirror").get() as {
+      active_manifest_json: string;
+    };
+    const legacy = JSON.parse(stored.active_manifest_json) as Record<string, unknown>;
+    const legacySscc = legacy.sscc as Record<string, unknown>;
+    delete legacySscc.allocationOrder;
+    delete legacy.ssccRevokedBlocks;
+    db.prepare("UPDATE inventory_task_mirror SET active_manifest_json = ?").run(
+      JSON.stringify(legacy),
+    );
+
+    const refreshed = await beginInventoryMirror(exec, {
+      ...base,
+      sscc: { ...base.sscc, consumedThroughSerial: null },
+      ssccRevokedBlocks: [{ allocationOrder: 39, fromSerial: 1000, toSerial: 1999 }],
+    });
+    expect(refreshed.alreadyActive).toBe(true);
+    const upgraded = db.prepare("SELECT active_manifest_json FROM inventory_task_mirror").get() as {
+      active_manifest_json: string;
+    };
+    expect(JSON.parse(upgraded.active_manifest_json)).toMatchObject({
+      sscc: { allocationOrder: 40, consumedThroughSerial: 1010 },
+      ssccRevokedBlocks: [{ allocationOrder: 39 }],
     });
   });
 

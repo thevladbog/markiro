@@ -46,6 +46,7 @@ const manifest = {
   },
   sscc: null,
   ssccRevokedFrom: [],
+  ssccRevokedBlocks: [],
 };
 
 describe("station inventory bundle contract", () => {
@@ -100,22 +101,27 @@ describe("station inventory bundle contract", () => {
         spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
       },
       sscc: {
+        allocationOrder: 2,
         issuerPrefix: "460000009",
         extensionDigit: 0,
         fromSerial: 1,
         toSerial: 2000,
         consumedThroughSerial: 10,
       },
-      ssccRevokedFrom: [1],
+      ssccRevokedFrom: [],
+      ssccRevokedBlocks: [{ allocationOrder: 1, fromSerial: 1, toSerial: 2000 }],
     };
-    expect(() => parseStationInventoryBundleManifest(repack)).toThrow(
-      "Invalid station inventory bundle manifest",
-    );
+    expect(parseStationInventoryBundleManifest(repack)).toEqual(repack);
     expect(() =>
       parseStationInventoryBundleManifest({
         ...repack,
-        ssccRevokedFrom: [],
         sscc: { ...repack.sscc, consumedThroughSerial: 2001 },
+      }),
+    ).toThrow("Invalid station inventory bundle manifest");
+    expect(() =>
+      parseStationInventoryBundleManifest({
+        ...repack,
+        ssccRevokedBlocks: [{ allocationOrder: 2, fromSerial: 1, toSerial: 2000 }],
       }),
     ).toThrow("Invalid station inventory bundle manifest");
   });

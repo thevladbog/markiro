@@ -68,6 +68,7 @@ const manifest: InventoryBundleManifest = {
   limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
   sscc: null,
   ssccRevokedFrom: [],
+  ssccRevokedBlocks: [],
 };
 
 const pages: InventoryBundlePage[] = [
@@ -174,6 +175,7 @@ describe("mirrorInventoryBundle", () => {
           spec: { widthMm: 5, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
         },
         sscc: {
+          allocationOrder: 1,
           issuerPrefix: "460000009",
           extensionDigit: 0,
           fromSerial: 1,
@@ -197,6 +199,7 @@ describe("mirrorInventoryBundle", () => {
           consumedThroughSerial: 10,
         },
         ssccRevokedFrom: [1],
+        ssccRevokedBlocks: [],
       },
     ];
     for (const response of malformed) {

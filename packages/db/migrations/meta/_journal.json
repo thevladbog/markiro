@@ -498,6 +498,13 @@
       "when": 1787616368348,
       "tag": "0070_curious_big_bertha",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1787628564661,
+      "tag": "0071_fantastic_hellion",
+      "breakpoints": true
     }
   ]
 }

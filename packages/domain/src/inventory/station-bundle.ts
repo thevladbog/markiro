@@ -125,6 +125,7 @@ const immutableManifestShape = {
 
 const ssccSchema = z
   .strictObject({
+    allocationOrder: z.number().int().safe().positive(),
     issuerPrefix: z.string().regex(/^[0-9]{9}$/),
     extensionDigit: z.number().int().min(0).max(9),
     fromSerial: z.number().int().safe().nonnegative(),
@@ -144,11 +145,22 @@ const ssccSchema = z
     }
   });
 
+const revokedSsccBlockSchema = z
+  .strictObject({
+    allocationOrder: z.number().int().safe().positive(),
+    fromSerial: z.number().int().safe().nonnegative(),
+    toSerial: z.number().int().safe().nonnegative(),
+  })
+  .refine((block) => block.fromSerial <= block.toSerial, {
+    message: "SSCC revoked range is inverted",
+  });
+
 export const stationInventoryBundleManifestSchema = z
   .strictObject({
     ...immutableManifestShape,
     sscc: ssccSchema.nullable(),
     ssccRevokedFrom: z.array(z.number().int().safe().nonnegative()),
+    ssccRevokedBlocks: z.array(revokedSsccBlockSchema),
   })
   .superRefine((manifest, context) => {
     if (manifest.productionDateFrom > manifest.productionDateTo) {
@@ -158,12 +170,14 @@ export const stationInventoryBundleManifestSchema = z
       (manifest.mode === "check" &&
         (manifest.boxLabelTemplate !== null ||
           manifest.sscc !== null ||
-          manifest.ssccRevokedFrom.length !== 0)) ||
+          manifest.ssccRevokedFrom.length !== 0 ||
+          manifest.ssccRevokedBlocks.length !== 0)) ||
       (manifest.mode === "repack" && (manifest.boxLabelTemplate === null || manifest.sscc === null))
     ) {
       context.addIssue({ code: "custom", message: "mode and repack facts are inconsistent" });
     }
     const uniqueRevocations = new Set(manifest.ssccRevokedFrom);
+    const revokedOrders = new Set(manifest.ssccRevokedBlocks.map((block) => block.allocationOrder));
     if (
       uniqueRevocations.size !== manifest.ssccRevokedFrom.length ||
       manifest.ssccRevokedFrom.some(
@@ -172,6 +186,17 @@ export const stationInventoryBundleManifestSchema = z
       (manifest.sscc !== null && uniqueRevocations.has(manifest.sscc.fromSerial))
     ) {
       context.addIssue({ code: "custom", message: "unsafe SSCC revocation list" });
+    }
+    if (
+      revokedOrders.size !== manifest.ssccRevokedBlocks.length ||
+      manifest.ssccRevokedBlocks.some(
+        (block, index) =>
+          index > 0 &&
+          block.allocationOrder <= manifest.ssccRevokedBlocks[index - 1]!.allocationOrder,
+      ) ||
+      (manifest.sscc !== null && revokedOrders.has(manifest.sscc.allocationOrder))
+    ) {
+      context.addIssue({ code: "custom", message: "unsafe SSCC revoked block list" });
     }
   });
 

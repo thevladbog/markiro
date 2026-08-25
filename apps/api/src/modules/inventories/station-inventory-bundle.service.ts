@@ -91,7 +91,7 @@ export class StationInventoryBundleService {
   ): Promise<StationInventoryBundleManifestDto> {
     const manifest = await this.loadStoredManifest(tx, tenantId, inventoryId);
     if (manifest.mode === "check") {
-      return { ...manifest, sscc: null, ssccRevokedFrom: [] };
+      return { ...manifest, sscc: null, ssccRevokedFrom: [], ssccRevokedBlocks: [] };
     }
 
     if (manifest.boxLabelTemplate === null) {
@@ -112,7 +112,7 @@ export class StationInventoryBundleService {
     }
 
     try {
-      const sscc = await this.sscc.allocateForBundle(
+      const sscc = await this.sscc.allocateOrderedForBundle(
         tenantId,
         issuerPrefix,
         BOX_EXTENSION_DIGIT,
@@ -127,7 +127,14 @@ export class StationInventoryBundleService {
         deviceId,
         tx,
       );
-      return { ...manifest, sscc, ssccRevokedFrom };
+      const ssccRevokedBlocks = await this.sscc.revokedBlocks(
+        tenantId,
+        issuerPrefix,
+        BOX_EXTENSION_DIGIT,
+        deviceId,
+        tx,
+      );
+      return { ...manifest, sscc, ssccRevokedFrom, ssccRevokedBlocks };
     } catch (error) {
       if (!(error instanceof SsccCapacityExhaustedException)) throw error;
       throw new ConflictException({ code: "INVENTORY_SSCC_UNAVAILABLE" });

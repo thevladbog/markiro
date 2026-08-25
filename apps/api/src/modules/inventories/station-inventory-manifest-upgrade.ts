@@ -99,6 +99,7 @@ export async function resolveStoredStationInventoryManifest(
   if (codeCount === null) throw new Error("Invalid stored station inventory manifest anchors");
 
   const current = tryParseCurrentManifest(facts.stationManifest);
+  let manifest: LegacyStationInventoryManifest;
   if (current !== null) {
     if (
       !anchorsMatch(current, facts, codeCount) ||
@@ -106,12 +107,13 @@ export async function resolveStoredStationInventoryManifest(
     ) {
       throw new Error("Invalid stored station inventory manifest anchors");
     }
-    return current;
-  }
-
-  const legacy = parseLegacyStationInventoryManifest(facts.stationManifest);
-  if (!anchorsMatch(legacy, facts, codeCount) || facts.snapshotFixedAt === null) {
-    throw new Error("Invalid legacy stored station inventory manifest anchors");
+    manifest = current;
+  } else {
+    const legacy = parseLegacyStationInventoryManifest(facts.stationManifest);
+    if (!anchorsMatch(legacy, facts, codeCount) || facts.snapshotFixedAt === null) {
+      throw new Error("Invalid legacy stored station inventory manifest anchors");
+    }
+    manifest = legacy;
   }
   const rows = await executor
     .select({
@@ -130,18 +132,25 @@ export async function resolveStoredStationInventoryManifest(
     .where(
       and(
         eq(schema.inventorySnapshotCodes.tenantId, tenantId),
-        eq(schema.inventorySnapshotCodes.snapshotId, legacy.snapshotId),
+        eq(schema.inventorySnapshotCodes.snapshotId, manifest.snapshotId),
       ),
     )
     .orderBy(asc(schema.inventorySnapshotCodes.codeHash));
   if (rows.length !== codeCount) {
-    throw new Error("Invalid legacy stored station inventory manifest row count");
+    throw new Error("Invalid stored station inventory manifest row count");
+  }
+  const contentDigest = inventorySnapshotContentDigest(rows);
+  if (current !== null) {
+    if (current.contentDigest !== contentDigest) {
+      throw new Error("Invalid stored station inventory manifest content digest");
+    }
+    return current;
   }
 
   const upgraded = parseStationInventoryManifest({
-    ...legacy,
+    ...manifest,
     snapshotFixedAt: facts.snapshotFixedAt.toISOString(),
-    contentDigest: inventorySnapshotContentDigest(rows),
+    contentDigest,
   });
   const now = new Date();
   await executor

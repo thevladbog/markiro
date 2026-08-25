@@ -168,8 +168,67 @@ async function snapshotRows(exec: SqlExecutor, snapshotId: string): Promise<Stor
 
 function immutableManifest(manifest: InventoryBundleManifest): unknown {
   return Object.fromEntries(
-    Object.entries(manifest).filter(([key]) => key !== "sscc" && key !== "ssccRevokedFrom"),
+    Object.entries(manifest).filter(
+      ([key]) => key !== "sscc" && key !== "ssccRevokedFrom" && key !== "ssccRevokedBlocks",
+    ),
   );
+}
+
+function upgradeLegacySsccFacts(
+  legacy: Record<string, unknown>,
+  incoming: InventoryBundleManifest,
+): Record<string, unknown> {
+  if ("ssccRevokedBlocks" in legacy) return legacy;
+  if (incoming.mode === "check") {
+    return { ...legacy, sscc: null, ssccRevokedFrom: [], ssccRevokedBlocks: [] };
+  }
+  if (incoming.sscc === null || typeof legacy.sscc !== "object" || legacy.sscc === null) {
+    throw new Error("active inventory manifest is invalid");
+  }
+  const incomingBlock = incoming.sscc;
+
+  const parsedLegacy = parseStationInventoryBundleManifest({
+    ...legacy,
+    sscc: {
+      ...(legacy.sscc as Record<string, unknown>),
+      allocationOrder: incomingBlock.allocationOrder,
+    },
+    ssccRevokedBlocks: [],
+  });
+  if (parsedLegacy.sscc === null) throw new Error("active inventory manifest is invalid");
+  const oldBlock = parsedLegacy.sscc;
+  const sameRange =
+    oldBlock.issuerPrefix === incomingBlock.issuerPrefix &&
+    oldBlock.extensionDigit === incomingBlock.extensionDigit &&
+    oldBlock.fromSerial === incomingBlock.fromSerial &&
+    oldBlock.toSerial === incomingBlock.toSerial;
+  const oldBlockRevoked = incoming.ssccRevokedBlocks.some(
+    (block) =>
+      block.allocationOrder < incomingBlock.allocationOrder &&
+      block.fromSerial === oldBlock.fromSerial &&
+      block.toSerial === oldBlock.toSerial,
+  );
+  if (!sameRange && !oldBlockRevoked && oldBlock.consumedThroughSerial !== oldBlock.toSerial) {
+    throw new Error("unsafe legacy inventory SSCC transition");
+  }
+
+  const sscc = sameRange
+    ? {
+        ...incomingBlock,
+        consumedThroughSerial:
+          oldBlock.consumedThroughSerial === null
+            ? incomingBlock.consumedThroughSerial
+            : incomingBlock.consumedThroughSerial === null
+              ? oldBlock.consumedThroughSerial
+              : Math.max(oldBlock.consumedThroughSerial, incomingBlock.consumedThroughSerial),
+      }
+    : incomingBlock;
+  return {
+    ...legacy,
+    sscc,
+    ssccRevokedFrom: incoming.ssccRevokedFrom,
+    ssccRevokedBlocks: incoming.ssccRevokedBlocks,
+  };
 }
 
 function parseStoredManifest(
@@ -190,7 +249,7 @@ function parseStoredManifest(
   // Task 3 originally persisted manifests before these immutable proof fields
   // existed. A same-snapshot server response may fix those two facts once;
   // every other field still passes the current strict shared parser.
-  const legacy = value as Record<string, unknown>;
+  const legacy = upgradeLegacySsccFacts(value as Record<string, unknown>, incoming);
   return {
     manifest: parseStationInventoryBundleManifest({
       ...legacy,
@@ -236,39 +295,79 @@ function mergeSsccSafety(
   if (current.sscc === null || incoming.sscc === null) {
     throw new Error("unsafe inventory SSCC transition");
   }
+  const currentBlock = current.sscc;
+  const incomingBlock = incoming.sscc;
 
-  const revoked = [...new Set([...current.ssccRevokedFrom, ...incoming.ssccRevokedFrom])].sort(
-    (left, right) => left - right,
-  );
-  const sameBlock =
-    current.sscc.issuerPrefix === incoming.sscc.issuerPrefix &&
-    current.sscc.extensionDigit === incoming.sscc.extensionDigit &&
-    current.sscc.fromSerial === incoming.sscc.fromSerial &&
-    current.sscc.toSerial === incoming.sscc.toSerial;
+  const sameBlockIdentity = currentBlock.allocationOrder === incomingBlock.allocationOrder;
+  const sameBlockBounds =
+    currentBlock.issuerPrefix === incomingBlock.issuerPrefix &&
+    currentBlock.extensionDigit === incomingBlock.extensionDigit &&
+    currentBlock.fromSerial === incomingBlock.fromSerial &&
+    currentBlock.toSerial === incomingBlock.toSerial;
+
+  if (sameBlockIdentity && !sameBlockBounds) {
+    throw new Error("unsafe inventory SSCC allocation identity");
+  }
 
   let sscc: InventoryBundleManifest["sscc"];
-  if (sameBlock) {
+  let ssccRevokedFrom: number[];
+  let ssccRevokedBlocks: InventoryBundleManifest["ssccRevokedBlocks"];
+  if (sameBlockIdentity) {
     const consumed = [
       current.sscc.consumedThroughSerial,
       incoming.sscc.consumedThroughSerial,
     ].filter((value): value is number => value !== null);
     sscc = {
-      ...current.sscc,
+      ...currentBlock,
       consumedThroughSerial: consumed.length === 0 ? null : Math.max(...consumed),
     };
-  } else if (
-    (incoming.ssccRevokedFrom.includes(current.sscc.fromSerial) ||
-      current.sscc.consumedThroughSerial === current.sscc.toSerial) &&
-    !revoked.includes(incoming.sscc.fromSerial)
-  ) {
-    sscc = incoming.sscc;
-  } else if (current.ssccRevokedFrom.includes(incoming.sscc.fromSerial)) {
-    sscc = current.sscc;
+    ssccRevokedFrom = [...new Set([...current.ssccRevokedFrom, ...incoming.ssccRevokedFrom])].sort(
+      (left, right) => left - right,
+    );
+    ssccRevokedBlocks = mergeRevokedBlocks(current, incoming);
+  } else if (incomingBlock.allocationOrder > currentBlock.allocationOrder) {
+    const currentWasRevoked = incoming.ssccRevokedBlocks.some(
+      (block) =>
+        block.allocationOrder === currentBlock.allocationOrder &&
+        block.fromSerial === currentBlock.fromSerial &&
+        block.toSerial === currentBlock.toSerial,
+    );
+    if (!currentWasRevoked && currentBlock.consumedThroughSerial !== currentBlock.toSerial) {
+      throw new Error("unsafe inventory SSCC transition");
+    }
+    sscc = incomingBlock;
+    ssccRevokedFrom = incoming.ssccRevokedFrom;
+    ssccRevokedBlocks = mergeRevokedBlocks(current, incoming);
   } else {
-    throw new Error("unsafe inventory SSCC transition");
+    sscc = currentBlock;
+    ssccRevokedFrom = current.ssccRevokedFrom;
+    ssccRevokedBlocks = current.ssccRevokedBlocks;
   }
 
-  return parseStationInventoryBundleManifest({ ...incoming, sscc, ssccRevokedFrom: revoked });
+  return parseStationInventoryBundleManifest({
+    ...incoming,
+    sscc,
+    ssccRevokedFrom,
+    ssccRevokedBlocks,
+  });
+}
+
+function mergeRevokedBlocks(
+  current: InventoryBundleManifest,
+  incoming: InventoryBundleManifest,
+): InventoryBundleManifest["ssccRevokedBlocks"] {
+  const byOrder = new Map<number, InventoryBundleManifest["ssccRevokedBlocks"][number]>();
+  for (const block of [...current.ssccRevokedBlocks, ...incoming.ssccRevokedBlocks]) {
+    const existing = byOrder.get(block.allocationOrder);
+    if (
+      existing !== undefined &&
+      (existing.fromSerial !== block.fromSerial || existing.toSerial !== block.toSerial)
+    ) {
+      throw new Error("unsafe inventory SSCC revocation identity");
+    }
+    byOrder.set(block.allocationOrder, block);
+  }
+  return [...byOrder.values()].sort((left, right) => left.allocationOrder - right.allocationOrder);
 }
 
 function candidateFrom(

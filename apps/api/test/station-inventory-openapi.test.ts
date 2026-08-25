@@ -126,13 +126,18 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
     if (!sscc) throw new Error("Missing SSCC schema");
     expect(sscc.nullable).toBe(true);
     exactClosedObject(sscc, [
+      "allocationOrder",
       "issuerPrefix",
       "extensionDigit",
       "fromSerial",
       "toSerial",
       "consumedThroughSerial",
     ]);
+    expect(sscc.properties?.allocationOrder).toEqual({ type: "integer", minimum: 1 });
     expect(sscc.properties?.consumedThroughSerial?.nullable).toBe(true);
+    const revokedBlocks = manifest.properties?.ssccRevokedBlocks;
+    expect(revokedBlocks?.type).toBe("array");
+    exactClosedObject(revokedBlocks?.items ?? {}, ["allocationOrder", "fromSerial", "toSerial"]);
 
     const page = responseSchema(document, "/station/inventories/{id}/bundle/codes", "get");
     exactClosedObject(page, [

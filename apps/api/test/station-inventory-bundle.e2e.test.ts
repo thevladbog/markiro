@@ -315,6 +315,7 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       boxLabelTemplate: null,
       sscc: null,
       ssccRevokedFrom: [],
+      ssccRevokedBlocks: [],
     });
     expect(JSON.stringify(manifest.body)).not.toMatch(/objectKey|private\//i);
 
@@ -445,6 +446,71 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       .expect(409, { code: "INVENTORY_BUNDLE_INVALID" });
   });
 
+  it("rejects a current manifest whose content digest was forged", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedBundle(agent);
+    await join(fixture);
+    const [inventory] = await db
+      .select({ manifest: schema.inventories.stationManifest })
+      .from(schema.inventories)
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+    await db
+      .update(schema.inventories)
+      .set({
+        stationManifest: {
+          ...(inventory!.manifest as Record<string, unknown>),
+          contentDigest: "f".repeat(64),
+        },
+      })
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+
+    await request(app!.getHttpServer())
+      .get(`/station/inventories/${fixture.inventoryId}/bundle/manifest`)
+      .set("x-api-key", fixture.apiKey)
+      .expect(409, { code: "INVENTORY_BUNDLE_INVALID" });
+  });
+
+  it("rejects current snapshot rows mutated after the manifest proof was frozen", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedBundle(agent);
+    await join(fixture);
+    await db
+      .update(schema.inventorySnapshotCodes)
+      .set({ sourceState: "MUTATED_AFTER_FIXATION" })
+      .where(
+        and(
+          eq(schema.inventorySnapshotCodes.tenantId, fixture.tenantId),
+          eq(schema.inventorySnapshotCodes.snapshotId, fixture.snapshotId),
+          eq(schema.inventorySnapshotCodes.codeHash, "a".repeat(64)),
+        ),
+      );
+
+    await request(app!.getHttpServer())
+      .get(`/station/inventories/${fixture.inventoryId}/bundle/codes`)
+      .set("x-api-key", fixture.apiKey)
+      .expect(409, { code: "INVENTORY_BUNDLE_INVALID" });
+  });
+
+  it("rejects current snapshot counts that no longer match frozen rows", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedBundle(agent);
+    await join(fixture);
+    await db
+      .update(schema.inventorySnapshots)
+      .set({ introducedCount: 1 })
+      .where(
+        and(
+          eq(schema.inventorySnapshots.tenantId, fixture.tenantId),
+          eq(schema.inventorySnapshots.id, fixture.snapshotId),
+        ),
+      );
+
+    await request(app!.getHttpServer())
+      .get(`/station/inventories/${fixture.inventoryId}/bundle/manifest`)
+      .set("x-api-key", fixture.apiKey)
+      .expect(409, { code: "INVENTORY_BUNDLE_INVALID" });
+  });
+
   it("reuses a device's existing SSCC block with original bounds and consumed cursor without creating a shift", async () => {
     const agent = request.agent(app!.getHttpServer());
     const fixture = await seedBundle(agent, "repack");
@@ -469,14 +535,17 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       boxCapacity: 12,
       boxLabelTemplate: { name: "Frozen bundle label", spec: LABEL_SPEC },
       sscc: {
+        allocationOrder: expect.any(Number),
         issuerPrefix: "460000009",
         extensionDigit: 0,
         fromSerial: expect.any(Number),
         toSerial: expect.any(Number),
         consumedThroughSerial: null,
       },
+      ssccRevokedBlocks: [],
     });
     const original = first.body.sscc as {
+      allocationOrder: number;
       fromSerial: number;
       toSerial: number;
     };
@@ -496,18 +565,73 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       .set("x-api-key", fixture.apiKey)
       .expect(200);
     expect(repeated.body.sscc).toEqual({
+      allocationOrder: original.allocationOrder,
       issuerPrefix: "460000009",
       extensionDigit: 0,
       fromSerial: original.fromSerial,
       toSerial: original.toSerial,
       consumedThroughSerial: original.fromSerial + 7,
     });
+    expect(repeated.body.ssccRevokedBlocks).toEqual([]);
 
     const [afterShifts] = await db
       .select({ value: count() })
       .from(schema.shifts)
       .where(eq(schema.shifts.tenantId, fixture.tenantId));
     expect(afterShifts?.value).toBe(beforeShifts?.value);
+  });
+
+  it("identifies a valid same-range replacement independently from its revoked predecessor", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedBundle(agent, "repack");
+    const first = await join(fixture);
+    const original = first.body.sscc as {
+      allocationOrder: number;
+      fromSerial: number;
+      toSerial: number;
+    };
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(schema.ssccBlocks)
+        .set({ revokedAt: new Date() })
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, fixture.tenantId),
+            eq(schema.ssccBlocks.allocationOrder, original.allocationOrder),
+          ),
+        );
+      await tx
+        .update(schema.ssccCounters)
+        .set({ nextSerial: original.fromSerial })
+        .where(
+          and(
+            eq(schema.ssccCounters.tenantId, fixture.tenantId),
+            eq(schema.ssccCounters.issuerPrefix, "460000009"),
+            eq(schema.ssccCounters.extensionDigit, 0),
+          ),
+        );
+    });
+
+    const reused = await request(app!.getHttpServer())
+      .get(`/station/inventories/${fixture.inventoryId}/bundle/manifest`)
+      .set("x-api-key", fixture.apiKey)
+      .expect(200);
+    expect(reused.body.sscc).toMatchObject({
+      allocationOrder: expect.any(Number),
+      fromSerial: original.fromSerial,
+      toSerial: original.toSerial,
+      consumedThroughSerial: null,
+    });
+    expect(reused.body.sscc.allocationOrder).toBeGreaterThan(original.allocationOrder);
+    expect(reused.body.ssccRevokedFrom).toEqual([]);
+    expect(reused.body.ssccRevokedBlocks).toEqual([
+      {
+        allocationOrder: original.allocationOrder,
+        fromSerial: original.fromSerial,
+        toSerial: original.toSerial,
+      },
+    ]);
   });
 
   it.each([
