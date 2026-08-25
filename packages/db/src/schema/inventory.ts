@@ -631,7 +631,8 @@ export const inventoryScanBatches = pgTable(
     payloadDigest: char("payload_digest", { length: 64 }).notNull(),
     sequenceCeiling: bigint("sequence_ceiling", { mode: "bigint" }).notNull(),
     outcome: inventoryScanBatchOutcomeEnum("outcome").notNull(),
-    result: jsonb("result").$type<Record<string, unknown>>(),
+    // The outcome and its exact replay body are committed together; there is no persisted pending row.
+    result: jsonb("result").$type<Record<string, unknown>>().notNull(),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -778,6 +779,7 @@ export const inventoryCodeResults = pgTable(
     winningScannedAt: timestamp("winning_scanned_at", { withTimezone: true }).notNull(),
     observedProductionDate: date("observed_production_date"),
     classification: inventoryCodeClassificationEnum("classification").notNull(),
+    originClassification: inventoryCodeClassificationEnum("origin_classification").notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -790,6 +792,12 @@ export const inventoryCodeResults = pgTable(
       table.tenantId,
       table.inventoryId,
       table.codeHash,
+    ),
+    unique("inventory_code_results_tenant_id_inventory_observed_date_uq").on(
+      table.tenantId,
+      table.id,
+      table.inventoryId,
+      table.observedProductionDate,
     ),
     foreignKey({
       name: "inventory_code_results_tenant_inventory_fk",
@@ -835,6 +843,15 @@ export const inventoryCodeResults = pgTable(
       table.id,
     ),
     check("inventory_code_results_hash_check", sql`${table.codeHash} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "inventory_code_results_snapshot_origin_check",
+      sql`${table.originClassification} <> 'voided'
+        and (${table.classification} = ${table.originClassification}
+          or ${table.classification} = 'voided')
+        and ((${table.originClassification} = 'unknown' and ${table.snapshotId} is null)
+          or (${table.originClassification} in ('expected', 'protected', 'ineligible')
+            and ${table.snapshotId} is not null))`,
+    ),
   ],
 );
 
@@ -908,6 +925,13 @@ export const inventoryRepackBoxes = pgTable(
         or (${table.state} = 'invalidated' and ${table.invalidatedAt} is not null)`,
     ),
     check(
+      "inventory_repack_boxes_lifecycle_print_check",
+      sql`(${table.state} = 'open' and ${table.printState} = 'not_ready')
+        or (${table.state} = 'closed'
+          and ${table.printState} in ('pending', 'printing', 'printed', 'failed'))
+        or ${table.state} = 'invalidated'`,
+    ),
+    check(
       "inventory_repack_boxes_print_state_check",
       sql`(${table.printState} = 'failed' and ${table.printErrorCode} is not null)
         or (${table.printState} <> 'failed' and ${table.printErrorCode} is null)`,
@@ -916,7 +940,13 @@ export const inventoryRepackBoxes = pgTable(
       "inventory_repack_boxes_print_error_code_check",
       sql`${table.printErrorCode} is null or ${table.printErrorCode} ~ '^[A-Z][A-Z0-9_]{0,127}$'`,
     ),
-    check("inventory_repack_boxes_print_attempt_count_check", sql`${table.printAttemptCount} >= 0`),
+    check(
+      "inventory_repack_boxes_print_attempt_count_check",
+      sql`(${table.printState} = 'not_ready' and ${table.printAttemptCount} = 0)
+        or (${table.printState} = 'pending' and ${table.printAttemptCount} >= 0)
+        or (${table.printState} in ('printing', 'printed', 'failed')
+          and ${table.printAttemptCount} > 0)`,
+    ),
     check(
       "inventory_repack_boxes_printed_at_check",
       sql`(${table.printState} = 'printed' and ${table.printedAt} is not null)
@@ -935,6 +965,8 @@ export const inventoryRepackItems = pgTable(
     boxId: uuid("box_id").notNull(),
     resultId: uuid("result_id").notNull(),
     productionDate: date("production_date").notNull(),
+    // Non-null only while active, so removed history does not block a later date correction.
+    activeObservedProductionDate: date("active_observed_production_date"),
     addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
     removedAt: timestamp("removed_at", { withTimezone: true }),
   },
@@ -971,6 +1003,21 @@ export const inventoryRepackItems = pgTable(
         inventoryCodeResults.inventoryId,
       ],
     }),
+    foreignKey({
+      name: "inventory_repack_items_tenant_result_active_date_fk",
+      columns: [
+        table.tenantId,
+        table.resultId,
+        table.inventoryId,
+        table.activeObservedProductionDate,
+      ],
+      foreignColumns: [
+        inventoryCodeResults.tenantId,
+        inventoryCodeResults.id,
+        inventoryCodeResults.inventoryId,
+        inventoryCodeResults.observedProductionDate,
+      ],
+    }),
     index("inventory_repack_items_box_active_idx").on(
       table.tenantId,
       table.inventoryId,
@@ -980,6 +1027,14 @@ export const inventoryRepackItems = pgTable(
     check(
       "inventory_repack_items_removed_at_check",
       sql`${table.removedAt} is null or ${table.removedAt} >= ${table.addedAt}`,
+    ),
+    check(
+      "inventory_repack_items_active_observed_date_check",
+      sql`(${table.removedAt} is null
+          and ${table.activeObservedProductionDate} is not null
+          and ${table.activeObservedProductionDate} = ${table.productionDate})
+        or (${table.removedAt} is not null
+          and ${table.activeObservedProductionDate} is null)`,
     ),
   ],
 );

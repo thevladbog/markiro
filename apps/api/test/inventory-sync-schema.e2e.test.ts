@@ -25,6 +25,7 @@ describe.skipIf(!databaseUrl)("inventory sync PostgreSQL facts", () => {
   const productId = randomUUID();
   const lineId = randomUUID();
   const inventoryId = randomUUID();
+  const snapshotId = randomUUID();
   const operatorId = randomUUID();
   const deviceAId = randomUUID();
   const deviceBId = randomUUID();
@@ -65,7 +66,7 @@ describe.skipIf(!databaseUrl)("inventory sync PostgreSQL facts", () => {
   async function expectConstraintViolation(
     statement: string,
     parameters: readonly unknown[],
-    expectedCode: "23503" | "23505" | "23514" = "23514",
+    expectedCode: "23502" | "23503" | "23505" | "23514" = "23514",
   ): Promise<void> {
     savepointSequence += 1;
     const savepoint = `inventory_sync_${savepointSequence}`;
@@ -127,6 +128,28 @@ describe.skipIf(!databaseUrl)("inventory sync PostgreSQL facts", () => {
        values ($1, $2, $3, $4, '04680089900383', $5, 'check', '2026-08-01', '2026-08-31', $6)`,
       [inventoryId, tenantId, `INV-${randomUUID()}`, productId, lineId, userId],
     );
+    await client.query(
+      `insert into inventory_snapshots
+         (id, tenant_id, inventory_id, combined_digest, emitted_count, introduced_count,
+          applied_count, retired_count, written_off_count, disaggregation_count, protected_count,
+          expected_count, package_count, loose_count, fixed_by_user_id)
+       values ($1, $2, $3, $4, 0, 4, 0, 0, 0, 0, 0, 4, 0, 4, $5)`,
+      [snapshotId, tenantId, inventoryId, "0".repeat(64), userId],
+    );
+    await client.query(
+      `insert into inventory_snapshot_codes
+         (tenant_id, snapshot_id, canonical_raw, code_hash, gtin14, serial, source_status,
+          source_production_date, expected, protected)
+       values ($1, $2, 'item-1', $3, '04680089900383', 'serial-1', 'INTRODUCED',
+               '2026-08-01', true, false),
+              ($1, $2, 'item-2', $4, '04680089900383', 'serial-2', 'INTRODUCED',
+               '2026-08-01', true, false),
+              ($1, $2, 'item-3', $5, '04680089900383', 'serial-3', 'INTRODUCED',
+               '2026-08-01', true, false),
+              ($1, $2, 'item-4', $6, '04680089900383', 'serial-4', 'INTRODUCED',
+               '2026-08-01', true, false)`,
+      [tenantId, snapshotId, "1".repeat(64), "2".repeat(64), "3".repeat(64), "4".repeat(64)],
+    );
   });
 
   afterAll(async () => {
@@ -161,25 +184,35 @@ describe.skipIf(!databaseUrl)("inventory sync PostgreSQL facts", () => {
     );
   });
 
-  it("binds each device batch id and payload digest and keeps event identity immutable", async () => {
+  it("persists complete replay results, binds batch identity, and keeps events immutable", async () => {
     const eventId = randomUUID();
-    await client.query(
+    await expectConstraintViolation(
       `insert into inventory_scan_batches
          (tenant_id, inventory_id, device_id, batch_id, payload_digest, sequence_ceiling, outcome)
-       values ($1, $2, $3, 'batch-a', $4, 1, 'applied')`,
+       values ($1, $2, $3, 'batch-without-result', $4, 0, 'rejected')`,
+      [tenantId, inventoryId, deviceAId, "9".repeat(64)],
+      "23502",
+    );
+    await client.query(
+      `insert into inventory_scan_batches
+         (tenant_id, inventory_id, device_id, batch_id, payload_digest, sequence_ceiling, outcome,
+          result)
+       values ($1, $2, $3, 'batch-a', $4, 1, 'applied', '{"accepted":1}'::jsonb)`,
       [tenantId, inventoryId, deviceAId, "a".repeat(64)],
     );
     await expectConstraintViolation(
       `insert into inventory_scan_batches
-         (tenant_id, inventory_id, device_id, batch_id, payload_digest, sequence_ceiling, outcome)
-       values ($1, $2, $3, 'batch-a', $4, 2, 'rejected')`,
+         (tenant_id, inventory_id, device_id, batch_id, payload_digest, sequence_ceiling, outcome,
+          result)
+       values ($1, $2, $3, 'batch-a', $4, 2, 'rejected', '{"error":"conflict"}'::jsonb)`,
       [tenantId, inventoryId, deviceAId, "b".repeat(64)],
       "23505",
     );
     await expectConstraintViolation(
       `insert into inventory_scan_batches
-         (tenant_id, inventory_id, device_id, batch_id, payload_digest, sequence_ceiling, outcome)
-       values ($1, $2, $3, 'batch-b', $4, 2, 'applied')`,
+         (tenant_id, inventory_id, device_id, batch_id, payload_digest, sequence_ceiling, outcome,
+          result)
+       values ($1, $2, $3, 'batch-b', $4, 2, 'applied', '{"accepted":0}'::jsonb)`,
       [tenantId, inventoryId, deviceAId, "a".repeat(64)],
       "23505",
     );
@@ -214,17 +247,103 @@ describe.skipIf(!databaseUrl)("inventory sync PostgreSQL facts", () => {
     );
   });
 
-  it("keeps one current claim and one active box membership while allowing many box items", async () => {
+  it("binds known, unknown, and voided results to their immutable origin", async () => {
+    const eventIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+    await client.query(
+      `insert into inventory_scan_batches
+         (tenant_id, inventory_id, device_id, batch_id, payload_digest, sequence_ceiling, outcome,
+          result)
+       values ($1, $2, $3, 'batch-snapshot-origin', $4, 13, 'applied',
+               '{"accepted":4}'::jsonb)`,
+      [tenantId, inventoryId, deviceAId, "7".repeat(64)],
+    );
+    await client.query(
+      `insert into inventory_scan_events
+         (event_id, tenant_id, inventory_id, batch_id, device_id, device_sequence, operator_id,
+          scanned_at, kind, normalized_identity, snapshot_revision, local_verdict,
+          authoritative_verdict)
+       values ($1, $5, $6, 'batch-snapshot-origin', $7, 10, $8, now(), 'item', 'known', 1,
+               'accepted', 'applied'),
+              ($2, $5, $6, 'batch-snapshot-origin', $7, 11, $8, now(), 'item', 'unknown', 1,
+               'accepted', 'applied'),
+              ($3, $5, $6, 'batch-snapshot-origin', $7, 12, $8, now(), 'item', 'voided-known', 1,
+               'accepted', 'applied'),
+              ($4, $5, $6, 'batch-snapshot-origin', $7, 13, $8, now(), 'item', 'voided-unknown', 1,
+               'accepted', 'applied')`,
+      [...eventIds, tenantId, inventoryId, deviceAId, operatorId],
+    );
+
+    await expectConstraintViolation(
+      `insert into inventory_code_results
+         (tenant_id, inventory_id, code_hash, first_accepted_event_id, winning_device_id,
+          winning_scanned_at, classification, origin_classification)
+       values ($1, $2, $3, $4, $5, now(), 'expected', 'expected')`,
+      [tenantId, inventoryId, "3".repeat(64), eventIds[0], deviceAId],
+    );
+    await expectConstraintViolation(
+      `insert into inventory_code_results
+         (tenant_id, inventory_id, code_hash, snapshot_id, first_accepted_event_id,
+          winning_device_id, winning_scanned_at, classification, origin_classification)
+       values ($1, $2, $3, $4, $5, $6, now(), 'unknown', 'unknown')`,
+      [tenantId, inventoryId, "3".repeat(64), snapshotId, eventIds[1], deviceAId],
+    );
+
+    await client.query(
+      `insert into inventory_code_results
+         (tenant_id, inventory_id, code_hash, snapshot_id, first_accepted_event_id,
+          winning_device_id, winning_scanned_at, classification, origin_classification)
+       values ($1, $2, $3, $4, $5, $9, now(), 'expected', 'expected'),
+              ($1, $2, $6, null, $7, $9, now(), 'unknown', 'unknown'),
+              ($1, $2, $8, $4, $10, $9, now(), 'voided', 'expected'),
+              ($1, $2, $11, null, $12, $9, now(), 'voided', 'unknown')`,
+      [
+        tenantId,
+        inventoryId,
+        "3".repeat(64),
+        snapshotId,
+        eventIds[0],
+        "5".repeat(64),
+        eventIds[1],
+        "4".repeat(64),
+        deviceAId,
+        eventIds[2],
+        "6".repeat(64),
+        eventIds[3],
+      ],
+    );
+    const stored = await client.query<{
+      classification: string;
+      origin_classification: string;
+      snapshot_id: string | null;
+    }>(
+      `select classification, origin_classification, snapshot_id
+       from inventory_code_results
+       where tenant_id = $1 and inventory_id = $2 and code_hash = any($3::char(64)[])
+       order by code_hash`,
+      [tenantId, inventoryId, ["3".repeat(64), "4".repeat(64), "5".repeat(64), "6".repeat(64)]],
+    );
+    expect(stored.rows).toEqual([
+      { classification: "expected", origin_classification: "expected", snapshot_id: snapshotId },
+      { classification: "voided", origin_classification: "expected", snapshot_id: snapshotId },
+      { classification: "unknown", origin_classification: "unknown", snapshot_id: null },
+      { classification: "voided", origin_classification: "unknown", snapshot_id: null },
+    ]);
+  });
+
+  it("binds active repack membership to the result date and releases it on removal", async () => {
     const eventAId = randomUUID();
     const eventBId = randomUUID();
+    const eventCId = randomUUID();
     const resultAId = randomUUID();
     const resultBId = randomUUID();
+    const resultCId = randomUUID();
     const boxAId = randomUUID();
     const boxBId = randomUUID();
     await client.query(
       `insert into inventory_scan_batches
-         (tenant_id, inventory_id, device_id, batch_id, payload_digest, sequence_ceiling, outcome)
-       values ($1, $2, $3, 'batch-claims', $4, 4, 'applied')`,
+         (tenant_id, inventory_id, device_id, batch_id, payload_digest, sequence_ceiling, outcome,
+          result)
+       values ($1, $2, $3, 'batch-claims', $4, 5, 'applied', '{"accepted":3}'::jsonb)`,
       [tenantId, inventoryId, deviceAId, "c".repeat(64)],
     );
     await client.query(
@@ -235,32 +354,40 @@ describe.skipIf(!databaseUrl)("inventory sync PostgreSQL facts", () => {
        values ($1, $3, $4, 'batch-claims', $5, 3, $6, now(), 'item', 'item-a', 1,
                'accepted', 'applied'),
               ($2, $3, $4, 'batch-claims', $5, 4, $6, now(), 'item', 'item-b', 1,
+               'accepted', 'applied'),
+              ($7, $3, $4, 'batch-claims', $5, 5, $6, now(), 'item', 'item-c', 1,
                'accepted', 'applied')`,
-      [eventAId, eventBId, tenantId, inventoryId, deviceAId, operatorId],
+      [eventAId, eventBId, tenantId, inventoryId, deviceAId, operatorId, eventCId],
     );
     await client.query(
       `insert into inventory_code_results
-         (id, tenant_id, inventory_id, code_hash, first_accepted_event_id, winning_device_id,
-          winning_scanned_at, classification)
-       values ($1, $3, $4, $5, $7, $9, now(), 'expected'),
-              ($2, $3, $4, $6, $8, $9, now(), 'expected')`,
+         (id, tenant_id, inventory_id, code_hash, snapshot_id, first_accepted_event_id,
+          winning_device_id, winning_scanned_at, observed_production_date, classification,
+          origin_classification)
+       values ($1, $4, $5, $6, $9, $10, $12, now(), '2026-08-01', 'expected', 'expected'),
+              ($2, $4, $5, $7, $9, $11, $12, now(), '2026-08-01', 'expected', 'expected'),
+              ($3, $4, $5, $8, null, $13, $12, now(), null, 'unknown', 'unknown')`,
       [
         resultAId,
         resultBId,
+        resultCId,
         tenantId,
         inventoryId,
         "1".repeat(64),
         "2".repeat(64),
+        "8".repeat(64),
+        snapshotId,
         eventAId,
         eventBId,
         deviceAId,
+        eventCId,
       ],
     );
     await expectConstraintViolation(
       `insert into inventory_code_results
          (tenant_id, inventory_id, code_hash, first_accepted_event_id, winning_device_id,
-          winning_scanned_at, classification)
-       values ($1, $2, $3, $4, $5, now(), 'unknown')`,
+          winning_scanned_at, classification, origin_classification)
+       values ($1, $2, $3, $4, $5, now(), 'unknown', 'unknown')`,
       [tenantId, inventoryId, "1".repeat(64), eventBId, deviceAId],
       "23505",
     );
@@ -274,59 +401,156 @@ describe.skipIf(!databaseUrl)("inventory sync PostgreSQL facts", () => {
     );
     await client.query(
       `insert into inventory_repack_items
-         (tenant_id, inventory_id, box_id, result_id, production_date)
-       values ($1, $2, $3, $4, '2026-08-01')`,
+         (tenant_id, inventory_id, box_id, result_id, production_date,
+          active_observed_production_date)
+       values ($1, $2, $3, $4, '2026-08-01', '2026-08-01')`,
       [tenantId, inventoryId, boxAId, resultAId],
     );
     await expectConstraintViolation(
       `insert into inventory_repack_items
-         (tenant_id, inventory_id, box_id, result_id, production_date)
-       values ($1, $2, $3, $4, '2026-08-02')`,
-      [tenantId, inventoryId, boxBId, resultAId],
-      "23505",
-    );
-    await client.query(
-      `update inventory_repack_items set removed_at = now()
-       where tenant_id = $1 and inventory_id = $2 and result_id = $3`,
-      [tenantId, inventoryId, resultAId],
-    );
-    await client.query(
-      `insert into inventory_repack_items
-         (tenant_id, inventory_id, box_id, result_id, production_date)
-       values ($1, $2, $3, $4, '2026-08-02')`,
-      [tenantId, inventoryId, boxBId, resultAId],
+         (tenant_id, inventory_id, box_id, result_id, production_date,
+          active_observed_production_date)
+       values ($1, $2, $3, $4, '2026-08-01', null)`,
+      [tenantId, inventoryId, boxAId, resultBId],
     );
     await expectConstraintViolation(
       `insert into inventory_repack_items
-         (tenant_id, inventory_id, box_id, result_id, production_date)
-       values ($1, $2, $3, $4, '2026-08-02')`,
-      [tenantId, inventoryId, boxAId, resultBId],
+         (tenant_id, inventory_id, box_id, result_id, production_date,
+          active_observed_production_date)
+       values ($1, $2, $3, $4, '2026-08-01', '2026-08-01')`,
+      [tenantId, inventoryId, boxAId, resultCId],
+      "23503",
+    );
+    await expectConstraintViolation(
+      `insert into inventory_repack_items
+         (tenant_id, inventory_id, box_id, result_id, production_date,
+          active_observed_production_date)
+       values ($1, $2, $3, $4, '2026-08-02', '2026-08-02')`,
+      [tenantId, inventoryId, boxBId, resultBId],
       "23503",
     );
     await client.query(
       `insert into inventory_repack_items
-         (tenant_id, inventory_id, box_id, result_id, production_date)
-       values ($1, $2, $3, $4, '2026-08-01')`,
+         (tenant_id, inventory_id, box_id, result_id, production_date,
+          active_observed_production_date)
+       values ($1, $2, $3, $4, '2026-08-01', '2026-08-01')`,
       [tenantId, inventoryId, boxAId, resultBId],
     );
+    await client.query(
+      `update inventory_repack_items
+       set removed_at = now(), active_observed_production_date = null
+       where tenant_id = $1 and inventory_id = $2 and result_id = $3`,
+      [tenantId, inventoryId, resultAId],
+    );
+    await client.query(
+      `update inventory_code_results set observed_production_date = '2026-08-02'
+       where tenant_id = $1 and inventory_id = $2 and id = $3`,
+      [tenantId, inventoryId, resultAId],
+    );
+    await client.query(
+      `insert into inventory_repack_items
+         (tenant_id, inventory_id, box_id, result_id, production_date,
+          active_observed_production_date)
+       values ($1, $2, $3, $4, '2026-08-02', '2026-08-02')`,
+      [tenantId, inventoryId, boxBId, resultAId],
+    );
+    const memberships = await client.query<{
+      active_observed_production_date: string | null;
+      production_date: string;
+      removed: boolean;
+    }>(
+      `select active_observed_production_date::text, production_date::text,
+              removed_at is not null as removed
+       from inventory_repack_items
+       where tenant_id = $1 and inventory_id = $2 and result_id = $3
+       order by production_date`,
+      [tenantId, inventoryId, resultAId],
+    );
+    expect(memberships.rows).toEqual([
+      { active_observed_production_date: null, production_date: "2026-08-01", removed: true },
+      {
+        active_observed_production_date: "2026-08-02",
+        production_date: "2026-08-02",
+        removed: false,
+      },
+    ]);
   });
 
-  it("requires print failure evidence and complete quarantine resolution evidence", async () => {
+  it("couples repack lifecycle to complete print evidence", async () => {
     await expectConstraintViolation(
       `insert into inventory_repack_boxes
          (tenant_id, inventory_id, new_sscc, owner_device_id, capacity, production_date,
-          state, print_state)
-       values ($1, $2, '046800899000000003', $3, 12, '2026-08-01', 'closed', 'failed')`,
+          state, print_state, print_attempt_count, printed_at)
+       values ($1, $2, '046800899000000003', $3, 12, '2026-08-01', 'open', 'printed', 1,
+               now())`,
       [tenantId, inventoryId, deviceAId],
     );
     await expectConstraintViolation(
       `insert into inventory_repack_boxes
          (tenant_id, inventory_id, new_sscc, owner_device_id, capacity, production_date,
-          state, print_state, print_error_code)
-       values ($1, $2, '046800899000000004', $3, 12, '2026-08-01', 'closed', 'pending',
+          state, print_state, print_attempt_count, print_error_code)
+       values ($1, $2, '046800899000000004', $3, 12, '2026-08-01', 'open', 'failed', 1,
                'PRINTER_OFFLINE')`,
       [tenantId, inventoryId, deviceAId],
     );
+    await expectConstraintViolation(
+      `insert into inventory_repack_boxes
+         (tenant_id, inventory_id, new_sscc, owner_device_id, capacity, production_date,
+          state, closed_at, print_state)
+       values ($1, $2, '046800899000000005', $3, 12, '2026-08-01', 'closed', now(),
+               'not_ready')`,
+      [tenantId, inventoryId, deviceAId],
+    );
+    await expectConstraintViolation(
+      `insert into inventory_repack_boxes
+         (tenant_id, inventory_id, new_sscc, owner_device_id, capacity, production_date,
+          state, print_state, print_attempt_count)
+       values ($1, $2, '046800899000000013', $3, 12, '2026-08-01', 'open', 'not_ready', 1)`,
+      [tenantId, inventoryId, deviceAId],
+    );
+    await expectConstraintViolation(
+      `insert into inventory_repack_boxes
+         (tenant_id, inventory_id, new_sscc, owner_device_id, capacity, production_date,
+          state, closed_at, print_state, print_attempt_count)
+       values ($1, $2, '046800899000000014', $3, 12, '2026-08-01', 'closed', now(),
+               'printing', 0)`,
+      [tenantId, inventoryId, deviceAId],
+    );
+    await expectConstraintViolation(
+      `insert into inventory_repack_boxes
+         (tenant_id, inventory_id, new_sscc, owner_device_id, capacity, production_date,
+          state, closed_at, print_state, print_attempt_count)
+       values ($1, $2, '046800899000000006', $3, 12, '2026-08-01', 'closed', now(),
+               'failed', 1)`,
+      [tenantId, inventoryId, deviceAId],
+    );
+    await expectConstraintViolation(
+      `insert into inventory_repack_boxes
+         (tenant_id, inventory_id, new_sscc, owner_device_id, capacity, production_date,
+          state, closed_at, print_state, print_error_code)
+       values ($1, $2, '046800899000000007', $3, 12, '2026-08-01', 'closed', now(),
+               'pending', 'PRINTER_OFFLINE')`,
+      [tenantId, inventoryId, deviceAId],
+    );
+    await client.query(
+      `insert into inventory_repack_boxes
+         (tenant_id, inventory_id, new_sscc, owner_device_id, capacity, production_date,
+          state, closed_at, print_state, print_attempt_count, print_error_code, printed_at)
+       values ($1, $2, '046800899000000008', $3, 12, '2026-08-01', 'open', null,
+               'not_ready', 0, null, null),
+              ($1, $2, '046800899000000009', $3, 12, '2026-08-01', 'closed', now(),
+               'pending', 0, null, null),
+              ($1, $2, '046800899000000010', $3, 12, '2026-08-01', 'closed', now(),
+               'printing', 1, null, null),
+              ($1, $2, '046800899000000011', $3, 12, '2026-08-01', 'closed', now(),
+               'printed', 1, null, now()),
+              ($1, $2, '046800899000000012', $3, 12, '2026-08-01', 'closed', now(),
+               'failed', 1, 'PRINTER_OFFLINE', null)`,
+      [tenantId, inventoryId, deviceAId],
+    );
+  });
+
+  it("requires complete quarantine resolution evidence", async () => {
     await expectConstraintViolation(
       `insert into inventory_late_events
          (tenant_id, inventory_id, device_id, batch_id, payload, payload_digest,

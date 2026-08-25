@@ -17,10 +17,18 @@ CREATE TABLE "inventory_code_results" (
 	"winning_scanned_at" timestamp with time zone NOT NULL,
 	"observed_production_date" date,
 	"classification" "inventory_code_classification" NOT NULL,
+	"origin_classification" "inventory_code_classification" NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "inventory_code_results_tenant_id_inventory_uq" UNIQUE("tenant_id","id","inventory_id"),
 	CONSTRAINT "inventory_code_results_current_claim_uq" UNIQUE("tenant_id","inventory_id","code_hash"),
-	CONSTRAINT "inventory_code_results_hash_check" CHECK ("inventory_code_results"."code_hash" ~ '^[0-9a-f]{64}$')
+	CONSTRAINT "inventory_code_results_tenant_id_inventory_observed_date_uq" UNIQUE("tenant_id","id","inventory_id","observed_production_date"),
+	CONSTRAINT "inventory_code_results_hash_check" CHECK ("inventory_code_results"."code_hash" ~ '^[0-9a-f]{64}$'),
+	CONSTRAINT "inventory_code_results_snapshot_origin_check" CHECK ("inventory_code_results"."origin_classification" <> 'voided'
+        and ("inventory_code_results"."classification" = "inventory_code_results"."origin_classification"
+          or "inventory_code_results"."classification" = 'voided')
+        and (("inventory_code_results"."origin_classification" = 'unknown' and "inventory_code_results"."snapshot_id" is null)
+          or ("inventory_code_results"."origin_classification" in ('expected', 'protected', 'ineligible')
+            and "inventory_code_results"."snapshot_id" is not null)))
 );
 --> statement-breakpoint
 CREATE TABLE "inventory_corrections" (
@@ -125,10 +133,17 @@ CREATE TABLE "inventory_repack_boxes" (
 	CONSTRAINT "inventory_repack_boxes_lifecycle_check" CHECK (("inventory_repack_boxes"."state" = 'open' and "inventory_repack_boxes"."closed_at" is null and "inventory_repack_boxes"."invalidated_at" is null)
         or ("inventory_repack_boxes"."state" = 'closed' and "inventory_repack_boxes"."closed_at" is not null and "inventory_repack_boxes"."invalidated_at" is null)
         or ("inventory_repack_boxes"."state" = 'invalidated' and "inventory_repack_boxes"."invalidated_at" is not null)),
+	CONSTRAINT "inventory_repack_boxes_lifecycle_print_check" CHECK (("inventory_repack_boxes"."state" = 'open' and "inventory_repack_boxes"."print_state" = 'not_ready')
+        or ("inventory_repack_boxes"."state" = 'closed'
+          and "inventory_repack_boxes"."print_state" in ('pending', 'printing', 'printed', 'failed'))
+        or "inventory_repack_boxes"."state" = 'invalidated'),
 	CONSTRAINT "inventory_repack_boxes_print_state_check" CHECK (("inventory_repack_boxes"."print_state" = 'failed' and "inventory_repack_boxes"."print_error_code" is not null)
         or ("inventory_repack_boxes"."print_state" <> 'failed' and "inventory_repack_boxes"."print_error_code" is null)),
 	CONSTRAINT "inventory_repack_boxes_print_error_code_check" CHECK ("inventory_repack_boxes"."print_error_code" is null or "inventory_repack_boxes"."print_error_code" ~ '^[A-Z][A-Z0-9_]{0,127}$'),
-	CONSTRAINT "inventory_repack_boxes_print_attempt_count_check" CHECK ("inventory_repack_boxes"."print_attempt_count" >= 0),
+	CONSTRAINT "inventory_repack_boxes_print_attempt_count_check" CHECK (("inventory_repack_boxes"."print_state" = 'not_ready' and "inventory_repack_boxes"."print_attempt_count" = 0)
+        or ("inventory_repack_boxes"."print_state" = 'pending' and "inventory_repack_boxes"."print_attempt_count" >= 0)
+        or ("inventory_repack_boxes"."print_state" in ('printing', 'printed', 'failed')
+          and "inventory_repack_boxes"."print_attempt_count" > 0)),
 	CONSTRAINT "inventory_repack_boxes_printed_at_check" CHECK (("inventory_repack_boxes"."print_state" = 'printed' and "inventory_repack_boxes"."printed_at" is not null)
         or ("inventory_repack_boxes"."print_state" <> 'printed' and "inventory_repack_boxes"."printed_at" is null))
 );
@@ -140,11 +155,17 @@ CREATE TABLE "inventory_repack_items" (
 	"box_id" uuid NOT NULL,
 	"result_id" uuid NOT NULL,
 	"production_date" date NOT NULL,
+	"active_observed_production_date" date,
 	"added_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"removed_at" timestamp with time zone,
 	CONSTRAINT "inventory_repack_items_tenant_id_inventory_uq" UNIQUE("tenant_id","id","inventory_id"),
 	CONSTRAINT "inventory_repack_items_tenant_box_result_uq" UNIQUE("tenant_id","box_id","result_id"),
-	CONSTRAINT "inventory_repack_items_removed_at_check" CHECK ("inventory_repack_items"."removed_at" is null or "inventory_repack_items"."removed_at" >= "inventory_repack_items"."added_at")
+	CONSTRAINT "inventory_repack_items_removed_at_check" CHECK ("inventory_repack_items"."removed_at" is null or "inventory_repack_items"."removed_at" >= "inventory_repack_items"."added_at"),
+	CONSTRAINT "inventory_repack_items_active_observed_date_check" CHECK (("inventory_repack_items"."removed_at" is null
+          and "inventory_repack_items"."active_observed_production_date" is not null
+          and "inventory_repack_items"."active_observed_production_date" = "inventory_repack_items"."production_date")
+        or ("inventory_repack_items"."removed_at" is not null
+          and "inventory_repack_items"."active_observed_production_date" is null))
 );
 --> statement-breakpoint
 CREATE TABLE "inventory_scan_batches" (
@@ -155,7 +176,7 @@ CREATE TABLE "inventory_scan_batches" (
 	"payload_digest" char(64) NOT NULL,
 	"sequence_ceiling" bigint NOT NULL,
 	"outcome" "inventory_scan_batch_outcome" NOT NULL,
-	"result" jsonb,
+	"result" jsonb NOT NULL,
 	"received_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "inventory_scan_batches_scope_batch_uq" UNIQUE("tenant_id","inventory_id","device_id","batch_id"),
 	CONSTRAINT "inventory_scan_batches_scope_digest_uq" UNIQUE("tenant_id","inventory_id","device_id","payload_digest"),
@@ -222,6 +243,7 @@ ALTER TABLE "inventory_repack_boxes" ADD CONSTRAINT "inventory_repack_boxes_tena
 ALTER TABLE "inventory_repack_items" ADD CONSTRAINT "inventory_repack_items_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "inventory_repack_items" ADD CONSTRAINT "inventory_repack_items_tenant_box_date_fk" FOREIGN KEY ("tenant_id","box_id","inventory_id","production_date") REFERENCES "public"."inventory_repack_boxes"("tenant_id","id","inventory_id","production_date") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "inventory_repack_items" ADD CONSTRAINT "inventory_repack_items_tenant_result_fk" FOREIGN KEY ("tenant_id","result_id","inventory_id") REFERENCES "public"."inventory_code_results"("tenant_id","id","inventory_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "inventory_repack_items" ADD CONSTRAINT "inventory_repack_items_tenant_result_active_date_fk" FOREIGN KEY ("tenant_id","result_id","inventory_id","active_observed_production_date") REFERENCES "public"."inventory_code_results"("tenant_id","id","inventory_id","observed_production_date") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "inventory_scan_batches" ADD CONSTRAINT "inventory_scan_batches_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "inventory_scan_batches" ADD CONSTRAINT "inventory_scan_batches_tenant_inventory_fk" FOREIGN KEY ("tenant_id","inventory_id") REFERENCES "public"."inventories"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "inventory_scan_batches" ADD CONSTRAINT "inventory_scan_batches_tenant_device_fk" FOREIGN KEY ("tenant_id","device_id") REFERENCES "public"."station_devices"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint

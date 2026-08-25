@@ -503,6 +503,13 @@ describe("inventory execution schema", () => {
         "inventory_code_results",
       ],
       [
+        "inventoryRepackItems",
+        "inventory_repack_items_tenant_result_active_date_fk",
+        ["tenant_id", "result_id", "inventory_id", "active_observed_production_date"],
+        ["tenant_id", "id", "inventory_id", "observed_production_date"],
+        "inventory_code_results",
+      ],
+      [
         "inventoryCorrections",
         "inventory_corrections_tenant_inventory_fk",
         ["tenant_id", "inventory_id"],
@@ -553,6 +560,12 @@ describe("inventory execution schema", () => {
       constraintColumns("inventoryCodeResults", "inventory_code_results_current_claim_uq"),
     ).toEqual(["tenant_id", "inventory_id", "code_hash"]);
     expect(
+      constraintColumns(
+        "inventoryCodeResults",
+        "inventory_code_results_tenant_id_inventory_observed_date_uq",
+      ),
+    ).toEqual(["tenant_id", "id", "inventory_id", "observed_production_date"]);
+    expect(
       constraintColumns("inventoryRepackBoxes", "inventory_repack_boxes_tenant_id_inventory_uq"),
     ).toEqual(["tenant_id", "id", "inventory_id"]);
     expect(
@@ -570,21 +583,62 @@ describe("inventory execution schema", () => {
     expect(indexWhere("inventoryRepackItems", "inventory_repack_items_active_result_uq")).toBe(
       '"removed_at" is null',
     );
+    const activeDate = checkExpression(
+      "inventoryRepackItems",
+      "inventory_repack_items_active_observed_date_check",
+    );
+    expect(activeDate).toContain('"removed_at" is null');
+    expect(activeDate).toContain('"active_observed_production_date" = "production_date"');
+    expect(activeDate).toContain('"removed_at" is not null');
+    expect(activeDate).toContain('"active_observed_production_date" is null');
   });
 
-  it("checks digests, immutable event payloads, print evidence, and quarantine resolution", () => {
+  it("requires complete replay, snapshot origin, print, and quarantine evidence", () => {
+    expect(schema.inventoryScanBatches.result.notNull).toBe(true);
     expect(
       checkExpression("inventoryScanBatches", "inventory_scan_batches_payload_digest_check"),
     ).toContain("^[0-9a-f]{64}$");
     expect(
       checkExpression("inventoryScanEvents", "inventory_scan_events_normalized_identity_check"),
     ).toContain("between 1 and 1024");
+    expect(Object.keys(schema.inventoryCodeResults)).toContain("originClassification");
+    const snapshotOrigin = checkExpression(
+      "inventoryCodeResults",
+      "inventory_code_results_snapshot_origin_check",
+    );
+    expect(snapshotOrigin).toContain("\"origin_classification\" <> 'voided'");
+    expect(snapshotOrigin).toContain('"classification" = "origin_classification"');
+    expect(snapshotOrigin).toContain("\"classification\" = 'voided'");
+    expect(snapshotOrigin).toContain("\"origin_classification\" = 'unknown'");
+    expect(snapshotOrigin).toContain('"snapshot_id" is null');
+    expect(snapshotOrigin).toContain(
+      "\"origin_classification\" in ('expected', 'protected', 'ineligible')",
+    );
+    expect(snapshotOrigin).toContain('"snapshot_id" is not null');
+    const lifecyclePrint = checkExpression(
+      "inventoryRepackBoxes",
+      "inventory_repack_boxes_lifecycle_print_check",
+    );
+    expect(lifecyclePrint).toContain("\"state\" = 'open'");
+    expect(lifecyclePrint).toContain("\"print_state\" = 'not_ready'");
+    expect(lifecyclePrint).toContain("\"state\" = 'closed'");
+    expect(lifecyclePrint).toContain(
+      "\"print_state\" in ('pending', 'printing', 'printed', 'failed')",
+    );
     expect(
       checkExpression("inventoryRepackBoxes", "inventory_repack_boxes_print_state_check"),
     ).toContain("\"print_state\" = 'failed'");
     expect(
       checkExpression("inventoryRepackBoxes", "inventory_repack_boxes_print_state_check"),
     ).toContain('"print_error_code" is not null');
+    const attempts = checkExpression(
+      "inventoryRepackBoxes",
+      "inventory_repack_boxes_print_attempt_count_check",
+    );
+    expect(attempts).toContain("\"print_state\" = 'not_ready'");
+    expect(attempts).toContain('"print_attempt_count" = 0');
+    expect(attempts).toContain("\"print_state\" in ('printing', 'printed', 'failed')");
+    expect(attempts).toContain('"print_attempt_count" > 0');
     const resolution = checkExpression(
       "inventoryLateEvents",
       "inventory_late_events_resolution_check",

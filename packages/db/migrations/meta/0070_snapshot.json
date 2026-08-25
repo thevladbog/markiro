@@ -1,5 +1,5 @@
 {
-  "id": "a1dafe03-10a7-4400-9550-b8e6b8edb62d",
+  "id": "a5e30cba-26a6-40ed-a688-a9e5c9c5877c",
   "prevId": "7d2dbe64-0190-4580-9605-02c8cdd2f441",
   "version": "7",
   "dialect": "postgresql",
@@ -14302,6 +14302,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "origin_classification": {
+          "name": "origin_classification",
+          "type": "inventory_code_classification",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp with time zone",
@@ -14460,6 +14467,16 @@
             "inventory_id",
             "code_hash"
           ]
+        },
+        "inventory_code_results_tenant_id_inventory_observed_date_uq": {
+          "name": "inventory_code_results_tenant_id_inventory_observed_date_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id",
+            "inventory_id",
+            "observed_production_date"
+          ]
         }
       },
       "policies": {},
@@ -14467,6 +14484,10 @@
         "inventory_code_results_hash_check": {
           "name": "inventory_code_results_hash_check",
           "value": "\"inventory_code_results\".\"code_hash\" ~ '^[0-9a-f]{64}$'"
+        },
+        "inventory_code_results_snapshot_origin_check": {
+          "name": "inventory_code_results_snapshot_origin_check",
+          "value": "\"inventory_code_results\".\"origin_classification\" <> 'voided'\n        and (\"inventory_code_results\".\"classification\" = \"inventory_code_results\".\"origin_classification\"\n          or \"inventory_code_results\".\"classification\" = 'voided')\n        and ((\"inventory_code_results\".\"origin_classification\" = 'unknown' and \"inventory_code_results\".\"snapshot_id\" is null)\n          or (\"inventory_code_results\".\"origin_classification\" in ('expected', 'protected', 'ineligible')\n            and \"inventory_code_results\".\"snapshot_id\" is not null))"
         }
       },
       "isRLSEnabled": false
@@ -15766,6 +15787,10 @@
           "name": "inventory_repack_boxes_lifecycle_check",
           "value": "(\"inventory_repack_boxes\".\"state\" = 'open' and \"inventory_repack_boxes\".\"closed_at\" is null and \"inventory_repack_boxes\".\"invalidated_at\" is null)\n        or (\"inventory_repack_boxes\".\"state\" = 'closed' and \"inventory_repack_boxes\".\"closed_at\" is not null and \"inventory_repack_boxes\".\"invalidated_at\" is null)\n        or (\"inventory_repack_boxes\".\"state\" = 'invalidated' and \"inventory_repack_boxes\".\"invalidated_at\" is not null)"
         },
+        "inventory_repack_boxes_lifecycle_print_check": {
+          "name": "inventory_repack_boxes_lifecycle_print_check",
+          "value": "(\"inventory_repack_boxes\".\"state\" = 'open' and \"inventory_repack_boxes\".\"print_state\" = 'not_ready')\n        or (\"inventory_repack_boxes\".\"state\" = 'closed'\n          and \"inventory_repack_boxes\".\"print_state\" in ('pending', 'printing', 'printed', 'failed'))\n        or \"inventory_repack_boxes\".\"state\" = 'invalidated'"
+        },
         "inventory_repack_boxes_print_state_check": {
           "name": "inventory_repack_boxes_print_state_check",
           "value": "(\"inventory_repack_boxes\".\"print_state\" = 'failed' and \"inventory_repack_boxes\".\"print_error_code\" is not null)\n        or (\"inventory_repack_boxes\".\"print_state\" <> 'failed' and \"inventory_repack_boxes\".\"print_error_code\" is null)"
@@ -15776,7 +15801,7 @@
         },
         "inventory_repack_boxes_print_attempt_count_check": {
           "name": "inventory_repack_boxes_print_attempt_count_check",
-          "value": "\"inventory_repack_boxes\".\"print_attempt_count\" >= 0"
+          "value": "(\"inventory_repack_boxes\".\"print_state\" = 'not_ready' and \"inventory_repack_boxes\".\"print_attempt_count\" = 0)\n        or (\"inventory_repack_boxes\".\"print_state\" = 'pending' and \"inventory_repack_boxes\".\"print_attempt_count\" >= 0)\n        or (\"inventory_repack_boxes\".\"print_state\" in ('printing', 'printed', 'failed')\n          and \"inventory_repack_boxes\".\"print_attempt_count\" > 0)"
         },
         "inventory_repack_boxes_printed_at_check": {
           "name": "inventory_repack_boxes_printed_at_check",
@@ -15825,6 +15850,12 @@
           "type": "date",
           "primaryKey": false,
           "notNull": true
+        },
+        "active_observed_production_date": {
+          "name": "active_observed_production_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
         },
         "added_at": {
           "name": "added_at",
@@ -15952,6 +15983,25 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "inventory_repack_items_tenant_result_active_date_fk": {
+          "name": "inventory_repack_items_tenant_result_active_date_fk",
+          "tableFrom": "inventory_repack_items",
+          "tableTo": "inventory_code_results",
+          "columnsFrom": [
+            "tenant_id",
+            "result_id",
+            "inventory_id",
+            "active_observed_production_date"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id",
+            "inventory_id",
+            "observed_production_date"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -15980,6 +16030,10 @@
         "inventory_repack_items_removed_at_check": {
           "name": "inventory_repack_items_removed_at_check",
           "value": "\"inventory_repack_items\".\"removed_at\" is null or \"inventory_repack_items\".\"removed_at\" >= \"inventory_repack_items\".\"added_at\""
+        },
+        "inventory_repack_items_active_observed_date_check": {
+          "name": "inventory_repack_items_active_observed_date_check",
+          "value": "(\"inventory_repack_items\".\"removed_at\" is null\n          and \"inventory_repack_items\".\"active_observed_production_date\" is not null\n          and \"inventory_repack_items\".\"active_observed_production_date\" = \"inventory_repack_items\".\"production_date\")\n        or (\"inventory_repack_items\".\"removed_at\" is not null\n          and \"inventory_repack_items\".\"active_observed_production_date\" is null)"
         }
       },
       "isRLSEnabled": false
@@ -16035,7 +16089,7 @@
           "name": "result",
           "type": "jsonb",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "received_at": {
           "name": "received_at",
