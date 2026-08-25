@@ -7,6 +7,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { canonicalizeKm, kmHash, type StationInventoryBundleManifest } from "@markiro/domain";
 
 import i18n from "../src/i18n/index.js";
+import type { StationClient } from "../src/lib/api-client.js";
 import { applyMigrations } from "../src/lib/mirror.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
@@ -117,6 +118,69 @@ beforeAll(async () => {
 afterEach(cleanup);
 
 describe("simple inventory work screen", () => {
+  it("refreshes visible progress when a remote-only authoritative claim is persisted", async () => {
+    const { db, exec } = await fixture();
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, 1, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+    const scan = scanner();
+    const expected = canonicalizeKm(raw("EXPECTED"));
+    const codeHash = kmHash(expected);
+    const changeId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const progressPage = {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      snapshotRevision: 1,
+      cursor: null,
+      resultRevision: 1,
+      items: [
+        {
+          id: changeId,
+          revision: 1,
+          kind: "claim",
+          codeHash,
+          classification: "expected",
+          observedProductionDate: "2026-08-19",
+          winner: {
+            codeHash,
+            eventId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            deviceId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            scannedAt: "2026-08-25T08:00:00.000Z",
+          },
+          correctedAt: "2026-08-25T10:00:00.000Z",
+        },
+      ],
+      nextCursor: `1:${changeId}`,
+    };
+    const get = vi.fn();
+    const client: Pick<StationClient, "get" | "post"> = {
+      async post<T>() {
+        return {} as T;
+      },
+      async get<T>() {
+        get();
+        return progressPage as T;
+      },
+    };
+
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+        client={client}
+      />,
+    );
+
+    await waitFor(() => expect(get).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByTestId("inventory-verified").textContent).toBe("1"));
+    expect(scan.source).toBeDefined();
+  });
+
   it("owns the scanner queue and renders durable expected, protected, unknown, ineligible, and duplicate verdicts", async () => {
     const { exec } = await fixture();
     const scan = scanner();

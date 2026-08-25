@@ -1469,8 +1469,12 @@ export async function readInventoryProgress(
      ), committed_results AS (
        SELECT result.*
          FROM inventory_code_results_mirror result
-         JOIN committed_events event ON event.event_id = result.first_accepted_event_id
+         LEFT JOIN inventory_scan_events_mirror owner
+           ON owner.inventory_id = result.inventory_id
+          AND owner.snapshot_id = result.snapshot_id
+          AND owner.event_id = result.first_accepted_event_id
         WHERE result.inventory_id = ? AND result.snapshot_id = ?
+          AND (owner.event_id IS NULL OR owner.commit_state = 'committed')
      )
      SELECT
        (SELECT COUNT(*) FROM committed_results

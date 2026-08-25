@@ -447,8 +447,8 @@ describe.skipIf(!ready)("station inventory task access e2e", () => {
     expect(resumed).toEqual({
       joinedAt: expect.any(Date),
       leftAt: null,
-      pendingEventCount: 9,
-      openBoxCount: 4,
+      pendingEventCount: 0,
+      openBoxCount: 0,
     });
     expect(resumed!.joinedAt).not.toEqual(historicalJoin);
     const resumedAudits = await db

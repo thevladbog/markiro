@@ -123,10 +123,12 @@ describe("floor task contracts", () => {
     await expect(activateVerifiedInventoryFloorTask(exec, inventoryId)).resolves.toEqual({
       kind: "inventory",
       inventory: manifest,
+      pointerValue: JSON.stringify({ inventoryId, snapshotId }),
     });
     await expect(readPersistedInventoryFloorTask(exec)).resolves.toEqual({
       kind: "inventory",
       inventory: manifest,
+      pointerValue: JSON.stringify({ inventoryId, snapshotId }),
     });
 
     await exec.run(
@@ -197,7 +199,11 @@ describe("floor task contracts", () => {
 
     await expect(
       readPersistedInventoryFloorTask(exec, createCredentialGeneration("credential-a")),
-    ).resolves.toEqual({ kind: "inventory", inventory: manifest });
+    ).resolves.toEqual({
+      kind: "inventory",
+      inventory: manifest,
+      pointerValue: expect.stringContaining('"activationId":"activation-a"'),
+    });
     await expect(
       readPersistedInventoryFloorTask(exec, createCredentialGeneration("credential-b")),
     ).resolves.toBeNull();

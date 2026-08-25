@@ -1082,7 +1082,11 @@ describe("TaskSelection inventory entry", () => {
     fireEvent.click(screen.getByRole("button", { name: "Join INV-00047" }));
 
     await waitFor(() => expect(onInventorySelected).toHaveBeenCalledOnce());
-    expect(onInventorySelected).toHaveBeenCalledWith({ kind: "inventory", inventory: manifest });
+    expect(onInventorySelected).toHaveBeenCalledWith({
+      kind: "inventory",
+      inventory: manifest,
+      pointerValue: expect.any(String),
+    });
     expect(posts.find(({ path }) => path.endsWith("/join"))?.body).toEqual({
       operatorId: "66666666-6666-4666-8666-666666666666",
       barcode,
@@ -1137,6 +1141,7 @@ describe("TaskSelection inventory entry", () => {
     await expect(readPersistedInventoryFloorTask(exec, generation)).resolves.toEqual({
       kind: "inventory",
       inventory: manifest,
+      pointerValue: expect.any(String),
     });
     const postCount = posts.length;
     act(() => scan.scan(barcode));

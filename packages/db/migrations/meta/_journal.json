@@ -519,6 +519,13 @@
       "when": 1787658524738,
       "tag": "0073_lowly_sumo",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1787662594798,
+      "tag": "0074_inventory_event_claim_outcomes",
+      "breakpoints": true
     }
   ]
 }

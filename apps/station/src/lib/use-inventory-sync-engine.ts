@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { InventoryProgressPage } from "@markiro/domain";
 
 import type { CredentialGeneration } from "./credential-recovery.js";
 import {
@@ -20,6 +21,7 @@ export interface UseInventorySyncEngineDeps {
   snapshotId: string;
   active: boolean;
   credentialGeneration?: CredentialGeneration;
+  onProgressApplied?: (page: InventoryProgressPage) => void | Promise<void>;
 }
 
 export interface UseInventorySyncEngineResult {
@@ -31,7 +33,8 @@ export interface UseInventorySyncEngineResult {
 export function useInventorySyncEngine(
   deps: UseInventorySyncEngineDeps,
 ): UseInventorySyncEngineResult {
-  const { exec, client, inventoryId, snapshotId, active, credentialGeneration } = deps;
+  const { exec, client, inventoryId, snapshotId, active, credentialGeneration, onProgressApplied } =
+    deps;
   const [state, setState] = useState<InventorySyncState>({
     pending: 0,
     draining: false,
@@ -51,6 +54,7 @@ export function useInventorySyncEngine(
       inventoryId,
       snapshotId,
       onState: setState,
+      ...(onProgressApplied ? { onProgressApplied } : {}),
       ...(credentialGeneration ? { credentialGeneration } : {}),
     });
     engineRef.current = engine;
@@ -67,7 +71,7 @@ export function useInventorySyncEngine(
       engine.stop();
       if (engineRef.current === engine) engineRef.current = null;
     };
-  }, [exec, client, inventoryId, snapshotId, active, credentialGeneration]);
+  }, [exec, client, inventoryId, snapshotId, active, credentialGeneration, onProgressApplied]);
 
   const nudge = useCallback(() => engineRef.current?.nudge(), []);
   const idle = useCallback(() => engineRef.current?.idle() ?? Promise.resolve(), []);

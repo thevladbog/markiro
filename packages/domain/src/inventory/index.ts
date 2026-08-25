@@ -36,13 +36,16 @@ export type {
 } from "./scan.js";
 export {
   INVENTORY_EVENT_BATCH_SIZE,
+  INVENTORY_EVENT_CLAIM_OUTCOME_SIZE,
   INVENTORY_EVENT_OUTCOMES,
+  INVENTORY_PROGRESS_CURSOR_PATTERN,
   INVENTORY_PROGRESS_PAGE_SIZE,
   inventoryEventBatchDigest,
   inventoryEventBatchPayloadSchema,
   inventoryEventBatchResponseSchema,
   inventoryEventBatchSchema,
   inventoryEventOutcomeSchema,
+  inventoryEventClaimOutcomeSchema,
   inventoryEventSchema,
   inventoryProgressChangeSchema,
   inventoryProgressCursorSchema,
@@ -57,7 +60,9 @@ export type {
   InventoryEventBatch,
   InventoryEventBatchPayload,
   InventoryEventBatchResponse,
+  InventoryEventClaimOutcome,
   InventoryEventOutcome,
+  ExpectedInventoryProgressPage,
   InventoryProgressChange,
   InventoryProgressPage,
 } from "./station-sync.js";

@@ -372,12 +372,13 @@ describe("inventory preparation schema", () => {
 });
 
 describe("inventory execution schema", () => {
-  it("exports the eight execution fact tables", () => {
+  it("exports the per-code claim evidence with the execution fact tables", () => {
     expect(
       [
         "inventoryDeviceParticipants",
         "inventoryScanBatches",
         "inventoryScanEvents",
+        "inventoryEventClaimOutcomes",
         "inventoryCodeResults",
         "inventoryRepackBoxes",
         "inventoryRepackItems",
@@ -388,6 +389,7 @@ describe("inventory execution schema", () => {
       "inventory_device_participants",
       "inventory_scan_batches",
       "inventory_scan_events",
+      "inventory_event_claim_outcomes",
       "inventory_code_results",
       "inventory_repack_boxes",
       "inventory_repack_items",

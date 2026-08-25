@@ -123,7 +123,14 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
     );
     const outcome = batchResponse.properties?.outcomes?.items ?? {};
     expect(outcome.additionalProperties).toBe(false);
-    expect(outcome.required).toEqual(["eventId", "status", "reasonCode"]);
+    expect(outcome.required).toEqual([
+      "eventId",
+      "status",
+      "reasonCode",
+      "claimedCount",
+      "conflictCount",
+      "claims",
+    ]);
     expect(outcome.properties?.status?.enum).toEqual([
       "applied",
       "replay",
@@ -131,7 +138,10 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
       "rejected",
       "quarantined",
     ]);
-    expect(outcome.properties?.winner?.additionalProperties).toBe(false);
+    const claim = outcome.properties?.claims?.items ?? {};
+    expect(claim.additionalProperties).toBe(false);
+    expect(claim.required).toEqual(["codeHash", "status", "winner"]);
+    expect(claim.properties?.winner?.additionalProperties).toBe(false);
 
     const progress = responseSchema(document, "/station/inventories/{id}/progress", "get");
     const change = progress.properties?.items?.items ?? {};
@@ -148,6 +158,10 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
     ]);
     expect(change.properties?.kind?.enum).toEqual(["claim", "correction"]);
     expect(progress.properties?.items?.maxItems).toBe(200);
+    const cursorPattern =
+      "^[1-9][0-9]*:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
+    expect(progress.properties?.cursor?.pattern).toBe(cursorPattern);
+    expect(progress.properties?.nextCursor?.pattern).toBe(cursorPattern);
 
     const leave = requestSchema(document, "/station/inventories/{id}/leave");
     exactClosedObject(leave, ["pendingEventCount", "openBoxCount"]);

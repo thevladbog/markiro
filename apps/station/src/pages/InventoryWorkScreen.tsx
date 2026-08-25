@@ -32,6 +32,7 @@ export interface InventoryWorkScreenProps {
   source: ScanSource;
   client?: Pick<StationClient, "get" | "post">;
   credentialGeneration?: CredentialGeneration;
+  floorTaskPointerValue?: string;
   onLeft?: () => void;
   onScanQueueRegister?: (queue: ScanQueue) => () => void;
   createEventId?: () => string;
@@ -70,6 +71,7 @@ export function InventoryWorkScreen({
   source,
   client,
   credentialGeneration,
+  floorTaskPointerValue,
   onLeft,
   onScanQueueRegister,
   createEventId = defaultEventId,
@@ -86,19 +88,6 @@ export function InventoryWorkScreen({
   const [leaving, setLeaving] = useState(false);
   const [leaveFailed, setLeaveFailed] = useState(false);
   const mounted = useRef(true);
-  const {
-    state: inventorySyncState,
-    nudge: nudgeInventorySync,
-    idle: inventorySyncIdle,
-  } = useInventorySyncEngine({
-    exec,
-    client: client ?? null,
-    inventoryId: inventory.inventoryId,
-    snapshotId: inventory.snapshotId,
-    active: true,
-    ...(credentialGeneration ? { credentialGeneration } : {}),
-  });
-
   const refresh = useCallback(async () => {
     const [nextProgress, nextRecent] = await Promise.all([
       readInventoryProgress(exec, inventory.inventoryId, inventory.snapshotId, deviceId),
@@ -110,6 +99,20 @@ export function InventoryWorkScreen({
       setResult((current) => current ?? (nextRecent[0] ? restoredResult(nextRecent[0]) : null));
     }
   }, [deviceId, exec, inventory.inventoryId, inventory.snapshotId]);
+
+  const {
+    state: inventorySyncState,
+    nudge: nudgeInventorySync,
+    idle: inventorySyncIdle,
+  } = useInventorySyncEngine({
+    exec,
+    client: client ?? null,
+    inventoryId: inventory.inventoryId,
+    snapshotId: inventory.snapshotId,
+    active: true,
+    onProgressApplied: refresh,
+    ...(credentialGeneration ? { credentialGeneration } : {}),
+  });
 
   useEffect(() => {
     mounted.current = true;
@@ -257,12 +260,17 @@ export function InventoryWorkScreen({
     setLeaveFailed(false);
     try {
       if (!client) throw new Error("inventory server client is unavailable");
+      if (!credentialGeneration || !floorTaskPointerValue) {
+        throw new Error("inventory floor task ownership unavailable");
+      }
       await leaveInventoryTask({
         exec,
         client,
         inventoryId: inventory.inventoryId,
         snapshotId: inventory.snapshotId,
         deviceId,
+        pointerValue: floorTaskPointerValue,
+        credentialGeneration,
         closeScanner: () => queue.close(),
         scanQueueIdle: () => queue.idle(),
         sync: { nudge: nudgeInventorySync, idle: inventorySyncIdle },

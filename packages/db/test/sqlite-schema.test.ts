@@ -8,6 +8,7 @@ import {
 import {
   inventoryCodeResultsMirror,
   inventoryConflictsMirror,
+  inventoryEventClaimOutcomesMirror,
   inventoryOutbox,
   inventoryRepackBoxesMirror,
   inventoryRepackItemsMirror,
@@ -74,7 +75,7 @@ describe("STATION_MIGRATIONS", () => {
     ]);
   });
 
-  it("creates and round-trips all nine inventory mirror tables with scanner indexes", () => {
+  it("creates and round-trips all ten inventory mirror tables with scanner indexes", () => {
     const db = migratedDb();
     const expectedTables = [
       "inventory_task_mirror",
@@ -86,6 +87,7 @@ describe("STATION_MIGRATIONS", () => {
       "inventory_repack_boxes_mirror",
       "inventory_repack_items_mirror",
       "inventory_conflicts_mirror",
+      "inventory_event_claim_outcomes_mirror",
     ];
     const tables = db
       .prepare(
@@ -180,6 +182,23 @@ describe("STATION_MIGRATIONS", () => {
        VALUES (?, ?, ?, ?, ?, ?)`,
     ).run("inventory-1", "snapshot-1", "event-1", 1, '{"kind":"item"}', "2026-08-25T08:00:00.000Z");
     db.prepare(
+      `INSERT INTO inventory_event_claim_outcomes_mirror
+         (inventory_id, snapshot_id, source_event_id, code_hash, status, winning_event_id,
+          winning_device_id, winning_scanned_at, result_revision, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "event-1",
+      "b".repeat(64),
+      "claimed",
+      "event-1",
+      "device-1",
+      "2026-08-25T08:00:00.000Z",
+      1,
+      "2026-08-25T08:00:00.000Z",
+    );
+    db.prepare(
       `INSERT INTO inventory_repack_boxes_mirror
          (inventory_id, snapshot_id, box_id, old_sscc_context, new_sscc, owner_device_id,
           capacity, production_date, state, print_state, print_attempt_count, opened_at,
@@ -262,6 +281,13 @@ describe("STATION_MIGRATIONS", () => {
     expect(inventoryRepackBoxesMirror).toBeDefined();
     expect(inventoryRepackItemsMirror).toBeDefined();
     expect(inventoryConflictsMirror).toBeDefined();
+    expect(inventoryEventClaimOutcomesMirror).toBeDefined();
+    expect(
+      db
+        .prepare("PRAGMA table_info(inventory_terminal_state)")
+        .all()
+        .some((column) => (column as { name?: string }).name === "progress_result_revision"),
+    ).toBe(true);
   });
 
   it("keeps the trailing inventory DDL rerunnable on an upgraded database", () => {

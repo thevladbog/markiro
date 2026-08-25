@@ -1,5 +1,5 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
 import {
@@ -118,7 +118,7 @@ export class StationInventorySyncService {
         return sameBatch.result as unknown as StationInventoryEventBatchResponseDto;
       }
       const [sameDigest] = await tx
-        .select({ batchId: schema.inventoryScanBatches.batchId })
+        .select({ result: schema.inventoryScanBatches.result })
         .from(schema.inventoryScanBatches)
         .where(
           and(
@@ -129,7 +129,16 @@ export class StationInventorySyncService {
           ),
         );
       if (sameDigest) {
-        throw new ConflictException({ code: "INVENTORY_BATCH_DIGEST_REUSED" });
+        const prior = sameDigest.result as unknown as InventoryEventBatchResponse;
+        return {
+          ...prior,
+          batchId: input.batchId,
+          outcomes: prior.outcomes.map((outcome) => ({
+            ...outcome,
+            status: "replay" as const,
+            reasonCode: "BATCH_REPLAY",
+          })),
+        };
       }
 
       if (inventory.activeSnapshotId !== input.snapshotId || input.snapshotRevision !== 1) {
@@ -169,6 +178,9 @@ export class StationInventorySyncService {
             status: "quarantined" as const,
             reasonCode:
               inventory.status === "completed" ? "INVENTORY_COMPLETED" : "INVENTORY_CLOSED",
+            claimedCount: 0,
+            conflictCount: 0,
+            claims: [],
           })),
         );
         await tx.insert(schema.inventoryScanBatches).values({
@@ -213,10 +225,44 @@ export class StationInventorySyncService {
             reason: inventory.status === "completed" ? "INVENTORY_COMPLETED" : "INVENTORY_CLOSED",
           },
         });
+        await tx
+          .update(schema.inventoryDeviceParticipants)
+          .set({
+            heartbeatAt: new Date(),
+            pendingEventCount: input.pendingEventCount,
+            openBoxCount: input.openBoxCount,
+          })
+          .where(
+            and(
+              eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
+              eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
+              eq(schema.inventoryDeviceParticipants.deviceId, deviceId),
+            ),
+          );
         return response;
       }
       if (participant.leftAt !== null) {
         throw new ConflictException({ code: "INVENTORY_PARTICIPANT_LEFT" });
+      }
+
+      const [acceptedHighWater] = await tx
+        .select({ sequenceCeiling: schema.inventoryScanBatches.sequenceCeiling })
+        .from(schema.inventoryScanBatches)
+        .where(
+          and(
+            eq(schema.inventoryScanBatches.tenantId, tenantId),
+            eq(schema.inventoryScanBatches.inventoryId, inventoryId),
+            eq(schema.inventoryScanBatches.deviceId, deviceId),
+            eq(schema.inventoryScanBatches.outcome, "applied"),
+          ),
+        )
+        .orderBy(desc(schema.inventoryScanBatches.sequenceCeiling))
+        .limit(1);
+      if (
+        acceptedHighWater &&
+        BigInt(input.events[0]?.deviceSequence ?? 0) <= acceptedHighWater.sequenceCeiling
+      ) {
+        throw new ConflictException({ code: "INVENTORY_EVENT_SEQUENCE_BELOW_HIGH_WATER" });
       }
 
       const eventIds = input.events.map((event) => event.eventId);
@@ -271,6 +317,7 @@ export class StationInventorySyncService {
       );
 
       const changed = new Map<string, ClaimTarget & { winner: InventoryClaimWinner }>();
+      const displacedEvents = new Set<string>();
       for (const event of input.events) {
         const eventTargets = targets.get(event.eventId) ?? [];
         for (const target of eventTargets) {
@@ -313,6 +360,7 @@ export class StationInventorySyncService {
           } else {
             const currentWinner = asWinner(current);
             if (winnerPrecedes(candidate, currentWinner)) {
+              displacedEvents.add(current.eventId);
               await tx
                 .update(schema.inventoryCodeResults)
                 .set({
@@ -332,13 +380,20 @@ export class StationInventorySyncService {
                   ),
                 );
               await tx
-                .update(schema.inventoryScanEvents)
-                .set({ authoritativeVerdict: "duplicate", firstWinningEventId: event.eventId })
+                .update(schema.inventoryEventClaimOutcomes)
+                .set({
+                  status: "duplicate",
+                  winningEventId: event.eventId,
+                  winningDeviceId: deviceId,
+                  winningScannedAt: new Date(event.scannedAt),
+                  updatedAt: new Date(),
+                })
                 .where(
                   and(
-                    eq(schema.inventoryScanEvents.tenantId, tenantId),
-                    eq(schema.inventoryScanEvents.inventoryId, inventoryId),
-                    eq(schema.inventoryScanEvents.eventId, current.eventId),
+                    eq(schema.inventoryEventClaimOutcomes.tenantId, tenantId),
+                    eq(schema.inventoryEventClaimOutcomes.inventoryId, inventoryId),
+                    eq(schema.inventoryEventClaimOutcomes.sourceEventId, current.eventId),
+                    eq(schema.inventoryEventClaimOutcomes.codeHash, target.codeHash),
                   ),
                 );
               changed.set(target.codeHash, { ...target, winner: candidate });
@@ -373,24 +428,38 @@ export class StationInventorySyncService {
       const outcomes: InventoryEventBatchResponse["outcomes"] = [];
       for (const event of input.events) {
         const eventTargets = targets.get(event.eventId) ?? [];
-        const winners = eventTargets
-          .map((target) => finalWinners.get(target.codeHash))
-          .filter((winner): winner is InventoryClaimWinner => winner !== undefined);
-        const applied = winners.filter((winner) => winner.eventId === event.eventId).length;
-        const lost = winners.filter((winner) => winner.eventId !== event.eventId);
-        const firstLost = lost.sort(
-          (a, b) =>
-            Date.parse(a.scannedAt) - Date.parse(b.scannedAt) ||
-            a.deviceId.localeCompare(b.deviceId) ||
-            a.eventId.localeCompare(b.eventId),
-        )[0];
+        const claims = eventTargets.map((target) => {
+          const winner = finalWinners.get(target.codeHash);
+          if (!winner) throw new Error("inventory claim winner missing");
+          return {
+            codeHash: target.codeHash,
+            status:
+              winner.eventId === event.eventId ? ("claimed" as const) : ("duplicate" as const),
+            winner,
+          };
+        });
+        const applied = claims.filter((claim) => claim.status === "claimed").length;
+        const lost = claims.length - applied;
         const status = applied > 0 || event.kind === "old_box" ? "applied" : "duplicate";
+        if (claims.length > 0) {
+          await tx.insert(schema.inventoryEventClaimOutcomes).values(
+            claims.map((claim) => ({
+              tenantId,
+              inventoryId,
+              sourceEventId: event.eventId,
+              codeHash: claim.codeHash,
+              status: claim.status,
+              winningEventId: claim.winner.eventId,
+              winningDeviceId: claim.winner.deviceId,
+              winningScannedAt: new Date(claim.winner.scannedAt),
+            })),
+          );
+        }
         await tx
           .update(schema.inventoryScanEvents)
           .set({
             authoritativeVerdict: status,
-            firstWinningEventId:
-              status === "duplicate" ? (firstLost?.eventId ?? null) : event.eventId,
+            firstWinningEventId: null,
           })
           .where(eq(schema.inventoryScanEvents.eventId, event.eventId));
         outcomes.push({
@@ -398,9 +467,37 @@ export class StationInventorySyncService {
           status,
           reasonCode: status === "applied" ? "CLAIM_APPLIED" : "CLAIM_LOST",
           claimedCount: applied,
-          conflictCount: lost.length,
-          ...(firstLost ? { winner: firstLost } : {}),
+          conflictCount: lost,
+          claims,
         });
+      }
+
+      for (const displacedEventId of displacedEvents) {
+        const evidence = await tx
+          .select({ status: schema.inventoryEventClaimOutcomes.status })
+          .from(schema.inventoryEventClaimOutcomes)
+          .where(
+            and(
+              eq(schema.inventoryEventClaimOutcomes.tenantId, tenantId),
+              eq(schema.inventoryEventClaimOutcomes.inventoryId, inventoryId),
+              eq(schema.inventoryEventClaimOutcomes.sourceEventId, displacedEventId),
+            ),
+          );
+        await tx
+          .update(schema.inventoryScanEvents)
+          .set({
+            authoritativeVerdict: evidence.some((claim) => claim.status === "claimed")
+              ? "applied"
+              : "duplicate",
+            firstWinningEventId: null,
+          })
+          .where(
+            and(
+              eq(schema.inventoryScanEvents.tenantId, tenantId),
+              eq(schema.inventoryScanEvents.inventoryId, inventoryId),
+              eq(schema.inventoryScanEvents.eventId, displacedEventId),
+            ),
+          );
       }
 
       const nextRevision =

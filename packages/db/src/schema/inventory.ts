@@ -772,6 +772,61 @@ export const inventoryScanEvents = pgTable(
   ],
 );
 
+/** Per-source-event/code authoritative claim projection; source scan facts stay immutable. */
+export const inventoryEventClaimOutcomes = pgTable(
+  "inventory_event_claim_outcomes",
+  {
+    tenantId: tenantId(),
+    inventoryId: uuid("inventory_id").notNull(),
+    sourceEventId: uuid("source_event_id").notNull(),
+    codeHash: char("code_hash", { length: 64 }).notNull(),
+    status: text("status").notNull(),
+    winningEventId: uuid("winning_event_id").notNull(),
+    winningDeviceId: uuid("winning_device_id").notNull(),
+    winningScannedAt: timestamp("winning_scanned_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("inventory_event_claim_outcomes_source_code_uq").on(
+      table.tenantId,
+      table.inventoryId,
+      table.sourceEventId,
+      table.codeHash,
+    ),
+    foreignKey({
+      name: "inventory_event_claim_outcomes_source_event_fk",
+      columns: [table.tenantId, table.inventoryId, table.sourceEventId],
+      foreignColumns: [
+        inventoryScanEvents.tenantId,
+        inventoryScanEvents.inventoryId,
+        inventoryScanEvents.eventId,
+      ],
+    }),
+    foreignKey({
+      name: "inventory_event_claim_outcomes_winner_event_fk",
+      columns: [table.tenantId, table.inventoryId, table.winningEventId],
+      foreignColumns: [
+        inventoryScanEvents.tenantId,
+        inventoryScanEvents.inventoryId,
+        inventoryScanEvents.eventId,
+      ],
+    }),
+    index("inventory_event_claim_outcomes_winner_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.winningEventId,
+    ),
+    check(
+      "inventory_event_claim_outcomes_code_hash_check",
+      sql`${table.codeHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "inventory_event_claim_outcomes_status_check",
+      sql`${table.status} in ('claimed', 'duplicate')`,
+    ),
+  ],
+);
+
 /** One authoritative current projection for every physically found code. */
 export const inventoryCodeResults = pgTable(
   "inventory_code_results",
@@ -1296,6 +1351,8 @@ export type InventoryScanBatch = typeof inventoryScanBatches.$inferSelect;
 export type NewInventoryScanBatch = typeof inventoryScanBatches.$inferInsert;
 export type InventoryScanEvent = typeof inventoryScanEvents.$inferSelect;
 export type NewInventoryScanEvent = typeof inventoryScanEvents.$inferInsert;
+export type InventoryEventClaimOutcome = typeof inventoryEventClaimOutcomes.$inferSelect;
+export type NewInventoryEventClaimOutcome = typeof inventoryEventClaimOutcomes.$inferInsert;
 export type InventoryCodeResult = typeof inventoryCodeResults.$inferSelect;
 export type NewInventoryCodeResult = typeof inventoryCodeResults.$inferInsert;
 export type InventoryProgressChange = typeof inventoryProgressChanges.$inferSelect;

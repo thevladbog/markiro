@@ -153,6 +153,8 @@ export class StationInventoryAccessService {
             joinedAt: now,
             leftAt: null,
             heartbeatAt: now,
+            pendingEventCount: 0,
+            openBoxCount: 0,
           })
           .where(
             and(

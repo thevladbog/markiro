@@ -40,6 +40,7 @@ export type ProductionFloorTask = { kind: "production"; shift: ProductionShiftTa
 export type InventoryFloorTask = {
   kind: "inventory";
   inventory: StationInventoryBundleManifest;
+  pointerValue: string;
 };
 export type ActiveFloorTask = ProductionFloorTask | InventoryFloorTask;
 
@@ -214,7 +215,7 @@ export async function activateVerifiedInventoryFloorTask(
     [ACTIVE_INVENTORY_FLOOR_TASK_KEY, pointer],
   );
   commit?.onPointerCommitted?.(pointer);
-  return { kind: "inventory", inventory };
+  return { kind: "inventory", inventory, pointerValue: pointer };
 }
 
 /** Removes only the exact activation owned by the retiring selection attempt. */
@@ -264,7 +265,7 @@ export async function readPersistedInventoryFloorTask(
     if (!row || row.active_snapshot_id !== parsed.data.snapshotId) {
       throw new Error("active inventory floor task is not published");
     }
-    return { kind: "inventory", inventory: parseActiveManifest(row) };
+    return { kind: "inventory", inventory: parseActiveManifest(row), pointerValue: raw };
   } finally {
     lease?.release();
   }

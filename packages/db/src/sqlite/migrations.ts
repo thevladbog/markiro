@@ -1014,6 +1014,21 @@ export const STATION_MIGRATIONS: string[] = [
   `ALTER TABLE inventory_scan_events_mirror ADD COLUMN server_winner_event_id TEXT;`,
   `ALTER TABLE inventory_scan_events_mirror ADD COLUMN server_winner_device_id TEXT;`,
   `ALTER TABLE inventory_scan_events_mirror ADD COLUMN server_winner_scanned_at TEXT;`,
+  `ALTER TABLE inventory_terminal_state
+     ADD COLUMN progress_result_revision INTEGER NOT NULL DEFAULT 0;`,
+  `CREATE TABLE IF NOT EXISTS inventory_event_claim_outcomes_mirror (
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     source_event_id TEXT NOT NULL,
+     code_hash TEXT NOT NULL,
+     status TEXT NOT NULL,
+     winning_event_id TEXT NOT NULL,
+     winning_device_id TEXT NOT NULL,
+     winning_scanned_at TEXT NOT NULL,
+     result_revision INTEGER NOT NULL,
+     updated_at TEXT NOT NULL,
+     PRIMARY KEY (inventory_id, snapshot_id, source_event_id, code_hash)
+   );`,
 ];
 
 export interface StationMigrationEntry {

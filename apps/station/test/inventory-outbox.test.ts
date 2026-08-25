@@ -112,6 +112,61 @@ describe("inventory outbox transport", () => {
     });
   });
 
+  it("acknowledges a deterministic replay after the original durable pin is lost", async () => {
+    const { db, exec } = await setup();
+    const eventId = "55555555-5555-4555-8555-555555555555";
+    queue(db, eventId, 1);
+    const original = await prepareInventoryOutboxBatch(exec, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      createBatchId: () => "original-batch",
+    });
+    if (!original) throw new Error("expected batch");
+    db.prepare("DELETE FROM station_meta WHERE key LIKE 'inventory_sync_batch_v1:%'").run();
+    const recovered = await prepareInventoryOutboxBatch(exec, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      createBatchId: () => "recovered-batch",
+    });
+    if (!recovered) throw new Error("expected recovered batch");
+    expect(recovered.request.payloadDigest).toBe(original.request.payloadDigest);
+    expect(recovered.request.batchId).toBe("recovered-batch");
+
+    await acknowledgeInventoryOutboxBatch(exec, recovered, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      snapshotRevision: 1,
+      batchId: recovered.request.batchId,
+      payloadDigest: recovered.request.payloadDigest,
+      sequenceCeiling: 1,
+      resultRevision: 1,
+      outcomes: [
+        {
+          eventId,
+          status: "replay",
+          reasonCode: "BATCH_REPLAY",
+          claimedCount: 1,
+          conflictCount: 0,
+          claims: [
+            {
+              codeHash: "1".repeat(64),
+              status: "claimed",
+              winner: {
+                codeHash: "1".repeat(64),
+                eventId,
+                deviceId: DEVICE_ID,
+                scannedAt: "2026-08-25T10:00:01.000Z",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 0,
+    });
+  });
+
   it("persists conflict evidence before deleting only exactly acknowledged rows", async () => {
     const { db, exec } = await setup();
     const eventId = "55555555-5555-4555-8555-555555555555";
@@ -135,12 +190,20 @@ describe("inventory outbox transport", () => {
           eventId,
           status: "duplicate",
           reasonCode: "CLAIM_LOST",
-          winner: {
-            codeHash: "1".repeat(64),
-            eventId: "77777777-7777-4777-8777-777777777777",
-            deviceId: "88888888-8888-4888-8888-888888888888",
-            scannedAt: "2026-08-25T09:00:00.000Z",
-          },
+          claimedCount: 0,
+          conflictCount: 1,
+          claims: [
+            {
+              codeHash: "1".repeat(64),
+              status: "duplicate",
+              winner: {
+                codeHash: "1".repeat(64),
+                eventId: "77777777-7777-4777-8777-777777777777",
+                deviceId: "88888888-8888-4888-8888-888888888888",
+                scannedAt: "2026-08-25T09:00:00.000Z",
+              },
+            },
+          ],
         },
       ],
     });
@@ -150,6 +213,93 @@ describe("inventory outbox transport", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
       count: 0,
     });
+  });
+
+  it("persists every per-code outcome from a mixed known-box acknowledgement", async () => {
+    const { db, exec } = await setup();
+    const eventId = "55555555-5555-4555-8555-555555555555";
+    queue(db, eventId, 1);
+    const boxEvent = {
+      eventId,
+      deviceSequence: 1,
+      operatorId: OPERATOR_ID,
+      scannedAt: "2026-08-25T10:00:01.000Z",
+      kind: "known_box",
+      normalizedIdentity: "known_box:346006820000000014",
+      codeHash: null,
+      canonicalRaw: "346006820000000014",
+      activeProductionDate: "2026-08-20",
+      localVerdict: "expected",
+    };
+    db.prepare(
+      `UPDATE inventory_scan_events_mirror
+          SET kind = 'known_box', normalized_identity = ?, code_hash = NULL, raw_payload = ?
+        WHERE event_id = ?`,
+    ).run(boxEvent.normalizedIdentity, boxEvent.canonicalRaw, eventId);
+    db.prepare("UPDATE inventory_outbox SET payload_json = ? WHERE event_id = ?").run(
+      JSON.stringify(boxEvent),
+      eventId,
+    );
+    const batch = await prepareInventoryOutboxBatch(exec, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      createBatchId: () => "mixed-box",
+    });
+    if (!batch) throw new Error("expected batch");
+    const losingHash = "1".repeat(64);
+    const claimedHash = "2".repeat(64);
+    const remoteEventId = "77777777-7777-4777-8777-777777777777";
+    await acknowledgeInventoryOutboxBatch(exec, batch, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      snapshotRevision: 1,
+      batchId: batch.request.batchId,
+      payloadDigest: batch.request.payloadDigest,
+      sequenceCeiling: 1,
+      resultRevision: 4,
+      outcomes: [
+        {
+          eventId,
+          status: "applied",
+          reasonCode: "CLAIM_APPLIED",
+          claimedCount: 1,
+          conflictCount: 1,
+          claims: [
+            {
+              codeHash: losingHash,
+              status: "duplicate",
+              winner: {
+                codeHash: losingHash,
+                eventId: remoteEventId,
+                deviceId: "88888888-8888-4888-8888-888888888888",
+                scannedAt: "2026-08-25T09:00:00.000Z",
+              },
+            },
+            {
+              codeHash: claimedHash,
+              status: "claimed",
+              winner: {
+                codeHash: claimedHash,
+                eventId,
+                deviceId: DEVICE_ID,
+                scannedAt: boxEvent.scannedAt,
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(
+      db
+        .prepare(
+          `SELECT code_hash, status, winning_event_id
+             FROM inventory_event_claim_outcomes_mirror ORDER BY code_hash`,
+        )
+        .all(),
+    ).toEqual([
+      { code_hash: losingHash, status: "duplicate", winning_event_id: remoteEventId },
+      { code_hash: claimedHash, status: "claimed", winning_event_id: eventId },
+    ]);
   });
 
   it("refuses to acknowledge a row whose pinned payload changed after the request", async () => {
@@ -173,7 +323,27 @@ describe("inventory outbox transport", () => {
         payloadDigest: batch.request.payloadDigest,
         sequenceCeiling: 1,
         resultRevision: 1,
-        outcomes: [{ eventId, status: "applied", reasonCode: "CLAIM_APPLIED" }],
+        outcomes: [
+          {
+            eventId,
+            status: "applied",
+            reasonCode: "CLAIM_APPLIED",
+            claimedCount: 1,
+            conflictCount: 0,
+            claims: [
+              {
+                codeHash: "1".repeat(64),
+                status: "claimed",
+                winner: {
+                  codeHash: "1".repeat(64),
+                  eventId,
+                  deviceId: DEVICE_ID,
+                  scannedAt: "2026-08-25T10:00:01.000Z",
+                },
+              },
+            ],
+          },
+        ],
       }),
     ).rejects.toThrow("inventory outbox payload changed");
     expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({

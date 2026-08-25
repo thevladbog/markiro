@@ -1509,6 +1509,7 @@ export function App() {
             operatorId={operator.operatorId}
             source={scanSource}
             client={activeClient}
+            floorTaskPointerValue={activeFloorTask.pointerValue}
             {...(floorGeneration ? { credentialGeneration: floorGeneration } : {})}
             onLeft={() => {
               setActiveFloorTask(null);

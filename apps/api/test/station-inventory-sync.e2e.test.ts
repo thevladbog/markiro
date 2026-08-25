@@ -240,9 +240,25 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         .where(eq(schema.inventoryScanEvents.eventId, request.events[0]!.eventId)),
     ).toHaveLength(1);
 
+    const renamedReplay = await service.ingest(tenantId, deviceAId, inventoryId, {
+      ...request,
+      batchId: "replay-renamed",
+    });
+    expect(renamedReplay).toEqual({
+      ...first,
+      batchId: "replay-renamed",
+      outcomes: first.outcomes.map((outcome) => ({
+        ...outcome,
+        status: "replay",
+        reasonCode: "BATCH_REPLAY",
+      })),
+    });
     await expect(
-      service.ingest(tenantId, deviceAId, inventoryId, { ...request, batchId: "replay-renamed" }),
-    ).rejects.toSatisfy((error: unknown) => errorCode(error) === "INVENTORY_BATCH_DIGEST_REUSED");
+      service.ingest(tenantId, deviceAId, inventoryId, {
+        ...request,
+        batchId: "replay-renamed",
+      }),
+    ).resolves.toEqual(renamedReplay);
     expect(
       await db
         .select()
@@ -363,7 +379,18 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         status: "applied",
         claimedCount: 1,
         conflictCount: 1,
-        winner: expect.objectContaining({ eventId: child.eventId, codeHash: knownA.codeHash }),
+        claims: [
+          {
+            codeHash: knownA.codeHash,
+            status: "duplicate",
+            winner: expect.objectContaining({ eventId: child.eventId, codeHash: knownA.codeHash }),
+          },
+          {
+            codeHash: knownB.codeHash,
+            status: "claimed",
+            winner: expect.objectContaining({ eventId: box.eventId, codeHash: knownB.codeHash }),
+          },
+        ],
       }),
     ]);
     const rows = await db
@@ -429,6 +456,66 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         openBoxCount: 2,
       },
     });
+
+    const displacement = event("a", {
+      scannedAt: "2026-08-25T10:59:00.000Z",
+      canonicalRaw: knownB.canonical.raw,
+    });
+    await service.ingest(
+      tenantId,
+      deviceAId,
+      inventoryId,
+      batch("known-box-displacement", [displacement]),
+    );
+    const claimEvidence = await db
+      .select({
+        codeHash: schema.inventoryEventClaimOutcomes.codeHash,
+        status: schema.inventoryEventClaimOutcomes.status,
+        winningEventId: schema.inventoryEventClaimOutcomes.winningEventId,
+      })
+      .from(schema.inventoryEventClaimOutcomes)
+      .where(eq(schema.inventoryEventClaimOutcomes.sourceEventId, box.eventId))
+      .orderBy(asc(schema.inventoryEventClaimOutcomes.codeHash));
+    expect(claimEvidence).toEqual([
+      { codeHash: knownA.codeHash, status: "duplicate", winningEventId: child.eventId },
+      { codeHash: knownB.codeHash, status: "duplicate", winningEventId: displacement.eventId },
+    ]);
+    const [boxEvidence] = await db
+      .select({ verdict: schema.inventoryScanEvents.authoritativeVerdict })
+      .from(schema.inventoryScanEvents)
+      .where(eq(schema.inventoryScanEvents.eventId, box.eventId));
+    expect(boxEvidence).toEqual({ verdict: "duplicate" });
+  });
+
+  it("enforces a monotonic accepted device sequence high-water while allowing gaps", async () => {
+    const scan10 = code("HIGH-WATER-10");
+    const event10 = {
+      ...event("a", { scannedAt: "2026-08-25T11:30:00.000Z", canonicalRaw: scan10.canonical.raw }),
+      deviceSequence: 1_000,
+    };
+    await expect(
+      service.ingest(tenantId, deviceAId, inventoryId, batch("high-water-10", [event10])),
+    ).resolves.toBeDefined();
+
+    const scan5 = code("HIGH-WATER-5");
+    const event5 = {
+      ...event("a", { scannedAt: "2026-08-25T11:31:00.000Z", canonicalRaw: scan5.canonical.raw }),
+      deviceSequence: 999,
+    };
+    await expect(
+      service.ingest(tenantId, deviceAId, inventoryId, batch("high-water-5", [event5])),
+    ).rejects.toSatisfy(
+      (error: unknown) => errorCode(error) === "INVENTORY_EVENT_SEQUENCE_BELOW_HIGH_WATER",
+    );
+
+    const scan12 = code("HIGH-WATER-12");
+    const event12 = {
+      ...event("a", { scannedAt: "2026-08-25T11:32:00.000Z", canonicalRaw: scan12.canonical.raw }),
+      deviceSequence: 1_002,
+    };
+    await expect(
+      service.ingest(tenantId, deviceAId, inventoryId, batch("high-water-12", [event12])),
+    ).resolves.toBeDefined();
   });
 
   it("denies foreign tenant/device scope and rejects immutable snapshot, operator, GTIN, and date facts", async () => {
@@ -570,9 +657,21 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
       .where(
         and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
       );
-    const late = batch("late", [
-      event("b", { scannedAt: "2026-08-25T13:00:00.000Z", canonicalRaw: raw("LATE") }),
-    ]);
+    await db
+      .update(schema.inventoryDeviceParticipants)
+      .set({ pendingEventCount: 9, openBoxCount: 4 })
+      .where(
+        and(
+          eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
+          eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
+          eq(schema.inventoryDeviceParticipants.deviceId, deviceBId),
+        ),
+      );
+    const late = batch(
+      "late",
+      [event("b", { scannedAt: "2026-08-25T13:00:00.000Z", canonicalRaw: raw("LATE") })],
+      { pendingEventCount: 0, openBoxCount: 0 },
+    );
     const response = await service.ingest(tenantId, deviceBId, inventoryId, late);
     expect(response.outcomes).toEqual([
       expect.objectContaining({
@@ -626,6 +725,20 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
       );
     expect(after).toEqual(before);
+    const [participantAfterQuarantine] = await db
+      .select({
+        pending: schema.inventoryDeviceParticipants.pendingEventCount,
+        open: schema.inventoryDeviceParticipants.openBoxCount,
+      })
+      .from(schema.inventoryDeviceParticipants)
+      .where(
+        and(
+          eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
+          eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
+          eq(schema.inventoryDeviceParticipants.deviceId, deviceBId),
+        ),
+      );
+    expect(participantAfterQuarantine).toEqual({ pending: 0, open: 0 });
 
     const other = code("LATE-WRONG-GTIN", OTHER_GTIN);
     const malformed = batch("late-malformed", [
@@ -639,5 +752,22 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
     await expect(service.ingest(tenantId, deviceBId, inventoryId, malformed)).rejects.toSatisfy(
       (error: unknown) => errorCode(error) === "INVENTORY_EVENT_GTIN_MISMATCH",
     );
+
+    await db
+      .update(schema.inventories)
+      .set({ status: "running" })
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
+      );
+    await expect(
+      service.leave(tenantId, deviceBId, inventoryId, { pendingEventCount: 0, openBoxCount: 0 }),
+    ).resolves.toEqual({ outcome: "left" });
+    const [reopened] = await db
+      .select({ status: schema.inventories.status })
+      .from(schema.inventories)
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
+      );
+    expect(reopened).toEqual({ status: "running" });
   });
 });

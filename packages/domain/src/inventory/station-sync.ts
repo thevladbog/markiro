@@ -4,8 +4,13 @@ import { z } from "zod";
 
 export const INVENTORY_EVENT_BATCH_SIZE = 100;
 export const INVENTORY_PROGRESS_PAGE_SIZE = 200;
+export const INVENTORY_EVENT_CLAIM_OUTCOME_SIZE = 10_000;
+export const INVENTORY_PROGRESS_CURSOR_PATTERN =
+  "^[1-9][0-9]*:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
 
-const uuidSchema = z.uuid();
+const uuidSchema = z
+  .string()
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 const hashSchema = z.string().regex(/^[0-9a-f]{64}$/);
 const civilDateSchema = z.iso.date();
 const instantSchema = z.iso.datetime({ offset: true });
@@ -109,6 +114,24 @@ export const inventoryClaimWinnerSchema = z.strictObject({
   scannedAt: instantSchema,
 });
 
+export const inventoryEventClaimOutcomeSchema = z
+  .strictObject({
+    codeHash: hashSchema,
+    status: z.enum(["claimed", "duplicate"]),
+    winner: inventoryClaimWinnerSchema,
+  })
+  .superRefine((value, context) => {
+    if (value.winner.codeHash !== value.codeHash) {
+      context.addIssue({
+        code: "custom",
+        path: ["winner", "codeHash"],
+        message: "winner mismatch",
+      });
+    }
+  });
+
+export type InventoryEventClaimOutcome = z.infer<typeof inventoryEventClaimOutcomeSchema>;
+
 export const INVENTORY_EVENT_OUTCOMES = [
   "applied",
   "replay",
@@ -117,14 +140,48 @@ export const INVENTORY_EVENT_OUTCOMES = [
   "quarantined",
 ] as const;
 
-export const inventoryEventOutcomeSchema = z.strictObject({
-  eventId: uuidSchema,
-  status: z.enum(INVENTORY_EVENT_OUTCOMES),
-  reasonCode: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/),
-  claimedCount: z.number().int().nonnegative().safe().optional(),
-  conflictCount: z.number().int().nonnegative().safe().optional(),
-  winner: inventoryClaimWinnerSchema.optional(),
-});
+export const inventoryEventOutcomeSchema = z
+  .strictObject({
+    eventId: uuidSchema,
+    status: z.enum(INVENTORY_EVENT_OUTCOMES),
+    reasonCode: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/),
+    claimedCount: z.number().int().nonnegative().safe(),
+    conflictCount: z.number().int().nonnegative().safe(),
+    claims: z.array(inventoryEventClaimOutcomeSchema).max(INVENTORY_EVENT_CLAIM_OUTCOME_SIZE),
+  })
+  .superRefine((value, context) => {
+    const hashes = new Set<string>();
+    for (const [index, claim] of value.claims.entries()) {
+      if (hashes.has(claim.codeHash)) {
+        context.addIssue({
+          code: "custom",
+          path: ["claims", index, "codeHash"],
+          message: "duplicate claim",
+        });
+      }
+      hashes.add(claim.codeHash);
+      if (claim.status === "claimed" && claim.winner.eventId !== value.eventId) {
+        context.addIssue({
+          code: "custom",
+          path: ["claims", index, "winner", "eventId"],
+          message: "claimed winner mismatch",
+        });
+      }
+      if (claim.status === "duplicate" && claim.winner.eventId === value.eventId) {
+        context.addIssue({
+          code: "custom",
+          path: ["claims", index, "winner", "eventId"],
+          message: "duplicate winner mismatch",
+        });
+      }
+    }
+    if (
+      value.claimedCount !== value.claims.filter((claim) => claim.status === "claimed").length ||
+      value.conflictCount !== value.claims.filter((claim) => claim.status === "duplicate").length
+    ) {
+      context.addIssue({ code: "custom", path: ["claims"], message: "claim counts mismatch" });
+    }
+  });
 
 export type InventoryEventOutcome = z.infer<typeof inventoryEventOutcomeSchema>;
 
@@ -143,7 +200,7 @@ export type InventoryEventBatchResponse = z.infer<typeof inventoryEventBatchResp
 
 export const inventoryProgressCursorSchema = z
   .string()
-  .regex(/^[1-9][0-9]*:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  .regex(new RegExp(INVENTORY_PROGRESS_CURSOR_PATTERN));
 
 export const inventoryProgressChangeSchema = z.strictObject({
   id: uuidSchema,
@@ -207,11 +264,14 @@ export function parseInventoryEventBatch(value: unknown): InventoryEventBatch {
 export function parseInventoryEventBatchResponse(
   value: unknown,
   request: InventoryEventBatch,
+  expectedInventoryId: string,
+  expectedDeviceId?: string,
 ): InventoryEventBatchResponse {
   const parsed = inventoryEventBatchResponseSchema.safeParse(value);
   if (!parsed.success) throw new Error("Invalid inventory event batch response");
   const response = parsed.data;
   if (
+    response.inventoryId !== expectedInventoryId ||
     response.snapshotId !== request.snapshotId ||
     response.snapshotRevision !== request.snapshotRevision ||
     response.batchId !== request.batchId ||
@@ -227,15 +287,56 @@ export function parseInventoryEventBatchResponse(
     if (!requested.has(outcome.eventId) || accounted.has(outcome.eventId)) {
       throw new Error("Invalid inventory event batch response");
     }
+    const requestEvent = request.events.find((event) => event.eventId === outcome.eventId);
+    if (!requestEvent) throw new Error("Invalid inventory event batch response");
+    const claimBearing =
+      outcome.status === "applied" || outcome.status === "replay" || outcome.status === "duplicate";
+    if (
+      claimBearing &&
+      requestEvent.kind === "item" &&
+      (outcome.claims.length !== 1 || outcome.claims[0]?.codeHash !== requestEvent.codeHash)
+    ) {
+      throw new Error("Invalid inventory event batch response");
+    }
+    if (claimBearing && requestEvent.kind === "old_box" && outcome.claims.length !== 0) {
+      throw new Error("Invalid inventory event batch response");
+    }
+    for (const claim of outcome.claims) {
+      if (
+        claim.status === "claimed" &&
+        (claim.winner.scannedAt !== requestEvent.scannedAt ||
+          (expectedDeviceId !== undefined && claim.winner.deviceId !== expectedDeviceId))
+      ) {
+        throw new Error("Invalid inventory event batch response");
+      }
+    }
     accounted.add(outcome.eventId);
   }
   if (accounted.size !== requested.size) throw new Error("Invalid inventory event batch response");
   return response;
 }
 
-export function parseInventoryProgressPage(value: unknown): InventoryProgressPage {
+export interface ExpectedInventoryProgressPage {
+  inventoryId: string;
+  snapshotId: string;
+  cursor: string | null;
+  minimumResultRevision: number;
+}
+
+export function parseInventoryProgressPage(
+  value: unknown,
+  expected: ExpectedInventoryProgressPage,
+): InventoryProgressPage {
   const parsed = inventoryProgressPageSchema.safeParse(value);
   if (!parsed.success) throw new Error("Invalid inventory progress page");
+  if (
+    parsed.data.inventoryId !== expected.inventoryId ||
+    parsed.data.snapshotId !== expected.snapshotId ||
+    parsed.data.cursor !== expected.cursor ||
+    parsed.data.resultRevision < expected.minimumResultRevision
+  ) {
+    throw new Error("Invalid inventory progress page");
+  }
   let previous = parsed.data.cursor
     ? {
         revision: Number(parsed.data.cursor.split(":", 1)[0]),
@@ -244,9 +345,11 @@ export function parseInventoryProgressPage(value: unknown): InventoryProgressPag
     : null;
   for (const item of parsed.data.items) {
     if (
-      previous !== null &&
-      (item.revision < previous.revision ||
-        (item.revision === previous.revision && item.id <= previous.id))
+      item.revision > parsed.data.resultRevision ||
+      (item.winner !== null && item.winner.codeHash !== item.codeHash) ||
+      (previous !== null &&
+        (item.revision < previous.revision ||
+          (item.revision === previous.revision && item.id <= previous.id)))
     ) {
       throw new Error("Invalid inventory progress page");
     }

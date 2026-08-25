@@ -372,6 +372,7 @@ export const inventoryTerminalState = sqliteTable(
     openRepackBoxId: text("open_repack_box_id"),
     nextDeviceSequence: integer("next_device_sequence").notNull().default(1),
     progressCursor: text("progress_cursor"),
+    progressResultRevision: integer("progress_result_revision").notNull().default(0),
     updatedAt: text("updated_at").notNull(),
   },
   (table) => [primaryKey({ columns: [table.inventoryId, table.snapshotId, table.deviceId] })],
@@ -434,6 +435,28 @@ export const inventoryScanEventsMirror = sqliteTable(
       table.deviceId,
       table.deviceSequence,
     ),
+  ],
+);
+
+/** Exact per-code server acknowledgement for each local source event. */
+export const inventoryEventClaimOutcomesMirror = sqliteTable(
+  "inventory_event_claim_outcomes_mirror",
+  {
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    sourceEventId: text("source_event_id").notNull(),
+    codeHash: text("code_hash").notNull(),
+    status: text("status").notNull(),
+    winningEventId: text("winning_event_id").notNull(),
+    winningDeviceId: text("winning_device_id").notNull(),
+    winningScannedAt: text("winning_scanned_at").notNull(),
+    resultRevision: integer("result_revision").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.inventoryId, table.snapshotId, table.sourceEventId, table.codeHash],
+    }),
   ],
 );
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   INVENTORY_CHZ_STATUSES,
+  INVENTORY_PROGRESS_CURSOR_PATTERN,
   inventoryEventBatchSchema,
   inventoryProgressCursorSchema,
   LABEL_FIELDS,
@@ -48,6 +49,9 @@ export interface LeaveStationInventoryResponseDto {
   readonly outcome: "left";
 }
 
+const CANONICAL_UUID_PATTERN =
+  "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
+
 const inventoryEventOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -64,9 +68,17 @@ const inventoryEventOpenApiSchema: SchemaObject = {
     "localVerdict",
   ],
   properties: {
-    eventId: { type: "string", format: "uuid" },
+    eventId: {
+      type: "string",
+      format: "uuid",
+      pattern: CANONICAL_UUID_PATTERN,
+    },
     deviceSequence: { type: "integer", minimum: 1 },
-    operatorId: { type: "string", format: "uuid" },
+    operatorId: {
+      type: "string",
+      format: "uuid",
+      pattern: CANONICAL_UUID_PATTERN,
+    },
     scannedAt: { type: "string", format: "date-time" },
     kind: { type: "string", enum: ["item", "known_box", "old_box"] },
     normalizedIdentity: { type: "string", minLength: 1, maxLength: 1024 },
@@ -86,18 +98,29 @@ const inventoryClaimWinnerOpenApiSchema: SchemaObject = {
   required: ["codeHash", "eventId", "deviceId", "scannedAt"],
   properties: {
     codeHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
-    eventId: { type: "string", format: "uuid" },
-    deviceId: { type: "string", format: "uuid" },
+    eventId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+    deviceId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
     scannedAt: { type: "string", format: "date-time" },
+  },
+};
+
+const inventoryEventClaimOutcomeOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["codeHash", "status", "winner"],
+  properties: {
+    codeHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    status: { type: "string", enum: ["claimed", "duplicate"] },
+    winner: inventoryClaimWinnerOpenApiSchema,
   },
 };
 
 const inventoryEventOutcomeOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["eventId", "status", "reasonCode"],
+  required: ["eventId", "status", "reasonCode", "claimedCount", "conflictCount", "claims"],
   properties: {
-    eventId: { type: "string", format: "uuid" },
+    eventId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
     status: {
       type: "string",
       enum: ["applied", "replay", "duplicate", "rejected", "quarantined"],
@@ -105,7 +128,11 @@ const inventoryEventOutcomeOpenApiSchema: SchemaObject = {
     reasonCode: { type: "string", pattern: "^[A-Z][A-Z0-9_]{0,127}$" },
     claimedCount: { type: "integer", minimum: 0 },
     conflictCount: { type: "integer", minimum: 0 },
-    winner: inventoryClaimWinnerOpenApiSchema,
+    claims: {
+      type: "array",
+      maxItems: 10_000,
+      items: inventoryEventClaimOutcomeOpenApiSchema,
+    },
   },
 };
 
@@ -125,7 +152,11 @@ export const stationInventoryEventBatchOpenApiSchema: SchemaObject = {
   properties: {
     batchId: { type: "string", minLength: 1, maxLength: 128 },
     payloadDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
-    snapshotId: { type: "string", format: "uuid" },
+    snapshotId: {
+      type: "string",
+      format: "uuid",
+      pattern: CANONICAL_UUID_PATTERN,
+    },
     snapshotRevision: { type: "integer", enum: [1] },
     sequenceCeiling: { type: "integer", minimum: 1 },
     pendingEventCount: { type: "integer", minimum: 0 },
@@ -148,8 +179,8 @@ export const stationInventoryEventBatchResponseOpenApiSchema: SchemaObject = {
     "outcomes",
   ],
   properties: {
-    inventoryId: { type: "string", format: "uuid" },
-    snapshotId: { type: "string", format: "uuid" },
+    inventoryId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+    snapshotId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
     snapshotRevision: { type: "integer", enum: [1] },
     batchId: { type: "string" },
     payloadDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
@@ -178,7 +209,7 @@ const inventoryProgressChangeOpenApiSchema: SchemaObject = {
     "correctedAt",
   ],
   properties: {
-    id: { type: "string", format: "uuid" },
+    id: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
     revision: { type: "integer", minimum: 1 },
     kind: { type: "string", enum: ["claim", "correction"] },
     codeHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
@@ -205,12 +236,12 @@ export const stationInventoryProgressOpenApiSchema: SchemaObject = {
     "nextCursor",
   ],
   properties: {
-    inventoryId: { type: "string", format: "uuid" },
-    snapshotId: { type: "string", format: "uuid" },
+    inventoryId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+    snapshotId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
     snapshotRevision: { type: "integer", enum: [1] },
     cursor: {
       type: "string",
-      pattern: "^[1-9][0-9]*:[0-9a-f-]{36}$",
+      pattern: INVENTORY_PROGRESS_CURSOR_PATTERN,
       nullable: true,
     },
     resultRevision: { type: "integer", minimum: 0 },
@@ -221,7 +252,7 @@ export const stationInventoryProgressOpenApiSchema: SchemaObject = {
     },
     nextCursor: {
       type: "string",
-      pattern: "^[1-9][0-9]*:[0-9a-f-]{36}$",
+      pattern: INVENTORY_PROGRESS_CURSOR_PATTERN,
       nullable: true,
     },
   },
