@@ -47,6 +47,7 @@ export function initConsentPanel(root: Document, browserWindow: BrowserWindow): 
   const accept = panel?.querySelector<HTMLButtonElement>("[data-consent-accept]");
   const save = panel?.querySelector<HTMLButtonElement>("[data-consent-save]");
   const settings = [...root.querySelectorAll<HTMLButtonElement>("[data-consent-settings]")];
+  let active = true;
 
   if (
     panel === null ||
@@ -90,12 +91,20 @@ export function initConsentPanel(root: Document, browserWindow: BrowserWindow): 
   save?.addEventListener("click", onSave);
   for (const control of settings) control.addEventListener("click", onCustomize);
 
-  const current = storedConsent(browserWindow);
-  panel.hidden = current !== null;
   summary.hidden = false;
   details.hidden = true;
+  const revealInitialChoice = (): void => {
+    if (!active) return;
+    panel.hidden = storedConsent(browserWindow) !== null;
+  };
+  if (root.fonts === undefined) {
+    revealInitialChoice();
+  } else {
+    void root.fonts.ready.then(revealInitialChoice, revealInitialChoice);
+  }
 
   return () => {
+    active = false;
     reject?.removeEventListener("click", onReject);
     customize?.removeEventListener("click", onCustomize);
     accept?.removeEventListener("click", onAccept);
@@ -178,7 +187,7 @@ export function initTagManager(
   const applyConsent = (): void => {
     const current = storedConsent(browserWindow);
     pushGoogleConsent(target, "update", current);
-    if (canUseCategory(current, "analytics") || canUseCategory(current, "marketing")) {
+    if (canUseCategory(current, "analytics")) {
       loadTagManager(root, browserWindow, containerId);
     }
   };

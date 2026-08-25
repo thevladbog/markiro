@@ -196,6 +196,7 @@ export function initDemoForm(form: HTMLFormElement, runtime: DemoFormRuntime): (
   const onSubmit = async (event: SubmitEvent): Promise<void> => {
     event.preventDefault();
     if (submitting) return;
+    runtime.track("landing_form_submit", {});
 
     const validation = validateDemoLead(
       {

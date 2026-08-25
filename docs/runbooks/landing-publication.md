@@ -7,7 +7,7 @@
 1. Убедиться, что release SHA опубликован workflow **Publish production images**, а `MARKIRO_LANDING_DOMAIN=markiro.app` задан в environments `production-deploy` и `production-infrastructure`.
 2. До соответствующего шага держать `PUBLIC_DEMO_SUBMISSION_ENABLED=false` в статической сборке и `LANDING_DEMO_SUBMISSION_ENABLED=false` в API. Эти флаги включаются и откатываются независимо.
 3. Секреты Postbox и SmartCaptcha хранить только в установленном production secret store. Не записывать значения API key, SMTP password, server key, captcha token, cookies или данные формы в этот runbook, команды, отчёты и логи.
-4. Не включать optional analytics/marketing. Форма создаёт только транзакционные письма и не означает согласия на маркетинг.
+4. Optional analytics включать только по `docs/runbooks/landing-google-analytics.md` и только после явного analytics-consent. Marketing tags остаются выключенными. Форма создаёт только транзакционные письма и не означает согласия на маркетинг.
 5. Эта возможность не подключает внешнюю CRM; любое CRM forwarding требует отдельного контракта, privacy review и release gate.
 6. Сохранить release SHA, время и обезличенный результат каждого гейта. Code deploy, юридическое одобрение, Postbox/DNS, SmartCaptcha, контролируемая доставка, публичное включение, monitoring и rollback остаются отдельными наблюдаемыми решениями.
 
