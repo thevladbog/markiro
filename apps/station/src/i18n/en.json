@@ -217,6 +217,29 @@
       "closeIncomplete": "Close incomplete box",
       "empty": "The open box has no bottles yet.",
       "dateBlocked": "Close the incomplete box or clear it first.",
+      "print": {
+        "printing": "Printing label",
+        "printed": "Label printed",
+        "failed": "Label was not printed",
+        "quantity": "Bottle quantity",
+        "retry": "Retry printing",
+        "setup": "Configure printer",
+        "errors": {
+          "templateMissing": "The task has no label template.",
+          "printerUnconfigured": "No printer is configured.",
+          "renderFailed": "The label could not be prepared.",
+          "transportFailed": "The printer did not confirm printing.",
+          "persistenceFailed": "The print result was not saved. Retry with the same SSCC."
+        }
+      },
+      "reprint": {
+        "title": "Reprint a box label",
+        "sscc": "Box SSCC",
+        "find": "Check box",
+        "candidate": "Reprint this SSCC",
+        "missing": "No printed box with this SSCC was found on this terminal.",
+        "action": "Reprint label"
+      },
       "position": "Position {{position}}: {{status}}"
     },
     "pagination": "Inventory task pages",

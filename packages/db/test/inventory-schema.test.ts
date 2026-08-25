@@ -382,6 +382,7 @@ describe("inventory execution schema", () => {
         "inventoryCodeResults",
         "inventoryRepackBoxes",
         "inventoryRepackItems",
+        "inventoryRepackPrintAttempts",
         "inventoryCorrections",
         "inventoryLateEvents",
       ].map((name) => getTableName(table(name))),
@@ -393,6 +394,7 @@ describe("inventory execution schema", () => {
       "inventory_code_results",
       "inventory_repack_boxes",
       "inventory_repack_items",
+      "inventory_repack_print_attempts",
       "inventory_corrections",
       "inventory_late_events",
     ]);
@@ -530,6 +532,20 @@ describe("inventory execution schema", () => {
         "inventory_code_results",
       ],
       [
+        "inventoryRepackPrintAttempts",
+        "inventory_repack_print_attempts_tenant_box_fk",
+        ["tenant_id", "box_id", "inventory_id"],
+        ["tenant_id", "id", "inventory_id"],
+        "inventory_repack_boxes",
+      ],
+      [
+        "inventoryRepackPrintAttempts",
+        "inventory_repack_print_attempts_tenant_event_fk",
+        ["tenant_id", "inventory_id", "source_event_id"],
+        ["tenant_id", "inventory_id", "event_id"],
+        "inventory_scan_events",
+      ],
+      [
         "inventoryRepackItems",
         "inventory_repack_items_tenant_result_active_date_fk",
         ["tenant_id", "result_id", "inventory_id", "active_observed_production_date"],
@@ -604,6 +620,12 @@ describe("inventory execution schema", () => {
     expect(
       constraintColumns("inventoryRepackItems", "inventory_repack_items_tenant_id_inventory_uq"),
     ).toEqual(["tenant_id", "id", "inventory_id"]);
+    expect(
+      constraintColumns(
+        "inventoryRepackPrintAttempts",
+        "inventory_repack_print_attempts_box_number_uq",
+      ),
+    ).toEqual(["tenant_id", "inventory_id", "box_id", "attempt_number"]);
     expect(
       constraintColumns("inventoryLateEvents", "inventory_late_events_tenant_id_inventory_uq"),
     ).toEqual(["tenant_id", "id", "inventory_id"]);

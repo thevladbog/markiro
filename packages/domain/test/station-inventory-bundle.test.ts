@@ -31,6 +31,9 @@ const manifest = {
   codeCount: 1,
   productId: "33333333-3333-4333-8333-333333333333",
   productName: "Сидр",
+  productPrintName: "Сидр сухой",
+  egaisCode: "0101234567890123456",
+  shelfLifeDays: 184,
   gtin14: "04600000000015",
   boxCapacity: 12,
   mode: "check" as const,
@@ -89,6 +92,22 @@ describe("station inventory bundle contract", () => {
     expect(() =>
       parseStationInventoryBundlePage({ ...page, items: [{ ...item, extra: 1 }] }),
     ).toThrow("Invalid station inventory bundle page");
+  });
+
+  it("requires immutable label product facts even when their catalog values are absent", () => {
+    expect(
+      parseStationInventoryBundleManifest({
+        ...manifest,
+        productPrintName: null,
+        egaisCode: null,
+        shelfLifeDays: null,
+      }),
+    ).toMatchObject({ productPrintName: null, egaisCode: null, shelfLifeDays: null });
+    const { productPrintName: ignored, ...missing } = manifest;
+    void ignored;
+    expect(() => parseStationInventoryBundleManifest(missing)).toThrow(
+      "Invalid station inventory bundle manifest",
+    );
   });
 
   it("fails closed on unsafe repack SSCC structures", () => {

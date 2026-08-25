@@ -1501,10 +1501,10 @@ export function App() {
               <h1 style={{ fontSize: "2rem" }}>{t("shifts.preparing")}</h1>
             </main>
           )
-        ) : config.deviceId && activeClient && activeFloorTask.inventory.mode === "check" ? (
+        ) : config.deviceId && activeClient ? (
           <InventoryWorkScreen
             exec={tauriExecutor}
-            inventory={{ ...activeFloorTask.inventory, mode: "check" }}
+            inventory={activeFloorTask.inventory}
             deviceId={config.deviceId}
             operatorId={operator.operatorId}
             source={scanSource}
@@ -1516,16 +1516,17 @@ export function App() {
               setFloorView("select");
             }}
             onScanQueueRegister={registerFloorWorkBarrier}
+            printing={
+              hardwareConfig.printer
+                ? {
+                    target: hardwareConfig.printer,
+                    language: hardwareConfig.printerLanguage,
+                    print: (target, bytes) => tauriHardware.print(target, bytes),
+                  }
+                : null
+            }
+            onOpenPrinterSetup={openPrintRecoverySetup}
           />
-        ) : activeFloorTask.inventory.mode === "repack" ? (
-          <main className="inventory-entry-ready" data-testid="inventory-entry-ready">
-            <Card>
-              <span>{t("inventory.readyEyebrow")}</span>
-              <h1>{activeFloorTask.inventory.inventoryNumber}</h1>
-              <p>{activeFloorTask.inventory.productName}</p>
-              <p>{t("inventory.ready")}</p>
-            </Card>
-          </main>
         ) : (
           <main className="station-centered-screen">
             <p role="status">{t("inventory.loadingLocalTask")}</p>

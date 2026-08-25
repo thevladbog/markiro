@@ -1258,6 +1258,9 @@ describe("App", () => {
       inventoryNumber: "INV-00047",
       productId: "44444444-4444-4444-8444-444444444444",
       productName: "Water",
+      productPrintName: null,
+      egaisCode: null,
+      shelfLifeDays: null,
       gtin14: "04600000000015",
       mode: "check",
       lineId: "33333333-3333-4333-8333-333333333333",
@@ -1335,7 +1338,6 @@ describe("App", () => {
       fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
       fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
       await database.publicationStarted;
-
       fireEvent.click(screen.getByRole("button", { name: "Change operator" }));
 
       await act(async () => {});
@@ -1374,6 +1376,115 @@ describe("App", () => {
     }
   });
 
+  it("routes a published repack inventory into the real work screen", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const inventoryId = "11111111-1111-4111-8111-111111111111";
+    const snapshotId = "22222222-2222-4222-8222-222222222222";
+    const snapshotFixedAt = "2026-08-25T05:00:00.000Z";
+    const contentDigest = inventorySnapshotContentDigest([]);
+    const manifest = {
+      inventoryId,
+      inventoryNumber: "INV-REPACK-1",
+      productId: "44444444-4444-4444-8444-444444444444",
+      productName: "Water",
+      productPrintName: "Water 0.5 l",
+      egaisCode: null,
+      shelfLifeDays: 180,
+      gtin14: "04600000000015",
+      mode: "repack",
+      lineId: "33333333-3333-4333-8333-333333333333",
+      lineName: "Line 1",
+      productionDateFrom: "2026-08-01",
+      productionDateTo: "2026-08-31",
+      boxCapacity: 12,
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: "a".repeat(64),
+      contentDigest,
+      codeCount: 0,
+      boxLabelTemplate: {
+        id: "77777777-7777-4777-8777-777777777777",
+        name: "Box",
+        spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+      },
+      limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
+      sscc: {
+        allocationOrder: 1,
+        issuerPrefix: "460068200",
+        extensionDigit: 0,
+        fromSerial: 1,
+        toSerial: 10,
+        consumedThroughSerial: null,
+      },
+      ssccRevokedFrom: [],
+      ssccRevokedBlocks: [],
+    };
+    const page = {
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: manifest.combinedDigest,
+      contentDigest,
+      cursor: null,
+      items: [],
+      nextCursor: null,
+      pageDigest: inventorySnapshotPageDigest({
+        snapshotId,
+        snapshotFixedAt,
+        contentDigest,
+        cursor: null,
+        items: [],
+        nextCursor: null,
+      }),
+    };
+    await mockInventoryEntryDatabase(pinHash, () => false);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/operators") throw new Error("keep cached operator");
+        if (path === "/shifts") return new Response(JSON.stringify({ items: [] }));
+        if (path === "/station/inventory-tasks") {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  inventoryId,
+                  inventoryNumber: manifest.inventoryNumber,
+                  productName: manifest.productName,
+                  mode: manifest.mode,
+                  lineId: manifest.lineId,
+                  lineName: manifest.lineName,
+                  productionDateFrom: manifest.productionDateFrom,
+                  productionDateTo: manifest.productionDateTo,
+                },
+              ],
+            }),
+          );
+        }
+        if (path === `/station/inventories/${inventoryId}/join`) {
+          return new Response(JSON.stringify(manifest));
+        }
+        if (path.endsWith("/bundle/manifest")) return new Response(JSON.stringify(manifest));
+        if (path.endsWith("/bundle/codes")) return new Response(JSON.stringify(page));
+        return new Response(JSON.stringify({ items: [] }));
+      }),
+    );
+
+    try {
+      render(<App />);
+      await signInAsOperator();
+      fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Continue INV-REPACK-1" }));
+      expect(await screen.findByTestId("inventory-repack-work")).toBeDefined();
+      expect(screen.queryByTestId("inventory-entry-ready")).toBeNull();
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   it("drains and retires a suspended inventory pointer when Update Center unmounts selection", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
@@ -1391,6 +1502,9 @@ describe("App", () => {
       inventoryNumber: "INV-00047",
       productId: "44444444-4444-4444-8444-444444444444",
       productName: "Water",
+      productPrintName: null,
+      egaisCode: null,
+      shelfLifeDays: null,
       gtin14: "04600000000015",
       mode: "check",
       lineId: "33333333-3333-4333-8333-333333333333",
@@ -1509,6 +1623,9 @@ describe("App", () => {
       inventoryNumber: "INV-00047",
       productId: "44444444-4444-4444-8444-444444444444",
       productName: "Water",
+      productPrintName: null,
+      egaisCode: null,
+      shelfLifeDays: null,
       gtin14: "04600000000015",
       mode: "check",
       lineId: "33333333-3333-4333-8333-333333333333",

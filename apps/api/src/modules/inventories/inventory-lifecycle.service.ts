@@ -57,7 +57,15 @@ interface StartFacts {
     contentDigest: string;
     counts: InventorySnapshotCountsDto;
   };
-  product: { id: string; name: string; gtin14: string; boxCapacity: number };
+  product: {
+    id: string;
+    name: string;
+    printName: string | null;
+    gtin14: string;
+    egaisCode: string | null;
+    shelfLifeDays: number | null;
+    boxCapacity: number;
+  };
   line: { id: string; name: string };
   boxLabelTemplate: StationInventoryLabelTemplateDescriptor | null;
 }
@@ -262,7 +270,10 @@ export class InventoryLifecycleService {
       .select({
         id: schema.products.id,
         name: schema.products.name,
+        printName: schema.products.printName,
         gtin14: schema.products.gtin14,
+        egaisCode: schema.products.egaisCode,
+        shelfLifeDays: schema.products.shelfLifeDays,
         boxCapacity: schema.products.boxCapacity,
         status: schema.products.status,
       })
@@ -318,7 +329,10 @@ export class InventoryLifecycleService {
       product: {
         id: product.id,
         name: product.name,
+        printName: product.printName,
         gtin14: product.gtin14,
+        egaisCode: product.egaisCode,
+        shelfLifeDays: product.shelfLifeDays,
         boxCapacity: product.boxCapacity,
       },
       line,
@@ -357,6 +371,19 @@ export class InventoryLifecycleService {
       )
       .for("share");
     if (!snapshot) throw new Error("Running inventory snapshot is missing");
+    const [product] = await tx
+      .select({
+        name: schema.products.name,
+        printName: schema.products.printName,
+        egaisCode: schema.products.egaisCode,
+        shelfLifeDays: schema.products.shelfLifeDays,
+      })
+      .from(schema.products)
+      .where(
+        and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, inventory.productId)),
+      )
+      .for("share");
+    if (!product) throw new Error("Running inventory product is missing");
 
     return {
       id: inventory.id,
@@ -370,6 +397,10 @@ export class InventoryLifecycleService {
       boxLabelTemplateId: inventory.boxLabelTemplateId,
       activeSnapshotId: inventory.activeSnapshotId,
       stationManifest: inventory.stationManifest,
+      authoritativeProductName: product.name,
+      authoritativeProductPrintName: product.printName,
+      authoritativeEgaisCode: product.egaisCode,
+      authoritativeShelfLifeDays: product.shelfLifeDays,
       snapshotId: snapshot.id,
       snapshotRevision: snapshot.revision,
       snapshotFixedAt: snapshot.fixedAt,
@@ -438,6 +469,9 @@ export class InventoryLifecycleService {
         snapshot.counts.disaggregation,
       productId: product.id,
       productName: product.name,
+      productPrintName: product.printName,
+      egaisCode: product.egaisCode,
+      shelfLifeDays: product.shelfLifeDays,
       gtin14: product.gtin14,
       boxCapacity: product.boxCapacity,
       mode: inventory.mode,

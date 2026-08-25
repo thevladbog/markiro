@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, FullScreenDialog } from "@markiro/ui";
-import type { StationInventoryBundleManifest } from "@markiro/domain";
+import { parseScannedSscc, type StationInventoryBundleManifest } from "@markiro/domain";
 
 import {
   listRecentInventoryOperations,
@@ -13,6 +13,15 @@ import {
   type RecordInventoryScanResult,
 } from "../lib/inventory-journal.js";
 import { loadInventoryProductionDate, setInventoryProductionDate } from "../lib/inventory-date.js";
+import {
+  attemptInventoryBoxPrint,
+  findInventoryPrintedBoxBySscc,
+  listInventoryBoxPrintAttempts,
+  recoverInterruptedInventoryPrint,
+  type InventoryBoxPrintingTransport,
+  type InventoryBoxPrintResult,
+  type InventoryPrintErrorCode,
+} from "../lib/inventory-box-printing.js";
 import type { StationClient } from "../lib/api-client.js";
 import type { CredentialGeneration } from "../lib/credential-recovery.js";
 import { leaveInventoryTask } from "../lib/inventory-sync.js";
@@ -30,6 +39,7 @@ import { createScanQueue, type ScanQueue } from "../lib/scan-queue.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import { useInventorySyncEngine } from "../lib/use-inventory-sync-engine.js";
 import { InventoryProgress as InventoryProgressView } from "../ui/inventory/InventoryProgress.js";
+import { InventoryBoxPrintRecovery } from "../ui/inventory/InventoryBoxPrintRecovery.js";
 import { InventoryScanInstrument } from "../ui/inventory/InventoryScanInstrument.js";
 import { RepackBoxInstrument } from "../ui/inventory/RepackBoxInstrument.js";
 import { RepackCorrections } from "../ui/inventory/RepackCorrections.js";
@@ -46,6 +56,8 @@ export interface InventoryWorkScreenProps {
   floorTaskPointerValue?: string;
   onLeft?: () => void;
   onScanQueueRegister?: (queue: ScanQueue) => () => void;
+  printing?: InventoryBoxPrintingTransport | null;
+  onOpenPrinterSetup?: () => void;
   createEventId?: () => string;
   now?: () => string;
 }
@@ -61,6 +73,19 @@ const EMPTY_PROGRESS: InventoryProgress = {
 
 const defaultEventId = () => crypto.randomUUID();
 const defaultNow = () => new Date().toISOString();
+
+function printErrorCode(value: string | null | undefined): InventoryPrintErrorCode | null {
+  switch (value) {
+    case "template_missing":
+    case "printer_unconfigured":
+    case "render_failed":
+    case "transport_failed":
+    case "persistence_failed":
+      return value;
+    default:
+      return null;
+  }
+}
 
 function restoredResult(operation: RecentInventoryOperation): RecordInventoryScanResult {
   return {
@@ -484,6 +509,8 @@ function RepackInventoryWorkScreen({
   floorTaskPointerValue,
   onLeft,
   onScanQueueRegister,
+  printing = null,
+  onOpenPrinterSetup,
   createEventId = defaultEventId,
   now = defaultNow,
 }: InventoryWorkScreenProps & {
@@ -501,7 +528,18 @@ function RepackInventoryWorkScreen({
   const [busy, setBusy] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [leaveFailed, setLeaveFailed] = useState(false);
+  const [printBusy, setPrintBusy] = useState(false);
+  const [printResult, setPrintResult] = useState<InventoryBoxPrintResult | null>(null);
+  const [reprintSscc, setReprintSscc] = useState("");
+  const [reprintCandidate, setReprintCandidate] = useState<{
+    boxId: string;
+    sscc: string;
+    quantity: number;
+    productionDate: string;
+  } | null>(null);
+  const [reprintError, setReprintError] = useState(false);
   const mounted = useRef(true);
+  const automaticPrints = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
     const [nextState, nextRecent] = await Promise.all([
@@ -591,6 +629,8 @@ function RepackInventoryWorkScreen({
           }),
         onOutcome: (outcome) => {
           if (!mounted.current) return;
+          if (outcome.verdict === "old-box-selected") setPrintResult(null);
+          if (outcome.verdict === "capacity-closed") setPrintBusy(true);
           setResult(outcome);
           setWriteFailed(false);
           nudge();
@@ -627,10 +667,135 @@ function RepackInventoryWorkScreen({
     };
   }, [onScanQueueRegister, productionDate, queue]);
 
+  const unresolvedPrint =
+    state.phase === "closed-pending-print" || state.box?.printState === "printing";
+
   useEffect(() => {
-    if (productionDate === null || dateDialog || correctionsDialog) return undefined;
+    if (
+      productionDate === null ||
+      dateDialog ||
+      correctionsDialog ||
+      unresolvedPrint ||
+      printBusy
+    ) {
+      return undefined;
+    }
     return source.start((raw) => queue.enqueue(raw));
-  }, [correctionsDialog, dateDialog, productionDate, queue, source]);
+  }, [correctionsDialog, dateDialog, printBusy, productionDate, queue, source, unresolvedPrint]);
+
+  useEffect(() => {
+    if (!correctionsDialog || printBusy) return undefined;
+    return source.start((raw) => {
+      const sscc = parseScannedSscc(raw);
+      if (sscc !== null) {
+        setReprintSscc(sscc);
+        setReprintCandidate(null);
+        setReprintError(false);
+      }
+    });
+  }, [correctionsDialog, printBusy, source]);
+
+  const runPrint = useCallback(
+    async (boxId: string, kind: "initial" | "reprint" = "initial") => {
+      setPrintBusy(true);
+      try {
+        await queue.idle();
+        const attemptedAt = now();
+        const outcome = await attemptInventoryBoxPrint({
+          exec,
+          manifest: inventory,
+          inventoryId: inventory.inventoryId,
+          snapshotId: inventory.snapshotId,
+          deviceId,
+          operatorId,
+          boxId,
+          attemptId: createEventId(),
+          eventId: createEventId(),
+          attemptedAt,
+          completedAt: now,
+          printing,
+          kind,
+        });
+        if (mounted.current) {
+          setPrintResult(outcome);
+          setWriteFailed(false);
+        }
+        nudge();
+        await refresh();
+      } catch (error) {
+        console.error("station: inventory box print failed", error);
+        if (mounted.current) setWriteFailed(true);
+      } finally {
+        if (mounted.current) setPrintBusy(false);
+      }
+    },
+    [createEventId, deviceId, exec, inventory, now, operatorId, printing, queue, nudge, refresh],
+  );
+
+  useEffect(() => {
+    const box = state.box;
+    if (!box || state.phase !== "closed-pending-print") return;
+    const key = `${box.boxId}:${box.printState}`;
+    if (automaticPrints.current.has(key)) return;
+    automaticPrints.current.add(key);
+    if (box.printState === "pending") {
+      void runPrint(box.boxId);
+      return;
+    }
+    if (box.printState === "printing") {
+      void (async () => {
+        setPrintBusy(true);
+        try {
+          const attempts = await listInventoryBoxPrintAttempts(
+            exec,
+            inventory.inventoryId,
+            inventory.snapshotId,
+            box.boxId,
+          );
+          const interrupted = attempts.findLast((attempt) => attempt.state === "printing");
+          if (interrupted) {
+            await recoverInterruptedInventoryPrint(exec, {
+              inventoryId: inventory.inventoryId,
+              snapshotId: inventory.snapshotId,
+              deviceId,
+              operatorId,
+              boxId: box.boxId,
+              attemptId: interrupted.attemptId,
+              eventId: createEventId(),
+              completedAt: now(),
+            });
+            setPrintResult({
+              state: "failed",
+              errorCode: "persistence_failed",
+              sscc: box.newSscc,
+              quantity: box.itemCount,
+              productionDate: box.productionDate,
+              attemptNumber: interrupted.attemptNumber,
+            });
+          }
+          nudge();
+          await refresh();
+        } catch (error) {
+          console.error("station: inventory print recovery failed", error);
+          if (mounted.current) setWriteFailed(true);
+        } finally {
+          if (mounted.current) setPrintBusy(false);
+        }
+      })();
+    }
+  }, [
+    createEventId,
+    deviceId,
+    exec,
+    inventory.inventoryId,
+    inventory.snapshotId,
+    now,
+    operatorId,
+    nudge,
+    refresh,
+    runPrint,
+    state,
+  ]);
 
   const runCorrection = async (kind: "remove" | "clear") => {
     setBusy(true);
@@ -673,6 +838,29 @@ function RepackInventoryWorkScreen({
       }
     } finally {
       if (mounted.current) setBusy(false);
+    }
+  };
+
+  const findReprint = async () => {
+    const candidate = await findInventoryPrintedBoxBySscc(exec, {
+      inventoryId: inventory.inventoryId,
+      snapshotId: inventory.snapshotId,
+      deviceId,
+      sscc: reprintSscc,
+    });
+    if (mounted.current) {
+      setReprintCandidate(candidate);
+      setReprintError(candidate === null);
+    }
+  };
+
+  const reprint = async () => {
+    if (!reprintCandidate) return;
+    await runPrint(reprintCandidate.boxId, "reprint");
+    if (mounted.current) {
+      setCorrectionsDialog(false);
+      setReprintCandidate(null);
+      setReprintSscc("");
     }
   };
 
@@ -756,6 +944,25 @@ function RepackInventoryWorkScreen({
         new Date(`${productionDate}T00:00:00Z`),
       )
     : t("inventory.work.loadingDate");
+  const printFacts =
+    printResult ??
+    (state.phase === "closed-pending-print" && state.box
+      ? {
+          state: state.box.printState === "failed" ? ("failed" as const) : ("printed" as const),
+          errorCode: printErrorCode(state.box.printErrorCode),
+          sscc: state.box.newSscc,
+          quantity: state.box.itemCount,
+          productionDate: state.box.productionDate,
+          attemptNumber: 0,
+        }
+      : null);
+  const printPanelState =
+    printResult?.state ??
+    (state.phase === "closed-pending-print"
+      ? state.box?.printState === "failed"
+        ? "failed"
+        : "printing"
+      : null);
   return (
     <StationScreen
       title={t("inventory.repack.title")}
@@ -778,46 +985,89 @@ function RepackInventoryWorkScreen({
               ? t("inventory.work.leaveFailed")
               : t("inventory.work.pendingSync", { count: syncState.pending })}
           </span>
-          <Button size="floor" variant="secondary" onClick={() => setDateDialog(true)}>
+          <Button
+            size="floor"
+            variant="secondary"
+            disabled={unresolvedPrint || printBusy}
+            onClick={() => setDateDialog(true)}
+          >
             {t("inventory.work.change")}
           </Button>
           <Button
             size="floor"
             variant="secondary"
-            disabled={!state.box || state.phase !== "scanning"}
-            onClick={() => setCorrectionsDialog(true)}
+            disabled={busy || unresolvedPrint || printBusy}
+            onClick={() => {
+              setReprintError(false);
+              setCorrectionsDialog(true);
+            }}
           >
             {t("inventory.repack.corrections")}
           </Button>
-          <Button size="floor" variant="secondary" disabled={leaving} onClick={() => void leave()}>
+          <Button
+            size="floor"
+            variant="secondary"
+            disabled={leaving || unresolvedPrint || printBusy}
+            onClick={() => void leave()}
+          >
             {leaving ? t("inventory.work.leaving") : t("inventory.work.leave")}
           </Button>
         </div>
         <div className="repack-work-main">
-          <RepackBoxInstrument
-            state={state}
-            result={result}
-            writeFailed={writeFailed}
-            capacity={inventory.boxCapacity}
-            labels={{
-              oldBox: t("inventory.repack.oldBox"),
-              newBox: t("inventory.repack.newBox"),
-              productionDate: t("inventory.work.productionDate"),
-              awaiting: t("inventory.repack.awaiting"),
-              scanning: t("inventory.repack.scanning"),
-              pendingPrint: t("inventory.repack.pendingPrint"),
-              invalidated: t("inventory.repack.invalidated"),
-              oldSelected: t("inventory.repack.oldSelected"),
-              accepted: t("inventory.repack.accepted"),
-              discrepancy: t("inventory.repack.discrepancy"),
-              writeFailed: t("inventory.work.verdict.writeFailed"),
-              position: (position, filled) =>
-                t("inventory.repack.position", {
-                  position,
-                  status: filled ? "занято" : "свободно",
-                }),
-            }}
-          />
+          {printFacts && printPanelState ? (
+            <InventoryBoxPrintRecovery
+              state={printPanelState}
+              facts={printFacts}
+              errorCode={printFacts.errorCode}
+              busy={printBusy}
+              onRetry={() => {
+                if (state.box) void runPrint(state.box.boxId);
+              }}
+              {...(onOpenPrinterSetup ? { onSetup: onOpenPrinterSetup } : {})}
+              labels={{
+                printing: t("inventory.repack.print.printing"),
+                printed: t("inventory.repack.print.printed"),
+                failed: t("inventory.repack.print.failed"),
+                sscc: "SSCC",
+                quantity: t("inventory.repack.print.quantity"),
+                productionDate: t("inventory.work.productionDate"),
+                retry: t("inventory.repack.print.retry"),
+                setup: t("inventory.repack.print.setup"),
+                errors: {
+                  template_missing: t("inventory.repack.print.errors.templateMissing"),
+                  printer_unconfigured: t("inventory.repack.print.errors.printerUnconfigured"),
+                  render_failed: t("inventory.repack.print.errors.renderFailed"),
+                  transport_failed: t("inventory.repack.print.errors.transportFailed"),
+                  persistence_failed: t("inventory.repack.print.errors.persistenceFailed"),
+                },
+              }}
+            />
+          ) : (
+            <RepackBoxInstrument
+              state={state}
+              result={result}
+              writeFailed={writeFailed}
+              capacity={inventory.boxCapacity}
+              labels={{
+                oldBox: t("inventory.repack.oldBox"),
+                newBox: t("inventory.repack.newBox"),
+                productionDate: t("inventory.work.productionDate"),
+                awaiting: t("inventory.repack.awaiting"),
+                scanning: t("inventory.repack.scanning"),
+                pendingPrint: t("inventory.repack.pendingPrint"),
+                invalidated: t("inventory.repack.invalidated"),
+                oldSelected: t("inventory.repack.oldSelected"),
+                accepted: t("inventory.repack.accepted"),
+                discrepancy: t("inventory.repack.discrepancy"),
+                writeFailed: t("inventory.work.verdict.writeFailed"),
+                position: (position, filled) =>
+                  t("inventory.repack.position", {
+                    position,
+                    status: filled ? "занято" : "свободно",
+                  }),
+              }}
+            />
+          )}
           <aside className="inventory-work-recent">
             <InventoryProgressView
               progress={EMPTY_PROGRESS}
@@ -860,10 +1110,28 @@ function RepackInventoryWorkScreen({
           busy={busy}
           onRemoveLast={() => void runCorrection("remove")}
           onClear={() => void runCorrection("clear")}
+          reprintSscc={reprintSscc}
+          onReprintSsccChange={(value) => {
+            setReprintSscc(value);
+            setReprintCandidate(null);
+            setReprintError(false);
+          }}
+          onFindReprint={() => void findReprint()}
+          reprintCandidate={reprintCandidate}
+          reprintError={reprintError}
+          onReprint={() => void reprint()}
           labels={{
             removeLast: t("inventory.repack.removeLast"),
             clear: t("inventory.repack.clear"),
             empty: t("inventory.repack.empty"),
+            reprintTitle: t("inventory.repack.reprint.title"),
+            reprintSscc: t("inventory.repack.reprint.sscc"),
+            findReprint: t("inventory.repack.reprint.find"),
+            reprintCandidate: t("inventory.repack.reprint.candidate"),
+            reprintMissing: t("inventory.repack.reprint.missing"),
+            reprint: t("inventory.repack.reprint.action"),
+            quantity: t("inventory.repack.print.quantity"),
+            productionDate: t("inventory.work.productionDate"),
           }}
         />
       </FullScreenDialog>

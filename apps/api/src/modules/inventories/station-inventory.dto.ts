@@ -115,6 +115,42 @@ const repackMutationOpenApiSchema: SchemaObject = {
         changedAt: { type: "string", format: "date-time" },
       },
     },
+    ...["print-outcome", "reprint-outcome"].map((action): SchemaObject => ({
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "action",
+        "boxId",
+        "sscc",
+        "attemptId",
+        "attemptNumber",
+        "result",
+        "errorCode",
+        "attemptedAt",
+        "completedAt",
+      ],
+      properties: {
+        action: { type: "string", enum: [action] },
+        boxId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+        sscc: { type: "string", pattern: "^[0-9]{18}$" },
+        attemptId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+        attemptNumber: { type: "integer", minimum: 1 },
+        result: { type: "string", enum: ["printed", "failed"] },
+        errorCode: {
+          type: "string",
+          nullable: true,
+          enum: [
+            "template_missing",
+            "printer_unconfigured",
+            "render_failed",
+            "transport_failed",
+            "persistence_failed",
+          ],
+        },
+        attemptedAt: { type: "string", format: "date-time" },
+        completedAt: { type: "string", format: "date-time" },
+      },
+    })),
   ],
 };
 
@@ -368,6 +404,9 @@ export interface StationInventoryManifest {
   readonly codeCount: number;
   readonly productId: string;
   readonly productName: string;
+  readonly productPrintName: string | null;
+  readonly egaisCode: string | null;
+  readonly shelfLifeDays: number | null;
   readonly gtin14: string;
   /** Frozen product aggregation capacity used by the offline repack reducer. */
   readonly boxCapacity: number;
@@ -474,6 +513,9 @@ const storedStationInventoryManifestSchema = z
     codeCount: z.number().int().nonnegative(),
     productId: z.uuid(),
     productName: z.string(),
+    productPrintName: z.string().min(1).nullable(),
+    egaisCode: z.string().min(1).nullable(),
+    shelfLifeDays: z.number().int().positive().nullable(),
     gtin14: z.string().regex(/^[0-9]{14}$/),
     boxCapacity: z.number().int().positive(),
     mode: z.enum(["check", "repack"]),
@@ -542,6 +584,9 @@ export function parseLegacyStationInventoryManifest(
   }
   const upgraded = parseStationInventoryManifest({
     ...record,
+    productPrintName: record.productPrintName ?? null,
+    egaisCode: record.egaisCode ?? null,
+    shelfLifeDays: record.shelfLifeDays ?? null,
     snapshotFixedAt: "2000-01-01T00:00:00.000Z",
     contentDigest: "0".repeat(64),
   });
@@ -670,6 +715,9 @@ export const stationInventoryManifestOpenApiSchema: SchemaObject = {
     "codeCount",
     "productId",
     "productName",
+    "productPrintName",
+    "egaisCode",
+    "shelfLifeDays",
     "gtin14",
     "boxCapacity",
     "mode",
@@ -691,6 +739,9 @@ export const stationInventoryManifestOpenApiSchema: SchemaObject = {
     codeCount: { type: "integer", minimum: 0 },
     productId: { type: "string", format: "uuid" },
     productName: { type: "string" },
+    productPrintName: { type: "string", nullable: true },
+    egaisCode: { type: "string", nullable: true },
+    shelfLifeDays: { type: "integer", minimum: 1, nullable: true },
     gtin14: { type: "string", pattern: "^[0-9]{14}$" },
     boxCapacity: { type: "integer", minimum: 1 },
     mode: { type: "string", enum: ["check", "repack"] },

@@ -688,6 +688,70 @@ export const inventoryRepackJournal = sqliteTable(
   ],
 );
 
+/** Append-only local initial-print and reprint attempts; one physical job may be active per box. */
+export const inventoryRepackPrintAttempts = sqliteTable(
+  "inventory_repack_print_attempts",
+  {
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    attemptId: text("attempt_id").notNull(),
+    boxId: text("box_id").notNull(),
+    kind: text("kind").notNull(),
+    attemptNumber: integer("attempt_number").notNull(),
+    state: text("state").notNull(),
+    errorCode: text("error_code"),
+    attemptedAt: text("attempted_at").notNull(),
+    completedAt: text("completed_at"),
+    eventId: text("event_id"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.inventoryId, table.snapshotId, table.attemptId] }),
+    uniqueIndex("inventory_repack_print_attempt_number_uq").on(
+      table.inventoryId,
+      table.snapshotId,
+      table.boxId,
+      table.attemptNumber,
+    ),
+    index("inventory_repack_print_attempt_box_idx").on(
+      table.inventoryId,
+      table.snapshotId,
+      table.boxId,
+      table.attemptNumber,
+    ),
+  ],
+);
+
+/** One-statement print finalization, terminal-pointer release and sync publication input. */
+export const inventoryRepackPrintJournal = sqliteTable(
+  "inventory_repack_print_journal",
+  {
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    attemptId: text("attempt_id").notNull(),
+    boxId: text("box_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    eventId: text("event_id").notNull(),
+    deviceSequence: integer("device_sequence").notNull(),
+    operatorId: text("operator_id").notNull(),
+    kind: text("kind").notNull(),
+    attemptNumber: integer("attempt_number").notNull(),
+    result: text("result").notNull(),
+    errorCode: text("error_code"),
+    attemptedAt: text("attempted_at").notNull(),
+    completedAt: text("completed_at").notNull(),
+    payloadJson: text("payload_json").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.inventoryId, table.snapshotId, table.attemptId] }),
+    uniqueIndex("inventory_repack_print_journal_event_uq").on(
+      table.inventoryId,
+      table.snapshotId,
+      table.eventId,
+    ),
+    check("inventory_repack_print_journal_payload_check", sql`json_valid(${table.payloadJson})`),
+  ],
+);
+
 /** Recoverable local/remote claim conflicts for one inventory snapshot. */
 export const inventoryConflictsMirror = sqliteTable(
   "inventory_conflicts_mirror",

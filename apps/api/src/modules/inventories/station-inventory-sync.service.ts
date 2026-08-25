@@ -1049,6 +1049,11 @@ export class StationInventorySyncService {
         capacity: schema.inventoryRepackBoxes.capacity,
         productionDate: schema.inventoryRepackBoxes.productionDate,
         oldSsccContext: schema.inventoryRepackBoxes.oldSsccContext,
+        newSscc: schema.inventoryRepackBoxes.newSscc,
+        printState: schema.inventoryRepackBoxes.printState,
+        printAttemptCount: schema.inventoryRepackBoxes.printAttemptCount,
+        printErrorCode: schema.inventoryRepackBoxes.printErrorCode,
+        printedAt: schema.inventoryRepackBoxes.printedAt,
       })
       .from(schema.inventoryRepackBoxes)
       .where(
@@ -1062,6 +1067,96 @@ export class StationInventorySyncService {
     if (!box || box.ownerDeviceId !== deviceId) {
       throw new ConflictException({ code: "INVENTORY_REPACK_BOX_NOT_OWNED" });
     }
+
+    if (mutation.action === "print-outcome" || mutation.action === "reprint-outcome") {
+      if (box.state !== "closed") {
+        throw new ConflictException({ code: "INVENTORY_REPACK_BOX_NOT_CLOSED" });
+      }
+      if (
+        box.capacity !== inventory.capacity ||
+        box.productionDate !== event.activeProductionDate
+      ) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_FROZEN_FACT_MISMATCH" });
+      }
+      if (mutation.sscc !== box.newSscc) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_PRINT_SSCC_MISMATCH" });
+      }
+      if (Date.parse(mutation.completedAt) < Date.parse(mutation.attemptedAt)) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_PRINT_TIME_INVALID" });
+      }
+      if (mutation.attemptNumber !== box.printAttemptCount + 1) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_PRINT_ATTEMPT_SEQUENCE_INVALID" });
+      }
+      if (
+        (mutation.action === "print-outcome" &&
+          box.printState !== "pending" &&
+          box.printState !== "failed") ||
+        (mutation.action === "reprint-outcome" && box.printState !== "printed")
+      ) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_PRINT_STATE_INVALID" });
+      }
+      const [composition] = await tx
+        .select({
+          count: sql<number>`count(*)::int`,
+          minimumDate: sql<string | null>`min(${schema.inventoryRepackItems.productionDate})`,
+          maximumDate: sql<string | null>`max(${schema.inventoryRepackItems.productionDate})`,
+        })
+        .from(schema.inventoryRepackItems)
+        .where(
+          and(
+            eq(schema.inventoryRepackItems.tenantId, tenantId),
+            eq(schema.inventoryRepackItems.inventoryId, inventoryId),
+            eq(schema.inventoryRepackItems.boxId, box.id),
+            isNull(schema.inventoryRepackItems.removedAt),
+          ),
+        );
+      if (
+        !composition ||
+        composition.count === 0 ||
+        composition.count > box.capacity ||
+        composition.minimumDate !== box.productionDate ||
+        composition.maximumDate !== box.productionDate
+      ) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_PRINT_COMPOSITION_INVALID" });
+      }
+      const [reusedAttempt] = await tx
+        .select({ id: schema.inventoryRepackPrintAttempts.id })
+        .from(schema.inventoryRepackPrintAttempts)
+        .where(eq(schema.inventoryRepackPrintAttempts.id, mutation.attemptId));
+      if (reusedAttempt) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_PRINT_ATTEMPT_REUSED" });
+      }
+      await tx.insert(schema.inventoryRepackPrintAttempts).values({
+        id: mutation.attemptId,
+        tenantId,
+        inventoryId,
+        boxId: box.id,
+        sourceEventId: event.eventId,
+        kind: mutation.action === "print-outcome" ? "initial" : "reprint",
+        attemptNumber: mutation.attemptNumber,
+        result: mutation.result,
+        errorCode: mutation.errorCode,
+        attemptedAt: new Date(mutation.attemptedAt),
+        completedAt: new Date(mutation.completedAt),
+      });
+      const isInitial = mutation.action === "print-outcome";
+      await tx
+        .update(schema.inventoryRepackBoxes)
+        .set({
+          printState: isInitial ? mutation.result : "printed",
+          printAttemptCount: mutation.attemptNumber,
+          printErrorCode:
+            isInitial && mutation.result === "failed" ? mutation.errorCode?.toUpperCase() : null,
+          printedAt:
+            isInitial && mutation.result === "printed"
+              ? new Date(mutation.completedAt)
+              : box.printedAt,
+          updatedAt: new Date(mutation.completedAt),
+        })
+        .where(eq(schema.inventoryRepackBoxes.id, box.id));
+      return;
+    }
+
     if (box.state !== "open") {
       throw new ConflictException({ code: "INVENTORY_REPACK_BOX_NOT_OPEN" });
     }

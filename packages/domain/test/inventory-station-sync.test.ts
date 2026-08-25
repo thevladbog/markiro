@@ -106,6 +106,64 @@ describe("inventory station sync contract", () => {
     ).toThrow("Invalid inventory event batch");
   });
 
+  it("binds initial print and reprint outcomes to one box and exact SSCC", () => {
+    const printPayload = {
+      ...payload,
+      sequenceCeiling: 8,
+      events: [
+        {
+          ...event,
+          eventId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          deviceSequence: 8,
+          kind: "repack_action" as const,
+          normalizedIdentity: "repack_action:print-outcome:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb:1",
+          codeHash: null,
+          canonicalRaw: null,
+          localVerdict: "repack-action" as const,
+          repack: {
+            action: "print-outcome" as const,
+            boxId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            sscc: "046006820000621519",
+            attemptId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            attemptNumber: 1,
+            result: "printed" as const,
+            errorCode: null,
+            attemptedAt: "2026-08-25T10:00:00.000Z",
+            completedAt: "2026-08-25T10:00:01.000Z",
+          },
+        },
+      ],
+    };
+    const parsed = parseInventoryEventBatch({
+      batchId: "print-1",
+      payloadDigest: inventoryEventBatchDigest(printPayload),
+      ...printPayload,
+    });
+    expect(parsed.events[0]?.repack).toEqual(printPayload.events[0]?.repack);
+    expect(
+      inventoryEventBatchDigest({
+        ...printPayload,
+        events: [
+          {
+            ...printPayload.events[0],
+            repack: { ...printPayload.events[0]!.repack, sscc: "046006820000621502" },
+          },
+        ],
+      }),
+    ).not.toBe(inventoryEventBatchDigest(printPayload));
+    expect(() =>
+      inventoryEventBatchDigest({
+        ...printPayload,
+        events: [
+          {
+            ...printPayload.events[0],
+            repack: { ...printPayload.events[0]!.repack, attemptNumber: 2 },
+          },
+        ],
+      }),
+    ).toThrow("Invalid inventory event batch payload");
+  });
+
   it("rejects repack actions attached to the wrong immutable event kind", () => {
     const invalid = {
       ...payload,

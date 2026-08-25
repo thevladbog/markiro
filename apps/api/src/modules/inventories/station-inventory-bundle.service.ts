@@ -273,6 +273,10 @@ export class StationInventoryBundleService {
         boxLabelTemplateId: schema.inventories.boxLabelTemplateId,
         activeSnapshotId: schema.inventories.activeSnapshotId,
         stationManifest: schema.inventories.stationManifest,
+        authoritativeProductName: schema.products.name,
+        authoritativeProductPrintName: schema.products.printName,
+        authoritativeEgaisCode: schema.products.egaisCode,
+        authoritativeShelfLifeDays: schema.products.shelfLifeDays,
         startedAt: schema.inventories.startedAt,
         snapshotId: schema.inventorySnapshots.id,
         snapshotRevision: schema.inventorySnapshots.revision,
@@ -292,6 +296,13 @@ export class StationInventoryBundleService {
           eq(schema.inventorySnapshots.tenantId, schema.inventories.tenantId),
           eq(schema.inventorySnapshots.inventoryId, schema.inventories.id),
           eq(schema.inventorySnapshots.id, schema.inventories.activeSnapshotId),
+        ),
+      )
+      .leftJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.inventories.tenantId),
+          eq(schema.products.id, schema.inventories.productId),
         ),
       );
   }

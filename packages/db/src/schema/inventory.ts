@@ -1239,6 +1239,78 @@ export const inventoryRepackItems = pgTable(
   ],
 );
 
+/** Append-only authoritative initial-label and exact-SSCC reprint outcomes. */
+export const inventoryRepackPrintAttempts = pgTable(
+  "inventory_repack_print_attempts",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: tenantId(),
+    inventoryId: uuid("inventory_id").notNull(),
+    boxId: uuid("box_id").notNull(),
+    sourceEventId: uuid("source_event_id").notNull(),
+    kind: text("kind").notNull(),
+    attemptNumber: integer("attempt_number").notNull(),
+    result: text("result").notNull(),
+    errorCode: text("error_code"),
+    attemptedAt: timestamp("attempted_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("inventory_repack_print_attempts_tenant_id_inventory_uq").on(
+      table.tenantId,
+      table.id,
+      table.inventoryId,
+    ),
+    unique("inventory_repack_print_attempts_box_number_uq").on(
+      table.tenantId,
+      table.inventoryId,
+      table.boxId,
+      table.attemptNumber,
+    ),
+    foreignKey({
+      name: "inventory_repack_print_attempts_tenant_box_fk",
+      columns: [table.tenantId, table.boxId, table.inventoryId],
+      foreignColumns: [
+        inventoryRepackBoxes.tenantId,
+        inventoryRepackBoxes.id,
+        inventoryRepackBoxes.inventoryId,
+      ],
+    }),
+    foreignKey({
+      name: "inventory_repack_print_attempts_tenant_event_fk",
+      columns: [table.tenantId, table.inventoryId, table.sourceEventId],
+      foreignColumns: [
+        inventoryScanEvents.tenantId,
+        inventoryScanEvents.inventoryId,
+        inventoryScanEvents.eventId,
+      ],
+    }),
+    check(
+      "inventory_repack_print_attempts_kind_check",
+      sql`${table.kind} in ('initial', 'reprint')`,
+    ),
+    check(
+      "inventory_repack_print_attempts_result_check",
+      sql`(${table.result} = 'printed' and ${table.errorCode} is null)
+        or (${table.result} = 'failed'
+          and ${table.errorCode} in ('template_missing', 'printer_unconfigured',
+            'render_failed', 'transport_failed', 'persistence_failed'))`,
+    ),
+    check("inventory_repack_print_attempts_number_check", sql`${table.attemptNumber} > 0`),
+    check(
+      "inventory_repack_print_attempts_time_check",
+      sql`${table.completedAt} >= ${table.attemptedAt}`,
+    ),
+    index("inventory_repack_print_attempts_box_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.boxId,
+      table.attemptNumber,
+    ),
+  ],
+);
+
 /** Append-only projection correction with exact actor, target and revision evidence. */
 export const inventoryCorrections = pgTable(
   "inventory_corrections",

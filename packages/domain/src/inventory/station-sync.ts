@@ -15,6 +15,24 @@ const uuidSchema = z
 const hashSchema = z.string().regex(/^[0-9a-f]{64}$/);
 const civilDateSchema = z.iso.date();
 const instantSchema = z.iso.datetime({ offset: true });
+const inventoryPrintErrorSchema = z.enum([
+  "template_missing",
+  "printer_unconfigured",
+  "render_failed",
+  "transport_failed",
+  "persistence_failed",
+]);
+
+const inventoryPrintOutcomeShape = {
+  boxId: uuidSchema,
+  sscc: z.string().regex(/^[0-9]{18}$/),
+  attemptId: uuidSchema,
+  attemptNumber: z.number().int().positive().safe(),
+  result: z.enum(["printed", "failed"]),
+  errorCode: inventoryPrintErrorSchema.nullable(),
+  attemptedAt: instantSchema,
+  completedAt: instantSchema,
+};
 
 export const inventoryRepackMutationSchema = z.discriminatedUnion("action", [
   z.strictObject({
@@ -54,6 +72,8 @@ export const inventoryRepackMutationSchema = z.discriminatedUnion("action", [
     productionDate: civilDateSchema,
     changedAt: instantSchema,
   }),
+  z.strictObject({ action: z.literal("print-outcome"), ...inventoryPrintOutcomeShape }),
+  z.strictObject({ action: z.literal("reprint-outcome"), ...inventoryPrintOutcomeShape }),
 ]);
 
 export type InventoryRepackMutation = z.infer<typeof inventoryRepackMutationSchema>;
@@ -99,7 +119,21 @@ export const inventoryEventSchema = z
         event.canonicalRaw === null &&
         event.localVerdict === "repack-action" &&
         event.normalizedIdentity === `repack_action:${action}:${event.repack?.boxId}`);
-    if (!valid) {
+    const printAction = action === "print-outcome" || action === "reprint-outcome";
+    const printRepack =
+      repack?.action === "print-outcome" || repack?.action === "reprint-outcome" ? repack : null;
+    const validPrint =
+      printAction &&
+      printRepack !== null &&
+      event.kind === "repack_action" &&
+      event.codeHash === null &&
+      event.canonicalRaw === null &&
+      event.localVerdict === "repack-action" &&
+      event.normalizedIdentity ===
+        `repack_action:${action}:${printRepack.boxId}:${printRepack.attemptNumber}` &&
+      ((printRepack.result === "printed" && printRepack.errorCode === null) ||
+        (printRepack.result === "failed" && printRepack.errorCode !== null));
+    if (!valid && !validPrint) {
       context.addIssue({ code: "custom", path: ["repack"], message: "repack mutation mismatch" });
     }
   });

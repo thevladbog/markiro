@@ -195,6 +195,9 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
       tenantId,
       gtin14: GTIN14,
       name: "Inventory Water",
+      printName: "Water 0.5 l",
+      egaisCode: "0101234567890123456",
+      shelfLifeDays: 184,
       boxCapacity: 12,
       status: "active",
     });
@@ -340,6 +343,9 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
       codeCount: 10,
       productId: fixture.productId,
       productName: "Inventory Water",
+      productPrintName: "Water 0.5 l",
+      egaisCode: "0101234567890123456",
+      shelfLifeDays: 184,
       gtin14: GTIN14,
       boxCapacity: 12,
       mode: "check",
@@ -438,7 +444,13 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
 
     await db
       .update(schema.products)
-      .set({ boxCapacity: 48 })
+      .set({
+        boxCapacity: 48,
+        name: "Edited after start",
+        printName: "Edited print name",
+        egaisCode: null,
+        shelfLifeDays: 1,
+      })
       .where(
         and(
           eq(schema.products.tenantId, fixture.tenantId),
@@ -447,6 +459,12 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
       );
     const duplicate = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
     expect(duplicate.body.boxCapacity).toBe(12);
+    expect(duplicate.body).toMatchObject({
+      productName: "Inventory Water",
+      productPrintName: "Water 0.5 l",
+      egaisCode: "0101234567890123456",
+      shelfLifeDays: 184,
+    });
   });
 
   it("requires a positive product box capacity before freezing either inventory mode", async () => {

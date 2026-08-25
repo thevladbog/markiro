@@ -30,7 +30,10 @@ const manifest: StationInventoryBundleManifest & { mode: "repack" } = {
   codeCount: 1,
   productId: "55555555-5555-4555-8555-555555555555",
   productName: "Пиво светлое 0,45 л",
+  productPrintName: "Пиво светлое 0,45 л",
   gtin14: GTIN,
+  egaisCode: "200000000001",
+  shelfLifeDays: 180,
   boxCapacity: 20,
   mode: "repack",
   lineId: "66666666-6666-4666-8666-666666666666",
@@ -170,5 +173,97 @@ describe("repack inventory work screen", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
       count: 2,
     });
+  });
+
+  it("prints a full box automatically, pauses product scanning, and exposes no skip step", async () => {
+    const db = new DatabaseSync(":memory:");
+    const exec = makeExec(db);
+    await applyMigrations(exec);
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'ИНВ-Р-42', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    db.prepare(
+      `INSERT INTO sscc_pool
+         (issuer_prefix, extension_digit, from_serial, to_serial, next_serial)
+       VALUES ('460068200', 0, 1, 100, 1)`,
+    ).run();
+    const km = canonicalizeKm(`01${GTIN}21REPACK-PRINT`);
+    db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+          source_production_date, parent_sscc, expected, protected)
+       VALUES (?, ?, ?, ?, ?, 'INTRODUCED', '2026-08-19', ?, 1, 0)`,
+    ).run(SNAPSHOT_ID, kmHash(km), km.raw, GTIN, km.serial, OLD_SSCC);
+    const scan = scanner();
+    let finishPrint: (() => void) | undefined;
+    const print = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishPrint = resolve;
+        }),
+    );
+
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={{ ...manifest, boxCapacity: 1 }}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+        printing={{
+          target: { kind: "usb", printer: "Zebra" },
+          language: "zpl",
+          print,
+        }}
+        createEventId={() => crypto.randomUUID()}
+        now={() => "2026-08-25T10:00:01.000Z"}
+      />,
+    );
+
+    await waitFor(() => expect(scan.active()).toBe(true));
+    scan.emit(OLD_SSCC);
+    await screen.findByText("Старый короб выбран");
+    scan.emit(km.raw);
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    expect(scan.active()).toBe(false);
+    expect(screen.queryByText(/пропустить/i)).toBeNull();
+    expect(screen.queryByText(/следующий короб/i)).toBeNull();
+
+    await act(async () => finishPrint?.());
+    expect(await screen.findByText("Этикетка напечатана")).toBeDefined();
+    await waitFor(() => expect(scan.active()).toBe(true));
+    expect(db.prepare("SELECT print_state FROM inventory_repack_boxes_mirror").get()).toEqual({
+      print_state: "printed",
+    });
+    expect(
+      db.prepare("SELECT COUNT(*) AS count FROM inventory_repack_print_attempts").get(),
+    ).toEqual({ count: 1 });
+
+    const printedSscc = String(
+      db.prepare("SELECT new_sscc FROM inventory_repack_boxes_mirror").get()?.new_sscc,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    await screen.findByLabelText("SSCC короба");
+    await waitFor(() => expect(scan.active()).toBe(true));
+    scan.emit(`(00)${printedSscc}`);
+    expect(await screen.findByDisplayValue(printedSscc)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить короб" }));
+    expect(await screen.findByText("Перепечатать этот SSCC")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку" }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
+    expect(scan.active()).toBe(false);
+    await act(async () => finishPrint?.());
+    await waitFor(() =>
+      expect(
+        db.prepare("SELECT COUNT(*) AS count FROM inventory_repack_print_attempts").get(),
+      ).toEqual({ count: 2 }),
+    );
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(DISTINCT box.new_sscc) AS count FROM inventory_repack_print_attempts attempt JOIN inventory_repack_boxes_mirror box ON box.box_id = attempt.box_id",
+        )
+        .get(),
+    ).toEqual({ count: 1 });
   });
 });

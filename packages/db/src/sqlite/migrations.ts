@@ -2181,6 +2181,110 @@ export const STATION_MIGRATIONS: string[] = [
                )
           );
      END;`,
+  `CREATE TABLE IF NOT EXISTS inventory_repack_print_attempts (
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     attempt_id TEXT NOT NULL,
+     box_id TEXT NOT NULL,
+     kind TEXT NOT NULL CHECK (kind IN ('initial', 'reprint')),
+     attempt_number INTEGER NOT NULL CHECK (attempt_number > 0),
+     state TEXT NOT NULL CHECK (state IN ('printing', 'printed', 'failed')),
+     error_code TEXT,
+     attempted_at TEXT NOT NULL,
+     completed_at TEXT,
+     event_id TEXT,
+     PRIMARY KEY (inventory_id, snapshot_id, attempt_id),
+     UNIQUE (inventory_id, snapshot_id, box_id, attempt_number),
+     CHECK ((state = 'failed' AND error_code IS NOT NULL)
+       OR (state <> 'failed' AND error_code IS NULL)),
+     CHECK ((state = 'printing' AND completed_at IS NULL)
+       OR (state <> 'printing' AND completed_at IS NOT NULL))
+   );
+   CREATE INDEX IF NOT EXISTS inventory_repack_print_attempt_box_idx
+     ON inventory_repack_print_attempts
+        (inventory_id, snapshot_id, box_id, attempt_number);
+   CREATE UNIQUE INDEX IF NOT EXISTS inventory_repack_print_one_active_uq
+     ON inventory_repack_print_attempts (inventory_id, snapshot_id, box_id)
+     WHERE state = 'printing';`,
+  `CREATE TABLE IF NOT EXISTS inventory_repack_print_journal (
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     attempt_id TEXT NOT NULL,
+     box_id TEXT NOT NULL,
+     device_id TEXT NOT NULL,
+     event_id TEXT NOT NULL,
+     device_sequence INTEGER NOT NULL,
+     operator_id TEXT NOT NULL,
+     kind TEXT NOT NULL CHECK (kind IN ('initial', 'reprint')),
+     attempt_number INTEGER NOT NULL CHECK (attempt_number > 0),
+     result TEXT NOT NULL CHECK (result IN ('printed', 'failed')),
+     error_code TEXT,
+     attempted_at TEXT NOT NULL,
+     completed_at TEXT NOT NULL,
+     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+     PRIMARY KEY (inventory_id, snapshot_id, attempt_id),
+     UNIQUE (inventory_id, snapshot_id, event_id),
+     CHECK ((result = 'failed' AND error_code IS NOT NULL)
+       OR (result = 'printed' AND error_code IS NULL))
+   );`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_repack_claim_print_v1
+     AFTER INSERT ON inventory_repack_print_attempts
+     BEGIN
+       UPDATE inventory_repack_boxes_mirror
+          SET print_state = 'printing', print_attempt_count = NEW.attempt_number,
+              print_error_code = NULL, updated_at = NEW.attempted_at
+        WHERE NEW.kind = 'initial'
+          AND inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND box_id = NEW.box_id AND state = 'closed'
+          AND print_state IN ('pending', 'failed');
+       SELECT CASE WHEN NEW.kind = 'initial' AND changes() <> 1
+         THEN RAISE(ABORT, 'inventory print claim rejected') END;
+       SELECT CASE WHEN NEW.kind = 'reprint' AND NOT EXISTS (
+         SELECT 1 FROM inventory_repack_boxes_mirror
+          WHERE inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+            AND box_id = NEW.box_id AND state = 'closed' AND print_state = 'printed'
+       ) THEN RAISE(ABORT, 'inventory reprint claim rejected') END;
+     END;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_repack_apply_print_v1
+     AFTER INSERT ON inventory_repack_print_journal
+     BEGIN
+       UPDATE inventory_repack_print_attempts
+          SET state = NEW.result, error_code = NEW.error_code,
+              completed_at = NEW.completed_at, event_id = NEW.event_id
+        WHERE inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND attempt_id = NEW.attempt_id AND box_id = NEW.box_id
+          AND kind = NEW.kind AND attempt_number = NEW.attempt_number
+          AND state = 'printing';
+       SELECT CASE WHEN changes() <> 1
+         THEN RAISE(ABORT, 'inventory print finalization rejected') END;
+       UPDATE inventory_repack_boxes_mirror
+          SET print_state = CASE WHEN NEW.result = 'printed' THEN 'printed' ELSE 'failed' END,
+              print_error_code = NEW.error_code,
+              printed_at = CASE WHEN NEW.result = 'printed' THEN NEW.completed_at ELSE NULL END,
+              updated_at = NEW.completed_at
+        WHERE NEW.kind = 'initial'
+          AND inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND box_id = NEW.box_id AND state = 'closed' AND print_state = 'printing';
+       SELECT CASE WHEN NEW.kind = 'initial' AND changes() <> 1
+         THEN RAISE(ABORT, 'inventory print box finalization rejected') END;
+       UPDATE inventory_terminal_state
+          SET open_repack_box_id = NULL, updated_at = NEW.completed_at
+        WHERE NEW.kind = 'initial' AND NEW.result = 'printed'
+          AND inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND device_id = NEW.device_id AND open_repack_box_id = NEW.box_id;
+       INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
+          scanned_at, kind, normalized_identity, code_hash, raw_payload,
+          active_production_date, local_verdict)
+       SELECT NEW.inventory_id, NEW.snapshot_id, NEW.event_id, NEW.device_id,
+              NEW.device_sequence, NEW.operator_id, NEW.completed_at, 'repack_action',
+              json_extract(NEW.payload_json, '$.normalizedIdentity'), NULL, NULL,
+              json_extract(NEW.payload_json, '$.activeProductionDate'), 'repack-action';
+       INSERT INTO inventory_outbox
+         (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+       VALUES (NEW.inventory_id, NEW.snapshot_id, NEW.event_id, NEW.device_sequence,
+               NEW.payload_json, NEW.completed_at);
+     END;`,
 ];
 
 export interface StationMigrationEntry {

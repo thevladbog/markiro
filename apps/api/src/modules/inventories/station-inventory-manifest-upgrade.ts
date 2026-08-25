@@ -22,6 +22,10 @@ export interface StoredStationManifestFacts {
   boxLabelTemplateId: string | null;
   activeSnapshotId: string | null;
   stationManifest: unknown;
+  authoritativeProductName: string | null;
+  authoritativeProductPrintName: string | null;
+  authoritativeEgaisCode: string | null;
+  authoritativeShelfLifeDays: number | null;
   snapshotId: string | null;
   snapshotRevision: number | null;
   snapshotFixedAt: Date | null;
@@ -42,6 +46,29 @@ function tryParseCurrentManifest(value: unknown): StationInventoryManifest | nul
   } catch {
     return null;
   }
+}
+
+function tryUpgradeFrozenPrintFacts(
+  value: unknown,
+  facts: StoredStationManifestFacts,
+): StationInventoryManifest | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (
+    "productPrintName" in record ||
+    "egaisCode" in record ||
+    "shelfLifeDays" in record ||
+    !("snapshotFixedAt" in record) ||
+    !("contentDigest" in record)
+  ) {
+    return null;
+  }
+  return tryParseCurrentManifest({
+    ...record,
+    productPrintName: facts.authoritativeProductPrintName,
+    egaisCode: facts.authoritativeEgaisCode,
+    shelfLifeDays: facts.authoritativeShelfLifeDays,
+  });
 }
 
 function declaredCodeCount(facts: StoredStationManifestFacts): number | null {
@@ -98,7 +125,10 @@ export async function resolveStoredStationInventoryManifest(
   const codeCount = declaredCodeCount(facts);
   if (codeCount === null) throw new Error("Invalid stored station inventory manifest anchors");
 
-  const current = tryParseCurrentManifest(facts.stationManifest);
+  const storedCurrent = tryParseCurrentManifest(facts.stationManifest);
+  const upgradedPrintFacts =
+    storedCurrent === null ? tryUpgradeFrozenPrintFacts(facts.stationManifest, facts) : null;
+  const current = storedCurrent ?? upgradedPrintFacts;
   let manifest: LegacyStationInventoryManifest;
   if (current !== null) {
     if (
@@ -144,11 +174,29 @@ export async function resolveStoredStationInventoryManifest(
     if (current.contentDigest !== contentDigest) {
       throw new Error("Invalid stored station inventory manifest content digest");
     }
+    if (upgradedPrintFacts !== null) {
+      await executor
+        .update(schema.inventories)
+        .set({ stationManifest: upgradedPrintFacts, updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.inventories.tenantId, tenantId),
+            eq(schema.inventories.id, facts.id),
+            eq(schema.inventories.status, "running"),
+            eq(schema.inventories.activeSnapshotId, upgradedPrintFacts.snapshotId),
+            eq(schema.inventories.stationManifest, facts.stationManifest),
+          ),
+        );
+    }
     return current;
   }
 
   const upgraded = parseStationInventoryManifest({
     ...manifest,
+    productName: facts.authoritativeProductName,
+    productPrintName: facts.authoritativeProductPrintName,
+    egaisCode: facts.authoritativeEgaisCode,
+    shelfLifeDays: facts.authoritativeShelfLifeDays,
     snapshotFixedAt: facts.snapshotFixedAt.toISOString(),
     contentDigest,
   });

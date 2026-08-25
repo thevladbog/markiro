@@ -40,6 +40,7 @@ export interface InventoryRepackBoxView {
   lastItemId: string | null;
   state: "open" | "closed" | "invalidated";
   printState: "not_ready" | "pending" | "printing" | "printed" | "failed";
+  printErrorCode: string | null;
   ownerDeviceId: string;
 }
 
@@ -81,6 +82,7 @@ interface BoxRow {
   production_date: string;
   state: "open" | "closed" | "invalidated";
   print_state: InventoryRepackBoxView["printState"];
+  print_error_code: string | null;
   item_count: number;
   last_item_id: string | null;
 }
@@ -140,7 +142,7 @@ async function ownedBox(
 ): Promise<BoxRow | null> {
   const rows = await exec.all<BoxRow>(
     `SELECT box.box_id, box.old_sscc_context, box.new_sscc, box.owner_device_id,
-            box.capacity, box.production_date, box.state, box.print_state,
+            box.capacity, box.production_date, box.state, box.print_state, box.print_error_code,
             (SELECT COUNT(*) FROM inventory_repack_items_mirror item
               WHERE item.inventory_id = box.inventory_id AND item.snapshot_id = box.snapshot_id
                 AND item.box_id = box.box_id AND item.removed_at IS NULL) AS item_count,
@@ -168,6 +170,7 @@ function view(row: BoxRow): InventoryRepackBoxView {
     lastItemId: row.last_item_id,
     state: row.state,
     printState: row.print_state,
+    printErrorCode: row.print_error_code,
     ownerDeviceId: row.owner_device_id,
   };
 }

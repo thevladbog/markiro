@@ -1280,6 +1280,110 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         .where(eq(schema.inventoryRepackBoxes.id, foreignReservationBoxId)),
     ).toEqual([]);
 
+    const closedAt = "2026-08-25T12:00:05.000Z";
+    const close = repackEvent("a", {
+      scannedAt: closedAt,
+      kind: "repack_action",
+      normalizedIdentity: `repack_action:close-incomplete:${boxAId}`,
+      codeHash: null,
+      canonicalRaw: null,
+      localVerdict: "repack-action",
+      repack: { action: "close-incomplete", boxId: boxAId, changedAt: closedAt },
+    });
+    await service.ingest(
+      tenantId,
+      deviceAId,
+      repackInventoryId,
+      repackBatch("repack-close-for-print", [close], 0),
+    );
+
+    const printEvent = (
+      action: "print-outcome" | "reprint-outcome",
+      attemptNumber: number,
+      result: "printed" | "failed",
+    ) => {
+      const completedAt = `2026-08-25T12:00:0${5 + attemptNumber}.000Z`;
+      return repackEvent("a", {
+        scannedAt: completedAt,
+        kind: "repack_action",
+        normalizedIdentity: `repack_action:${action}:${boxAId}:${attemptNumber}`,
+        codeHash: null,
+        canonicalRaw: null,
+        localVerdict: "repack-action",
+        repack: {
+          action,
+          boxId: boxAId,
+          sscc: ssccA,
+          attemptId: randomUUID(),
+          attemptNumber,
+          result,
+          errorCode: result === "failed" ? "transport_failed" : null,
+          attemptedAt: `2026-08-25T12:00:0${4 + attemptNumber}.000Z`,
+          completedAt,
+        },
+      });
+    };
+    const printed = printEvent("print-outcome", 1, "printed");
+    const printRequest = repackBatch("repack-print-1", [printed], 0);
+    const printResponse = await service.ingest(
+      tenantId,
+      deviceAId,
+      repackInventoryId,
+      printRequest,
+    );
+    await expect(
+      service.ingest(tenantId, deviceAId, repackInventoryId, printRequest),
+    ).resolves.toEqual(printResponse);
+    const forgedPrint = printEvent("print-outcome", 1, "failed");
+    await expect(
+      service.ingest(
+        tenantId,
+        deviceAId,
+        repackInventoryId,
+        repackBatch("repack-print-1", [forgedPrint], 0),
+      ),
+    ).rejects.toSatisfy((error: unknown) => errorCode(error) === "INVENTORY_BATCH_DIGEST_CONFLICT");
+    const reprinted = printEvent("reprint-outcome", 2, "printed");
+    await service.ingest(
+      tenantId,
+      deviceAId,
+      repackInventoryId,
+      repackBatch("repack-reprint-2", [reprinted], 0),
+    );
+    expect(
+      await db
+        .select({
+          printState: schema.inventoryRepackBoxes.printState,
+          attemptCount: schema.inventoryRepackBoxes.printAttemptCount,
+          newSscc: schema.inventoryRepackBoxes.newSscc,
+        })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.id, boxAId)),
+    ).toEqual([{ printState: "printed", attemptCount: 2, newSscc: ssccA }]);
+    expect(
+      await db
+        .select({
+          kind: schema.inventoryRepackPrintAttempts.kind,
+          attemptNumber: schema.inventoryRepackPrintAttempts.attemptNumber,
+          result: schema.inventoryRepackPrintAttempts.result,
+        })
+        .from(schema.inventoryRepackPrintAttempts)
+        .where(eq(schema.inventoryRepackPrintAttempts.boxId, boxAId))
+        .orderBy(asc(schema.inventoryRepackPrintAttempts.attemptNumber)),
+    ).toEqual([
+      { kind: "initial", attemptNumber: 1, result: "printed" },
+      { kind: "reprint", attemptNumber: 2, result: "printed" },
+    ]);
+
+    const pauseBoxId = randomUUID();
+    const pauseBox = open("a", pauseBoxId, buildSscc(0, issuerPrefix, 103));
+    await service.ingest(
+      tenantId,
+      deviceAId,
+      repackInventoryId,
+      repackBatch("repack-open-for-pause", [pauseBox], 1),
+    );
+
     await expect(
       service.leave(tenantId, deviceAId, repackInventoryId, {
         pendingEventCount: 0,
@@ -1290,7 +1394,7 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
       await db
         .select({ state: schema.inventoryRepackBoxes.state })
         .from(schema.inventoryRepackBoxes)
-        .where(eq(schema.inventoryRepackBoxes.id, boxAId)),
+        .where(eq(schema.inventoryRepackBoxes.id, pauseBoxId)),
     ).toEqual([{ state: "open" }]);
   });
 
@@ -1389,6 +1493,53 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         ),
       );
     expect(participantAfterQuarantine).toEqual({ pending: 0, open: 0 });
+
+    const latePrintBoxId = randomUUID();
+    const latePrintCompletedAt = "2026-08-25T13:00:02.000Z";
+    const latePrintEvent = event("b", {
+      scannedAt: latePrintCompletedAt,
+      kind: "repack_action",
+      normalizedIdentity: `repack_action:print-outcome:${latePrintBoxId}:1`,
+      codeHash: null,
+      canonicalRaw: null,
+      localVerdict: "repack-action",
+      repack: {
+        action: "print-outcome",
+        boxId: latePrintBoxId,
+        sscc: "046006820000621519",
+        attemptId: randomUUID(),
+        attemptNumber: 1,
+        result: "printed",
+        errorCode: null,
+        attemptedAt: "2026-08-25T13:00:01.000Z",
+        completedAt: latePrintCompletedAt,
+      },
+    });
+    const latePrint = batch("late-print", [latePrintEvent]);
+    const latePrintResponse = await service.ingest(tenantId, deviceBId, inventoryId, latePrint);
+    expect(latePrintResponse.outcomes).toEqual([
+      expect.objectContaining({
+        eventId: latePrintEvent.eventId,
+        status: "quarantined",
+        reasonCode: "INVENTORY_CLOSED",
+      }),
+    ]);
+    await expect(service.ingest(tenantId, deviceBId, inventoryId, latePrint)).resolves.toEqual(
+      latePrintResponse,
+    );
+    expect(
+      await db
+        .select({ id: schema.inventoryRepackPrintAttempts.id })
+        .from(schema.inventoryRepackPrintAttempts)
+        .where(eq(schema.inventoryRepackPrintAttempts.inventoryId, inventoryId)),
+    ).toEqual([]);
+    expect(
+      await db
+        .select({ batchId: schema.inventoryLateEvents.batchId })
+        .from(schema.inventoryLateEvents)
+        .where(eq(schema.inventoryLateEvents.inventoryId, inventoryId))
+        .orderBy(asc(schema.inventoryLateEvents.batchId)),
+    ).toEqual([{ batchId: "late" }, { batchId: "late-print" }]);
 
     const other = code("LATE-WRONG-GTIN", OTHER_GTIN);
     const malformed = batch("late-malformed", [

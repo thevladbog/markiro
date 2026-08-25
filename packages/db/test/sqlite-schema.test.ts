@@ -87,6 +87,8 @@ describe("STATION_MIGRATIONS", () => {
       "inventory_repack_boxes_mirror",
       "inventory_repack_items_mirror",
       "inventory_repack_journal",
+      "inventory_repack_print_attempts",
+      "inventory_repack_print_journal",
       "inventory_conflicts_mirror",
       "inventory_event_claim_outcomes_mirror",
       "inventory_sync_ack_receipts",
@@ -120,6 +122,18 @@ describe("STATION_MIGRATIONS", () => {
         .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = ?")
         .all("inventory_repack_apply_journal_v1"),
     ).toEqual([{ name: "inventory_repack_apply_journal_v1" }]);
+    expect(
+      db
+        .prepare(
+          `SELECT name FROM sqlite_master WHERE type = 'trigger'
+            AND name IN ('inventory_repack_claim_print_v1', 'inventory_repack_apply_print_v1')
+            ORDER BY name`,
+        )
+        .all(),
+    ).toEqual([
+      { name: "inventory_repack_apply_print_v1" },
+      { name: "inventory_repack_claim_print_v1" },
+    ]);
     expect(
       db
         .prepare(
@@ -299,7 +313,9 @@ describe("STATION_MIGRATIONS", () => {
         (table) =>
           !table.startsWith("inventory_sync_ack_receipts") &&
           !table.startsWith("inventory_progress_receipts") &&
-          table !== "inventory_repack_journal",
+          table !== "inventory_repack_journal" &&
+          table !== "inventory_repack_print_attempts" &&
+          table !== "inventory_repack_print_journal",
       )) {
       expect(
         db.prepare(`SELECT snapshot_id FROM ${table} LIMIT 1`).get(),

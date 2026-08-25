@@ -117,7 +117,30 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
     expect(batch.properties?.events?.items?.required).toContain("operatorId");
     expect(batch.properties?.events?.maxItems).toBe(100);
     expect(batch.properties?.events?.items?.properties?.kind?.enum).toContain("repack_action");
-    expect(batch.properties?.events?.items?.properties?.repack?.oneOf).toHaveLength(6);
+    const repackActions = batch.properties?.events?.items?.properties?.repack?.oneOf;
+    expect(repackActions).toHaveLength(8);
+    const printOutcome = repackActions?.find((item) =>
+      item.properties?.action?.enum?.includes("print-outcome"),
+    );
+    exactClosedObject(printOutcome ?? {}, [
+      "action",
+      "boxId",
+      "sscc",
+      "attemptId",
+      "attemptNumber",
+      "result",
+      "errorCode",
+      "attemptedAt",
+      "completedAt",
+    ]);
+    expect(printOutcome?.properties?.sscc?.pattern).toBe("^[0-9]{18}$");
+    expect(printOutcome?.properties?.errorCode?.enum).toEqual([
+      "template_missing",
+      "printer_unconfigured",
+      "render_failed",
+      "transport_failed",
+      "persistence_failed",
+    ]);
 
     const batchResponse = responseSchema(
       document,
