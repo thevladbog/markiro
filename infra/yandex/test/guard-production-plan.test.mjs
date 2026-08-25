@@ -860,12 +860,62 @@ test("guard CLI identifies data security-group ingress cardinality without plan 
     }
     assert.equal(
       stderr,
-      "production plan rejected (safe-action-data-security-group-ingress-cardinality-before-2-after-1)\n",
+      "production plan rejected (safe-action-data-security-group-ingress-cardinality-before-2-after-1-desired-matches-before-0)\n",
     );
     assert.doesNotMatch(
       stderr,
       /description-[123]|rule-[123]|label-[123]|target-[123]|protocol-[123]|security-group-[123]|v4-[123]|v6-[123]/,
     );
+  });
+});
+
+test("guard CLI counts semantically duplicate desired ingress rules without plan values", async () => {
+  const changed = await readFixture("safe");
+  const desiredRule = {
+    description: "same-description",
+    from_port: -1,
+    id: "new-rule-id",
+    labels: { source: "new-label" },
+    port: 6432,
+    predefined_target: "",
+    protocol: "TCP",
+    security_group_id: "same-security-group",
+    to_port: -1,
+    v4_cidr_blocks: [],
+    v6_cidr_blocks: [],
+  };
+  const liveRule = (suffix) => ({
+    ...desiredRule,
+    from_port: 6432,
+    id: `old-rule-${suffix}`,
+    labels: { source: `old-label-${suffix}` },
+    port: -1,
+    protocol: "tcp",
+    to_port: 6432,
+  });
+  changed.resource_changes.push({
+    address: "module.network.yandex_vpc_security_group.data",
+    type: "yandex_vpc_security_group",
+    change: {
+      actions: ["update"],
+      before: { ingress: [liveRule(1), liveRule(2)] },
+      after: { ingress: [desiredRule] },
+    },
+  });
+
+  await withPlan(changed, (planPath) => {
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [script, planPath], { cwd: root, stdio: "pipe" });
+      assert.fail("guard CLI unexpectedly accepted duplicate security-group ingress rules");
+    } catch (error) {
+      stderr = String(error.stderr);
+    }
+    assert.equal(
+      stderr,
+      "production plan rejected (safe-action-data-security-group-ingress-cardinality-before-2-after-1-desired-matches-before-2)\n",
+    );
+    assert.doesNotMatch(stderr, /same-description|same-security-group|old-rule|old-label/);
   });
 });
 
