@@ -1796,6 +1796,98 @@ export const STATION_MIGRATIONS: string[] = [
           AND progress_cursor IS NEW.requested_cursor
           AND progress_result_revision = NEW.prior_result_revision;
      END;`,
+  // Forward fail-closed admission: bind each acknowledgement outcome to the
+  // exact immutable request event instead of trusting aggregate shape alone.
+  `CREATE TRIGGER IF NOT EXISTS inventory_sync_validate_ack_event_facts_v3
+     BEFORE INSERT ON inventory_sync_ack_receipts_v2
+     WHEN NOT EXISTS (
+       SELECT 1 FROM inventory_sync_ack_receipts_v2 receipt
+        WHERE receipt.receipt_id = NEW.receipt_id
+          AND receipt.inventory_id IS NEW.inventory_id
+          AND receipt.snapshot_id IS NEW.snapshot_id
+          AND receipt.batch_id IS NEW.batch_id
+          AND receipt.payload_digest IS NEW.payload_digest
+          AND receipt.response_json IS NEW.response_json
+          AND receipt.outbox_rows_json IS NEW.outbox_rows_json
+          AND receipt.pin_key IS NEW.pin_key
+          AND receipt.pin_value IS NEW.pin_value
+          AND receipt.applied_at IS NEW.applied_at
+     ) AND EXISTS (
+       SELECT 1 FROM json_each(NEW.response_json, '$.outcomes') outcome
+        WHERE (SELECT COUNT(*)
+                 FROM json_each(NEW.pin_value, '$.request.events') event
+                WHERE json_extract(event.value, '$.eventId') =
+                      json_extract(outcome.value, '$.eventId')) <> 1
+           OR (
+             json_extract(outcome.value, '$.status') = 'applied'
+             AND json_extract(outcome.value, '$.reasonCode') = 'CLAIM_APPLIED'
+             AND json_array_length(outcome.value, '$.claims') = 0
+             AND NOT EXISTS (
+               SELECT 1 FROM json_each(NEW.pin_value, '$.request.events') event
+                WHERE json_extract(event.value, '$.eventId') =
+                      json_extract(outcome.value, '$.eventId')
+                  AND json_extract(event.value, '$.kind') = 'old_box'
+             )
+           )
+           OR EXISTS (
+             SELECT 1 FROM json_each(NEW.pin_value, '$.request.events') event
+              WHERE json_extract(event.value, '$.eventId') =
+                    json_extract(outcome.value, '$.eventId')
+                AND json_extract(event.value, '$.kind') = 'old_box'
+                AND json_array_length(outcome.value, '$.claims') <> 0
+           )
+           OR EXISTS (
+             SELECT 1 FROM json_each(NEW.pin_value, '$.request.events') event
+              WHERE json_extract(event.value, '$.eventId') =
+                    json_extract(outcome.value, '$.eventId')
+                AND json_extract(event.value, '$.kind') = 'item'
+                AND json_array_length(outcome.value, '$.claims') > 0
+                AND (
+                  json_type(event.value, '$.codeHash') <> 'text'
+                  OR json_array_length(outcome.value, '$.claims') <> 1
+                  OR json_extract(outcome.value, '$.claims[0].codeHash') IS NOT
+                       json_extract(event.value, '$.codeHash')
+                )
+           )
+     )
+     BEGIN
+       SELECT RAISE(ABORT, 'inventory acknowledgement event facts invalid');
+     END;`,
+  // z.iso.date() semantics at the direct-SQL boundary: JSON null or an exact
+  // Gregorian YYYY-MM-DD that SQLite round-trips without normalization.
+  `CREATE TRIGGER IF NOT EXISTS inventory_progress_validate_civil_date_v3
+     BEFORE INSERT ON inventory_progress_receipts_v2
+     WHEN NOT EXISTS (
+       SELECT 1 FROM inventory_progress_receipts_v2 receipt
+        WHERE receipt.receipt_id = NEW.receipt_id
+          AND receipt.inventory_id IS NEW.inventory_id
+          AND receipt.snapshot_id IS NEW.snapshot_id
+          AND receipt.device_id IS NEW.device_id
+          AND receipt.requested_cursor IS NEW.requested_cursor
+          AND receipt.prior_result_revision IS NEW.prior_result_revision
+          AND receipt.page_json IS NEW.page_json
+          AND receipt.pointer_key IS NEW.pointer_key
+          AND receipt.pointer_value IS NEW.pointer_value
+          AND receipt.credential_ownership IS NEW.credential_ownership
+          AND receipt.applied_at IS NEW.applied_at
+     ) AND EXISTS (
+       SELECT 1 FROM json_each(NEW.page_json, '$.items') item
+        WHERE json_type(item.value, '$.observedProductionDate') IS NULL
+           OR json_type(item.value, '$.observedProductionDate') NOT IN ('text', 'null')
+           OR (
+             json_type(item.value, '$.observedProductionDate') = 'text'
+             AND (
+               length(json_extract(item.value, '$.observedProductionDate')) <> 10
+               OR json_extract(item.value, '$.observedProductionDate') NOT GLOB
+                    '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+               OR date(json_extract(item.value, '$.observedProductionDate')) IS NOT
+                    json_extract(item.value, '$.observedProductionDate')
+             )
+           )
+     )
+     BEGIN
+       SELECT RAISE(ABORT, 'inventory progress civil date invalid');
+     END;`,
 ];
 
 export interface StationMigrationEntry {

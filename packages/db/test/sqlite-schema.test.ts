@@ -1384,7 +1384,7 @@ const RECEIPT_DIGEST = "a".repeat(64);
 const RECEIPT_POINTER_KEY = "active_inventory_floor_task_v1";
 const RECEIPT_OWNERSHIP = "b".repeat(64);
 
-function receiptDb(): {
+function receiptDb(kind: "item" | "old_box" = "item"): {
   db: DatabaseSync;
   outboxRowsJson: string;
   pinKey: string;
@@ -1403,24 +1403,25 @@ function receiptDb(): {
        (inventory_id, snapshot_id, device_id, operator_id, next_device_sequence, updated_at)
      VALUES (?, ?, ?, ?, 2, '2026-08-25T10:00:00.000Z')`,
   ).run(RECEIPT_INVENTORY_ID, RECEIPT_SNAPSHOT_ID, RECEIPT_DEVICE_ID, RECEIPT_EVENT_ID);
+  const isOldBox = kind === "old_box";
   const event = {
     eventId: RECEIPT_EVENT_ID,
     deviceSequence: 1,
     operatorId: RECEIPT_EVENT_ID,
     scannedAt: "2026-08-25T10:00:01.000Z",
-    kind: "item",
-    normalizedIdentity: `item:${"c".repeat(64)}`,
-    codeHash: "c".repeat(64),
-    canonicalRaw: "010460000000001521SERIAL",
+    kind,
+    normalizedIdentity: isOldBox ? "old_box:046000000000000001" : `item:${"c".repeat(64)}`,
+    codeHash: isOldBox ? null : "c".repeat(64),
+    canonicalRaw: isOldBox ? "000460000000000001" : "010460000000001521SERIAL",
     activeProductionDate: "2026-08-20",
-    localVerdict: "expected",
+    localVerdict: isOldBox ? "unknown" : "expected",
   };
   db.prepare(
     `INSERT INTO inventory_scan_events_mirror
        (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
         kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict,
         commit_state, legacy_audit_version)
-     VALUES (?, ?, ?, ?, 1, ?, ?, 'item', ?, ?, ?, '2026-08-20', 'expected', 'committed', 1)`,
+     VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, '2026-08-20', ?, 'committed', 1)`,
   ).run(
     RECEIPT_INVENTORY_ID,
     RECEIPT_SNAPSHOT_ID,
@@ -1428,9 +1429,11 @@ function receiptDb(): {
     RECEIPT_DEVICE_ID,
     RECEIPT_EVENT_ID,
     event.scannedAt,
+    event.kind,
     event.normalizedIdentity,
     event.codeHash,
     event.canonicalRaw,
+    event.localVerdict,
   );
   const result = db
     .prepare(
@@ -1488,20 +1491,22 @@ function receiptDb(): {
         eventId: RECEIPT_EVENT_ID,
         status: "applied",
         reasonCode: "CLAIM_APPLIED",
-        claimedCount: 1,
+        claimedCount: isOldBox ? 0 : 1,
         conflictCount: 0,
-        claims: [
-          {
-            codeHash: "c".repeat(64),
-            status: "claimed",
-            winner: {
-              codeHash: "c".repeat(64),
-              eventId: RECEIPT_EVENT_ID,
-              deviceId: RECEIPT_DEVICE_ID,
-              scannedAt: event.scannedAt,
-            },
-          },
-        ],
+        claims: isOldBox
+          ? []
+          : [
+              {
+                codeHash: "c".repeat(64),
+                status: "claimed",
+                winner: {
+                  codeHash: "c".repeat(64),
+                  eventId: RECEIPT_EVENT_ID,
+                  deviceId: RECEIPT_DEVICE_ID,
+                  scannedAt: event.scannedAt,
+                },
+              },
+            ],
       },
     ],
   });
@@ -1648,6 +1653,65 @@ describe("inventory receipt trigger admission", () => {
     ).toThrow();
   });
 
+  it("rejects a forged zero-claim item acknowledgement without any mutation", () => {
+    const fixture = receiptDb();
+    const response = JSON.parse(fixture.responseJson) as {
+      outcomes: Array<{ claimedCount: number; claims: unknown[] }>;
+    };
+    response.outcomes[0]!.claimedCount = 0;
+    response.outcomes[0]!.claims = [];
+    const storedPin = fixture.db
+      .prepare("SELECT value FROM station_meta WHERE key = ?")
+      .get(fixture.pinKey);
+
+    expect(() => insertAckReceipt(fixture, { responseJson: JSON.stringify(response) })).toThrow();
+    expect(fixture.db.prepare("SELECT count(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 1,
+    });
+    expect(
+      fixture.db.prepare("SELECT value FROM station_meta WHERE key = ?").get(fixture.pinKey),
+    ).toEqual(storedPin);
+    expect(
+      fixture.db
+        .prepare(
+          `SELECT authoritative_verdict, server_reason_code
+             FROM inventory_scan_events_mirror WHERE event_id = ?`,
+        )
+        .get(RECEIPT_EVENT_ID),
+    ).toEqual({ authoritative_verdict: null, server_reason_code: null });
+    for (const table of [
+      "inventory_sync_ack_receipts_v2",
+      "inventory_event_claim_outcomes_mirror",
+      "inventory_conflicts_mirror",
+    ]) {
+      expect(fixture.db.prepare(`SELECT count(*) AS count FROM ${table}`).get()).toEqual({
+        count: 0,
+      });
+    }
+  });
+
+  it("accepts a zero-claim acknowledgement only for the pinned old_box event", () => {
+    const fixture = receiptDb("old_box");
+    expect(() => insertAckReceipt(fixture)).not.toThrow();
+    expect(fixture.db.prepare("SELECT count(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 0,
+    });
+    expect(
+      fixture.db.prepare("SELECT value FROM station_meta WHERE key = ?").get(fixture.pinKey),
+    ).toBeUndefined();
+    expect(
+      fixture.db
+        .prepare(
+          `SELECT authoritative_verdict, server_reason_code
+             FROM inventory_scan_events_mirror WHERE event_id = ?`,
+        )
+        .get(RECEIPT_EVENT_ID),
+    ).toEqual({ authoritative_verdict: "applied", server_reason_code: "CLAIM_APPLIED" });
+    expect(
+      fixture.db.prepare("SELECT count(*) AS count FROM inventory_sync_ack_receipts_v2").get(),
+    ).toEqual({ count: 1 });
+  });
+
   it("rejects malformed or unowned progress receipts without any mutation", () => {
     const validPageJson = JSON.stringify({
       inventoryId: RECEIPT_INVENTORY_ID,
@@ -1724,5 +1788,114 @@ describe("inventory receipt trigger admission", () => {
         appliedAt: "2026-08-25T10:02:00.000Z",
       }),
     ).toThrow();
+  });
+
+  it.each([
+    ["JSON null", null],
+    ["a valid leap day", "2024-02-29"],
+  ])("accepts observedProductionDate as %s", (_name, observed) => {
+    const fixture = receiptDb();
+    const changeId = "99999999-9999-4999-8999-999999999999";
+    const pageJson = JSON.stringify({
+      inventoryId: RECEIPT_INVENTORY_ID,
+      snapshotId: RECEIPT_SNAPSHOT_ID,
+      snapshotRevision: 1,
+      cursor: null,
+      resultRevision: 1,
+      items: [
+        {
+          id: changeId,
+          revision: 1,
+          kind: "claim",
+          codeHash: "c".repeat(64),
+          classification: "expected",
+          observedProductionDate: observed,
+          winner: {
+            codeHash: "c".repeat(64),
+            eventId: "77777777-7777-4777-8777-777777777777",
+            deviceId: "88888888-8888-4888-8888-888888888888",
+            scannedAt: "2026-08-25T09:00:00.000Z",
+          },
+          correctedAt: "2026-08-25T10:01:00.000Z",
+        },
+      ],
+      nextCursor: `1:${changeId}`,
+    });
+
+    expect(() =>
+      insertProgressReceipt(fixture, {
+        receiptId: `${RECEIPT_INVENTORY_ID}:${RECEIPT_SNAPSHOT_ID}:${RECEIPT_DEVICE_ID}:root:0:1:1:${changeId}`,
+        pageJson,
+        appliedAt: "2026-08-25T10:01:00.000Z",
+      }),
+    ).not.toThrow();
+    expect(
+      fixture.db
+        .prepare(
+          "SELECT observed_production_date FROM inventory_code_results_mirror WHERE code_hash = ?",
+        )
+        .get("c".repeat(64)),
+    ).toEqual({ observed_production_date: observed });
+    expect(
+      fixture.db
+        .prepare("SELECT progress_cursor, progress_result_revision FROM inventory_terminal_state")
+        .get(),
+    ).toEqual({ progress_cursor: `1:${changeId}`, progress_result_revision: 1 });
+  });
+
+  it.each([
+    ["an object", { forged: true }],
+    ["a number", 20260825],
+    ["an impossible civil date", "2023-02-29"],
+  ])("rejects observedProductionDate as %s without progress mutation", (_name, observed) => {
+    const fixture = receiptDb();
+    const changeId = "99999999-9999-4999-8999-999999999999";
+    const pageJson = JSON.stringify({
+      inventoryId: RECEIPT_INVENTORY_ID,
+      snapshotId: RECEIPT_SNAPSHOT_ID,
+      snapshotRevision: 1,
+      cursor: null,
+      resultRevision: 1,
+      items: [
+        {
+          id: changeId,
+          revision: 1,
+          kind: "claim",
+          codeHash: "c".repeat(64),
+          classification: "expected",
+          observedProductionDate: observed,
+          winner: {
+            codeHash: "c".repeat(64),
+            eventId: "77777777-7777-4777-8777-777777777777",
+            deviceId: "88888888-8888-4888-8888-888888888888",
+            scannedAt: "2026-08-25T09:00:00.000Z",
+          },
+          correctedAt: "2026-08-25T10:01:00.000Z",
+        },
+      ],
+      nextCursor: `1:${changeId}`,
+    });
+
+    expect(() =>
+      insertProgressReceipt(fixture, {
+        receiptId: `${RECEIPT_INVENTORY_ID}:${RECEIPT_SNAPSHOT_ID}:${RECEIPT_DEVICE_ID}:root:0:1:1:${changeId}`,
+        pageJson,
+        appliedAt: "2026-08-25T10:01:00.000Z",
+      }),
+    ).toThrow();
+    for (const table of [
+      "inventory_progress_receipts_v2",
+      "inventory_code_results_mirror",
+      "inventory_conflicts_mirror",
+    ]) {
+      expect(fixture.db.prepare(`SELECT count(*) AS count FROM ${table}`).get()).toEqual({
+        count: 0,
+      });
+    }
+    expect(
+      fixture.db
+        .prepare("SELECT progress_cursor, progress_result_revision FROM inventory_terminal_state")
+        .get(),
+    ).toEqual({ progress_cursor: null, progress_result_revision: 0 });
   });
 });
