@@ -109,7 +109,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
         ],
         bullets: [
           "результат проверки кода;",
-          "связь единицы с коробом или паллетой;",
+          "связь единицы с коробом;",
           "ошибки и действия восстановления;",
           "состояние синхронизации локальных операций.",
         ],
@@ -460,7 +460,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
         ],
         bullets: [
           "code validation results;",
-          "the relationship between an item, case, or pallet;",
+          "the relationship between an item and its case;",
           "errors and recovery actions;",
           "the synchronization state of local operations.",
         ],

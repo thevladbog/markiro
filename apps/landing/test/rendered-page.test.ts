@@ -209,6 +209,15 @@ describe("rendered landing page", () => {
     expect(enSscc).toContain("The currently supported level is the item-to-case chain");
     expect(enSscc).toContain("Pallet aggregation");
     expect(enSscc).toContain("will be added as a separate next stage");
+
+    const ruSerialization = documents.get("/markirovka-chestny-znak/")?.body.textContent ?? "";
+    expect(ruSerialization).toContain("связь единицы с коробом");
+    expect(ruSerialization).not.toContain("связь единицы с коробом или паллетой");
+
+    const enSerialization =
+      documents.get("/en/chestny-znak-serialization/")?.body.textContent ?? "";
+    expect(enSerialization).toContain("the relationship between an item and its case");
+    expect(enSerialization).not.toContain("the relationship between an item, case, or pallet");
   });
 
   it("renders the four visible fields in the accessible order with optional phone copy", () => {
