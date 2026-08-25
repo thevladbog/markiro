@@ -62,24 +62,21 @@ resource "yandex_vpc_security_group" "app" {
   ingress {
     protocol       = "TCP"
     description    = "GitHub-hosted deployment reaches key-authenticated SSH."
-    from_port      = 22
-    to_port        = 22
+    port           = 22
     v4_cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
     protocol       = "TCP"
     description    = "Public HTTP reaches Caddy for redirects and ACME."
-    from_port      = 80
-    to_port        = 80
+    port           = 80
     v4_cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
     protocol       = "TCP"
     description    = "Public HTTPS reaches Caddy directly."
-    from_port      = 443
-    to_port        = 443
+    port           = 443
     v4_cidr_blocks = ["0.0.0.0/0"]
   }
 
@@ -99,8 +96,7 @@ resource "yandex_vpc_security_group" "data" {
   ingress {
     protocol          = "TCP"
     description       = "Only the application may reach the PostgreSQL pooler."
-    from_port         = 6432
-    to_port           = 6432
+    port              = 6432
     security_group_id = yandex_vpc_security_group.app.id
   }
 
