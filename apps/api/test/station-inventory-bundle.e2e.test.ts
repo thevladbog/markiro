@@ -15,6 +15,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -46,6 +47,7 @@ interface BundleFixture {
   tenantId: string;
   inventoryId: string;
   snapshotId: string;
+  productId: string;
   lineId: string;
   operatorId: string;
   deviceId: string;
@@ -196,6 +198,7 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       productId,
       productName: "Bundle Water",
       gtin14: GTIN14,
+      boxCapacity: 12,
       mode,
       lineId,
       lineName: "Bundle line",
@@ -239,6 +242,7 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       tenantId,
       inventoryId,
       snapshotId: snapshot.id,
+      productId,
       lineId,
       operatorId: operator.body.id as string,
       deviceId: device.deviceId,
@@ -252,6 +256,20 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       .set("x-api-key", fixture.apiKey)
       .send({ operatorId: fixture.operatorId })
       .expect(200);
+  }
+
+  async function attachExpiredSubscription(
+    tenantId: string,
+    startsAt: Date,
+    endsAt: Date,
+  ): Promise<void> {
+    const planVersionId = await createPublishedPlan(db, {
+      maxLines: null,
+      maxStations: null,
+      maxKiosks: null,
+      maxCabinetUsers: null,
+    });
+    await createManagedSubscription(db, { tenantId, planVersionId, startsAt, endsAt });
   }
 
   it("publishes the immutable manifest and bounded snapshot-pinned code pages in code-hash order", async () => {
@@ -269,6 +287,7 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       snapshotRevision: 1,
       combinedDigest: DIGEST,
       codeCount: 3,
+      boxCapacity: 12,
       mode: "check",
       boxLabelTemplate: null,
       sscc: null,
@@ -339,6 +358,15 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
   it("reuses a device's existing SSCC block with original bounds and consumed cursor without creating a shift", async () => {
     const agent = request.agent(app!.getHttpServer());
     const fixture = await seedBundle(agent, "repack");
+    await db
+      .update(schema.products)
+      .set({ boxCapacity: 48 })
+      .where(
+        and(
+          eq(schema.products.tenantId, fixture.tenantId),
+          eq(schema.products.id, fixture.productId),
+        ),
+      );
     const [beforeShifts] = await db
       .select({ value: count() })
       .from(schema.shifts)
@@ -348,6 +376,7 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
     expect(first.body).toMatchObject({
       inventoryId: fixture.inventoryId,
       mode: "repack",
+      boxCapacity: 12,
       boxLabelTemplate: { name: "Frozen bundle label", spec: LABEL_SPEC },
       sscc: {
         issuerPrefix: "460000009",
@@ -437,6 +466,102 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
           ),
         );
       expect({ participants, audits }).toEqual({ participants: [], audits: [] });
+    }
+  });
+
+  it("enforces the strict recovery boundary before bundle admission and SSCC/participant/audit publication", async () => {
+    const endsAt = new Date(Date.now() - 60_000);
+    for (const boundary of ["before", "equal", "after"] as const) {
+      const agent = request.agent(app!.getHttpServer());
+      const fixture = await seedBundle(agent, "repack");
+      const startedAt = new Date(
+        endsAt.getTime() + (boundary === "before" ? -1 : boundary === "equal" ? 0 : 1),
+      );
+      await db
+        .update(schema.inventories)
+        .set({ startedAt })
+        .where(
+          and(
+            eq(schema.inventories.tenantId, fixture.tenantId),
+            eq(schema.inventories.id, fixture.inventoryId),
+          ),
+        );
+      await attachExpiredSubscription(
+        fixture.tenantId,
+        new Date(endsAt.getTime() - 86_400_000),
+        endsAt,
+      );
+
+      const joinRequest = request(app!.getHttpServer())
+        .post(`/station/inventories/${fixture.inventoryId}/join`)
+        .set("x-api-key", fixture.apiKey)
+        .send({ operatorId: fixture.operatorId });
+      if (boundary === "before") {
+        await joinRequest.expect(200);
+        await request(app!.getHttpServer())
+          .get(`/station/inventories/${fixture.inventoryId}/bundle/manifest`)
+          .set("x-api-key", fixture.apiKey)
+          .expect(200);
+        await request(app!.getHttpServer())
+          .get(`/station/inventories/${fixture.inventoryId}/bundle/codes`)
+          .set("x-api-key", fixture.apiKey)
+          .expect(200);
+
+        await db
+          .update(schema.inventories)
+          .set({ startedAt: endsAt })
+          .where(
+            and(
+              eq(schema.inventories.tenantId, fixture.tenantId),
+              eq(schema.inventories.id, fixture.inventoryId),
+            ),
+          );
+        await request(app!.getHttpServer())
+          .get(`/station/inventories/${fixture.inventoryId}/bundle/manifest`)
+          .set("x-api-key", fixture.apiKey)
+          .expect(403, { code: "subscription_read_only" });
+        await request(app!.getHttpServer())
+          .get(`/station/inventories/${fixture.inventoryId}/bundle/codes`)
+          .set("x-api-key", fixture.apiKey)
+          .expect(403, { code: "subscription_read_only" });
+        continue;
+      }
+
+      await joinRequest.expect(403, { code: "subscription_read_only" });
+      const participants = await db
+        .select({ id: schema.inventoryDeviceParticipants.id })
+        .from(schema.inventoryDeviceParticipants)
+        .where(
+          and(
+            eq(schema.inventoryDeviceParticipants.tenantId, fixture.tenantId),
+            eq(schema.inventoryDeviceParticipants.inventoryId, fixture.inventoryId),
+            eq(schema.inventoryDeviceParticipants.deviceId, fixture.deviceId),
+          ),
+        );
+      const audits = await db
+        .select({ id: schema.tenantAuditEvents.id })
+        .from(schema.tenantAuditEvents)
+        .where(
+          and(
+            eq(schema.tenantAuditEvents.organizationId, fixture.tenantId),
+            eq(schema.tenantAuditEvents.action, "inventory.station.joined"),
+            eq(schema.tenantAuditEvents.targetId, fixture.inventoryId),
+          ),
+        );
+      const blocks = await db
+        .select({ id: schema.ssccBlocks.id })
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, fixture.tenantId),
+            eq(schema.ssccBlocks.deviceId, fixture.deviceId),
+          ),
+        );
+      expect({ participants, audits, blocks }).toEqual({
+        participants: [],
+        audits: [],
+        blocks: [],
+      });
     }
   });
 });

@@ -45,6 +45,8 @@ export interface StationInventoryManifest {
   readonly productId: string;
   readonly productName: string;
   readonly gtin14: string;
+  /** Frozen product aggregation capacity used by the offline repack reducer. */
+  readonly boxCapacity: number;
   readonly mode: InventoryMode;
   readonly lineId: string;
   readonly lineName: string;
@@ -142,6 +144,7 @@ const storedStationInventoryManifestSchema = z
     productId: z.uuid(),
     productName: z.string(),
     gtin14: z.string().regex(/^[0-9]{14}$/),
+    boxCapacity: z.number().int().positive(),
     mode: z.enum(["check", "repack"]),
     lineId: z.uuid(),
     lineName: z.string(),
@@ -305,6 +308,7 @@ export const stationInventoryManifestOpenApiSchema: SchemaObject = {
     "productId",
     "productName",
     "gtin14",
+    "boxCapacity",
     "mode",
     "lineId",
     "lineName",
@@ -323,6 +327,7 @@ export const stationInventoryManifestOpenApiSchema: SchemaObject = {
     productId: { type: "string", format: "uuid" },
     productName: { type: "string" },
     gtin14: { type: "string", pattern: "^[0-9]{14}$" },
+    boxCapacity: { type: "integer", minimum: 1 },
     mode: { type: "string", enum: ["check", "repack"] },
     lineId: { type: "string", format: "uuid" },
     lineName: { type: "string" },

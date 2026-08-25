@@ -50,7 +50,7 @@ interface StartFacts {
     combinedDigest: string;
     counts: InventorySnapshotCountsDto;
   };
-  product: { id: string; name: string; gtin14: string };
+  product: { id: string; name: string; gtin14: string; boxCapacity: number };
   line: { id: string; name: string };
   boxLabelTemplate: StationInventoryLabelTemplateDescriptor | null;
 }
@@ -121,6 +121,7 @@ export class InventoryLifecycleService {
           productId: facts.product.id,
           productName: facts.product.name,
           gtin14: facts.product.gtin14,
+          boxCapacity: facts.product.boxCapacity,
           lineId: facts.line.id,
           lineName: facts.line.name,
           mode: inventory.mode,
@@ -219,6 +220,7 @@ export class InventoryLifecycleService {
         id: schema.products.id,
         name: schema.products.name,
         gtin14: schema.products.gtin14,
+        boxCapacity: schema.products.boxCapacity,
         status: schema.products.status,
       })
       .from(schema.products)
@@ -232,6 +234,13 @@ export class InventoryLifecycleService {
     }
     if (product.gtin14 !== inventory.gtin14Snapshot) {
       throw new ConflictException({ code: "INVENTORY_PRODUCT_GTIN_CHANGED" });
+    }
+    if (
+      !Number.isInteger(product.boxCapacity) ||
+      product.boxCapacity === null ||
+      product.boxCapacity <= 0
+    ) {
+      throw new ConflictException({ code: "INVENTORY_BOX_CAPACITY_INVALID" });
     }
 
     const [line] = await tx
@@ -261,7 +270,12 @@ export class InventoryLifecycleService {
         combinedDigest: snapshot.combinedDigest,
         counts,
       },
-      product: { id: product.id, name: product.name, gtin14: product.gtin14 },
+      product: {
+        id: product.id,
+        name: product.name,
+        gtin14: product.gtin14,
+        boxCapacity: product.boxCapacity,
+      },
       line,
       boxLabelTemplate: await this.resolveBoxLabelTemplate(tx, tenantId, inventory),
     };
@@ -321,6 +335,7 @@ export class InventoryLifecycleService {
       productId: product.id,
       productName: product.name,
       gtin14: product.gtin14,
+      boxCapacity: product.boxCapacity,
       mode: inventory.mode,
       lineId: line.id,
       lineName: line.name,

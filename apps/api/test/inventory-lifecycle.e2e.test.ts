@@ -62,6 +62,7 @@ interface ReadyInventoryFixture {
 }
 
 interface MutableStoredManifest {
+  boxCapacity?: number;
   productionDateFrom: string;
   productionDateTo: string;
   boxLabelTemplate: {
@@ -150,6 +151,7 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
       tenantId,
       gtin14: GTIN14,
       name: "Inventory Water",
+      boxCapacity: 12,
       status: "active",
     });
     await db.insert(schema.lines).values({ id: lineId, tenantId, name: "Inventory line" });
@@ -276,6 +278,7 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
       productId: fixture.productId,
       productName: "Inventory Water",
       gtin14: GTIN14,
+      boxCapacity: 12,
       mode: "check",
       lineId: fixture.lineId,
       lineName: "Inventory line",
@@ -346,6 +349,7 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
           productId: fixture.productId,
           productName: "Inventory Water",
           gtin14: GTIN14,
+          boxCapacity: 12,
           lineId: fixture.lineId,
           lineName: "Inventory line",
           mode: "check",
@@ -367,6 +371,39 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
       spec: BOX_LABEL_SPEC,
     });
     expect(response.body.boxLabelTemplate.id).not.toBe(replacement);
+    expect(response.body.boxCapacity).toBe(12);
+
+    await db
+      .update(schema.products)
+      .set({ boxCapacity: 48 })
+      .where(
+        and(
+          eq(schema.products.tenantId, fixture.tenantId),
+          eq(schema.products.id, fixture.productId),
+        ),
+      );
+    const duplicate = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+    expect(duplicate.body.boxCapacity).toBe(12);
+  });
+
+  it("requires a positive product box capacity before freezing either inventory mode", async () => {
+    for (const mode of ["check", "repack"] as const) {
+      const agent = request.agent(app!.getHttpServer());
+      const fixture = await seedReadyInventory(agent, mode);
+      await db
+        .update(schema.products)
+        .set({ boxCapacity: 0 })
+        .where(
+          and(
+            eq(schema.products.tenantId, fixture.tenantId),
+            eq(schema.products.id, fixture.productId),
+          ),
+        );
+
+      await agent
+        .post(`/inventories/${fixture.inventoryId}/start`)
+        .expect(409, { code: "INVENTORY_BOX_CAPACITY_INVALID" });
+    }
   });
 
   it("makes duplicate and concurrent starts idempotent without changing started fields or duplicating the success audit", async () => {
@@ -473,6 +510,20 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
     manifest.productionDateFrom = "2026-02-30";
 
     await expectStoredManifestRejected(agent, fixture, manifest);
+  });
+
+  it("rejects a stored manifest with missing or non-positive frozen box capacity", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedReadyInventory(agent, "repack");
+    const started = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+
+    const missing = structuredClone(started.body) as MutableStoredManifest;
+    delete missing.boxCapacity;
+    await expectStoredManifestRejected(agent, fixture, missing);
+
+    const nonPositive = structuredClone(started.body) as MutableStoredManifest;
+    nonPositive.boxCapacity = 0;
+    await expectStoredManifestRejected(agent, fixture, nonPositive);
   });
 
   it("rejects an inverted stored production date range", async () => {

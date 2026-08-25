@@ -14,6 +14,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -28,6 +29,7 @@ interface RunningInventoryFixture {
   tenantId: string;
   inventoryId: string;
   inventoryNumber: string;
+  productId: string;
   lineId: string;
   otherLineId: string;
   snapshotId: string;
@@ -74,6 +76,7 @@ describe.skipIf(!ready)("station inventory task access e2e", () => {
       tenantId,
       gtin14: GTIN14,
       name: "Inventory Water",
+      boxCapacity: 12,
       status: "active",
     });
     await db.insert(schema.lines).values([
@@ -132,6 +135,7 @@ describe.skipIf(!ready)("station inventory task access e2e", () => {
           productId,
           productName: "Inventory Water",
           gtin14: GTIN14,
+          boxCapacity: 12,
           mode: "check",
           lineId,
           lineName: "Inventory line",
@@ -163,6 +167,7 @@ describe.skipIf(!ready)("station inventory task access e2e", () => {
       tenantId,
       inventoryId,
       inventoryNumber,
+      productId,
       lineId,
       otherLineId,
       snapshotId: snapshot.id,
@@ -177,6 +182,20 @@ describe.skipIf(!ready)("station inventory task access e2e", () => {
       .set({ lineId })
       .where(eq(schema.stationDevices.id, device.deviceId));
     return device;
+  }
+
+  async function attachExpiredSubscription(
+    tenantId: string,
+    startsAt: Date,
+    endsAt: Date,
+  ): Promise<void> {
+    const planVersionId = await createPublishedPlan(db, {
+      maxLines: null,
+      maxStations: null,
+      maxKiosks: null,
+      maxCabinetUsers: null,
+    });
+    await createManagedSubscription(db, { tenantId, planVersionId, startsAt, endsAt });
   }
 
   it("lists only running tasks assigned to the authenticated device's server-side line", async () => {
@@ -311,6 +330,225 @@ describe.skipIf(!ready)("station inventory task access e2e", () => {
         },
       },
     ]);
+  });
+
+  it("keeps an already-active join retry idempotent without rewriting join facts, blockers, or audit", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedRunningInventory(agent);
+    const device = await station(agent, "Retry station", fixture.lineId);
+    const endpoint = `/station/inventories/${fixture.inventoryId}/join`;
+
+    await request(app!.getHttpServer())
+      .post(endpoint)
+      .set("x-api-key", device.apiKey)
+      .send({ operatorId: fixture.operatorId })
+      .expect(200);
+    const [first] = await db
+      .select({
+        operatorId: schema.inventoryDeviceParticipants.operatorId,
+        configuredLineId: schema.inventoryDeviceParticipants.configuredLineId,
+        joinMethod: schema.inventoryDeviceParticipants.joinMethod,
+        differentLineConfirmed: schema.inventoryDeviceParticipants.differentLineConfirmed,
+        joinedAt: schema.inventoryDeviceParticipants.joinedAt,
+      })
+      .from(schema.inventoryDeviceParticipants)
+      .where(
+        and(
+          eq(schema.inventoryDeviceParticipants.tenantId, fixture.tenantId),
+          eq(schema.inventoryDeviceParticipants.inventoryId, fixture.inventoryId),
+          eq(schema.inventoryDeviceParticipants.deviceId, device.deviceId),
+        ),
+      );
+    if (!first) throw new Error("Expected first participant activation");
+    await db
+      .update(schema.inventoryDeviceParticipants)
+      .set({ pendingEventCount: 7, openBoxCount: 3 })
+      .where(
+        and(
+          eq(schema.inventoryDeviceParticipants.tenantId, fixture.tenantId),
+          eq(schema.inventoryDeviceParticipants.inventoryId, fixture.inventoryId),
+          eq(schema.inventoryDeviceParticipants.deviceId, device.deviceId),
+        ),
+      );
+
+    await request(app!.getHttpServer())
+      .post(endpoint)
+      .set("x-api-key", device.apiKey)
+      .send({ operatorId: fixture.operatorId })
+      .expect(200);
+
+    const [retried] = await db
+      .select({
+        operatorId: schema.inventoryDeviceParticipants.operatorId,
+        configuredLineId: schema.inventoryDeviceParticipants.configuredLineId,
+        joinMethod: schema.inventoryDeviceParticipants.joinMethod,
+        differentLineConfirmed: schema.inventoryDeviceParticipants.differentLineConfirmed,
+        joinedAt: schema.inventoryDeviceParticipants.joinedAt,
+        pendingEventCount: schema.inventoryDeviceParticipants.pendingEventCount,
+        openBoxCount: schema.inventoryDeviceParticipants.openBoxCount,
+      })
+      .from(schema.inventoryDeviceParticipants)
+      .where(
+        and(
+          eq(schema.inventoryDeviceParticipants.tenantId, fixture.tenantId),
+          eq(schema.inventoryDeviceParticipants.inventoryId, fixture.inventoryId),
+          eq(schema.inventoryDeviceParticipants.deviceId, device.deviceId),
+        ),
+      );
+    expect(retried).toEqual({ ...first, pendingEventCount: 7, openBoxCount: 3 });
+
+    const audits = await db
+      .select({ id: schema.tenantAuditEvents.id })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, fixture.tenantId),
+          eq(schema.tenantAuditEvents.action, "inventory.station.joined"),
+          eq(schema.tenantAuditEvents.targetId, fixture.inventoryId),
+        ),
+      );
+    expect(audits).toHaveLength(1);
+
+    const historicalJoin = new Date("2026-08-01T00:00:00.000Z");
+    await db
+      .update(schema.inventoryDeviceParticipants)
+      .set({ joinedAt: historicalJoin, leftAt: new Date(), pendingEventCount: 9, openBoxCount: 4 })
+      .where(
+        and(
+          eq(schema.inventoryDeviceParticipants.tenantId, fixture.tenantId),
+          eq(schema.inventoryDeviceParticipants.inventoryId, fixture.inventoryId),
+          eq(schema.inventoryDeviceParticipants.deviceId, device.deviceId),
+        ),
+      );
+    await request(app!.getHttpServer())
+      .post(endpoint)
+      .set("x-api-key", device.apiKey)
+      .send({ operatorId: fixture.operatorId })
+      .expect(200);
+    const [resumed] = await db
+      .select({
+        joinedAt: schema.inventoryDeviceParticipants.joinedAt,
+        leftAt: schema.inventoryDeviceParticipants.leftAt,
+        pendingEventCount: schema.inventoryDeviceParticipants.pendingEventCount,
+        openBoxCount: schema.inventoryDeviceParticipants.openBoxCount,
+      })
+      .from(schema.inventoryDeviceParticipants)
+      .where(
+        and(
+          eq(schema.inventoryDeviceParticipants.tenantId, fixture.tenantId),
+          eq(schema.inventoryDeviceParticipants.inventoryId, fixture.inventoryId),
+          eq(schema.inventoryDeviceParticipants.deviceId, device.deviceId),
+        ),
+      );
+    expect(resumed).toEqual({
+      joinedAt: expect.any(Date),
+      leftAt: null,
+      pendingEventCount: 9,
+      openBoxCount: 4,
+    });
+    expect(resumed!.joinedAt).not.toEqual(historicalJoin);
+    const resumedAudits = await db
+      .select({ id: schema.tenantAuditEvents.id })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, fixture.tenantId),
+          eq(schema.tenantAuditEvents.action, "inventory.station.joined"),
+          eq(schema.tenantAuditEvents.targetId, fixture.inventoryId),
+        ),
+      );
+    expect(resumedAudits).toHaveLength(2);
+  });
+
+  it("admits expired-subscription discovery only when inventory started strictly before expiry", async () => {
+    const endsAt = new Date(Date.now() - 60_000);
+    for (const boundary of ["before", "equal", "after"] as const) {
+      const agent = request.agent(app!.getHttpServer());
+      const fixture = await seedRunningInventory(agent);
+      const device = await station(agent, `Recovery ${boundary}`, fixture.lineId);
+      const startedAt = new Date(
+        endsAt.getTime() + (boundary === "before" ? -1 : boundary === "equal" ? 0 : 1),
+      );
+      await db
+        .update(schema.inventories)
+        .set({ startedAt })
+        .where(
+          and(
+            eq(schema.inventories.tenantId, fixture.tenantId),
+            eq(schema.inventories.id, fixture.inventoryId),
+          ),
+        );
+      await attachExpiredSubscription(
+        fixture.tenantId,
+        new Date(endsAt.getTime() - 86_400_000),
+        endsAt,
+      );
+
+      const list = await request(app!.getHttpServer())
+        .get("/station/inventory-tasks")
+        .set("x-api-key", device.apiKey)
+        .expect(200);
+      expect(list.body.items).toHaveLength(boundary === "before" ? 1 : 0);
+
+      const preview = request(app!.getHttpServer())
+        .post("/station/inventory-tasks/resolve-barcode")
+        .set("x-api-key", device.apiKey)
+        .send({ barcode: `markiro:inventory:v1:${fixture.inventoryId}` });
+      if (boundary === "before") {
+        await preview.expect(200);
+      } else {
+        await preview.expect(403, { code: "subscription_read_only" });
+      }
+    }
+  });
+
+  it("fails task list and barcode preview closed on schema-valid copied manifest facts", async () => {
+    const listAgent = request.agent(app!.getHttpServer());
+    const listFixture = await seedRunningInventory(listAgent);
+    const listDevice = await station(listAgent, "Copied list manifest", listFixture.lineId);
+    const [listInventory] = await db
+      .select({ manifest: schema.inventories.stationManifest })
+      .from(schema.inventories)
+      .where(eq(schema.inventories.id, listFixture.inventoryId));
+    await db
+      .update(schema.inventories)
+      .set({
+        stationManifest: {
+          ...(listInventory!.manifest as Record<string, unknown>),
+          inventoryId: randomUUID(),
+        },
+      })
+      .where(eq(schema.inventories.id, listFixture.inventoryId));
+    await request(app!.getHttpServer())
+      .get("/station/inventory-tasks")
+      .set("x-api-key", listDevice.apiKey)
+      .expect(409, { code: "INVENTORY_BUNDLE_INVALID" });
+
+    const previewAgent = request.agent(app!.getHttpServer());
+    const previewFixture = await seedRunningInventory(previewAgent);
+    const previewDevice = await station(
+      previewAgent,
+      "Copied preview manifest",
+      previewFixture.lineId,
+    );
+    const [previewInventory] = await db
+      .select({ manifest: schema.inventories.stationManifest })
+      .from(schema.inventories)
+      .where(eq(schema.inventories.id, previewFixture.inventoryId));
+    await db
+      .update(schema.inventories)
+      .set({
+        stationManifest: {
+          ...(previewInventory!.manifest as Record<string, unknown>),
+          productId: randomUUID(),
+        },
+      })
+      .where(eq(schema.inventories.id, previewFixture.inventoryId));
+    await request(app!.getHttpServer())
+      .post("/station/inventory-tasks/resolve-barcode")
+      .set("x-api-key", previewDevice.apiKey)
+      .send({ barcode: `markiro:inventory:v1:${previewFixture.inventoryId}` })
+      .expect(409, { code: "INVENTORY_BUNDLE_INVALID" });
   });
 
   it("denies unconfirmed barcode-less cross-line joins, cross-tenant ids, non-running tasks, and revoked devices", async () => {

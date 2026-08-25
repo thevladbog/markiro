@@ -1,5 +1,5 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
 
@@ -7,7 +7,6 @@ import { DB } from "../../auth/auth.module";
 import { StationInventoryBundleService } from "./station-inventory-bundle.service";
 import {
   parseInventoryTaskBarcode,
-  parseStationInventoryManifest,
   type JoinStationInventoryDto,
   type ResolveStationInventoryBarcodeResponseDto,
   type StationInventoryBundleManifestDto,
@@ -25,19 +24,9 @@ export class StationInventoryAccessService {
 
   async list(tenantId: string, deviceLineId: string | null): Promise<StationInventoryTaskListDto> {
     if (deviceLineId === null) return { items: [] };
-    const rows = await this.db
-      .select({ stationManifest: schema.inventories.stationManifest })
-      .from(schema.inventories)
-      .where(
-        and(
-          eq(schema.inventories.tenantId, tenantId),
-          eq(schema.inventories.status, "running"),
-          eq(schema.inventories.lineId, deviceLineId),
-        ),
-      )
-      .orderBy(asc(schema.inventories.number), asc(schema.inventories.id));
+    const manifests = await this.bundles.listRunningManifests(tenantId, deviceLineId);
     return {
-      items: rows.map((row) => this.taskFromStoredManifest(row.stationManifest, deviceLineId)),
+      items: manifests.map((manifest) => this.taskFromManifest(manifest)),
     };
   }
 
@@ -48,18 +37,8 @@ export class StationInventoryAccessService {
   ): Promise<ResolveStationInventoryBarcodeResponseDto> {
     const inventoryId = parseInventoryTaskBarcode(barcode);
     if (inventoryId === null) throw new NotFoundException();
-    const [inventory] = await this.db
-      .select({ stationManifest: schema.inventories.stationManifest })
-      .from(schema.inventories)
-      .where(
-        and(
-          eq(schema.inventories.tenantId, tenantId),
-          eq(schema.inventories.id, inventoryId),
-          eq(schema.inventories.status, "running"),
-        ),
-      );
-    if (!inventory) throw new NotFoundException();
-    const task = this.taskFromStoredManifest(inventory.stationManifest);
+    const manifest = await this.bundles.loadStoredManifest(this.db, tenantId, inventoryId);
+    const task = this.taskFromManifest(manifest);
     return {
       task,
       deviceLineId,
@@ -130,12 +109,43 @@ export class StationInventoryAccessService {
         throw new ConflictException({ code: "INVENTORY_DIFFERENT_LINE_CONFIRMATION_REQUIRED" });
       }
 
+      const [existingParticipant] = await tx
+        .select({ leftAt: schema.inventoryDeviceParticipants.leftAt })
+        .from(schema.inventoryDeviceParticipants)
+        .where(
+          and(
+            eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
+            eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
+            eq(schema.inventoryDeviceParticipants.deviceId, deviceId),
+          ),
+        )
+        .for("update");
       const manifest = await this.bundles.prepareJoinManifest(tx, tenantId, inventoryId, deviceId);
+      if (existingParticipant?.leftAt === null) return manifest;
+
       const now = new Date();
       const joinMethod = differentLine ? "task_barcode" : "assigned_line";
-      await tx
-        .insert(schema.inventoryDeviceParticipants)
-        .values({
+      if (existingParticipant) {
+        await tx
+          .update(schema.inventoryDeviceParticipants)
+          .set({
+            operatorId: operator.id,
+            configuredLineId: deviceLineId,
+            joinMethod,
+            differentLineConfirmed: differentLine,
+            joinedAt: now,
+            leftAt: null,
+            heartbeatAt: now,
+          })
+          .where(
+            and(
+              eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
+              eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
+              eq(schema.inventoryDeviceParticipants.deviceId, deviceId),
+            ),
+          );
+      } else {
+        await tx.insert(schema.inventoryDeviceParticipants).values({
           tenantId,
           inventoryId,
           deviceId,
@@ -145,25 +155,8 @@ export class StationInventoryAccessService {
           differentLineConfirmed: differentLine,
           joinedAt: now,
           heartbeatAt: now,
-        })
-        .onConflictDoUpdate({
-          target: [
-            schema.inventoryDeviceParticipants.tenantId,
-            schema.inventoryDeviceParticipants.inventoryId,
-            schema.inventoryDeviceParticipants.deviceId,
-          ],
-          set: {
-            operatorId: operator.id,
-            configuredLineId: deviceLineId,
-            joinMethod,
-            differentLineConfirmed: differentLine,
-            joinedAt: now,
-            leftAt: null,
-            heartbeatAt: now,
-            pendingEventCount: 0,
-            openBoxCount: 0,
-          },
         });
+      }
       await tx.insert(schema.tenantAuditEvents).values({
         organizationId: tenantId,
         actorUserId: null,
@@ -189,16 +182,7 @@ export class StationInventoryAccessService {
     });
   }
 
-  private taskFromStoredManifest(value: unknown, expectedLineId?: string): StationInventoryTaskDto {
-    let manifest: StationInventoryManifest;
-    try {
-      manifest = parseStationInventoryManifest(value);
-    } catch {
-      throw new ConflictException({ code: "INVENTORY_BUNDLE_INVALID" });
-    }
-    if (expectedLineId !== undefined && manifest.lineId !== expectedLineId) {
-      throw new ConflictException({ code: "INVENTORY_BUNDLE_INVALID" });
-    }
+  private taskFromManifest(manifest: StationInventoryManifest): StationInventoryTaskDto {
     return {
       inventoryId: manifest.inventoryId,
       inventoryNumber: manifest.inventoryNumber,

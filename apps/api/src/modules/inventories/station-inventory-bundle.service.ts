@@ -10,6 +10,12 @@ import { and, asc, eq, gt, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 
 import { DB } from "../../auth/auth.module";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
+import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
+import type {
+  EffectiveEntitlements,
+  EntitlementsExecutor,
+} from "../../subscriptions/entitlements.types";
 import {
   BOX_EXTENSION_DIGIT,
   deriveIssuerPrefix,
@@ -25,7 +31,31 @@ import {
 } from "./station-inventory.dto";
 
 type InventoryTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
-type InventoryExecutor = Pick<Db, "select">;
+type InventoryExecutor = EntitlementsExecutor;
+
+interface StoredManifestFacts {
+  id: string;
+  number: string;
+  mode: "check" | "repack";
+  productId: string;
+  gtin14Snapshot: string;
+  lineId: string;
+  productionDateFrom: string;
+  productionDateTo: string;
+  boxLabelTemplateId: string | null;
+  activeSnapshotId: string | null;
+  stationManifest: unknown;
+  startedAt: Date | null;
+  snapshotId: string | null;
+  snapshotRevision: number | null;
+  snapshotCombinedDigest: string | null;
+  emitted: number | null;
+  introduced: number | null;
+  applied: number | null;
+  retired: number | null;
+  writtenOff: number | null;
+  disaggregation: number | null;
+}
 
 const INVENTORY_BOX_BLOCK_SIZE = 2000;
 
@@ -34,7 +64,27 @@ export class StationInventoryBundleService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly sscc: SsccService,
+    private readonly entitlements: EntitlementsService,
   ) {}
+
+  async listRunningManifests(
+    tenantId: string,
+    lineId: string,
+  ): Promise<StationInventoryManifest[]> {
+    const access = await this.entitlements.resolveRecovery(tenantId, this.db, new Date());
+    const rows = await this.selectStoredManifestFacts(this.db)
+      .where(
+        and(
+          eq(schema.inventories.tenantId, tenantId),
+          eq(schema.inventories.status, "running"),
+          eq(schema.inventories.lineId, lineId),
+        ),
+      )
+      .orderBy(asc(schema.inventories.number), asc(schema.inventories.id));
+    return rows
+      .filter((row) => this.isRecoveryEligible(access, row.startedAt))
+      .map((row) => this.validateStoredManifest(row));
+  }
 
   getManifest(
     tenantId: string,
@@ -164,40 +214,96 @@ export class StationInventoryBundleService {
     if (!participant) throw new NotFoundException();
   }
 
-  private async loadStoredManifest(
+  async loadStoredManifest(
     executor: InventoryExecutor,
     tenantId: string,
     inventoryId: string,
   ): Promise<StationInventoryManifest> {
-    const [inventory] = await executor
-      .select({
-        id: schema.inventories.id,
-        status: schema.inventories.status,
-        mode: schema.inventories.mode,
-        productId: schema.inventories.productId,
-        lineId: schema.inventories.lineId,
-        activeSnapshotId: schema.inventories.activeSnapshotId,
-        stationManifest: schema.inventories.stationManifest,
-      })
-      .from(schema.inventories)
-      .where(
-        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
-      );
-    if (!inventory || inventory.status !== "running" || inventory.activeSnapshotId === null) {
-      throw new NotFoundException();
-    }
+    const [inventory] = await this.selectStoredManifestFacts(executor).where(
+      and(
+        eq(schema.inventories.tenantId, tenantId),
+        eq(schema.inventories.id, inventoryId),
+        eq(schema.inventories.status, "running"),
+      ),
+    );
+    if (!inventory) throw new NotFoundException();
 
+    const access = await this.entitlements.resolveRecovery(tenantId, executor, new Date());
+    if (!this.isRecoveryEligible(access, inventory.startedAt)) {
+      throw new SubscriptionReadOnlyException();
+    }
+    return this.validateStoredManifest(inventory);
+  }
+
+  private validateStoredManifest(inventory: StoredManifestFacts): StationInventoryManifest {
     let manifest: StationInventoryManifest;
     try {
       manifest = parseStationInventoryManifest(inventory.stationManifest);
     } catch {
       throw new ConflictException({ code: "INVENTORY_BUNDLE_INVALID" });
     }
-    const [snapshot] = await executor
+    const codeCount =
+      inventory.emitted !== null &&
+      inventory.introduced !== null &&
+      inventory.applied !== null &&
+      inventory.retired !== null &&
+      inventory.writtenOff !== null &&
+      inventory.disaggregation !== null
+        ? inventory.emitted +
+          inventory.introduced +
+          inventory.applied +
+          inventory.retired +
+          inventory.writtenOff +
+          inventory.disaggregation
+        : -1;
+    if (
+      inventory.activeSnapshotId === null ||
+      inventory.snapshotId === null ||
+      inventory.snapshotRevision !== 1 ||
+      manifest.inventoryId !== inventory.id ||
+      manifest.inventoryNumber !== inventory.number ||
+      manifest.snapshotId !== inventory.snapshotId ||
+      manifest.snapshotId !== inventory.activeSnapshotId ||
+      manifest.snapshotRevision !== inventory.snapshotRevision ||
+      manifest.combinedDigest !== inventory.snapshotCombinedDigest ||
+      manifest.codeCount !== codeCount ||
+      manifest.mode !== inventory.mode ||
+      manifest.productId !== inventory.productId ||
+      manifest.gtin14 !== inventory.gtin14Snapshot ||
+      manifest.lineId !== inventory.lineId ||
+      manifest.productionDateFrom !== inventory.productionDateFrom ||
+      manifest.productionDateTo !== inventory.productionDateTo ||
+      (manifest.boxLabelTemplate?.id ?? null) !== inventory.boxLabelTemplateId
+    ) {
+      throw new ConflictException({ code: "INVENTORY_BUNDLE_INVALID" });
+    }
+    return manifest;
+  }
+
+  private isRecoveryEligible(access: EffectiveEntitlements, startedAt: Date | null): boolean {
+    if (access.access !== "read_only") return true;
+    const endsAt = access.subscription?.endsAt ?? null;
+    return endsAt !== null && startedAt !== null && startedAt < endsAt;
+  }
+
+  private selectStoredManifestFacts(executor: InventoryExecutor) {
+    return executor
       .select({
-        id: schema.inventorySnapshots.id,
-        revision: schema.inventorySnapshots.revision,
-        combinedDigest: schema.inventorySnapshots.combinedDigest,
+        id: schema.inventories.id,
+        number: schema.inventories.number,
+        mode: schema.inventories.mode,
+        productId: schema.inventories.productId,
+        gtin14Snapshot: schema.inventories.gtin14Snapshot,
+        lineId: schema.inventories.lineId,
+        productionDateFrom: schema.inventories.productionDateFrom,
+        productionDateTo: schema.inventories.productionDateTo,
+        boxLabelTemplateId: schema.inventories.boxLabelTemplateId,
+        activeSnapshotId: schema.inventories.activeSnapshotId,
+        stationManifest: schema.inventories.stationManifest,
+        startedAt: schema.inventories.startedAt,
+        snapshotId: schema.inventorySnapshots.id,
+        snapshotRevision: schema.inventorySnapshots.revision,
+        snapshotCombinedDigest: schema.inventorySnapshots.combinedDigest,
         emitted: schema.inventorySnapshots.emittedCount,
         introduced: schema.inventorySnapshots.introducedCount,
         applied: schema.inventorySnapshots.appliedCount,
@@ -205,36 +311,14 @@ export class StationInventoryBundleService {
         writtenOff: schema.inventorySnapshots.writtenOffCount,
         disaggregation: schema.inventorySnapshots.disaggregationCount,
       })
-      .from(schema.inventorySnapshots)
-      .where(
+      .from(schema.inventories)
+      .leftJoin(
+        schema.inventorySnapshots,
         and(
-          eq(schema.inventorySnapshots.tenantId, tenantId),
-          eq(schema.inventorySnapshots.inventoryId, inventoryId),
-          eq(schema.inventorySnapshots.id, inventory.activeSnapshotId),
+          eq(schema.inventorySnapshots.tenantId, schema.inventories.tenantId),
+          eq(schema.inventorySnapshots.inventoryId, schema.inventories.id),
+          eq(schema.inventorySnapshots.id, schema.inventories.activeSnapshotId),
         ),
       );
-    const codeCount = snapshot
-      ? snapshot.emitted +
-        snapshot.introduced +
-        snapshot.applied +
-        snapshot.retired +
-        snapshot.writtenOff +
-        snapshot.disaggregation
-      : -1;
-    if (
-      !snapshot ||
-      snapshot.revision !== 1 ||
-      manifest.inventoryId !== inventory.id ||
-      manifest.snapshotId !== snapshot.id ||
-      manifest.snapshotRevision !== snapshot.revision ||
-      manifest.combinedDigest !== snapshot.combinedDigest ||
-      manifest.codeCount !== codeCount ||
-      manifest.mode !== inventory.mode ||
-      manifest.productId !== inventory.productId ||
-      manifest.lineId !== inventory.lineId
-    ) {
-      throw new ConflictException({ code: "INVENTORY_BUNDLE_INVALID" });
-    }
-    return manifest;
   }
 }

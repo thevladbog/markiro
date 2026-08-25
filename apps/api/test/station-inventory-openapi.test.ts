@@ -117,7 +117,9 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
       snapshotRevision: { type: "integer", minimum: 1, maximum: 1 },
       combinedDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
       codeCount: { type: "integer", minimum: 0 },
+      boxCapacity: { type: "integer", minimum: 1 },
     });
+    expect(manifest.required).toContain("boxCapacity");
     const sscc = manifest.properties?.sscc;
     if (!sscc) throw new Error("Missing SSCC schema");
     expect(sscc.nullable).toBe(true);
