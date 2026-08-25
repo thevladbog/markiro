@@ -7,7 +7,7 @@ fixtures × 2 locales (`ru`, `en`) × 3 exact viewports (`1024×768`, `1280×800
 connected real-PostgreSQL API fixture passed all 15 inventory-sync cases across two device
 identities, and the cabinet inventory-detail boundary returned its tenant-scoped blocker
 projection. The evidence was generated from immutable code commit
-`6af7be25895bf16b06e162632f3f39a4453abbb6` on branch `codex/inventory-station-v1`.
+`f14fd538a3e1e389cb7a91f2991b567543020c4e` on branch `codex/inventory-station-v1`.
 
 **NOT RUN — physical acceptance.** No packaged Windows/Tauri build, HID or serial scanner, two
 physical terminals, offline factory network, restart of an installed app, physical printer/driver,
@@ -56,7 +56,10 @@ added.
 
 The check and repack fixtures supply frozen synthetic state to `InventoryWorkScreen`; the production
 check, repack, correction, date, leave, and print-recovery render branches produce the gallery DOM.
-The gallery no longer maintains a parallel copy of either production work page.
+The print-recovery fixture also supplies the same printer-setup callback boundary as the production
+app, using a deterministic no-op callback so both enabled recovery actions are measured without
+opening hardware setup. The gallery no longer maintains a parallel copy of either production work
+page.
 
 ## Representative screenshots
 
@@ -114,7 +117,7 @@ INVENTORY_TEST_DATABASE_URL=<disposable-local-db> apps/api/node_modules/.bin/vit
 PASS — 1/1 selected (14 not selected)
 
 INVENTORY_ACCEPTANCE_ARTIFACTS=1 \
-INVENTORY_ACCEPTANCE_COMMIT=6af7be25895bf16b06e162632f3f39a4453abbb6 \
+INVENTORY_ACCEPTANCE_COMMIT=f14fd538a3e1e389cb7a91f2991b567543020c4e \
 tools/production-browser/node_modules/.bin/playwright test \
   --config tools/production-browser/station-inventory.playwright.config.ts
 PASS — 96/96 matrix rows, 1/1 Playwright scenario
