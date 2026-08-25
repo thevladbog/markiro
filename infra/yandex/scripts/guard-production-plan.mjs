@@ -306,6 +306,46 @@ function unknownArrayObjectKeys(value) {
   ].sort();
 }
 
+function securityGroupRuleSemanticSignature(rule) {
+  if (!object(rule) || typeof rule.protocol !== "string") return null;
+  const optionalString = (value) => {
+    if (value === null || value === undefined) return "";
+    return typeof value === "string" ? value : null;
+  };
+  const stringArray = (value) => {
+    if (value === null || value === undefined) return [];
+    if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) return null;
+    return [...value].sort();
+  };
+  const port = rule.port ?? -1;
+  const fromPort = rule.from_port ?? -1;
+  const toPort = rule.to_port ?? -1;
+  if (![port, fromPort, toPort].every((value) => Number.isInteger(value))) return null;
+  const description = optionalString(rule.description);
+  const securityGroupId = optionalString(rule.security_group_id);
+  const predefinedTarget = optionalString(rule.predefined_target);
+  const v4Cidrs = stringArray(rule.v4_cidr_blocks);
+  const v6Cidrs = stringArray(rule.v6_cidr_blocks);
+  if (
+    description === null ||
+    securityGroupId === null ||
+    predefinedTarget === null ||
+    v4Cidrs === null ||
+    v6Cidrs === null
+  )
+    return null;
+  const portRange = port !== -1 ? [port, port] : [fromPort, toPort];
+  return stableValueSignature({
+    description,
+    portRange,
+    predefinedTarget,
+    protocol: rule.protocol.toUpperCase(),
+    securityGroupId,
+    v4Cidrs,
+    v6Cidrs,
+  });
+}
+
 function appComputeActionScope(resource) {
   const beforeValue = resource.change?.before;
   const afterValue = resource.change?.after;
@@ -359,7 +399,23 @@ function securityGroupActionScope(resource, baseScope) {
           Array.isArray(afterValue.ingress) &&
           beforeValue.ingress.length !== afterValue.ingress.length
         ) {
-          return `ingress-cardinality-before-${beforeValue.ingress.length}-after-${afterValue.ingress.length}`;
+          let desiredMatches = "";
+          if (afterValue.ingress.length === 1) {
+            const desiredSignature = securityGroupRuleSemanticSignature(afterValue.ingress[0]);
+            const liveSignatures = beforeValue.ingress.map((rule) =>
+              securityGroupRuleSemanticSignature(rule),
+            );
+            if (
+              desiredSignature !== null &&
+              liveSignatures.every((signature) => signature !== null)
+            ) {
+              const matchCount = liveSignatures.filter(
+                (signature) => signature === desiredSignature,
+              ).length;
+              desiredMatches = `-desired-matches-before-${matchCount}`;
+            }
+          }
+          return `ingress-cardinality-before-${beforeValue.ingress.length}-after-${afterValue.ingress.length}${desiredMatches}`;
         }
         const ingressFields = changedArrayObjectKeys(beforeValue.ingress, afterValue.ingress);
         if (!ingressFields || ingressFields.length === 0) return "ingress";
