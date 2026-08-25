@@ -600,7 +600,7 @@ const stationInventorySsccOpenApiSchema: SchemaObject = {
     "consumedThroughSerial",
   ],
   properties: {
-    allocationOrder: { type: "integer", minimum: 1 },
+    allocationOrder: { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
     issuerPrefix: { type: "string", pattern: "^[0-9]{9}$" },
     extensionDigit: { type: "integer", minimum: 0, maximum: 9 },
     fromSerial: { type: "integer", minimum: 0 },
@@ -614,7 +614,7 @@ const stationInventoryRevokedSsccBlockOpenApiSchema: SchemaObject = {
   additionalProperties: false,
   required: ["allocationOrder", "fromSerial", "toSerial"],
   properties: {
-    allocationOrder: { type: "integer", minimum: 1 },
+    allocationOrder: { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
     fromSerial: { type: "integer", minimum: 0 },
     toSerial: { type: "integer", minimum: 0 },
   },

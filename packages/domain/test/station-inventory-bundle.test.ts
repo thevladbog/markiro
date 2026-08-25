@@ -124,5 +124,11 @@ describe("station inventory bundle contract", () => {
         ssccRevokedBlocks: [{ allocationOrder: 2, fromSerial: 1, toSerial: 2000 }],
       }),
     ).toThrow("Invalid station inventory bundle manifest");
+    expect(() =>
+      parseStationInventoryBundleManifest({
+        ...repack,
+        ssccRevokedBlocks: [{ allocationOrder: 3, fromSerial: 1, toSerial: 2000 }],
+      }),
+    ).toThrow("Invalid station inventory bundle manifest");
   });
 });

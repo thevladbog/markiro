@@ -723,6 +723,70 @@ describe("inventory mirror staging", () => {
     ).rejects.toThrow("unsafe inventory SSCC transition");
   });
 
+  it("rejects a future revoked allocation without poisoning a later legitimate replacement", async () => {
+    const base = {
+      ...manifest(),
+      mode: "repack" as const,
+      boxLabelTemplate: {
+        id: "66666666-6666-4666-8666-666666666666",
+        name: "Короб",
+        spec: {
+          widthMm: 58,
+          heightMm: 40,
+          dpi: 203 as const,
+          language: "zpl" as const,
+          elements: [],
+        },
+      },
+      sscc: {
+        allocationOrder: 50,
+        issuerPrefix: "460000009",
+        extensionDigit: 0,
+        fromSerial: 1000,
+        toSerial: 1999,
+        consumedThroughSerial: 1010,
+      },
+      ssccRevokedFrom: [] as number[],
+      ssccRevokedBlocks: [],
+    };
+    const first = await beginInventoryMirror(exec, base);
+    await ingestInventoryPage(
+      exec,
+      first,
+      null,
+      page(SNAPSHOT_A, DIGEST_A, rows, null, null, base),
+    );
+    expect(await publishInventorySnapshot(exec, first)).toBe(true);
+
+    await expect(
+      beginInventoryMirror(exec, {
+        ...base,
+        ssccRevokedBlocks: [{ allocationOrder: 51, fromSerial: 2000, toSerial: 2999 }],
+      }),
+    ).rejects.toThrow("Invalid station inventory bundle manifest");
+
+    const legitimate = {
+      ...base,
+      sscc: {
+        ...base.sscc,
+        allocationOrder: 51,
+        fromSerial: 2000,
+        toSerial: 2999,
+        consumedThroughSerial: null,
+      },
+      ssccRevokedFrom: [1000],
+      ssccRevokedBlocks: [{ allocationOrder: 50, fromSerial: 1000, toSerial: 1999 }],
+    };
+    expect((await beginInventoryMirror(exec, legitimate)).alreadyActive).toBe(true);
+    const stored = db.prepare("SELECT active_manifest_json FROM inventory_task_mirror").get() as {
+      active_manifest_json: string;
+    };
+    expect(JSON.parse(stored.active_manifest_json)).toMatchObject({
+      sscc: { allocationOrder: 51, fromSerial: 2000 },
+      ssccRevokedBlocks: [{ allocationOrder: 50 }],
+    });
+  });
+
   it("upgrades a pre-allocation-order active manifest from authoritative live facts", async () => {
     const base = {
       ...manifest(),

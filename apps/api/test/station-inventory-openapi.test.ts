@@ -133,11 +133,20 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
       "toSerial",
       "consumedThroughSerial",
     ]);
-    expect(sscc.properties?.allocationOrder).toEqual({ type: "integer", minimum: 1 });
+    expect(sscc.properties?.allocationOrder).toEqual({
+      type: "integer",
+      minimum: 1,
+      maximum: Number.MAX_SAFE_INTEGER,
+    });
     expect(sscc.properties?.consumedThroughSerial?.nullable).toBe(true);
     const revokedBlocks = manifest.properties?.ssccRevokedBlocks;
     expect(revokedBlocks?.type).toBe("array");
     exactClosedObject(revokedBlocks?.items ?? {}, ["allocationOrder", "fromSerial", "toSerial"]);
+    expect(revokedBlocks?.items?.properties?.allocationOrder).toEqual({
+      type: "integer",
+      minimum: 1,
+      maximum: Number.MAX_SAFE_INTEGER,
+    });
 
     const page = responseSchema(document, "/station/inventories/{id}/bundle/codes", "get");
     exactClosedObject(page, [

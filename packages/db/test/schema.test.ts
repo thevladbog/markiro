@@ -80,7 +80,16 @@ describe("platform schema", () => {
     // the only record of where a gap in the numbering came from.
     expect(ssccBlocks.revokedAt.notNull).toBe(false);
     expect(ssccBlocks.allocationOrder.notNull).toBe(true);
-    expect(ssccBlocks.allocationOrder.hasDefault).toBe(true);
+    expect(ssccBlocks.allocationOrder.hasDefault).toBe(false);
+    const allocationOrderIndex = getTableConfig(ssccBlocks).indexes.find(
+      (index) => index.config.name === "sscc_blocks_stream_allocation_order_uq",
+    );
+    expect(allocationOrderIndex?.config.unique).toBe(true);
+    expect(
+      allocationOrderIndex?.config.columns.map((column) =>
+        is(column, IndexedColumn) ? column.name : undefined,
+      ),
+    ).toEqual(["tenant_id", "issuer_prefix", "extension_digit", "device_id", "allocation_order"]);
   });
 
   it("gives boxes a tenant-unique sscc", () => {

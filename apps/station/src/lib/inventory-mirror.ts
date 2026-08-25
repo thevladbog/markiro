@@ -343,6 +343,11 @@ function mergeSsccSafety(
     ssccRevokedFrom = current.ssccRevokedFrom;
     ssccRevokedBlocks = current.ssccRevokedBlocks;
   }
+  if (sscc === null) throw new Error("unsafe inventory SSCC transition");
+  const liveAllocationOrder = sscc.allocationOrder;
+  if (ssccRevokedBlocks.some((block) => block.allocationOrder >= liveAllocationOrder)) {
+    throw new Error("unsafe inventory SSCC revocation order");
+  }
 
   return parseStationInventoryBundleManifest({
     ...incoming,

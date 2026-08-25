@@ -167,6 +167,64 @@ describe.skipIf(!ready)("sscc e2e", () => {
     expect(new Set(blocks.map((b) => b.fromSerial)).size).toBe(8);
   });
 
+  it("orders allocations independently per tenant and device stream", async () => {
+    const svc = app!.get(SsccService);
+    const prefix = freshPrefix();
+    const primaryDevice = await registerDevice("Scoped order primary device");
+    const peerDevice = await registerDevice("Scoped order peer device");
+    const otherAgent = request.agent(app!.getHttpServer());
+    const otherTenantId = await signUpAndActivate(otherAgent);
+    const otherDevice = (
+      await createTestStationDevice(app!, otherAgent, "Scoped order other tenant device")
+    ).deviceId;
+
+    await svc.allocate(tenantId, prefix, 0, primaryDevice, 10);
+    await svc.allocate(tenantId, prefix, 0, primaryDevice, 10);
+    await svc.allocate(tenantId, prefix, 0, peerDevice, 10);
+    await svc.allocate(otherTenantId, prefix, 0, otherDevice, 10);
+
+    const rows = await db
+      .select({
+        tenantId: schema.ssccBlocks.tenantId,
+        deviceId: schema.ssccBlocks.deviceId,
+        allocationOrder: schema.ssccBlocks.allocationOrder,
+      })
+      .from(schema.ssccBlocks)
+      .where(eq(schema.ssccBlocks.issuerPrefix, prefix));
+    const orders = (streamTenantId: string, streamDeviceId: string) =>
+      rows
+        .filter((row) => row.tenantId === streamTenantId && row.deviceId === streamDeviceId)
+        .map((row) => Number(row.allocationOrder))
+        .sort((left, right) => left - right);
+    expect(orders(tenantId, primaryDevice)).toEqual([1, 2]);
+    expect(orders(tenantId, peerDevice)).toEqual([1]);
+    expect(orders(otherTenantId, otherDevice)).toEqual([1]);
+  });
+
+  it("never duplicates allocation order under concurrent same-stream allocation", async () => {
+    const svc = app!.get(SsccService);
+    const prefix = freshPrefix();
+    const deviceId = await registerDevice("Concurrent scoped order device");
+    await Promise.all(
+      Array.from({ length: 8 }, () => svc.allocate(tenantId, prefix, 0, deviceId, 10)),
+    );
+
+    const rows = await db
+      .select({ allocationOrder: schema.ssccBlocks.allocationOrder })
+      .from(schema.ssccBlocks)
+      .where(
+        and(
+          eq(schema.ssccBlocks.tenantId, tenantId),
+          eq(schema.ssccBlocks.issuerPrefix, prefix),
+          eq(schema.ssccBlocks.extensionDigit, 0),
+          eq(schema.ssccBlocks.deviceId, deviceId),
+        ),
+      );
+    expect(
+      rows.map((row) => Number(row.allocationOrder)).sort((left, right) => left - right),
+    ).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
   it("starts a fresh box range at serial one", async () => {
     const deviceId = await registerDevice("First serial device");
     const block = await app!.get(SsccService).allocate(tenantId, "555555555", 0, deviceId, 3);
@@ -206,6 +264,7 @@ describe.skipIf(!ready)("sscc e2e", () => {
     const deviceId = await registerDevice("Duplicate revoked start device");
     await db.insert(schema.ssccBlocks).values([
       {
+        allocationOrder: 1,
         tenantId,
         issuerPrefix: prefix,
         extensionDigit: 0,
@@ -215,6 +274,7 @@ describe.skipIf(!ready)("sscc e2e", () => {
         revokedAt: new Date(),
       },
       {
+        allocationOrder: 2,
         tenantId,
         issuerPrefix: prefix,
         extensionDigit: 0,
@@ -513,6 +573,7 @@ describe.skipIf(!ready)("sscc e2e", () => {
       const prefix = "700000005";
       const deviceId = await registerDevice("Remainder device D");
       await db.insert(schema.ssccBlocks).values({
+        allocationOrder: 1,
         tenantId,
         issuerPrefix: prefix,
         extensionDigit: 0,

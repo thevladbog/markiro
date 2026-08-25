@@ -581,6 +581,16 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
     expect(afterShifts?.value).toBe(beforeShifts?.value);
   });
 
+  it("does not expose another tenant's SSCC allocation activity in bundle order", async () => {
+    const firstFixture = await seedBundle(request.agent(app!.getHttpServer()), "repack");
+    const secondFixture = await seedBundle(request.agent(app!.getHttpServer()), "repack");
+
+    const first = await join(firstFixture);
+    const second = await join(secondFixture);
+    expect(first.body.sscc.allocationOrder).toBe(1);
+    expect(second.body.sscc.allocationOrder).toBe(1);
+  });
+
   it("identifies a valid same-range replacement independently from its revoked predecessor", async () => {
     const agent = request.agent(app!.getHttpServer());
     const fixture = await seedBundle(agent, "repack");

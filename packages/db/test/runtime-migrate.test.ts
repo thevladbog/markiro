@@ -112,9 +112,14 @@ try {
   await cp(migrationsFolder, legacyMigrationsFolder, { recursive: true });
   await rm(join(legacyMigrationsFolder, "0029_loving_triathlon.sql"));
   await rm(join(legacyMigrationsFolder, "meta", "0029_snapshot.json"));
+  await rm(join(legacyMigrationsFolder, "0071_fantastic_hellion.sql"));
+  await rm(join(legacyMigrationsFolder, "meta", "0071_snapshot.json"));
   const journalPath = join(legacyMigrationsFolder, "meta", "_journal.json");
   const journal = JSON.parse(await readFile(journalPath, "utf8"));
-  journal.entries = journal.entries.filter((entry) => entry.tag !== "0029_loving_triathlon");
+  journal.entries = journal.entries.filter(
+    (entry) =>
+      entry.tag !== "0029_loving_triathlon" && entry.tag !== "0071_fantastic_hellion",
+  );
   await writeFile(journalPath, JSON.stringify(journal));
 
   pool = new pg.Pool({ connectionString: scratchUrl.toString() });
@@ -134,20 +139,44 @@ try {
     ],
   );
   await pool.query(
-    "INSERT INTO sscc_blocks (tenant_id, issuer_prefix, extension_digit, device_id, from_serial, to_serial) VALUES ($1, $2, $3, $4, $5, $6)",
-    ["runtime-fixture-tenant", "460000000", 1, "00000000-0000-0000-0000-000000000001", 1, 1],
+    "INSERT INTO station_devices (id, tenant_id, name, api_key_id, enrolled_at) VALUES ($1, $2, $3, $4, $5)",
+    [
+      "00000000-0000-0000-0000-000000000002",
+      "runtime-fixture-tenant",
+      "Second legacy station",
+      "second-legacy-api-key",
+      new Date("2026-08-06T00:00:00.000Z"),
+    ],
+  );
+  await pool.query(
+    "INSERT INTO sscc_blocks " +
+      "(tenant_id, issuer_prefix, extension_digit, device_id, from_serial, to_serial, issued_at) " +
+      "VALUES " +
+      "($1, $2, $3, $4, 1, 1, '2026-08-06T00:00:01.000Z'), " +
+      "($1, $2, $3, $4, 2, 2, '2026-08-06T00:00:02.000Z'), " +
+      "($1, $2, $3, $5, 3, 3, '2026-08-06T00:00:03.000Z')",
+    [
+      "runtime-fixture-tenant",
+      "460000000",
+      1,
+      "00000000-0000-0000-0000-000000000001",
+      "00000000-0000-0000-0000-000000000002",
+    ],
   );
 
   const { runRuntimeMigrations } = await import(pathToFileURL(runtimeModule).href);
   await runRuntimeMigrations({ databaseUrl: scratchUrl.toString(), migrationsFolder, log: () => {} });
 
   const result = await pool.query(
-    "SELECT d.id, d.api_key_id, d.enrolled_at, b.device_id, b.allocation_order FROM station_devices d JOIN sscc_blocks b ON b.tenant_id = d.tenant_id AND b.device_id = d.id WHERE d.id = $1",
-    ["00000000-0000-0000-0000-000000000001"],
+    "SELECT d.id, d.api_key_id, d.enrolled_at, b.device_id, b.allocation_order FROM station_devices d JOIN sscc_blocks b ON b.tenant_id = d.tenant_id AND b.device_id = d.id WHERE d.id IN ($1, $2) ORDER BY d.id, b.allocation_order",
+    [
+      "00000000-0000-0000-0000-000000000001",
+      "00000000-0000-0000-0000-000000000002",
+    ],
   );
   process.stdout.write(
     JSON.stringify({
-      record: result.rows[0],
+      records: result.rows,
       databaseUrlArguments: process.argv.filter((argument) => argument.includes(databaseUrl)),
     }),
   );
@@ -324,13 +353,29 @@ describe("runRuntimeMigrations", () => {
       );
 
       expect(JSON.parse(stdout)).toEqual({
-        record: {
-          id: "00000000-0000-0000-0000-000000000001",
-          api_key_id: "legacy-api-key",
-          enrolled_at: "2026-08-06T00:00:00.000Z",
-          device_id: "00000000-0000-0000-0000-000000000001",
-          allocation_order: "1",
-        },
+        records: [
+          {
+            id: "00000000-0000-0000-0000-000000000001",
+            api_key_id: "legacy-api-key",
+            enrolled_at: "2026-08-06T00:00:00.000Z",
+            device_id: "00000000-0000-0000-0000-000000000001",
+            allocation_order: "1",
+          },
+          {
+            id: "00000000-0000-0000-0000-000000000001",
+            api_key_id: "legacy-api-key",
+            enrolled_at: "2026-08-06T00:00:00.000Z",
+            device_id: "00000000-0000-0000-0000-000000000001",
+            allocation_order: "2",
+          },
+          {
+            id: "00000000-0000-0000-0000-000000000002",
+            api_key_id: "second-legacy-api-key",
+            enrolled_at: "2026-08-06T00:00:00.000Z",
+            device_id: "00000000-0000-0000-0000-000000000002",
+            allocation_order: "1",
+          },
+        ],
         databaseUrlArguments: [],
       });
     },

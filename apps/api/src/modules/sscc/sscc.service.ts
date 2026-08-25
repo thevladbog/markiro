@@ -51,7 +51,7 @@ export interface SsccBlock {
 }
 
 export interface OrderedSsccBlock extends SsccBlock {
-  /** Globally monotonic identity assigned by Postgres when this block is cut. */
+  /** Monotonic only within this tenant/issuer/extension/device stream. */
   allocationOrder: number;
 }
 
@@ -631,7 +631,29 @@ export class SsccService {
         consumedThroughSerial: null,
       };
 
+      // The counter upsert above holds the (tenant, issuer, extension) row
+      // lock until this transaction commits. Every allocation in this
+      // device stream therefore computes its next scoped order only after
+      // the previous one is visible; different tenants/devices still start
+      // at 1 and reveal nothing about allocations in other streams.
+      const [latestOrder] = await tx
+        .select({ value: max(schema.ssccBlocks.allocationOrder) })
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, tenantId),
+            eq(schema.ssccBlocks.issuerPrefix, issuerPrefix),
+            eq(schema.ssccBlocks.extensionDigit, extensionDigit),
+            eq(schema.ssccBlocks.deviceId, deviceId),
+          ),
+        );
+      const allocationOrder = Number(latestOrder?.value ?? 0) + 1;
+      if (!Number.isSafeInteger(allocationOrder)) {
+        throw new InternalServerErrorException("SSCC allocation order is exhausted");
+      }
+
       await tx.insert(schema.ssccBlocks).values({
+        allocationOrder,
         tenantId,
         issuerPrefix,
         extensionDigit,

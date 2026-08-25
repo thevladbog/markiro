@@ -178,6 +178,7 @@ export const stationInventoryBundleManifestSchema = z
     }
     const uniqueRevocations = new Set(manifest.ssccRevokedFrom);
     const revokedOrders = new Set(manifest.ssccRevokedBlocks.map((block) => block.allocationOrder));
+    const liveAllocationOrder = manifest.sscc?.allocationOrder;
     if (
       uniqueRevocations.size !== manifest.ssccRevokedFrom.length ||
       manifest.ssccRevokedFrom.some(
@@ -194,7 +195,8 @@ export const stationInventoryBundleManifestSchema = z
           index > 0 &&
           block.allocationOrder <= manifest.ssccRevokedBlocks[index - 1]!.allocationOrder,
       ) ||
-      (manifest.sscc !== null && revokedOrders.has(manifest.sscc.allocationOrder))
+      (liveAllocationOrder !== undefined &&
+        manifest.ssccRevokedBlocks.some((block) => block.allocationOrder >= liveAllocationOrder))
     ) {
       context.addIssue({ code: "custom", message: "unsafe SSCC revoked block list" });
     }
