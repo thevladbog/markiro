@@ -1,7 +1,12 @@
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { canonicalizeKm, kmHash } from "@markiro/domain";
+import {
+  buildSscc,
+  canonicalizeKm,
+  kmHash,
+  type StationInventoryBundleManifest,
+} from "@markiro/domain";
 import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
 
 import {
@@ -10,9 +15,16 @@ import {
   readInventoryRepackState,
   recordInventoryRepackScan,
   removeLastInventoryRepackItem,
+  resolveInvalidatedInventoryRepackBox,
 } from "../src/lib/inventory-repacking.js";
+import { attemptInventoryBoxPrint } from "../src/lib/inventory-box-printing.js";
 import { listRecentInventoryOperations } from "../src/lib/inventory-journal.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
+import {
+  acknowledgeInventoryOutboxBatch,
+  inventoryOutboxDepth,
+  prepareInventoryOutboxBatch,
+} from "../src/lib/inventory-outbox.js";
 import { addRange } from "../src/lib/sscc-pool.js";
 import { makeExec } from "./support/sqlite-exec.js";
 
@@ -186,6 +198,203 @@ describe("durable inventory repacking", () => {
         input(first.km.raw, "dddddddd-dddd-4ddd-8ddd-dddddddddddd", capacity),
       ),
     ).rejects.toThrow("inventory repack printing is pending");
+  });
+
+  it("starts a second box after successful print and restart without reusing the historical box", async () => {
+    const { db, exec, seed } = await setup(1);
+    const first = seed("FIRST-BOX");
+    const firstOpenEventId = "77777777-7777-4777-8777-777777777777";
+    await recordInventoryRepackScan(exec, input(OLD_SSCC, firstOpenEventId, 1));
+    await recordInventoryRepackScan(exec, {
+      ...input(first.km.raw, "88888888-8888-4888-8888-888888888888", 1),
+      createItemId: () => ITEM_ID,
+    });
+    const manifest = {
+      inventoryId: INVENTORY_ID,
+      inventoryNumber: "ИНВ-42",
+      snapshotId: SNAPSHOT_ID,
+      snapshotRevision: 1,
+      snapshotFixedAt: "2026-08-25T01:00:00.000Z",
+      combinedDigest: "a".repeat(64),
+      contentDigest: "b".repeat(64),
+      codeCount: 1,
+      productId: "99999999-9999-4999-8999-999999999999",
+      productName: "Пиво",
+      productPrintName: "Пиво",
+      gtin14: GTIN,
+      egaisCode: null,
+      shelfLifeDays: 180,
+      boxCapacity: 1,
+      mode: "repack",
+      lineId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      lineName: "Линия",
+      productionDateFrom: "2026-08-01",
+      productionDateTo: "2026-08-31",
+      boxLabelTemplate: {
+        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        name: "Короб",
+        spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+      },
+      limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
+      sscc: null,
+      ssccRevokedFrom: [],
+      ssccRevokedBlocks: [],
+    } as unknown as StationInventoryBundleManifest & { mode: "repack" };
+    await attemptInventoryBoxPrint({
+      exec,
+      manifest,
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      deviceId: DEVICE_ID,
+      operatorId: OPERATOR_ID,
+      boxId: BOX_ID,
+      attemptId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      eventId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      attemptedAt: "2026-08-25T10:01:00.000Z",
+      completedAt: () => "2026-08-25T10:01:01.000Z",
+      printing: {
+        target: { kind: "tcp", host: "10.0.0.5", port: 9100 },
+        language: "zpl",
+        print: vi.fn(async () => undefined),
+      },
+      render: vi.fn(async () => new Uint8Array([1, 2, 3])),
+    });
+
+    const restarted = makeExec(db);
+    await expect(
+      readInventoryRepackState(restarted, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID),
+    ).resolves.toEqual({ phase: "awaiting-old-box", box: null });
+    const secondBoxId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const secondOldSscc = buildSscc(3, "460068200", 1);
+    const second = await recordInventoryRepackScan(restarted, {
+      ...input(secondOldSscc, "ffffffff-ffff-4fff-8fff-ffffffffffff", 1),
+      createBoxId: () => secondBoxId,
+    });
+    expect(second).toMatchObject({
+      verdict: "old-box-selected",
+      boxId: secondBoxId,
+      itemCount: 0,
+    });
+    expect(second.newSscc).not.toBe(
+      db.prepare("SELECT new_sscc FROM inventory_repack_boxes_mirror WHERE box_id = ?").get(BOX_ID)
+        ?.new_sscc,
+    );
+    expect(db.prepare("SELECT next_serial FROM sscc_pool").get()).toEqual({ next_serial: 3 });
+  });
+
+  it("journals an owner-scoped conflict resolution, preserves conflict evidence, and drains it after acknowledgement", async () => {
+    const { db, exec, capacity, seed } = await setup();
+    const item = seed("CONFLICTED");
+    const openEventId = "77777777-7777-4777-8777-777777777777";
+    const itemEventId = "88888888-8888-4888-8888-888888888888";
+    await recordInventoryRepackScan(exec, input(OLD_SSCC, openEventId, capacity));
+    await recordInventoryRepackScan(exec, {
+      ...input(item.km.raw, itemEventId, capacity),
+      createItemId: () => ITEM_ID,
+    });
+    const losingBatch = await prepareInventoryOutboxBatch(exec, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      createBatchId: () => "losing-batch",
+    });
+    if (!losingBatch) throw new Error("expected losing batch");
+    const remoteEventId = "99999999-9999-4999-8999-999999999999";
+    await acknowledgeInventoryOutboxBatch(exec, losingBatch, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      snapshotRevision: 1,
+      batchId: losingBatch.request.batchId,
+      payloadDigest: losingBatch.request.payloadDigest,
+      sequenceCeiling: losingBatch.request.sequenceCeiling,
+      resultRevision: 2,
+      outcomes: [
+        {
+          eventId: openEventId,
+          status: "applied",
+          reasonCode: "CLAIM_APPLIED",
+          claimedCount: 0,
+          conflictCount: 0,
+          claims: [],
+        },
+        {
+          eventId: itemEventId,
+          status: "duplicate",
+          reasonCode: "CLAIM_LOST",
+          claimedCount: 0,
+          conflictCount: 1,
+          claims: [
+            {
+              codeHash: item.hash,
+              status: "duplicate",
+              winner: {
+                codeHash: item.hash,
+                eventId: remoteEventId,
+                deviceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                scannedAt: "2026-08-25T09:00:00.000Z",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    await expect(
+      readInventoryRepackState(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID),
+    ).resolves.toMatchObject({ phase: "invalidated", box: { itemCount: 1 } });
+
+    const resolution = {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      deviceId: DEVICE_ID,
+      operatorId: OPERATOR_ID,
+      eventId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      changedAt: "2026-08-25T11:00:00.000Z",
+      reason: "claim-lost" as const,
+    };
+    await resolveInvalidatedInventoryRepackBox(exec, resolution);
+    await resolveInvalidatedInventoryRepackBox(exec, resolution);
+    await expect(
+      readInventoryRepackState(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID),
+    ).resolves.toMatchObject({ phase: "scanning", box: { boxId: BOX_ID, itemCount: 0 } });
+    expect(
+      db
+        .prepare("SELECT state FROM inventory_conflicts_mirror WHERE losing_event_id = ?")
+        .get(itemEventId),
+    ).toEqual({ state: "resolved" });
+    expect(await inventoryOutboxDepth(exec, INVENTORY_ID, SNAPSHOT_ID)).toBe(1);
+
+    const resolutionBatch = await prepareInventoryOutboxBatch(exec, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      createBatchId: () => "resolution-batch",
+    });
+    if (!resolutionBatch) throw new Error("expected resolution batch");
+    await acknowledgeInventoryOutboxBatch(exec, resolutionBatch, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      snapshotRevision: 1,
+      batchId: resolutionBatch.request.batchId,
+      payloadDigest: resolutionBatch.request.payloadDigest,
+      sequenceCeiling: resolutionBatch.request.sequenceCeiling,
+      resultRevision: 2,
+      outcomes: [
+        {
+          eventId: resolution.eventId,
+          status: "applied",
+          reasonCode: "CLAIM_APPLIED",
+          claimedCount: 0,
+          conflictCount: 0,
+          claims: [],
+        },
+      ],
+    });
+    expect(await inventoryOutboxDepth(exec, INVENTORY_ID, SNAPSHOT_ID)).toBe(0);
+    expect(
+      db
+        .prepare(
+          "SELECT authoritative_verdict, server_reason_code FROM inventory_scan_events_mirror WHERE event_id = ?",
+        )
+        .get(resolution.eventId),
+    ).toEqual({ authoritative_verdict: "applied", server_reason_code: "CLAIM_APPLIED" });
   });
 
   it("replays a post-commit crash exactly and survives restart without duplicating membership", async () => {

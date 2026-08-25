@@ -179,6 +179,7 @@ describe("inventory sync engine", () => {
             `SELECT name FROM sqlite_master
               WHERE type = 'trigger' AND name IN (
                 'inventory_sync_validate_ack_v2', 'inventory_sync_apply_ack_v2',
+                'inventory_sync_validate_ack_v3', 'inventory_sync_apply_ack_v3',
                 'inventory_progress_validate_page_v2', 'inventory_progress_apply_page_v2'
               ) ORDER BY name`,
           )
@@ -187,7 +188,9 @@ describe("inventory sync engine", () => {
         { name: "inventory_progress_apply_page_v2" },
         { name: "inventory_progress_validate_page_v2" },
         { name: "inventory_sync_apply_ack_v2" },
+        { name: "inventory_sync_apply_ack_v3" },
         { name: "inventory_sync_validate_ack_v2" },
+        { name: "inventory_sync_validate_ack_v3" },
       ]);
     } finally {
       for (const database of databases) database.close();
@@ -305,6 +308,100 @@ describe("inventory sync engine", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("terminally acknowledges a permanent rejection, keeps diagnostic evidence, and then leaves", async () => {
+    const { db, exec } = await setup();
+    const generation = createCredentialGeneration("rejected-event-credential");
+    const ownership = await credentialGenerationOwnership(generation);
+    if (!ownership) throw new Error("expected credential ownership");
+    const pointerValue = JSON.stringify({
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      credentialOwnership: ownership,
+      activationId: "rejected-event-activation",
+    });
+    db.prepare(
+      "INSERT OR REPLACE INTO station_meta (key, value) VALUES ('active_inventory_floor_task_v1', ?)",
+    ).run(pointerValue);
+    const post = vi.fn(async (path: string, value?: unknown) => {
+      if (path.endsWith("/leave")) return { outcome: "left" };
+      const body = value as {
+        batchId: string;
+        payloadDigest: string;
+        sequenceCeiling: number;
+        events: Array<{ eventId: string }>;
+      };
+      return {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        snapshotRevision: 1,
+        batchId: body.batchId,
+        payloadDigest: body.payloadDigest,
+        sequenceCeiling: body.sequenceCeiling,
+        resultRevision: 0,
+        outcomes: body.events.map((queued) => ({
+          eventId: queued.eventId,
+          status: "rejected",
+          reasonCode: "INVENTORY_EVENT_REJECTED",
+          claimedCount: 0,
+          conflictCount: 0,
+          claims: [],
+        })),
+      };
+    });
+    const engine = createInventorySyncEngine({
+      exec,
+      client: { post },
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      floorTaskPointerValue: pointerValue,
+      credentialGeneration: generation,
+      retry: false,
+      onState: () => undefined,
+    });
+    engine.nudge();
+    await engine.idle();
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 0,
+    });
+    expect(
+      db
+        .prepare(
+          `SELECT authoritative_verdict, server_reason_code, normalized_identity, raw_payload
+             FROM inventory_scan_events_mirror WHERE event_id = ?`,
+        )
+        .get(EVENT_ID),
+    ).toEqual({
+      authoritative_verdict: "rejected",
+      server_reason_code: "INVENTORY_EVENT_REJECTED",
+      normalized_identity: `item:${"a".repeat(64)}`,
+      raw_payload: "010460000000001521SERIAL",
+    });
+
+    await leaveInventoryTask({
+      exec,
+      client: { post },
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      deviceId: DEVICE_ID,
+      pointerValue,
+      credentialGeneration: generation,
+      closeScanner: async () => undefined,
+      scanQueueIdle: async () => undefined,
+      sync: engine,
+    });
+    expect(post).toHaveBeenCalledWith(`/station/inventories/${INVENTORY_ID}/leave`, {
+      pendingEventCount: 0,
+      openBoxCount: 0,
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM station_meta WHERE key = 'active_inventory_floor_task_v1'",
+        )
+        .get(),
+    ).toEqual({ count: 0 });
   });
 
   it("caps exponential retry at sixty seconds", async () => {

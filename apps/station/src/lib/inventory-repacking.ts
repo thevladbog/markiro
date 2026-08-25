@@ -138,7 +138,7 @@ async function ownedBox(
   inventoryId: string,
   snapshotId: string,
   deviceId: string,
-  boxId?: string | null,
+  boxId: string,
 ): Promise<BoxRow | null> {
   const rows = await exec.all<BoxRow>(
     `SELECT box.box_id, box.old_sscc_context, box.new_sscc, box.owner_device_id,
@@ -152,9 +152,9 @@ async function ownedBox(
               ORDER BY item.position DESC LIMIT 1) AS last_item_id
        FROM inventory_repack_boxes_mirror box
       WHERE box.inventory_id = ? AND box.snapshot_id = ? AND box.owner_device_id = ?
-        AND (? IS NULL OR box.box_id = ?)
-      ORDER BY box.opened_at DESC LIMIT 1`,
-    [inventoryId, snapshotId, deviceId, boxId ?? null, boxId ?? null],
+        AND box.box_id = ?
+      LIMIT 1`,
+    [inventoryId, snapshotId, deviceId, boxId],
   );
   return rows[0] ?? null;
 }
@@ -186,13 +186,9 @@ export async function readInventoryRepackState(
       WHERE inventory_id = ? AND snapshot_id = ? AND device_id = ?`,
     [inventoryId, snapshotId, deviceId],
   );
-  const box = await ownedBox(
-    exec,
-    inventoryId,
-    snapshotId,
-    deviceId,
-    terminalRows[0]?.open_repack_box_id,
-  );
+  const openBoxId = terminalRows[0]?.open_repack_box_id;
+  if (!openBoxId) return { phase: "awaiting-old-box", box: null };
+  const box = await ownedBox(exec, inventoryId, snapshotId, deviceId, openBoxId);
   if (!box) return { phase: "awaiting-old-box", box: null };
   return {
     phase:
@@ -588,6 +584,10 @@ interface CorrectionInput {
   changedAt: string;
 }
 
+export interface ResolveInvalidatedInventoryRepackBoxInput extends CorrectionInput {
+  reason: "claim-lost";
+}
+
 async function correction(
   exec: SqlExecutor,
   input: CorrectionInput,
@@ -699,4 +699,77 @@ export function changeOpenInventoryRepackDate(
   input: CorrectionInput & { productionDate: string },
 ): Promise<void> {
   return correction(exec, input, "change-date", undefined, input.productionDate);
+}
+
+async function resolveInvalidatedInternal(
+  exec: SqlExecutor,
+  input: ResolveInvalidatedInventoryRepackBoxInput,
+): Promise<void> {
+  const prior = await existingJournal(exec, input.inventoryId, input.snapshotId, input.eventId);
+  if (prior) {
+    const event = parseStoredEvent(prior);
+    if (
+      event.operatorId !== input.operatorId ||
+      event.scannedAt !== input.changedAt ||
+      event.repack?.action !== "resolve-conflict" ||
+      event.repack.reason !== input.reason
+    ) {
+      throw new Error("inventory repack event identity changed");
+    }
+    return;
+  }
+  const state = await readInventoryRepackState(
+    exec,
+    input.inventoryId,
+    input.snapshotId,
+    input.deviceId,
+  );
+  if (state.phase !== "invalidated" || !state.box) {
+    throw new Error("inventory repack box is not invalidated");
+  }
+  if (state.box.ownerDeviceId !== input.deviceId) {
+    throw new Error("inventory repack box belongs to another terminal");
+  }
+  const sequence = await allocateSequence(
+    exec,
+    input.inventoryId,
+    input.snapshotId,
+    input.deviceId,
+  );
+  const repack: InventoryRepackMutation = {
+    action: "resolve-conflict",
+    boxId: state.box.boxId,
+    reason: input.reason,
+    changedAt: input.changedAt,
+  };
+  const event = inventoryEventSchema.parse({
+    eventId: input.eventId,
+    deviceSequence: sequence,
+    operatorId: input.operatorId,
+    scannedAt: input.changedAt,
+    kind: "repack_action",
+    normalizedIdentity: `repack_action:resolve-conflict:${state.box.boxId}`,
+    codeHash: null,
+    canonicalRaw: null,
+    activeProductionDate: state.box.productionDate,
+    localVerdict: "repack-action",
+    repack,
+  });
+  await writeJournal(exec, {
+    inventoryId: input.inventoryId,
+    snapshotId: input.snapshotId,
+    deviceId: input.deviceId,
+    event,
+    action: "resolve-conflict",
+    boxId: state.box.boxId,
+  });
+}
+
+export function resolveInvalidatedInventoryRepackBox(
+  exec: SqlExecutor,
+  input: ResolveInvalidatedInventoryRepackBoxInput,
+): Promise<void> {
+  return serialized(`${input.inventoryId}:${input.snapshotId}:${input.deviceId}`, () =>
+    resolveInvalidatedInternal(exec, input),
+  );
 }

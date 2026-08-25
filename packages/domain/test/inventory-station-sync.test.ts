@@ -190,6 +190,45 @@ describe("inventory station sync contract", () => {
     ).toThrow("Invalid inventory event batch");
   });
 
+  it("binds conflict resolution to an invalidated box and a required claim-loss reason", () => {
+    const resolutionPayload = {
+      ...payload,
+      events: [
+        {
+          ...event,
+          kind: "repack_action" as const,
+          normalizedIdentity: "repack_action:resolve-conflict:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          codeHash: null,
+          canonicalRaw: null,
+          localVerdict: "repack-action" as const,
+          repack: {
+            action: "resolve-conflict" as const,
+            boxId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            reason: "claim-lost" as const,
+            changedAt: "2026-08-25T10:01:00.000Z",
+          },
+        },
+      ],
+    };
+    const parsed = parseInventoryEventBatch({
+      batchId: "resolve-conflict",
+      payloadDigest: inventoryEventBatchDigest(resolutionPayload),
+      ...resolutionPayload,
+    });
+    expect(parsed.events[0]?.repack).toEqual(resolutionPayload.events[0]?.repack);
+    expect(() =>
+      inventoryEventBatchDigest({
+        ...resolutionPayload,
+        events: [
+          {
+            ...resolutionPayload.events[0],
+            repack: { ...resolutionPayload.events[0]!.repack, reason: "operator-request" },
+          },
+        ],
+      }),
+    ).toThrow("Invalid inventory event batch payload");
+  });
+
   it("uses one deterministic canonical digest independent of a batch id", () => {
     expect(inventoryEventBatchDigest(payload)).toBe(
       "833603f1d134151319c41bdf7a1d8eb9ac38858db3d530dd3a5c7696e18f8535",
@@ -451,7 +490,6 @@ describe("inventory station sync contract", () => {
       ["quarantined", "CLAIM_APPLIED"],
       ["quarantined", "BATCH_REPLAY"],
       ["rejected", "INVENTORY_CLOSED"],
-      ["rejected", "INVENTORY_EVENT_REJECTED"],
     ] as const) {
       expect(() =>
         parseInventoryEventBatchResponse(
@@ -471,6 +509,21 @@ describe("inventory station sync contract", () => {
         ).outcomes[0]?.reasonCode,
       ).toBe(reasonCode);
     }
+
+    expect(
+      parseInventoryEventBatchResponse(
+        response("rejected", "INVENTORY_EVENT_REJECTED"),
+        request,
+        "44444444-4444-4444-8444-444444444444",
+      ).outcomes[0],
+    ).toMatchObject({
+      eventId: event.eventId,
+      status: "rejected",
+      reasonCode: "INVENTORY_EVENT_REJECTED",
+      claimedCount: 0,
+      conflictCount: 0,
+      claims: [],
+    });
   });
 
   it("recognizes the explicit zero-claim old-box acknowledgement exception", () => {

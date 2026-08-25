@@ -93,6 +93,7 @@ describe("STATION_MIGRATIONS", () => {
       "inventory_event_claim_outcomes_mirror",
       "inventory_sync_ack_receipts",
       "inventory_sync_ack_receipts_v2",
+      "inventory_sync_ack_receipts_v3",
       "inventory_progress_receipts",
       "inventory_progress_receipts_v2",
     ];
@@ -1590,6 +1591,32 @@ function insertAckReceipt(
     );
 }
 
+function insertAckReceiptV3(
+  fixture: ReturnType<typeof receiptDb>,
+  responseJson: string,
+  receiptId = `${RECEIPT_INVENTORY_ID}:${RECEIPT_SNAPSHOT_ID}:${RECEIPT_BATCH_ID}:${RECEIPT_DIGEST}`,
+): void {
+  fixture.db
+    .prepare(
+      `INSERT INTO inventory_sync_ack_receipts_v3
+         (receipt_id, inventory_id, snapshot_id, batch_id, payload_digest,
+          response_json, outbox_rows_json, pin_key, pin_value, applied_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      receiptId,
+      RECEIPT_INVENTORY_ID,
+      RECEIPT_SNAPSHOT_ID,
+      RECEIPT_BATCH_ID,
+      RECEIPT_DIGEST,
+      responseJson,
+      fixture.outboxRowsJson,
+      fixture.pinKey,
+      fixture.pinValue,
+      "2026-08-25T10:00:01.000Z",
+    );
+}
+
 interface MutableReceiptResponse {
   outcomes: Array<{
     status: string;
@@ -1662,6 +1689,7 @@ function expectAcknowledgementStateUntouched(fixture: ReturnType<typeof receiptD
   ).toEqual({ authoritative_verdict: null, server_reason_code: null });
   for (const table of [
     "inventory_sync_ack_receipts_v2",
+    "inventory_sync_ack_receipts_v3",
     "inventory_event_claim_outcomes_mirror",
     "inventory_conflicts_mirror",
   ]) {
@@ -1704,6 +1732,59 @@ function insertProgressReceipt(
 }
 
 describe("inventory receipt trigger admission", () => {
+  it("durably reduces a rejected event through v3 while preserving its diagnostic row", () => {
+    const fixture = receiptDb();
+    const rejected = mutableReceiptResponse(fixture);
+    const outcome = rejected.outcomes[0]!;
+    outcome.status = "rejected";
+    outcome.reasonCode = "INVENTORY_EVENT_REJECTED";
+    outcome.claimedCount = 0;
+    outcome.conflictCount = 0;
+    outcome.claims = [];
+
+    expect(() => insertAckReceiptV3(fixture, JSON.stringify(rejected))).not.toThrow();
+    expect(fixture.db.prepare("SELECT count(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 0,
+    });
+    expect(
+      fixture.db
+        .prepare(
+          `SELECT authoritative_verdict, server_reason_code, raw_payload
+             FROM inventory_scan_events_mirror WHERE event_id = ?`,
+        )
+        .get(RECEIPT_EVENT_ID),
+    ).toEqual({
+      authoritative_verdict: "rejected",
+      server_reason_code: "INVENTORY_EVENT_REJECTED",
+      raw_payload: "010460000000001521SERIAL",
+    });
+    expect(
+      fixture.db.prepare("SELECT count(*) AS count FROM inventory_sync_ack_receipts_v3").get(),
+    ).toEqual({ count: 1 });
+  });
+
+  it("rejects a contradictory rejected v3 receipt without draining evidence", () => {
+    const fixture = receiptDb();
+    const rejected = mutableReceiptResponse(fixture);
+    const outcome = rejected.outcomes[0]!;
+    outcome.status = "rejected";
+    outcome.reasonCode = "INVENTORY_EVENT_REJECTED";
+    outcome.claimedCount = 1;
+
+    expect(() => insertAckReceiptV3(fixture, JSON.stringify(rejected))).toThrow(
+      "inventory acknowledgement receipt invalid",
+    );
+    expectAcknowledgementStateUntouched(fixture);
+  });
+
+  it("rejects a non-derived v3 receipt identity without draining evidence", () => {
+    const fixture = receiptDb();
+    expect(() => insertAckReceiptV3(fixture, fixture.responseJson, "forged-receipt")).toThrow(
+      "inventory acknowledgement receipt invalid",
+    );
+    expectAcknowledgementStateUntouched(fixture);
+  });
+
   it.each([
     ["an empty acknowledgement object", () => ({ responseJson: "{}" })],
     [

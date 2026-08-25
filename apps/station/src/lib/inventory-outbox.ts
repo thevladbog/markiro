@@ -256,7 +256,7 @@ export async function acknowledgeInventoryOutboxBatch(
   }>(
     `SELECT inventory_id, snapshot_id, batch_id, payload_digest, response_json,
             outbox_rows_json, pin_key, pin_value, applied_at
-       FROM inventory_sync_ack_receipts_v2 WHERE receipt_id = ?`,
+       FROM inventory_sync_ack_receipts_v3 WHERE receipt_id = ?`,
     [receiptId],
   );
   const appliedAt = batch.request.events.at(-1)?.scannedAt;
@@ -279,7 +279,7 @@ export async function acknowledgeInventoryOutboxBatch(
     return response;
   }
   await exec.run(
-    `INSERT INTO inventory_sync_ack_receipts_v2
+    `INSERT INTO inventory_sync_ack_receipts_v3
        (receipt_id, inventory_id, snapshot_id, batch_id, payload_digest,
         response_json, outbox_rows_json, pin_key, pin_value, applied_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -311,7 +311,7 @@ export async function acknowledgeInventoryOutboxBatch(
   }>(
     `SELECT receipt_id, inventory_id, snapshot_id, batch_id, payload_digest, response_json,
             outbox_rows_json, pin_key, pin_value, applied_at
-       FROM inventory_sync_ack_receipts_v2 WHERE receipt_id = ?`,
+       FROM inventory_sync_ack_receipts_v3 WHERE receipt_id = ?`,
     [receiptId],
   );
   const stored = receipts[0];

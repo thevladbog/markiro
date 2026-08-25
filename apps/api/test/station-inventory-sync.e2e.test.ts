@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { ConflictException, NotFoundException } from "@nestjs/common";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createDb, schema } from "@markiro/db";
@@ -785,7 +785,7 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
     ).resolves.toBeDefined();
   });
 
-  it("denies foreign tenant/device scope and rejects immutable snapshot, operator, GTIN, and date facts", async () => {
+  it("denies foreign scope and terminally rejects permanent GTIN and date facts", async () => {
     const valid = event("a", { scannedAt: "2026-08-25T12:00:00.000Z", canonicalRaw: raw("FACTS") });
     await expect(
       service.ingest(foreignTenantId, foreignDeviceId, inventoryId, batch("foreign", [valid])),
@@ -805,23 +805,54 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
       (error: unknown) => errorCode(error) === "INVENTORY_PARTICIPANT_OPERATOR_MISMATCH",
     );
     const other = code("OTHER-GTIN", OTHER_GTIN);
+    sequenceA = 1_002;
+    const wrongGtinBase = event("a", {
+      scannedAt: "2026-08-25T12:00:01.000Z",
+      canonicalRaw: other.canonical.raw,
+    });
     const wrongGtin = batch("wrong-gtin", [
       {
-        ...valid,
-        eventId: randomUUID(),
+        ...wrongGtinBase,
         canonicalRaw: other.canonical.raw,
         codeHash: other.codeHash,
         normalizedIdentity: `item:${other.codeHash}`,
       },
     ]);
-    await expect(service.ingest(tenantId, deviceAId, inventoryId, wrongGtin)).rejects.toSatisfy(
-      (error: unknown) => errorCode(error) === "INVENTORY_EVENT_GTIN_MISMATCH",
-    );
+    const wrongGtinResponse = await service.ingest(tenantId, deviceAId, inventoryId, wrongGtin);
+    expect(wrongGtinResponse.outcomes[0]).toMatchObject({
+      status: "rejected",
+      reasonCode: "INVENTORY_EVENT_REJECTED",
+    });
+    const wrongDateBase = event("a", {
+      scannedAt: "2026-08-25T12:00:02.000Z",
+      canonicalRaw: raw("WRONG-DATE"),
+    });
     const wrongDate = batch("wrong-date", [
-      { ...valid, eventId: randomUUID(), activeProductionDate: "2026-09-01" },
+      { ...wrongDateBase, activeProductionDate: "2026-09-01" },
     ]);
-    await expect(service.ingest(tenantId, deviceAId, inventoryId, wrongDate)).rejects.toSatisfy(
-      (error: unknown) => errorCode(error) === "INVENTORY_EVENT_PRODUCTION_DATE_MISMATCH",
+    const wrongDateResponse = await service.ingest(tenantId, deviceAId, inventoryId, wrongDate);
+    expect(wrongDateResponse.outcomes[0]).toMatchObject({
+      status: "rejected",
+      reasonCode: "INVENTORY_EVENT_REJECTED",
+    });
+    expect(
+      await db
+        .select({
+          eventId: schema.inventoryScanEvents.eventId,
+          verdict: schema.inventoryScanEvents.authoritativeVerdict,
+        })
+        .from(schema.inventoryScanEvents)
+        .where(
+          inArray(schema.inventoryScanEvents.eventId, [
+            wrongGtin.events[0]!.eventId,
+            wrongDate.events[0]!.eventId,
+          ]),
+        ),
+    ).toEqual(
+      expect.arrayContaining([
+        { eventId: wrongGtin.events[0]!.eventId, verdict: "rejected" },
+        { eventId: wrongDate.events[0]!.eventId, verdict: "rejected" },
+      ]),
     );
   });
 
@@ -1111,6 +1142,109 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
       ]),
     );
 
+    const plainKnownBox = repackEvent("a", {
+      scannedAt: "2026-08-25T12:00:00.100Z",
+      kind: "known_box",
+      normalizedIdentity: `known_box:${oldSscc}`,
+      codeHash: null,
+      canonicalRaw: oldSscc,
+      localVerdict: "expected",
+      repack: undefined,
+    });
+    const knownBoxRequest = repackBatch("repack-forged-known-box", [plainKnownBox], 1);
+    const knownBoxResponse = await service.ingest(
+      tenantId,
+      deviceAId,
+      repackInventoryId,
+      knownBoxRequest,
+    );
+    expect(knownBoxResponse.outcomes).toEqual([
+      {
+        eventId: plainKnownBox.eventId,
+        status: "rejected",
+        reasonCode: "INVENTORY_EVENT_REJECTED",
+        claimedCount: 0,
+        conflictCount: 0,
+        claims: [],
+      },
+    ]);
+    await expect(
+      service.ingest(tenantId, deviceAId, repackInventoryId, knownBoxRequest),
+    ).resolves.toEqual(knownBoxResponse);
+    await expect(
+      service.ingest(tenantId, deviceAId, repackInventoryId, {
+        ...knownBoxRequest,
+        batchId: "repack-forged-known-box-alias",
+      }),
+    ).resolves.toEqual({
+      ...knownBoxResponse,
+      batchId: "repack-forged-known-box-alias",
+    });
+
+    const missingMembership = repackEvent("a", {
+      scannedAt: "2026-08-25T12:00:00.150Z",
+      canonicalRaw: raceCode.canonical.raw,
+      codeHash: raceCode.codeHash,
+      normalizedIdentity: `item:${raceCode.codeHash}`,
+      repack: undefined,
+    });
+    const missingMembershipResponse = await service.ingest(
+      tenantId,
+      deviceAId,
+      repackInventoryId,
+      repackBatch("repack-missing-add-item", [missingMembership], 1),
+    );
+    expect(missingMembershipResponse.outcomes[0]).toMatchObject({
+      eventId: missingMembership.eventId,
+      status: "rejected",
+      reasonCode: "INVENTORY_EVENT_REJECTED",
+    });
+    expect(
+      await db
+        .select({ eventId: schema.inventoryScanEvents.eventId })
+        .from(schema.inventoryScanEvents)
+        .where(eq(schema.inventoryScanEvents.eventId, missingMembership.eventId)),
+    ).toEqual([{ eventId: missingMembership.eventId }]);
+
+    for (const [batchId, eventDate, mutationDate] of [
+      ["repack-change-date-mismatch", "2026-08-22", "2026-08-23"],
+      ["repack-change-date-out-of-range", "2026-09-01", "2026-09-01"],
+    ] as const) {
+      const changedAt = `2026-08-25T12:00:00.${batchId.endsWith("mismatch") ? "200" : "225"}Z`;
+      const invalidDate = repackEvent("b", {
+        scannedAt: changedAt,
+        kind: "repack_action",
+        normalizedIdentity: `repack_action:change-date:${boxBId}`,
+        codeHash: null,
+        canonicalRaw: null,
+        activeProductionDate: eventDate,
+        localVerdict: "repack-action",
+        repack: {
+          action: "change-date",
+          boxId: boxBId,
+          productionDate: mutationDate,
+          changedAt,
+        },
+      });
+      const response = await service.ingest(
+        tenantId,
+        deviceBId,
+        repackInventoryId,
+        repackBatch(batchId, [invalidDate], 1),
+      );
+      expect(response.outcomes[0]).toMatchObject({
+        eventId: invalidDate.eventId,
+        status: "rejected",
+        reasonCode: "INVENTORY_EVENT_REJECTED",
+      });
+    }
+    expect(
+      await db
+        .select({ productionDate: schema.inventoryRepackBoxes.productionDate })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.id, boxBId)),
+    ).toEqual([{ productionDate: "2026-08-21" }]);
+
     const changedDateAt = "2026-08-25T12:00:00.250Z";
     const changedDate = repackEvent("b", {
       scannedAt: changedDateAt,
@@ -1345,6 +1479,67 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         .where(eq(schema.inventoryRepackBoxes.id, foreignReservationBoxId)),
     ).toEqual([]);
 
+    const resolutionAt = "2026-08-25T12:00:04.500Z";
+    const resolveConflict = repackEvent("b", {
+      scannedAt: resolutionAt,
+      kind: "repack_action",
+      normalizedIdentity: `repack_action:resolve-conflict:${boxBId}`,
+      codeHash: null,
+      canonicalRaw: null,
+      activeProductionDate: terminalDateB,
+      localVerdict: "repack-action",
+      repack: {
+        action: "resolve-conflict",
+        boxId: boxBId,
+        reason: "claim-lost",
+        changedAt: resolutionAt,
+      },
+    });
+    const resolutionRequest = repackBatch("repack-resolve-conflict", [resolveConflict], 1);
+    const resolutionResponse = await service.ingest(
+      tenantId,
+      deviceBId,
+      repackInventoryId,
+      resolutionRequest,
+    );
+    await expect(
+      service.ingest(tenantId, deviceBId, repackInventoryId, resolutionRequest),
+    ).resolves.toEqual(resolutionResponse);
+    expect(resolutionResponse.outcomes[0]).toMatchObject({
+      status: "applied",
+      reasonCode: "CLAIM_APPLIED",
+    });
+    expect(
+      await db
+        .select({ state: schema.inventoryRepackBoxes.state })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.id, boxBId)),
+    ).toEqual([{ state: "open" }]);
+    expect(
+      await db
+        .select({ action: schema.tenantAuditEvents.action, after: schema.tenantAuditEvents.after })
+        .from(schema.tenantAuditEvents)
+        .where(
+          and(
+            eq(schema.tenantAuditEvents.organizationId, tenantId),
+            eq(schema.tenantAuditEvents.targetId, boxBId),
+            eq(schema.tenantAuditEvents.action, "inventory.station.repack_conflict_resolved"),
+          ),
+        ),
+    ).toEqual([
+      expect.objectContaining({
+        action: "inventory.station.repack_conflict_resolved",
+        after: expect.objectContaining({
+          tenantId,
+          inventoryId: repackInventoryId,
+          deviceId: deviceBId,
+          operatorId,
+          boxId: boxBId,
+          reason: "claim-lost",
+        }),
+      }),
+    ]);
+
     const closedAt = "2026-08-25T12:00:05.000Z";
     const close = repackEvent("a", {
       scannedAt: closedAt,
@@ -1488,6 +1683,37 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         .from(schema.inventoryRepackBoxes)
         .where(eq(schema.inventoryRepackBoxes.id, pauseBoxId)),
     ).toEqual([{ state: "open" }]);
+  });
+
+  it("returns a terminal rejection for repack mutations forged into check mode", async () => {
+    const changedAt = "2026-08-25T12:30:00.000Z";
+    const forged = event("b", {
+      scannedAt: changedAt,
+      kind: "repack_action",
+      normalizedIdentity: `repack_action:clear-box:${randomUUID()}`,
+      codeHash: null,
+      canonicalRaw: null,
+      activeProductionDate: "2026-08-20",
+      localVerdict: "repack-action",
+    });
+    const boxId = forged.normalizedIdentity.slice("repack_action:clear-box:".length);
+    forged.repack = { action: "clear-box", boxId, changedAt };
+    const response = await service.ingest(
+      tenantId,
+      deviceBId,
+      inventoryId,
+      batch("check-mode-repack-mutation", [forged]),
+    );
+    expect(response.outcomes).toEqual([
+      {
+        eventId: forged.eventId,
+        status: "rejected",
+        reasonCode: "INVENTORY_EVENT_REJECTED",
+        claimedCount: 0,
+        conflictCount: 0,
+        claims: [],
+      },
+    ]);
   });
 
   it("quarantines a recognized late batch exactly once after close and rejects malformed late facts", async () => {

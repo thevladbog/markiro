@@ -70,8 +70,10 @@ function isStationRequest(req: Request): boolean {
     (method === "GET" && path === "/station/inventory-tasks") ||
     (method === "POST" && path === "/station/inventory-tasks/resolve-barcode") ||
     (method === "POST" && /^\/station\/inventories\/[^/]+\/join$/.test(path)) ||
+    (method === "POST" && /^\/station\/inventories\/[^/]+\/(?:event-batches|leave)$/.test(path)) ||
     (method === "GET" &&
       /^\/station\/inventories\/[^/]+\/bundle\/(?:manifest|codes)$/.test(path)) ||
+    (method === "GET" && /^\/station\/inventories\/[^/]+\/progress$/.test(path)) ||
     (method === "GET" && /^\/shifts\/[^/]+\/(?:bundle|reference-bundle)$/.test(path)) ||
     (method === "POST" && /^\/shifts\/[^/]+\/open$/.test(path))
   );

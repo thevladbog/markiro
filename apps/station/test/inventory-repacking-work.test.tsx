@@ -140,6 +140,12 @@ describe("repack inventory work screen", () => {
     await screen.findByRole("dialog");
     expect(scan.active()).toBe(false);
     expect(scan.stops()).toBe(1);
+    fireEvent.change(screen.getByLabelText("Дата производства"), {
+      target: { value: "2026-10-01" },
+    });
+    expect(
+      (screen.getByRole("button", { name: "Применить дату" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
     scan.emit(OLD_SSCC);
     expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_repack_boxes_mirror").get()).toEqual(
       {
@@ -173,6 +179,80 @@ describe("repack inventory work screen", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
       count: 2,
     });
+    await act(async () => i18n.changeLanguage("en"));
+    expect(screen.getByLabelText("Position 1: occupied")).toBeDefined();
+    expect(screen.getByLabelText("Position 2: free")).toBeDefined();
+    await act(async () => i18n.changeLanguage("ru"));
+  });
+
+  it("offers one explicit recovery transition for an invalidated owned box", async () => {
+    const db = new DatabaseSync(":memory:");
+    const exec = makeExec(db);
+    await applyMigrations(exec);
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'ИНВ-Р-42', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    const boxId = "88888888-8888-4888-8888-888888888888";
+    const losingEventId = "99999999-9999-4999-8999-999999999999";
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          open_repack_box_id, next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', ?, 2, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID, boxId);
+    db.prepare(
+      `INSERT INTO inventory_repack_boxes_mirror
+         (inventory_id, snapshot_id, box_id, opened_event_id, old_sscc_context, new_sscc,
+          owner_device_id, capacity, production_date, state, print_state, opened_at,
+          invalidated_at, updated_at)
+       VALUES (?, ?, ?, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', ?, '046006820000621515',
+               ?, 20, '2026-08-19', 'invalidated', 'not_ready',
+               '2026-08-25T09:00:00.000Z', '2026-08-25T10:00:00.000Z',
+               '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, boxId, OLD_SSCC, DEVICE_ID);
+    db.prepare(
+      `INSERT INTO inventory_repack_items_mirror
+         (inventory_id, snapshot_id, item_id, source_event_id, box_id, code_hash,
+          position, production_date, added_at)
+       VALUES (?, ?, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', ?, ?, ?, 1,
+               '2026-08-19', '2026-08-25T09:01:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, losingEventId, boxId, "c".repeat(64));
+    db.prepare(
+      `INSERT INTO inventory_conflicts_mirror
+         (inventory_id, snapshot_id, conflict_id, code_hash, losing_event_id,
+          winning_event_id, winning_device_id, winning_scanned_at, detected_at, state)
+       VALUES (?, ?, 'conflict-1', ?, ?, 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+               'dddddddd-dddd-4ddd-8ddd-dddddddddddd', '2026-08-25T08:59:00.000Z',
+               '2026-08-25T10:00:00.000Z', 'open')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, "c".repeat(64), losingEventId);
+
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scanner().source}
+        createEventId={() => "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"}
+        now={() => "2026-08-25T10:01:00.000Z"}
+      />,
+    );
+
+    expect(await screen.findByText("Короб заблокирован из-за конфликта")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    const resolve = await screen.findByRole("button", {
+      name: "Очистить конфликт и продолжить",
+    });
+    fireEvent.click(resolve);
+    await waitFor(() => expect(screen.getByText("Сканируйте каждую бутылку")).toBeDefined());
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 1,
+    });
+    expect(
+      db
+        .prepare("SELECT state FROM inventory_conflicts_mirror WHERE conflict_id = 'conflict-1'")
+        .get(),
+    ).toEqual({ state: "resolved" });
   });
 
   it("prints a full box automatically, pauses product scanning, and exposes no skip step", async () => {

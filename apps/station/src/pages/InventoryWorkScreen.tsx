@@ -36,6 +36,7 @@ import {
   readInventoryRepackState,
   recordInventoryRepackScan,
   removeLastInventoryRepackItem,
+  resolveInvalidatedInventoryRepackBox,
   type InventoryRepackScanResult,
   type InventoryRepackStateView,
 } from "../lib/inventory-repacking.js";
@@ -1044,7 +1045,7 @@ function RepackInventoryWorkScreen({
     gallery,
   ]);
 
-  const runCorrection = async (kind: "remove" | "clear") => {
+  const runCorrection = async (kind: "remove" | "clear" | "resolve-conflict") => {
     setBusy(true);
     try {
       await new Promise<void>((resolve, reject) => {
@@ -1061,6 +1062,11 @@ function RepackInventoryWorkScreen({
               };
               if (kind === "remove") {
                 await removeLastInventoryRepackItem(exec, input);
+              } else if (kind === "resolve-conflict") {
+                await resolveInvalidatedInventoryRepackBox(exec, {
+                  ...input,
+                  reason: "claim-lost",
+                });
               } else {
                 await clearOpenInventoryRepackBox(exec, input);
               }
@@ -1150,7 +1156,12 @@ function RepackInventoryWorkScreen({
   };
 
   const applyDate = async () => {
-    if (state.box && state.box.itemCount > 0) return;
+    if (
+      (state.box && state.box.itemCount > 0) ||
+      dateDraft < inventory.productionDateFrom ||
+      dateDraft > inventory.productionDateTo
+    )
+      return;
     await new Promise<void>((resolve, reject) => {
       if (
         !queue.enqueueJob(async () => {
@@ -1355,7 +1366,7 @@ function RepackInventoryWorkScreen({
                 position: (position, filled) =>
                   t("inventory.repack.position", {
                     position,
-                    status: filled ? "занято" : "свободно",
+                    status: filled ? t("inventory.repack.occupied") : t("inventory.repack.free"),
                   }),
               }}
             />
@@ -1399,9 +1410,11 @@ function RepackInventoryWorkScreen({
       >
         <RepackCorrections
           itemCount={state.box?.itemCount ?? 0}
+          invalidated={state.phase === "invalidated"}
           busy={busy}
           onRemoveLast={() => void runCorrection("remove")}
           onClear={() => void runCorrection("clear")}
+          onResolveConflict={() => void runCorrection("resolve-conflict")}
           reprintSscc={reprintSscc}
           onReprintSsccChange={(value) => {
             setReprintSscc(value);
@@ -1415,6 +1428,7 @@ function RepackInventoryWorkScreen({
           labels={{
             removeLast: t("inventory.repack.removeLast"),
             clear: t("inventory.repack.clear"),
+            resolveConflict: t("inventory.repack.resolveConflict"),
             empty: t("inventory.repack.empty"),
             reprintTitle: t("inventory.repack.reprint.title"),
             reprintSscc: t("inventory.repack.reprint.sscc"),
@@ -1435,7 +1449,11 @@ function RepackInventoryWorkScreen({
         footer={
           <Button
             size="floor"
-            disabled={Boolean(state.box && state.box.itemCount > 0)}
+            disabled={
+              Boolean(state.box && state.box.itemCount > 0) ||
+              dateDraft < inventory.productionDateFrom ||
+              dateDraft > inventory.productionDateTo
+            }
             onClick={() =>
               void applyDate().catch((error: unknown) => {
                 console.error("station: repack date change failed", error);

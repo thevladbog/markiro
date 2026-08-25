@@ -118,7 +118,12 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
     expect(batch.properties?.events?.maxItems).toBe(100);
     expect(batch.properties?.events?.items?.properties?.kind?.enum).toContain("repack_action");
     const repackActions = batch.properties?.events?.items?.properties?.repack?.oneOf;
-    expect(repackActions).toHaveLength(8);
+    expect(repackActions).toHaveLength(9);
+    const conflictResolution = repackActions?.find((item) =>
+      item.properties?.action?.enum?.includes("resolve-conflict"),
+    );
+    exactClosedObject(conflictResolution ?? {}, ["action", "boxId", "reason", "changedAt"]);
+    expect(conflictResolution?.properties?.reason?.enum).toEqual(["claim-lost"]);
     const printOutcome = repackActions?.find((item) =>
       item.properties?.action?.enum?.includes("print-outcome"),
     );
@@ -161,12 +166,14 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
       "applied",
       "replay",
       "duplicate",
+      "rejected",
       "quarantined",
     ]);
     expect(outcome.properties?.reasonCode?.enum).toEqual([
       "CLAIM_APPLIED",
       "CLAIM_LOST",
       "BATCH_REPLAY",
+      "INVENTORY_EVENT_REJECTED",
       "INVENTORY_CLOSED",
       "INVENTORY_COMPLETED",
     ]);

@@ -72,6 +72,12 @@ export const inventoryRepackMutationSchema = z.discriminatedUnion("action", [
     productionDate: civilDateSchema,
     changedAt: instantSchema,
   }),
+  z.strictObject({
+    action: z.literal("resolve-conflict"),
+    boxId: uuidSchema,
+    reason: z.literal("claim-lost"),
+    changedAt: instantSchema,
+  }),
   z.strictObject({ action: z.literal("print-outcome"), ...inventoryPrintOutcomeShape }),
   z.strictObject({ action: z.literal("reprint-outcome"), ...inventoryPrintOutcomeShape }),
 ]);
@@ -113,7 +119,8 @@ export const inventoryEventSchema = z
       ((action === "remove-last" ||
         action === "clear-box" ||
         action === "close-incomplete" ||
-        action === "change-date") &&
+        action === "change-date" ||
+        action === "resolve-conflict") &&
         event.kind === "repack_action" &&
         event.codeHash === null &&
         event.canonicalRaw === null &&
@@ -242,12 +249,19 @@ export const inventoryEventClaimOutcomeSchema = z
 
 export type InventoryEventClaimOutcome = z.infer<typeof inventoryEventClaimOutcomeSchema>;
 
-export const INVENTORY_EVENT_OUTCOMES = ["applied", "replay", "duplicate", "quarantined"] as const;
+export const INVENTORY_EVENT_OUTCOMES = [
+  "applied",
+  "replay",
+  "duplicate",
+  "rejected",
+  "quarantined",
+] as const;
 
 export const INVENTORY_EVENT_REASON_CODES = [
   "CLAIM_APPLIED",
   "CLAIM_LOST",
   "BATCH_REPLAY",
+  "INVENTORY_EVENT_REJECTED",
   "INVENTORY_CLOSED",
   "INVENTORY_COMPLETED",
 ] as const;
@@ -302,6 +316,11 @@ export const inventoryEventOutcomeSchema = z
       (value.status === "applied" &&
         ((carriesClaims && value.claimedCount === 0) || value.reasonCode !== "CLAIM_APPLIED")) ||
       (value.status === "replay" && value.reasonCode !== "BATCH_REPLAY") ||
+      (value.status === "rejected" &&
+        (value.claimedCount !== 0 ||
+          value.conflictCount !== 0 ||
+          carriesClaims ||
+          value.reasonCode !== "INVENTORY_EVENT_REJECTED")) ||
       (value.status === "quarantined" &&
         (value.claimedCount !== 0 ||
           value.conflictCount !== 0 ||

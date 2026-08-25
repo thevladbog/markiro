@@ -514,6 +514,33 @@ export const inventorySyncAckReceiptsV2 = sqliteTable(
   ],
 );
 
+/** Rejected-aware fail-closed reducer input; prior receipt generations remain evidence. */
+export const inventorySyncAckReceiptsV3 = sqliteTable(
+  "inventory_sync_ack_receipts_v3",
+  {
+    receiptId: text("receipt_id").primaryKey(),
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    batchId: text("batch_id").notNull(),
+    payloadDigest: text("payload_digest").notNull(),
+    responseJson: text("response_json").notNull(),
+    outboxRowsJson: text("outbox_rows_json").notNull(),
+    pinKey: text("pin_key").notNull(),
+    pinValue: text("pin_value").notNull(),
+    appliedAt: text("applied_at").notNull(),
+  },
+  (table) => [
+    check(
+      "inventory_sync_ack_receipts_v3_response_size_check",
+      sql`json_valid(${table.responseJson}) and length(${table.responseJson}) <= 8388608`,
+    ),
+    check(
+      "inventory_sync_ack_receipts_v3_rows_size_check",
+      sql`json_valid(${table.outboxRowsJson}) and length(${table.outboxRowsJson}) <= 524288`,
+    ),
+  ],
+);
+
 /** Durable input to the single-statement progress projection reducer. */
 export const inventoryProgressReceipts = sqliteTable(
   "inventory_progress_receipts",

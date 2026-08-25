@@ -2356,6 +2356,289 @@ export const STATION_MIGRATIONS: string[] = [
        VALUES (NEW.inventory_id, NEW.snapshot_id, NEW.event_id, NEW.device_sequence,
                NEW.payload_json, NEW.completed_at);
      END;`,
+  // A losing claim invalidates an unprinted box. Recovery is an explicit,
+  // journaled transition: remove its active composition, preserve item/event
+  // evidence, resolve the matching conflict rows, and reopen the reserved SSCC.
+  `CREATE TRIGGER IF NOT EXISTS inventory_repack_resolve_conflict_v1
+     AFTER INSERT ON inventory_repack_journal
+     WHEN NEW.action = 'resolve-conflict'
+     BEGIN
+       UPDATE inventory_conflicts_mirror
+          SET state = 'resolved'
+        WHERE inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND state = 'open'
+          AND losing_event_id IN (
+            SELECT source_event_id FROM inventory_repack_items_mirror
+             WHERE inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+               AND box_id = NEW.box_id AND removed_at IS NULL
+          );
+
+       UPDATE inventory_repack_items_mirror
+          SET removed_at = NEW.occurred_at
+        WHERE inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND box_id = NEW.box_id AND removed_at IS NULL;
+
+       UPDATE inventory_repack_boxes_mirror
+          SET state = 'open', print_state = 'not_ready', print_attempt_count = 0,
+              print_error_code = NULL, closed_event_id = NULL, closed_at = NULL,
+              invalidated_at = NULL, printed_at = NULL, updated_at = NEW.occurred_at
+        WHERE inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND box_id = NEW.box_id AND owner_device_id = NEW.device_id
+          AND state = 'invalidated' AND print_attempt_count = 0 AND printed_at IS NULL;
+       SELECT CASE WHEN changes() <> 1
+         THEN RAISE(ABORT, 'inventory repack conflict resolution rejected') END;
+     END;`,
+  // Rejected outcomes were added after v2 shipped. A new receipt generation
+  // preserves deployed validator SQL while admitting only an exact, bounded,
+  // request-bound response and then delegates to the immutable v1 reducer.
+  `CREATE TABLE IF NOT EXISTS inventory_sync_ack_receipts_v3 (
+     receipt_id TEXT PRIMARY KEY,
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     batch_id TEXT NOT NULL,
+     payload_digest TEXT NOT NULL,
+     response_json TEXT NOT NULL,
+     outbox_rows_json TEXT NOT NULL,
+     pin_key TEXT NOT NULL,
+     pin_value TEXT NOT NULL,
+     applied_at TEXT NOT NULL,
+     CHECK (json_valid(response_json) AND length(response_json) <= 8388608),
+     CHECK (json_valid(outbox_rows_json) AND length(outbox_rows_json) <= 524288)
+   );`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_sync_reject_changed_ack_v3
+     BEFORE INSERT ON inventory_sync_ack_receipts_v3
+     WHEN EXISTS (
+       SELECT 1 FROM inventory_sync_ack_receipts_v3 receipt
+        WHERE receipt.receipt_id = NEW.receipt_id
+          AND NOT (
+            receipt.inventory_id IS NEW.inventory_id
+            AND receipt.snapshot_id IS NEW.snapshot_id
+            AND receipt.batch_id IS NEW.batch_id
+            AND receipt.payload_digest IS NEW.payload_digest
+            AND receipt.response_json IS NEW.response_json
+            AND receipt.outbox_rows_json IS NEW.outbox_rows_json
+            AND receipt.pin_key IS NEW.pin_key
+            AND receipt.pin_value IS NEW.pin_value
+            AND receipt.applied_at IS NEW.applied_at
+          )
+     )
+     BEGIN
+       SELECT RAISE(ABORT, 'inventory acknowledgement receipt changed');
+     END;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_sync_validate_ack_v3
+     BEFORE INSERT ON inventory_sync_ack_receipts_v3
+     WHEN NOT EXISTS (
+       SELECT 1 FROM inventory_sync_ack_receipts_v3 receipt
+        WHERE receipt.receipt_id = NEW.receipt_id
+          AND receipt.inventory_id IS NEW.inventory_id
+          AND receipt.snapshot_id IS NEW.snapshot_id
+          AND receipt.batch_id IS NEW.batch_id
+          AND receipt.payload_digest IS NEW.payload_digest
+          AND receipt.response_json IS NEW.response_json
+          AND receipt.outbox_rows_json IS NEW.outbox_rows_json
+          AND receipt.pin_key IS NEW.pin_key
+          AND receipt.pin_value IS NEW.pin_value
+          AND receipt.applied_at IS NEW.applied_at
+     ) AND NOT (
+       json_valid(NEW.response_json)
+       AND json_valid(NEW.outbox_rows_json)
+       AND json_valid(NEW.pin_value)
+       AND json_type(NEW.response_json, '$') = 'object'
+       AND json_type(NEW.outbox_rows_json, '$') = 'array'
+       AND json_type(NEW.pin_value, '$') = 'object'
+       AND (SELECT COUNT(*) FROM json_each(NEW.response_json)) = 8
+       AND (SELECT COUNT(*) FROM json_each(NEW.pin_value)) = 5
+       AND json_extract(NEW.response_json, '$.inventoryId') IS NEW.inventory_id
+       AND json_extract(NEW.response_json, '$.snapshotId') IS NEW.snapshot_id
+       AND json_extract(NEW.response_json, '$.snapshotRevision') IS 1
+       AND json_extract(NEW.response_json, '$.batchId') IS NEW.batch_id
+       AND json_extract(NEW.response_json, '$.payloadDigest') IS NEW.payload_digest
+       AND json_type(NEW.response_json, '$.sequenceCeiling') = 'integer'
+       AND json_type(NEW.response_json, '$.resultRevision') = 'integer'
+       AND json_extract(NEW.response_json, '$.resultRevision') >= 0
+       AND json_type(NEW.response_json, '$.outcomes') = 'array'
+       AND json_array_length(NEW.response_json, '$.outcomes') BETWEEN 1 AND 100
+       AND json_extract(NEW.pin_value, '$.inventoryId') IS NEW.inventory_id
+       AND json_extract(NEW.pin_value, '$.snapshotId') IS NEW.snapshot_id
+       AND json_type(NEW.pin_value, '$.deviceId') = 'text'
+       AND json_type(NEW.pin_value, '$.request') = 'object'
+       AND json_type(NEW.pin_value, '$.outboxRows') = 'array'
+       AND NEW.receipt_id = NEW.inventory_id || ':' || NEW.snapshot_id || ':' ||
+            NEW.batch_id || ':' || NEW.payload_digest
+       AND NEW.pin_key = 'inventory_sync_batch_v1:' || NEW.inventory_id || ':' || NEW.snapshot_id
+       AND json_extract(NEW.pin_value, '$.request.snapshotId') IS NEW.snapshot_id
+       AND json_extract(NEW.pin_value, '$.request.snapshotRevision') IS 1
+       AND json_extract(NEW.pin_value, '$.request.batchId') IS NEW.batch_id
+       AND json_extract(NEW.pin_value, '$.request.payloadDigest') IS NEW.payload_digest
+       AND json_extract(NEW.pin_value, '$.request.sequenceCeiling') IS
+            json_extract(NEW.response_json, '$.sequenceCeiling')
+       AND json_type(NEW.pin_value, '$.request.events') = 'array'
+       AND json_type(NEW.pin_value, '$.request.events[#-1].scannedAt') = 'text'
+       AND NEW.applied_at = json_extract(NEW.pin_value, '$.request.events[#-1].scannedAt')
+       AND json_array_length(NEW.outbox_rows_json) BETWEEN 1 AND 100
+       AND json_array_length(NEW.response_json, '$.outcomes') =
+            json_array_length(NEW.outbox_rows_json)
+       AND json_array_length(NEW.pin_value, '$.request.events') =
+            json_array_length(NEW.outbox_rows_json)
+       AND json(NEW.outbox_rows_json) = json(json_extract(NEW.pin_value, '$.outboxRows'))
+       AND EXISTS (
+         SELECT 1 FROM station_meta pin
+          WHERE pin.key = NEW.pin_key AND pin.value = NEW.pin_value
+       )
+       AND EXISTS (
+         SELECT 1 FROM inventory_terminal_state terminal
+          WHERE terminal.inventory_id = NEW.inventory_id
+            AND terminal.snapshot_id = NEW.snapshot_id
+            AND terminal.device_id = json_extract(NEW.pin_value, '$.deviceId')
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM json_each(NEW.outbox_rows_json) pinned
+          WHERE json_type(pinned.value, '$') <> 'object'
+             OR (SELECT COUNT(*) FROM json_each(pinned.value)) <> 3
+             OR json_type(pinned.value, '$.id') <> 'integer'
+             OR json_type(pinned.value, '$.eventId') <> 'text'
+             OR json_type(pinned.value, '$.payloadJson') <> 'text'
+             OR NOT EXISTS (
+               SELECT 1 FROM inventory_outbox queued
+                WHERE queued.id = json_extract(pinned.value, '$.id')
+                  AND queued.inventory_id = NEW.inventory_id
+                  AND queued.snapshot_id = NEW.snapshot_id
+                  AND queued.event_id = json_extract(pinned.value, '$.eventId')
+                  AND queued.payload_json = json_extract(pinned.value, '$.payloadJson')
+             )
+             OR (SELECT COUNT(*) FROM json_each(NEW.pin_value, '$.request.events') event
+                  WHERE json_extract(event.value, '$.eventId') =
+                        json_extract(pinned.value, '$.eventId')) <> 1
+       )
+       AND (SELECT COUNT(DISTINCT json_extract(pinned.value, '$.id'))
+              FROM json_each(NEW.outbox_rows_json) pinned) = json_array_length(NEW.outbox_rows_json)
+       AND (SELECT COUNT(DISTINCT json_extract(pinned.value, '$.eventId'))
+              FROM json_each(NEW.outbox_rows_json) pinned) = json_array_length(NEW.outbox_rows_json)
+       AND NOT EXISTS (
+         SELECT 1 FROM json_each(NEW.response_json, '$.outcomes') outcome
+          WHERE json_type(outcome.value, '$') <> 'object'
+             OR (SELECT COUNT(*) FROM json_each(outcome.value)) <> 6
+             OR json_type(outcome.value, '$.eventId') <> 'text'
+             OR json_type(outcome.value, '$.status') <> 'text'
+             OR json_type(outcome.value, '$.reasonCode') <> 'text'
+             OR json_type(outcome.value, '$.claimedCount') <> 'integer'
+             OR json_type(outcome.value, '$.conflictCount') <> 'integer'
+             OR json_type(outcome.value, '$.claims') <> 'array'
+             OR json_extract(outcome.value, '$.claimedCount') < 0
+             OR json_extract(outcome.value, '$.conflictCount') < 0
+             OR json_extract(outcome.value, '$.claimedCount') <>
+                  (SELECT COUNT(*) FROM json_each(outcome.value, '$.claims') claim
+                    WHERE json_extract(claim.value, '$.status') = 'claimed')
+             OR json_extract(outcome.value, '$.conflictCount') <>
+                  (SELECT COUNT(*) FROM json_each(outcome.value, '$.claims') claim
+                    WHERE json_extract(claim.value, '$.status') = 'duplicate')
+             OR json_array_length(outcome.value, '$.claims') > 10000
+             OR NOT (
+               (json_extract(outcome.value, '$.status') = 'applied'
+                 AND json_extract(outcome.value, '$.reasonCode') = 'CLAIM_APPLIED'
+                 AND (json_extract(outcome.value, '$.claimedCount') > 0 OR (
+                   json_array_length(outcome.value, '$.claims') = 0 AND EXISTS (
+                     SELECT 1 FROM json_each(NEW.pin_value, '$.request.events') event
+                      WHERE json_extract(event.value, '$.eventId') =
+                            json_extract(outcome.value, '$.eventId')
+                        AND json_extract(event.value, '$.kind') IN ('old_box', 'repack_action')
+                   )
+                 )))
+               OR (json_extract(outcome.value, '$.status') = 'duplicate'
+                 AND json_extract(outcome.value, '$.reasonCode') = 'CLAIM_LOST'
+                 AND json_extract(outcome.value, '$.claimedCount') = 0
+                 AND json_extract(outcome.value, '$.conflictCount') > 0)
+               OR (json_extract(outcome.value, '$.status') = 'replay'
+                 AND json_extract(outcome.value, '$.reasonCode') = 'BATCH_REPLAY')
+               OR (json_extract(outcome.value, '$.status') = 'rejected'
+                 AND json_extract(outcome.value, '$.reasonCode') = 'INVENTORY_EVENT_REJECTED'
+                 AND json_extract(outcome.value, '$.claimedCount') = 0
+                 AND json_extract(outcome.value, '$.conflictCount') = 0
+                 AND json_array_length(outcome.value, '$.claims') = 0)
+               OR (json_extract(outcome.value, '$.status') = 'quarantined'
+                 AND json_extract(outcome.value, '$.reasonCode') IN
+                   ('INVENTORY_CLOSED', 'INVENTORY_COMPLETED')
+                 AND json_extract(outcome.value, '$.claimedCount') = 0
+                 AND json_extract(outcome.value, '$.conflictCount') = 0
+                 AND json_array_length(outcome.value, '$.claims') = 0)
+             )
+             OR (SELECT COUNT(*) FROM json_each(NEW.outbox_rows_json) pinned
+                  WHERE json_extract(pinned.value, '$.eventId') =
+                        json_extract(outcome.value, '$.eventId')) <> 1
+             OR (SELECT COUNT(*) FROM json_each(NEW.pin_value, '$.request.events') event
+                  WHERE json_extract(event.value, '$.eventId') =
+                        json_extract(outcome.value, '$.eventId')) <> 1
+             OR EXISTS (
+               SELECT 1 FROM json_each(outcome.value, '$.claims') claim
+                WHERE json_type(claim.value, '$') <> 'object'
+                   OR (SELECT COUNT(*) FROM json_each(claim.value)) <> 3
+                   OR (SELECT COUNT(*) FROM json_each(claim.value, '$.winner')) <> 4
+                   OR json_type(claim.value, '$.codeHash') <> 'text'
+                   OR length(json_extract(claim.value, '$.codeHash')) <> 64
+                   OR json_extract(claim.value, '$.codeHash') GLOB '*[^0-9a-f]*'
+                   OR json_extract(claim.value, '$.status') NOT IN ('claimed', 'duplicate')
+                   OR json_type(claim.value, '$.winner') <> 'object'
+                   OR json_extract(claim.value, '$.winner.codeHash') IS NOT
+                        json_extract(claim.value, '$.codeHash')
+                   OR json_type(claim.value, '$.winner.eventId') <> 'text'
+                   OR json_type(claim.value, '$.winner.deviceId') <> 'text'
+                   OR json_type(claim.value, '$.winner.scannedAt') <> 'text'
+                   OR (json_extract(claim.value, '$.status') = 'claimed' AND (
+                     json_extract(claim.value, '$.winner.eventId') IS NOT
+                       json_extract(outcome.value, '$.eventId')
+                     OR json_extract(claim.value, '$.winner.deviceId') IS NOT
+                       json_extract(NEW.pin_value, '$.deviceId')
+                     OR json_extract(claim.value, '$.winner.scannedAt') IS NOT (
+                       SELECT json_extract(event.value, '$.scannedAt')
+                         FROM json_each(NEW.pin_value, '$.request.events') event
+                        WHERE json_extract(event.value, '$.eventId') =
+                              json_extract(outcome.value, '$.eventId')
+                     )
+                   ))
+                   OR (json_extract(claim.value, '$.status') = 'duplicate'
+                     AND json_extract(claim.value, '$.winner.eventId') IS
+                          json_extract(outcome.value, '$.eventId'))
+             )
+             OR EXISTS (
+               SELECT 1 FROM json_each(NEW.pin_value, '$.request.events') event
+                WHERE json_extract(event.value, '$.eventId') =
+                      json_extract(outcome.value, '$.eventId')
+                  AND json_extract(event.value, '$.kind') IN ('old_box', 'repack_action')
+                  AND json_array_length(outcome.value, '$.claims') <> 0
+             )
+             OR EXISTS (
+               SELECT 1 FROM json_each(NEW.pin_value, '$.request.events') event
+                WHERE json_extract(event.value, '$.eventId') =
+                      json_extract(outcome.value, '$.eventId')
+                  AND json_extract(event.value, '$.kind') = 'item'
+                  AND json_array_length(outcome.value, '$.claims') > 0
+                  AND (json_type(event.value, '$.codeHash') <> 'text'
+                    OR json_array_length(outcome.value, '$.claims') <> 1
+                    OR json_extract(outcome.value, '$.claims[0].codeHash') IS NOT
+                         json_extract(event.value, '$.codeHash'))
+             )
+       )
+       AND (SELECT COUNT(DISTINCT json_extract(outcome.value, '$.eventId'))
+              FROM json_each(NEW.response_json, '$.outcomes') outcome) =
+            json_array_length(NEW.response_json, '$.outcomes')
+       AND (SELECT COUNT(*) FROM json_each(NEW.response_json, '$.outcomes') outcome,
+                  json_each(outcome.value, '$.claims') claim) <= 10000
+     )
+     BEGIN
+       SELECT RAISE(ABORT, 'inventory acknowledgement receipt invalid');
+     END;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_sync_apply_ack_v3
+     AFTER INSERT ON inventory_sync_ack_receipts_v3
+     BEGIN
+       INSERT INTO inventory_sync_ack_receipts (
+         receipt_id, inventory_id, snapshot_id, batch_id, payload_digest,
+         response_json, outbox_rows_json, pin_key, pin_value, applied_at
+       ) VALUES (
+         NEW.receipt_id, NEW.inventory_id, NEW.snapshot_id, NEW.batch_id,
+         NEW.payload_digest, NEW.response_json, NEW.outbox_rows_json,
+         NEW.pin_key, NEW.pin_value, NEW.applied_at
+       ) ON CONFLICT(receipt_id) DO NOTHING;
+     END;`,
 ];
 
 export interface StationMigrationEntry {

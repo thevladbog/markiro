@@ -74,6 +74,13 @@ function asWinner(row: {
   };
 }
 
+function conflictCode(error: ConflictException): string | null {
+  const response = error.getResponse();
+  return typeof response === "object" && response !== null && "code" in response
+    ? String(response.code)
+    : null;
+}
+
 @Injectable()
 export class StationInventorySyncService {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -176,11 +183,15 @@ export class StationInventorySyncService {
         const replay = {
           ...prior,
           batchId: input.batchId,
-          outcomes: prior.outcomes.map((outcome) => ({
-            ...outcome,
-            status: "replay" as const,
-            reasonCode: "BATCH_REPLAY" as const,
-          })),
+          outcomes: prior.outcomes.map((outcome) =>
+            outcome.status === "rejected" || outcome.status === "quarantined"
+              ? outcome
+              : {
+                  ...outcome,
+                  status: "replay" as const,
+                  reasonCode: "BATCH_REPLAY" as const,
+                },
+          ),
         };
         await tx.insert(schema.inventoryScanBatches).values({
           tenantId,
@@ -202,30 +213,50 @@ export class StationInventorySyncService {
         throw new ConflictException({ code: "INVENTORY_PARTICIPANT_OPERATOR_MISMATCH" });
       }
 
+      const repackFacts = repackInventoryFacts(inventory.mode, inventory.stationManifest);
       const targets = new Map<string, ClaimTarget[]>();
+      const rejectedEvents = new Set<string>();
+      const rejectionErrors = new Map<string, ConflictException>();
       let expandedClaimCount = 0;
       for (const event of input.events) {
-        const expanded = await this.validateAndExpand(
-          tx,
-          tenantId,
-          inventoryId,
-          input.snapshotId,
-          inventory.gtin14,
-          inventory.productionDateFrom,
-          inventory.productionDateTo,
-          event,
-        );
+        let expanded: ClaimTarget[];
+        try {
+          expanded = await this.validateAndExpand(
+            tx,
+            tenantId,
+            inventoryId,
+            input.snapshotId,
+            inventory.gtin14,
+            inventory.productionDateFrom,
+            inventory.productionDateTo,
+            repackFacts,
+            event,
+          );
+        } catch (error) {
+          if (!(error instanceof ConflictException)) throw error;
+          rejectedEvents.add(event.eventId);
+          rejectionErrors.set(event.eventId, error);
+          targets.set(event.eventId, []);
+          continue;
+        }
         if (expanded.length > INVENTORY_EVENT_CLAIM_OUTCOME_SIZE) {
           throw new ConflictException({ code: "INVENTORY_EVENT_CLAIM_LIMIT_EXCEEDED" });
         }
-        expandedClaimCount += expanded.length;
-        if (expandedClaimCount > INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE) {
+        if (expandedClaimCount + expanded.length > INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE) {
           throw new ConflictException({ code: "INVENTORY_BATCH_CLAIM_LIMIT_EXCEEDED" });
         }
+        expandedClaimCount += expanded.length;
         targets.set(event.eventId, expanded);
       }
 
       if (inventory.status !== "running") {
+        const invalidLateEvent = input.events.find((event) => rejectionErrors.has(event.eventId));
+        if (invalidLateEvent) {
+          const rejection = rejectionErrors.get(invalidLateEvent.eventId);
+          if (rejection && conflictCode(rejection) !== "INVENTORY_EVENT_MODE_MISMATCH") {
+            throw rejection;
+          }
+        }
         if (inventory.status !== "closed" && inventory.status !== "completed") {
           throw new ConflictException({ code: "INVENTORY_NOT_ACCEPTING_EVENTS" });
         }
@@ -313,7 +344,7 @@ export class StationInventorySyncService {
             eq(schema.inventoryScanBatches.tenantId, tenantId),
             eq(schema.inventoryScanBatches.inventoryId, inventoryId),
             eq(schema.inventoryScanBatches.deviceId, deviceId),
-            eq(schema.inventoryScanBatches.outcome, "applied"),
+            inArray(schema.inventoryScanBatches.outcome, ["applied", "rejected"]),
           ),
         )
         .orderBy(desc(schema.inventoryScanBatches.sequenceCeiling))
@@ -352,7 +383,7 @@ export class StationInventorySyncService {
         batchId: input.batchId,
         payloadDigest: input.payloadDigest,
         sequenceCeiling: BigInt(input.sequenceCeiling),
-        outcome: "applied",
+        outcome: rejectedEvents.size === input.events.length ? "rejected" : "applied",
         result: {},
       });
       await tx.insert(schema.inventoryScanEvents).values(
@@ -372,7 +403,7 @@ export class StationInventorySyncService {
           activeProductionDate: event.activeProductionDate,
           snapshotRevision: input.snapshotRevision,
           localVerdict: event.localVerdict,
-          authoritativeVerdict: "pending",
+          authoritativeVerdict: rejectedEvents.has(event.eventId) ? "rejected" : "pending",
         })),
       );
 
@@ -487,6 +518,17 @@ export class StationInventorySyncService {
 
       const outcomes: InventoryEventBatchResponse["outcomes"] = [];
       for (const event of input.events) {
+        if (rejectedEvents.has(event.eventId)) {
+          outcomes.push({
+            eventId: event.eventId,
+            status: "rejected",
+            reasonCode: "INVENTORY_EVENT_REJECTED",
+            claimedCount: 0,
+            conflictCount: 0,
+            claims: [],
+          });
+          continue;
+        }
         const eventTargets = targets.get(event.eventId) ?? [];
         const claims = eventTargets.map((target) => {
           const winner = finalWinners.get(target.codeHash);
@@ -535,9 +577,8 @@ export class StationInventorySyncService {
         });
       }
 
-      const repackFacts = repackInventoryFacts(inventory.mode, inventory.stationManifest);
       for (const [index, event] of input.events.entries()) {
-        if (!event.repack) continue;
+        if (!event.repack || rejectedEvents.has(event.eventId)) continue;
         await this.applyRepackMutation(
           tx,
           tenantId,
@@ -649,6 +690,8 @@ export class StationInventorySyncService {
           payloadDigest: input.payloadDigest,
           sequenceCeiling: input.sequenceCeiling,
           eventCount: input.events.length,
+          rejectedEventCount: rejectedEvents.size,
+          rejectedEventIds: [...rejectedEvents],
           resultRevision: nextRevision,
           pendingEventCount: input.pendingEventCount,
           openBoxCount: input.openBoxCount,
@@ -845,13 +888,35 @@ export class StationInventorySyncService {
     gtin14: string,
     productionDateFrom: string,
     productionDateTo: string,
+    inventory: RepackInventoryFacts,
     event: InventoryEvent,
   ): Promise<ClaimTarget[]> {
+    if (inventory.mode === "check" && (event.kind === "old_box" || event.repack !== undefined)) {
+      throw new ConflictException({ code: "INVENTORY_EVENT_MODE_MISMATCH" });
+    }
+    if (inventory.mode === "repack" && event.kind === "known_box") {
+      throw new ConflictException({ code: "INVENTORY_EVENT_MODE_MISMATCH" });
+    }
+    if (
+      inventory.mode === "repack" &&
+      (inventory.capacity === null ||
+        (event.kind === "old_box" && event.repack?.action !== "open-box"))
+    ) {
+      throw new ConflictException({ code: "INVENTORY_REPACK_CONFIGURATION_INVALID" });
+    }
     if (event.kind === "repack_action") {
       if (
         event.activeProductionDate === null ||
         event.activeProductionDate < productionDateFrom ||
         event.activeProductionDate > productionDateTo
+      ) {
+        throw new ConflictException({ code: "INVENTORY_EVENT_PRODUCTION_DATE_MISMATCH" });
+      }
+      if (
+        event.repack?.action === "change-date" &&
+        (event.repack.productionDate !== event.activeProductionDate ||
+          event.repack.productionDate < productionDateFrom ||
+          event.repack.productionDate > productionDateTo)
       ) {
         throw new ConflictException({ code: "INVENTORY_EVENT_PRODUCTION_DATE_MISMATCH" });
       }
@@ -896,6 +961,14 @@ export class StationInventorySyncService {
             eq(schema.inventorySnapshotCodes.codeHash, event.codeHash),
           ),
         );
+      const eligible = row?.expected === true && row.protected !== true;
+      if (
+        inventory.mode === "repack" &&
+        ((eligible && event.repack?.action !== "add-item") ||
+          (!eligible && event.repack?.action === "add-item"))
+      ) {
+        throw new ConflictException({ code: "INVENTORY_EVENT_MODE_MISMATCH" });
+      }
       return [
         {
           codeHash: event.codeHash,
@@ -914,7 +987,16 @@ export class StationInventorySyncService {
     if (!sscc || event.codeHash !== null || event.normalizedIdentity !== `${event.kind}:${sscc}`) {
       throw new ConflictException({ code: "INVENTORY_EVENT_IDENTITY_INVALID" });
     }
-    if (event.repack?.action === "open-box") return [];
+    if (event.repack?.action === "open-box") {
+      if (
+        event.repack.productionDate !== event.activeProductionDate ||
+        event.repack.productionDate < productionDateFrom ||
+        event.repack.productionDate > productionDateTo
+      ) {
+        throw new ConflictException({ code: "INVENTORY_EVENT_PRODUCTION_DATE_MISMATCH" });
+      }
+      return [];
+    }
     const rows = await tx
       .select({
         codeHash: schema.inventorySnapshotCodes.codeHash,
@@ -1066,6 +1148,90 @@ export class StationInventorySyncService {
       .for("update");
     if (!box || box.ownerDeviceId !== deviceId) {
       throw new ConflictException({ code: "INVENTORY_REPACK_BOX_NOT_OWNED" });
+    }
+
+    if (mutation.action === "resolve-conflict") {
+      if (
+        box.state !== "invalidated" ||
+        box.printAttemptCount !== 0 ||
+        box.printedAt !== null ||
+        mutation.reason !== "claim-lost"
+      ) {
+        throw new ConflictException({ code: "INVENTORY_REPACK_CONFLICT_RESOLUTION_INVALID" });
+      }
+      const resolvedAt = new Date(mutation.changedAt);
+      const activeItems = await tx
+        .select({ id: schema.inventoryRepackItems.id })
+        .from(schema.inventoryRepackItems)
+        .where(
+          and(
+            eq(schema.inventoryRepackItems.tenantId, tenantId),
+            eq(schema.inventoryRepackItems.inventoryId, inventoryId),
+            eq(schema.inventoryRepackItems.boxId, box.id),
+            isNull(schema.inventoryRepackItems.removedAt),
+          ),
+        )
+        .for("update");
+      if (activeItems.length > 0) {
+        await tx
+          .update(schema.inventoryRepackItems)
+          .set({ removedAt: resolvedAt, activeObservedProductionDate: null })
+          .where(
+            inArray(
+              schema.inventoryRepackItems.id,
+              activeItems.map((item) => item.id),
+            ),
+          );
+      }
+      await tx
+        .update(schema.inventoryRepackBoxes)
+        .set({
+          state: "open",
+          printState: "not_ready",
+          printAttemptCount: 0,
+          printErrorCode: null,
+          closedEventId: null,
+          closedAt: null,
+          invalidatedAt: null,
+          printedAt: null,
+          updatedAt: resolvedAt,
+        })
+        .where(
+          and(
+            eq(schema.inventoryRepackBoxes.tenantId, tenantId),
+            eq(schema.inventoryRepackBoxes.inventoryId, inventoryId),
+            eq(schema.inventoryRepackBoxes.id, box.id),
+            eq(schema.inventoryRepackBoxes.ownerDeviceId, deviceId),
+            eq(schema.inventoryRepackBoxes.state, "invalidated"),
+          ),
+        );
+      await tx.insert(schema.tenantAuditEvents).values({
+        organizationId: tenantId,
+        actorUserId: null,
+        action: "inventory.station.repack_conflict_resolved",
+        outcome: "success",
+        targetType: "inventory_repack_box",
+        targetId: box.id,
+        before: {
+          state: box.state,
+          activeItemCount: activeItems.length,
+          printState: box.printState,
+          printAttemptCount: box.printAttemptCount,
+        },
+        after: {
+          tenantId,
+          inventoryId,
+          deviceId,
+          operatorId: event.operatorId,
+          boxId: box.id,
+          reason: mutation.reason,
+          state: "open",
+          activeItemCount: 0,
+          sourceEventId: event.eventId,
+          resolvedAt: mutation.changedAt,
+        },
+      });
+      return;
     }
 
     if (mutation.action === "print-outcome" || mutation.action === "reprint-outcome") {

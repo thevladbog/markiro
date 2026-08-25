@@ -115,6 +115,17 @@ const repackMutationOpenApiSchema: SchemaObject = {
         changedAt: { type: "string", format: "date-time" },
       },
     },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["action", "boxId", "reason", "changedAt"],
+      properties: {
+        action: { type: "string", enum: ["resolve-conflict"] },
+        boxId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+        reason: { type: "string", enum: ["claim-lost"] },
+        changedAt: { type: "string", format: "date-time" },
+      },
+    },
     ...["print-outcome", "reprint-outcome"].map((action): SchemaObject => ({
       type: "object",
       additionalProperties: false,

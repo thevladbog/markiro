@@ -214,6 +214,7 @@
       "corrections": "Corrections",
       "removeLast": "Remove last bottle",
       "clear": "Clear open box",
+      "resolveConflict": "Clear conflict and continue",
       "closeIncomplete": "Close incomplete box",
       "empty": "The open box has no bottles yet.",
       "dateBlocked": "Close the incomplete box or clear it first.",
@@ -240,7 +241,9 @@
         "missing": "No printed box with this SSCC was found on this terminal.",
         "action": "Reprint label"
       },
-      "position": "Position {{position}}: {{status}}"
+      "position": "Position {{position}}: {{status}}",
+      "occupied": "occupied",
+      "free": "free"
     },
     "pagination": "Inventory task pages",
     "previous": "Previous task",
