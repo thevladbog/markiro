@@ -1,5 +1,5 @@
 import type { SqlExecutor } from "./mirror.js";
-import { isStationBetaVersion } from "./station-version.js";
+import { isStationVersion } from "./station-version.js";
 
 export const UPDATE_STATE_KEY = "station_update_state_v1";
 export const AUTO_CHECK_INTERVAL_MS = 86_400_000;
@@ -42,7 +42,7 @@ function ensureNotFuture(value: string, now = Date.now()): void {
 }
 
 function validateVersion(value: unknown): string {
-  if (!isStationBetaVersion(value)) invalid();
+  if (!isStationVersion(value)) invalid();
   return value;
 }
 

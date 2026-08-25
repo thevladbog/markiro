@@ -84,3 +84,50 @@ test("active runbooks do not instruct operators to use retired release phases", 
     /deployment_phase=|rollback_rehearsal=|observability_phase=|postgres_provisioning_phase=|dns_apply_run_id=|dns_verifier_run_id=/,
   );
 });
+
+test("active infrastructure runbooks require separate reviewed plan and apply runs", async () => {
+  const [goLive, infrastructure, bootstrap] = await Promise.all([
+    read("docs/runbooks/yandex-first-go-live.md"),
+    read("docs/runbooks/yandex-infrastructure-apply.md"),
+    read("docs/runbooks/yandex-bootstrap.md"),
+  ]);
+
+  for (const runbook of [goLive, infrastructure]) {
+    assert.match(runbook, /mode=plan/);
+    assert.match(runbook, /mode=apply/);
+    assert.match(runbook, /production-infrastructure/);
+    assert.match(runbook, /production-infrastructure-apply/);
+    assert.match(runbook, /plan_key/);
+    assert.match(runbook, /plan_sha256/);
+    assert.match(runbook, /plan_version_id/);
+    assert.match(runbook, /plan_json_key/);
+    assert.match(runbook, /plan_json_sha256/);
+    assert.match(runbook, /plan_json_version_id/);
+    assert.match(runbook, /plan_review_confirmed=true/);
+  }
+  assert.match(goLive, /enable_station_release_public_dns=false/);
+  assert.match(bootstrap, /production-infrastructure/);
+  assert.match(bootstrap, /production-infrastructure-apply/);
+  assert.match(bootstrap, /два.*OIDC|OIDC.*два/is);
+});
+
+test("operator review retrieves both exact protected versions and inspects every before and after", async () => {
+  const runbook = await read("docs/runbooks/yandex-infrastructure-apply.md");
+  assert.match(runbook, /--key "\$PLAN_KEY"[\s\S]*--version-id "\$PLAN_VERSION_ID"/);
+  assert.match(runbook, /--key "\$PLAN_JSON_KEY"[\s\S]*--version-id "\$PLAN_JSON_VERSION_ID"/);
+  assert.match(runbook, /"\$PLAN_SHA256"[\s\S]*sha256sum --check/);
+  assert.match(runbook, /"\$PLAN_JSON_SHA256"[\s\S]*sha256sum --check/);
+  assert.match(runbook, /terraform[\s\S]*show -json/);
+  assert.match(runbook, /cmp "\$review_dir\/production-plan\.json"/);
+  assert.match(runbook, /jq --slurp -e '\.\[0\] == \.\[1\]'/);
+  for (const field of ["before", "after", "after_unknown", "address", "type", "actions"]) {
+    assert.match(runbook, new RegExp(field));
+  }
+  assert.match(runbook, /principals\/actions\/roles/i);
+  assert.match(runbook, /DNS type\/name\/data/i);
+  assert.match(runbook, /CDN origin group/i);
+  assert.match(runbook, /configuration reference/i);
+  assert.match(runbook, /literal unknown/i);
+  assert.match(runbook, /plan_review_confirmed=true/);
+  assert.doesNotMatch(runbook, /upload-artifact|GITHUB_STEP_SUMMARY/);
+});

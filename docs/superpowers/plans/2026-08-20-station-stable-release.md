@@ -199,7 +199,7 @@ git commit -m "feat(station): model stable release versions"
 - Produces:
 
 ```ts
-const STABLE_CHANNEL_URL: "https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json";
+const STABLE_CHANNEL_URL: "https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json";
 
 validateAcceptedBeta(input: {
   sourceBetaTag: string;
@@ -288,7 +288,7 @@ Create:
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json"
+        "https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json"
       ]
     }
   }
@@ -398,7 +398,7 @@ Add a stable fixture and assert exact URL/version/evidence behavior:
 const stableVersion = "0.1.0";
 const stableNames = stationAssetNames(stableVersion);
 const stableBundleUrl =
-  `https://github.com/thevladbog/markiro/releases/download/` +
+  `https://github.com/thevladbog/markiro-station-releases/releases/download/` +
   `station-v${stableVersion}/${stableNames.bundle}`;
 
 test("stages and validates stable artifacts with beta provenance", async () => {

@@ -3246,6 +3246,46 @@ body,
   font: var(--floor-body);
 }
 
+.station-update-center__source {
+  display: grid;
+  width: min(720px, 100%);
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--info-solid);
+  border-radius: var(--mk-radius-operational);
+  background: var(--surface-card);
+}
+
+.station-update-center__source:has(.mk-chip--ok) {
+  border-left-color: var(--ok-solid);
+}
+
+.station-update-center__source-label,
+.station-update-center__source-note {
+  margin: 0;
+}
+
+.station-update-center__source-label {
+  color: var(--fg-3);
+  font: var(--text-meta);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.station-update-center__source-chip {
+  width: fit-content;
+  height: 36px !important;
+  padding-inline: var(--sp-3) !important;
+  font: var(--floor-body-strong) !important;
+}
+
+.station-update-center__source-note {
+  max-width: 62ch;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
 .station-update-center__progress {
   width: min(720px, 100%);
   height: 20px;

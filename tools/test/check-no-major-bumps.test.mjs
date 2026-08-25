@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,7 @@ import test from "node:test";
 import { breakingVersionOf, findBreakingChanges, majorOf } from "../dependency-manifests.mjs";
 
 const toolsDir = fileURLToPath(new URL("../", import.meta.url));
+const repositoryDir = fileURLToPath(new URL("../../", import.meta.url));
 
 const manifest = (file, dependencies) => ({ file, manifest: { dependencies } });
 
@@ -213,4 +214,16 @@ test("the guard fails on a 0.x minor crossing from a path containing a space", (
   const r = runGuard({ name: "scratch", dependencies: { "drizzle-orm": "0.46.0" } });
   assert.equal(r.status, 1, `expected exit 1, got ${r.status}; stdout=${r.stdout}`);
   assert.match(r.stderr, /drizzle-orm 0\.45\.2 -> 0\.46\.0/);
+});
+
+test("private repositories retain a high-severity dependency audit gate", () => {
+  const workflow = readFileSync(
+    join(repositoryDir, ".github/workflows/dependency-review.yml"),
+    "utf8",
+  );
+
+  assert.match(workflow, /if:.*repository\.private == false/);
+  assert.match(workflow, /actions\/dependency-review-action@/);
+  assert.match(workflow, /if:.*repository\.private == true/);
+  assert.match(workflow, /pnpm audit --prod --audit-level high/);
 });

@@ -6,6 +6,7 @@ import { paginate } from "../lib/pagination.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { ShiftCard } from "../ui/ShiftCard.js";
 import type { SqlExecutor } from "../lib/mirror.js";
+import type { AcquireShiftEntry, ShiftEntryLease } from "../lib/shift-entry-lease.js";
 import { StationScreen } from "../ui/StationScreen.js";
 import {
   prefetchStationProductImage,
@@ -56,7 +57,11 @@ async function excludeLocallyClosedShifts(
 export interface ShiftSelectionProps {
   client: StationClient;
   exec?: SqlExecutor;
-  onSelected: (shift: { id: string; status: string; mode: string }) => void;
+  acquireShiftEntry?: AcquireShiftEntry;
+  onSelected: (
+    shift: { id: string; status: string; mode: string },
+    lease?: ShiftEntryLease,
+  ) => void | Promise<void>;
   onNew: () => void;
   /** Opens the workstation setup screen; omitted where there is no way in. */
   onSetup?: () => void;
@@ -84,6 +89,7 @@ export function shiftSelectionPersistentState(input: {
 export function ShiftSelection({
   client,
   exec,
+  acquireShiftEntry,
   onSelected,
   onNew,
   onSetup,
@@ -104,6 +110,7 @@ export function ShiftSelection({
   const [imageRefreshKey, setImageRefreshKey] = useState(0);
   const [requestedPage, setRequestedPage] = useState(1);
   const mounted = useRef(true);
+  const shiftEntryOperation = useRef(0);
   const isCurrentRef = useRef(isCurrent);
   const listRequest = useRef<{ client: StationClient; id: number } | null>(null);
   const listRequestId = useRef(0);
@@ -117,6 +124,7 @@ export function ShiftSelection({
     mounted.current = true;
     return () => {
       mounted.current = false;
+      shiftEntryOperation.current += 1;
     };
   }, []);
 
@@ -210,25 +218,65 @@ export function ShiftSelection({
 
   async function open(shift: ShiftListItem) {
     if (busy) return;
+    const operation = ++shiftEntryOperation.current;
+    let lease: ShiftEntryLease | null = null;
+    const current = (): boolean =>
+      mounted.current &&
+      shiftEntryOperation.current === operation &&
+      isCurrent?.() !== false &&
+      (lease?.isCurrent() ?? true);
     setError(null);
     setBusy(true);
     try {
+      if (acquireShiftEntry) {
+        lease = await acquireShiftEntry();
+        if (!current()) return;
+      }
       const opened = await client.post<{ id: string; status: string; mode: string }>(
         `/shifts/${shift.id}/open`,
       );
-      if (!mounted.current || isCurrent?.() === false) return;
-      onSelected(opened);
+      if (!current()) return;
+      if (lease) await onSelected(opened, lease);
+      else await onSelected(opened);
+      if (!current()) return;
     } catch (err) {
-      if (!mounted.current || isCurrent?.() === false) return;
+      if (!current()) return;
       setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
     } finally {
-      if (mounted.current && isCurrent?.() !== false) setBusy(false);
+      lease?.release();
+      if (mounted.current && shiftEntryOperation.current === operation && isCurrent?.() !== false) {
+        setBusy(false);
+      }
     }
   }
 
-  function rejoin(shift: ShiftListItem) {
+  async function rejoin(shift: ShiftListItem) {
     if (busy || isCurrent?.() === false) return;
-    onSelected(shift);
+    const operation = ++shiftEntryOperation.current;
+    let lease: ShiftEntryLease | null = null;
+    const current = (): boolean =>
+      mounted.current &&
+      shiftEntryOperation.current === operation &&
+      isCurrent?.() !== false &&
+      (lease?.isCurrent() ?? true);
+    setError(null);
+    setBusy(true);
+    try {
+      if (acquireShiftEntry) {
+        lease = await acquireShiftEntry();
+        if (!current()) return;
+      }
+      if (lease) await onSelected(shift, lease);
+      else await onSelected(shift);
+      if (!current()) return;
+    } catch {
+      if (current()) setError(t("shifts.actionFailed"));
+    } finally {
+      lease?.release();
+      if (mounted.current && shiftEntryOperation.current === operation && isCurrent?.() !== false) {
+        setBusy(false);
+      }
+    }
   }
 
   const message = error ? <Alert tone="error">{error}</Alert> : <span aria-hidden="true" />;
@@ -239,20 +287,20 @@ export function ShiftSelection({
       header={<div className="shift-selection__message">{message}</div>}
       actions={
         <FloorFooter ariaLabel={t("shifts.actions")}>
-          <Button size="floor" onClick={onNew}>
+          <Button size="floor" disabled={busy} onClick={onNew}>
             {t("shifts.new")}
           </Button>
           <div className="shift-selection__secondary-actions">
             <Button
               size="floor"
               variant="secondary"
-              disabled={manualRefreshing}
+              disabled={busy || manualRefreshing}
               onClick={() => refreshShifts({ manual: true })}
             >
               {t("shifts.refresh")}
             </Button>
             {onSetup ? (
-              <Button size="floor" variant="secondary" onClick={onSetup}>
+              <Button size="floor" variant="secondary" disabled={busy} onClick={onSetup}>
                 {t("shell.setup")}
               </Button>
             ) : null}
@@ -316,7 +364,9 @@ export function ShiftSelection({
                   actionLabel={shift.status === "active" ? t("shifts.rejoin") : t("shifts.open")}
                   active={shift.status === "active"}
                   disabled={busy}
-                  onSelect={() => (shift.status === "active" ? rejoin(shift) : void open(shift))}
+                  onSelect={() =>
+                    shift.status === "active" ? void rejoin(shift) : void open(shift)
+                  }
                   exec={exec}
                   productId={shift.productId}
                   image={shift.image}

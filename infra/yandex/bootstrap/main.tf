@@ -49,16 +49,17 @@ resource "yandex_lockbox_secret" "state_backend" {
 module "iam" {
   source = "../modules/iam"
 
-  folder_id                         = var.folder_id
-  organization_id                   = var.organization_id
-  github_repository                 = var.github_repository
-  github_repository_owner_id        = var.github_repository_owner_id
-  github_repository_id              = var.github_repository_id
-  github_infrastructure_environment = var.github_infrastructure_environment
-  state_bucket_name                 = yandex_storage_bucket.state.bucket
-  runtime_secret_id                 = yandex_lockbox_secret.runtime.id
-  state_backend_secret_id           = yandex_lockbox_secret.state_backend.id
-  labels                            = local.labels
+  folder_id                               = var.folder_id
+  organization_id                         = var.organization_id
+  github_repository                       = var.github_repository
+  github_repository_owner_id              = var.github_repository_owner_id
+  github_repository_id                    = var.github_repository_id
+  github_infrastructure_environment       = var.github_infrastructure_environment
+  github_infrastructure_apply_environment = var.github_infrastructure_apply_environment
+  state_bucket_name                       = yandex_storage_bucket.state.bucket
+  runtime_secret_id                       = yandex_lockbox_secret.runtime.id
+  state_backend_secret_id                 = yandex_lockbox_secret.state_backend.id
+  labels                                  = local.labels
 }
 
 resource "yandex_kms_symmetric_key_iam_member" "terraform_encrypter_decrypter" {

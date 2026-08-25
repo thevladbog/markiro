@@ -19,10 +19,14 @@ function controllerFixture(version = "0.1.0-beta.2"): StationUpdaterController {
     },
     severity: "warn",
     error: null,
+    origin: "yandex",
+    fallbackReason: null,
+    packageFallbackReason: null,
     downloadedBytes: 0,
     totalBytes: null,
     checkNow: vi.fn().mockResolvedValue(undefined),
     install: vi.fn().mockResolvedValue(undefined),
+    cancel: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -38,6 +42,8 @@ describe("UpdateCenter", () => {
       />,
     );
     expect(screen.getByText("0.1.0-beta.2")).toBeDefined();
+    expect(screen.getByText("Source: Markiro (Yandex)")).toBeDefined();
+    expect(screen.getAllByRole("status").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Download and install" }));
     expect(controller.install).not.toHaveBeenCalled();
     expect(screen.getByText("7 operations are still waiting to sync")).toBeDefined();
@@ -59,5 +65,85 @@ describe("UpdateCenter", () => {
       true,
     );
     expect(screen.getByText("Leave the active shift before installing")).toBeDefined();
+  });
+
+  it("shows discovery and package fallback as distinct informational status", () => {
+    const controller = {
+      ...controllerFixture(),
+      origin: "github" as const,
+      fallbackReason: "primary-unavailable" as const,
+      packageFallbackReason: "timeout" as const,
+    };
+    render(
+      <UpdateCenter
+        controller={controller}
+        activeShift={false}
+        pendingOutbox={0}
+        onBack={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("GitHub backup source used")).toBeDefined();
+    expect(
+      screen.getByText(
+        "Checked through the GitHub backup because the primary source was unavailable.",
+      ),
+    ).toBeDefined();
+    expect(
+      screen.getByText("The update package was downloaded through the GitHub backup."),
+    ).toBeDefined();
+  });
+
+  it("uses distinct calm copy for origin mismatch and integrity failure", () => {
+    const { rerender } = render(
+      <UpdateCenter
+        controller={{ ...controllerFixture(), error: "origin-mismatch" }}
+        activeShift={false}
+        pendingOutbox={0}
+        onBack={() => {}}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "The update sources do not match. Installation was stopped; Station work continues.",
+      ),
+    ).toBeDefined();
+
+    rerender(
+      <UpdateCenter
+        controller={{ ...controllerFixture(), error: "integrity-failed" }}
+        activeShift={false}
+        pendingOutbox={0}
+        onBack={() => {}}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "Update integrity could not be verified. Installation was stopped; Station work continues.",
+      ),
+    ).toBeDefined();
+  });
+
+  it("invalidates updater work before leaving and again on non-Back unmount", () => {
+    const controller = controllerFixture();
+    const onBack = vi.fn();
+    const view = render(
+      <UpdateCenter
+        controller={controller}
+        activeShift={false}
+        pendingOutbox={0}
+        onBack={onBack}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(controller.cancel).toHaveBeenCalledOnce();
+    expect(onBack).toHaveBeenCalledOnce();
+    expect(vi.mocked(controller.cancel).mock.invocationCallOrder[0]).toBeLessThan(
+      onBack.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
+    );
+
+    view.unmount();
+    expect(controller.cancel).toHaveBeenCalledTimes(2);
   });
 });
