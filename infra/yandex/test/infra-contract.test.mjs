@@ -68,12 +68,14 @@ function assertDirectGraph({ production, network, compute }) {
   for (const port of [22, 80, 443]) {
     assert.match(
       network,
-      new RegExp(
-        `from_port\\s*=\\s*${port}[\\s\\S]{0,120}to_port\\s*=\\s*${port}[\\s\\S]{0,160}0\\.0\\.0\\.0/0`,
-      ),
+      new RegExp(`(?:^|\\n)\\s*port\\s*=\\s*${port}[\\s\\S]{0,160}0\\.0\\.0\\.0/0`),
     );
   }
-  assert.doesNotMatch(network, /from_port\s*=\s*8080/);
+  assert.match(
+    network,
+    /(?:^|\n)\s*port\s*=\s*6432[\s\S]{0,160}security_group_id\s*=\s*yandex_vpc_security_group\.app\.id/,
+  );
+  assert.doesNotMatch(network, /(?:from_port|to_port)\s*=/);
 }
 
 test("production graph is the direct VM MVP and cannot reintroduce managed edge machinery", async () => {
