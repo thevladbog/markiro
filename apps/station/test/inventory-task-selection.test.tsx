@@ -6,6 +6,7 @@ import { inventorySnapshotContentDigest, inventorySnapshotPageDigest } from "@ma
 
 import i18n from "../src/i18n/index.js";
 import type { StationClient } from "../src/lib/api-client.js";
+import { createCredentialGeneration } from "../src/lib/credential-recovery.js";
 import type { InventoryFloorTask } from "../src/lib/floor-task.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import type { InventoryBundleManifest, InventoryBundlePage } from "../src/lib/inventory-mirror.js";
@@ -140,6 +141,34 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function suspendedExecutor(
+  shouldSuspend: (kind: "run" | "all", sql: string, params: unknown[]) => boolean,
+) {
+  const db = new DatabaseSync(":memory:");
+  const gate = deferred<void>();
+  const started = deferred<void>();
+  let suspended = false;
+  const exec: SqlExecutor = {
+    async run(sql, params = []) {
+      if (!suspended && shouldSuspend("run", sql, params)) {
+        suspended = true;
+        started.resolve();
+        await gate.promise;
+      }
+      db.prepare(sql).run(...(params as never[]));
+    },
+    async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+      if (!suspended && shouldSuspend("all", sql, params)) {
+        suspended = true;
+        started.resolve();
+        await gate.promise;
+      }
+      return db.prepare(sql).all(...(params as never[])) as T[];
+    },
+  };
+  return { exec, started: started.promise, release: gate.resolve };
+}
+
 function client(
   input: {
     listed?: boolean;
@@ -219,6 +248,136 @@ afterEach(() => {
 });
 
 describe("TaskSelection inventory entry", () => {
+  it("retires an old client activation suspended in its pointer write before replacement can continue", async () => {
+    const suspended = suspendedExecutor(
+      (kind, sql, params) =>
+        kind === "run" &&
+        sql.includes("INSERT INTO station_meta") &&
+        params[0] === "active_inventory_floor_task_v1",
+    );
+    await applyMigrations(suspended.exec);
+    const scan = scanner();
+    const old = client();
+    const replacementList = deferred<unknown>();
+    const replacement = client({ inventoryListResponse: replacementList.promise });
+    const onInventorySelected = vi.fn();
+    const props = {
+      exec: suspended.exec,
+      source: scan.source,
+      operatorId: "66666666-6666-4666-8666-666666666666",
+      currentLineName: "Розлив №2",
+      onShiftSelected: () => {},
+      onInventorySelected,
+      onNew: () => {},
+    };
+    const view = render(
+      <TaskSelection
+        {...props}
+        client={old.api}
+        credentialGeneration={createCredentialGeneration("credential-a")}
+      />,
+    );
+    openWarehouseCategoryIfPresent();
+    fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
+    await suspended.started;
+
+    view.rerender(
+      <TaskSelection
+        {...props}
+        client={replacement.api}
+        credentialGeneration={createCredentialGeneration("credential-b")}
+      />,
+    );
+    expect(screen.getByRole("status").textContent).toContain("Loading inventory tasks");
+    suspended.release();
+    await act(async () => {});
+
+    expect(onInventorySelected).not.toHaveBeenCalled();
+    expect(
+      await suspended.exec.all("SELECT value FROM station_meta WHERE key = ?", [
+        "active_inventory_floor_task_v1",
+      ]),
+    ).toEqual([]);
+  });
+
+  it.each([
+    ["activation read", "production shift"],
+    ["activation read", "new shift"],
+    ["activation read", "setup"],
+    ["pointer write", "production shift"],
+    ["pointer write", "new shift"],
+    ["pointer write", "setup"],
+  ] as const)(
+    "waits a suspended %s before entering %s and leaves no resumable inventory pointer",
+    async (suspension, destination) => {
+      const suspended = suspendedExecutor((kind, sql, params) => {
+        if (suspension === "activation read") {
+          return (
+            kind === "all" && /SELECT inventory_id, inventory_number, active_snapshot_id/.test(sql)
+          );
+        }
+        return (
+          kind === "run" &&
+          sql.includes("INSERT INTO station_meta") &&
+          params[0] === "active_inventory_floor_task_v1"
+        );
+      });
+      await applyMigrations(suspended.exec);
+      const scan = scanner();
+      const { api } = client({ shifts });
+      const onShiftSelected = vi.fn();
+      const onInventorySelected = vi.fn();
+      const onNew = vi.fn();
+      const onSetup = vi.fn();
+      const view = render(
+        <TaskSelection
+          client={api}
+          exec={suspended.exec}
+          source={scan.source}
+          operatorId="66666666-6666-4666-8666-666666666666"
+          currentLineName="Розлив №2"
+          onShiftSelected={onShiftSelected}
+          onInventorySelected={onInventorySelected}
+          onNew={onNew}
+          onSetup={onSetup}
+          credentialGeneration={createCredentialGeneration("credential-a")}
+        />,
+      );
+      openWarehouseCategoryIfPresent();
+      fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
+      await suspended.started;
+
+      const production = screen.queryByRole("tab", { name: /Production shifts/ });
+      if (destination !== "setup" && production) fireEvent.click(production);
+      if (destination === "production shift") {
+        fireEvent.click(screen.getByRole("button", { name: "Open" }));
+      } else if (destination === "new shift") {
+        fireEvent.click(screen.getByRole("button", { name: "New shift" }));
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+      }
+      await act(async () => {});
+
+      const routeCallback =
+        destination === "production shift"
+          ? onShiftSelected
+          : destination === "new shift"
+            ? onNew
+            : onSetup;
+      if (routeCallback) expect(routeCallback).not.toHaveBeenCalled();
+
+      suspended.release();
+      await waitFor(() => expect(routeCallback).toHaveBeenCalledOnce());
+      expect(onInventorySelected).not.toHaveBeenCalled();
+      expect(
+        await suspended.exec.all("SELECT value FROM station_meta WHERE key = ?", [
+          "active_inventory_floor_task_v1",
+        ]),
+      ).toEqual([]);
+      view.unmount();
+    },
+  );
+
   it("clears prior-client rows and barcode confirmation while the replacement client is pending", async () => {
     const exec = executor();
     await applyMigrations(exec);
@@ -313,26 +472,29 @@ describe("TaskSelection inventory entry", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
       await waitFor(() => expect(posts.some(({ path }) => path.endsWith("/join"))).toBe(true));
 
+      let routeCallback: ReturnType<typeof vi.fn> | null = null;
       if (destination === "production shift") {
         const production = screen.queryByRole("tab", { name: /Production shifts/ });
         if (production) fireEvent.click(production);
         fireEvent.click(screen.getByRole("button", { name: "Open" }));
-        await waitFor(() => expect(onShiftSelected).toHaveBeenCalledOnce());
+        routeCallback = onShiftSelected;
       } else if (destination === "new shift") {
         const production = screen.queryByRole("tab", { name: /Production shifts/ });
         if (production) fireEvent.click(production);
         fireEvent.click(screen.getByRole("button", { name: "New shift" }));
-        expect(onNew).toHaveBeenCalledOnce();
+        routeCallback = onNew;
       } else if (destination === "setup") {
         fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-        expect(onSetup).toHaveBeenCalledOnce();
+        routeCallback = onSetup;
       } else {
         view.unmount();
       }
+      if (routeCallback) expect(routeCallback).not.toHaveBeenCalled();
       pendingJoin.resolve(manifest);
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
+      if (routeCallback) await waitFor(() => expect(routeCallback).toHaveBeenCalledOnce());
 
       expect(
         await exec.all("SELECT value FROM station_meta WHERE key = ?", [
@@ -606,9 +768,10 @@ describe("TaskSelection inventory entry", () => {
       ["active_inventory_floor_task_v1"],
     );
     expect(pointerRows).toHaveLength(1);
-    expect(JSON.parse(pointerRows[0]!.value)).toEqual({
+    expect(JSON.parse(pointerRows[0]!.value)).toMatchObject({
       inventoryId,
       snapshotId,
+      activationId: expect.any(String),
     });
   });
 

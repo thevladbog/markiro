@@ -189,7 +189,10 @@ describe("floor task contracts", () => {
     const originalGeneration = createCredentialGeneration("credential-a");
     const commitLease = acquireCredentialCommitLease(originalGeneration);
     expect(commitLease).not.toBeNull();
-    await activateVerifiedInventoryFloorTask(exec, inventoryId, commitLease!);
+    await activateVerifiedInventoryFloorTask(exec, inventoryId, {
+      credentialLease: commitLease!,
+      activationId: "activation-a",
+    });
     commitLease!.release();
 
     await expect(

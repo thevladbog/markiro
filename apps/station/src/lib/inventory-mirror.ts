@@ -541,6 +541,7 @@ async function resetLegacyActive(
 export async function beginInventoryMirror(
   exec: SqlExecutor,
   value: unknown,
+  credentialOwnership?: string,
 ): Promise<InventoryMirrorCandidate> {
   let manifest = parseStationInventoryBundleManifest(value);
   const before = await taskState(exec, manifest.inventoryId);
@@ -567,10 +568,17 @@ export async function beginInventoryMirror(
         inventorySnapshotContentDigest(rows) !== manifest.contentDigest
       ) {
         await resetLegacyActive(exec, manifest.inventoryId, before);
-        return beginInventoryMirror(exec, manifest);
+        return beginInventoryMirror(exec, manifest, credentialOwnership);
       }
     }
     manifest = await refreshActiveManifest(exec, before, manifest);
+    if (credentialOwnership !== undefined) {
+      await exec.run(
+        `UPDATE inventory_task_mirror SET credential_ownership = ?
+          WHERE inventory_id = ? AND active_snapshot_id = ?`,
+        [credentialOwnership, manifest.inventoryId, manifest.snapshotId],
+      );
+    }
     const active = await taskState(exec, manifest.inventoryId);
     return candidateFrom(manifest, active?.staging_generation ?? before.staging_generation, true);
   }
@@ -583,7 +591,7 @@ export async function beginInventoryMirror(
       !storedManifestHasProof(before.staged_manifest_json))
   ) {
     await resetLegacyStage(exec, manifest.inventoryId, before);
-    return beginInventoryMirror(exec, manifest);
+    return beginInventoryMirror(exec, manifest, credentialOwnership);
   }
 
   if (
@@ -625,8 +633,8 @@ export async function beginInventoryMirror(
        staged_combined_digest, staged_content_digest, staged_code_count,
        staged_manifest_json, staged_next_cursor, staged_verified_digest,
        staged_verified_content_digest, staged_last_page_digest, staged_page_json,
-       staging_generation, updated_at
-     ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, 1, ?)
+       credential_ownership, staging_generation, updated_at
+     ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, 1, ?)
      ON CONFLICT(inventory_id) DO UPDATE SET
        inventory_number = excluded.inventory_number,
        staged_snapshot_id = excluded.staged_snapshot_id,
@@ -665,6 +673,9 @@ export async function beginInventoryMirror(
          inventory_task_mirror.staged_code_count = excluded.staged_code_count
          THEN inventory_task_mirror.staged_last_page_digest ELSE NULL END,
        staged_page_json = NULL,
+       credential_ownership = COALESCE(
+         excluded.credential_ownership, inventory_task_mirror.credential_ownership
+       ),
        staging_generation = CASE WHEN
          inventory_task_mirror.staged_snapshot_id = excluded.staged_snapshot_id AND
          inventory_task_mirror.staged_snapshot_fixed_at = excluded.staged_snapshot_fixed_at AND
@@ -688,6 +699,7 @@ export async function beginInventoryMirror(
       manifest.contentDigest,
       manifest.codeCount,
       manifestJson,
+      credentialOwnership ?? null,
       new Date().toISOString(),
     ],
   );

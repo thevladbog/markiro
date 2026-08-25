@@ -285,6 +285,15 @@ describe("STATION_MIGRATIONS", () => {
     });
   });
 
+  it("adds credential ownership to an existing inventory mirror for scoped recovery cleanup", () => {
+    const db = migratedDb();
+    const columns = db.prepare("PRAGMA table_info(inventory_task_mirror)").all() as Array<{
+      name: string;
+    }>;
+
+    expect(columns.map(({ name }) => name)).toContain("credential_ownership");
+  });
+
   it("atomically removes only an explicitly reset inactive snapshot", () => {
     const db = migratedDb();
     db.prepare(

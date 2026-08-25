@@ -505,4 +505,7 @@ export const STATION_MIGRATIONS: string[] = [
         WHERE snapshot_id = NEW.staged_reset_snapshot_id
           AND (NEW.active_snapshot_id IS NULL OR snapshot_id <> NEW.active_snapshot_id);
      END;`,
+  // Task 4 recovery cleanup must distinguish reproducible inventory data
+  // downloaded by a rejected credential from a newer credential's mirror.
+  `ALTER TABLE inventory_task_mirror ADD COLUMN credential_ownership TEXT;`,
 ];

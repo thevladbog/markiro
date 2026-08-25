@@ -867,7 +867,11 @@ export function App() {
         // action. Count all durable unsent facts in one SQLite snapshot before
         // deleting any reproducible state; a count failure stays fail-closed.
         const sealed = await readSealedWorkSummary(tauriExecutor, floorWorkRegistry.current());
-        await clearRejectedCredentialState({ exec: tauriExecutor, clearCredential });
+        await clearRejectedCredentialState({
+          exec: tauriExecutor,
+          clearCredential,
+          credentialGeneration: credentialRecovery.event.generation,
+        });
         const cleared = await readConfig();
         if (
           cleared.machineId !== previous.machineId ||

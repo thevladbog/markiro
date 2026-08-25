@@ -185,6 +185,57 @@ export interface FloorWorkBarrier {
   idle(): Promise<void>;
 }
 
+export interface FloorCommitLease {
+  release(): void;
+}
+
+export interface FloorCommitLifecycle {
+  open(): void;
+  acquire(): FloorCommitLease | null;
+  close(): Promise<void>;
+  idle(): Promise<void>;
+}
+
+/** Synchronous admission plus an awaitable drain boundary for local route commits. */
+export function createFloorCommitLifecycle(): FloorCommitLifecycle {
+  let accepting = true;
+  let active = 0;
+  let idleResolvers: Array<() => void> = [];
+
+  function idle(): Promise<void> {
+    if (active === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => idleResolvers.push(resolve));
+  }
+
+  return {
+    open() {
+      accepting = true;
+    },
+    acquire() {
+      if (!accepting) return null;
+      active += 1;
+      let released = false;
+      return {
+        release() {
+          if (released) return;
+          released = true;
+          active -= 1;
+          if (active === 0) {
+            const resolvers = idleResolvers;
+            idleResolvers = [];
+            for (const resolve of resolvers) resolve();
+          }
+        },
+      };
+    },
+    close() {
+      accepting = false;
+      return idle();
+    },
+    idle,
+  };
+}
+
 export interface FloorWorkRegistry {
   register(barrier: FloorWorkBarrier): () => void;
   current(): Iterable<FloorWorkBarrier>;
@@ -300,6 +351,7 @@ export async function readSealedWorkSummary(
 interface ClearRejectedCredentialStateDeps {
   exec: SqlExecutor;
   clearCredential: () => Promise<void>;
+  credentialGeneration?: CredentialGeneration;
 }
 
 /**
@@ -317,7 +369,11 @@ interface ClearRejectedCredentialStateDeps {
 export async function clearRejectedCredentialState({
   exec,
   clearCredential,
+  credentialGeneration,
 }: ClearRejectedCredentialStateDeps): Promise<void> {
+  const rejectedOwnership = credentialGeneration
+    ? await credentialGenerationOwnership(credentialGeneration)
+    : null;
   await clearCredential();
   // A bundle request can have passed server authorization just before the
   // key was revoked. Let every already-started download/write settle, then
@@ -331,7 +387,42 @@ export async function clearRejectedCredentialState({
   await exec.run("DELETE FROM shift_mirror");
   await exec.run("DELETE FROM product_mirror");
   await clearStationProductImages(exec);
-  await exec.run("DELETE FROM station_meta WHERE key = ?", ["active_inventory_floor_task_v1"]);
-  await exec.run("DELETE FROM inventory_snapshot_codes_mirror");
-  await exec.run("DELETE FROM inventory_task_mirror");
+  if (rejectedOwnership === null) {
+    await exec.run("DELETE FROM station_meta WHERE key = ?", ["active_inventory_floor_task_v1"]);
+    await exec.run("DELETE FROM inventory_snapshot_codes_mirror");
+    await exec.run("DELETE FROM inventory_task_mirror");
+    return;
+  }
+  const pointers = await exec.all<{ value: unknown }>(
+    "SELECT value FROM station_meta WHERE key = ?",
+    ["active_inventory_floor_task_v1"],
+  );
+  const pointerValue = pointers[0]?.value;
+  if (typeof pointerValue === "string") {
+    try {
+      const parsed = JSON.parse(pointerValue) as { credentialOwnership?: unknown };
+      if (parsed.credentialOwnership === rejectedOwnership) {
+        await exec.run("DELETE FROM station_meta WHERE key = ? AND value = ?", [
+          "active_inventory_floor_task_v1",
+          pointerValue,
+        ]);
+      }
+    } catch {
+      // A malformed pointer is not attributable to this rejected owner.
+    }
+  }
+  await exec.run(
+    `DELETE FROM inventory_snapshot_codes_mirror
+      WHERE snapshot_id IN (
+        SELECT active_snapshot_id FROM inventory_task_mirror
+         WHERE credential_ownership = ? AND active_snapshot_id IS NOT NULL
+        UNION
+        SELECT staged_snapshot_id FROM inventory_task_mirror
+         WHERE credential_ownership = ? AND staged_snapshot_id IS NOT NULL
+      )`,
+    [rejectedOwnership, rejectedOwnership],
+  );
+  await exec.run("DELETE FROM inventory_task_mirror WHERE credential_ownership = ?", [
+    rejectedOwnership,
+  ]);
 }

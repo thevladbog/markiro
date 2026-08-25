@@ -5,6 +5,7 @@ import { Alert, Button } from "@markiro/ui";
 import { mirrorInventoryBundle } from "../lib/inventory-bundle.js";
 import {
   activateVerifiedInventoryFloorTask,
+  clearOwnedInventoryFloorTask,
   parseInventoryTaskList,
   parseResolvedInventoryTask,
   type InventoryFloorTask,
@@ -16,6 +17,8 @@ import type { SqlExecutor } from "../lib/mirror.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import {
   acquireCredentialCommitLease,
+  createFloorCommitLifecycle,
+  credentialGenerationOwnership,
   type CredentialGeneration,
   type FloorWorkBarrier,
 } from "../lib/credential-recovery.js";
@@ -88,8 +91,10 @@ export function TaskSelection({
   const lifecycleGeneration = useRef(0);
   const renderedClient = useRef(client);
   const intakeOpen = useRef(true);
-  const floorRetirementClosing = useRef(false);
   const inventoryOperation = useRef<Promise<void> | null>(null);
+  const ownedPointer = useRef<string | null>(null);
+  const routeRetirement = useRef<Promise<void> | null>(null);
+  const commitLifecycle = useMemo(() => createFloorCommitLifecycle(), []);
   const busyRef = useRef(false);
   const isCurrentRef = useRef(isCurrent);
   const inventoryRequest = useRef<{
@@ -104,19 +109,41 @@ export function TaskSelection({
     if (renderedClient.current === client) return;
     renderedClient.current = client;
     lifecycleGeneration.current += 1;
-    intakeOpen.current = true;
-    floorRetirementClosing.current = false;
+    intakeOpen.current = false;
+    const priorOperation = inventoryOperation.current ?? Promise.resolve();
+    const retirement = Promise.all([priorOperation, commitLifecycle.close()]).then(async () => {
+      const pointer = ownedPointer.current;
+      if (pointer !== null) {
+        await clearOwnedInventoryFloorTask(exec, pointer);
+        if (ownedPointer.current === pointer) ownedPointer.current = null;
+      }
+    });
+    routeRetirement.current = null;
     inventoryRequestId.current += 1;
     inventoryRequest.current = null;
     loadedInventoryClient.current = null;
-    busyRef.current = false;
+    busyRef.current = true;
     setTasks([]);
     setError(null);
     setConfirmation(null);
     setPage(1);
     setLoading(true);
-    setBusy(false);
-  }, [client]);
+    setBusy(true);
+    void retirement.then(
+      () => {
+        if (renderedClient.current !== client || !mounted.current) return;
+        commitLifecycle.open();
+        intakeOpen.current = true;
+        busyRef.current = false;
+        setBusy(false);
+      },
+      () => {
+        if (renderedClient.current === client && mounted.current) {
+          setError(t("inventory.joinFailed"));
+        }
+      },
+    );
+  }, [client, commitLifecycle, exec, t]);
 
   useEffect(() => {
     isCurrentRef.current = isCurrent;
@@ -126,30 +153,66 @@ export function TaskSelection({
     mounted.current = true;
     return () => {
       mounted.current = false;
-      if (!floorRetirementClosing.current) lifecycleGeneration.current += 1;
+      lifecycleGeneration.current += 1;
     };
-  }, []);
-
-  const retireSelectionAttempts = useCallback(() => {
-    intakeOpen.current = false;
-    lifecycleGeneration.current += 1;
   }, []);
 
   const floorWorkBarrier = useMemo<FloorWorkBarrier>(
     () => ({
       close() {
         intakeOpen.current = false;
-        floorRetirementClosing.current = true;
-        return inventoryOperation.current ?? Promise.resolve();
+        lifecycleGeneration.current += 1;
+        const operation = inventoryOperation.current ?? Promise.resolve();
+        return Promise.all([operation, commitLifecycle.close()]).then(() => undefined);
       },
       idle() {
-        return inventoryOperation.current ?? Promise.resolve();
+        const operation = inventoryOperation.current ?? Promise.resolve();
+        return Promise.all([operation, commitLifecycle.idle()]).then(() => undefined);
       },
     }),
-    [],
+    [commitLifecycle],
   );
 
-  useEffect(() => onFloorWorkRegister?.(floorWorkBarrier), [floorWorkBarrier, onFloorWorkRegister]);
+  const retireSelectionAttempts = useCallback(() => {
+    const hasInventoryWork = inventoryOperation.current !== null || ownedPointer.current !== null;
+    const retirement = (floorWorkBarrier.close?.() ?? floorWorkBarrier.idle()).then(async () => {
+      const pointer = ownedPointer.current;
+      if (pointer === null) return;
+      await clearOwnedInventoryFloorTask(exec, pointer);
+      if (ownedPointer.current === pointer) ownedPointer.current = null;
+    });
+    routeRetirement.current = hasInventoryWork ? retirement : null;
+    if (!hasInventoryWork) {
+      void retirement.catch(() => {
+        if (mounted.current) setError(t("inventory.joinFailed"));
+      });
+    }
+  }, [exec, floorWorkBarrier, t]);
+
+  const enterRetiredRoute = useCallback(
+    (enter: () => void) => {
+      const retirement = routeRetirement.current;
+      if (retirement === null) {
+        enter();
+        return;
+      }
+      void retirement.then(enter).catch(() => {
+        if (mounted.current) setError(t("inventory.joinFailed"));
+      });
+    },
+    [t],
+  );
+
+  useEffect(() => {
+    commitLifecycle.open();
+    const unregister = onFloorWorkRegister?.(floorWorkBarrier);
+    return () => {
+      void (floorWorkBarrier.close?.() ?? floorWorkBarrier.idle()).then(
+        () => unregister?.(),
+        () => unregister?.(),
+      );
+    };
+  }, [commitLifecycle, floorWorkBarrier, onFloorWorkRegister]);
 
   const refreshInventoryTasks = useCallback((): Promise<void> => {
     if (inventoryRequest.current?.client === client) return inventoryRequest.current.promise;
@@ -191,9 +254,10 @@ export function TaskSelection({
     async (task: StationInventoryTask, barcode?: string, confirmDifferentLine?: true) => {
       if (!intakeOpen.current || busyRef.current || isCurrentRef.current?.() === false) return;
       const originGeneration = lifecycleGeneration.current;
+      const activationId = crypto.randomUUID();
       const lease = {
         isCurrent: () =>
-          (mounted.current || floorRetirementClosing.current) &&
+          mounted.current &&
           lifecycleGeneration.current === originGeneration &&
           isCurrentRef.current?.() !== false,
       };
@@ -211,32 +275,42 @@ export function TaskSelection({
         );
         if (!lease.isCurrent()) return;
         if (!taskMatchesManifest(task, joined)) throw new Error("inventory join task mismatch");
+        const credentialOwnership = credentialGeneration
+          ? await credentialGenerationOwnership(credentialGeneration)
+          : null;
+        if (!lease.isCurrent() || (credentialGeneration && credentialOwnership === null)) return;
         let active: InventoryFloorTask | null = null;
         const published = await mirrorInventoryBundle(client, exec, task.inventoryId, {
           ...lease,
+          ...(credentialOwnership ? { credentialOwnership } : {}),
           commitPublication: async (publishSnapshot) => {
             if (!lease.isCurrent()) return false;
-            if (!credentialGeneration) return publishSnapshot();
-            const commitLease = acquireCredentialCommitLease(credentialGeneration);
-            if (!commitLease) return false;
+            const floorCommitLease = commitLifecycle.acquire();
+            if (!floorCommitLease) return false;
+            const credentialCommitLease = credentialGeneration
+              ? acquireCredentialCommitLease(credentialGeneration)
+              : null;
+            if (credentialGeneration && !credentialCommitLease) {
+              floorCommitLease.release();
+              return false;
+            }
             try {
-              if (!lease.isCurrent()) return false;
-              if (!(await publishSnapshot()) || !lease.isCurrent()) return false;
-              active = await activateVerifiedInventoryFloorTask(
-                exec,
-                task.inventoryId,
-                commitLease,
-              );
+              if (!(await publishSnapshot())) return false;
+              active = await activateVerifiedInventoryFloorTask(exec, task.inventoryId, {
+                ...(credentialCommitLease ? { credentialLease: credentialCommitLease } : {}),
+                activationId,
+                onPointerCommitted: (pointer) => {
+                  ownedPointer.current = pointer;
+                },
+              });
               return true;
             } finally {
-              commitLease.release();
+              credentialCommitLease?.release();
+              floorCommitLease.release();
             }
           },
         });
         if (!published || !lease.isCurrent()) return;
-        if (!credentialGeneration) {
-          active = await activateVerifiedInventoryFloorTask(exec, task.inventoryId);
-        }
         if (!active) throw new Error("inventory floor task activation unavailable");
         if (!lease.isCurrent()) return;
         if (mounted.current) {
@@ -257,7 +331,7 @@ export function TaskSelection({
         }
       }
     },
-    [client, credentialGeneration, exec, onInventorySelected, operatorId, t],
+    [client, commitLifecycle, credentialGeneration, exec, onInventorySelected, operatorId, t],
   );
 
   const joinTask = useCallback(
@@ -404,10 +478,10 @@ export function TaskSelection({
       <ShiftSelection
         client={client}
         exec={exec}
-        onSelected={onShiftSelected}
-        onNew={onNew}
-        {...(onSetup ? { onSetup } : {})}
-        {...(onConflicts ? { onConflicts } : {})}
+        onSelected={(shift) => enterRetiredRoute(() => onShiftSelected(shift))}
+        onNew={() => enterRetiredRoute(onNew)}
+        {...(onSetup ? { onSetup: () => enterRetiredRoute(onSetup) } : {})}
+        {...(onConflicts ? { onConflicts: () => enterRetiredRoute(onConflicts) } : {})}
         {...(isCurrent ? { isCurrent } : {})}
         onRouteIntent={retireSelectionAttempts}
         onCoordinatedRefresh={refreshInventoryTasks}

@@ -614,7 +614,11 @@ async function mockBackfilledActiveShiftRecovery(pinHash: string) {
   return { exec, executed };
 }
 
-async function mockInventoryEntryDatabase(pinHash: string) {
+async function mockInventoryEntryDatabase(
+  pinHash: string,
+  suspendQuery: (query: string) => boolean = (query) =>
+    query.includes("SET active_snapshot_id = staged_snapshot_id"),
+) {
   const db = new DatabaseSync(":memory:");
   const exec = {
     async run(sql: string, values: unknown[] = []) {
@@ -671,7 +675,7 @@ async function mockInventoryEntryDatabase(pinHash: string) {
     if (cmd === "plugin:sql|execute") {
       const { query, values = [] } = (payload ?? {}) as { query: string; values?: unknown[] };
       executed.push({ query, values });
-      if (query.includes("SET active_snapshot_id = staged_snapshot_id")) {
+      if (suspendQuery(query)) {
         markPublicationStarted();
         await publicationGate;
       }
@@ -1356,6 +1360,142 @@ describe("App", () => {
         ]),
       ).toHaveLength(1);
       expect(await readPersistedInventoryFloorTask(database.exec)).not.toBeNull();
+    } finally {
+      database.releasePublication();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("keeps an unmounted inventory page write registered until credential recovery can clean it", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+    lockdownMock.subscribe.mockImplementation((listener) => {
+      lockdownMock.listeners.add(listener);
+      return () => lockdownMock.listeners.delete(listener);
+    });
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const inventoryId = "11111111-1111-4111-8111-111111111111";
+    const snapshotId = "22222222-2222-4222-8222-222222222222";
+    const snapshotFixedAt = "2026-08-25T05:00:00.000Z";
+    const contentDigest = inventorySnapshotContentDigest([]);
+    const manifest = {
+      inventoryId,
+      inventoryNumber: "INV-00047",
+      productId: "44444444-4444-4444-8444-444444444444",
+      productName: "Water",
+      gtin14: "04600000000015",
+      mode: "check",
+      lineId: "33333333-3333-4333-8333-333333333333",
+      lineName: "Line 1",
+      productionDateFrom: "2026-08-01",
+      productionDateTo: "2026-08-31",
+      boxCapacity: 12,
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: "a".repeat(64),
+      contentDigest,
+      codeCount: 0,
+      boxLabelTemplate: null,
+      limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
+      sscc: null,
+      ssccRevokedFrom: [],
+      ssccRevokedBlocks: [],
+    };
+    const page = {
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: manifest.combinedDigest,
+      contentDigest,
+      cursor: null,
+      items: [],
+      nextCursor: null,
+      pageDigest: inventorySnapshotPageDigest({
+        snapshotId,
+        snapshotFixedAt,
+        contentDigest,
+        cursor: null,
+        items: [],
+        nextCursor: null,
+      }),
+    };
+    const database = await mockInventoryEntryDatabase(pinHash, (query) =>
+      query.includes("SET staged_next_cursor = ?"),
+    );
+    let rejectInventoryList = false;
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = new URL(url).pathname;
+      if (path === "/station/operators") {
+        throw new Error("keep cached operator");
+      }
+      if (path === "/shifts") {
+        if (rejectInventoryList) {
+          return new Response(JSON.stringify({ message: "revoked" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ items: [] }));
+      }
+      if (path === "/station/inventory-tasks") {
+        if (rejectInventoryList) {
+          return new Response(JSON.stringify({ message: "revoked" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                inventoryId,
+                inventoryNumber: manifest.inventoryNumber,
+                productName: manifest.productName,
+                mode: manifest.mode,
+                lineId: manifest.lineId,
+                lineName: manifest.lineName,
+                productionDateFrom: manifest.productionDateFrom,
+                productionDateTo: manifest.productionDateTo,
+              },
+            ],
+          }),
+        );
+      }
+      if (path === `/station/inventories/${inventoryId}/join`) {
+        return new Response(JSON.stringify(manifest));
+      }
+      if (path.endsWith("/bundle/manifest")) return new Response(JSON.stringify(manifest));
+      if (path.endsWith("/bundle/codes")) return new Response(JSON.stringify(page));
+      return new Response(JSON.stringify({ items: [] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      render(<App />);
+      await signInAsOperator();
+      fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
+      await database.publicationStarted;
+
+      rejectInventoryList = true;
+      fireEvent.click(screen.getByRole("button", { name: "Refresh tasks" }));
+      await waitFor(() =>
+        expect(
+          fetchMock.mock.calls.filter(
+            ([url]) => new URL(url).pathname === "/station/inventory-tasks",
+          ),
+        ).toHaveLength(2),
+      );
+      await waitFor(() => expect(screen.queryByTestId("scanner-status")).toBeNull());
+      expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(0);
+
+      database.releasePublication();
+      await waitFor(() =>
+        expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(1),
+      );
+      await screen.findByTestId("sealed-work-summary");
+      expect(await database.exec.all("SELECT * FROM inventory_task_mirror")).toEqual([]);
     } finally {
       database.releasePublication();
       consoleErrorSpy.mockRestore();

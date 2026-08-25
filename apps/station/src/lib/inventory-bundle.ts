@@ -13,6 +13,7 @@ import type { SqlExecutor } from "./mirror.js";
 
 export interface InventoryMirrorLease {
   isCurrent: () => boolean;
+  credentialOwnership?: string;
   commitPublication?: (publishSnapshot: () => Promise<boolean>) => Promise<boolean>;
 }
 
@@ -46,7 +47,7 @@ export async function mirrorInventoryBundle(
   if (manifest.inventoryId !== inventoryId) {
     throw new Error("inventory bundle requested inventory mismatch");
   }
-  const candidate = await beginInventoryMirror(exec, manifest);
+  const candidate = await beginInventoryMirror(exec, manifest, lease?.credentialOwnership);
   if (!leaseIsCurrent(lease)) return false;
   if (candidate.alreadyActive) {
     return commitPublication(lease, () => Promise.resolve(true));

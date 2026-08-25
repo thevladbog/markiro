@@ -83,6 +83,17 @@ const activeInventoryPointerSchema = z.union([
     inventoryId: z.uuid(),
     snapshotId: z.uuid(),
     credentialOwnership: z.string().regex(/^[0-9a-f]{64}$/),
+    activationId: z.string().min(1),
+  }),
+  z.strictObject({
+    inventoryId: z.uuid(),
+    snapshotId: z.uuid(),
+    activationId: z.string().min(1),
+  }),
+  z.strictObject({
+    inventoryId: z.uuid(),
+    snapshotId: z.uuid(),
+    credentialOwnership: z.string().regex(/^[0-9a-f]{64}$/),
   }),
   z.strictObject({
     inventoryId: z.uuid(),
@@ -91,6 +102,12 @@ const activeInventoryPointerSchema = z.union([
   }),
   legacyActiveInventoryPointerSchema,
 ]);
+
+export interface InventoryFloorActivationCommit {
+  credentialLease?: CredentialCommitLease;
+  activationId: string;
+  onPointerCommitted?: (pointerValue: string) => void;
+}
 
 interface ActiveInventoryRow {
   inventory_id: string;
@@ -173,8 +190,9 @@ async function activeInventoryRow(
 export async function activateVerifiedInventoryFloorTask(
   exec: SqlExecutor,
   inventoryId: string,
-  lease?: CredentialCommitLease,
+  commit?: InventoryFloorActivationCommit,
 ): Promise<InventoryFloorTask> {
+  const lease = commit?.credentialLease;
   if (lease && !lease.active) throw new Error("inventory floor task activation retired");
   const row = await activeInventoryRow(exec, inventoryId);
   if (!row) throw new Error("inventory bundle is not published");
@@ -188,13 +206,26 @@ export async function activateVerifiedInventoryFloorTask(
     inventoryId,
     snapshotId: inventory.snapshotId,
     ...(credentialOwnership === null ? {} : { credentialOwnership }),
+    ...(commit ? { activationId: commit.activationId } : {}),
   });
   await exec.run(
     `INSERT INTO station_meta (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     [ACTIVE_INVENTORY_FLOOR_TASK_KEY, pointer],
   );
+  commit?.onPointerCommitted?.(pointer);
   return { kind: "inventory", inventory };
+}
+
+/** Removes only the exact activation owned by the retiring selection attempt. */
+export async function clearOwnedInventoryFloorTask(
+  exec: SqlExecutor,
+  pointerValue: string,
+): Promise<void> {
+  await exec.run("DELETE FROM station_meta WHERE key = ? AND value = ?", [
+    ACTIVE_INVENTORY_FLOOR_TASK_KEY,
+    pointerValue,
+  ]);
 }
 
 export async function readPersistedInventoryFloorTask(
