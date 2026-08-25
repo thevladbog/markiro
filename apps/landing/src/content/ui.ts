@@ -40,10 +40,10 @@ const RU = {
     cycle: {
       heading: ["КОД ПРОШЁЛ.", "КОРОБ СОБРАН."],
       kicker: "02 / ПРОИЗВОДСТВЕННЫЙ ЦИКЛ",
-      lead: "Оператор видит понятный текущий шаг. Система сохраняет связь между кодом, группой и этикеткой.",
+      lead: "Оператор последовательно проверяет код на бутылке или банке, собирает короб и печатает этикетку с SSCC.",
       stages: [
         ["Проверка кода", "Система сверяет код и не пропускает проблемный."],
-        ["Сборка группы", "Товар собирается в короб и паллету с сохранением родительства."],
+        ["Сборка короба", "Товар собирается в короб с сохранением связи каждого кода с SSCC."],
         ["Этикетка и печать", "Макет строится из тех же данных, которые прошли проверку."],
       ],
     },
@@ -66,24 +66,27 @@ const RU = {
       unavailableContact: "Напишите нам на",
     },
     hero: {
-      heading: ["Линия идёт.", "Маркировка под контролем."],
+      heading: ["Маркировка и агрегация.", "Линия идёт."],
       kicker: "МАРКИРОВКА / АГРЕГАЦИЯ / ПРОСЛЕЖИВАЕМОСТЬ",
-      lead: "Проверяем коды, собираем короба и печатаем этикетки даже без интернета. Инженер поймёт процесс, работа продолжится.",
-      note: "ДЛЯ ЛИНИЙ, КОТОРЫЕ НЕЛЬЗЯ ОСТАНАВЛИВАТЬ",
+      lead: "Производственная система для пива, сидра и слабоалкогольных напитков: проверяем коды, собираем короба, печатаем этикетки и сохраняем операции при нестабильной сети.",
+      note: "ДЛЯ ПРОИЗВОДСТВЕННЫХ ЛИНИЙ, КОТОРЫЕ НЕЛЬЗЯ ОСТАНАВЛИВАТЬ",
     },
     implementation: {
-      heading: "Запускаем без большого проекта.",
-      kicker: "06 / ВНЕДРЕНИЕ",
-      lead: "Начните с одной станции и реального рабочего сценария. Масштабирование идёт после проверки процесса на линии.",
+      heading: "Сейчас — пиво, сидр и слабоалкогольные напитки.",
+      kicker: "06 / ТЕКУЩАЯ СПЕЦИАЛИЗАЦИЯ",
+      lead: "Markiro сейчас ориентирован на производителей пива, сидра и другой продукции товарной группы «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки». Принадлежность конкретного товара проверяется по ТН ВЭД ЕАЭС и ОКПД 2. Новые товарные группы добавляются поэтапно.",
       link: "Обсудить первую линию",
       steps: [
-        ["Разбираем линию", "Фиксируем оборудование, роли и текущий маршрут кодов."],
-        ["Настраиваем сценарий", "Собираем рабочий процесс под конкретный продукт и упаковку."],
+        [
+          "Проверяем продукцию",
+          "Фиксируем товарную группу, форм-фактор упаковки и действующие правила учёта.",
+        ],
+        ["Разбираем линию", "Сопоставляем оборудование, роли и текущий маршрут кодов."],
+        ["Запускаем один сценарий", "Настраиваем рабочую станцию под конкретный продукт и короб."],
         [
           "Проверяем на смене",
-          "Запускаем вместе с оператором и проверяем восстановление после ошибок.",
+          "Работаем вместе с оператором и проверяем восстановление после ошибок.",
         ],
-        ["Расширяем контур", "Добавляем кабинеты, киоски и интеграции по готовности."],
       ],
     },
     lineConsole: {
@@ -120,7 +123,7 @@ const RU = {
       labelsReady: ["ЭТИКЕТКИ", "ГОТОВЫ"],
       lead: "Каждый экран отвечает на один вопрос оператора и не прячет состояние за таблицами.",
       productFound: "Продукт найден",
-      productName: "Молоко отборное в короб",
+      productName: "Сидр яблочный 0,45 л",
       productNumber: "ПРОДУКТ 404123",
       secondDescription:
         "Предпросмотр и печать используют один макет. Оператор не сверяет поля на глаз.",
@@ -191,7 +194,7 @@ const EN = {
     cycle: {
       heading: ["CODE VERIFIED.", "CASE COMPLETE."],
       kicker: "02 / PRODUCTION CYCLE",
-      lead: "The operator sees one clear current step. The system retains the relationship between the code, group, and label.",
+      lead: "The operator verifies the code on a bottle or can, assembles the case, and prints its SSCC label.",
       stages: [
         [
           "Code verification",
@@ -199,7 +202,7 @@ const EN = {
         ],
         [
           "Pack aggregation",
-          "Products become cases and pallets without losing their parent-child relationships.",
+          "Products become cases while each serialized code remains linked to the case SSCC.",
         ],
         ["Label and print", "The layout uses the same data that passed validation."],
       ],
@@ -223,30 +226,24 @@ const EN = {
       unavailableContact: "Email us at",
     },
     hero: {
-      heading: ["Keep the line moving.", "Keep serialization under control."],
+      heading: ["Serialization and aggregation.", "Keep the line moving."],
       kicker: "SERIALIZATION / AGGREGATION / TRACEABILITY",
-      lead: "Verify codes, aggregate cases, and print labels even without the internet. Engineers retain control and production continues.",
-      note: "FOR LINES THAT CANNOT AFFORD TO STOP",
+      lead: "A production system for beer, cider and low-alcohol beverages: verify codes, aggregate cases, print labels, and retain operations through unstable connectivity.",
+      note: "FOR PRODUCTION LINES THAT CANNOT AFFORD TO STOP",
     },
     implementation: {
-      heading: "Start without a large transformation project.",
-      kicker: "06 / IMPLEMENTATION",
-      lead: "Begin with one station and a real operating workflow. Scale only after validating the process on the line.",
+      heading: "Currently focused on beer, cider and low-alcohol beverages.",
+      kicker: "06 / CURRENT PRODUCT FOCUS",
+      lead: "Markiro currently focuses on producers of beer, cider, and other products in the Chestny ZNAK product group “Beer, beverages made from beer and low-alcohol beverages”. Applicability to a specific product is checked against its TN VED EAEU and OKPD 2 codes. Additional product categories are being added gradually.",
       link: "Discuss the first line",
       steps: [
         [
-          "Understand the line",
-          "Document the equipment, roles, and current route of serialized codes.",
+          "Confirm the product",
+          "Document the product group, packaging format, and applicable traceability rules.",
         ],
-        [
-          "Configure the workflow",
-          "Build the operating process around the actual product and packaging.",
-        ],
-        ["Validate during a shift", "Launch with an operator and test recovery from real errors."],
-        [
-          "Extend the production layer",
-          "Add office tools, kiosks, and integrations when the process is ready.",
-        ],
+        ["Understand the line", "Map the equipment, roles, and current route of serialized codes."],
+        ["Launch one workflow", "Configure the workstation for the actual product and case."],
+        ["Validate during a shift", "Work with an operator and test recovery from real errors."],
       ],
     },
     lineConsole: {
@@ -281,7 +278,7 @@ const EN = {
       labelsReady: ["LABELS", "READY"],
       lead: "Each screen answers one operator question and never hides the current state behind tables.",
       productFound: "Product found",
-      productName: "Premium milk into case",
+      productName: "Apple cider 0.45 L",
       productNumber: "PRODUCT 404123",
       secondDescription:
         "Preview and print use one layout. The operator never has to compare fields by eye.",
