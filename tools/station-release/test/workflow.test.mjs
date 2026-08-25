@@ -31,6 +31,7 @@ test("station beta build and dual-origin publication use separate exact protecte
   assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), [
     "mode",
+    "owner_confirmation",
     "bump",
     "repair_tag",
     "seed_infrastructure_evidence",
@@ -49,7 +50,8 @@ test("station beta build and dual-origin publication use separate exact protecte
   assert.equal(workflow.on.workflow_dispatch.inputs.repair_tag.default, "");
   assert.equal(workflow.concurrency.group, "station-beta-release");
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
-  assert.deepEqual(Object.keys(workflow.jobs), ["build", "release"]);
+  assert.deepEqual(Object.keys(workflow.jobs), ["authorize", "build", "release"]);
+  assert.equal(workflow.jobs.build.needs, "authorize");
   assert.equal(workflow.jobs.build["runs-on"], "windows-latest");
   assert.equal(workflow.jobs.build.environment, "station-beta");
   assert.deepEqual(workflow.jobs.build.permissions, { actions: "read", contents: "read" });
@@ -139,6 +141,46 @@ test("station beta build and dual-origin publication use separate exact protecte
   assert.doesNotMatch(text, /--access-key|--secret-access-key|--credentials/i);
   assert.doesNotMatch(text, /force|:latest\b|pull_request_target|self-hosted|id-token|curl .+\|/i);
   assert.doesNotMatch(text, /continue-on-error/i);
+});
+
+test("beta publication requires the repository owner, main, and the exact confirmation", async () => {
+  const workflow = load(await source());
+  const input = workflow.on.workflow_dispatch.inputs.owner_confirmation;
+  const authorize = workflow.jobs.authorize;
+  const step = authorize.steps.find(
+    (candidate) => candidate.name === "Authorize station beta release owner",
+  );
+
+  assert.equal(input.required, true);
+  assert.equal(input.type, "string");
+  assert.equal(authorize.environment, undefined);
+  assert.deepEqual(authorize.permissions, {});
+  assert.equal(authorize.if, "github.ref == 'refs/heads/main'");
+  assert.equal(authorize["runs-on"], "ubuntu-latest");
+  assert.equal(authorize["timeout-minutes"], 5);
+  assert.ok(step);
+  assert.deepEqual(step.env, {
+    OWNER_CONFIRMATION: "${{ inputs.owner_confirmation }}",
+    RELEASE_ACTOR: "${{ github.actor }}",
+    RELEASE_OWNER: "${{ github.repository_owner }}",
+  });
+
+  const run = (env) =>
+    execFile("bash", ["-c", step.run], {
+      env: {
+        ...process.env,
+        GITHUB_REF: "refs/heads/main",
+        OWNER_CONFIRMATION: "PUBLISH-STATION-BETA",
+        RELEASE_ACTOR: "thevladbog",
+        RELEASE_OWNER: "thevladbog",
+        ...env,
+      },
+    });
+
+  await assert.doesNotReject(run({}));
+  await assert.rejects(run({ RELEASE_ACTOR: "another-user" }));
+  await assert.rejects(run({ OWNER_CONFIRMATION: "publish-station-beta" }));
+  await assert.rejects(run({ GITHUB_REF: "refs/heads/feature" }));
 });
 
 test("promote-existing requires one exact beta repair tag and never infers a release", async () => {

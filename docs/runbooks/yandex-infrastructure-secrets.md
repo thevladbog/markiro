@@ -53,7 +53,13 @@ subject и не переносите state-backend credentials в GitHub. Эта
 ## GitHub Environment `station-release`
 
 GitHub Environment `station-release` должен разрешать deployment только из
-`main` и быть защищён ручным approval release owner. Его точный инвентарь:
+`main`. На текущем GitHub plan для private repository нативные required
+reviewers недоступны. Их заменяет проверяемый workflow gate до build/sign и до
+доступа к publisher secrets: `github.actor` обязан совпасть с
+`github.repository_owner`, а `owner_confirmation` — с точным маркером канала
+`PUBLISH-STATION-BETA` или `PUBLISH-STATION-STABLE`. Это одно-владельческая
+ручная защита, не двухпользовательский approval. Для нативного required reviewer
+нужен подходящий GitHub Enterprise plan. Точный инвентарь Environment:
 
 - secret `STATION_RELEASE_REPOSITORY_TOKEN`: fine-grained token с Contents
   read/write только для публичного binary-only repository

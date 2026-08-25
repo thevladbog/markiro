@@ -9,6 +9,10 @@ on:
         type: choice
         default: publish
         options: [publish, promote-existing, seed-baseline]
+      owner_confirmation:
+        description: Type PUBLISH-STATION-BETA; only the repository owner may dispatch
+        required: true
+        type: string
       bump:
         description: Beta version increment for publish and seed-baseline
         required: true
@@ -34,8 +38,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  authorize:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Authorize station beta release owner
+        shell: bash
+        env:
+          OWNER_CONFIRMATION: ${{ inputs.owner_confirmation }}
+          RELEASE_ACTOR: ${{ github.actor }}
+          RELEASE_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$RELEASE_ACTOR" = "$RELEASE_OWNER"
+          test "$OWNER_CONFIRMATION" = "PUBLISH-STATION-BETA"
+
   build:
     if: github.ref == 'refs/heads/main'
+    needs: authorize
     runs-on: windows-latest
     timeout-minutes: 60
     environment: station-beta
