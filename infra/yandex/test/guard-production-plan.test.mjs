@@ -585,6 +585,52 @@ test("guard CLI identifies changed VM fields without their values", async () => 
   }
 });
 
+test("guard CLI identifies changed app security-group fields without their values", async () => {
+  const cases = [
+    {
+      before: { ingress: [{ description: "old-ingress-rule" }] },
+      after: { ingress: [{ description: "do-not-print-this-plan-value" }] },
+      scope: "ingress",
+    },
+    {
+      before: { egress: [{ description: "old-egress-rule" }] },
+      after: { egress: [{ description: "do-not-print-this-plan-value" }] },
+      scope: "egress",
+    },
+    {
+      before: { labels: { environment: "old-label" } },
+      after: { labels: { environment: "do-not-print-this-plan-value" } },
+      scope: "labels",
+    },
+    {
+      before: { description: "old-description" },
+      after: { description: "do-not-print-this-plan-value" },
+      scope: "description",
+    },
+  ];
+
+  for (const { before, after, scope } of cases) {
+    const changed = await readFixture("safe");
+    changed.resource_changes.push({
+      address: "module.network.yandex_vpc_security_group.app",
+      type: "yandex_vpc_security_group",
+      change: { actions: ["update"], before, after },
+    });
+
+    await withPlan(changed, (planPath) => {
+      let stderr = "";
+      try {
+        execFileSync(process.execPath, [script, planPath], { cwd: root, stdio: "pipe" });
+        assert.fail(`guard CLI unexpectedly accepted app security-group ${scope} update`);
+      } catch (error) {
+        stderr = String(error.stderr);
+      }
+      assert.equal(stderr, `production plan rejected (safe-action-app-security-group-${scope})\n`);
+      assert.doesNotMatch(stderr, /old-|do-not-print-this-plan-value/);
+    });
+  }
+});
+
 test("production plan guard permits direct-VM DNS flag enable and disable transitions", async () => {
   const safe = await readFixture("safe");
   for (const address of directVmDnsAddresses) {

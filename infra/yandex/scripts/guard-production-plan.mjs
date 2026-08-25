@@ -96,6 +96,18 @@ const appComputeMetadataFieldScopes = new Map([
   ["ssh-keys", "ssh-keys"],
   ["user-data", "user-data"],
 ]);
+const appSecurityGroupAddress = "module.network.yandex_vpc_security_group.app";
+const appSecurityGroupFieldScopes = new Map([
+  ["description", "description"],
+  ["egress", "egress"],
+  ["folder_id", "folder"],
+  ["id", "id"],
+  ["ingress", "ingress"],
+  ["labels", "labels"],
+  ["name", "name"],
+  ["network_id", "network"],
+  ["status", "status"],
+]);
 
 const retiredProductionResources = new Map([
   ["yandex_logging_group.application", "yandex_logging_group"],
@@ -240,6 +252,17 @@ function appComputeActionScope(resource) {
   const uniqueScopes = [...new Set(scopes)].sort();
   if (uniqueScopes.length === 1 && uniqueScopes[0] === "other") return "safe-action-app-compute";
   return `safe-action-app-compute-${uniqueScopes.join("-and-")}`;
+}
+
+function appSecurityGroupActionScope(resource) {
+  const fields = changedKeys(resource.change?.before, resource.change?.after);
+  if (!fields || fields.length === 0) return "safe-action-app-security-group";
+
+  const scopes = [
+    ...new Set(fields.map((field) => appSecurityGroupFieldScopes.get(field) ?? "other")),
+  ].sort();
+  if (scopes.length === 1 && scopes[0] === "other") return "safe-action-app-security-group";
+  return `safe-action-app-security-group-${scopes.join("-and-")}`;
 }
 
 function actions(resource) {
@@ -693,7 +716,9 @@ export function guardProductionPlan(plan) {
         const scope =
           resource.address === appComputeAddress
             ? appComputeActionScope(resource)
-            : (safeProductionActionScopes.get(resource.address) ?? "safe-resource-action");
+            : resource.address === appSecurityGroupAddress
+              ? appSecurityGroupActionScope(resource)
+              : (safeProductionActionScopes.get(resource.address) ?? "safe-resource-action");
         rejected(scope);
       }
     }
