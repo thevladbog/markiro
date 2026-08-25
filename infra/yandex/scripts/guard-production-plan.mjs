@@ -122,6 +122,15 @@ const securityGroupRuleFieldScopes = new Map([
   ["v4_cidr_blocks", "v4-cidrs"],
   ["v6_cidr_blocks", "v6-cidrs"],
 ]);
+const securityGroupRuleSemanticFieldScopes = new Map([
+  ["description", "description"],
+  ["portRange", "port-range"],
+  ["predefinedTarget", "predefined-target"],
+  ["protocol", "protocol"],
+  ["securityGroupId", "security-group"],
+  ["v4Cidrs", "v4-cidrs"],
+  ["v6Cidrs", "v6-cidrs"],
+]);
 
 const retiredProductionResources = new Map([
   ["yandex_logging_group.application", "yandex_logging_group"],
@@ -306,7 +315,7 @@ function unknownArrayObjectKeys(value) {
   ].sort();
 }
 
-function securityGroupRuleSemanticSignature(rule) {
+function securityGroupRuleSemanticValue(rule) {
   if (!object(rule) || typeof rule.protocol !== "string") return null;
   const optionalString = (value) => {
     if (value === null || value === undefined) return "";
@@ -335,7 +344,7 @@ function securityGroupRuleSemanticSignature(rule) {
   )
     return null;
   const portRange = port !== -1 ? [port, port] : [fromPort, toPort];
-  return stableValueSignature({
+  return {
     description,
     portRange,
     predefinedTarget,
@@ -343,7 +352,21 @@ function securityGroupRuleSemanticSignature(rule) {
     securityGroupId,
     v4Cidrs,
     v6Cidrs,
-  });
+  };
+}
+
+function securityGroupRuleSemanticSignature(rule) {
+  const value = securityGroupRuleSemanticValue(rule);
+  return value === null ? null : stableValueSignature(value);
+}
+
+function securityGroupRuleSemanticDifferenceScopes(leftRule, rightRule) {
+  const leftValue = securityGroupRuleSemanticValue(leftRule);
+  const rightValue = securityGroupRuleSemanticValue(rightRule);
+  if (leftValue === null || rightValue === null) return null;
+  const fields = changedKeys(leftValue, rightValue);
+  if (!fields) return null;
+  return fields.map((field) => securityGroupRuleSemanticFieldScopes.get(field) ?? "other");
 }
 
 function appComputeActionScope(resource) {
@@ -413,6 +436,18 @@ function securityGroupActionScope(resource, baseScope) {
                 (signature) => signature === desiredSignature,
               ).length;
               desiredMatches = `-desired-matches-before-${matchCount}`;
+              if (matchCount === 1 && beforeValue.ingress.length === 2) {
+                const unmatchedRule = beforeValue.ingress.find(
+                  (_rule, index) => liveSignatures[index] !== desiredSignature,
+                );
+                const differenceScopes = securityGroupRuleSemanticDifferenceScopes(
+                  afterValue.ingress[0],
+                  unmatchedRule,
+                );
+                if (differenceScopes?.length) {
+                  desiredMatches += `-unmatched-diff-${differenceScopes.join("-and-")}`;
+                }
+              }
             }
           }
           return `ingress-cardinality-before-${beforeValue.ingress.length}-after-${afterValue.ingress.length}${desiredMatches}`;
