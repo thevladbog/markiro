@@ -1,8 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
+  STATION_MIGRATION_ENTRIES,
   STATION_MIGRATIONS,
-  SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATIONS,
+  SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATION_IDS,
 } from "../src/sqlite/migrations.js";
 import {
   inventoryCodeResultsMirror,
@@ -38,13 +39,14 @@ function applyStationMigrations(db: DatabaseSync): void {
     name: string;
   }>;
   const finalLegacyAuditExists = columns.some((column) => column.name === "legacy_audit_version");
+  const commitStateAlreadyExisted = columns.some((column) => column.name === "commit_state");
+  const skipLegacyAudits = finalLegacyAuditExists || commitStateAlreadyExisted;
+  const supersededIds = new Set<string>(SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATION_IDS);
   applyStatements(
     db,
-    STATION_MIGRATIONS.filter(
-      (statement) =>
-        !finalLegacyAuditExists ||
-        !SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATIONS.includes(statement),
-    ),
+    STATION_MIGRATION_ENTRIES.filter(
+      (migration) => !skipLegacyAudits || !supersededIds.has(migration.id),
+    ).map((migration) => migration.sql),
   );
 }
 
@@ -55,6 +57,23 @@ function migratedDb(): DatabaseSync {
 }
 
 describe("STATION_MIGRATIONS", () => {
+  it("assigns unique append-only identities and names only the superseded audit steps", () => {
+    expect(STATION_MIGRATION_ENTRIES.map((migration) => migration.id)).toEqual(
+      STATION_MIGRATIONS.map(
+        (_statement, index) => `station-sqlite-${String(index).padStart(3, "0")}`,
+      ),
+    );
+    expect(new Set(STATION_MIGRATION_ENTRIES.map((migration) => migration.id)).size).toBe(
+      STATION_MIGRATION_ENTRIES.length,
+    );
+    expect(SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATION_IDS).toEqual([
+      "station-sqlite-078",
+      "station-sqlite-079",
+      "station-sqlite-081",
+      "station-sqlite-082",
+    ]);
+  });
+
   it("creates and round-trips all nine inventory mirror tables with scanner indexes", () => {
     const db = migratedDb();
     const expectedTables = [

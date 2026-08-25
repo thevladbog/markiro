@@ -1,6 +1,6 @@
 import {
-  STATION_MIGRATIONS,
-  SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATIONS,
+  STATION_MIGRATION_ENTRIES,
+  SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATION_IDS,
   type OperatorMirrorRecord,
 } from "@markiro/db/station-sqlite";
 
@@ -135,16 +135,22 @@ export async function applyMigrations(exec: SqlExecutor): Promise<void> {
   const finalLegacyAuditExists = inventoryEventColumns.some(
     (column) => column.name === "legacy_audit_version",
   );
-  for (const stmt of STATION_MIGRATIONS) {
-    // Once every legacy row carries the final marker, the round-2 audit must
-    // never run again: its proof depended on an outbox that sync may now have
-    // acknowledged and deleted. The appended versioned audit remains
-    // rerunnable and new journal events start at that version.
-    if (finalLegacyAuditExists && SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATIONS.includes(stmt)) {
+  const commitStateAlreadyExisted = inventoryEventColumns.some(
+    (column) => column.name === "commit_state",
+  );
+  const skipLegacyAudits = finalLegacyAuditExists || commitStateAlreadyExisted;
+  const supersededIds = new Set<string>(SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATION_IDS);
+  for (const migration of STATION_MIGRATION_ENTRIES) {
+    // A database that already had commit_state may be either round 1 or round
+    // 2. Do not guess from a now-drained outbox: skip both destructive audit
+    // generations and let the appended repair-first protocol reconcile its
+    // version-zero facts. Current marker-bearing databases also never rerun
+    // those one-time audits after acknowledgement.
+    if (skipLegacyAudits && supersededIds.has(migration.id)) {
       continue;
     }
     try {
-      await exec.run(stmt);
+      await exec.run(migration.sql);
     } catch (err) {
       // `CREATE TABLE IF NOT EXISTS` is idempotent; `ALTER TABLE ADD COLUMN`
       // is not, and every statement re-runs on each boot. A duplicate-column

@@ -93,6 +93,24 @@ async function setup() {
   return { db, exec };
 }
 
+function round1Db() {
+  const commitStateMigration = STATION_MIGRATIONS.findIndex((statement) =>
+    statement.includes("ADD COLUMN commit_state"),
+  );
+  expect(commitStateMigration).toBeGreaterThan(0);
+  const db = new DatabaseSync(":memory:");
+  for (const statement of STATION_MIGRATIONS.slice(0, commitStateMigration + 1)) {
+    try {
+      db.exec(statement);
+    } catch (error) {
+      if (!/duplicate column name/i.test(error instanceof Error ? error.message : String(error))) {
+        throw error;
+      }
+    }
+  }
+  return db;
+}
+
 function failOnce(base: SqlExecutor, pattern: RegExp): SqlExecutor {
   let failed = false;
   return {
@@ -144,6 +162,222 @@ function suspendOnce(base: SqlExecutor, pattern: RegExp) {
 }
 
 describe("inventory journal", () => {
+  it("repairs a round-1 committed orphan before it can be presented as accepted", async () => {
+    const db = round1Db();
+    const code = seedCode(db, "ROUND1-ORPHAN");
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'INV-R1', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
+          kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict)
+       VALUES (?, ?, 'round1-orphan', ?, 1, ?, '2026-08-25T08:00:00.000Z',
+               'item', ?, ?, ?, '2026-08-20', 'expected')`,
+    ).run(
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+      DEVICE_ID,
+      OPERATOR_ID,
+      `item:${code.codeHash}`,
+      code.codeHash,
+      code.km.raw,
+    );
+
+    const exec = makeExec(db);
+    await applyMigrations(exec);
+
+    expect(db.prepare("SELECT commit_state FROM inventory_scan_events_mirror").get()).toEqual({
+      commit_state: "pending",
+    });
+    expect(await listRecentInventoryOperations(exec, INVENTORY_ID, SNAPSHOT_ID)).toEqual([]);
+    await expect(reconcilePendingInventoryEvents(exec, INVENTORY_ID, SNAPSHOT_ID)).resolves.toEqual(
+      { requiresRescan: false, recoveredCommitted: 1, failed: 0 },
+    );
+    expect(
+      db
+        .prepare(
+          `SELECT commit_state, legacy_audit_version FROM inventory_scan_events_mirror
+           WHERE event_id = 'round1-orphan'`,
+        )
+        .get(),
+    ).toEqual({ commit_state: "committed", legacy_audit_version: 1 });
+    expect(
+      db.prepare("SELECT first_accepted_event_id FROM inventory_code_results_mirror").get(),
+    ).toEqual({ first_accepted_event_id: "round1-orphan" });
+    expect(db.prepare("SELECT event_id FROM inventory_outbox").get()).toEqual({
+      event_id: "round1-orphan",
+    });
+
+    db.prepare("DELETE FROM inventory_outbox WHERE event_id = 'round1-orphan'").run();
+    await applyMigrations(exec);
+    expect(
+      db
+        .prepare(
+          `SELECT commit_state, legacy_audit_version FROM inventory_scan_events_mirror
+           WHERE event_id = 'round1-orphan'`,
+        )
+        .get(),
+    ).toEqual({ commit_state: "committed", legacy_audit_version: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 0,
+    });
+  });
+
+  it("requeues unknown observations and rebuilds partial box projections from a round-2 schema", async () => {
+    const db = round1Db();
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'INV-R2', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    const first = seedCode(db, "BOX-REPAIR-A", { parentSscc: SSCC });
+    const second = seedCode(db, "BOX-REPAIR-B", { parentSscc: SSCC, protected: 1 });
+    const foreign = seedCode(db, "BOX-FOREIGN", { parentSscc: "123456789012345675" });
+    const unknown = canonicalizeKm(raw("ROUND2-UNKNOWN"));
+    const unknownHash = kmHash(unknown);
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
+          kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict)
+       VALUES (?, ?, 'round2-box', ?, 1, ?, '2026-08-25T08:00:00.000Z',
+               'known_box', ?, NULL, ?, '2026-08-20', 'expected'),
+              (?, ?, 'round2-unknown', ?, 2, ?, '2026-08-25T08:01:00.000Z',
+               'item', ?, ?, ?, '2026-08-20', 'unknown')`,
+    ).run(
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+      DEVICE_ID,
+      OPERATOR_ID,
+      `known_box:${SSCC}`,
+      SSCC,
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+      DEVICE_ID,
+      OPERATOR_ID,
+      `item:${unknownHash}`,
+      unknownHash,
+      unknown.raw,
+    );
+    const addProjection = db.prepare(
+      `INSERT INTO inventory_code_results_mirror
+         (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
+          winning_scanned_at, observed_production_date, classification, origin_classification,
+          updated_at)
+       VALUES (?, ?, ?, 'round2-box', ?, '2026-08-25T08:00:00.000Z', '2026-08-20',
+               'expected', 'expected', '2026-08-25T08:00:00.000Z')`,
+    );
+    addProjection.run(INVENTORY_ID, SNAPSHOT_ID, first.codeHash, DEVICE_ID);
+    addProjection.run(INVENTORY_ID, SNAPSHOT_ID, foreign.codeHash, DEVICE_ID);
+
+    const exec = makeExec(db);
+    await applyMigrations(exec);
+    expect(
+      db.prepare("SELECT DISTINCT commit_state FROM inventory_scan_events_mirror").all(),
+    ).toEqual([{ commit_state: "pending" }]);
+    await expect(reconcilePendingInventoryEvents(exec, INVENTORY_ID, SNAPSHOT_ID)).resolves.toEqual(
+      { requiresRescan: false, recoveredCommitted: 2, failed: 0 },
+    );
+    expect(
+      db
+        .prepare(
+          `SELECT code_hash, origin_classification FROM inventory_code_results_mirror
+           ORDER BY code_hash`,
+        )
+        .all(),
+    ).toEqual(
+      [
+        { code_hash: first.codeHash, origin_classification: "expected" },
+        { code_hash: second.codeHash, origin_classification: "protected" },
+      ].sort((a, b) => a.code_hash.localeCompare(b.code_hash)),
+    );
+    expect(db.prepare("SELECT event_id FROM inventory_outbox ORDER BY event_id").all()).toEqual([
+      { event_id: "round2-box" },
+      { event_id: "round2-unknown" },
+    ]);
+  });
+
+  it("fails a dependent duplicate when its corrupt owner cannot be reconstructed", async () => {
+    const { db, exec } = await setup();
+    const code = seedCode(db, "INVALID-OWNER");
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
+          kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict,
+          commit_state, legacy_audit_version)
+       VALUES (?, ?, 'invalid-owner', ?, 1, ?, '2026-08-25T08:00:00.000Z',
+               'item', ?, ?, 'not-a-km', '2026-08-20', 'expected', 'failed', 1),
+              (?, ?, 'dependent-duplicate', ?, 2, ?, '2026-08-25T08:01:00.000Z',
+               'item', ?, ?, ?, '2026-08-20', 'duplicate', 'committed', 1)`,
+    ).run(
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+      DEVICE_ID,
+      OPERATOR_ID,
+      `item:${code.codeHash}`,
+      code.codeHash,
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+      DEVICE_ID,
+      OPERATOR_ID,
+      `item:${code.codeHash}`,
+      code.codeHash,
+      code.km.raw,
+    );
+
+    await expect(reconcilePendingInventoryEvents(exec, INVENTORY_ID, SNAPSHOT_ID)).resolves.toEqual(
+      { requiresRescan: true, recoveredCommitted: 0, failed: 2 },
+    );
+    expect(
+      db
+        .prepare(
+          "SELECT event_id, commit_state FROM inventory_scan_events_mirror ORDER BY device_sequence",
+        )
+        .all(),
+    ).toEqual([
+      { event_id: "invalid-owner", commit_state: "failed" },
+      { event_id: "dependent-duplicate", commit_state: "failed" },
+    ]);
+    expect(await listRecentInventoryOperations(exec, INVENTORY_ID, SNAPSHOT_ID)).toEqual([]);
+    expect(await readInventoryProgress(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID)).toMatchObject({
+      verified: 0,
+    });
+  });
+
+  it("requeues a legacy duplicate only when an exact prior winner remains valid", async () => {
+    const { db, exec } = await setup();
+    const code = seedCode(db, "VALID-OWNER");
+    await recordInventoryScan(exec, input(code.km.raw, "valid-owner"));
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
+          kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict,
+          commit_state, legacy_audit_version)
+       VALUES (?, ?, 'valid-dependent', ?, 2, ?, '2026-08-25T08:01:00.000Z',
+               'item', ?, ?, ?, '2026-08-20', 'duplicate', 'pending', 0)`,
+    ).run(
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+      DEVICE_ID,
+      OPERATOR_ID,
+      `item:${code.codeHash}`,
+      code.codeHash,
+      code.km.raw,
+    );
+
+    await expect(reconcilePendingInventoryEvents(exec, INVENTORY_ID, SNAPSHOT_ID)).resolves.toEqual(
+      { requiresRescan: false, recoveredCommitted: 1, failed: 0 },
+    );
+    expect(
+      db
+        .prepare(
+          "SELECT commit_state, legacy_audit_version FROM inventory_scan_events_mirror WHERE event_id = 'valid-dependent'",
+        )
+        .get(),
+    ).toEqual({ commit_state: "committed", legacy_audit_version: 1 });
+    expect(await readInventoryProgress(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID)).toMatchObject({
+      verified: 1,
+    });
+  });
+
   it("keeps an audited committed event after its acknowledged outbox is drained and migrations rerun", async () => {
     const { db, exec } = await setup();
     const code = seedCode(db, "ACK-DRAINED");
@@ -968,11 +1202,11 @@ describe("inventory journal", () => {
       `INSERT INTO inventory_scan_events_mirror
          (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
           kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict,
-          commit_state)
+          commit_state, legacy_audit_version)
        VALUES (?, ?, 'event-unknown-failed', ?, 1, ?, '2026-08-25T11:00:00.000Z',
-               'item', ?, ?, ?, '2026-08-20', 'unknown', 'failed'),
+               'item', ?, ?, ?, '2026-08-20', 'unknown', 'failed', 1),
               (?, ?, 'event-unknown-durable', ?, 2, ?, '2026-08-25T10:00:00.000Z',
-               'item', ?, ?, ?, '2026-08-20', 'duplicate', 'committed')`,
+               'item', ?, ?, ?, '2026-08-20', 'duplicate', 'committed', 1)`,
     ).run(
       INVENTORY_ID,
       SNAPSHOT_ID,
@@ -1017,6 +1251,13 @@ describe("inventory journal", () => {
     await expect(reconcilePendingInventoryEvents(exec, INVENTORY_ID, SNAPSHOT_ID)).resolves.toEqual(
       { requiresRescan: false, recoveredCommitted: 0, failed: 0 },
     );
+    expect(
+      db
+        .prepare(
+          "SELECT local_verdict FROM inventory_scan_events_mirror WHERE event_id = 'event-unknown-durable'",
+        )
+        .get(),
+    ).toEqual({ local_verdict: "unknown" });
     expect(await readInventoryProgress(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID)).toMatchObject({
       discrepancies: 1,
     });
@@ -1035,6 +1276,21 @@ describe("inventory journal", () => {
     const { db, exec } = await setup();
     const child = seedCode(db, "BOX-WON-ELSEWHERE", { parentSscc: SSCC });
     db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
+          kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict,
+          commit_state, legacy_audit_version)
+       VALUES (?, ?, 'remote-event', 'STA-REMOTE', 1, ?, '2026-08-25T08:30:00.000Z',
+               'item', ?, ?, ?, '2026-08-20', 'expected', 'committed', 1)`,
+    ).run(
+      INVENTORY_ID,
+      SNAPSHOT_ID,
+      OPERATOR_ID,
+      `item:${child.codeHash}`,
+      child.codeHash,
+      child.km.raw,
+    );
+    db.prepare(
       `INSERT INTO inventory_code_results_mirror
          (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
           winning_scanned_at, observed_production_date, classification, origin_classification,
@@ -1045,19 +1301,16 @@ describe("inventory journal", () => {
 
     await recordInventoryScan(exec, input(SSCC, "event-box-duplicate"));
     const restarted = makeExec(db);
-    expect(await listRecentInventoryOperations(restarted, INVENTORY_ID, SNAPSHOT_ID)).toMatchObject(
-      [
-        {
-          verdict: "duplicate",
-          scanKind: "known_box",
-          firstWinning: {
-            eventId: "remote-event",
-            deviceId: "STA-REMOTE",
-            scannedAt: "2026-08-25T08:30:00.000Z",
-          },
-        },
-      ],
-    );
+    const recent = await listRecentInventoryOperations(restarted, INVENTORY_ID, SNAPSHOT_ID);
+    expect(recent.find((operation) => operation.eventId === "event-box-duplicate")).toMatchObject({
+      verdict: "duplicate",
+      scanKind: "known_box",
+      firstWinning: {
+        eventId: "remote-event",
+        deviceId: "STA-REMOTE",
+        scannedAt: "2026-08-25T08:30:00.000Z",
+      },
+    });
   });
 
   it("does not derive a displayed box suffix from a corrupt legacy raw payload", async () => {

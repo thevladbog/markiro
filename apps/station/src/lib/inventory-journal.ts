@@ -98,6 +98,7 @@ interface ExistingEventRow {
   active_production_date: string | null;
   local_verdict: string;
   commit_state: string;
+  legacy_audit_version: number;
 }
 
 interface OutboxDbRow {
@@ -298,7 +299,7 @@ async function existingEvent(
   const rows = await exec.all<ExistingEventRow>(
     `SELECT event_id, device_id, device_sequence, operator_id, scanned_at, kind,
             normalized_identity, code_hash, raw_payload, active_production_date,
-            local_verdict, commit_state
+            local_verdict, commit_state, legacy_audit_version
        FROM inventory_scan_events_mirror
       WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?`,
     [inventoryId, snapshotId, eventId],
@@ -562,9 +563,16 @@ async function firstProjectionWinner(
   let rows: ClaimDbRow[] = [];
   if (classification.scanKind === "item") {
     rows = await exec.all<ClaimDbRow>(
-      `SELECT code_hash, first_accepted_event_id, winning_device_id, winning_scanned_at
-         FROM inventory_code_results_mirror
-        WHERE inventory_id = ? AND snapshot_id = ? AND code_hash = ?`,
+      `SELECT result.code_hash, result.first_accepted_event_id,
+              result.winning_device_id, result.winning_scanned_at
+         FROM inventory_code_results_mirror result
+         JOIN inventory_scan_events_mirror owner
+           ON owner.inventory_id = result.inventory_id
+          AND owner.snapshot_id = result.snapshot_id
+          AND owner.event_id = result.first_accepted_event_id
+          AND owner.commit_state = 'committed'
+          AND owner.legacy_audit_version = 1
+        WHERE result.inventory_id = ? AND result.snapshot_id = ? AND result.code_hash = ?`,
       [input.inventoryId, input.snapshotId, classification.codeHash],
     );
   } else if (classification.scanKind === "known_box") {
@@ -574,6 +582,12 @@ async function firstProjectionWinner(
          FROM inventory_code_results_mirror result
          JOIN inventory_snapshot_codes_mirror snapshot
            ON snapshot.snapshot_id = result.snapshot_id AND snapshot.code_hash = result.code_hash
+         JOIN inventory_scan_events_mirror owner
+           ON owner.inventory_id = result.inventory_id
+          AND owner.snapshot_id = result.snapshot_id
+          AND owner.event_id = result.first_accepted_event_id
+          AND owner.commit_state = 'committed'
+          AND owner.legacy_audit_version = 1
         WHERE result.inventory_id = ? AND result.snapshot_id = ? AND snapshot.parent_sscc = ?
         ORDER BY result.winning_scanned_at, result.winning_device_id,
                  result.first_accepted_event_id
@@ -634,6 +648,417 @@ function projectionMatches(verdict: InventoryLocalVerdict, summary: ProjectionSu
   return (verdict === "unknown" || verdict === "duplicate") && summary.total === 0;
 }
 
+function eventPrecedesSql(ownerAlias: string, eventAlias: string): string {
+  return `(
+    ${ownerAlias}.device_sequence < ${eventAlias}.device_sequence
+    OR (${ownerAlias}.device_sequence = ${eventAlias}.device_sequence
+        AND ${ownerAlias}.device_id < ${eventAlias}.device_id)
+    OR (${ownerAlias}.device_sequence = ${eventAlias}.device_sequence
+        AND ${ownerAlias}.device_id = ${eventAlias}.device_id
+        AND ${ownerAlias}.event_id < ${eventAlias}.event_id)
+  )`;
+}
+
+async function hasValidPriorRepresentative(
+  exec: SqlExecutor,
+  event: ExistingEventRow,
+  inventoryId: string,
+  snapshotId: string,
+): Promise<boolean> {
+  if (event.kind === "known_box") {
+    const rows = await exec.all<{ valid: number }>(
+      `SELECT CASE WHEN EXISTS (
+          SELECT 1 FROM inventory_snapshot_codes_mirror child
+           WHERE child.snapshot_id = event.snapshot_id
+             AND child.parent_sscc = substr(event.normalized_identity, 11)
+        ) AND NOT EXISTS (
+          SELECT 1 FROM inventory_snapshot_codes_mirror child
+           WHERE child.snapshot_id = event.snapshot_id
+             AND child.parent_sscc = substr(event.normalized_identity, 11)
+             AND NOT EXISTS (
+               SELECT 1 FROM inventory_code_results_mirror result
+               JOIN inventory_scan_events_mirror owner
+                 ON owner.inventory_id = result.inventory_id
+                AND owner.snapshot_id = result.snapshot_id
+                AND owner.event_id = result.first_accepted_event_id
+                AND owner.commit_state = 'committed'
+                AND owner.legacy_audit_version = 1
+              WHERE result.inventory_id = event.inventory_id
+                AND result.snapshot_id = event.snapshot_id
+                AND result.code_hash = child.code_hash
+                AND result.winning_device_id = owner.device_id
+                AND result.winning_scanned_at = owner.scanned_at
+                AND result.observed_production_date IS owner.active_production_date
+                AND result.classification = result.origin_classification
+                AND result.origin_classification = CASE
+                  WHEN child.source_state = 'MOVING_BY_UD' OR child.protected = 1
+                    THEN 'protected'
+                  WHEN child.expected = 1 THEN 'expected'
+                  ELSE 'known-ineligible'
+                END
+                AND ${eventPrecedesSql("owner", "event")}
+             )
+        ) THEN 1 ELSE 0 END AS valid
+         FROM inventory_scan_events_mirror event
+        WHERE event.inventory_id = ? AND event.snapshot_id = ? AND event.event_id = ?`,
+      [inventoryId, snapshotId, event.event_id],
+    );
+    return rows[0]?.valid === 1;
+  }
+
+  if (event.code_hash) {
+    const rows = await exec.all<{ valid: number }>(
+      `SELECT CASE WHEN EXISTS (
+           SELECT 1 FROM inventory_code_results_mirror result
+           JOIN inventory_scan_events_mirror owner
+             ON owner.inventory_id = result.inventory_id
+            AND owner.snapshot_id = result.snapshot_id
+            AND owner.event_id = result.first_accepted_event_id
+            AND owner.commit_state = 'committed'
+            AND owner.legacy_audit_version = 1
+          WHERE result.inventory_id = event.inventory_id
+            AND result.snapshot_id = event.snapshot_id
+            AND result.code_hash = event.code_hash
+            AND result.winning_device_id = owner.device_id
+            AND result.winning_scanned_at = owner.scanned_at
+            AND ${eventPrecedesSql("owner", "event")}
+         ) OR EXISTS (
+           SELECT 1 FROM inventory_scan_events_mirror owner
+            WHERE owner.inventory_id = event.inventory_id
+              AND owner.snapshot_id = event.snapshot_id
+              AND owner.normalized_identity = event.normalized_identity
+              AND owner.commit_state = 'committed'
+              AND owner.legacy_audit_version = 1
+              AND owner.local_verdict = 'unknown'
+              AND ${eventPrecedesSql("owner", "event")}
+         ) THEN 1 ELSE 0 END AS valid
+       FROM inventory_scan_events_mirror event
+      WHERE event.inventory_id = ? AND event.snapshot_id = ? AND event.event_id = ?`,
+      [inventoryId, snapshotId, event.event_id],
+    );
+    return rows[0]?.valid === 1;
+  }
+
+  const rows = await exec.all<{ valid: number }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM inventory_scan_events_mirror owner
+        WHERE owner.inventory_id = event.inventory_id
+          AND owner.snapshot_id = event.snapshot_id
+          AND owner.normalized_identity = event.normalized_identity
+          AND owner.commit_state = 'committed'
+          AND owner.legacy_audit_version = 1
+          AND owner.local_verdict <> 'duplicate'
+          AND ${eventPrecedesSql("owner", "event")}
+     ) AS valid
+     FROM inventory_scan_events_mirror event
+    WHERE event.inventory_id = ? AND event.snapshot_id = ? AND event.event_id = ?`,
+    [inventoryId, snapshotId, event.event_id],
+  );
+  return rows[0]?.valid === 1;
+}
+
+async function rebuildLegacyProjection(
+  exec: SqlExecutor,
+  event: ExistingEventRow,
+  inventoryId: string,
+  snapshotId: string,
+): Promise<boolean> {
+  const verdict = inventoryVerdict(event.local_verdict);
+  if (verdict === "invalid" || !event.raw_payload) return false;
+  const parsed = classifyScan(event.raw_payload);
+
+  if (event.kind === "item") {
+    if (parsed.kind !== "km") return false;
+    const codeHash = kmHash(parsed.km);
+    if (
+      event.code_hash !== codeHash ||
+      event.normalized_identity !== `item:${codeHash}` ||
+      parsed.km.raw !== event.raw_payload
+    ) {
+      return false;
+    }
+    const facts = await exec.all<{
+      origin: "expected" | "protected" | "known-ineligible";
+    }>(
+      `SELECT CASE
+         WHEN source_state = 'MOVING_BY_UD' OR protected = 1 THEN 'protected'
+         WHEN expected = 1 THEN 'expected'
+         ELSE 'known-ineligible'
+       END AS origin
+       FROM inventory_snapshot_codes_mirror
+      WHERE snapshot_id = ? AND code_hash = ?
+        AND EXISTS (
+          SELECT 1 FROM inventory_task_mirror
+           WHERE inventory_id = ? AND active_snapshot_id = ?
+        )`,
+      [snapshotId, codeHash, inventoryId, snapshotId],
+    );
+    const origin = facts[0]?.origin;
+    if (verdict === "duplicate") {
+      if (await hasValidPriorRepresentative(exec, event, inventoryId, snapshotId)) return true;
+      if (origin !== undefined) return false;
+      await exec.run(
+        `UPDATE inventory_scan_events_mirror SET local_verdict = 'unknown'
+          WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?
+            AND legacy_audit_version = 0 AND commit_state = 'pending'`,
+        [inventoryId, snapshotId, event.event_id],
+      );
+      event.local_verdict = "unknown";
+      return true;
+    }
+    if (verdict === "unknown") return origin === undefined;
+    if (!origin || verdict !== origin || !event.active_production_date) return false;
+    await exec.run(
+      `INSERT INTO inventory_code_results_mirror
+         (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
+          winning_scanned_at, observed_production_date, classification, origin_classification,
+          updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(inventory_id, snapshot_id, code_hash) DO NOTHING`,
+      [
+        inventoryId,
+        snapshotId,
+        codeHash,
+        event.event_id,
+        event.device_id,
+        event.scanned_at,
+        event.active_production_date,
+        origin,
+        origin,
+        event.scanned_at,
+      ],
+    );
+    const rows = await exec.all<{ valid: number }>(
+      `SELECT CASE WHEN COUNT(*) = 1 AND MAX(
+         code_hash = ? AND winning_device_id = ? AND winning_scanned_at = ?
+         AND observed_production_date IS ? AND classification = ?
+         AND origin_classification = ?
+       ) = 1 THEN 1 ELSE 0 END AS valid
+       FROM inventory_code_results_mirror
+      WHERE inventory_id = ? AND snapshot_id = ? AND first_accepted_event_id = ?`,
+      [
+        codeHash,
+        event.device_id,
+        event.scanned_at,
+        event.active_production_date,
+        origin,
+        origin,
+        inventoryId,
+        snapshotId,
+        event.event_id,
+      ],
+    );
+    return rows[0]?.valid === 1;
+  }
+
+  if (parsed.kind !== "sscc" || parsed.sscc !== event.raw_payload) return false;
+  if (event.normalized_identity !== `${event.kind}:${parsed.sscc}`) return false;
+  const children = await exec.all<{ origin: InventoryOriginClassification }>(
+    `SELECT CASE
+       WHEN source_state = 'MOVING_BY_UD' OR protected = 1 THEN 'protected'
+       WHEN expected = 1 THEN 'expected'
+       ELSE 'known-ineligible'
+     END AS origin
+     FROM inventory_snapshot_codes_mirror
+    WHERE snapshot_id = ? AND parent_sscc = ?
+      AND EXISTS (
+        SELECT 1 FROM inventory_task_mirror
+         WHERE inventory_id = ? AND active_snapshot_id = ?
+      )`,
+    [snapshotId, parsed.sscc, inventoryId, snapshotId],
+  );
+  if (verdict === "duplicate") {
+    if (await hasValidPriorRepresentative(exec, event, inventoryId, snapshotId)) return true;
+    if (children.length > 0) return false;
+    await exec.run(
+      `UPDATE inventory_scan_events_mirror SET local_verdict = 'unknown'
+        WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?
+          AND legacy_audit_version = 0 AND commit_state = 'pending'`,
+      [inventoryId, snapshotId, event.event_id],
+    );
+    event.local_verdict = "unknown";
+    return true;
+  }
+  if (verdict === "unknown") return children.length === 0;
+  if (event.kind !== "known_box" || children.length === 0 || !event.active_production_date) {
+    return false;
+  }
+  const origins = new Set(children.map((child) => child.origin));
+  const dominant = origins.has("expected")
+    ? "expected"
+    : origins.has("protected")
+      ? "protected"
+      : "known-ineligible";
+  if (verdict !== dominant) return false;
+  await insertKnownBoxProjections(
+    exec,
+    {
+      inventoryId,
+      snapshotId,
+      deviceId: event.device_id,
+      operatorId: event.operator_id,
+      taskGtin14: "",
+      raw: event.raw_payload,
+      eventId: event.event_id,
+      scannedAt: event.scanned_at,
+    },
+    parsed.sscc,
+    event.active_production_date,
+  );
+  const proof = await exec.all<{ valid: number }>(
+    `SELECT CASE WHEN
+       EXISTS (
+         SELECT 1 FROM inventory_code_results_mirror owned
+          WHERE owned.inventory_id = ? AND owned.snapshot_id = ?
+            AND owned.first_accepted_event_id = ? AND owned.origin_classification = ?
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM inventory_code_results_mirror owned
+         LEFT JOIN inventory_snapshot_codes_mirror child
+           ON child.snapshot_id = owned.snapshot_id AND child.code_hash = owned.code_hash
+        WHERE owned.inventory_id = ? AND owned.snapshot_id = ?
+          AND owned.first_accepted_event_id = ?
+          AND (child.code_hash IS NULL OR child.parent_sscc <> ?
+            OR owned.winning_device_id <> ? OR owned.winning_scanned_at <> ?
+            OR owned.observed_production_date IS NOT ?
+            OR owned.classification <> owned.origin_classification
+            OR owned.origin_classification <> CASE
+              WHEN child.source_state = 'MOVING_BY_UD' OR child.protected = 1 THEN 'protected'
+              WHEN child.expected = 1 THEN 'expected'
+              ELSE 'known-ineligible'
+            END)
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM inventory_snapshot_codes_mirror child
+          WHERE child.snapshot_id = ? AND child.parent_sscc = ?
+            AND NOT EXISTS (
+              SELECT 1 FROM inventory_code_results_mirror winner
+              LEFT JOIN inventory_scan_events_mirror owner
+                ON owner.inventory_id = winner.inventory_id
+               AND owner.snapshot_id = winner.snapshot_id
+               AND owner.event_id = winner.first_accepted_event_id
+               WHERE winner.inventory_id = ? AND winner.snapshot_id = ?
+                 AND winner.code_hash = child.code_hash
+                 AND winner.classification = winner.origin_classification
+                 AND winner.origin_classification = CASE
+                   WHEN child.source_state = 'MOVING_BY_UD' OR child.protected = 1
+                     THEN 'protected'
+                   WHEN child.expected = 1 THEN 'expected'
+                   ELSE 'known-ineligible'
+                 END
+                 AND (
+                   (winner.first_accepted_event_id = ?
+                    AND winner.winning_device_id = ?
+                    AND winner.winning_scanned_at = ?
+                    AND winner.observed_production_date IS ?)
+                   OR (
+                     owner.commit_state = 'committed'
+                     AND owner.legacy_audit_version = 1
+                     AND winner.winning_device_id = owner.device_id
+                     AND winner.winning_scanned_at = owner.scanned_at
+                     AND winner.observed_production_date IS owner.active_production_date
+                     AND (
+                       owner.device_sequence < ?
+                       OR (owner.device_sequence = ? AND owner.device_id < ?)
+                       OR (owner.device_sequence = ? AND owner.device_id = ?
+                           AND owner.event_id < ?)
+                     )
+                     AND (
+                       (owner.kind = 'item' AND owner.code_hash = child.code_hash)
+                       OR (owner.kind = 'known_box'
+                           AND owner.normalized_identity = 'known_box:' || child.parent_sscc)
+                     )
+                   )
+                 )
+            )
+       ) THEN 1 ELSE 0 END AS valid`,
+    [
+      inventoryId,
+      snapshotId,
+      event.event_id,
+      verdict,
+      inventoryId,
+      snapshotId,
+      event.event_id,
+      parsed.sscc,
+      event.device_id,
+      event.scanned_at,
+      event.active_production_date,
+      snapshotId,
+      parsed.sscc,
+      inventoryId,
+      snapshotId,
+      event.event_id,
+      event.device_id,
+      event.scanned_at,
+      event.active_production_date,
+      event.device_sequence,
+      event.device_sequence,
+      event.device_id,
+      event.device_sequence,
+      event.device_id,
+      event.event_id,
+    ],
+  );
+  return proof[0]?.valid === 1;
+}
+
+async function repairOneLegacyEvent(
+  exec: SqlExecutor,
+  event: ExistingEventRow,
+  inventoryId: string,
+  snapshotId: string,
+): Promise<"committed" | "failed"> {
+  await exec.run(
+    `UPDATE inventory_scan_events_mirror SET commit_state = 'pending'
+      WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?
+        AND legacy_audit_version = 0 AND commit_state IN ('pending', 'committed')`,
+    [inventoryId, snapshotId, event.event_id],
+  );
+  await exec.run(
+    `DELETE FROM inventory_code_results_mirror
+      WHERE inventory_id = ? AND snapshot_id = ? AND first_accepted_event_id = ?`,
+    [inventoryId, snapshotId, event.event_id],
+  );
+  const valid = await rebuildLegacyProjection(exec, event, inventoryId, snapshotId);
+  if (!valid) {
+    await exec.run(
+      `DELETE FROM inventory_outbox
+        WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?`,
+      [inventoryId, snapshotId, event.event_id],
+    );
+    await exec.run(
+      `UPDATE inventory_scan_events_mirror
+          SET commit_state = 'failed', legacy_audit_version = 1
+        WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?
+          AND legacy_audit_version = 0 AND commit_state = 'pending'`,
+      [inventoryId, snapshotId, event.event_id],
+    );
+    return "failed";
+  }
+  const verdict = inventoryVerdict(event.local_verdict);
+  if (verdict === "invalid") throw new Error("invalid inventory noise cannot be repaired");
+  await exec.run(
+    `INSERT INTO inventory_outbox
+       (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(inventory_id, snapshot_id, event_id) DO UPDATE SET
+       device_sequence = excluded.device_sequence,
+       payload_json = excluded.payload_json,
+       created_at = excluded.created_at`,
+    [
+      inventoryId,
+      snapshotId,
+      event.event_id,
+      event.device_sequence,
+      eventPayload(event, verdict),
+      event.scanned_at,
+    ],
+  );
+  await finalizePendingEvent(exec, inventoryId, snapshotId, event.event_id);
+  return "committed";
+}
+
 async function finalizePendingEvent(
   exec: SqlExecutor,
   inventoryId: string,
@@ -663,10 +1088,14 @@ async function reconcileOnePendingEvent(
   const queued = await outboxRow(exec, inventoryId, snapshotId, event.event_id);
   const summary = await ownedProjectionSummary(exec, inventoryId, snapshotId, event.event_id);
   if (queued) {
+    const representativeValid =
+      verdict !== "duplicate" ||
+      (await hasValidPriorRepresentative(exec, event, inventoryId, snapshotId));
     if (
       queued.device_sequence !== event.device_sequence ||
       queued.payload_json !== eventPayload(event, verdict) ||
-      !projectionMatches(verdict, summary)
+      !projectionMatches(verdict, summary) ||
+      !representativeValid
     ) {
       throw new Error("inventory pending event has inconsistent durable output");
     }
@@ -719,29 +1148,142 @@ async function reconcileOnePendingEvent(
   return "failed";
 }
 
+async function duplicateCanBecomeUnknown(
+  exec: SqlExecutor,
+  event: ExistingEventRow,
+  inventoryId: string,
+  snapshotId: string,
+): Promise<boolean> {
+  if (!event.raw_payload) return false;
+  const parsed = classifyScan(event.raw_payload);
+  if (event.kind === "item") {
+    if (parsed.kind !== "km") return false;
+    const codeHash = kmHash(parsed.km);
+    if (event.code_hash !== codeHash || event.normalized_identity !== `item:${codeHash}`) {
+      return false;
+    }
+    const rows = await exec.all<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM inventory_snapshot_codes_mirror
+        WHERE snapshot_id = ? AND code_hash = ?
+          AND EXISTS (
+            SELECT 1 FROM inventory_task_mirror
+             WHERE inventory_id = ? AND active_snapshot_id = ?
+          )`,
+      [snapshotId, codeHash, inventoryId, snapshotId],
+    );
+    return (rows[0]?.count ?? 0) === 0;
+  }
+  if (parsed.kind !== "sscc" || event.normalized_identity !== `${event.kind}:${parsed.sscc}`) {
+    return false;
+  }
+  const rows = await exec.all<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM inventory_snapshot_codes_mirror
+      WHERE snapshot_id = ? AND parent_sscc = ?
+        AND EXISTS (
+          SELECT 1 FROM inventory_task_mirror
+           WHERE inventory_id = ? AND active_snapshot_id = ?
+        )`,
+    [snapshotId, parsed.sscc, inventoryId, snapshotId],
+  );
+  return (rows[0]?.count ?? 0) === 0;
+}
+
+async function reconcileCommittedDuplicates(
+  exec: SqlExecutor,
+  inventoryId: string,
+  snapshotId: string,
+): Promise<void> {
+  const duplicates = await exec.all<ExistingEventRow>(
+    `SELECT event_id, device_id, device_sequence, operator_id, scanned_at, kind,
+            normalized_identity, code_hash, raw_payload, active_production_date,
+            local_verdict, commit_state, legacy_audit_version
+       FROM inventory_scan_events_mirror
+      WHERE inventory_id = ? AND snapshot_id = ? AND local_verdict = 'duplicate'
+        AND commit_state = 'committed' AND legacy_audit_version = 1
+      ORDER BY device_sequence, device_id, event_id`,
+    [inventoryId, snapshotId],
+  );
+  for (const event of duplicates) {
+    if (await hasValidPriorRepresentative(exec, event, inventoryId, snapshotId)) continue;
+    if (await duplicateCanBecomeUnknown(exec, event, inventoryId, snapshotId)) {
+      event.local_verdict = "unknown";
+      await exec.run(
+        `UPDATE inventory_scan_events_mirror SET local_verdict = 'unknown'
+          WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?
+            AND commit_state = 'committed' AND local_verdict = 'duplicate'`,
+        [inventoryId, snapshotId, event.event_id],
+      );
+      await exec.run(
+        `INSERT INTO inventory_outbox
+           (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(inventory_id, snapshot_id, event_id) DO UPDATE SET
+           device_sequence = excluded.device_sequence,
+           payload_json = excluded.payload_json,
+           created_at = excluded.created_at`,
+        [
+          inventoryId,
+          snapshotId,
+          event.event_id,
+          event.device_sequence,
+          eventPayload(event, "unknown"),
+          event.scanned_at,
+        ],
+      );
+      continue;
+    }
+    await exec.run(
+      `DELETE FROM inventory_outbox
+        WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?`,
+      [inventoryId, snapshotId, event.event_id],
+    );
+    await exec.run(
+      `UPDATE inventory_scan_events_mirror SET commit_state = 'failed'
+        WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?
+          AND commit_state = 'committed' AND local_verdict = 'duplicate'`,
+      [inventoryId, snapshotId, event.event_id],
+    );
+  }
+}
+
 async function reconcilePendingInventoryEventsInternal(
   exec: SqlExecutor,
   inventoryId: string,
   snapshotId: string,
   excludingEventId?: string,
 ): Promise<InventoryJournalReconciliation> {
+  const legacy = await exec.all<ExistingEventRow>(
+    `SELECT event_id, device_id, device_sequence, operator_id, scanned_at, kind,
+            normalized_identity, code_hash, raw_payload, active_production_date,
+            local_verdict, commit_state, legacy_audit_version
+       FROM inventory_scan_events_mirror
+      WHERE inventory_id = ? AND snapshot_id = ? AND legacy_audit_version = 0
+        AND commit_state IN ('pending', 'committed')
+      ORDER BY device_sequence, device_id, event_id`,
+    [inventoryId, snapshotId],
+  );
+  let recoveredCommitted = 0;
+  for (const event of legacy) {
+    const state = await repairOneLegacyEvent(exec, event, inventoryId, snapshotId);
+    if (state === "committed") recoveredCommitted += 1;
+  }
   const params: unknown[] = [inventoryId, snapshotId];
   const exclusion = excludingEventId ? " AND event_id <> ?" : "";
   if (excludingEventId) params.push(excludingEventId);
   const pending = await exec.all<ExistingEventRow>(
     `SELECT event_id, device_id, device_sequence, operator_id, scanned_at, kind,
             normalized_identity, code_hash, raw_payload, active_production_date,
-            local_verdict, commit_state
+            local_verdict, commit_state, legacy_audit_version
        FROM inventory_scan_events_mirror
       WHERE inventory_id = ? AND snapshot_id = ? AND commit_state = 'pending'${exclusion}
       ORDER BY device_id, device_sequence, event_id`,
     params,
   );
-  let recoveredCommitted = 0;
   for (const event of pending) {
     const state = await reconcileOnePendingEvent(exec, event, inventoryId, snapshotId);
     if (state === "committed") recoveredCommitted += 1;
   }
+  await reconcileCommittedDuplicates(exec, inventoryId, snapshotId);
   const unresolved = await exec.all<{ failed_count: number }>(
     `SELECT COUNT(*) AS failed_count
        FROM inventory_scan_events_mirror failed

@@ -183,9 +183,9 @@ describe("simple inventory work screen", () => {
       `INSERT INTO inventory_scan_events_mirror
          (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
           kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict,
-          commit_state)
+          commit_state, legacy_audit_version)
        VALUES (?, ?, 'orphan-event', ?, 1, ?, '2026-08-25T08:00:00.000Z', 'item', ?, ?, ?,
-               '2026-08-19', 'expected', 'pending')`,
+               '2026-08-19', 'expected', 'pending', 1)`,
     ).run(
       INVENTORY_ID,
       SNAPSHOT_ID,

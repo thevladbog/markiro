@@ -986,13 +986,37 @@ export const STATION_MIGRATIONS: string[] = [
          AND event.commit_state = 'failed'
          AND event.legacy_audit_version = 1
     );`,
+  // Round 4 repair-first handoff. On a pre-existing round-1/round-2 database
+  // the runtime executor skips the superseded destructive audits above. The
+  // marker therefore starts at zero and this statement hides ambiguous legacy
+  // acceptance until the journal can rebuild and requeue it from immutable
+  // event/snapshot facts. Fresh databases have no version-zero rows here.
+  `UPDATE inventory_scan_events_mirror
+      SET commit_state = 'pending'
+    WHERE legacy_audit_version = 0 AND commit_state = 'committed';`,
 ];
 
-/** Round-2 statements superseded once the one-time version marker exists. */
-export const SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATIONS = STATION_MIGRATIONS.filter(
-  (statement) =>
-    (statement.includes("SET commit_state = CASE WHEN EXISTS (") &&
-      !statement.includes("legacy_audit_version")) ||
-    (statement.includes("DELETE FROM inventory_code_results_mirror AS result") &&
-      !statement.includes("legacy_audit_version = 1")),
+export interface StationMigrationEntry {
+  readonly id: string;
+  readonly sql: string;
+}
+
+/**
+ * Stable append-only identities for runtime dispatch. The numeric identity is
+ * the statement's historical append position; existing entries must never be
+ * reordered. STATION_MIGRATIONS remains the compatibility SQL export.
+ */
+export const STATION_MIGRATION_ENTRIES: readonly StationMigrationEntry[] = STATION_MIGRATIONS.map(
+  (sql, index) => ({
+    id: `station-sqlite-${String(index).padStart(3, "0")}`,
+    sql,
+  }),
 );
+
+/** Exact legacy audit identities; never infer these from SQL text. */
+export const SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATION_IDS = [
+  "station-sqlite-078",
+  "station-sqlite-079",
+  "station-sqlite-081",
+  "station-sqlite-082",
+] as const;
