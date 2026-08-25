@@ -4,6 +4,7 @@ import "../styles/landing.css";
 
 import { getUiCopy } from "../content/ui";
 import { serializeJsonLd, type PageGraph, type PageMetadata } from "../lib/seo";
+import ConsentPanel from "../components/ConsentPanel.astro";
 
 interface Props {
   metadata: PageMetadata;
@@ -56,6 +57,13 @@ const jsonLd = serializeJsonLd(graph);
   </head>
   <body>
     <a class="skip-link" href="#main">{copy.skipLink}</a>
+    <ConsentPanel locale={page.locale} />
     <slot />
+    <script>
+      import { GTM_CONTAINER_ID, initConsentPanel, initTagManager } from "../scripts/tracking";
+
+      initConsentPanel(document, window);
+      initTagManager(document, window, GTM_CONTAINER_ID);
+    </script>
   </body>
 </html>

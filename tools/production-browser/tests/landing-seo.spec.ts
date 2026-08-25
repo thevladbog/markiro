@@ -70,6 +70,42 @@ const MARKIRO_MODULE_LAYOUT = [
   { x: "26", y: "42", color: "rgb(61, 220, 122)" },
 ];
 
+test("cookie panel reveals granular controls only after an explicit settings action", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const panel = page.locator("[data-consent-panel]");
+  const details = panel.locator("[data-consent-details]");
+
+  await expect(panel).toBeVisible();
+  await expect(details).toBeHidden();
+  await panel.locator("[data-consent-customize]").click();
+  await expect(details).toBeVisible();
+});
+
+test("GTM stays offline until analytics consent and loads only once after permission", async ({
+  page,
+}) => {
+  const gtmRequests: string[] = [];
+  await page.route("https://www.googletagmanager.com/**", async (route) => {
+    gtmRequests.push(route.request().url());
+    await route.fulfill({ body: "", contentType: "application/javascript", status: 200 });
+  });
+
+  await page.goto("/");
+  expect(gtmRequests).toEqual([]);
+  await expect(page.locator("iframe[src*='googletagmanager.com']")).toHaveCount(0);
+
+  await page.locator("[data-consent-customize]").click();
+  await page.locator("[data-consent-analytics]").check();
+  await page.locator("[data-consent-save]").click();
+  await expect.poll(() => gtmRequests).toHaveLength(1);
+  expect(gtmRequests[0]).toBe("https://www.googletagmanager.com/gtm.js?id=GTM-KZ6P7NVF");
+
+  await page.evaluate(() => window.dispatchEvent(new Event("markiro:consent-changed")));
+  await expect.poll(() => gtmRequests).toHaveLength(1);
+});
+
 const demoCases = [
   {
     company: "Завод Север",
