@@ -1,7 +1,12 @@
 import type { SchemaObject } from "@nestjs/swagger";
 import { z } from "zod";
 
-import { LABEL_FIELDS, parseLabelTemplate, type LabelTemplateSpec } from "@markiro/domain";
+import {
+  INVENTORY_CHZ_STATUSES,
+  LABEL_FIELDS,
+  parseLabelTemplate,
+  type LabelTemplateSpec,
+} from "@markiro/domain";
 
 import { inventoryCivilDateSchema, type InventoryMode } from "./dto";
 
@@ -352,5 +357,237 @@ export const stationInventoryManifestOpenApiSchema: SchemaObject = {
         progressPageSize: { type: "integer", enum: [STATION_INVENTORY_PROGRESS_PAGE_SIZE] },
       },
     },
+  },
+};
+
+const inventoryTaskBarcodePrefix = "markiro:inventory:v1:";
+
+export function formatInventoryTaskBarcode(inventoryId: string): string {
+  return `${inventoryTaskBarcodePrefix}${inventoryId}`;
+}
+
+export function parseInventoryTaskBarcode(barcode: string): string | null {
+  if (!barcode.startsWith(inventoryTaskBarcodePrefix)) return null;
+  const parsed = z.uuid().safeParse(barcode.slice(inventoryTaskBarcodePrefix.length));
+  return parsed.success ? parsed.data : null;
+}
+
+export interface StationInventoryTaskDto {
+  inventoryId: string;
+  inventoryNumber: string;
+  productName: string;
+  mode: InventoryMode;
+  lineId: string;
+  lineName: string;
+  productionDateFrom: string;
+  productionDateTo: string;
+}
+
+export interface StationInventoryTaskListDto {
+  items: StationInventoryTaskDto[];
+}
+
+export interface ResolveStationInventoryBarcodeDto {
+  barcode: string;
+}
+
+export interface ResolveStationInventoryBarcodeResponseDto {
+  task: StationInventoryTaskDto;
+  deviceLineId: string | null;
+  requiresDifferentLineConfirmation: boolean;
+}
+
+export const resolveStationInventoryBarcodeSchema = z.strictObject({
+  barcode: z.string().max(128),
+});
+
+export interface JoinStationInventoryDto {
+  operatorId: string;
+  barcode?: string;
+  confirmDifferentLine?: boolean;
+}
+
+export const joinStationInventorySchema = z.strictObject({
+  operatorId: z.uuid(),
+  barcode: z.string().max(128).optional(),
+  confirmDifferentLine: z.boolean().optional(),
+});
+
+export interface StationInventorySsccBlockDto {
+  issuerPrefix: string;
+  extensionDigit: number;
+  fromSerial: number;
+  toSerial: number;
+  consumedThroughSerial: number | null;
+}
+
+export interface StationInventoryBundleManifestDto extends StationInventoryManifest {
+  sscc: StationInventorySsccBlockDto | null;
+  ssccRevokedFrom: number[];
+}
+
+export interface StationInventoryBundleCodeDto {
+  codeHash: string;
+  canonicalRaw: string;
+  gtin14: string;
+  serial: string;
+  sourceStatus: (typeof INVENTORY_CHZ_STATUSES)[number];
+  sourceState: string | null;
+  sourceProductionDate: string | null;
+  parentSscc: string | null;
+  expected: boolean;
+  protected: boolean;
+}
+
+export interface StationInventoryBundleCodesDto {
+  snapshotId: string;
+  snapshotRevision: 1;
+  combinedDigest: string;
+  items: StationInventoryBundleCodeDto[];
+  nextCursor: string | null;
+}
+
+export const stationInventoryBundleCodesQuerySchema = z.strictObject({
+  cursor: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(STATION_INVENTORY_CODE_PAGE_SIZE)
+    .default(STATION_INVENTORY_CODE_PAGE_SIZE),
+});
+
+export type StationInventoryBundleCodesQueryDto = z.infer<
+  typeof stationInventoryBundleCodesQuerySchema
+>;
+
+const stationInventoryTaskOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "inventoryId",
+    "inventoryNumber",
+    "productName",
+    "mode",
+    "lineId",
+    "lineName",
+    "productionDateFrom",
+    "productionDateTo",
+  ],
+  properties: {
+    inventoryId: { type: "string", format: "uuid" },
+    inventoryNumber: { type: "string" },
+    productName: { type: "string" },
+    mode: { type: "string", enum: ["check", "repack"] },
+    lineId: { type: "string", format: "uuid" },
+    lineName: { type: "string" },
+    productionDateFrom: { type: "string", format: "date" },
+    productionDateTo: { type: "string", format: "date" },
+  },
+};
+
+export const stationInventoryTaskListOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: { items: { type: "array", items: stationInventoryTaskOpenApiSchema } },
+};
+
+export const resolveStationInventoryBarcodeOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["barcode"],
+  properties: { barcode: { type: "string", maxLength: 128 } },
+};
+
+export const resolveStationInventoryBarcodeResponseOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["task", "deviceLineId", "requiresDifferentLineConfirmation"],
+  properties: {
+    task: stationInventoryTaskOpenApiSchema,
+    deviceLineId: { type: "string", format: "uuid", nullable: true },
+    requiresDifferentLineConfirmation: { type: "boolean" },
+  },
+};
+
+export const joinStationInventoryOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["operatorId"],
+  properties: {
+    operatorId: { type: "string", format: "uuid" },
+    barcode: { type: "string", maxLength: 128 },
+    confirmDifferentLine: { type: "boolean" },
+  },
+};
+
+const stationInventorySsccOpenApiSchema: SchemaObject = {
+  type: "object",
+  nullable: true,
+  additionalProperties: false,
+  required: ["issuerPrefix", "extensionDigit", "fromSerial", "toSerial", "consumedThroughSerial"],
+  properties: {
+    issuerPrefix: { type: "string", pattern: "^[0-9]{9}$" },
+    extensionDigit: { type: "integer", minimum: 0, maximum: 9 },
+    fromSerial: { type: "integer", minimum: 0 },
+    toSerial: { type: "integer", minimum: 0 },
+    consumedThroughSerial: { type: "integer", minimum: 0, nullable: true },
+  },
+};
+
+export const stationInventoryBundleManifestOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [...(stationInventoryManifestOpenApiSchema.required ?? []), "sscc", "ssccRevokedFrom"],
+  properties: {
+    ...(stationInventoryManifestOpenApiSchema.properties ?? {}),
+    sscc: stationInventorySsccOpenApiSchema,
+    ssccRevokedFrom: { type: "array", items: { type: "integer", minimum: 0 } },
+  },
+};
+
+const stationInventoryBundleCodeOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "codeHash",
+    "canonicalRaw",
+    "gtin14",
+    "serial",
+    "sourceStatus",
+    "sourceState",
+    "sourceProductionDate",
+    "parentSscc",
+    "expected",
+    "protected",
+  ],
+  properties: {
+    codeHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    canonicalRaw: { type: "string", maxLength: 1024 },
+    gtin14: { type: "string", pattern: "^[0-9]{14}$" },
+    serial: { type: "string", minLength: 1 },
+    sourceStatus: { type: "string", enum: [...INVENTORY_CHZ_STATUSES] },
+    sourceState: { type: "string", nullable: true },
+    sourceProductionDate: { type: "string", format: "date", nullable: true },
+    parentSscc: { type: "string", pattern: "^[0-9]{18}$", nullable: true },
+    expected: { type: "boolean" },
+    protected: { type: "boolean" },
+  },
+};
+
+export const stationInventoryBundleCodesOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["snapshotId", "snapshotRevision", "combinedDigest", "items", "nextCursor"],
+  properties: {
+    snapshotId: { type: "string", format: "uuid" },
+    snapshotRevision: { type: "integer", minimum: 1, maximum: 1 },
+    combinedDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    items: { type: "array", items: stationInventoryBundleCodeOpenApiSchema },
+    nextCursor: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true },
   },
 };
