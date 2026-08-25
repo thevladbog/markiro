@@ -97,7 +97,8 @@ const appComputeMetadataFieldScopes = new Map([
   ["user-data", "user-data"],
 ]);
 const appSecurityGroupAddress = "module.network.yandex_vpc_security_group.app";
-const appSecurityGroupFieldScopes = new Map([
+const dataSecurityGroupAddress = "module.network.yandex_vpc_security_group.data";
+const securityGroupFieldScopes = new Map([
   ["description", "description"],
   ["egress", "egress"],
   ["folder_id", "folder"],
@@ -108,7 +109,7 @@ const appSecurityGroupFieldScopes = new Map([
   ["network_id", "network"],
   ["status", "status"],
 ]);
-const appSecurityGroupRuleFieldScopes = new Map([
+const securityGroupRuleFieldScopes = new Map([
   ["description", "description"],
   ["from_port", "from-port"],
   ["id", "id"],
@@ -309,22 +310,22 @@ function appComputeActionScope(resource) {
   return `safe-action-app-compute-${uniqueScopes.join("-and-")}`;
 }
 
-function appSecurityGroupActionScope(resource) {
+function securityGroupActionScope(resource, baseScope) {
   const beforeValue = resource.change?.before;
   const afterValue = resource.change?.after;
   const fields = changedKeys(beforeValue, afterValue);
-  if (!fields || fields.length === 0) return "safe-action-app-security-group";
+  if (!fields || fields.length === 0) return baseScope;
 
   const scopes = [
     ...new Set(
       fields.map((field) => {
-        if (field !== "ingress") return appSecurityGroupFieldScopes.get(field) ?? "other";
+        if (field !== "ingress") return securityGroupFieldScopes.get(field) ?? "other";
         const ingressFields = changedArrayObjectKeys(beforeValue.ingress, afterValue.ingress);
         if (!ingressFields || ingressFields.length === 0) return "ingress";
         const ingressScopes = [
           ...new Set(
             ingressFields.map(
-              (ingressField) => appSecurityGroupRuleFieldScopes.get(ingressField) ?? "other",
+              (ingressField) => securityGroupRuleFieldScopes.get(ingressField) ?? "other",
             ),
           ),
         ].sort();
@@ -332,8 +333,8 @@ function appSecurityGroupActionScope(resource) {
       }),
     ),
   ].sort();
-  if (scopes.length === 1 && scopes[0] === "other") return "safe-action-app-security-group";
-  return `safe-action-app-security-group-${scopes.join("-and-")}`;
+  if (scopes.length === 1 && scopes[0] === "other") return baseScope;
+  return `${baseScope}-${scopes.join("-and-")}`;
 }
 
 function actions(resource) {
@@ -788,8 +789,10 @@ export function guardProductionPlan(plan) {
           resource.address === appComputeAddress
             ? appComputeActionScope(resource)
             : resource.address === appSecurityGroupAddress
-              ? appSecurityGroupActionScope(resource)
-              : (safeProductionActionScopes.get(resource.address) ?? "safe-resource-action");
+              ? securityGroupActionScope(resource, "safe-action-app-security-group")
+              : resource.address === dataSecurityGroupAddress
+                ? securityGroupActionScope(resource, "safe-action-data-security-group")
+                : (safeProductionActionScopes.get(resource.address) ?? "safe-resource-action");
         rejected(scope);
       }
     }
