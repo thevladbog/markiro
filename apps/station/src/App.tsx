@@ -81,6 +81,7 @@ import { OperatorLogin } from "./pages/OperatorLogin.js";
 import { TaskSelection } from "./pages/TaskSelection.js";
 import { NewShift } from "./pages/NewShift.js";
 import { WorkScreen } from "./pages/WorkScreen.js";
+import { InventoryWorkScreen } from "./pages/InventoryWorkScreen.js";
 import { WorkstationSetup } from "./pages/WorkstationSetup.js";
 import { UpdateCenter } from "./pages/UpdateCenter.js";
 import { FloorShell } from "./ui/FloorShell.js";
@@ -1500,7 +1501,16 @@ export function App() {
               <h1 style={{ fontSize: "2rem" }}>{t("shifts.preparing")}</h1>
             </main>
           )
-        ) : (
+        ) : config.deviceId && activeFloorTask.inventory.mode === "check" ? (
+          <InventoryWorkScreen
+            exec={tauriExecutor}
+            inventory={{ ...activeFloorTask.inventory, mode: "check" }}
+            deviceId={config.deviceId}
+            operatorId={operator.operatorId}
+            source={scanSource}
+            onScanQueueRegister={registerFloorWorkBarrier}
+          />
+        ) : activeFloorTask.inventory.mode === "repack" ? (
           <main className="inventory-entry-ready" data-testid="inventory-entry-ready">
             <Card>
               <span>{t("inventory.readyEyebrow")}</span>
@@ -1508,6 +1518,10 @@ export function App() {
               <p>{activeFloorTask.inventory.productName}</p>
               <p>{t("inventory.ready")}</p>
             </Card>
+          </main>
+        ) : (
+          <main className="station-centered-screen">
+            <p role="status">{t("inventory.loadingLocalTask")}</p>
           </main>
         )
       ) : floorView === "select" ? (

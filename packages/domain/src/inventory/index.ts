@@ -25,3 +25,12 @@ export type {
   StationInventoryBundleManifest,
   StationInventoryBundlePage,
 } from "./station-bundle.js";
+export { classifyInventoryScan } from "./scan.js";
+export type {
+  InventoryBoxChildClassification,
+  InventoryLocalClaim,
+  InventoryOriginClassification,
+  InventoryScanClassification,
+  InventoryScanClassifierContext,
+  InventoryScanSnapshotRow,
+} from "./scan.js";

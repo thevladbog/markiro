@@ -206,6 +206,55 @@
     "page": "{{page}} of {{pageCount}}",
     "readyEyebrow": "Verified local inventory task",
     "ready": "The snapshot is stored and ready for offline work.",
+    "work": {
+      "title": "Product check",
+      "productionDate": "Production date",
+      "futureOnly": "Applies from the next accepted scan",
+      "change": "Change",
+      "changeDate": "Change production date",
+      "loadingDate": "Loading…",
+      "prompt": "Scan a bottle or box",
+      "promptHint": "A box verifies all known contents",
+      "recent": "Recent scans",
+      "emptyRecent": "No accepted scans yet.",
+      "invalidTime": "Time unavailable",
+      "serial": "Serial",
+      "dateDialogTitle": "Change production date",
+      "cancel": "Cancel",
+      "applyDate": "Apply date",
+      "verdict": {
+        "expected": "Code accepted",
+        "boxAccepted": "Box accepted: {{count}} codes",
+        "protected": "Code not counted: already in shipment",
+        "ineligible": "Code is not part of this inventory",
+        "unknown": "Code is absent from the source snapshot",
+        "duplicateHere": "Code was already checked on this terminal",
+        "duplicateOther": "Code was already checked on another terminal",
+        "invalid": "Code not recognized",
+        "writeFailed": "Scan was not saved — scan again"
+      },
+      "badge": {
+        "box": "BOX",
+        "duplicate": "DUPLICATE",
+        "protected": "NOT COUNTED",
+        "discrepancy": "DISCREPANCY",
+        "ineligible": "INELIGIBLE"
+      },
+      "progress": {
+        "verified": "Verified",
+        "discrepancies": "Discrepancies",
+        "terminal": "checked by this terminal",
+        "boxes": "boxes accepted whole",
+        "items": "bottles scanned separately"
+      },
+      "status": {
+        "expected": "ACCEPTED",
+        "protected": "PROTECTED",
+        "ineligible": "INELIGIBLE",
+        "unknown": "DISCREPANCY",
+        "duplicate": "DUPLICATE"
+      }
+    },
     "confirmation": {
       "title": "Task is assigned to another line",
       "cancel": "Cancel",

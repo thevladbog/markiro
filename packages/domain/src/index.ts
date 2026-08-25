@@ -146,6 +146,15 @@ export type {
   InventorySnapshotClassification,
   InventorySnapshotSourceRow,
 } from "./inventory/index.js";
+export { classifyInventoryScan } from "./inventory/index.js";
+export type {
+  InventoryBoxChildClassification,
+  InventoryLocalClaim,
+  InventoryOriginClassification,
+  InventoryScanClassification,
+  InventoryScanClassifierContext,
+  InventoryScanSnapshotRow,
+} from "./inventory/index.js";
 export {
   CABINET_CAPABILITY,
   hasCabinetCapabilities,

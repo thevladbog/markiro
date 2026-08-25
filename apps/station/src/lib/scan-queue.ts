@@ -10,7 +10,7 @@ export interface ScanOutcome {
   planReached?: boolean;
 }
 
-export interface ScanQueueDeps {
+export interface ScanQueueDeps<TOutcome = ScanOutcome> {
   /**
    * Re-checks floor admission when a buffered scan reaches the head of the
    * queue. A close can enter a blocking recovery state while later physical
@@ -18,8 +18,8 @@ export interface ScanQueueDeps {
    */
   shouldProcess?(raw: string): boolean;
   /** Validate + journal one scan. Runs with no other scan in flight. */
-  process(raw: string): Promise<ScanOutcome>;
-  onOutcome(outcome: ScanOutcome): void;
+  process(raw: string): Promise<TOutcome>;
+  onOutcome(outcome: TOutcome): void;
   /**
    * Called when `process` throws, so a lost write is never silent — the
    * operator scanned something and must see SOME signal, even a failure one.
@@ -62,7 +62,7 @@ type QueueEntry = { type: "scan"; raw: string } | { type: "job"; run: () => Prom
  * A scan that arrives mid-flight is buffered, never dropped — dropping input
  * on a production line silently loses codes.
  */
-export function createScanQueue(deps: ScanQueueDeps): ScanQueue {
+export function createScanQueue<TOutcome = ScanOutcome>(deps: ScanQueueDeps<TOutcome>): ScanQueue {
   const buffer: QueueEntry[] = [];
   let draining = false;
   let accepting = true;
@@ -94,7 +94,7 @@ export function createScanQueue(deps: ScanQueueDeps): ScanQueue {
           console.warn("station: scan discarded by floor admission");
           continue;
         }
-        let outcome: ScanOutcome;
+        let outcome: TOutcome;
         try {
           outcome = await deps.process(raw);
         } catch (err) {
