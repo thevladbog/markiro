@@ -64,8 +64,10 @@ export interface ShiftSelectionProps {
   onConflicts?: () => void;
   /** False once this credential generation is sealed or this floor is retired. */
   isCurrent?: () => boolean;
-  /** Retires work owned by the selection surface before another route starts. */
-  onRouteIntent?: () => void;
+  /** Exclusively retires selection work before another route starts. */
+  onRouteIntent?: (options?: ShiftSelectionRouteIntentOptions) => ShiftSelectionRouteIntent | null;
+  /** Disables route controls owned by the wider floor-task selection surface. */
+  routeControlsDisabled?: boolean;
   /** Runs under the same initial/manual/poll request lock as the shift list. */
   onCoordinatedRefresh?: () => Promise<void>;
   /** Fixed category navigation receives the current visible production count. */
@@ -76,6 +78,17 @@ export interface ShiftSelectionProps {
   title?: string;
   actionsLabel?: string;
   refreshLabel?: string;
+}
+
+export interface ShiftSelectionRouteIntent {
+  ready: Promise<void>;
+  commit: () => boolean;
+  cancel: () => Promise<void>;
+}
+
+export interface ShiftSelectionRouteIntentOptions {
+  /** Setup remains reachable for legacy repair after production credentials are sealed. */
+  allowSealedCredential?: true;
 }
 
 export type ShiftSelectionPersistentState =
@@ -102,6 +115,7 @@ export function ShiftSelection({
   onConflicts,
   isCurrent,
   onRouteIntent,
+  routeControlsDisabled = false,
   onCoordinatedRefresh,
   categoryNavigation,
   alternateContent,
@@ -234,29 +248,112 @@ export function ShiftSelection({
     if (requestedPage !== currentPage.page) setRequestedPage(currentPage.page);
   }, [currentPage.page, requestedPage]);
 
+  const controlsDisabled = busy || routeControlsDisabled;
+
+  function acquireRouteIntent(
+    options?: ShiftSelectionRouteIntentOptions,
+  ): ShiftSelectionRouteIntent | null {
+    if (controlsDisabled || (options?.allowSealedCredential !== true && isCurrent?.() === false))
+      return null;
+    return onRouteIntent?.(options) ?? null;
+  }
+
   async function open(shift: ShiftListItem) {
-    if (busy) return;
-    onRouteIntent?.();
+    if (!onRouteIntent) {
+      if (controlsDisabled) return;
+      setError(null);
+      setBusy(true);
+      try {
+        const opened = await client.post<{ id: string; status: string; mode: string }>(
+          `/shifts/${shift.id}/open`,
+        );
+        if (!mounted.current || isCurrent?.() === false) return;
+        onSelected(opened);
+      } catch (err) {
+        if (!mounted.current || isCurrent?.() === false) return;
+        setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
+      } finally {
+        if (mounted.current && isCurrent?.() !== false) setBusy(false);
+      }
+      return;
+    }
+    const intent = acquireRouteIntent();
+    if (!intent) return;
     setError(null);
     setBusy(true);
+    let committed = false;
     try {
+      await intent.ready;
+      if (!mounted.current || isCurrent?.() === false) {
+        await intent.cancel();
+        return;
+      }
       const opened = await client.post<{ id: string; status: string; mode: string }>(
         `/shifts/${shift.id}/open`,
       );
-      if (!mounted.current || isCurrent?.() === false) return;
+      if (!mounted.current || isCurrent?.() === false) {
+        await intent.cancel();
+        return;
+      }
+      if (!intent.commit()) {
+        await intent.cancel();
+        return;
+      }
+      committed = true;
       onSelected(opened);
     } catch (err) {
+      await intent.cancel().catch((cancelError: unknown) => {
+        console.error("station: route acquisition cancellation failed", cancelError);
+      });
       if (!mounted.current || isCurrent?.() === false) return;
       setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
     } finally {
-      if (mounted.current && isCurrent?.() !== false) setBusy(false);
+      if (!committed && mounted.current && isCurrent?.() !== false) setBusy(false);
     }
   }
 
-  function rejoin(shift: ShiftListItem) {
-    if (busy || isCurrent?.() === false) return;
-    onRouteIntent?.();
-    onSelected(shift);
+  async function enterRoute(enter: () => void, options?: ShiftSelectionRouteIntentOptions) {
+    if (!onRouteIntent) {
+      if (controlsDisabled || (options?.allowSealedCredential !== true && isCurrent?.() === false))
+        return;
+      enter();
+      return;
+    }
+    const intent = acquireRouteIntent(options);
+    if (!intent) return;
+    setError(null);
+    setBusy(true);
+    let committed = false;
+    try {
+      await intent.ready;
+      if (
+        !mounted.current ||
+        (options?.allowSealedCredential !== true && isCurrent?.() === false)
+      ) {
+        await intent.cancel();
+        return;
+      }
+      if (!intent.commit()) {
+        await intent.cancel();
+        return;
+      }
+      committed = true;
+      enter();
+    } catch (err) {
+      await intent.cancel().catch((cancelError: unknown) => {
+        console.error("station: route acquisition cancellation failed", cancelError);
+      });
+      if (mounted.current && (options?.allowSealedCredential === true || isCurrent?.() !== false)) {
+        setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
+      }
+    } finally {
+      if (
+        !committed &&
+        mounted.current &&
+        (options?.allowSealedCredential === true || isCurrent?.() !== false)
+      )
+        setBusy(false);
+    }
   }
 
   const message = error ? <Alert tone="error">{error}</Alert> : <span aria-hidden="true" />;
@@ -268,13 +365,7 @@ export function ShiftSelection({
       actions={
         <FloorFooter ariaLabel={actionsLabel ?? t("shifts.actions")}>
           {productionActionsVisible ? (
-            <Button
-              size="floor"
-              onClick={() => {
-                onRouteIntent?.();
-                onNew();
-              }}
-            >
+            <Button size="floor" disabled={controlsDisabled} onClick={() => void enterRoute(onNew)}>
               {t("shifts.new")}
             </Button>
           ) : (
@@ -284,7 +375,7 @@ export function ShiftSelection({
             <Button
               size="floor"
               variant="secondary"
-              disabled={manualRefreshing}
+              disabled={manualRefreshing || controlsDisabled}
               onClick={() => refreshShifts({ manual: true })}
             >
               {refreshLabel ?? t("shifts.refresh")}
@@ -293,10 +384,8 @@ export function ShiftSelection({
               <Button
                 size="floor"
                 variant="secondary"
-                onClick={() => {
-                  onRouteIntent?.();
-                  onSetup();
-                }}
+                disabled={controlsDisabled}
+                onClick={() => void enterRoute(onSetup, { allowSealedCredential: true })}
               >
                 {t("shell.setup")}
               </Button>
@@ -305,11 +394,8 @@ export function ShiftSelection({
               <Button
                 size="floor"
                 variant="secondary"
-                disabled={busy}
-                onClick={() => {
-                  onRouteIntent?.();
-                  onConflicts();
-                }}
+                disabled={controlsDisabled}
+                onClick={() => void enterRoute(onConflicts)}
               >
                 {t("shell.conflicts")}
               </Button>
@@ -373,8 +459,12 @@ export function ShiftSelection({
                   counterpartyLabel={t("shifts.forCounterparty")}
                   actionLabel={shift.status === "active" ? t("shifts.rejoin") : t("shifts.open")}
                   active={shift.status === "active"}
-                  disabled={busy}
-                  onSelect={() => (shift.status === "active" ? rejoin(shift) : void open(shift))}
+                  disabled={controlsDisabled}
+                  onSelect={() =>
+                    shift.status === "active"
+                      ? void enterRoute(() => onSelected(shift))
+                      : void open(shift)
+                  }
                   exec={exec}
                   productId={shift.productId}
                   image={shift.image}

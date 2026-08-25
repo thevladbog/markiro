@@ -24,10 +24,25 @@ import {
 } from "../lib/credential-recovery.js";
 import { parseStationInventoryBundleManifest } from "@markiro/domain";
 import { InventoryTaskConfirmation } from "./InventoryTaskConfirmation.js";
-import { ShiftSelection, type ShiftSelectionProps } from "./ShiftSelection.js";
+import {
+  ShiftSelection,
+  type ShiftSelectionProps,
+  type ShiftSelectionRouteIntent,
+  type ShiftSelectionRouteIntentOptions,
+} from "./ShiftSelection.js";
 
 const INVENTORY_PAGE_SIZE = 1;
 type TaskCategory = "production" | "warehouse";
+interface SelectionRouteIntentRecord {
+  token: symbol;
+  client: StationClient;
+  credentialGeneration: CredentialGeneration | undefined;
+  lifecycleGeneration: number;
+  retirement: Promise<void>;
+  state: "pending" | "committed" | "cancelling";
+  cancellation: Promise<void> | null;
+  allowSealedCredential: boolean;
+}
 
 export interface TaskSelectionProps {
   client: StationClient;
@@ -81,6 +96,7 @@ export function TaskSelection({
   const [tasks, setTasks] = useState<StationInventoryTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [routePending, setRoutePending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [confirmation, setConfirmation] = useState<{
@@ -90,13 +106,15 @@ export function TaskSelection({
   const mounted = useRef(true);
   const lifecycleGeneration = useRef(0);
   const renderedClient = useRef(client);
+  const renderedCredentialGeneration = useRef(credentialGeneration);
   const intakeOpen = useRef(true);
   const inventoryOperation = useRef<Promise<void> | null>(null);
   const ownedPointer = useRef<string | null>(null);
-  const routeRetirement = useRef<Promise<void> | null>(null);
   const lifecycleRetirement = useRef<Promise<void> | null>(null);
+  const activeRouteIntent = useRef<SelectionRouteIntentRecord | null>(null);
   const commitLifecycle = useMemo(() => createFloorCommitLifecycle(), []);
   const busyRef = useRef(false);
+  const routePendingRef = useRef(false);
   const isCurrentRef = useRef(isCurrent);
   const inventoryRequest = useRef<{
     client: StationClient;
@@ -122,10 +140,16 @@ export function TaskSelection({
   }, [commitLifecycle, exec]);
 
   useLayoutEffect(() => {
-    if (renderedClient.current === client) return;
+    if (
+      renderedClient.current === client &&
+      renderedCredentialGeneration.current === credentialGeneration
+    )
+      return;
     renderedClient.current = client;
+    renderedCredentialGeneration.current = credentialGeneration;
     const retirement = retireSelectionLifecycle();
-    routeRetirement.current = null;
+    activeRouteIntent.current = null;
+    routePendingRef.current = false;
     inventoryRequestId.current += 1;
     inventoryRequest.current = null;
     loadedInventoryClient.current = null;
@@ -136,6 +160,7 @@ export function TaskSelection({
     setPage(1);
     setLoading(true);
     setBusy(true);
+    setRoutePending(false);
     void retirement.then(
       () => {
         if (renderedClient.current !== client || !mounted.current) return;
@@ -151,7 +176,7 @@ export function TaskSelection({
         }
       },
     );
-  }, [client, commitLifecycle, retireSelectionLifecycle, t]);
+  }, [client, commitLifecycle, credentialGeneration, retireSelectionLifecycle, t]);
 
   useEffect(() => {
     isCurrentRef.current = isCurrent;
@@ -179,29 +204,81 @@ export function TaskSelection({
     [commitLifecycle, retireSelectionLifecycle],
   );
 
-  const retireSelectionAttempts = useCallback(() => {
-    const hasInventoryWork = inventoryOperation.current !== null || ownedPointer.current !== null;
-    const retirement = floorWorkBarrier.close?.() ?? floorWorkBarrier.idle();
-    routeRetirement.current = hasInventoryWork ? retirement : null;
-    if (!hasInventoryWork) {
-      void retirement.catch(() => {
-        if (mounted.current) setError(t("inventory.joinFailed"));
-      });
-    }
-  }, [floorWorkBarrier, t]);
+  const acquireRouteIntent = useCallback(
+    (options?: ShiftSelectionRouteIntentOptions): ShiftSelectionRouteIntent | null => {
+      const allowSealedCredential = options?.allowSealedCredential === true;
+      if (
+        activeRouteIntent.current !== null ||
+        routePendingRef.current ||
+        !mounted.current ||
+        (!allowSealedCredential && isCurrentRef.current?.() === false)
+      )
+        return null;
 
-  const enterRetiredRoute = useCallback(
-    (enter: () => void) => {
-      const retirement = routeRetirement.current;
-      if (retirement === null) {
-        enter();
-        return;
-      }
-      void retirement.then(enter).catch(() => {
-        if (mounted.current) setError(t("inventory.joinFailed"));
-      });
+      routePendingRef.current = true;
+      busyRef.current = true;
+      setRoutePending(true);
+      setBusy(true);
+      setConfirmation(null);
+      const retirement = retireSelectionLifecycle();
+      const record: SelectionRouteIntentRecord = {
+        token: Symbol("selection-route-intent"),
+        client,
+        credentialGeneration,
+        lifecycleGeneration: lifecycleGeneration.current,
+        retirement,
+        state: "pending",
+        cancellation: null,
+        allowSealedCredential,
+      };
+      activeRouteIntent.current = record;
+
+      return {
+        ready: retirement,
+        commit() {
+          if (
+            activeRouteIntent.current?.token !== record.token ||
+            record.state !== "pending" ||
+            !mounted.current ||
+            renderedClient.current !== record.client ||
+            renderedCredentialGeneration.current !== record.credentialGeneration ||
+            lifecycleGeneration.current !== record.lifecycleGeneration ||
+            (!record.allowSealedCredential && isCurrentRef.current?.() === false)
+          )
+            return false;
+          activeRouteIntent.current.state = "committed";
+          return true;
+        },
+        cancel() {
+          if (record.state === "committed") return Promise.resolve();
+          if (record.cancellation) return record.cancellation;
+          if (activeRouteIntent.current?.token === record.token) {
+            activeRouteIntent.current.state = "cancelling";
+          }
+          record.cancellation = retirement.then(() => {
+            if (
+              activeRouteIntent.current?.token !== record.token ||
+              !mounted.current ||
+              renderedClient.current !== record.client ||
+              renderedCredentialGeneration.current !== record.credentialGeneration ||
+              lifecycleGeneration.current !== record.lifecycleGeneration ||
+              isCurrentRef.current?.() === false
+            )
+              return;
+            if (lifecycleRetirement.current === retirement) lifecycleRetirement.current = null;
+            commitLifecycle.open();
+            intakeOpen.current = true;
+            activeRouteIntent.current = null;
+            routePendingRef.current = false;
+            busyRef.current = false;
+            setRoutePending(false);
+            setBusy(false);
+          });
+          return record.cancellation;
+        },
+      };
     },
-    [t],
+    [client, commitLifecycle, credentialGeneration, retireSelectionLifecycle],
   );
 
   useEffect(() => {
@@ -212,6 +289,7 @@ export function TaskSelection({
       void priorRetirement.then(
         () => {
           if (!mounted.current) return;
+          if (activeRouteIntent.current !== null) return;
           lifecycleRetirement.current = null;
           commitLifecycle.open();
           intakeOpen.current = true;
@@ -463,7 +541,7 @@ export function TaskSelection({
               </div>
               <Button
                 size="floor"
-                disabled={busy}
+                disabled={busy || routePending}
                 aria-label={t("inventory.continueLabel", { number: task.inventoryNumber })}
                 onClick={() => void joinTask(task)}
               >
@@ -502,12 +580,13 @@ export function TaskSelection({
       <ShiftSelection
         client={client}
         exec={exec}
-        onSelected={(shift) => enterRetiredRoute(() => onShiftSelected(shift))}
-        onNew={() => enterRetiredRoute(onNew)}
-        {...(onSetup ? { onSetup: () => enterRetiredRoute(onSetup) } : {})}
-        {...(onConflicts ? { onConflicts: () => enterRetiredRoute(onConflicts) } : {})}
+        onSelected={onShiftSelected}
+        onNew={onNew}
+        {...(onSetup ? { onSetup } : {})}
+        {...(onConflicts ? { onConflicts } : {})}
         {...(isCurrent ? { isCurrent } : {})}
-        onRouteIntent={retireSelectionAttempts}
+        onRouteIntent={acquireRouteIntent}
+        routeControlsDisabled={routePending}
         onCoordinatedRefresh={refreshInventoryTasks}
         title={category === "warehouse" ? t("inventory.warehouseTitle") : t("shifts.title")}
         actionsLabel={category === "warehouse" ? t("inventory.actions") : t("shifts.actions")}
@@ -526,6 +605,7 @@ export function TaskSelection({
               variant={category === "production" ? "primary" : "secondary"}
               role="tab"
               aria-selected={category === "production"}
+              disabled={routePending}
               onClick={() => setCategory("production")}
             >
               {t("inventory.categories.production", { count: openShiftCount })}
@@ -535,6 +615,7 @@ export function TaskSelection({
               variant={category === "warehouse" ? "primary" : "secondary"}
               role="tab"
               aria-selected={category === "warehouse"}
+              disabled={routePending}
               onClick={() => setCategory("warehouse")}
             >
               {t("inventory.categories.warehouse", { count: tasks.length })}

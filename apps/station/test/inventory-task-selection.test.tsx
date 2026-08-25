@@ -179,11 +179,14 @@ function client(
     joinResponse?: Promise<unknown>;
     manifestResponse?: Promise<unknown>;
     pageResponse?: Promise<unknown>;
+    shiftOpenResponses?: unknown[];
+    shiftOpenResponse?: Promise<unknown>;
   } = {},
 ) {
   const posts: Array<{ path: string; body: unknown }> = [];
   const gets: string[] = [];
   let inventoryListIndex = 0;
+  let shiftOpenIndex = 0;
   const api: StationClient = {
     async get<T>(path: string): Promise<T> {
       gets.push(path);
@@ -218,10 +221,15 @@ function client(
       } else if (path === `/station/inventories/${inventoryId}/join`) {
         value = input.joinResponse ? await input.joinResponse : manifest;
       } else if (path === "/shifts/shift-1/open") {
-        value = { id: "shift-1", status: "active", mode: "validation" };
+        value = input.shiftOpenResponse
+          ? await input.shiftOpenResponse
+          : (input.shiftOpenResponses?.[
+              Math.min(shiftOpenIndex++, input.shiftOpenResponses.length - 1)
+            ] ?? { id: "shift-1", status: "active", mode: "validation" });
       } else {
         throw new Error(`Unexpected POST ${path}`);
       }
+      if (value instanceof Error) throw value;
       return value as T;
     },
     async download() {
@@ -248,6 +256,274 @@ afterEach(() => {
 });
 
 describe("TaskSelection inventory entry", () => {
+  it("reopens warehouse intake after a production open fails", async () => {
+    const exec = executor();
+    await applyMigrations(exec);
+    const scan = scanner();
+    const { api, posts } = client({
+      shifts: [shifts[0]],
+      shiftOpenResponses: [new Error("open failed")],
+    });
+    const onInventorySelected = vi.fn();
+    render(
+      <TaskSelection
+        client={api}
+        exec={exec}
+        source={scan.source}
+        operatorId="66666666-6666-4666-8666-666666666666"
+        currentLineName="Розлив №2"
+        onShiftSelected={() => {}}
+        onInventorySelected={onInventorySelected}
+        onNew={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    expect(await screen.findByText("Action failed. Please try again.")).toBeDefined();
+    fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
+
+    await waitFor(() => expect(onInventorySelected).toHaveBeenCalledOnce());
+    expect(posts.filter(({ path }) => path.endsWith("/join"))).toHaveLength(1);
+  });
+
+  it("reopens barcode confirmation after a production open fails", async () => {
+    const exec = executor();
+    await applyMigrations(exec);
+    const scan = scanner();
+    const { api, posts } = client({
+      shifts: [shifts[0]],
+      listed: false,
+      shiftOpenResponses: [new Error("open failed")],
+    });
+    render(
+      <TaskSelection
+        client={api}
+        exec={exec}
+        source={scan.source}
+        operatorId="66666666-6666-4666-8666-666666666666"
+        currentLineName="Packing A"
+        onShiftSelected={() => {}}
+        onInventorySelected={() => {}}
+        onNew={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    await screen.findByText("Action failed. Please try again.");
+    act(() => scan.scan(barcode));
+
+    expect(
+      await screen.findByRole("dialog", { name: "Task is assigned to another line" }),
+    ).toBeDefined();
+    expect(
+      posts.filter(({ path }) => path === "/station/inventory-tasks/resolve-barcode"),
+    ).toHaveLength(1);
+  });
+
+  it("allows a production open retry after the first request fails", async () => {
+    const exec = executor();
+    await applyMigrations(exec);
+    const scan = scanner();
+    const { api, posts } = client({
+      shifts: [shifts[0]],
+      shiftOpenResponses: [
+        new Error("open failed"),
+        { id: "shift-1", status: "active", mode: "validation" },
+      ],
+    });
+    const onShiftSelected = vi.fn();
+    render(
+      <TaskSelection
+        client={api}
+        exec={exec}
+        source={scan.source}
+        operatorId="66666666-6666-4666-8666-666666666666"
+        currentLineName="Розлив №2"
+        onShiftSelected={onShiftSelected}
+        onInventorySelected={() => {}}
+        onNew={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    await screen.findByText("Action failed. Please try again.");
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+    await waitFor(() => expect(onShiftSelected).toHaveBeenCalledOnce());
+    expect(posts.filter(({ path }) => path === "/shifts/shift-1/open")).toHaveLength(2);
+  });
+
+  it("gives one pending production open exclusive ownership of all floor-route intake", async () => {
+    const exec = executor();
+    await applyMigrations(exec);
+    const scan = scanner();
+    const pendingOpen = deferred<unknown>();
+    const { api, posts } = client({ shifts: [shifts[0]], shiftOpenResponse: pendingOpen.promise });
+    const onShiftSelected = vi.fn();
+    const onNew = vi.fn();
+    const onSetup = vi.fn();
+    render(
+      <TaskSelection
+        client={api}
+        exec={exec}
+        source={scan.source}
+        operatorId="66666666-6666-4666-8666-666666666666"
+        currentLineName="Розлив №2"
+        onShiftSelected={onShiftSelected}
+        onInventorySelected={() => {}}
+        onNew={onNew}
+        onSetup={onSetup}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    await waitFor(() =>
+      expect(posts.filter(({ path }) => path === "/shifts/shift-1/open")).toHaveLength(1),
+    );
+    const newShift = screen.getByRole("button", { name: "New shift" });
+    const setup = screen.getByRole("button", { name: "Workstation setup" });
+    const warehouse = screen.getByRole("tab", { name: /Warehouse operations/ });
+    expect(newShift.hasAttribute("disabled")).toBe(true);
+    expect(setup.hasAttribute("disabled")).toBe(true);
+    expect(warehouse.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(newShift);
+    fireEvent.click(setup);
+    fireEvent.click(warehouse);
+    act(() => scan.scan(barcode));
+    expect(onNew).not.toHaveBeenCalled();
+    expect(onSetup).not.toHaveBeenCalled();
+    expect(screen.queryByText("INV-00047")).toBeNull();
+    expect(posts.some(({ path }) => path === "/station/inventory-tasks/resolve-barcode")).toBe(
+      false,
+    );
+
+    pendingOpen.resolve({ id: "shift-1", status: "active", mode: "validation" });
+    await waitFor(() => expect(onShiftSelected).toHaveBeenCalledOnce());
+    expect(onNew).not.toHaveBeenCalled();
+    expect(onSetup).not.toHaveBeenCalled();
+  });
+
+  it("does not reopen a failed route acquisition after the selection unmounts", async () => {
+    const exec = executor();
+    await applyMigrations(exec);
+    const scan = scanner();
+    const pendingOpen = deferred<unknown>();
+    const { api, posts } = client({ shifts: [shifts[0]], shiftOpenResponse: pendingOpen.promise });
+    const onShiftSelected = vi.fn();
+    const view = render(
+      <TaskSelection
+        client={api}
+        exec={exec}
+        source={scan.source}
+        operatorId="66666666-6666-4666-8666-666666666666"
+        currentLineName="Розлив №2"
+        onShiftSelected={onShiftSelected}
+        onInventorySelected={() => {}}
+        onNew={() => {}}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    await waitFor(() =>
+      expect(posts.filter(({ path }) => path === "/shifts/shift-1/open")).toHaveLength(1),
+    );
+
+    view.unmount();
+    pendingOpen.resolve(new Error("open failed"));
+    await act(async () => {});
+    act(() => scan.scan(barcode));
+
+    expect(scan.stopped()).toBe(true);
+    expect(onShiftSelected).not.toHaveBeenCalled();
+    expect(posts.some(({ path }) => path === "/station/inventory-tasks/resolve-barcode")).toBe(
+      false,
+    );
+  });
+
+  it("rejects an old open response and reopens intake only for the replacement client", async () => {
+    const exec = executor();
+    await applyMigrations(exec);
+    const scan = scanner();
+    const pendingOpen = deferred<unknown>();
+    const old = client({ shifts: [shifts[0]], shiftOpenResponse: pendingOpen.promise });
+    const replacement = client({ shifts: [shifts[0]] });
+    const onShiftSelected = vi.fn();
+    const onInventorySelected = vi.fn();
+    const props = {
+      exec,
+      source: scan.source,
+      operatorId: "66666666-6666-4666-8666-666666666666",
+      currentLineName: "Розлив №2",
+      onShiftSelected,
+      onInventorySelected,
+      onNew: () => {},
+    };
+    const view = render(
+      <TaskSelection
+        {...props}
+        client={old.api}
+        credentialGeneration={createCredentialGeneration("credential-a")}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    await waitFor(() =>
+      expect(old.posts.filter(({ path }) => path === "/shifts/shift-1/open")).toHaveLength(1),
+    );
+
+    view.rerender(
+      <TaskSelection
+        {...props}
+        client={replacement.api}
+        credentialGeneration={createCredentialGeneration("credential-b")}
+      />,
+    );
+    pendingOpen.resolve({ id: "shift-1", status: "active", mode: "validation" });
+    await act(async () => {});
+    expect(onShiftSelected).not.toHaveBeenCalled();
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Warehouse operations/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
+    await waitFor(() => expect(onInventorySelected).toHaveBeenCalledOnce());
+    expect(replacement.posts.filter(({ path }) => path.endsWith("/join"))).toHaveLength(1);
+  });
+
+  it("keeps intake retired when the credential is sealed before open completes", async () => {
+    const exec = executor();
+    await applyMigrations(exec);
+    const scan = scanner();
+    const pendingOpen = deferred<unknown>();
+    const { api, posts } = client({ shifts: [shifts[0]], shiftOpenResponse: pendingOpen.promise });
+    const onShiftSelected = vi.fn();
+    let current = true;
+    render(
+      <TaskSelection
+        client={api}
+        exec={exec}
+        source={scan.source}
+        operatorId="66666666-6666-4666-8666-666666666666"
+        currentLineName="Розлив №2"
+        onShiftSelected={onShiftSelected}
+        onInventorySelected={() => {}}
+        onNew={() => {}}
+        isCurrent={() => current}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+    await waitFor(() =>
+      expect(posts.filter(({ path }) => path === "/shifts/shift-1/open")).toHaveLength(1),
+    );
+
+    current = false;
+    pendingOpen.resolve(new Error("credential sealed"));
+    await act(async () => {});
+    act(() => scan.scan(barcode));
+
+    expect(onShiftSelected).not.toHaveBeenCalled();
+    expect(posts.some(({ path }) => path === "/station/inventory-tasks/resolve-barcode")).toBe(
+      false,
+    );
+  });
+
   it("drains a pointer write on unmount, deletes only its exact activation, then unregisters", async () => {
     const suspended = suspendedExecutor(
       (kind, sql, params) =>

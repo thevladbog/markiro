@@ -3177,7 +3177,9 @@ describe("App", () => {
     // where the open effect's dependency array (keyed on port/baud) alone
     // would never re-run.
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-    fireEvent.change(await screen.findByRole("combobox", { name: "Port" }), {
+    const port = await screen.findByRole("combobox", { name: "Port" });
+    await waitFor(() => expect((port as HTMLSelectElement).disabled).toBe(false));
+    fireEvent.change(port, {
       target: { value: "COM3" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
@@ -3708,7 +3710,9 @@ describe("App", () => {
     // leaves running must still be retired and the still-configured COM3
     // session reopened, without an app restart.
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-    fireEvent.change(await screen.findByRole("combobox", { name: "Port" }), {
+    const port = await screen.findByRole("combobox", { name: "Port" });
+    await waitFor(() => expect((port as HTMLSelectElement).disabled).toBe(false));
+    fireEvent.change(port, {
       target: { value: "COM9" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Connect scanner" }));
@@ -3777,7 +3781,9 @@ describe("App", () => {
       // the operator action from Finding 1 (no "Connect scanner" test-press
       // first).
       fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-      fireEvent.change(await screen.findByRole("combobox", { name: "Port" }), {
+      const port = await screen.findByRole("combobox", { name: "Port" });
+      await waitFor(() => expect((port as HTMLSelectElement).disabled).toBe(false));
+      fireEvent.change(port, {
         target: { value: "COM9" },
       });
       fireEvent.click(screen.getByRole("button", { name: "Done" }));
