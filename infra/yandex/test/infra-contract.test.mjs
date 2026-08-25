@@ -57,6 +57,10 @@ function assertDirectGraph({ production, network, compute }) {
     instance,
     /lifecycle\s*\{[\s\S]*ignore_changes\s*=\s*\[[\s\S]*boot_disk\[0\]\.initialize_params\[0\]\.image_id[\s\S]*\]/,
   );
+  assert.match(
+    instance,
+    /lifecycle\s*\{[\s\S]*ignore_changes\s*=\s*\[[\s\S]*metadata\["user-data"\][\s\S]*\]/,
+  );
   assert.match(compute, /nat_ip_address\s*=\s*yandex_vpc_address\.app/);
   assert.doesNotMatch(compute, /replace_triggered_by/);
 

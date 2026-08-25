@@ -66,7 +66,11 @@ resource "yandex_compute_instance" "app" {
 
   lifecycle {
     # A newer image in the family must not replace the live MVP VM.
-    ignore_changes = [boot_disk[0].initialize_params[0].image_id]
+    # Cloud-init is create-only; later application changes use the deployment workflow.
+    ignore_changes = [
+      boot_disk[0].initialize_params[0].image_id,
+      metadata["user-data"],
+    ]
   }
 
   resources {
