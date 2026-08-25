@@ -286,6 +286,26 @@ function changedArrayObjectKeys(beforeValue, afterValue) {
   );
 }
 
+function containsUnknown(value) {
+  if (value === true) return true;
+  if (Array.isArray(value)) return value.some((item) => containsUnknown(item));
+  if (object(value)) return Object.values(value).some((item) => containsUnknown(item));
+  return false;
+}
+
+function unknownArrayObjectKeys(value) {
+  if (!Array.isArray(value) || value.some((item) => !object(item))) return null;
+  return [
+    ...new Set(
+      value.flatMap((item) =>
+        Object.entries(item)
+          .filter(([, fieldValue]) => containsUnknown(fieldValue))
+          .map(([field]) => field),
+      ),
+    ),
+  ].sort();
+}
+
 function appComputeActionScope(resource) {
   const beforeValue = resource.change?.before;
   const afterValue = resource.change?.after;
@@ -321,6 +341,19 @@ function securityGroupActionScope(resource, baseScope) {
       fields.map((field) => {
         if (field !== "ingress") return securityGroupFieldScopes.get(field) ?? "other";
         if (resource.change?.after_unknown?.ingress === true) return "ingress-after-unknown";
+        const unknownIngressFields = unknownArrayObjectKeys(
+          resource.change?.after_unknown?.ingress,
+        );
+        if (unknownIngressFields?.length) {
+          const unknownIngressScopes = [
+            ...new Set(
+              unknownIngressFields.map(
+                (ingressField) => securityGroupRuleFieldScopes.get(ingressField) ?? "other",
+              ),
+            ),
+          ].sort();
+          return `ingress-after-unknown-${unknownIngressScopes.join("-and-")}`;
+        }
         const ingressFields = changedArrayObjectKeys(beforeValue.ingress, afterValue.ingress);
         if (!ingressFields || ingressFields.length === 0) return "ingress";
         const ingressScopes = [
