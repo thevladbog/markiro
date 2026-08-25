@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-25T22:09:33.621Z",
-  "testedCommit": "f14fd538a3e1e389cb7a91f2991b567543020c4e",
+  "generatedAt": "2026-08-25T23:25:30.495Z",
+  "testedCommit": "8995dc14045d28230c07364a9dde53c8a33aef39",
   "browser": "Chromium 151.0.7922.34",
   "server": "isolated local Station Vite on 127.0.0.1:43179",
   "fixtureDate": "2026-08-19",

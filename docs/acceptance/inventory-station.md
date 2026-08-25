@@ -4,10 +4,10 @@
 
 **PASS — automated evidence.** The deterministic Station gallery passed all 96 rows: 16 inventory
 fixtures × 2 locales (`ru`, `en`) × 3 exact viewports (`1024×768`, `1280×800`, `1280×1024`). The
-connected real-PostgreSQL API fixture passed all 15 inventory-sync cases across two device
+connected real-PostgreSQL API fixture passed all 16 inventory-sync cases across two device
 identities, and the cabinet inventory-detail boundary returned its tenant-scoped blocker
 projection. The evidence was generated from immutable code commit
-`f14fd538a3e1e389cb7a91f2991b567543020c4e` on branch `codex/inventory-station-v1`.
+`8995dc14045d28230c07364a9dde53c8a33aef39` on branch `codex/inventory-station-v1`.
 
 **NOT RUN — physical acceptance.** No packaged Windows/Tauri build, HID or serial scanner, two
 physical terminals, offline factory network, restart of an installed app, physical printer/driver,
@@ -18,8 +18,9 @@ unchecked in `docs/hardware-acceptance-checklist.md`.
 
 - macOS host; Node `v24.18.0`; pnpm `11.22.0`.
 - Chromium `151.0.7922.34`, isolated local Station Vite server on `127.0.0.1:43179`.
-- Disposable PostgreSQL `17.10` container and database created only for this acceptance run;
-  migrations applied through the repository migration journal. No shared database was used.
+- Disposable PostgreSQL 16 containers and databases were recreated between the focused, database,
+  and full API gates; migrations were applied through the repository migration journal. No shared
+  database was used, and the final task-scoped container was removed.
 - Gallery facts are frozen at `2026-08-19`; fixtures make no API, database, Tauri, printer, random,
   or current-time calls and contain no full raw KM, credential, PIN, pairing code, token, or
   production identifier.
@@ -75,7 +76,7 @@ All six images were inspected at their original resolution after the matrix pass
 ## Two-device API scenario
 
 The existing connected fixture in `apps/api/test/station-inventory-sync.e2e.test.ts` was run as one
-complete 15-test sequence because its progress cursor intentionally observes facts produced by
+complete 16-test sequence because its progress cursor intentionally observes facts produced by
 earlier steps. It uses the real `StationInventorySyncService` contract, real migrations and
 PostgreSQL locks with two distinct server-authorized device identities.
 
@@ -90,6 +91,15 @@ The run proves:
 - each open repack box has exactly one server-side owner; device B's explicit `clear-box` attempt
   against device A's open box returns the exact `INVENTORY_REPACK_BOX_NOT_OWNED` denial, while the
   later same-code race still invalidates the losing box deterministically;
+- forged `known_box` expansion and missing eligible `add-item` membership are terminally rejected
+  in repack mode, while repack mutations are terminally rejected in check mode;
+- mismatched and out-of-range repack date mutations are terminally rejected without changing the
+  box date, while an in-range date equal to the event date remains accepted;
+- an invalidated, unprinted box can be recovered only by its owning device through the journaled
+  `claim-lost` correction; active losing membership is removed, the box is reopened, and one exact
+  `inventory.station.repack_conflict_resolved` audit record is retained across retry;
+- rejected events are immutable server evidence, replay with the same batch or digest is stable,
+  and the Station removes only the rejected outbox row while preserving its raw diagnostic mirror;
 - pending work blocks leave, while zero-pending leave preserves a synchronized open box and leaves
   the inventory `running`;
 - cabinet `GET /inventories/:id` exposes the tenant-scoped `blockers` projection. Its connected HTTP
@@ -107,47 +117,77 @@ scanners, or printers.
 apps/station/node_modules/.bin/vitest run test/screen-gallery.test.tsx
 PASS — 44/44
 
-DATABASE_URL=<disposable-local-db> apps/api/node_modules/.bin/vitest run \
-  test/inventories-openapi.test.ts test/inventories.e2e.test.ts \
-  -t 'documents CRUD|projects tenant-scoped station close blockers'
-PASS — 2/2 selected
+packages/domain/node_modules/.bin/vitest run test/inventory-station-sync.test.ts
+PASS — 16/16
+
+packages/db/node_modules/.bin/vitest run test/sqlite-schema.test.ts
+PASS — 57/57
 
 INVENTORY_TEST_DATABASE_URL=<disposable-local-db> apps/api/node_modules/.bin/vitest run \
-  test/station-inventory-sync.e2e.test.ts -t 'owns repack boxes and membership'
-PASS — 1/1 selected (14 not selected)
+  test/station-inventory-sync.e2e.test.ts
+PASS — 16/16
+
+apps/api/node_modules/.bin/vitest run \
+  test/cors-station-surface.test.ts test/station-inventory-openapi.test.ts
+PASS — 64 CORS assertions; OpenAPI's 4 environment-gated assertions passed in the full API run
+
+node --test tools/station-release/test/verify-api-cors.test.mjs
+PASS — 158/158
 
 INVENTORY_ACCEPTANCE_ARTIFACTS=1 \
-INVENTORY_ACCEPTANCE_COMMIT=f14fd538a3e1e389cb7a91f2991b567543020c4e \
+INVENTORY_ACCEPTANCE_COMMIT=8995dc14045d28230c07364a9dde53c8a33aef39 \
 tools/production-browser/node_modules/.bin/playwright test \
   --config tools/production-browser/station-inventory.playwright.config.ts
 PASS — 96/96 matrix rows, 1/1 Playwright scenario
 
-corepack pnpm --filter @markiro/db build
-PASS
+packages/domain/node_modules/.bin/vitest run
+PASS — 28 files, 396 tests
 
-DATABASE_URL=<disposable-local-db> INVENTORY_TEST_DATABASE_URL=<same-disposable-local-db> corepack pnpm --filter @markiro/api test
-PASS — 195 files passed, 1 skipped; 1981 tests passed, 2 skipped
+packages/domain/node_modules/.bin/tsc -p tsconfig.json --noEmit
+packages/domain/node_modules/.bin/tsc -p tsconfig.test.json
+node_modules/.bin/eslint packages/domain
+packages/domain/node_modules/.bin/tsc -p tsconfig.json
+PASS — all Domain typecheck, lint, and build gates
 
-corepack pnpm --filter @markiro/api typecheck
-corepack pnpm --filter @markiro/api lint
-corepack pnpm --filter @markiro/api build
+DATABASE_URL=<disposable-local-db> packages/db/node_modules/.bin/vitest run
+PASS — 39 files, 249 tests
+
+packages/db/node_modules/.bin/tsc -p tsconfig.json --noEmit
+packages/db/node_modules/.bin/tsc -p tsconfig.test.json
+node_modules/.bin/eslint packages/db
+packages/db/node_modules/.bin/tsc -p tsconfig.json
+PASS — all database typecheck, lint, and build gates
+
+DATABASE_URL=<disposable-local-db> INVENTORY_TEST_DATABASE_URL=<same-disposable-local-db> \
+  apps/api/node_modules/.bin/vitest run
+PASS — 195 files passed, 1 skipped; 1991 tests passed, 2 skipped
+
+apps/api/node_modules/.bin/tsc -p tsconfig.json --noEmit
+node_modules/.bin/eslint apps/api
+apps/api/node_modules/.bin/nest build
 PASS — all three
 
-corepack pnpm --filter @markiro/station test
-PASS — 83 files, 1118 tests
+apps/station/node_modules/.bin/vitest run
+PASS — 83 files, 1122 tests
 
-corepack pnpm --filter @markiro/station typecheck
-corepack pnpm --filter @markiro/station lint
-corepack pnpm --filter @markiro/station build
+apps/station/node_modules/.bin/tsc -p tsconfig.json --noEmit
+node_modules/.bin/eslint apps/station
+apps/station/node_modules/.bin/vite build
 PASS — all three; build retained the existing large-chunk warning
 
-corepack pnpm format:check
+tools/production-browser/node_modules/.bin/tsc -p tools/production-browser/tsconfig.json --noEmit
+PASS
+
+node_modules/.bin/prettier --check .
 git diff --check
 PASS — both after formatting the generated JSON and this document
 ```
 
-The full API gate's one skipped file/two skipped tests are repository-declared skips, reported
-separately from the 1981 connected passes. The Station test run emitted jsdom's known canvas
-diagnostic without a failed test. `graphify update .` also passed after the sandboxed first attempt
-was retried with its required filesystem access (18,267 nodes / 35,947 edges). Local database URLs
-and test-only credentials are omitted; no production secret was used or recorded.
+The full API gate's one skipped file/two skipped tests are the repository-declared local Mailpit/
+MinIO lifecycle suite and real-command local-infrastructure smoke. They are reported separately from
+the 1991 connected passes. The API run emitted its existing Vite native-config warning and expected
+injected-failure logs; the Station run emitted jsdom's known canvas diagnostic; none failed a test.
+`graphify update .` passed after the sandboxed first attempt was retried with its required filesystem
+access (18,273 nodes / 35,971 edges), with 32 pre-existing partial Astro syntax extractions and a
+stale community-label notice. Local database URLs and test-only credentials are omitted; no
+production secret was used or recorded.
