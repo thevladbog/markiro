@@ -541,6 +541,7 @@ async function firstUnknownObservation(
       WHERE inventory_id = ? AND snapshot_id = ?
         AND normalized_identity = ?
         AND commit_state IN ('pending', 'committed')
+        AND local_verdict = 'unknown'
       ORDER BY device_sequence, device_id, event_id
       LIMIT 1`,
     [inventoryId, snapshotId, event.normalized_identity],
@@ -796,15 +797,7 @@ async function rebuildLegacyProjection(
     const origin = facts[0]?.origin;
     if (verdict === "duplicate") {
       if (await hasValidPriorRepresentative(exec, event, inventoryId, snapshotId)) return true;
-      if (origin !== undefined) return false;
-      await exec.run(
-        `UPDATE inventory_scan_events_mirror SET local_verdict = 'unknown'
-          WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?
-            AND legacy_audit_version = 0 AND commit_state = 'pending'`,
-        [inventoryId, snapshotId, event.event_id],
-      );
-      event.local_verdict = "unknown";
-      return true;
+      return false;
     }
     if (verdict === "unknown") return origin === undefined;
     if (!origin || verdict !== origin || !event.active_production_date) return false;
@@ -869,15 +862,7 @@ async function rebuildLegacyProjection(
   );
   if (verdict === "duplicate") {
     if (await hasValidPriorRepresentative(exec, event, inventoryId, snapshotId)) return true;
-    if (children.length > 0) return false;
-    await exec.run(
-      `UPDATE inventory_scan_events_mirror SET local_verdict = 'unknown'
-        WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?
-          AND legacy_audit_version = 0 AND commit_state = 'pending'`,
-      [inventoryId, snapshotId, event.event_id],
-    );
-    event.local_verdict = "unknown";
-    return true;
+    return false;
   }
   if (verdict === "unknown") return children.length === 0;
   if (event.kind !== "known_box" || children.length === 0 || !event.active_production_date) {
@@ -1038,23 +1023,22 @@ async function repairOneLegacyEvent(
   }
   const verdict = inventoryVerdict(event.local_verdict);
   if (verdict === "invalid") throw new Error("invalid inventory noise cannot be repaired");
+  const payloadJson = eventPayload(event, verdict);
   await exec.run(
     `INSERT INTO inventory_outbox
        (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
      VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(inventory_id, snapshot_id, event_id) DO UPDATE SET
-       device_sequence = excluded.device_sequence,
-       payload_json = excluded.payload_json,
-       created_at = excluded.created_at`,
-    [
-      inventoryId,
-      snapshotId,
-      event.event_id,
-      event.device_sequence,
-      eventPayload(event, verdict),
-      event.scanned_at,
-    ],
+     ON CONFLICT(inventory_id, snapshot_id, event_id) DO NOTHING`,
+    [inventoryId, snapshotId, event.event_id, event.device_sequence, payloadJson, event.scanned_at],
   );
+  const queued = await outboxRow(exec, inventoryId, snapshotId, event.event_id);
+  if (
+    !queued ||
+    queued.device_sequence !== event.device_sequence ||
+    queued.payload_json !== payloadJson
+  ) {
+    throw new Error("inventory legacy repair has inconsistent durable output");
+  }
   await finalizePendingEvent(exec, inventoryId, snapshotId, event.event_id);
   return "committed";
 }
@@ -1148,104 +1132,6 @@ async function reconcileOnePendingEvent(
   return "failed";
 }
 
-async function duplicateCanBecomeUnknown(
-  exec: SqlExecutor,
-  event: ExistingEventRow,
-  inventoryId: string,
-  snapshotId: string,
-): Promise<boolean> {
-  if (!event.raw_payload) return false;
-  const parsed = classifyScan(event.raw_payload);
-  if (event.kind === "item") {
-    if (parsed.kind !== "km") return false;
-    const codeHash = kmHash(parsed.km);
-    if (event.code_hash !== codeHash || event.normalized_identity !== `item:${codeHash}`) {
-      return false;
-    }
-    const rows = await exec.all<{ count: number }>(
-      `SELECT COUNT(*) AS count FROM inventory_snapshot_codes_mirror
-        WHERE snapshot_id = ? AND code_hash = ?
-          AND EXISTS (
-            SELECT 1 FROM inventory_task_mirror
-             WHERE inventory_id = ? AND active_snapshot_id = ?
-          )`,
-      [snapshotId, codeHash, inventoryId, snapshotId],
-    );
-    return (rows[0]?.count ?? 0) === 0;
-  }
-  if (parsed.kind !== "sscc" || event.normalized_identity !== `${event.kind}:${parsed.sscc}`) {
-    return false;
-  }
-  const rows = await exec.all<{ count: number }>(
-    `SELECT COUNT(*) AS count FROM inventory_snapshot_codes_mirror
-      WHERE snapshot_id = ? AND parent_sscc = ?
-        AND EXISTS (
-          SELECT 1 FROM inventory_task_mirror
-           WHERE inventory_id = ? AND active_snapshot_id = ?
-        )`,
-    [snapshotId, parsed.sscc, inventoryId, snapshotId],
-  );
-  return (rows[0]?.count ?? 0) === 0;
-}
-
-async function reconcileCommittedDuplicates(
-  exec: SqlExecutor,
-  inventoryId: string,
-  snapshotId: string,
-): Promise<void> {
-  const duplicates = await exec.all<ExistingEventRow>(
-    `SELECT event_id, device_id, device_sequence, operator_id, scanned_at, kind,
-            normalized_identity, code_hash, raw_payload, active_production_date,
-            local_verdict, commit_state, legacy_audit_version
-       FROM inventory_scan_events_mirror
-      WHERE inventory_id = ? AND snapshot_id = ? AND local_verdict = 'duplicate'
-        AND commit_state = 'committed' AND legacy_audit_version = 1
-      ORDER BY device_sequence, device_id, event_id`,
-    [inventoryId, snapshotId],
-  );
-  for (const event of duplicates) {
-    if (await hasValidPriorRepresentative(exec, event, inventoryId, snapshotId)) continue;
-    if (await duplicateCanBecomeUnknown(exec, event, inventoryId, snapshotId)) {
-      event.local_verdict = "unknown";
-      await exec.run(
-        `UPDATE inventory_scan_events_mirror SET local_verdict = 'unknown'
-          WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?
-            AND commit_state = 'committed' AND local_verdict = 'duplicate'`,
-        [inventoryId, snapshotId, event.event_id],
-      );
-      await exec.run(
-        `INSERT INTO inventory_outbox
-           (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(inventory_id, snapshot_id, event_id) DO UPDATE SET
-           device_sequence = excluded.device_sequence,
-           payload_json = excluded.payload_json,
-           created_at = excluded.created_at`,
-        [
-          inventoryId,
-          snapshotId,
-          event.event_id,
-          event.device_sequence,
-          eventPayload(event, "unknown"),
-          event.scanned_at,
-        ],
-      );
-      continue;
-    }
-    await exec.run(
-      `DELETE FROM inventory_outbox
-        WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?`,
-      [inventoryId, snapshotId, event.event_id],
-    );
-    await exec.run(
-      `UPDATE inventory_scan_events_mirror SET commit_state = 'failed'
-        WHERE inventory_id = ? AND snapshot_id = ? AND event_id = ?
-          AND commit_state = 'committed' AND local_verdict = 'duplicate'`,
-      [inventoryId, snapshotId, event.event_id],
-    );
-  }
-}
-
 async function reconcilePendingInventoryEventsInternal(
   exec: SqlExecutor,
   inventoryId: string,
@@ -1283,7 +1169,6 @@ async function reconcilePendingInventoryEventsInternal(
     const state = await reconcileOnePendingEvent(exec, event, inventoryId, snapshotId);
     if (state === "committed") recoveredCommitted += 1;
   }
-  await reconcileCommittedDuplicates(exec, inventoryId, snapshotId);
   const unresolved = await exec.all<{ failed_count: number }>(
     `SELECT COUNT(*) AS failed_count
        FROM inventory_scan_events_mirror failed
@@ -1295,6 +1180,10 @@ async function reconcilePendingInventoryEventsInternal(
              AND replacement.snapshot_id = failed.snapshot_id
              AND replacement.normalized_identity = failed.normalized_identity
              AND replacement.commit_state = 'committed'
+             AND replacement.legacy_audit_version = 1
+             AND replacement.local_verdict IN (
+               'expected', 'protected', 'known-ineligible', 'unknown'
+             )
         )`,
     [inventoryId, snapshotId],
   );
@@ -1494,7 +1383,7 @@ export async function readInventoryProgress(
        + (SELECT COUNT(*) FROM (
             SELECT unknown_event.normalized_identity
               FROM committed_events unknown_event
-             WHERE unknown_event.local_verdict IN ('unknown', 'duplicate')
+             WHERE unknown_event.local_verdict = 'unknown'
                AND (
                  unknown_event.kind = 'old_box'
                  OR (
@@ -1625,7 +1514,7 @@ export async function listRecentInventoryOperations(
             WHERE source.inventory_id = e.inventory_id
               AND source.snapshot_id = e.snapshot_id
               AND source.normalized_identity = e.normalized_identity
-              AND source.local_verdict IN ('unknown', 'duplicate')
+              AND source.local_verdict = 'unknown'
               AND source.commit_state = 'committed'
               AND (
                 source.kind = 'old_box'
