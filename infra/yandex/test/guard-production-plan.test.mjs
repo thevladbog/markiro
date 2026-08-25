@@ -590,7 +590,17 @@ test("guard CLI identifies changed app security-group fields without their value
     {
       before: { ingress: [{ description: "old-ingress-rule" }] },
       after: { ingress: [{ description: "do-not-print-this-plan-value" }] },
-      scope: "ingress",
+      scope: "ingress-description",
+    },
+    {
+      before: { ingress: [{ from_port: 8080, to_port: 8080 }] },
+      after: { ingress: [{ from_port: 80, to_port: 80 }] },
+      scope: "ingress-from-port-and-to-port",
+    },
+    {
+      before: { ingress: [{ security_group_id: "old-security-group" }] },
+      after: { ingress: [{ v4_cidr_blocks: ["do-not-print-this-plan-value"] }] },
+      scope: "ingress-security-group-and-v4-cidrs",
     },
     {
       before: { egress: [{ description: "old-egress-rule" }] },
@@ -626,7 +636,7 @@ test("guard CLI identifies changed app security-group fields without their value
         stderr = String(error.stderr);
       }
       assert.equal(stderr, `production plan rejected (safe-action-app-security-group-${scope})\n`);
-      assert.doesNotMatch(stderr, /old-|do-not-print-this-plan-value/);
+      assert.doesNotMatch(stderr, /old-|8080|do-not-print-this-plan-value/);
     });
   }
 });

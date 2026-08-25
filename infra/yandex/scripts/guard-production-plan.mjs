@@ -108,6 +108,16 @@ const appSecurityGroupFieldScopes = new Map([
   ["network_id", "network"],
   ["status", "status"],
 ]);
+const appSecurityGroupRuleFieldScopes = new Map([
+  ["description", "description"],
+  ["from_port", "from-port"],
+  ["predefined_target", "predefined-target"],
+  ["protocol", "protocol"],
+  ["security_group_id", "security-group"],
+  ["to_port", "to-port"],
+  ["v4_cidr_blocks", "v4-cidrs"],
+  ["v6_cidr_blocks", "v6-cidrs"],
+]);
 
 const retiredProductionResources = new Map([
   ["yandex_logging_group.application", "yandex_logging_group"],
@@ -230,6 +240,48 @@ function changedKeys(beforeValue, afterValue) {
     .filter((key) => !isDeepStrictEqual(beforeValue[key], afterValue[key]));
 }
 
+function stableValueSignature(value) {
+  if (Array.isArray(value)) {
+    return `[${value
+      .map((item) => stableValueSignature(item))
+      .sort()
+      .join(",")}]`;
+  }
+  if (object(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableValueSignature(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+
+function changedArrayObjectKeys(beforeValue, afterValue) {
+  if (
+    !Array.isArray(beforeValue) ||
+    !Array.isArray(afterValue) ||
+    beforeValue.some((item) => !object(item)) ||
+    afterValue.some((item) => !object(item))
+  )
+    return null;
+
+  const keys = [
+    ...new Set([
+      ...beforeValue.flatMap((item) => Object.keys(item)),
+      ...afterValue.flatMap((item) => Object.keys(item)),
+    ]),
+  ].sort();
+  const signatures = (items, key) =>
+    items
+      .map((item) =>
+        Object.hasOwn(item, key) ? `present:${stableValueSignature(item[key])}` : "absent",
+      )
+      .sort();
+  return keys.filter(
+    (key) => !isDeepStrictEqual(signatures(beforeValue, key), signatures(afterValue, key)),
+  );
+}
+
 function appComputeActionScope(resource) {
   const beforeValue = resource.change?.before;
   const afterValue = resource.change?.after;
@@ -255,11 +307,27 @@ function appComputeActionScope(resource) {
 }
 
 function appSecurityGroupActionScope(resource) {
-  const fields = changedKeys(resource.change?.before, resource.change?.after);
+  const beforeValue = resource.change?.before;
+  const afterValue = resource.change?.after;
+  const fields = changedKeys(beforeValue, afterValue);
   if (!fields || fields.length === 0) return "safe-action-app-security-group";
 
   const scopes = [
-    ...new Set(fields.map((field) => appSecurityGroupFieldScopes.get(field) ?? "other")),
+    ...new Set(
+      fields.map((field) => {
+        if (field !== "ingress") return appSecurityGroupFieldScopes.get(field) ?? "other";
+        const ingressFields = changedArrayObjectKeys(beforeValue.ingress, afterValue.ingress);
+        if (!ingressFields || ingressFields.length === 0) return "ingress";
+        const ingressScopes = [
+          ...new Set(
+            ingressFields.map(
+              (ingressField) => appSecurityGroupRuleFieldScopes.get(ingressField) ?? "other",
+            ),
+          ),
+        ].sort();
+        return `ingress-${ingressScopes.join("-and-")}`;
+      }),
+    ),
   ].sort();
   if (scopes.length === 1 && scopes[0] === "other") return "safe-action-app-security-group";
   return `safe-action-app-security-group-${scopes.join("-and-")}`;
