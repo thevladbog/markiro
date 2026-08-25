@@ -64,17 +64,17 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/",
     alternatePath: "/en/",
     locale: "ru",
-    title: "Markiro — маркировка и агрегация для производства",
+    title: "ПО для маркировки пива и агрегации коробов — Markiro",
     description:
-      "Markiro помогает проверять коды, печатать этикетки, собирать короба и паллеты и сохранять прослеживаемость на производственной линии.",
-    heading: "Линия идёт. Маркировка под контролем.",
+      "ПО для маркировки пива и слабоалкогольных напитков: проверка кодов, агрегация коробов и работа станции при нестабильной сети.",
+    heading: "Маркировка и агрегация. Линия идёт.",
     navigationLabel: "Markiro",
     eyebrow: "Маркировка / агрегация / прослеживаемость",
     introduction:
-      "Производственная система для проверки кодов, упаковки, агрегации и восстановления операций без остановки линии.",
+      "Производственная система для пива, сидра и слабоалкогольных напитков: проверка кодов, упаковка, агрегация и восстановление операций без остановки линии.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT,
-    reviewedAt: "2026-08-14",
+    reviewedAt: "2026-08-26",
     relatedPaths: ["/markirovka-chestny-znak/", "/sscc-i-agregatsiya/", "/oflayn-rabota/"],
     sections: [],
   },
@@ -109,7 +109,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
         ],
         bullets: [
           "результат проверки кода;",
-          "связь единицы с коробом или паллетой;",
+          "связь единицы с коробом;",
           "ошибки и действия восстановления;",
           "состояние синхронизации локальных операций.",
         ],
@@ -126,41 +126,85 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/sscc-i-agregatsiya/",
     alternatePath: "/en/sscc-and-aggregation/",
     locale: "ru",
-    title: "SSCC и агрегация коробов и паллет — Markiro",
+    title: "SSCC и агрегация коробов с пивной продукцией — Markiro",
     description:
-      "Markiro помогает собирать единицы в короба и паллеты, проверять иерархию упаковки по SSCC и сохранять историю агрегации и восстановления.",
-    heading: "SSCC и агрегация без потери иерархии упаковки",
+      "Markiro собирает маркированное пиво и слабоалкогольные напитки в короба, проверяет SSCC и сохраняет историю агрегации и восстановления.",
+    heading: "SSCC и агрегация коробов для пивной продукции",
     navigationLabel: "SSCC и агрегация",
-    eyebrow: "Единица → короб → паллета",
+    eyebrow: "Единица → короб",
     introduction:
-      "SSCC — серийный код транспортной упаковки. В Markiro он становится идентификатором короба или паллеты, с которым связаны вложенные единицы и история операций.",
+      "Markiro сейчас ориентирован на производственные сценарии товарной группы «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки», включая сидр. Новые товарные группы добавляются поэтапно. Для конкретного товара применимость проверяется по кодам ТН ВЭД ЕАЭС и ОКПД 2 и фактическому процессу линии.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT,
-    reviewedAt: "2026-08-14",
+    reviewedAt: "2026-08-26",
     relatedPaths: ["/markirovka-chestny-znak/", "/rabochee-mesto-upakovki/", "/oflayn-rabota/"],
     sections: [
       {
-        heading: "Как строится иерархия",
+        heading: "Что такое SSCC в агрегации",
         paragraphs: [
-          "Оператор открывает упаковку, сканирует вложенные коды и закрывает её после проверки состава. Для следующего уровня готовый короб становится вложением паллеты.",
+          "SSCC — 18-значный идентификатор логистической единицы: например, короба или паллеты. В текущем сценарии Markiro он идентифицирует короб. В штрихкоде и при обмене с внешними системами SSCC может передаваться с идентификатором применения GS1 AI (00), поэтому оператор видит 20 цифр, а система хранит нормализованное 18-значное значение.",
+          "Код единицы товара и SSCC решают разные задачи. Код маркировки идентифицирует конкретную потребительскую упаковку, а SSCC связывает транспортную упаковку с её составом и уровнем в иерархии.",
+        ],
+      },
+      {
+        heading: "Как единицы собираются в короб",
+        paragraphs: [
+          "Оператор открывает короб на рабочей станции и последовательно сканирует коды маркировки бутылок, банок или другой потребительской упаковки. Markiro связывает принятые коды с открытым коробом и показывает его заполнение. После проверки состава оператор закрывает короб и печатает его этикетку.",
+          "Текущий поддерживаемый уровень — цепочка «единица → короб». Паллетная агрегация, где закрытые короба становятся вложениями паллеты, будет добавлена отдельным следующим этапом.",
         ],
         bullets: [
-          "один код не должен одновременно принадлежать разным открытым упаковкам;",
-          "состав проверяется до закрытия;",
-          "каждое изменение остаётся отдельным событием;",
-          "ошибка не должна останавливать работу остальных операций линии.",
+          "рабочая станция получает доступный диапазон SSCC и расходует номера последовательно;",
+          "код связывается с конкретной открытой упаковкой и рабочей сменой;",
+          "состав и количество единиц видны до закрытия короба;",
+          "этикетка строится из тех же данных, которые прошли проверку.",
         ],
       },
       {
-        heading: "Зачем сохранять события, а не только итог",
+        heading: "Что Markiro проверяет до закрытия упаковки",
         paragraphs: [
-          "Итоговая связь показывает текущее состояние, а журнал объясняет, как оно появилось. Это необходимо для разбора расхождений, повторной синхронизации и контролируемого восстановления.",
+          "Проверка происходит на границе каждой операции. Проблемный код не должен незаметно перейти в готовую транспортную упаковку, а ошибка одного сканирования не должна лишать оператора возможности продолжать допустимые действия.",
+        ],
+        bullets: [
+          "распознан ли формат кода и относится ли он к текущему заданию;",
+          "не был ли этот код уже принят или связан с другой упаковкой;",
+          "достигнуто ли ожидаемое количество единиц в коробе;",
+          "какой короб, станция, смена и оператор создали событие;",
+          "подтверждена ли печать этикетки или требуется отдельное действие.",
         ],
       },
       {
-        heading: "Работа при нестабильной сети",
+        heading: "Почему журнал событий важнее одного итогового состояния",
         paragraphs: [
-          "Локальная станция продолжает регистрировать допустимые операции. После восстановления связи очередь отправляется повторяемо, а конфликт должен стать видимым и восстанавливаемым.",
+          "Итоговая связь показывает, какие единицы сейчас относятся к коробу. Журнал объясняет, как это состояние появилось: кто отсканировал код, когда упаковка была закрыта, что отправлялось на печать и где возникло отклонение.",
+          "Такой порядок нужен для разбора расхождений и восстановления после сбоя. Закрытая упаковка не исправляется незаметно: изменение состава, исключение кода или разагрегация должны оставаться отдельным контролируемым действием.",
+        ],
+      },
+      {
+        heading: "Как агрегация работает при нестабильной сети",
+        paragraphs: [
+          "Рабочая станция хранит локальное задание, диапазон SSCC, открытые упаковки и журнал сканирований. Поэтому допустимые операции не зависят от ответа сервера на каждом шаге и могут продолжаться при временном разрыве связи.",
+          "После восстановления сети локальная очередь отправляется повторяемо. Подтверждённые сервером события удаляются из очереди, а конфликт между устройствами сохраняется и становится видимым для ответственного сотрудника. Markiro не маскирует конфликт автоматическим выбором, который нельзя проверить.",
+        ],
+      },
+      {
+        heading: "Граница Markiro и внешних систем",
+        paragraphs: [
+          "Markiro формирует и сохраняет производственный факт агрегации: SSCC, состав упаковки, родительские связи и историю операций. Передача сведений в систему маркировки «Честный знак», 1С или другой внешний контур выполняется только по согласованному интеграционному контракту предприятия.",
+          "Демонстрация начинается с проверки текущего задания, правил упаковки, источника SSCC и требуемого выходного документа. Это позволяет не обещать универсальный обмен там, где состав данных и ответственность сторон ещё не определены.",
+        ],
+      },
+      {
+        heading: "Что подготовить для демонстрации агрегации",
+        paragraphs: [
+          "Для предметного разбора достаточно одного реального сценария линии. Мы сопоставим его с текущими возможностями Markiro и отдельно обозначим, какие настройки или интеграции потребуются.",
+        ],
+        bullets: [
+          "вид продукции и коды ТН ВЭД ЕАЭС и ОКПД 2;",
+          "тип потребительской и транспортной упаковки;",
+          "количество единиц в коробе и, если это требуется в будущем, планируемое количество коробов на паллете;",
+          "модели сканеров и принтеров;",
+          "источник производственного задания и диапазонов SSCC;",
+          "состав обмена с 1С и системой маркировки.",
         ],
       },
     ],
@@ -367,17 +411,17 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/en/",
     alternatePath: "/",
     locale: "en",
-    title: "Markiro — production serialization and aggregation",
+    title: "Beer serialization and case aggregation software — Markiro",
     description:
-      "Markiro verifies serialized codes, prints labels, aggregates cases and pallets, and keeps production traceability available when the network is down.",
-    heading: "Keep the line moving. Keep serialization under control.",
+      "Serialization software for beer and low-alcohol beverages: code verification, case aggregation, and resilient workstation operation.",
+    heading: "Serialization and aggregation. Keep the line moving.",
     navigationLabel: "Markiro",
     eyebrow: "Serialization / aggregation / traceability",
     introduction:
-      "A production system for code verification, packing, aggregation, and recoverable operations without stopping the line.",
+      "A production system for beer, cider and low-alcohol beverages: code verification, packing, aggregation, and recoverable operations without stopping the line.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: "Markiro — production serialization, aggregation, and traceability",
-    reviewedAt: "2026-08-14",
+    reviewedAt: "2026-08-26",
     relatedPaths: [
       "/en/chestny-znak-serialization/",
       "/en/sscc-and-aggregation/",
@@ -416,7 +460,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
         ],
         bullets: [
           "code validation results;",
-          "the relationship between an item, case, or pallet;",
+          "the relationship between an item and its case;",
           "errors and recovery actions;",
           "the synchronization state of local operations.",
         ],
@@ -433,17 +477,17 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/en/sscc-and-aggregation/",
     alternatePath: "/sscc-i-agregatsiya/",
     locale: "en",
-    title: "SSCC case and pallet aggregation — Markiro",
+    title: "SSCC case aggregation for beer production — Markiro",
     description:
-      "Markiro aggregates items into cases and pallets, validates the SSCC packaging hierarchy, and retains the history required for controlled recovery.",
-    heading: "SSCC aggregation without losing the packaging hierarchy",
+      "Markiro aggregates serialized beer and low-alcohol beverages into cases, validates SSCC relationships, and retains recovery history.",
+    heading: "SSCC case aggregation for beer production",
     navigationLabel: "SSCC and aggregation",
-    eyebrow: "Item → case → pallet",
+    eyebrow: "Item → case",
     introduction:
-      "An SSCC identifies a logistics unit. In Markiro, it identifies a case or pallet together with its contents and complete aggregation history.",
+      "Markiro currently focuses on production workflows for the Chestny ZNAK product group “Beer, beverages made from beer and low-alcohol beverages”, including cider. Additional product categories are being added gradually. Applicability to a specific product is checked against its TN VED EAEU and OKPD 2 codes and the actual line process.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: "Markiro — production serialization, aggregation, and traceability",
-    reviewedAt: "2026-08-14",
+    reviewedAt: "2026-08-26",
     relatedPaths: [
       "/en/chestny-znak-serialization/",
       "/en/packing-workstation/",
@@ -451,27 +495,71 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     ],
     sections: [
       {
-        heading: "How the hierarchy is built",
+        heading: "What an SSCC means in aggregation",
         paragraphs: [
-          "The operator opens a pack, scans its contents, and closes it after validation. At the next level, the completed case becomes an item inside a pallet.",
+          "An SSCC is the 18-digit identifier of a logistics unit such as a case or pallet. In Markiro's current workflow it identifies a case. In a barcode and external exchange the SSCC can be represented with the GS1 Application Identifier (00), so the operator may see 20 digits while the system stores the normalized 18-digit value.",
+          "A serialized product code and an SSCC serve different purposes. The serialized code identifies an individual consumer unit; the SSCC connects a transport pack to its contents and its level in the packaging hierarchy.",
+        ],
+      },
+      {
+        heading: "How items become cases",
+        paragraphs: [
+          "The operator opens a case at the workstation and scans the serialized codes on bottles, cans, or other consumer packs. Markiro connects accepted codes to that open case and displays its fill state. After validating the contents, the operator closes the case and prints its label.",
+          "The currently supported level is the item-to-case chain. Pallet aggregation, where closed cases become items inside a pallet, will be added as a separate next stage.",
         ],
         bullets: [
-          "one code cannot belong to two open packs at the same time;",
-          "contents are validated before closing;",
-          "every change remains a separate event;",
-          "one error must not stop unrelated line operations.",
+          "the workstation receives an available SSCC range and consumes numbers sequentially;",
+          "each code is associated with a specific open pack and production shift;",
+          "contents and item count remain visible before the case is closed;",
+          "the label uses the same data that passed validation.",
         ],
       },
       {
-        heading: "Why events matter as much as the result",
+        heading: "What Markiro validates before closing a pack",
         paragraphs: [
-          "The final relationship shows the current state; the event log explains how it was created. That history supports discrepancy analysis, safe resynchronization, and controlled recovery.",
+          "Validation happens at each operation boundary. A problematic code must not silently enter a completed logistics unit, while one rejected scan must not prevent the operator from continuing unrelated permitted work.",
+        ],
+        bullets: [
+          "whether the code format is recognized and belongs to the active order;",
+          "whether the code was already accepted or associated with another pack;",
+          "whether the expected number of items has been reached;",
+          "which case, workstation, shift, and operator produced the event;",
+          "whether label printing was confirmed or needs a separate action.",
         ],
       },
       {
-        heading: "Working through unstable connectivity",
+        heading: "Why the event log matters more than a final snapshot",
         paragraphs: [
-          "The local station keeps recording permitted operations. When connectivity returns, the queue can be submitted safely and any conflict remains visible and recoverable.",
+          "The final relationship shows which items currently belong to a case. The event log explains how that state was created: who scanned a code, when the pack was closed, what was sent to print, and where an exception appeared.",
+          "This ordered history supports discrepancy analysis and recovery after a failure. A closed pack is not edited silently: changing its contents, releasing a code, or disaggregating the pack remains a separate controlled action.",
+        ],
+      },
+      {
+        heading: "How aggregation continues through unstable connectivity",
+        paragraphs: [
+          "The workstation retains the local order, SSCC range, open packs, and scan journal. Permitted operations therefore do not depend on a server response at every step and can continue through a temporary connection loss.",
+          "When connectivity returns, the local queue is submitted idempotently. Server-accepted events leave the queue, while a cross-device conflict is retained and made visible to the responsible user. Markiro does not hide the conflict behind an automatic choice that cannot be audited.",
+        ],
+      },
+      {
+        heading: "The boundary between Markiro and external systems",
+        paragraphs: [
+          "Markiro creates and retains the production fact of aggregation: the SSCC, pack contents, parent-child relationships, and operation history. Submission to Chestny ZNAK, 1C, or another external system follows the plant's agreed integration contract.",
+          "A demonstration begins by checking the active production order, packing rules, SSCC source, and required output document. This prevents a generic integration promise where the data contract and ownership have not yet been defined.",
+        ],
+      },
+      {
+        heading: "What to prepare for an aggregation demonstration",
+        paragraphs: [
+          "One real line workflow is enough for a focused review. We will compare it with current Markiro capabilities and identify any configuration or integration work separately.",
+        ],
+        bullets: [
+          "product type and its TN VED EAEU and OKPD 2 codes;",
+          "consumer and transport packaging formats;",
+          "items per case and, when relevant for future scope, the planned number of cases per pallet;",
+          "scanner and printer models;",
+          "the source of production orders and SSCC ranges;",
+          "the required exchange with 1C and the serialization system.",
         ],
       },
     ],
