@@ -8,7 +8,7 @@
 - GA4 web stream Measurement ID: `G-WSYRNLH3K9`.
 - Production origin: `https://markiro.app`.
 
-GTM-контейнер загружается сайтом только после согласия на категорию «Аналитика» или «Маркетинг». До выбора сайт передаёт Google Consent Mode v2 со значениями `denied`; при изменении выбора передаются актуальные `analytics_storage`, `ad_storage`, `ad_user_data` и `ad_personalization`. Теги ниже дополнительно ограничиваются собственной категорией consent, чтобы analytics-тег не сработал при выборе только маркетинга.
+В этой release-конфигурации GTM-контейнер загружается сайтом только после согласия на категорию «Аналитика». Выбор только «Маркетинг» сохраняется, но не загружает контейнер, пока marketing-тегов нет. До выбора сайт ставит в очередь Google Consent Mode v2 со значениями `denied`; при изменении выбора передаются актуальные `analytics_storage`, `ad_storage`, `ad_user_data` и `ad_personalization`. Теги ниже дополнительно требуют `analytics_storage`.
 
 ## Границы данных
 
@@ -38,14 +38,14 @@ GTM-контейнер загружается сайтом только посл
 
 Google tag отвечает за `page_view`, автоматически собираемые события и включённые возможности Enhanced Measurement. Отдельный GA4 configuration tag не создавать.
 
-## 3. Создать trigger микро-событий
+## 3. Создать trigger событий клика
 
 1. Открыть **Triggers → New → Custom Event**.
-2. Название: `CE - Landing micro events`.
+2. Название: `CE - Landing clicks`.
 3. Event name:
 
    ```text
-   ^landing_(demo_click|phone_click|form_start|form_submit|form_error)$
+   ^landing_(demo_click|phone_click)$
    ```
 
 4. Включить **Use regex matching**.
@@ -53,33 +53,62 @@ Google tag отвечает за `page_view`, автоматически соб�
 
 События приходят из сайта только при выданном analytics-consent:
 
-| Event                 | Когда возникает                                 | Параметры                                                                                    |
-| --------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `landing_demo_click`  | Нажат CTA перехода к demo                       | `placement`: `header`, `hero` или `seo-hero`                                                 |
-| `landing_phone_click` | Нажат публичный телефон                         | `placement`: `header`, `hero` или `demo`                                                     |
-| `landing_form_start`  | Первое изменение поля формы                     | нет                                                                                          |
-| `landing_form_submit` | Реальная попытка отправить форму, включая Enter | нет                                                                                          |
-| `landing_form_error`  | Проверка или отправка завершилась ошибкой       | `errorClass`: `validation`, `unavailable`, `captcha`, `rate_limited`, `server` или `network` |
+| Event                 | Когда возникает           | Параметры                                    |
+| --------------------- | ------------------------- | -------------------------------------------- |
+| `landing_demo_click`  | Нажат CTA перехода к demo | `placement`: `header`, `hero` или `seo-hero` |
+| `landing_phone_click` | Нажат публичный телефон   | `placement`: `header`, `hero` или `demo`     |
 
-## 4. Создать GA4 tag микро-событий
+## 4. Создать GA4 tag событий клика
 
 1. Открыть **Tags → New → Google Analytics: GA4 Event**.
-2. Название: `GA4 - Landing micro events`.
+2. Название: `GA4 - Landing clicks`.
 3. Measurement ID: `G-WSYRNLH3K9`.
 4. Event Name: `{{Event}}`.
-5. Добавить event parameters:
+5. Добавить event parameter:
 
-   | Event Parameter | Value                   |
-   | --------------- | ----------------------- |
-   | `placement`     | `{{DLV - placement}}`   |
-   | `error_class`   | `{{DLV - error_class}}` |
+   | Event Parameter | Value                 |
+   | --------------- | --------------------- |
+   | `placement`     | `{{DLV - placement}}` |
 
-6. Trigger: `CE - Landing micro events`.
+6. Trigger: `CE - Landing clicks`.
 7. В **Advanced Settings → Consent Settings** потребовать `analytics_storage`.
 
-Пустые необязательные параметры не должны подменяться строками `undefined`, `null` или `not set` через Custom JavaScript.
+## 5. Создать события жизненного цикла формы
 
-## 5. Создать lead conversion
+1. Создать Custom Event trigger:
+   - название `CE - Landing form lifecycle`;
+   - Event name `^landing_(form_start|form_submit)$`;
+   - включить **Use regex matching**;
+   - All Custom Events.
+2. Создать **Google Analytics: GA4 Event** tag:
+   - название `GA4 - Landing form lifecycle`;
+   - Measurement ID `G-WSYRNLH3K9`;
+   - Event Name `{{Event}}`;
+   - event parameters не добавлять;
+   - trigger `CE - Landing form lifecycle`;
+   - additional consent `analytics_storage`.
+
+`landing_form_start` возникает при первом изменении поля. `landing_form_submit` возникает при реальной попытке отправить форму, включая Enter, но ещё не означает принятую заявку.
+
+## 6. Создать событие ошибки формы
+
+1. Создать Custom Event trigger:
+   - название `CE - Landing form error`;
+   - Event name `landing_form_error`;
+   - All Custom Events.
+2. Создать **Google Analytics: GA4 Event** tag:
+   - название `GA4 - Landing form error`;
+   - Measurement ID `G-WSYRNLH3K9`;
+   - Event Name `landing_form_error`;
+   - event parameter `error_class` = `{{DLV - error_class}}`;
+   - trigger `CE - Landing form error`;
+   - additional consent `analytics_storage`.
+
+Допустимые значения `error_class`: `validation`, `unavailable`, `captcha`, `rate_limited`, `server`, `network`.
+
+Параметры намеренно разделены по тегам: `placement` не прикрепляется к событиям формы, а `error_class` — к кликам или следующим попыткам. Не объединять эти теги в один общий tag с обеими Data Layer variables: значения Data Layer могут сохраняться между событиями.
+
+## 7. Создать lead conversion
 
 1. Создать Custom Event trigger:
    - название `CE - Landing form success`;
@@ -98,7 +127,7 @@ Google tag отвечает за `page_view`, автоматически соб�
 
 `landing_form_success` возникает только после принятого API-ответа `202`; клик по кнопке или клиентская валидация не считаются лидом.
 
-## 6. Настроить Enhanced Measurement
+## 8. Настроить Enhanced Measurement
 
 В GA4 открыть **Admin → Data Streams → markiro.app → Enhanced Measurement**:
 
@@ -110,19 +139,20 @@ Google tag отвечает за `page_view`, автоматически соб�
 
 Site search и Video engagement включать только после появления соответствующих функций.
 
-## 7. Проверить до публикации
+## 9. Проверить до публикации
 
 1. В GTM нажать **Preview**, подключить `https://markiro.app` через Tag Assistant.
 2. В чистой сессии до выбора cookies убедиться, что запросов `gtm.js`, `g/collect` и analytics cookies нет.
-3. Выбрать только «Аналитика». Проверить один Google tag и один `page_view`.
-4. Проверить CTA с placement `header`, `hero` и `seo-hero`.
-5. Проверить три телефонных placement: `header`, `hero`, `demo`.
-6. Начать заполнение формы, отправить невалидную форму, затем успешно отправить контролируемую тестовую заявку.
-7. В Tag Assistant и GA4 DebugView подтвердить ровно по одному `landing_form_submit`, `landing_form_error` для ошибки и `generate_lead` для принятой заявки.
-8. Проверить Reject all в новой чистой сессии: GA4-теги и события не должны срабатывать.
-9. Проверить выбор только «Маркетинг»: GA4-теги не должны срабатывать из-за required `analytics_storage`.
+3. Выбрать только «Маркетинг». Убедиться, что `gtm.js`, Google tag, `page_view` и GA4 events не появились.
+4. Не перезагружая страницу, дополнительно включить «Аналитику». Проверить загрузку одного GTM container, одного Google tag и одного `page_view`.
+5. Проверить CTA с placement `header`, `hero` и `seo-hero`.
+6. Проверить три телефонных placement: `header`, `hero`, `demo`.
+7. Начать заполнение формы, отправить невалидную форму, затем успешно отправить контролируемую тестовую заявку.
+8. В Tag Assistant и GA4 DebugView подтвердить ровно по одному `landing_form_submit`, `landing_form_error` для ошибки и `generate_lead` для принятой заявки.
+9. Убедиться, что `placement` есть только у click events, `error_class` — только у `landing_form_error`, а у `landing_form_start` и `landing_form_submit` нет параметров от предыдущих событий.
+10. Проверить Reject all в новой чистой сессии: GA4-теги и события не должны срабатывать.
 
-## 8. Опубликовать и принять
+## 10. Опубликовать и принять
 
 1. В GTM выбрать **Submit → Publish and Create Version**.
 2. Version name: `markiro.app GA4 baseline`.

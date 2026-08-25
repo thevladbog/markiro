@@ -187,7 +187,7 @@ export function initTagManager(
   const applyConsent = (): void => {
     const current = storedConsent(browserWindow);
     pushGoogleConsent(target, "update", current);
-    if (canUseCategory(current, "analytics") || canUseCategory(current, "marketing")) {
+    if (canUseCategory(current, "analytics")) {
       loadTagManager(root, browserWindow, containerId);
     }
   };

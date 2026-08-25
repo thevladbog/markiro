@@ -115,6 +115,11 @@ test("GTM stays offline until analytics consent and loads only once after permis
   await expect(page.locator("iframe[src*='googletagmanager.com']")).toHaveCount(0);
 
   await page.locator("[data-consent-customize]").click();
+  await page.locator("[data-consent-marketing]").check();
+  await page.locator("[data-consent-save]").click();
+  expect(gtmRequests).toEqual([]);
+
+  await page.locator("[data-consent-settings]").click();
   await page.locator("[data-consent-analytics]").check();
   await page.locator("[data-consent-save]").click();
   await expect.poll(() => gtmRequests).toHaveLength(1);
