@@ -825,6 +825,50 @@ test("guard CLI identifies nested unknown data security-group fields without pla
   });
 });
 
+test("guard CLI identifies data security-group ingress cardinality without plan values", async () => {
+  const changed = await readFixture("safe");
+  const rule = (suffix) => ({
+    description: `description-${suffix}`,
+    from_port: suffix,
+    id: `rule-${suffix}`,
+    labels: { source: `label-${suffix}` },
+    port: suffix,
+    predefined_target: `target-${suffix}`,
+    protocol: `protocol-${suffix}`,
+    security_group_id: `security-group-${suffix}`,
+    to_port: suffix,
+    v4_cidr_blocks: [`v4-${suffix}`],
+    v6_cidr_blocks: [`v6-${suffix}`],
+  });
+  changed.resource_changes.push({
+    address: "module.network.yandex_vpc_security_group.data",
+    type: "yandex_vpc_security_group",
+    change: {
+      actions: ["update"],
+      before: { ingress: [rule(1), rule(2)] },
+      after: { ingress: [rule(3)] },
+    },
+  });
+
+  await withPlan(changed, (planPath) => {
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [script, planPath], { cwd: root, stdio: "pipe" });
+      assert.fail("guard CLI unexpectedly accepted security-group ingress cardinality drift");
+    } catch (error) {
+      stderr = String(error.stderr);
+    }
+    assert.equal(
+      stderr,
+      "production plan rejected (safe-action-data-security-group-ingress-cardinality-before-2-after-1)\n",
+    );
+    assert.doesNotMatch(
+      stderr,
+      /description-[123]|rule-[123]|label-[123]|target-[123]|protocol-[123]|security-group-[123]|v4-[123]|v6-[123]/,
+    );
+  });
+});
+
 test("production plan guard permits direct-VM DNS flag enable and disable transitions", async () => {
   const safe = await readFixture("safe");
   for (const address of directVmDnsAddresses) {
