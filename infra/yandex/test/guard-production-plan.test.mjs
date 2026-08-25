@@ -704,6 +704,44 @@ test("guard CLI identifies changed app security-group fields without their value
   }
 });
 
+test("guard CLI identifies changed data security-group fields without their values", async () => {
+  const changed = await readFixture("safe");
+  changed.resource_changes.push({
+    address: "module.network.yandex_vpc_security_group.data",
+    type: "yandex_vpc_security_group",
+    change: {
+      actions: ["update"],
+      before: {
+        ingress: [{ id: "old-rule-id", labels: { source: "old-label" }, port: 6432 }],
+      },
+      after: {
+        ingress: [
+          {
+            id: "do-not-print-this-plan-value",
+            labels: { source: "do-not-print-this-plan-value" },
+            port: 6433,
+          },
+        ],
+      },
+    },
+  });
+
+  await withPlan(changed, (planPath) => {
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [script, planPath], { cwd: root, stdio: "pipe" });
+      assert.fail("guard CLI unexpectedly accepted data security-group update");
+    } catch (error) {
+      stderr = String(error.stderr);
+    }
+    assert.equal(
+      stderr,
+      "production plan rejected (safe-action-data-security-group-ingress-id-and-labels-and-port)\n",
+    );
+    assert.doesNotMatch(stderr, /old-|6432|6433|do-not-print-this-plan-value/);
+  });
+});
+
 test("production plan guard permits direct-VM DNS flag enable and disable transitions", async () => {
   const safe = await readFixture("safe");
   for (const address of directVmDnsAddresses) {
