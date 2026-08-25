@@ -742,6 +742,49 @@ test("guard CLI identifies changed data security-group fields without their valu
   });
 });
 
+test("guard CLI identifies an unknown data security-group ingress without plan values", async () => {
+  const changed = await readFixture("safe");
+  changed.resource_changes.push({
+    address: "module.network.yandex_vpc_security_group.data",
+    type: "yandex_vpc_security_group",
+    change: {
+      actions: ["update"],
+      before: {
+        ingress: [
+          {
+            description: "old-description",
+            security_group_id: "old-security-group",
+          },
+        ],
+      },
+      after: {
+        ingress: [
+          {
+            description: "do-not-print-this-plan-value",
+            security_group_id: "do-not-print-this-plan-value",
+          },
+        ],
+      },
+      after_unknown: { ingress: true },
+    },
+  });
+
+  await withPlan(changed, (planPath) => {
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [script, planPath], { cwd: root, stdio: "pipe" });
+      assert.fail("guard CLI unexpectedly accepted unknown data security-group ingress");
+    } catch (error) {
+      stderr = String(error.stderr);
+    }
+    assert.equal(
+      stderr,
+      "production plan rejected (safe-action-data-security-group-ingress-after-unknown)\n",
+    );
+    assert.doesNotMatch(stderr, /old-|do-not-print-this-plan-value/);
+  });
+});
+
 test("production plan guard permits direct-VM DNS flag enable and disable transitions", async () => {
   const safe = await readFixture("safe");
   for (const address of directVmDnsAddresses) {
