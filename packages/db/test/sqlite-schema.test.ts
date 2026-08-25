@@ -1,7 +1,18 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { STATION_MIGRATIONS } from "../src/sqlite/migrations.js";
-import { shiftMirror } from "../src/sqlite/schema.js";
+import {
+  inventoryCodeResultsMirror,
+  inventoryConflictsMirror,
+  inventoryOutbox,
+  inventoryRepackBoxesMirror,
+  inventoryRepackItemsMirror,
+  inventoryScanEventsMirror,
+  inventorySnapshotCodesMirror,
+  inventoryTaskMirror,
+  inventoryTerminalState,
+  shiftMirror,
+} from "../src/sqlite/schema.js";
 
 /** Mirrors apps/station/src/lib/mirror.ts's applyMigrations against a raw node:sqlite handle. */
 function applyStatements(db: DatabaseSync, statements: readonly string[]): void {
@@ -30,6 +41,208 @@ function migratedDb(): DatabaseSync {
 }
 
 describe("STATION_MIGRATIONS", () => {
+  it("creates and round-trips all nine inventory mirror tables with scanner indexes", () => {
+    const db = migratedDb();
+    const expectedTables = [
+      "inventory_task_mirror",
+      "inventory_snapshot_codes_mirror",
+      "inventory_terminal_state",
+      "inventory_code_results_mirror",
+      "inventory_scan_events_mirror",
+      "inventory_outbox",
+      "inventory_repack_boxes_mirror",
+      "inventory_repack_items_mirror",
+      "inventory_conflicts_mirror",
+    ];
+    const tables = db
+      .prepare(
+        `SELECT name FROM sqlite_master
+          WHERE type = 'table' AND name LIKE 'inventory_%'
+          ORDER BY name`,
+      )
+      .all() as Array<{ name: string }>;
+    expect(tables.map((row) => row.name)).toEqual([...expectedTables].sort());
+
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, active_snapshot_id, active_snapshot_revision,
+          active_combined_digest, active_code_count, active_manifest_json, staging_generation)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("inventory-1", "INV-1", "snapshot-1", 1, "a".repeat(64), 1, "{}", 1);
+    db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status, source_state,
+          source_production_date, parent_sscc, expected, protected)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "snapshot-1",
+      "b".repeat(64),
+      "010460000000001521SERIAL",
+      "04600000000015",
+      "SERIAL",
+      "INTRODUCED",
+      null,
+      "2026-08-01",
+      "004600000000000015",
+      1,
+      0,
+    );
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          source_parent_sscc, next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "device-1",
+      "operator-1",
+      "2026-08-01",
+      null,
+      2,
+      "2026-08-25T08:00:00.000Z",
+    );
+    db.prepare(
+      `INSERT INTO inventory_code_results_mirror
+         (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
+          winning_scanned_at, observed_production_date, classification, origin_classification,
+          updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "b".repeat(64),
+      "event-1",
+      "device-1",
+      "2026-08-25T08:00:00.000Z",
+      "2026-08-01",
+      "expected",
+      "expected",
+      "2026-08-25T08:00:00.000Z",
+    );
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
+          scanned_at, kind, normalized_identity, code_hash, raw_payload,
+          active_production_date, local_verdict)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "event-1",
+      "device-1",
+      1,
+      "operator-1",
+      "2026-08-25T08:00:00.000Z",
+      "item",
+      "01...21...",
+      "b".repeat(64),
+      "010460000000001521SERIAL",
+      "2026-08-01",
+      "accepted",
+    );
+    db.prepare(
+      `INSERT INTO inventory_outbox
+         (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run("inventory-1", "snapshot-1", "event-1", 1, '{"kind":"item"}', "2026-08-25T08:00:00.000Z");
+    db.prepare(
+      `INSERT INTO inventory_repack_boxes_mirror
+         (inventory_id, snapshot_id, box_id, old_sscc_context, new_sscc, owner_device_id,
+          capacity, production_date, state, print_state, print_attempt_count, opened_at,
+          updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "box-1",
+      null,
+      "004600000000000015",
+      "device-1",
+      12,
+      "2026-08-01",
+      "open",
+      "not_ready",
+      0,
+      "2026-08-25T08:00:00.000Z",
+      "2026-08-25T08:00:00.000Z",
+    );
+    db.prepare(
+      `INSERT INTO inventory_repack_items_mirror
+         (inventory_id, snapshot_id, item_id, box_id, code_hash, production_date, added_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "item-1",
+      "box-1",
+      "b".repeat(64),
+      "2026-08-01",
+      "2026-08-25T08:00:00.000Z",
+    );
+    db.prepare(
+      `INSERT INTO inventory_conflicts_mirror
+         (inventory_id, snapshot_id, conflict_id, code_hash, winning_event_id,
+          winning_device_id, winning_scanned_at, detected_at, state)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "conflict-1",
+      "b".repeat(64),
+      "event-0",
+      "device-2",
+      "2026-08-25T07:59:00.000Z",
+      "2026-08-25T08:00:00.000Z",
+      "open",
+    );
+
+    expect(
+      db.prepare("SELECT inventory_id, active_snapshot_id FROM inventory_task_mirror").get(),
+    ).toEqual({ inventory_id: "inventory-1", active_snapshot_id: "snapshot-1" });
+    for (const table of expectedTables.slice(1)) {
+      expect(
+        db.prepare(`SELECT snapshot_id FROM ${table} LIMIT 1`).get(),
+        `${table} must retain its snapshot revision`,
+      ).toEqual({ snapshot_id: "snapshot-1" });
+    }
+
+    const indexes = db
+      .prepare(
+        `SELECT name FROM sqlite_master
+          WHERE type = 'index' AND tbl_name = 'inventory_snapshot_codes_mirror'`,
+      )
+      .all() as Array<{ name: string }>;
+    expect(indexes.map((row) => row.name)).toEqual(
+      expect.arrayContaining([
+        "inventory_snapshot_codes_mirror_parent_sscc_idx",
+        "inventory_snapshot_codes_mirror_expected_date_idx",
+      ]),
+    );
+
+    expect(inventoryTaskMirror).toBeDefined();
+    expect(inventorySnapshotCodesMirror).toBeDefined();
+    expect(inventoryTerminalState).toBeDefined();
+    expect(inventoryCodeResultsMirror).toBeDefined();
+    expect(inventoryScanEventsMirror).toBeDefined();
+    expect(inventoryOutbox).toBeDefined();
+    expect(inventoryRepackBoxesMirror).toBeDefined();
+    expect(inventoryRepackItemsMirror).toBeDefined();
+    expect(inventoryConflictsMirror).toBeDefined();
+  });
+
+  it("keeps the trailing inventory DDL rerunnable on an upgraded database", () => {
+    const firstInventoryMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("CREATE TABLE IF NOT EXISTS inventory_task_mirror"),
+    );
+    expect(firstInventoryMigration).toBeGreaterThan(0);
+
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, firstInventoryMigration));
+    applyStatements(db, STATION_MIGRATIONS.slice(firstInventoryMigration));
+    expect(() => applyStationMigrations(db)).not.toThrow();
+  });
+
   it("creates the durable product image cache table", () => {
     const db = migratedDb();
     const rows = db

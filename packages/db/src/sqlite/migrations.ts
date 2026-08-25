@@ -300,4 +300,153 @@ export const STATION_MIGRATIONS: string[] = [
   // Optional short product name for the shift card and, in a follow-up,
   // label rendering (spec 2026-08-21). Trailing ALTER for the same reason.
   `ALTER TABLE product_mirror ADD COLUMN print_name TEXT;`,
+  // Inventory v1 is an additive, deployed-device upgrade. Keep all nine
+  // architecture tables and their indexes trailing and rerunnable. Active and
+  // staged manifest fields intentionally coexist: a partial new download must
+  // not overwrite the currently published scanner contract.
+  `CREATE TABLE IF NOT EXISTS inventory_task_mirror (
+     inventory_id TEXT PRIMARY KEY,
+     inventory_number TEXT NOT NULL,
+     active_snapshot_id TEXT,
+     active_snapshot_revision INTEGER,
+     active_combined_digest TEXT,
+     active_code_count INTEGER,
+     active_manifest_json TEXT,
+     staged_snapshot_id TEXT,
+     staged_snapshot_revision INTEGER,
+     staged_combined_digest TEXT,
+     staged_code_count INTEGER,
+     staged_manifest_json TEXT,
+     staged_next_cursor TEXT,
+     staged_verified_digest TEXT,
+     staging_generation INTEGER NOT NULL DEFAULT 0,
+     updated_at TEXT
+   );`,
+  `CREATE TABLE IF NOT EXISTS inventory_snapshot_codes_mirror (
+     snapshot_id TEXT NOT NULL,
+     code_hash TEXT NOT NULL,
+     canonical_raw TEXT NOT NULL,
+     gtin14 TEXT NOT NULL,
+     serial TEXT NOT NULL,
+     source_status TEXT NOT NULL,
+     source_state TEXT,
+     source_production_date TEXT,
+     parent_sscc TEXT,
+     expected INTEGER NOT NULL,
+     protected INTEGER NOT NULL,
+     PRIMARY KEY (snapshot_id, code_hash)
+   );`,
+  `CREATE INDEX IF NOT EXISTS inventory_snapshot_codes_mirror_parent_sscc_idx
+     ON inventory_snapshot_codes_mirror (snapshot_id, parent_sscc);`,
+  `CREATE INDEX IF NOT EXISTS inventory_snapshot_codes_mirror_expected_date_idx
+     ON inventory_snapshot_codes_mirror (snapshot_id, expected, source_production_date);`,
+  `CREATE TABLE IF NOT EXISTS inventory_terminal_state (
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     device_id TEXT NOT NULL,
+     operator_id TEXT,
+     active_production_date TEXT,
+     source_parent_sscc TEXT,
+     open_repack_box_id TEXT,
+     next_device_sequence INTEGER NOT NULL DEFAULT 1,
+     progress_cursor TEXT,
+     updated_at TEXT NOT NULL,
+     PRIMARY KEY (inventory_id, snapshot_id, device_id)
+   );`,
+  `CREATE TABLE IF NOT EXISTS inventory_code_results_mirror (
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     code_hash TEXT NOT NULL,
+     first_accepted_event_id TEXT NOT NULL,
+     winning_device_id TEXT NOT NULL,
+     winning_scanned_at TEXT NOT NULL,
+     observed_production_date TEXT,
+     classification TEXT NOT NULL,
+     origin_classification TEXT NOT NULL,
+     updated_at TEXT NOT NULL,
+     PRIMARY KEY (inventory_id, snapshot_id, code_hash)
+   );`,
+  `CREATE TABLE IF NOT EXISTS inventory_scan_events_mirror (
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     event_id TEXT NOT NULL,
+     device_id TEXT NOT NULL,
+     device_sequence INTEGER NOT NULL,
+     operator_id TEXT NOT NULL,
+     scanned_at TEXT NOT NULL,
+     kind TEXT NOT NULL,
+     normalized_identity TEXT NOT NULL,
+     code_hash TEXT,
+     raw_payload TEXT,
+     active_production_date TEXT,
+     local_verdict TEXT NOT NULL,
+     PRIMARY KEY (inventory_id, snapshot_id, event_id)
+   );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS inventory_scan_events_mirror_device_sequence_uq
+     ON inventory_scan_events_mirror
+        (inventory_id, snapshot_id, device_id, device_sequence);`,
+  `CREATE TABLE IF NOT EXISTS inventory_outbox (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     event_id TEXT NOT NULL,
+     device_sequence INTEGER NOT NULL,
+     payload_json TEXT NOT NULL,
+     created_at TEXT NOT NULL
+   );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS inventory_outbox_event_uq
+     ON inventory_outbox (inventory_id, snapshot_id, event_id);`,
+  `CREATE INDEX IF NOT EXISTS inventory_outbox_sequence_idx
+     ON inventory_outbox (inventory_id, snapshot_id, device_sequence);`,
+  `CREATE TABLE IF NOT EXISTS inventory_repack_boxes_mirror (
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     box_id TEXT NOT NULL,
+     old_sscc_context TEXT,
+     new_sscc TEXT NOT NULL,
+     owner_device_id TEXT NOT NULL,
+     capacity INTEGER NOT NULL,
+     production_date TEXT NOT NULL,
+     state TEXT NOT NULL,
+     print_state TEXT NOT NULL,
+     print_attempt_count INTEGER NOT NULL DEFAULT 0,
+     print_error_code TEXT,
+     opened_at TEXT NOT NULL,
+     closed_at TEXT,
+     invalidated_at TEXT,
+     printed_at TEXT,
+     updated_at TEXT NOT NULL,
+     PRIMARY KEY (inventory_id, snapshot_id, box_id)
+   );`,
+  `CREATE INDEX IF NOT EXISTS inventory_repack_boxes_mirror_owner_state_idx
+     ON inventory_repack_boxes_mirror
+        (inventory_id, snapshot_id, owner_device_id, state);`,
+  `CREATE TABLE IF NOT EXISTS inventory_repack_items_mirror (
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     item_id TEXT NOT NULL,
+     box_id TEXT NOT NULL,
+     code_hash TEXT NOT NULL,
+     production_date TEXT NOT NULL,
+     added_at TEXT NOT NULL,
+     removed_at TEXT,
+     PRIMARY KEY (inventory_id, snapshot_id, item_id)
+   );`,
+  `CREATE INDEX IF NOT EXISTS inventory_repack_items_mirror_box_active_idx
+     ON inventory_repack_items_mirror (inventory_id, snapshot_id, box_id, removed_at);`,
+  `CREATE TABLE IF NOT EXISTS inventory_conflicts_mirror (
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     conflict_id TEXT NOT NULL,
+     code_hash TEXT NOT NULL,
+     losing_event_id TEXT,
+     winning_event_id TEXT NOT NULL,
+     winning_device_id TEXT NOT NULL,
+     winning_scanned_at TEXT NOT NULL,
+     detected_at TEXT NOT NULL,
+     state TEXT NOT NULL,
+     PRIMARY KEY (inventory_id, snapshot_id, conflict_id)
+   );`,
+  `CREATE INDEX IF NOT EXISTS inventory_conflicts_mirror_state_idx
+     ON inventory_conflicts_mirror (inventory_id, snapshot_id, state, detected_at);`,
 ];

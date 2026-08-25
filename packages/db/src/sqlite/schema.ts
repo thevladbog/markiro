@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  index,
   integer,
   primaryKey,
   sqliteTable,
@@ -295,6 +296,228 @@ export const ssccPool = sqliteTable(
     nextSerial: integer("next_serial").notNull(),
   },
   (t) => [primaryKey({ columns: [t.issuerPrefix, t.extensionDigit, t.fromSerial] })],
+);
+
+/**
+ * One inventory task plus its independently staged and published bundle
+ * identities. The manifest JSON is duplicated for active/staged revisions so
+ * downloading a replacement can never change facts used by the active
+ * scanner before the pointer publication succeeds.
+ */
+export const inventoryTaskMirror = sqliteTable("inventory_task_mirror", {
+  inventoryId: text("inventory_id").primaryKey(),
+  inventoryNumber: text("inventory_number").notNull(),
+  activeSnapshotId: text("active_snapshot_id"),
+  activeSnapshotRevision: integer("active_snapshot_revision"),
+  activeCombinedDigest: text("active_combined_digest"),
+  activeCodeCount: integer("active_code_count"),
+  activeManifestJson: text("active_manifest_json"),
+  stagedSnapshotId: text("staged_snapshot_id"),
+  stagedSnapshotRevision: integer("staged_snapshot_revision"),
+  stagedCombinedDigest: text("staged_combined_digest"),
+  stagedCodeCount: integer("staged_code_count"),
+  stagedManifestJson: text("staged_manifest_json"),
+  stagedNextCursor: text("staged_next_cursor"),
+  stagedVerifiedDigest: text("staged_verified_digest"),
+  stagingGeneration: integer("staging_generation").notNull().default(0),
+  updatedAt: text("updated_at"),
+});
+
+/** Immutable code facts remain keyed by snapshot so an incomplete download cannot overwrite v1. */
+export const inventorySnapshotCodesMirror = sqliteTable(
+  "inventory_snapshot_codes_mirror",
+  {
+    snapshotId: text("snapshot_id").notNull(),
+    codeHash: text("code_hash").notNull(),
+    canonicalRaw: text("canonical_raw").notNull(),
+    gtin14: text("gtin14").notNull(),
+    serial: text("serial").notNull(),
+    sourceStatus: text("source_status").notNull(),
+    sourceState: text("source_state"),
+    sourceProductionDate: text("source_production_date"),
+    parentSscc: text("parent_sscc"),
+    expected: integer("expected", { mode: "boolean" }).notNull(),
+    protected: integer("protected", { mode: "boolean" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.snapshotId, table.codeHash] }),
+    index("inventory_snapshot_codes_mirror_parent_sscc_idx").on(table.snapshotId, table.parentSscc),
+    index("inventory_snapshot_codes_mirror_expected_date_idx").on(
+      table.snapshotId,
+      table.expected,
+      table.sourceProductionDate,
+    ),
+  ],
+);
+
+/** Device/operator-local reducer state for one published inventory revision. */
+export const inventoryTerminalState = sqliteTable(
+  "inventory_terminal_state",
+  {
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    operatorId: text("operator_id"),
+    activeProductionDate: text("active_production_date"),
+    sourceParentSscc: text("source_parent_sscc"),
+    openRepackBoxId: text("open_repack_box_id"),
+    nextDeviceSequence: integer("next_device_sequence").notNull().default(1),
+    progressCursor: text("progress_cursor"),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.inventoryId, table.snapshotId, table.deviceId] })],
+);
+
+/** Current local claim projection, tied to the snapshot under which the code was evaluated. */
+export const inventoryCodeResultsMirror = sqliteTable(
+  "inventory_code_results_mirror",
+  {
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    codeHash: text("code_hash").notNull(),
+    firstAcceptedEventId: text("first_accepted_event_id").notNull(),
+    winningDeviceId: text("winning_device_id").notNull(),
+    winningScannedAt: text("winning_scanned_at").notNull(),
+    observedProductionDate: text("observed_production_date"),
+    classification: text("classification").notNull(),
+    originClassification: text("origin_classification").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.inventoryId, table.snapshotId, table.codeHash] })],
+);
+
+/** Append-only local scan facts. Device sequence is unique within a snapshot revision. */
+export const inventoryScanEventsMirror = sqliteTable(
+  "inventory_scan_events_mirror",
+  {
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    eventId: text("event_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    deviceSequence: integer("device_sequence").notNull(),
+    operatorId: text("operator_id").notNull(),
+    scannedAt: text("scanned_at").notNull(),
+    kind: text("kind").notNull(),
+    normalizedIdentity: text("normalized_identity").notNull(),
+    codeHash: text("code_hash"),
+    rawPayload: text("raw_payload"),
+    activeProductionDate: text("active_production_date"),
+    localVerdict: text("local_verdict").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.inventoryId, table.snapshotId, table.eventId] }),
+    uniqueIndex("inventory_scan_events_mirror_device_sequence_uq").on(
+      table.inventoryId,
+      table.snapshotId,
+      table.deviceId,
+      table.deviceSequence,
+    ),
+  ],
+);
+
+/** Monotonic inventory transport queue; hard deletion is the acknowledgement boundary. */
+export const inventoryOutbox = sqliteTable(
+  "inventory_outbox",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    eventId: text("event_id").notNull(),
+    deviceSequence: integer("device_sequence").notNull(),
+    payloadJson: text("payload_json").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("inventory_outbox_event_uq").on(table.inventoryId, table.snapshotId, table.eventId),
+    index("inventory_outbox_sequence_idx").on(
+      table.inventoryId,
+      table.snapshotId,
+      table.deviceSequence,
+    ),
+  ],
+);
+
+/** Locally owned repack boxes and their durable label lifecycle. */
+export const inventoryRepackBoxesMirror = sqliteTable(
+  "inventory_repack_boxes_mirror",
+  {
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    boxId: text("box_id").notNull(),
+    oldSsccContext: text("old_sscc_context"),
+    newSscc: text("new_sscc").notNull(),
+    ownerDeviceId: text("owner_device_id").notNull(),
+    capacity: integer("capacity").notNull(),
+    productionDate: text("production_date").notNull(),
+    state: text("state").notNull(),
+    printState: text("print_state").notNull(),
+    printAttemptCount: integer("print_attempt_count").notNull().default(0),
+    printErrorCode: text("print_error_code"),
+    openedAt: text("opened_at").notNull(),
+    closedAt: text("closed_at"),
+    invalidatedAt: text("invalidated_at"),
+    printedAt: text("printed_at"),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.inventoryId, table.snapshotId, table.boxId] }),
+    index("inventory_repack_boxes_mirror_owner_state_idx").on(
+      table.inventoryId,
+      table.snapshotId,
+      table.ownerDeviceId,
+      table.state,
+    ),
+  ],
+);
+
+/** Repack membership evidence, including removed history for later reconciliation. */
+export const inventoryRepackItemsMirror = sqliteTable(
+  "inventory_repack_items_mirror",
+  {
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    itemId: text("item_id").notNull(),
+    boxId: text("box_id").notNull(),
+    codeHash: text("code_hash").notNull(),
+    productionDate: text("production_date").notNull(),
+    addedAt: text("added_at").notNull(),
+    removedAt: text("removed_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.inventoryId, table.snapshotId, table.itemId] }),
+    index("inventory_repack_items_mirror_box_active_idx").on(
+      table.inventoryId,
+      table.snapshotId,
+      table.boxId,
+      table.removedAt,
+    ),
+  ],
+);
+
+/** Recoverable local/remote claim conflicts for one inventory snapshot. */
+export const inventoryConflictsMirror = sqliteTable(
+  "inventory_conflicts_mirror",
+  {
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    conflictId: text("conflict_id").notNull(),
+    codeHash: text("code_hash").notNull(),
+    losingEventId: text("losing_event_id"),
+    winningEventId: text("winning_event_id").notNull(),
+    winningDeviceId: text("winning_device_id").notNull(),
+    winningScannedAt: text("winning_scanned_at").notNull(),
+    detectedAt: text("detected_at").notNull(),
+    state: text("state").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.inventoryId, table.snapshotId, table.conflictId] }),
+    index("inventory_conflicts_mirror_state_idx").on(
+      table.inventoryId,
+      table.snapshotId,
+      table.state,
+      table.detectedAt,
+    ),
+  ],
 );
 
 /**
