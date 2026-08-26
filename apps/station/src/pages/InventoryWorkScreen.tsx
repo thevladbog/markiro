@@ -1467,6 +1467,7 @@ function RepackInventoryWorkScreen({
           claimLostConflict={
             state.phase === "invalidated" && state.box?.invalidationSource === "claim_lost"
           }
+          compositionBlocked={state.phase === "invalidated"}
           busy={busy}
           onRemoveLast={() => void runCorrection("remove")}
           onClear={() => void runCorrection("clear")}

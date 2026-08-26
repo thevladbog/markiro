@@ -255,7 +255,7 @@ describe("repack inventory work screen", () => {
     ).toEqual({ state: "resolved" });
   });
 
-  it("does not offer claim-lost recovery for an admin-invalidated box", async () => {
+  it("hides local composition controls for a non-empty admin-invalidated box", async () => {
     const db = new DatabaseSync(":memory:");
     const exec = makeExec(db);
     await applyMigrations(exec);
@@ -279,6 +279,14 @@ describe("repack inventory work screen", () => {
                '2026-08-25T09:00:00.000Z', '2026-08-25T10:00:00.000Z', 'admin',
                '2026-08-25T10:00:00.000Z')`,
     ).run(INVENTORY_ID, SNAPSHOT_ID, boxId, OLD_SSCC, DEVICE_ID);
+    db.prepare(
+      `INSERT INTO inventory_repack_items_mirror
+         (inventory_id, snapshot_id, item_id, source_event_id, box_id, code_hash,
+          position, production_date, added_at)
+       VALUES (?, ?, '15151515-1515-4515-8515-151515151515',
+               '16161616-1616-4616-8616-161616161616', ?, ?, 1,
+               '2026-08-19', '2026-08-25T09:01:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, boxId, "d".repeat(64));
 
     render(
       <InventoryWorkScreen
@@ -295,6 +303,8 @@ describe("repack inventory work screen", () => {
     expect(await screen.findByText("Короб аннулирован администратором")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
     expect(screen.queryByRole("button", { name: "Очистить конфликт и продолжить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Убрать последнюю бутылку" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Очистить открытый короб" })).toBeNull();
   });
 
   it("prints a full box automatically, pauses product scanning, and exposes no skip step", async () => {
