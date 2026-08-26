@@ -22,6 +22,7 @@ type JsonSchema = {
   properties?: Record<string, JsonSchema>;
   items?: JsonSchema;
   oneOf?: JsonSchema[];
+  discriminator?: { propertyName: string };
 };
 
 function operation(document: OpenAPIObject, path: string, method: "get" | "post") {
@@ -206,9 +207,11 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
       "resultId",
       "codeHash",
       "ownerDeviceId",
+      "removedAt",
       "correctedAt",
     ]);
     expect(removeItem?.properties?.kind?.enum).toEqual(["remove_item"]);
+    expect(removeItem?.properties?.removedAt?.format).toBe("date-time");
     for (const [variant, kind] of [
       [invalidateBox, "invalidate_box"],
       [reprint, "reprint"],

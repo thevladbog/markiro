@@ -379,6 +379,7 @@ export const inventoryProgressChangeSchema = z.discriminatedUnion("kind", [
     resultId: uuidSchema,
     codeHash: hashSchema,
     ownerDeviceId: uuidSchema,
+    removedAt: instantSchema,
   }),
   z.strictObject({
     ...inventoryProgressIdentityShape,

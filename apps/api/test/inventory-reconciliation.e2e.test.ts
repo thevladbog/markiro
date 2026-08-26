@@ -518,6 +518,24 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
         actions: ["void_scan", "remove_item"],
       }),
     ]);
+    await db
+      .update(schema.inventoryRepackBoxes)
+      .set({
+        state: "closed",
+        printState: "pending",
+        closedAt: new Date("2026-08-20T12:00:00.000Z"),
+      })
+      .where(eq(schema.inventoryRepackBoxes.id, openBoxId));
+    const closedMembership = await agent
+      .get(`/inventories/${inventoryId}/evidence?classification=unknown&kind=item`)
+      .expect(200);
+    expect(closedMembership.body.items).toEqual([
+      expect.objectContaining({
+        eventId: unknownEventId,
+        codeResultId: unknownResultId,
+        actions: ["void_scan"],
+      }),
+    ]);
     await agent
       .get(`/inventories/${inventoryId}/evidence?page=0&pageSize=101&search=${"x".repeat(129)}`)
       .expect(400);

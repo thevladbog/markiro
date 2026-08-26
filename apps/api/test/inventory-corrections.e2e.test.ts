@@ -813,6 +813,19 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
         activeObservedProductionDate: null,
       }),
     );
+    const page = await stationSync.progress(
+      fixture.tenantId,
+      fixture.deviceId,
+      fixture.inventoryId,
+      { limit: 200 },
+    );
+    expect(page.items).toEqual([
+      expect.objectContaining({
+        kind: "remove_item",
+        correctedAt: removed.body.createdAt,
+        removedAt: futureAddedAt.toISOString(),
+      }),
+    ]);
   });
 
   it("rolls back the inserted correction, projection, and revision when projection update fails", async () => {

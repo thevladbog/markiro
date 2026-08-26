@@ -1412,6 +1412,7 @@ function RepackInventoryWorkScreen({
                 scanning: t("inventory.repack.scanning"),
                 pendingPrint: t("inventory.repack.pendingPrint"),
                 invalidated: t("inventory.repack.invalidated"),
+                adminInvalidated: t("inventory.repack.adminInvalidated"),
                 oldSelected: t("inventory.repack.oldSelected"),
                 accepted: t("inventory.repack.accepted"),
                 discrepancy: t("inventory.repack.discrepancy"),
@@ -1463,7 +1464,9 @@ function RepackInventoryWorkScreen({
       >
         <RepackCorrections
           itemCount={state.box?.itemCount ?? 0}
-          invalidated={state.phase === "invalidated"}
+          claimLostConflict={
+            state.phase === "invalidated" && state.box?.invalidationSource === "claim_lost"
+          }
           busy={busy}
           onRemoveLast={() => void runCorrection("remove")}
           onClear={() => void runCorrection("clear")}

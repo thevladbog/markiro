@@ -589,6 +589,7 @@ function galleryRepackState(variant: string): InventoryRepackStateView {
       state: variant === "repack-box-ready" ? "closed" : "open",
       printState: variant === "repack-box-ready" ? "pending" : "not_ready",
       printErrorCode: null,
+      invalidationSource: null,
       ownerDeviceId: "gallery-terminal-a",
     },
   };

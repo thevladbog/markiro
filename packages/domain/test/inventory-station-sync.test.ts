@@ -251,6 +251,7 @@ describe("inventory station sync contract", () => {
           resultId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
           codeHash: "b".repeat(64),
           ownerDeviceId: "55555555-5555-4555-8555-555555555555",
+          removedAt: "2099-08-25T10:01:00.000Z",
           correctedAt: "2026-08-25T10:01:00.000Z",
         },
         {

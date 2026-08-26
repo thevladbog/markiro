@@ -2,7 +2,7 @@ import { Button } from "@markiro/ui";
 
 export interface RepackCorrectionsProps {
   itemCount: number;
-  invalidated: boolean;
+  claimLostConflict: boolean;
   busy: boolean;
   onRemoveLast: () => void;
   onClear: () => void;
@@ -31,7 +31,7 @@ export interface RepackCorrectionsProps {
 
 export function RepackCorrections({
   itemCount,
-  invalidated,
+  claimLostConflict,
   busy,
   onRemoveLast,
   onClear,
@@ -47,7 +47,7 @@ export function RepackCorrections({
   return (
     <div className="repack-corrections">
       <section>
-        {invalidated ? (
+        {claimLostConflict ? (
           <Button size="floor" variant="secondary" disabled={busy} onClick={onResolveConflict}>
             {labels.resolveConflict}
           </Button>

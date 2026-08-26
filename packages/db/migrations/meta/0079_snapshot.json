@@ -14627,6 +14627,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "effect_at": {
+          "name": "effect_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",

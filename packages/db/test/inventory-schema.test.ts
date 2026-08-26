@@ -439,15 +439,24 @@ describe("inventory execution schema", () => {
     ]);
   });
 
-  it("persists a full normalized correction request digest for exact replay", () => {
+  it("persists exact correction request and effect evidence with a coherent backfill", () => {
     const columns = getTableConfig(table("inventoryCorrections")).columns.map((column) => ({
       name: column.name,
       notNull: column.notNull,
     }));
     expect(columns).toContainEqual({ name: "request_digest", notNull: true });
+    expect(columns).toContainEqual({ name: "effect_at", notNull: true });
     expect(
       checkExpression("inventoryCorrections", "inventory_corrections_request_digest_check"),
     ).toContain("request_digest");
+    const migration = readFileSync(
+      new URL("../migrations/0079_youthful_miek.sql", import.meta.url),
+      "utf8",
+    );
+    expect(migration).toContain('"effect_at" = COALESCE("effect_at", "created_at")');
+    expect(migration).toContain(
+      'ALTER TABLE "inventory_corrections" ALTER COLUMN "effect_at" SET NOT NULL',
+    );
   });
 
   it("tenant-scopes execution ownership through composite foreign keys", () => {

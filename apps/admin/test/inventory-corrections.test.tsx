@@ -270,6 +270,22 @@ it("uses paginated evidence actions and never offers controls for duplicate nonw
   });
 });
 
+it("does not render a date correction when evidence permits only voiding an active membership", async () => {
+  const originalItems = evidence.items;
+  const originalTotal = evidence.total;
+  evidence.items = [{ ...progress.recentEvents[0], actions: ["void_scan"] }];
+  evidence.total = 1;
+  try {
+    renderCorrections();
+    fireEvent.click(await screen.findByRole("button", { name: "Выбрать …00000042 / …4831" }));
+    expect(screen.getByRole("button", { name: "Отменить скан" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Изменить дату" })).toBeNull();
+  } finally {
+    evidence.items = originalItems;
+    evidence.total = originalTotal;
+  }
+});
+
 it("offers reprint only for a closed printed box and never for open, invalidated, or pending boxes", async () => {
   const mutableProgress = progress as unknown as {
     boxTotal: number;

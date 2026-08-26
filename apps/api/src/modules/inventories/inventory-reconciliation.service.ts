@@ -771,7 +771,11 @@ function parseEvidenceEventRow(value: unknown): InventoryEvidenceEventDto {
   return {
     ...event,
     actions:
-      activeBoxState === "open" ? ["void_scan", "remove_item"] : ["void_scan", "change_date"],
+      activeBoxState === "open"
+        ? ["void_scan", "remove_item"]
+        : activeBoxState === null
+          ? ["void_scan", "change_date"]
+          : ["void_scan"],
   };
 }
 

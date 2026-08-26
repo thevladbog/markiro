@@ -1330,6 +1330,7 @@ export const inventoryCorrections = pgTable(
     beforeProjectionDigest: char("before_projection_digest", { length: 64 }).notNull(),
     afterProjectionDigest: char("after_projection_digest", { length: 64 }).notNull(),
     resultRevision: integer("result_revision").notNull(),
+    effectAt: timestamp("effect_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

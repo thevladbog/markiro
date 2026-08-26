@@ -629,6 +629,7 @@ export const inventoryRepackBoxesMirror = sqliteTable(
     openedAt: text("opened_at").notNull(),
     closedAt: text("closed_at"),
     invalidatedAt: text("invalidated_at"),
+    invalidationSource: text("invalidation_source"),
     printedAt: text("printed_at"),
     updatedAt: text("updated_at").notNull(),
   },

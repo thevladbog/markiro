@@ -339,7 +339,10 @@ describe("durable inventory repacking", () => {
     });
     await expect(
       readInventoryRepackState(exec, INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID),
-    ).resolves.toMatchObject({ phase: "invalidated", box: { itemCount: 1 } });
+    ).resolves.toMatchObject({
+      phase: "invalidated",
+      box: { itemCount: 1, invalidationSource: "claim_lost" },
+    });
 
     const resolution = {
       inventoryId: INVENTORY_ID,
@@ -395,6 +398,19 @@ describe("durable inventory repacking", () => {
         )
         .get(resolution.eventId),
     ).toEqual({ authoritative_verdict: "applied", server_reason_code: "CLAIM_APPLIED" });
+
+    db.prepare(
+      `UPDATE inventory_repack_boxes_mirror
+          SET state = 'invalidated', invalidated_at = ?, invalidation_source = 'admin'
+        WHERE inventory_id = ? AND snapshot_id = ? AND box_id = ?`,
+    ).run("2026-08-25T11:01:00.000Z", INVENTORY_ID, SNAPSHOT_ID, BOX_ID);
+    await expect(
+      resolveInvalidatedInventoryRepackBox(exec, {
+        ...resolution,
+        eventId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        changedAt: "2026-08-25T11:02:00.000Z",
+      }),
+    ).rejects.toThrow("not a claim-lost conflict");
   });
 
   it("replays a post-commit crash exactly and survives restart without duplicating membership", async () => {

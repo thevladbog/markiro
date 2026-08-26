@@ -242,6 +242,7 @@ export class InventoryCorrectionsService {
         beforeProjectionDigest: prepared.beforeProjectionDigest,
         afterProjectionDigest: prepared.afterProjectionDigest,
         resultRevision: nextRevision,
+        effectAt: prepared.effectAt,
         createdAt: changedAt,
       })
       .returning();
@@ -269,6 +270,7 @@ export class InventoryCorrectionsService {
     target: InventoryCorrectionTargetDto;
     beforeProjectionDigest: string;
     afterProjectionDigest: string;
+    effectAt: Date;
     apply: () => Promise<void>;
   }> {
     if (input.action === "void_scan" || input.action === "restore_scan") {
@@ -299,6 +301,7 @@ export class InventoryCorrectionsService {
         target: { eventId, codeResultId: result.id, repackBoxId: null },
         beforeProjectionDigest: digest(codeResultProjection(result)),
         afterProjectionDigest: digest(codeResultProjection(after)),
+        effectAt: changedAt,
         apply: async () => {
           await tx
             .update(schema.inventoryCodeResults)
@@ -351,6 +354,7 @@ export class InventoryCorrectionsService {
         target: { eventId: null, codeResultId: result.id, repackBoxId: null },
         beforeProjectionDigest: digest(codeResultProjection(result)),
         afterProjectionDigest: digest(codeResultProjection(after)),
+        effectAt: changedAt,
         apply: async () => {
           await tx
             .update(schema.inventoryCodeResults)
@@ -402,6 +406,7 @@ export class InventoryCorrectionsService {
         target: { eventId: null, codeResultId: resultId, repackBoxId: item.boxId },
         beforeProjectionDigest: digest(repackItemProjection(item)),
         afterProjectionDigest: digest(repackItemProjection(after)),
+        effectAt: removedAt,
         apply: async () => {
           await tx
             .update(schema.inventoryRepackItems)
@@ -434,6 +439,7 @@ export class InventoryCorrectionsService {
         target: { eventId: null, codeResultId: null, repackBoxId: box.id },
         beforeProjectionDigest: digest(repackBoxProjection(box)),
         afterProjectionDigest: digest(repackBoxProjection(after)),
+        effectAt: changedAt,
         apply: async () => {
           await tx
             .update(schema.inventoryRepackBoxes)
@@ -456,6 +462,7 @@ export class InventoryCorrectionsService {
       target: { eventId: null, codeResultId: null, repackBoxId: box.id },
       beforeProjectionDigest: digest(repackBoxProjection(box)),
       afterProjectionDigest: digest(repackBoxProjection(box)),
+      effectAt: changedAt,
       apply: () => Promise.resolve(),
     };
   }

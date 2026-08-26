@@ -353,6 +353,7 @@ const inventoryProgressChangeOpenApiSchema: SchemaObject = {
         "resultId",
         "codeHash",
         "ownerDeviceId",
+        "removedAt",
         "correctedAt",
       ],
       properties: {
@@ -362,6 +363,7 @@ const inventoryProgressChangeOpenApiSchema: SchemaObject = {
         resultId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
         codeHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
         ownerDeviceId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+        removedAt: { type: "string", format: "date-time" },
       },
     },
     ...["invalidate_box", "reprint"].map((kind): SchemaObject => ({

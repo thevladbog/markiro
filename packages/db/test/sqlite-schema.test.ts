@@ -75,6 +75,33 @@ describe("STATION_MIGRATIONS", () => {
     ]);
   });
 
+  it("backfills pre-source invalidated boxes as genuine claim-lost conflicts", () => {
+    const sourceMigrationIndex = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN invalidation_source"),
+    );
+    expect(sourceMigrationIndex).toBeGreaterThan(0);
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, sourceMigrationIndex));
+    db.prepare(
+      `INSERT INTO inventory_repack_boxes_mirror
+         (inventory_id, snapshot_id, box_id, opened_event_id, old_sscc_context, new_sscc,
+          owner_device_id, capacity, production_date, state, print_state, opened_at,
+          invalidated_at, updated_at)
+       VALUES ('inventory', 'snapshot', 'box', 'event', 'source', '346006820000000014',
+               'device', 20, '2026-08-19', 'invalidated', 'not_ready',
+               '2026-08-25T09:00:00.000Z', '2026-08-25T10:00:00.000Z',
+               '2026-08-25T10:00:00.000Z')`,
+    ).run();
+    applyStatements(db, STATION_MIGRATIONS.slice(sourceMigrationIndex));
+    expect(
+      db
+        .prepare(
+          "SELECT invalidation_source FROM inventory_repack_boxes_mirror WHERE box_id = 'box'",
+        )
+        .get(),
+    ).toEqual({ invalidation_source: "claim_lost" });
+  });
+
   it("creates inventory mirrors and single-statement acknowledgement/progress receipts", () => {
     const db = migratedDb();
     const expectedTables = [
@@ -110,6 +137,7 @@ describe("STATION_MIGRATIONS", () => {
       expect.arrayContaining([
         expect.objectContaining({ name: "opened_event_id", notnull: 1 }),
         expect.objectContaining({ name: "closed_event_id", notnull: 0 }),
+        expect.objectContaining({ name: "invalidation_source", notnull: 0 }),
       ]),
     );
     expect(db.prepare("PRAGMA table_info(inventory_repack_items_mirror)").all()).toEqual(
@@ -2052,9 +2080,15 @@ describe("inventory receipt trigger admission", () => {
 
     expect(
       fixture.db
-        .prepare("SELECT state, invalidated_at FROM inventory_repack_boxes_mirror WHERE box_id = ?")
+        .prepare(
+          "SELECT state, invalidated_at, invalidation_source FROM inventory_repack_boxes_mirror WHERE box_id = ?",
+        )
         .get(boxId),
-    ).toEqual({ state: "invalidated", invalidated_at: "2026-08-25T10:00:01.000Z" });
+    ).toEqual({
+      state: "invalidated",
+      invalidated_at: "2026-08-25T10:00:01.000Z",
+      invalidation_source: "claim_lost",
+    });
   });
 
   it.each(["acknowledgement", "progress"] as const)(
@@ -2109,7 +2143,7 @@ describe("inventory receipt trigger admission", () => {
       expect(
         fixture.db
           .prepare(
-            `SELECT state, print_state, invalidated_at
+            `SELECT state, print_state, invalidated_at, invalidation_source
                FROM inventory_repack_boxes_mirror WHERE box_id = ?`,
           )
           .get(boxId),
@@ -2117,6 +2151,7 @@ describe("inventory receipt trigger admission", () => {
         state: "invalidated",
         print_state: "failed",
         invalidated_at: "2026-08-25T10:00:01.000Z",
+        invalidation_source: "claim_lost",
       });
     },
   );

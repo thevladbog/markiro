@@ -47,6 +47,7 @@ interface ProgressStreamRow {
   resultId: string | null;
   boxId: string | null;
   ownerDeviceId: string | null;
+  effectAt: Date | string;
   changedAt: Date | string;
 }
 
@@ -103,6 +104,10 @@ function parseProgressStreamRow(value: unknown): ProgressStreamRow {
   if (!(changedAt instanceof Date) && typeof changedAt !== "string") {
     throw new Error("Inventory progress changedAt is invalid");
   }
+  const effectAt = read("effectAt");
+  if (!(effectAt instanceof Date) && typeof effectAt !== "string") {
+    throw new Error("Inventory progress effectAt is invalid");
+  }
   const winningScannedAt = read("winningScannedAt");
   if (
     winningScannedAt !== null &&
@@ -124,6 +129,7 @@ function parseProgressStreamRow(value: unknown): ProgressStreamRow {
     resultId: nullableString("resultId"),
     boxId: nullableString("boxId"),
     ownerDeviceId: nullableString("ownerDeviceId"),
+    effectAt,
     changedAt,
   };
 }
@@ -801,26 +807,27 @@ export class StationInventorySyncService {
     inventoryId: string,
     query: StationInventoryProgressQueryDto,
   ): Promise<StationInventoryProgressDto> {
-    const participant = await this.activeParticipant(tenantId, deviceId, inventoryId);
-    const [inventory] = await this.db
-      .select({
-        snapshotId: schema.inventories.activeSnapshotId,
-        resultRevision: schema.inventories.resultRevision,
-      })
-      .from(schema.inventories)
-      .where(
-        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
-      );
-    if (!inventory?.snapshotId) throw new NotFoundException();
-    void participant;
-    const [revisionText, id] = query.cursor?.split(":") ?? [];
-    const revision = revisionText ? Number(revisionText) : null;
-    const cursorCondition =
-      revision === null || id === undefined
-        ? sql`true`
-        : sql`(stream."resultRevision" > ${revision}
+    await this.activeParticipant(tenantId, deviceId, inventoryId);
+    return this.db.transaction(
+      async (tx) => {
+        const [inventory] = await tx
+          .select({
+            snapshotId: schema.inventories.activeSnapshotId,
+            resultRevision: schema.inventories.resultRevision,
+          })
+          .from(schema.inventories)
+          .where(
+            and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
+          );
+        if (!inventory?.snapshotId) throw new NotFoundException();
+        const [revisionText, id] = query.cursor?.split(":") ?? [];
+        const revision = revisionText ? Number(revisionText) : null;
+        const cursorCondition =
+          revision === null || id === undefined
+            ? sql`true`
+            : sql`(stream."resultRevision" > ${revision}
           or (stream."resultRevision" = ${revision} and stream.id > ${id}))`;
-    const rowsResult = await this.db.execute(sql<ProgressStreamRow>`
+        const rowsResult = await tx.execute(sql<ProgressStreamRow>`
       select *
       from (
         select
@@ -836,6 +843,7 @@ export class StationInventorySyncService {
           null::uuid as "resultId",
           null::uuid as "boxId",
           null::uuid as "ownerDeviceId",
+          change.changed_at as "effectAt",
           change.changed_at as "changedAt"
         from inventory_progress_changes change
         where change.tenant_id = ${tenantId}
@@ -856,6 +864,7 @@ export class StationInventorySyncService {
           correction.target_code_result_id,
           correction.target_repack_box_id,
           box.owner_device_id,
+          correction.effect_at,
           correction.created_at
         from inventory_corrections correction
         left join inventory_code_results result
@@ -874,70 +883,74 @@ export class StationInventorySyncService {
       order by stream."resultRevision", stream.id
       limit ${query.limit}
     `);
-    const items: StationInventoryProgressDto["items"] = rowsResult.rows
-      .map(parseProgressStreamRow)
-      .map((row) => {
-        const correctedAt = readProgressDate(row.changedAt);
-        if (row.kind === "claim" || row.kind === "correction") {
-          if (!row.codeHash || !row.classification) {
-            throw new Error("Inventory progress code projection is incomplete");
-          }
-          return {
-            id: row.id,
-            revision: row.resultRevision,
-            kind: row.kind,
-            codeHash: row.codeHash,
-            classification: row.classification,
-            observedProductionDate: row.observedProductionDate,
-            winner:
-              row.winningEventId && row.winningDeviceId && row.winningScannedAt
-                ? {
-                    codeHash: row.codeHash,
-                    eventId: row.winningEventId,
-                    deviceId: row.winningDeviceId,
-                    scannedAt: readProgressDate(row.winningScannedAt),
-                  }
-                : null,
-            correctedAt,
-          };
-        }
-        if (!row.boxId || !row.ownerDeviceId) {
-          throw new Error("Inventory progress box correction is incomplete");
-        }
-        if (row.kind === "remove_item") {
-          if (!row.resultId || !row.codeHash) {
-            throw new Error("Inventory progress membership correction is incomplete");
-          }
-          return {
-            id: row.id,
-            revision: row.resultRevision,
-            kind: row.kind,
-            boxId: row.boxId,
-            resultId: row.resultId,
-            codeHash: row.codeHash,
-            ownerDeviceId: row.ownerDeviceId,
-            correctedAt,
-          };
-        }
+        const items: StationInventoryProgressDto["items"] = rowsResult.rows
+          .map(parseProgressStreamRow)
+          .map((row) => {
+            const correctedAt = readProgressDate(row.changedAt);
+            if (row.kind === "claim" || row.kind === "correction") {
+              if (!row.codeHash || !row.classification) {
+                throw new Error("Inventory progress code projection is incomplete");
+              }
+              return {
+                id: row.id,
+                revision: row.resultRevision,
+                kind: row.kind,
+                codeHash: row.codeHash,
+                classification: row.classification,
+                observedProductionDate: row.observedProductionDate,
+                winner:
+                  row.winningEventId && row.winningDeviceId && row.winningScannedAt
+                    ? {
+                        codeHash: row.codeHash,
+                        eventId: row.winningEventId,
+                        deviceId: row.winningDeviceId,
+                        scannedAt: readProgressDate(row.winningScannedAt),
+                      }
+                    : null,
+                correctedAt,
+              };
+            }
+            if (!row.boxId || !row.ownerDeviceId) {
+              throw new Error("Inventory progress box correction is incomplete");
+            }
+            if (row.kind === "remove_item") {
+              if (!row.resultId || !row.codeHash) {
+                throw new Error("Inventory progress membership correction is incomplete");
+              }
+              return {
+                id: row.id,
+                revision: row.resultRevision,
+                kind: row.kind,
+                boxId: row.boxId,
+                resultId: row.resultId,
+                codeHash: row.codeHash,
+                ownerDeviceId: row.ownerDeviceId,
+                removedAt: readProgressDate(row.effectAt),
+                correctedAt,
+              };
+            }
+            return {
+              id: row.id,
+              revision: row.resultRevision,
+              kind: row.kind,
+              boxId: row.boxId,
+              ownerDeviceId: row.ownerDeviceId,
+              correctedAt,
+            };
+          });
+        const last = items.at(-1);
         return {
-          id: row.id,
-          revision: row.resultRevision,
-          kind: row.kind,
-          boxId: row.boxId,
-          ownerDeviceId: row.ownerDeviceId,
-          correctedAt,
+          inventoryId,
+          snapshotId: inventory.snapshotId,
+          snapshotRevision: 1,
+          cursor: query.cursor ?? null,
+          resultRevision: inventory.resultRevision,
+          items,
+          nextCursor: last ? `${last.revision}:${last.id}` : null,
         };
-      });
-    const last = items.at(-1);
-    return {
-      inventoryId,
-      snapshotId: inventory.snapshotId,
-      snapshotRevision: 1,
-      cursor: query.cursor ?? null,
-      resultRevision: inventory.resultRevision,
-      items,
-      nextCursor: last ? `${last.revision}:${last.id}` : null,
-    };
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   }
 
   leave(
@@ -1315,11 +1328,24 @@ export class StationInventorySyncService {
     }
 
     if (mutation.action === "resolve-conflict") {
+      const [adminInvalidation] = await tx
+        .select({ id: schema.inventoryCorrections.id })
+        .from(schema.inventoryCorrections)
+        .where(
+          and(
+            eq(schema.inventoryCorrections.tenantId, tenantId),
+            eq(schema.inventoryCorrections.inventoryId, inventoryId),
+            eq(schema.inventoryCorrections.targetRepackBoxId, box.id),
+            eq(schema.inventoryCorrections.action, "invalidate_box"),
+          ),
+        )
+        .limit(1);
       if (
         box.state !== "invalidated" ||
         box.printAttemptCount !== 0 ||
         box.printedAt !== null ||
-        mutation.reason !== "claim-lost"
+        mutation.reason !== "claim-lost" ||
+        adminInvalidation !== undefined
       ) {
         throw new ConflictException({ code: "INVENTORY_REPACK_CONFLICT_RESOLUTION_INVALID" });
       }

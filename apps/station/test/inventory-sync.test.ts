@@ -180,13 +180,13 @@ describe("inventory sync engine", () => {
               WHERE type = 'trigger' AND name IN (
                 'inventory_sync_validate_ack_v2', 'inventory_sync_apply_ack_v2',
                 'inventory_sync_validate_ack_v3', 'inventory_sync_apply_ack_v3',
-                'inventory_progress_validate_page_v3', 'inventory_progress_apply_page_v2'
+                'inventory_progress_validate_page_v4', 'inventory_progress_apply_page_v2'
               ) ORDER BY name`,
           )
           .all(),
       ).toEqual([
         { name: "inventory_progress_apply_page_v2" },
-        { name: "inventory_progress_validate_page_v3" },
+        { name: "inventory_progress_validate_page_v4" },
         { name: "inventory_sync_apply_ack_v2" },
         { name: "inventory_sync_apply_ack_v3" },
         { name: "inventory_sync_validate_ack_v2" },
@@ -1033,6 +1033,7 @@ describe("inventory progress and leave", () => {
             resultId,
             codeHash: "c".repeat(64),
             ownerDeviceId: DEVICE_ID,
+            removedAt: "2099-08-25T10:01:00.000Z",
             correctedAt: "2026-08-25T10:01:00.000Z",
           },
           {
@@ -1068,12 +1069,18 @@ describe("inventory progress and leave", () => {
       db
         .prepare("SELECT removed_at FROM inventory_repack_items_mirror WHERE item_id = 'item-1'")
         .get(),
-    ).toEqual({ removed_at: "2026-08-25T10:01:00.000Z" });
+    ).toEqual({ removed_at: "2099-08-25T10:01:00.000Z" });
     expect(
       db
-        .prepare("SELECT state, invalidated_at FROM inventory_repack_boxes_mirror WHERE box_id = ?")
+        .prepare(
+          "SELECT state, invalidated_at, invalidation_source FROM inventory_repack_boxes_mirror WHERE box_id = ?",
+        )
         .get(openBoxId),
-    ).toEqual({ state: "invalidated", invalidated_at: "2026-08-25T10:02:00.000Z" });
+    ).toEqual({
+      state: "invalidated",
+      invalidated_at: "2026-08-25T10:02:00.000Z",
+      invalidation_source: "admin",
+    });
     expect(
       db
         .prepare(
