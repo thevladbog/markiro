@@ -160,6 +160,37 @@ it("submits only catalog selections with exact versions and polls pending runs e
   expect(listCount).toBe(countAfterReady);
 });
 
+it("keeps polling a pending run after reopen until stale-revision failure is visible", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  let listCount = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/inventory-document-formats") return response({ items: [format] });
+      if (url === `/api/inventories/${INVENTORY_ID}/document-runs`) {
+        listCount += 1;
+        return response({
+          items: [
+            run(listCount === 1 ? "processing" : "failed", {
+              errorCode: listCount === 1 ? null : "STALE_RESULT_REVISION",
+            }),
+          ],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  renderDocuments("running");
+
+  expect(await screen.findByText("Формируется")).toBeDefined();
+  await act(async () => vi.advanceTimersByTimeAsync(2_000));
+  expect(await screen.findByText(/STALE_RESULT_REVISION/)).toBeDefined();
+  const countAfterFailure = listCount;
+  await act(async () => vi.advanceTimersByTimeAsync(4_000));
+  expect(listCount).toBe(countAfterFailure);
+});
+
 it("turns server contract failures into an actionable localized message", async () => {
   vi.stubGlobal(
     "fetch",

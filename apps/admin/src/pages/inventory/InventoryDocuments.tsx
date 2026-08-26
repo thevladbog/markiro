@@ -58,7 +58,7 @@ export function InventoryDocuments({
 }) {
   const { t, i18n } = useTranslation();
   const formats = useInventoryDocumentFormats();
-  const runs = useInventoryDocumentRuns(inventoryId, inventoryStatus);
+  const runs = useInventoryDocumentRuns(inventoryId);
   const create = useCreateInventoryDocumentRun();
   const retry = useRetryInventoryDocumentRun(inventoryId);
   const complete = useCompleteInventory();

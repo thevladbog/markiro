@@ -43,7 +43,6 @@ import {
   type InventoryEvidenceResponse,
   type InventoryImport,
   type InventoryProgress,
-  type InventoryStatus,
   type InventoryLateEventsResponse,
   type InventoryLateEventReplayResponse,
   type InventoryReopenResponse,
@@ -475,14 +474,12 @@ export function useInventoryDocumentFormats(): UseQueryResult<InventoryDocumentF
 
 export function useInventoryDocumentRuns(
   inventoryId: string,
-  inventoryStatus: InventoryStatus,
 ): UseQueryResult<InventoryDocumentRun[]> {
   return useQuery({
     queryKey: inventoryDocumentRunsQueryKey(inventoryId),
     queryFn: () => listInventoryDocumentRuns(inventoryId),
     enabled: inventoryId.length > 0,
     refetchInterval: (query) =>
-      inventoryStatus === "closed" &&
       query.state.data?.some((run) => run.status === "queued" || run.status === "processing")
         ? 2_000
         : false,
