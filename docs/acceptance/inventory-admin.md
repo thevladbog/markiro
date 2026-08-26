@@ -5,7 +5,7 @@
 **PASS — implemented workflow and automated evidence.** The tenant-admin, API, PostgreSQL, and
 Station test surfaces cover inventory creation and preparation, six Chestny ZNAK status inputs,
 snapshot fixation, multi-device execution, reconciliation and corrections, close/reopen, and the
-document job infrastructure. The focused connected journey passed 211 tests in 13 API files. The
+document job infrastructure. The focused connected journey passed 212 tests in 13 API files. The
 full package gates also passed after one stale Station access fixture was updated to include all
 facts now required by the frozen manifest contract.
 
@@ -34,11 +34,17 @@ Chestny ZNAK submission. Inventory v1 sends no document externally.
 
 ## Automated journey composition
 
-A new monolithic test was not added. The operation spans three trust and persistence boundaries:
-cabinet session APIs, Station device/offline behavior, and asynchronous document publication. A
-single test would either duplicate the established fixtures or bypass those boundaries. The
-following existing connected and UI suites form the reproducible journey, with the test registry
-substitution confined to document tests.
+A DB-backed scenario named `regenerates and completes revision 8 after reopening invalidates
+revision 7` now proves the complete document lifecycle in one tenant-authorized sequence. It creates
+and processes a selected synthetic run at closed revision 7, downloads its artifact and ZIP,
+reopens and verifies invalidation plus revision 8, closes again, creates a new-key revision-8 run,
+processes and downloads it, acknowledges the documents, and observes completion at revision 8.
+
+The entire inventory operation is not collapsed into that one test. It spans three trust and
+persistence boundaries: cabinet session APIs, Station device/offline behavior, and asynchronous
+document publication. Duplicating all established fixtures in one test would bypass or weaken those
+boundaries. The following connected and UI suites form the rest of the reproducible journey, with
+the test registry substitution confined to document tests.
 
 | Journey stage                                                                                                             | Evidence                                                                                                          |
 | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -51,7 +57,7 @@ substitution confined to document tests.
 | Apply an append-only correction with revision and audit protection                                                        | `inventory-corrections.e2e.test.ts`, `inventory-corrections.test.tsx`                                             |
 | Evaluate blockers, leave, close, quarantine late work, and freeze a result revision                                       | `inventory-close.e2e.test.ts`, `inventory-late-events.e2e.test.ts`                                                |
 | Generate selected synthetic artifacts, verify SHA-256, deterministic ZIP and manifest, and tenant-scoped downloads        | `inventory-document-runner.test.ts`, `inventory-documents.e2e.test.ts`                                            |
-| Reopen, invalidate prior artifacts, increment revision, close again, regenerate, download, acknowledge, and complete      | `inventory-documents.e2e.test.ts`, `inventory-close.e2e.test.ts`, admin document/completion tests                 |
+| Reopen, invalidate prior artifacts, increment revision, close again, regenerate, download, acknowledge, and complete      | Exact DB-backed `regenerates and completes revision 8…` scenario in `inventory-documents.e2e.test.ts`             |
 
 The connected snapshot fixture selects six independently stored imports. Its introduced rows include
 an inclusive-range pair, an out-of-range row, and a `MOVING_BY_UD` row; the asserted result is two
@@ -82,7 +88,7 @@ generator output, and an entry in the tested ZIP manifest. The unresolved contra
 
 ```text
 Focused connected inventory API journey on disposable PostgreSQL:
-13 files passed; 211 tests passed
+13 files passed; 212 tests passed
 
 @markiro/domain test / typecheck / lint / build:
 29 files passed; 404 tests passed; all remaining gates passed

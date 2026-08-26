@@ -22,6 +22,7 @@ import {
 import {
   INVENTORY_DOCUMENT_GENERATOR_REGISTRY,
   InventoryDocumentGeneratorRegistry,
+  InventoryDocumentRunnerService,
   type InventoryDocumentGenerator,
 } from "../src/modules/inventories/inventory-document-runner.service";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
@@ -147,6 +148,7 @@ describe.skipIf(!ready)("inventory document endpoints with synthetic test regist
   let app: INestApplication | undefined;
   let db: Db;
   let document: OpenAPIObject;
+  let runner: InventoryDocumentRunnerService;
   let registry = new InventoryDocumentGeneratorRegistry(syntheticGenerators);
   const enqueue = vi.fn(async () => "job-1");
   const objects = new Map<string, Buffer>();
@@ -187,6 +189,7 @@ describe.skipIf(!ready)("inventory document endpoints with synthetic test regist
     mountAuth(server, setup.auth);
     server.use(express.json());
     await app.init();
+    runner = app.get(InventoryDocumentRunnerService);
     document = SwaggerModule.createDocument(
       app,
       new DocumentBuilder().setTitle("inventory documents").setVersion("test").build(),
@@ -536,6 +539,100 @@ describe.skipIf(!ready)("inventory document endpoints with synthetic test regist
     await owner.agent
       .get(`/inventory-document-runs/${created.body.id}/artifacts/${artifactId}/download`)
       .expect(404);
+  });
+
+  it("regenerates and completes revision 8 after reopening invalidates revision 7", async () => {
+    const owner = await seedInventory();
+    const firstKey = randomUUID();
+    const first = await owner.agent
+      .post(`/inventories/${owner.inventoryId}/document-runs`)
+      .send(createBody(firstKey))
+      .expect(201);
+    expect(first.body.resultRevision).toBe(7);
+
+    await runner.run(first.body.id as string, { retryCount: 0, retryLimit: 0 });
+    const firstHistory = await owner.agent
+      .get(`/inventories/${owner.inventoryId}/document-runs`)
+      .expect(200);
+    const firstRun = firstHistory.body.items.find(
+      (run: { id: string }) => run.id === first.body.id,
+    ) as { status: string; artifacts: Array<{ id: string; sha256: string }> } | undefined;
+    if (!firstRun) throw new Error("Expected revision 7 document run");
+    expect(firstRun).toMatchObject({
+      status: "ready",
+      artifacts: [{ id: expect.any(String), sha256: expect.stringMatching(/^[0-9a-f]{64}$/) }],
+    });
+    const firstArtifactId = firstRun.artifacts[0]!.id;
+    await owner.agent
+      .get(`/inventory-document-runs/${first.body.id}/artifacts/${firstArtifactId}/download`)
+      .expect(200);
+    await owner.agent.get(`/inventory-document-runs/${first.body.id}/download`).expect(200);
+
+    const reopened = await owner.agent
+      .post(`/inventories/${owner.inventoryId}/reopen`)
+      .send({})
+      .expect(201);
+    expect(reopened.body).toMatchObject({
+      inventoryId: owner.inventoryId,
+      status: "running",
+      resultRevision: 8,
+      invalidatedArtifactCount: 1,
+    });
+    await owner.agent
+      .get(`/inventory-document-runs/${first.body.id}/artifacts/${firstArtifactId}/download`)
+      .expect(404);
+    const [invalidated] = await db
+      .select({ invalidatedAt: schema.inventoryDocumentArtifacts.invalidatedAt })
+      .from(schema.inventoryDocumentArtifacts)
+      .where(eq(schema.inventoryDocumentArtifacts.id, firstArtifactId));
+    expect(invalidated?.invalidatedAt).toBeInstanceOf(Date);
+
+    const closedAgain = await owner.agent
+      .post(`/inventories/${owner.inventoryId}/close`)
+      .send({})
+      .expect(201);
+    expect(closedAgain.body).toMatchObject({
+      inventoryId: owner.inventoryId,
+      status: "closed",
+      resultRevision: 8,
+    });
+
+    const secondKey = randomUUID();
+    expect(secondKey).not.toBe(firstKey);
+    const second = await owner.agent
+      .post(`/inventories/${owner.inventoryId}/document-runs`)
+      .send(createBody(secondKey))
+      .expect(201);
+    expect(second.body).toMatchObject({ resultRevision: 8, status: "queued" });
+    expect(second.body.id).not.toBe(first.body.id);
+
+    await runner.run(second.body.id as string, { retryCount: 0, retryLimit: 0 });
+    const secondHistory = await owner.agent
+      .get(`/inventories/${owner.inventoryId}/document-runs`)
+      .expect(200);
+    const secondRun = secondHistory.body.items.find(
+      (run: { id: string }) => run.id === second.body.id,
+    ) as { status: string; artifacts: Array<{ id: string; sha256: string }> } | undefined;
+    if (!secondRun) throw new Error("Expected revision 8 document run");
+    expect(secondRun).toMatchObject({
+      status: "ready",
+      artifacts: [{ id: expect.any(String), sha256: expect.stringMatching(/^[0-9a-f]{64}$/) }],
+    });
+    const secondArtifactId = secondRun.artifacts[0]!.id;
+    await owner.agent
+      .get(`/inventory-document-runs/${second.body.id}/artifacts/${secondArtifactId}/download`)
+      .expect(200);
+    await owner.agent.get(`/inventory-document-runs/${second.body.id}/download`).expect(200);
+
+    const completed = await owner.agent
+      .post(`/inventories/${owner.inventoryId}/complete`)
+      .send({ documentsDownloadedAndChecked: true })
+      .expect(201);
+    expect(completed.body).toMatchObject({
+      inventoryId: owner.inventoryId,
+      status: "completed",
+      resultRevision: 8,
+    });
   });
 
   it("does not record ZIP download evidence when presigning fails", async () => {
