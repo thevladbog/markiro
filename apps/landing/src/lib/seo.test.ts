@@ -35,10 +35,15 @@ describe("SEO generators", () => {
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/stati\/agregatsiya-piva-v-koroba\/<\/loc>[\s\S]*?<lastmod>2026-08-26<\/lastmod>/,
     );
+    expect(sitemap).toMatch(
+      /<loc>https:\/\/markiro\.app\/stati\/markirovka-piva-2026\/<\/loc>[\s\S]*?<lastmod>2026-08-26<\/lastmod>/,
+    );
+    expect(sitemap).toContain("<loc>https://markiro.app/en/articles/beer-case-aggregation/</loc>");
+    expect(sitemap).toContain("<loc>https://markiro.app/en/articles/beer-marking-2026/</loc>");
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(39);
+    expect(sitemap.match(/<url>/g)).toHaveLength(42);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -50,6 +55,9 @@ describe("SEO generators", () => {
     );
     expect(llms).toContain("https://markiro.app/sscc-i-agregatsiya/");
     expect(llms).toContain("https://markiro.app/stati/agregatsiya-piva-v-koroba/");
+    expect(llms).toContain("https://markiro.app/stati/markirovka-piva-2026/");
+    expect(llms).toContain("https://markiro.app/en/articles/beer-case-aggregation/");
+    expect(llms).toContain("https://markiro.app/en/articles/beer-marking-2026/");
     expect(llms).toContain("## English");
     expect(llms).toContain(
       "> Production serialization, aggregation, and traceability with offline-capable line stations.",
@@ -81,7 +89,7 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(39);
+    expect(sitemap.match(/<url>/g)).toHaveLength(42);
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
     );

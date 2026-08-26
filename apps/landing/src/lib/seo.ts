@@ -107,6 +107,7 @@ export function buildPageGraph(page: SeoPageDefinition): PageGraph {
 
 export function buildArticlePageGraph(page: ArticlePageDefinition): PageGraph {
   const pageUrl = absoluteUrl(page.path);
+  const homeUrl = page.locale === "ru" ? `${SITE_URL}/` : `${SITE_URL}/en/`;
   return {
     "@context": "https://schema.org",
     "@graph": [
@@ -149,7 +150,7 @@ export function buildArticlePageGraph(page: ArticlePageDefinition): PageGraph {
       {
         "@type": "BreadcrumbList",
         itemListElement: [
-          { "@type": "ListItem", position: 1, name: "Markiro", item: `${SITE_URL}/` },
+          { "@type": "ListItem", position: 1, name: "Markiro", item: homeUrl },
           { "@type": "ListItem", position: 2, name: page.navigationLabel, item: pageUrl },
         ],
       },

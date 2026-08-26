@@ -1,0 +1,283 @@
+---
+import { Picture } from "astro:assets";
+
+import articleHero from "../../../assets/beer-marking-2026-hero.png";
+import LandingFooter from "../../../components/LandingFooter.astro";
+import LandingHeader from "../../../components/LandingHeader.astro";
+import { BEER_MARKING_2026_ARTICLE } from "../../../content/articles";
+import { buildArticlePageGraph } from "../../../lib/seo";
+import { readPublicSiteConfig } from "../../../lib/site-config";
+import BaseLayout from "../../../layouts/BaseLayout.astro";
+
+const article = BEER_MARKING_2026_ARTICLE;
+const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<BaseLayout metadata={article} graph={buildArticlePageGraph(article)}>
+  <LandingHeader page={article} phone={config.phone} />
+  <main id="main" class="article-page">
+    <header class="article-hero">
+      <div class="container article-hero__inner">
+        <nav class="breadcrumbs" aria-label="Хлебные крошки">
+          <ol>
+            <li><a href="/">Markiro</a></li>
+            <li aria-current="page">{article.navigationLabel}</li>
+          </ol>
+        </nav>
+        <div class="article-hero__layout">
+          <div class="article-hero__copy">
+            <p class="section-index">{article.eyebrow}</p>
+            <h1>{article.heading}</h1>
+            <p class="article-hero__lead">{article.introduction}</p>
+            <div class="article-byline" aria-label="Сведения о публикации">
+              <span>{article.authorName}</span>
+              <time datetime={article.publishedAt}>26 августа 2026</time>
+              <span>{article.readingTimeMinutes} минут чтения</span>
+            </div>
+          </div>
+          <figure class="article-hero__media" data-article-visual>
+            <Picture
+              src={articleHero}
+              alt="Инженер проверяет готовность линии маркировки пива: сканер, принтер и рабочую станцию"
+              widths={[480, 720, 1080]}
+              formats={["avif", "webp"]}
+              sizes="(max-width: 767px) 100vw, 45vw"
+              loading="eager"
+              fetchpriority="high"
+              data-article-hero-image
+            />
+            <figcaption>Готовность определяется на реальной линии: от чтения кода до восстановления операции после сбоя.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </header>
+
+    <article class="container article-body">
+      <aside class="article-summary" aria-labelledby="article-summary-title">
+        <p class="section-index">Коротко</p>
+        <h2 id="article-summary-title">Что важно в 2026 году</h2>
+        <ul>
+          <li data-key-takeaway>Основные этапы обязательной маркировки пива и слабоалкогольных напитков уже действуют.</li>
+          <li data-key-takeaway>Для потребительской упаковки, произведённой или ввезённой с 1 сентября 2025 года, действует экземплярная прослеживаемость.</li>
+          <li data-key-takeaway>Адаптационный период предназначен для подтверждённой технической неготовности и не является общей отменой требований.</li>
+          <li data-key-takeaway>Отчёт о нанесении производитель передаёт не позднее следующего календарного дня после нанесения средств идентификации.</li>
+          <li data-key-takeaway>Проверять нужно связку данных, оборудования, действий оператора, локального журнала и внешнего обмена.</li>
+          <li data-key-takeaway>Пилот должен включать дубли, сбой печати, потерю сети и перезапуск, а не только успешную упаковку.</li>
+        </ul>
+      </aside>
+
+      <nav class="article-toc" aria-label="Содержание статьи">
+        <p class="section-index">Содержание</p>
+        <ol>
+          <li><a href="#requirements">Что уже действует</a></li>
+          <li><a href="#adaptation">Что означает адаптационный период</a></li>
+          <li><a href="#production-line">Что проверить на линии</a></li>
+          <li><a href="#terms">Какие коды не нужно путать</a></li>
+          <li><a href="#pilot">Как провести пилот</a></li>
+          <li><a href="#markiro">Граница текущего контура Markiro</a></li>
+        </ol>
+      </nav>
+
+      <section id="requirements" aria-labelledby="requirements-title">
+        <p class="section-index">01 / Требования</p>
+        <h2 id="requirements-title">Что уже действует для маркировки пива в 2026 году</h2>
+        <p><strong>В 2026 году производитель не начинает маркировку с нуля: обязательное нанесение на основные виды упаковки и ключевые этапы прослеживаемости уже вступили в силу.</strong> Поэтому задача смещается от календаря внедрения к устойчивому ежедневному выполнению операций.</p>
+        <p>Для пива и слабоалкогольных напитков в потребительской упаковке, произведённых или ввезённых в Россию с 1 сентября 2025 года, действует обязанность передавать экземплярные сведения при отгрузке и приёмке между участниками оборота. Для кег соответствующая дата наступила раньше — 1 марта 2025 года. Актуальная дорожная карта опубликована в <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/sroki-i-etapy-zapuska-obyazatelnoy-markirovki-piva-pivnykh-i-slaboalkogolnykh-napitkov">разделе «Честного знака» о сроках маркировки пива</a>.</p>
+        <div class="article-cases">
+          <article>
+            <h3>До запуска партии</h3>
+            <p>Определены товар, GTIN, вид упаковки, производственное задание и источник кодов.</p>
+          </article>
+          <article>
+            <h3>На линии</h3>
+            <p>Средство идентификации нанесено, прочитано и связано с конкретным результатом операции.</p>
+          </article>
+          <article>
+            <h3>После нанесения</h3>
+            <p>Производитель передаёт отчёт о нанесении не позднее следующего календарного дня после нанесения СИ — это отдельно разъясняет <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/kogda-nuzhno-vvodit-pivo-i-pivnye-napitki-v-oborot">официальная инструкция по вводу пива в оборот</a>.</p>
+          </article>
+          <article>
+            <h3>При движении продукции</h3>
+            <p>Фактический состав отгрузки должен соответствовать экземплярным сведениям, переданным через ЭДО.</p>
+          </article>
+        </div>
+        <div class="article-callout article-callout--boundary">
+          <strong>Проверяйте применимость требований к конкретному товару.</strong>
+          <p>Коммерческого названия напитка недостаточно: состав товарной группы определяется действующими кодами ТН ВЭД ЕАЭС и ОКПД 2. Материал не заменяет проверку актуальной редакции правил для вашей продукции и схемы оборота.</p>
+        </div>
+      </section>
+
+      <section id="adaptation" aria-labelledby="adaptation-title">
+        <p class="section-index">02 / Разъяснение 2026</p>
+        <h2 id="adaptation-title">Что означает адаптационный период для экземплярного учёта</h2>
+        <p><strong>Адаптационный период не отменяет требования и не означает, что экземплярный учёт отложен для всей отрасли.</strong> Он предусмотрен для участников, у которых ещё нет полной технической готовности передавать сведения об обороте продукции в потребительской упаковке, произведённой с 1 сентября 2025 года.</p>
+        <p>Участники, у которых передача УПД с кодами идентификации уже реализована, продолжают работать в ранее утверждённом порядке. При технической неготовности оператор просит направить сведения об организации, причине, плановой дате перехода и ответственных сотрудниках. Условия перечислены в <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/perenos-srokov-po-ekzemplyarnomu-uchetu-piva">официальном разъяснении от 14 июля 2026 года</a>.</p>
+        <div class="article-callout">
+          <strong>Что не признаётся технической невозможностью</strong>
+          <p>По опубликованному разъяснению, отсутствие регистрации, МОД или подключения к ЭДО, а также временное отключение мобильного интернета само по себе не подтверждает техническую невозможность экземплярного оборота.</p>
+        </div>
+        <p>Практический вывод для производителя: адаптационный период следует использовать как ограниченное окно для завершения конкретных технических работ. Полезно фиксировать не формулировку «система не готова», а список незавершённых интеграций, сценарии проверки, владельцев задач и дату контрольного запуска.</p>
+      </section>
+
+      <section id="production-line" aria-labelledby="production-line-title">
+        <p class="section-index">03 / Производственный контур</p>
+        <h2 id="production-line-title">Что проверить непосредственно на производственной линии</h2>
+        <p><strong>Готовая интеграция в кабинете не доказывает готовность линии.</strong> Между получением кодов и корректным документом об отгрузке находятся физическое нанесение, сканер, принтер, действия оператора, упаковка и локальное состояние рабочей станции.</p>
+        <figure class="article-visual" data-article-visual>
+          <img
+            src="/images/articles/markirovka-piva-2026-control-map.svg"
+            width="1200"
+            height="620"
+            loading="lazy"
+            decoding="async"
+            alt="Карта готовности: данные товара проходят через нанесение, проверку и упаковку, а локальный журнал связывает линию с ГИС МТ, ЭДО и 1С"
+            data-article-diagram
+          />
+          <figcaption>Требование превращается в управляемый процесс только тогда, когда каждый физический шаг имеет проверяемый цифровой результат.</figcaption>
+        </figure>
+        <div class="article-checklist">
+          <div>
+            <h3>Данные и задание</h3>
+            <ul>
+              <li>Товар сопоставлен с правильным GTIN.</li>
+              <li>Указаны вид упаковки и параметры партии.</li>
+              <li>Оператор не вводит критичные идентификаторы вручную.</li>
+              <li>Ошибочная партия блокируется до нанесения.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Оборудование и оператор</h3>
+            <ul>
+              <li>Сканер читает реальные коды на фактической таре.</li>
+              <li>Принтер воспроизводит макет без потери читаемости.</li>
+              <li>Результат последнего скана виден и различим без цвета.</li>
+              <li>Повторный код не попадает в состав второй раз.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Журнал и обмен</h3>
+            <ul>
+              <li>Операция имеет явный локальный статус.</li>
+              <li>Очередь переживает потерю сети и перезапуск.</li>
+              <li>Повторная отправка не создаёт дубликат.</li>
+              <li>Конфликт становится видимым и восстанавливаемым.</li>
+            </ul>
+          </div>
+        </div>
+        <p>Подробный рабочий цикл единичных кодов и коробов разобран в материале <a href="/stati/agregatsiya-piva-v-koroba/">об агрегации пива без остановки линии</a>.</p>
+      </section>
+
+      <section id="terms" aria-labelledby="terms-title">
+        <p class="section-index">04 / Термины</p>
+        <h2 id="terms-title">Какие коды не нужно путать между собой</h2>
+        <p><strong>Средство идентификации, код маркировки и код идентификации связаны, но используются на разных этапах.</strong> Ошибка в терминологии часто превращается в неверный формат обмена или попытку передать во внешнюю систему лишние данные.</p>
+        <div class="article-cases">
+          <article>
+            <h3>Средство идентификации — СИ</h3>
+            <p>Машиночитаемое представление кода маркировки, нанесённое на товар, упаковку или этикетку.</p>
+          </article>
+          <article>
+            <h3>Код маркировки — КМ</h3>
+            <p>Уникальная последовательность символов, которую участник получает для преобразования в средство идентификации.</p>
+          </article>
+          <article>
+            <h3>Код идентификации — КИ</h3>
+            <p>Часть кода маркировки, идентифицирующая конкретный экземпляр. Для пива официальный материал указывает структуру из 25 символов.</p>
+          </article>
+          <article>
+            <h3>SSCC и КИТУ</h3>
+            <p>Идентифицируют транспортную упаковку и её состав, а не заменяют код отдельной бутылки или банки.</p>
+          </article>
+        </div>
+        <p>Актуальные определения СИ, КМ и КИ опубликованы в <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/sredstvo-identifikatsii-kod-markirovki-i-kod-identifikatsii-kak-otlichit-i-gde-ispolzuyutsya-pivo">разъяснении «Честного знака» от 31 июля 2026 года</a>. Отдельно о транспортной упаковке читайте на странице <a href="/sscc-i-agregatsiya/">SSCC и агрегации в Markiro</a>.</p>
+      </section>
+
+      <section id="pilot" aria-labelledby="pilot-title">
+        <p class="section-index">05 / Проверка готовности</p>
+        <h2 id="pilot-title">Как провести пилот, который обнаружит реальные риски</h2>
+        <p><strong>Пилот нельзя считать успешным только потому, что одна бутылка отсканировалась, а один короб закрылся.</strong> Его задача — подтвердить нормальный темп работы и показать заранее определённое поведение при ошибке оборудования, оператора или связи.</p>
+        <figure class="article-visual" data-article-visual>
+          <img
+            src="/images/articles/markirovka-piva-2026-readiness.svg"
+            width="1200"
+            height="620"
+            loading="lazy"
+            decoding="async"
+            alt="Пять проверок пилота: чтение реального кода, отказ на дубль, повторная печать, работа без сети и восстановление после перезапуска"
+            data-article-diagram
+          />
+          <figcaption>Сценарии отказа дают больше информации о готовности производства, чем одиночная успешная демонстрация.</figcaption>
+        </figure>
+        <ol class="article-steps">
+          <li>
+            <h3>Подготовить реальные образцы</h3>
+            <p>Используйте фактическую тару, поверхность, скорость движения и оборудование, а не только распечатанный тестовый лист.</p>
+          </li>
+          <li>
+            <h3>Зафиксировать ожидаемый результат каждого шага</h3>
+            <p>Для принятого и отклонённого скана заранее определите экранный статус, звуковой сигнал, запись в журнале и допустимое следующее действие.</p>
+          </li>
+          <li>
+            <h3>Искусственно вызвать сбои</h3>
+            <p>Повторите код, отключите принтер и сеть, закройте приложение и перезапустите рабочее место с открытой упаковкой.</p>
+          </li>
+          <li>
+            <h3>Сверить физический и цифровой состав</h3>
+            <p>После восстановления проверьте бутылки или банки в коробе, назначенный SSCC, события журнала и результат синхронизации.</p>
+          </li>
+          <li>
+            <h3>Разделить автоматическую и внешнюю проверку</h3>
+            <p>Тесты интерфейса не доказывают чтение реальным сканером, печать на выбранном принтере или приём документа внешней системой. Эти проверки фиксируются отдельно.</p>
+          </li>
+        </ol>
+        <p>Архитектура очереди и восстановление операций подробно описаны на странице <a href="/oflayn-rabota/">офлайн-работы производственной станции</a>.</p>
+      </section>
+
+      <section id="markiro" aria-labelledby="markiro-title">
+        <p class="section-index">06 / Markiro</p>
+        <h2 id="markiro-title">Какую часть процесса закрывает Markiro</h2>
+        <p>Markiro связывает рабочее задание, сканер, принтер, действия оператора и локальный журнал в одном производственном контуре. Его задача — не только провести успешную операцию, но и сохранить понятную точку продолжения после ошибки.</p>
+        <ul>
+          <li>проверка формата и повторов кодов на рабочем месте;</li>
+          <li>сбор единиц в короб и фиксация состава;</li>
+          <li>назначение SSCC и повторная печать этикетки без создания новой упаковки;</li>
+          <li>локальная очередь операций при нестабильной связи;</li>
+          <li>явные статусы принятия, отказа и конфликта;</li>
+          <li>восстановление смены и незавершённых операций после перезапуска.</li>
+        </ul>
+        <div class="article-callout article-callout--boundary">
+          <strong>Текущий контур Markiro — «единица → короб → SSCC».</strong>
+          <p>Паллетная агрегация относится к следующему этапу развития. Состав обмена с ГИС МТ, ЭДО, 1С и другими системами подтверждается отдельно для конкретного предприятия и не описывается как универсальная готовая интеграция.</p>
+        </div>
+        <p>Основная специализация сейчас — товарная группа «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки». Новые типы продукции добавляются поэтапно.</p>
+      </section>
+
+      <section class="article-conclusion" aria-labelledby="conclusion-title">
+        <p class="section-index">Вывод</p>
+        <h2 id="conclusion-title">Готовность подтверждается не настройкой, а воспроизводимым процессом</h2>
+        <p>В 2026 году производителю важно соединить требования к кодам и документам с тем, что фактически происходит у оператора. Если линия не умеет однозначно отклонять дубль, повторять печать, переживать потерю сети и восстанавливаться после перезапуска, административная настройка сама по себе не обеспечивает устойчивую маркировку.</p>
+        <p>Начните с одной линии, одного продукта и ограниченного набора реальных сценариев. Зафиксируйте результат каждого шага, а затем расширяйте пилот на остальные форматы упаковки и внешние системы.</p>
+        <a class="button" href="/#demo" data-analytics="landing_demo_click" data-placement="article-conclusion">
+          Проверить готовность одной линии <span aria-hidden="true">→</span>
+        </a>
+      </section>
+
+      <section class="article-related" aria-labelledby="article-related-title">
+        <p class="section-index">По теме</p>
+        <h2 id="article-related-title">Следующие материалы</h2>
+        <div class="seo-related__grid">
+          <a href="/stati/agregatsiya-piva-v-koroba/"><span>Агрегация пива в короба</span><span aria-hidden="true">→</span></a>
+          <a href="/sscc-i-agregatsiya/"><span>SSCC и агрегация</span><span aria-hidden="true">→</span></a>
+          <a href="/integratsiya-1c/"><span>Интеграция маркировки с 1С</span><span aria-hidden="true">→</span></a>
+        </div>
+      </section>
+    </article>
+  </main>
+  <LandingFooter page={article} />
+
+  <script>
+    import { browserLandingRuntime, initLanding } from "../../../scripts/site";
+
+    initLanding(document, browserLandingRuntime(window));
+  </script>
+</BaseLayout>
