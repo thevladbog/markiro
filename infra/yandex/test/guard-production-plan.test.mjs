@@ -159,7 +159,15 @@ function addExactReleaseConfiguration(plan) {
               },
               {
                 address: "yandex_cdn_origin_group.releases",
-                expressions: { origin: { references: releaseBucketDomainReference } },
+                expressions: {
+                  origin: [
+                    {
+                      source: { references: releaseBucketDomainReference },
+                      enabled: { constant_value: true },
+                      backup: { constant_value: false },
+                    },
+                  ],
+                },
               },
               {
                 address: "yandex_cdn_resource.releases",
@@ -336,7 +344,7 @@ test("production plan guard accepts provider-computed create edges only with exa
     (plan) => {
       plan.configuration.root_module.module_calls.station_releases.module.resources.find(
         (candidate) => candidate.address === "yandex_cdn_origin_group.releases",
-      ).expressions.origin.references = [
+      ).expressions.origin[0].source.references = [
         "yandex_storage_bucket.media.bucket_domain_name",
         "yandex_storage_bucket.media",
       ];
@@ -344,7 +352,7 @@ test("production plan guard accepts provider-computed create edges only with exa
     (plan) => {
       plan.configuration.root_module.module_calls.station_releases.module.resources
         .find((candidate) => candidate.address === "yandex_cdn_origin_group.releases")
-        .expressions.origin.references.push("var.release_bucket_name");
+        .expressions.origin[0].source.references.push("var.release_bucket_name");
     },
   ]) {
     const invalid = copy(creation);
@@ -649,11 +657,21 @@ test("guard CLI rejects computed release origin references without leaking them"
       },
     },
     {
+      scope: "expression",
+      mutate(plan) {
+        plan.configuration.root_module.module_calls.station_releases.module.resources
+          .find((candidate) => candidate.address === "yandex_cdn_origin_group.releases")
+          .expressions.origin.push({
+            source: { references: ["do-not-print-this-plan-value"] },
+          });
+      },
+    },
+    {
       scope: "shape",
       mutate(plan) {
         plan.configuration.root_module.module_calls.station_releases.module.resources.find(
           (candidate) => candidate.address === "yandex_cdn_origin_group.releases",
-        ).expressions.origin.do_not_print_this_plan_value = true;
+        ).expressions.origin[0].source.do_not_print_this_plan_value = true;
       },
     },
     {
@@ -661,7 +679,7 @@ test("guard CLI rejects computed release origin references without leaking them"
       mutate(plan) {
         plan.configuration.root_module.module_calls.station_releases.module.resources
           .find((candidate) => candidate.address === "yandex_cdn_origin_group.releases")
-          .expressions.origin.references.push("do-not-print-this-plan-value");
+          .expressions.origin[0].source.references.push("do-not-print-this-plan-value");
       },
     },
     {
@@ -669,7 +687,7 @@ test("guard CLI rejects computed release origin references without leaking them"
       mutate(plan) {
         plan.configuration.root_module.module_calls.station_releases.module.resources.find(
           (candidate) => candidate.address === "yandex_cdn_origin_group.releases",
-        ).expressions.origin.references[0] = "do-not-print-this-plan-value";
+        ).expressions.origin[0].source.references[0] = "do-not-print-this-plan-value";
       },
     },
   ];
