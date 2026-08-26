@@ -12,7 +12,7 @@
 
   <g transform="translate(68 112)">
     <rect width="286" height="314" fill="#1b1a1f" stroke="#45434a"/>
-    <g transform="translate(82 33)">
+    <g transform="translate(94 35) scale(.8)">
       <path d="M52 0h22v28c0 12 10 18 17 31 9 17 12 42 12 83v75c0 17-10 28-25 28H48c-15 0-25-11-25-28v-75c0-41 3-66 12-83 7-13 17-19 17-31z" fill="#a86b2d" stroke="#e1a864" stroke-width="3"/>
       <path d="M52 21h22" stroke="#f0c68f" stroke-width="4"/>
       <rect x="41" y="112" width="44" height="44" rx="2" fill="#f4f2ed"/>

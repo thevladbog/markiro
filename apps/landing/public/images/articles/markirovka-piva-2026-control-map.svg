@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title description">
+  <title id="title">Карта готовности линии маркировки пива в 2026 году</title>
+  <desc id="description">Производственные данные переходят в нанесение и проверку кода, затем в упаковку и агрегацию. Локальный журнал связывает операции с обменом с внешними системами.</desc>
+  <rect width="1200" height="620" fill="#131216"/>
+  <rect x="1" y="1" width="1198" height="618" fill="none" stroke="#343238" stroke-width="2"/>
+
+  <text x="64" y="67" font-family="IBM Plex Mono, monospace" font-size="16" font-weight="600" letter-spacing="2" fill="#3ddc7a">ГОТОВНОСТЬ — ЭТО СВЯЗАННЫЙ ПРОЦЕСС</text>
+
+  <g font-family="IBM Plex Sans, sans-serif">
+    <g transform="translate(64 112)">
+      <rect width="300" height="216" fill="#1b1a1f" stroke="#45434a"/>
+      <text x="28" y="44" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" fill="#3ddc7a">01 / ДАННЫЕ</text>
+      <text x="28" y="88" font-size="25" font-weight="600" fill="#f5f4f1">Товар и задание</text>
+      <text x="28" y="126" font-size="17" fill="#aaa7af">GTIN · упаковка · партия</text>
+      <text x="28" y="156" font-size="17" fill="#aaa7af">параметры нанесения</text>
+      <rect x="28" y="180" width="244" height="4" fill="#3ddc7a"/>
+    </g>
+
+    <path d="M382 220h54" stroke="#3ddc7a" stroke-width="3"/>
+    <path d="m425 209 12 11-12 11" fill="none" stroke="#3ddc7a" stroke-width="3"/>
+
+    <g transform="translate(454 112)">
+      <rect width="300" height="216" fill="#1b1a1f" stroke="#45434a"/>
+      <text x="28" y="44" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" fill="#3ddc7a">02 / ЛИНИЯ</text>
+      <text x="28" y="81" font-size="23" font-weight="600" fill="#f5f4f1">Нанесение</text>
+      <text x="28" y="109" font-size="23" font-weight="600" fill="#f5f4f1">и проверка</text>
+      <text x="28" y="143" font-size="16" fill="#aaa7af">Data Matrix · сканер</text>
+      <text x="28" y="169" font-size="16" fill="#aaa7af">принтер · результат</text>
+      <rect x="28" y="190" width="244" height="4" fill="#3ddc7a"/>
+    </g>
+
+    <path d="M772 220h54" stroke="#3ddc7a" stroke-width="3"/>
+    <path d="m815 209 12 11-12 11" fill="none" stroke="#3ddc7a" stroke-width="3"/>
+
+    <g transform="translate(844 112)">
+      <rect width="292" height="216" fill="#1b1a1f" stroke="#45434a"/>
+      <text x="28" y="44" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" fill="#3ddc7a">03 / УПАКОВКА</text>
+      <text x="28" y="88" font-size="25" font-weight="600" fill="#f5f4f1">Состав и SSCC</text>
+      <text x="28" y="126" font-size="17" fill="#aaa7af">единица → короб</text>
+      <text x="28" y="156" font-size="17" fill="#aaa7af">контроль дублей и состава</text>
+      <rect x="28" y="180" width="236" height="4" fill="#3ddc7a"/>
+    </g>
+  </g>
+
+  <g transform="translate(64 378)">
+    <rect width="1072" height="166" fill="#202026" stroke="#5b5861"/>
+    <circle cx="58" cy="58" r="24" fill="#3ddc7a"/>
+    <path d="M58 45v27m0 16v2" stroke="#131216" stroke-width="5" stroke-linecap="square"/>
+    <text x="104" y="48" font-family="IBM Plex Sans, sans-serif" font-size="25" font-weight="600" fill="#f5f4f1">Локальный журнал</text>
+    <text x="104" y="80" font-family="IBM Plex Sans, sans-serif" font-size="20" font-weight="600" fill="#f5f4f1">Доказательство и точка восстановления</text>
+    <text x="104" y="116" font-family="IBM Plex Sans, sans-serif" font-size="17" fill="#aaa7af">Принятие · отказ · повторная печать · перезапуск · синхронизация</text>
+    <path d="M760 31v104" stroke="#45434a" stroke-width="2"/>
+    <text x="798" y="72" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" letter-spacing="1" fill="#3ddc7a">ВНЕШНИЙ КОНТУР</text>
+    <text x="798" y="108" font-family="IBM Plex Sans, sans-serif" font-size="18" fill="#f5f4f1">ГИС МТ · ЭДО · 1С</text>
+  </g>
+</svg>

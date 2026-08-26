@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title description">
+  <title id="title">Пять проверок производственной линии перед запуском маркировки пива</title>
+  <desc id="description">Пять последовательных проверок: реальные коды, отказ на дубль, повторная печать, работа без сети и восстановление после перезапуска.</desc>
+  <rect width="1200" height="620" fill="#131216"/>
+  <rect x="1" y="1" width="1198" height="618" fill="none" stroke="#343238" stroke-width="2"/>
+
+  <text x="64" y="67" font-family="IBM Plex Mono, monospace" font-size="16" font-weight="600" letter-spacing="2" fill="#3ddc7a">ПИЛОТ ДОЛЖЕН ПРОВЕРЯТЬ НЕ ТОЛЬКО УСПЕШНЫЙ СЦЕНАРИЙ</text>
+  <path d="M118 168v334" stroke="#45434a" stroke-width="4"/>
+
+  <g font-family="IBM Plex Sans, sans-serif">
+    <g transform="translate(82 112)">
+      <circle cx="36" cy="36" r="34" fill="#3ddc7a"/>
+      <text x="36" y="44" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="20" font-weight="700" fill="#131216">01</text>
+      <text x="96" y="31" font-size="23" font-weight="600" fill="#f5f4f1">Реальный код читается на скорости линии</text>
+      <text x="96" y="59" font-size="17" fill="#aaa7af">Не тестовый PDF, а этикетка на фактической упаковке.</text>
+    </g>
+
+    <g transform="translate(82 204)">
+      <circle cx="36" cy="36" r="34" fill="#242329" stroke="#3ddc7a" stroke-width="3"/>
+      <text x="36" y="44" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="20" font-weight="700" fill="#3ddc7a">02</text>
+      <text x="96" y="31" font-size="23" font-weight="600" fill="#f5f4f1">Повторный скан не меняет состав</text>
+      <text x="96" y="59" font-size="17" fill="#aaa7af">Оператор получает однозначный отказ, а событие остаётся в журнале.</text>
+    </g>
+
+    <g transform="translate(82 296)">
+      <circle cx="36" cy="36" r="34" fill="#242329" stroke="#3ddc7a" stroke-width="3"/>
+      <text x="36" y="44" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="20" font-weight="700" fill="#3ddc7a">03</text>
+      <text x="96" y="31" font-size="23" font-weight="600" fill="#f5f4f1">Повторная печать сохраняет идентификатор</text>
+      <text x="96" y="59" font-size="17" fill="#aaa7af">Сбой принтера не создаёт второй короб или новый SSCC.</text>
+    </g>
+
+    <g transform="translate(82 388)">
+      <circle cx="36" cy="36" r="34" fill="#242329" stroke="#3ddc7a" stroke-width="3"/>
+      <text x="36" y="44" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="20" font-weight="700" fill="#3ddc7a">04</text>
+      <text x="96" y="31" font-size="23" font-weight="600" fill="#f5f4f1">Допустимая работа продолжается без сети</text>
+      <text x="96" y="59" font-size="17" fill="#aaa7af">Очередь видна оператору и переживает временную потерю связи.</text>
+    </g>
+
+    <g transform="translate(82 480)">
+      <circle cx="36" cy="36" r="34" fill="#242329" stroke="#3ddc7a" stroke-width="3"/>
+      <text x="36" y="44" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="20" font-weight="700" fill="#3ddc7a">05</text>
+      <text x="96" y="31" font-size="23" font-weight="600" fill="#f5f4f1">После перезапуска есть точка продолжения</text>
+      <text x="96" y="59" font-size="17" fill="#aaa7af">Смена, открытая упаковка и неотправленные события восстанавливаются.</text>
+    </g>
+  </g>
+</svg>
