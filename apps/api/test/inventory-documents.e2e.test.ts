@@ -22,6 +22,7 @@ import {
 import {
   INVENTORY_DOCUMENT_GENERATOR_REGISTRY,
   InventoryDocumentGeneratorRegistry,
+  type InventoryDocumentGenerator,
 } from "../src/modules/inventories/inventory-document-runner.service";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import { listenOnLoopback } from "./support/listen-loopback";
@@ -111,10 +112,42 @@ const syntheticBoxesDescriptor = {
   requiredSourceCategories: ["newBoxes"] as const,
 };
 
+const syntheticGenerators: readonly InventoryDocumentGenerator[] = [
+  {
+    descriptor: syntheticDescriptor,
+    generate: async () => [
+      {
+        partNumber: 1,
+        filename: "stock.csv",
+        mimeType: syntheticDescriptor.mimeType,
+        bytes: new TextEncoder().encode("code\r\nA\r\n"),
+        rowCount: 1,
+        codeCount: 1,
+        boxCount: 0,
+      },
+    ],
+  },
+  {
+    descriptor: syntheticBoxesDescriptor,
+    generate: async () => [
+      {
+        partNumber: 1,
+        filename: "boxes.csv",
+        mimeType: syntheticBoxesDescriptor.mimeType,
+        bytes: new TextEncoder().encode("box\r\n"),
+        rowCount: 0,
+        codeCount: 0,
+        boxCount: 0,
+      },
+    ],
+  },
+];
+
 describe.skipIf(!ready)("inventory document endpoints with synthetic test registry", () => {
   let app: INestApplication | undefined;
   let db: Db;
   let document: OpenAPIObject;
+  let registry = new InventoryDocumentGeneratorRegistry(syntheticGenerators);
   const enqueue = vi.fn(async () => "job-1");
   const objects = new Map<string, Buffer>();
   const storage = {
@@ -134,47 +167,22 @@ describe.skipIf(!ready)("inventory document endpoints with synthetic test regist
     const env = loadEnv({ ...process.env, ...PLATFORM_TEST_ENV });
     const setup: AuthSetup = setupAuth(env);
     db = setup.db;
-    const registry = new InventoryDocumentGeneratorRegistry([
-      {
-        descriptor: syntheticDescriptor,
-        generate: async () => [
-          {
-            partNumber: 1,
-            filename: "stock.csv",
-            mimeType: syntheticDescriptor.mimeType,
-            bytes: new TextEncoder().encode("code\r\nA\r\n"),
-            rowCount: 1,
-            codeCount: 1,
-            boxCount: 0,
-          },
-        ],
-      },
-      {
-        descriptor: syntheticBoxesDescriptor,
-        generate: async () => [
-          {
-            partNumber: 1,
-            filename: "boxes.csv",
-            mimeType: syntheticBoxesDescriptor.mimeType,
-            bytes: new TextEncoder().encode("box\r\n"),
-            rowCount: 0,
-            codeCount: 0,
-            boxCount: 0,
-          },
-        ],
-      },
-    ]);
+    const registryProvider = {
+      listAvailable: () => registry.listAvailable(),
+      resolve: (id: string, version: number) => registry.resolve(id, version),
+    } as InventoryDocumentGeneratorRegistry;
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL, env })],
     })
       .overrideProvider(PgBossService)
       .useValue({ enqueueInventoryDocumentRun: enqueue })
       .overrideProvider(INVENTORY_DOCUMENT_GENERATOR_REGISTRY)
-      .useValue(registry)
+      .useValue(registryProvider)
       .overrideProvider(ObjectStorageService)
       .useValue(storage)
       .compile();
     app = ref.createNestApplication({ bodyParser: false });
+    app.useLogger(false);
     const server = app.getHttpAdapter().getInstance();
     mountAuth(server, setup.auth);
     server.use(express.json());
@@ -266,6 +274,43 @@ describe.skipIf(!ready)("inventory document endpoints with synthetic test regist
     idempotencyKey,
   });
 
+  async function seedReadySingleArtifact(
+    owner: Awaited<ReturnType<typeof seedInventory>>,
+    filename: string,
+  ) {
+    const created = await owner.agent
+      .post(`/inventories/${owner.inventoryId}/document-runs`)
+      .send(createBody())
+      .expect(201);
+    const objectKey = `tenants/${owner.tenantId}/inventory-documents/manual/${filename}`;
+    const body = Buffer.from("code\r\nA\r\n");
+    objects.set(objectKey, body);
+    await db
+      .update(schema.inventoryDocumentRuns)
+      .set({ status: "ready", completedAt: new Date(), sourceSnapshotStartedAt: new Date() })
+      .where(eq(schema.inventoryDocumentRuns.id, created.body.id));
+    const [artifact] = await db
+      .insert(schema.inventoryDocumentArtifacts)
+      .values({
+        tenantId: owner.tenantId,
+        runId: created.body.id,
+        formatId: syntheticDescriptor.id,
+        formatVersion: 1,
+        partNumber: 1,
+        filename,
+        mimeType: syntheticDescriptor.mimeType,
+        rowCount: 1,
+        codeCount: 1,
+        boxCount: 0,
+        byteSize: body.byteLength,
+        sha256: createHash("sha256").update(body).digest("hex"),
+        objectKey,
+      })
+      .returning({ id: schema.inventoryDocumentArtifacts.id });
+    if (!artifact) throw new Error("Expected artifact");
+    return { runId: created.body.id as string, artifactId: artifact.id };
+  }
+
   it("publishes strict create/list/retry/individual/ZIP OpenAPI operations", () => {
     expect(document.paths["/inventories/{id}/document-runs"]?.post).toBeDefined();
     expect(document.paths["/inventories/{id}/document-runs"]?.get).toBeDefined();
@@ -317,6 +362,54 @@ describe.skipIf(!ready)("inventory document endpoints with synthetic test regist
       .post(`/inventories/${closed.inventoryId}/document-runs`)
       .send({ ...createBody(), selectedFormats: [{ id: syntheticDescriptor.id, version: 2 }] })
       .expect(400, { code: "INVENTORY_DOCUMENT_FORMAT_SUPERSEDED" });
+  });
+
+  it("replays persisted idempotency independently of catalog changes but rejects a stale revision", async () => {
+    const owner = await seedInventory();
+    const key = randomUUID();
+    const first = await owner.agent
+      .post(`/inventories/${owner.inventoryId}/document-runs`)
+      .send(createBody(key))
+      .expect(201);
+
+    try {
+      await db
+        .update(schema.inventoryDocumentRuns)
+        .set({ status: "failed", errorCode: "QUEUE_FAILED", completedAt: new Date() })
+        .where(eq(schema.inventoryDocumentRuns.id, first.body.id));
+      registry = new InventoryDocumentGeneratorRegistry([]);
+      const removedCatalogReplay = await owner.agent
+        .post(`/inventories/${owner.inventoryId}/document-runs`)
+        .send(createBody(key))
+        .expect(201);
+      expect(removedCatalogReplay.body.id).toBe(first.body.id);
+      expect(removedCatalogReplay.body.status).toBe("queued");
+
+      registry = new InventoryDocumentGeneratorRegistry([
+        {
+          ...syntheticGenerators[0]!,
+          descriptor: { ...syntheticDescriptor, version: 2 },
+        },
+      ]);
+      const changedVersionReplay = await owner.agent
+        .post(`/inventories/${owner.inventoryId}/document-runs`)
+        .send(createBody(key))
+        .expect(201);
+      expect(changedVersionReplay.body.id).toBe(first.body.id);
+      await owner.agent
+        .post(`/inventories/${owner.inventoryId}/document-runs`)
+        .send(createBody())
+        .expect(400, { code: "INVENTORY_DOCUMENT_FORMAT_SUPERSEDED" });
+
+      await owner.agent.post(`/inventories/${owner.inventoryId}/reopen`).send({}).expect(201);
+      await owner.agent.post(`/inventories/${owner.inventoryId}/close`).send({}).expect(201);
+      await owner.agent
+        .post(`/inventories/${owner.inventoryId}/document-runs`)
+        .send(createBody(key))
+        .expect(409, { code: "INVENTORY_DOCUMENT_RUN_STALE_REVISION" });
+    } finally {
+      registry = new InventoryDocumentGeneratorRegistry(syntheticGenerators);
+    }
   });
 
   it("lists only tenant-owned runs and denies cross-tenant artifact downloads", async () => {
@@ -443,6 +536,189 @@ describe.skipIf(!ready)("inventory document endpoints with synthetic test regist
     await owner.agent
       .get(`/inventory-document-runs/${created.body.id}/artifacts/${artifactId}/download`)
       .expect(404);
+  });
+
+  it("does not record ZIP download evidence when presigning fails", async () => {
+    const owner = await seedInventory();
+    const seeded = await seedReadySingleArtifact(owner, "presign.csv");
+    storage.presignRead.mockRejectedValueOnce(new Error("synthetic presign failure"));
+
+    await owner.agent.get(`/inventory-document-runs/${seeded.runId}/download`).expect(500);
+
+    const [stored] = await db
+      .select({ downloadedAt: schema.inventoryDocumentArtifacts.downloadedAt })
+      .from(schema.inventoryDocumentArtifacts)
+      .where(eq(schema.inventoryDocumentArtifacts.id, seeded.artifactId));
+    expect(stored?.downloadedAt).toBeNull();
+    const successfulAudits = await db
+      .select({ id: schema.tenantAuditEvents.id })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, owner.tenantId),
+          eq(schema.tenantAuditEvents.targetId, seeded.runId),
+          eq(schema.tenantAuditEvents.action, "inventory.document_run.zip_downloaded"),
+          eq(schema.tenantAuditEvents.outcome, "success"),
+        ),
+      );
+    expect(successfulAudits).toHaveLength(0);
+  });
+
+  it("does not record ZIP download evidence when an artifact is invalidated after presigning", async () => {
+    const owner = await seedInventory();
+    const seeded = await seedReadySingleArtifact(owner, "race.csv");
+    storage.presignRead.mockImplementationOnce(async (key: string) => {
+      await db
+        .update(schema.inventoryDocumentArtifacts)
+        .set({ invalidatedAt: new Date() })
+        .where(eq(schema.inventoryDocumentArtifacts.id, seeded.artifactId));
+      return `https://storage.test/${encodeURIComponent(key)}`;
+    });
+
+    await owner.agent
+      .get(`/inventory-document-runs/${seeded.runId}/download`)
+      .expect(409, { code: "INVENTORY_DOCUMENT_ARTIFACT_INVALIDATED" });
+
+    const [stored] = await db
+      .select({
+        downloadedAt: schema.inventoryDocumentArtifacts.downloadedAt,
+        invalidatedAt: schema.inventoryDocumentArtifacts.invalidatedAt,
+      })
+      .from(schema.inventoryDocumentArtifacts)
+      .where(eq(schema.inventoryDocumentArtifacts.id, seeded.artifactId));
+    expect(stored?.downloadedAt).toBeNull();
+    expect(stored?.invalidatedAt).toBeInstanceOf(Date);
+    const successfulAudits = await db
+      .select({ id: schema.tenantAuditEvents.id })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, owner.tenantId),
+          eq(schema.tenantAuditEvents.targetId, seeded.runId),
+          eq(schema.tenantAuditEvents.action, "inventory.document_run.zip_downloaded"),
+          eq(schema.tenantAuditEvents.outcome, "success"),
+        ),
+      );
+    expect(successfulAudits).toHaveLength(0);
+  });
+
+  it("completes the latest ready selection without requiring every available format", async () => {
+    const owner = await seedInventory();
+    const created = await owner.agent
+      .post(`/inventories/${owner.inventoryId}/document-runs`)
+      .send(createBody())
+      .expect(201);
+    const now = new Date();
+    await db
+      .update(schema.inventoryDocumentRuns)
+      .set({ status: "ready", completedAt: now, sourceSnapshotStartedAt: now })
+      .where(eq(schema.inventoryDocumentRuns.id, created.body.id));
+    await db.insert(schema.inventoryDocumentArtifacts).values({
+      tenantId: owner.tenantId,
+      runId: created.body.id,
+      formatId: syntheticDescriptor.id,
+      formatVersion: 1,
+      partNumber: 1,
+      filename: "selected-stock.csv",
+      mimeType: syntheticDescriptor.mimeType,
+      rowCount: 0,
+      codeCount: 0,
+      boxCount: 0,
+      byteSize: 1,
+      sha256: createHash("sha256").update("a").digest("hex"),
+      objectKey: `tenants/${owner.tenantId}/inventory-documents/complete/selected-stock.csv`,
+      downloadedAt: now,
+      downloadedByUserId: owner.userId,
+    });
+
+    await owner.agent
+      .post(`/inventories/${owner.inventoryId}/complete`)
+      .send({ documentsDownloadedAndChecked: true })
+      .expect(201);
+  });
+
+  it("does not combine artifacts from different ready runs", async () => {
+    const owner = await seedInventory();
+    const older = await owner.agent
+      .post(`/inventories/${owner.inventoryId}/document-runs`)
+      .send({
+        selectedFormats: [{ id: syntheticBoxesDescriptor.id, version: 1 }],
+        idempotencyKey: randomUUID(),
+      })
+      .expect(201);
+    const latest = await owner.agent
+      .post(`/inventories/${owner.inventoryId}/document-runs`)
+      .send({
+        selectedFormats: [
+          { id: syntheticDescriptor.id, version: 1 },
+          { id: syntheticBoxesDescriptor.id, version: 1 },
+        ],
+        idempotencyKey: randomUUID(),
+      })
+      .expect(201);
+    const now = new Date();
+    await db
+      .update(schema.inventoryDocumentRuns)
+      .set({
+        status: "ready",
+        completedAt: now,
+        sourceSnapshotStartedAt: now,
+        createdAt: new Date("2026-08-26T10:00:00.000Z"),
+      })
+      .where(eq(schema.inventoryDocumentRuns.id, older.body.id));
+    await db
+      .update(schema.inventoryDocumentRuns)
+      .set({
+        status: "ready",
+        completedAt: now,
+        sourceSnapshotStartedAt: now,
+        createdAt: new Date("2026-08-26T10:01:00.000Z"),
+      })
+      .where(eq(schema.inventoryDocumentRuns.id, latest.body.id));
+    await db.insert(schema.inventoryDocumentArtifacts).values([
+      {
+        tenantId: owner.tenantId,
+        runId: older.body.id,
+        formatId: syntheticBoxesDescriptor.id,
+        formatVersion: 1,
+        partNumber: 1,
+        filename: "older-boxes.csv",
+        mimeType: syntheticBoxesDescriptor.mimeType,
+        rowCount: 0,
+        codeCount: 0,
+        boxCount: 0,
+        byteSize: 1,
+        sha256: createHash("sha256").update("b").digest("hex"),
+        objectKey: `tenants/${owner.tenantId}/inventory-documents/complete/older-boxes.csv`,
+        downloadedAt: now,
+        downloadedByUserId: owner.userId,
+      },
+      {
+        tenantId: owner.tenantId,
+        runId: latest.body.id,
+        formatId: syntheticDescriptor.id,
+        formatVersion: 1,
+        partNumber: 1,
+        filename: "latest-stock.csv",
+        mimeType: syntheticDescriptor.mimeType,
+        rowCount: 0,
+        codeCount: 0,
+        boxCount: 0,
+        byteSize: 1,
+        sha256: createHash("sha256").update("a").digest("hex"),
+        objectKey: `tenants/${owner.tenantId}/inventory-documents/complete/latest-stock.csv`,
+        downloadedAt: now,
+        downloadedByUserId: owner.userId,
+      },
+    ]);
+
+    await owner.agent
+      .post(`/inventories/${owner.inventoryId}/complete`)
+      .send({ documentsDownloadedAndChecked: true })
+      .expect(409, {
+        code: "INVENTORY_DOCUMENT_ARTIFACTS_NOT_READY",
+        missingFormats: [{ id: syntheticBoxesDescriptor.id, version: 1 }],
+      });
   });
 
   it("completes only after current required artifacts are ready, downloaded, and acknowledged", async () => {

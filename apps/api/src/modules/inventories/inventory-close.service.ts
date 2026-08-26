@@ -1,5 +1,5 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
 import { parseInventoryEventBatchResponse } from "@markiro/domain";
@@ -243,11 +243,35 @@ export class InventoryCloseService {
       if ((activeRun?.count ?? 0) > 0) {
         throw new ConflictException({ code: "INVENTORY_DOCUMENT_RUNS_ACTIVE" });
       }
-      const requiredFormats = this.documentGenerators.listAvailable();
-      if (requiredFormats.length === 0) {
+      if (this.documentGenerators.listAvailable().length === 0) {
         throw new ConflictException({
           code: "INVENTORY_DOCUMENT_ARTIFACTS_UNAVAILABLE",
           requiredTask: 8,
+        });
+      }
+      const [readyRun] = await tx
+        .select({
+          id: schema.inventoryDocumentRuns.id,
+          selectedFormats: schema.inventoryDocumentRuns.selectedFormats,
+        })
+        .from(schema.inventoryDocumentRuns)
+        .where(
+          and(
+            eq(schema.inventoryDocumentRuns.tenantId, tenantId),
+            eq(schema.inventoryDocumentRuns.inventoryId, inventoryId),
+            eq(schema.inventoryDocumentRuns.resultRevision, inventory.resultRevision),
+            eq(schema.inventoryDocumentRuns.status, "ready"),
+          ),
+        )
+        .orderBy(
+          desc(schema.inventoryDocumentRuns.createdAt),
+          desc(schema.inventoryDocumentRuns.id),
+        )
+        .limit(1);
+      if (!readyRun) {
+        throw new ConflictException({
+          code: "INVENTORY_DOCUMENT_ARTIFACTS_NOT_READY",
+          missingFormats: [],
         });
       }
       const readyArtifacts = await tx
@@ -267,19 +291,27 @@ export class InventoryCloseService {
         .where(
           and(
             eq(schema.inventoryDocumentRuns.tenantId, tenantId),
-            eq(schema.inventoryDocumentRuns.inventoryId, inventoryId),
-            eq(schema.inventoryDocumentRuns.resultRevision, inventory.resultRevision),
-            eq(schema.inventoryDocumentRuns.status, "ready"),
+            eq(schema.inventoryDocumentRuns.id, readyRun.id),
             isNull(schema.inventoryDocumentArtifacts.invalidatedAt),
           ),
         );
       const readyKeys = new Set(
         readyArtifacts.map((artifact) => `${artifact.formatId}@${artifact.formatVersion}`),
       );
-      const missing = requiredFormats.filter(
+      const selectedKeys = new Set(
+        readyRun.selectedFormats.map((format) => `${format.id}@${format.version}`),
+      );
+      const missing = readyRun.selectedFormats.filter(
         (format) => !readyKeys.has(`${format.id}@${format.version}`),
       );
-      if (missing.length > 0 || readyArtifacts.some((artifact) => artifact.downloadedAt === null)) {
+      const unexpectedArtifact = readyArtifacts.some(
+        (artifact) => !selectedKeys.has(`${artifact.formatId}@${artifact.formatVersion}`),
+      );
+      if (
+        missing.length > 0 ||
+        unexpectedArtifact ||
+        readyArtifacts.some((artifact) => artifact.downloadedAt === null)
+      ) {
         throw new ConflictException({
           code: "INVENTORY_DOCUMENT_ARTIFACTS_NOT_READY",
           missingFormats: missing.map((format) => ({ id: format.id, version: format.version })),

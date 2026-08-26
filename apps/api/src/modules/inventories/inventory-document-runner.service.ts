@@ -521,14 +521,19 @@ function compareText(left: string, right: string): number {
 }
 
 function assertArchiveFilename(filename: string): void {
+  const caseFolded = filename.normalize("NFC").toLowerCase();
   if (
     filename.length === 0 ||
     filename.length > 200 ||
-    filename === "manifest.json" ||
+    caseFolded === "manifest.json" ||
     filename.includes("/") ||
     filename.includes("\\") ||
+    filename.includes(":") ||
     filename.includes("..") ||
     filename.startsWith(".") ||
+    filename.endsWith(".") ||
+    filename.endsWith(" ") ||
+    /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(filename) ||
     Array.from(filename).some((character) => {
       const codePoint = character.charCodeAt(0);
       return codePoint <= 0x1f || codePoint === 0x7f;

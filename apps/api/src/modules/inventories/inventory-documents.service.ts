@@ -53,6 +53,13 @@ export class InventoryDocumentsService {
     const selectedFormats = [...input.selectedFormats].sort((left, right) =>
       left.id < right.id ? -1 : left.id > right.id ? 1 : 0,
     );
+    const requestDigest = digestRequest({ inventoryId, selectedFormats });
+    const persisted = await this.findIdempotentRun(tenantId, actorUserId, input.idempotencyKey);
+    if (persisted) {
+      const replay = await this.prepareIdempotentReplay(persisted, actorUserId, requestDigest);
+      if (replay.shouldEnqueue) await this.enqueueOrFail(replay.row, actorUserId);
+      return this.getById(tenantId, replay.row.id);
+    }
     for (const selected of selectedFormats) {
       try {
         this.generators.resolve(selected.id, selected.version);
@@ -60,7 +67,6 @@ export class InventoryDocumentsService {
         throw formatSelectionError(error);
       }
     }
-    const requestDigest = digestRequest({ inventoryId, selectedFormats });
 
     let row: InventoryDocumentRunRow;
     let shouldEnqueue = true;
@@ -107,30 +113,11 @@ export class InventoryDocumentsService {
       });
     } catch (error) {
       if (!isIdempotencyConflict(error)) throw error;
-      const [existing] = await this.db
-        .select()
-        .from(schema.inventoryDocumentRuns)
-        .where(
-          and(
-            eq(schema.inventoryDocumentRuns.tenantId, tenantId),
-            eq(schema.inventoryDocumentRuns.createdByUserId, actorUserId),
-            eq(schema.inventoryDocumentRuns.idempotencyKey, input.idempotencyKey),
-          ),
-        )
-        .limit(1);
+      const existing = await this.findIdempotentRun(tenantId, actorUserId, input.idempotencyKey);
       if (!existing) throw error;
-      if (existing.requestDigest !== requestDigest) {
-        throw new ConflictException({ code: "INVENTORY_DOCUMENT_IDEMPOTENCY_CONFLICT" });
-      }
-      row = existing;
-      shouldEnqueue = false;
-      if (existing.status === "failed" && existing.errorCode === "QUEUE_FAILED") {
-        const restored = await this.restoreFailed(existing, actorUserId, ["QUEUE_FAILED"]);
-        if (restored) {
-          row = restored;
-          shouldEnqueue = true;
-        }
-      }
+      const replay = await this.prepareIdempotentReplay(existing, actorUserId, requestDigest);
+      row = replay.row;
+      shouldEnqueue = replay.shouldEnqueue;
     }
     if (shouldEnqueue) await this.enqueueOrFail(row, actorUserId);
     return this.getById(tenantId, row.id);
@@ -303,6 +290,7 @@ export class InventoryDocumentsService {
     const filename = `inventory-${run.inventoryId}-revision-${run.resultRevision}.zip`;
     await this.storage.putVerified(objectKey, body, "application/zip", sha256);
     try {
+      const url = await this.storage.presignRead(objectKey, 300, { downloadFilename: filename });
       await this.db.transaction(async (tx) => {
         const updated = await tx
           .update(schema.inventoryDocumentArtifacts)
@@ -335,12 +323,65 @@ export class InventoryDocumentsService {
           },
         );
       });
+      return { url, filename, expiresInSeconds: 300 };
     } catch (error) {
       await this.storage.delete(objectKey).catch(() => undefined);
       throw error;
     }
-    const url = await this.storage.presignRead(objectKey, 300, { downloadFilename: filename });
-    return { url, filename, expiresInSeconds: 300 };
+  }
+
+  private async findIdempotentRun(
+    tenantId: string,
+    actorUserId: string,
+    idempotencyKey: string,
+  ): Promise<InventoryDocumentRunRow | undefined> {
+    const [existing] = await this.db
+      .select()
+      .from(schema.inventoryDocumentRuns)
+      .where(
+        and(
+          eq(schema.inventoryDocumentRuns.tenantId, tenantId),
+          eq(schema.inventoryDocumentRuns.createdByUserId, actorUserId),
+          eq(schema.inventoryDocumentRuns.idempotencyKey, idempotencyKey),
+        ),
+      )
+      .limit(1);
+    return existing;
+  }
+
+  private async prepareIdempotentReplay(
+    existing: InventoryDocumentRunRow,
+    actorUserId: string,
+    requestDigest: string,
+  ): Promise<{ row: InventoryDocumentRunRow; shouldEnqueue: boolean }> {
+    if (existing.requestDigest !== requestDigest) {
+      throw new ConflictException({ code: "INVENTORY_DOCUMENT_IDEMPOTENCY_CONFLICT" });
+    }
+    const [inventory] = await this.db
+      .select({
+        status: schema.inventories.status,
+        resultRevision: schema.inventories.resultRevision,
+      })
+      .from(schema.inventories)
+      .where(
+        and(
+          eq(schema.inventories.tenantId, existing.tenantId),
+          eq(schema.inventories.id, existing.inventoryId),
+        ),
+      )
+      .limit(1);
+    if (
+      !inventory ||
+      inventory.status !== "closed" ||
+      inventory.resultRevision !== existing.resultRevision
+    ) {
+      throw new ConflictException({ code: "INVENTORY_DOCUMENT_RUN_STALE_REVISION" });
+    }
+    if (existing.status === "failed" && existing.errorCode === "QUEUE_FAILED") {
+      const restored = await this.restoreFailed(existing, actorUserId, ["QUEUE_FAILED"]);
+      if (restored) return { row: restored, shouldEnqueue: true };
+    }
+    return { row: existing, shouldEnqueue: false };
   }
 
   private async getById(tenantId: string, runId: string): Promise<InventoryDocumentRunDto> {

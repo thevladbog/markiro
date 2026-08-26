@@ -68,14 +68,20 @@ describe("inventory document ZIP", () => {
     );
   });
 
-  it.each(["../escape.csv", "/root.csv", "nested/file.csv", "nested\\file.csv", "manifest.json"])(
-    "rejects unsafe artifact filename %s",
-    (filename) => {
-      expect(() => buildInventoryDocumentZip("run-1", 7, [{ ...artifacts[0]!, filename }])).toThrow(
-        "INVENTORY_DOCUMENT_ARCHIVE_FILENAME_INVALID",
-      );
-    },
-  );
+  it.each([
+    "../escape.csv",
+    "/root.csv",
+    "nested/file.csv",
+    "nested\\file.csv",
+    "manifest.json",
+    "MANIFEST.JSON",
+    "C:stock.csv",
+    "CON.csv",
+  ])("rejects unsafe artifact filename %s", (filename) => {
+    expect(() => buildInventoryDocumentZip("run-1", 7, [{ ...artifacts[0]!, filename }])).toThrow(
+      "INVENTORY_DOCUMENT_ARCHIVE_FILENAME_INVALID",
+    );
+  });
 
   it("rejects duplicate and case-folding filename collisions", () => {
     expect(() =>
