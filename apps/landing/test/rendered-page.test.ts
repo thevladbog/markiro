@@ -546,6 +546,389 @@ describe("rendered landing page", () => {
     }
   });
 
+  it("publishes a bilingual guide to beer Data Matrix application methods", () => {
+    for (const article of [
+      {
+        route: "stati/nanesenie-data-matrix-na-pivo",
+        lang: "ru",
+        heading: "Как наносить Data Matrix на пиво",
+        alternate: "/en/articles/beer-data-matrix-application-methods/",
+        alternateLang: "en",
+        diagramPrefix: "nanesenie-data-matrix-pivo",
+        methods: /этикетк.*типограф.*прям/i,
+        boundary: "единица → короб → SSCC",
+        backlinkRoute: "stati/oborudovanie-dlya-markirovki-piva",
+      },
+      {
+        route: "en/articles/beer-data-matrix-application-methods",
+        lang: "en",
+        heading: "Beer Data Matrix application in Russia",
+        alternate: "/stati/nanesenie-data-matrix-na-pivo/",
+        alternateLang: "ru",
+        diagramPrefix: "beer-datamatrix-application",
+        methods: /label.*preprint.*direct print/i,
+        boundary: "item → case → SSCC",
+        backlinkRoute: "en/articles/beer-marking-line-equipment",
+      },
+    ] as const) {
+      const output = path.join(outputDirectory, article.route, "index.html");
+      expect(existsSync(output)).toBe(true);
+      if (!existsSync(output)) continue;
+
+      const localizedDocument = new JSDOM(readFileSync(output, "utf8")).window.document;
+      expect(localizedDocument.documentElement.lang).toBe(article.lang);
+      expect(localizedDocument.querySelectorAll("h1")).toHaveLength(1);
+      expect(localizedDocument.querySelector("h1")?.textContent).toContain(article.heading);
+      expect(localizedDocument.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+        `https://markiro.app/${article.route}/`,
+      );
+      expect(
+        localizedDocument
+          .querySelector(`link[rel="alternate"][hreflang="${article.alternateLang}"]`)
+          ?.getAttribute("href"),
+      ).toBe(`https://markiro.app${article.alternate}`);
+      expect(
+        localizedDocument.querySelectorAll("[data-key-takeaway]").length,
+      ).toBeGreaterThanOrEqual(5);
+      expect(localizedDocument.querySelectorAll("figure[data-article-visual]")).toHaveLength(3);
+      expect(localizedDocument.querySelectorAll("[data-article-diagram]")).toHaveLength(2);
+
+      const hero = localizedDocument.querySelector<HTMLImageElement>("[data-article-hero-image]");
+      expect(hero?.getAttribute("loading")).toBe("eager");
+      expect(hero?.getAttribute("width")).not.toBeNull();
+      expect(hero?.getAttribute("height")).not.toBeNull();
+
+      for (const diagram of localizedDocument.querySelectorAll<HTMLImageElement>(
+        "[data-article-diagram]",
+      )) {
+        expect(diagram.getAttribute("src")).toContain(article.diagramPrefix);
+        expect(diagram.getAttribute("alt")).not.toBe("");
+        expect(diagram.getAttribute("loading")).toBe("lazy");
+      }
+
+      const graph = JSON.parse(
+        localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
+      ) as { "@graph": Array<Record<string, unknown>> };
+      expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
+        dateModified: "2026-08-26",
+        datePublished: "2026-08-26",
+        image: "https://markiro.app/og-beer-datamatrix-application.jpg",
+        inLanguage: article.lang,
+      });
+
+      const bodyText = localizedDocument.body.textContent?.replace(/\s+/g, " ") ?? "";
+      expect(bodyText).toMatch(article.methods);
+      expect(bodyText).toMatch(/1,5 \(C\)|1\.5 \(C\)/);
+      expect(bodyText).toMatch(/только одно.*средств|only one.*identification means/i);
+      expect(bodyText).toContain(article.boundary);
+      expect(bodyText).toMatch(/физическ.*подтвержд|physical.*accepted/i);
+
+      for (const href of [
+        "https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/kakim-dolzhen-byt-datamatrix-trebovaniya-k-preobrazovaniyu-i-kachestvu-naneseniya-pivo",
+        "https://markirovka.ru/knowledge/fast_start/marking_location/etiketirovanie-datamatrix-vneshniy-vid-oborudovanie-osobennosti-naneseniya",
+        "https://markirovka.ru/knowledge/fast_start/typography/tipografskoe-nanesenie-datamatrix-preimushchestva-oborudovanie-protsess",
+        "https://markirovka.ru/knowledge/fast_start/marking_location/praktika-pryamogo-naneseniya-data-matrix-vidy-upakovki-mesta-naneseniya-materialy",
+      ]) {
+        expect(localizedDocument.querySelector(`a[href="${href}"]`)).not.toBeNull();
+      }
+
+      const backlink = path.join(outputDirectory, article.backlinkRoute, "index.html");
+      const backlinkDocument = new JSDOM(readFileSync(backlink, "utf8")).window.document;
+      expect(backlinkDocument.querySelector(`a[href="${article.alternate}"]`)).toBeNull();
+      expect(backlinkDocument.querySelector(`a[href="/${article.route}/"]`)).not.toBeNull();
+    }
+  });
+
+  it("publishes a bilingual guide to resilient offline beer marking", () => {
+    for (const article of [
+      {
+        route: "stati/markirovka-piva-bez-interneta",
+        lang: "ru",
+        heading: "Маркировка пива без интернета",
+        alternate: "/en/articles/offline-beer-marking-russia/",
+        alternateLang: "en",
+        diagramPrefix: "markirovka-piva-offline",
+        localBoundary: "единица → короб → SSCC",
+        durableClaim: /журнал.*перезапуск|перезапуск.*журнал/i,
+        noFalseSuccess: /не.*зелёный успех|не показывать ложный успех/i,
+        backlinkRoute: "stati/agregatsiya-piva-v-koroba",
+      },
+      {
+        route: "en/articles/offline-beer-marking-russia",
+        lang: "en",
+        heading: "Offline beer marking in Russia",
+        alternate: "/stati/markirovka-piva-bez-interneta/",
+        alternateLang: "ru",
+        diagramPrefix: "offline-beer-marking",
+        localBoundary: "item → case → SSCC",
+        durableClaim: /journal.*restart|restart.*journal/i,
+        noFalseSuccess: /must not invent|never display false success/i,
+        backlinkRoute: "en/articles/beer-case-aggregation",
+      },
+    ] as const) {
+      const output = path.join(outputDirectory, article.route, "index.html");
+      expect(existsSync(output)).toBe(true);
+      if (!existsSync(output)) continue;
+
+      const localizedDocument = new JSDOM(readFileSync(output, "utf8")).window.document;
+      expect(localizedDocument.documentElement.lang).toBe(article.lang);
+      expect(localizedDocument.querySelectorAll("h1")).toHaveLength(1);
+      expect(localizedDocument.querySelector("h1")?.textContent).toContain(article.heading);
+      expect(localizedDocument.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+        `https://markiro.app/${article.route}/`,
+      );
+      expect(
+        localizedDocument
+          .querySelector(`link[rel="alternate"][hreflang="${article.alternateLang}"]`)
+          ?.getAttribute("href"),
+      ).toBe(`https://markiro.app${article.alternate}`);
+      expect(
+        localizedDocument.querySelectorAll("[data-key-takeaway]").length,
+      ).toBeGreaterThanOrEqual(5);
+      expect(localizedDocument.querySelectorAll("figure[data-article-visual]")).toHaveLength(3);
+      expect(localizedDocument.querySelectorAll("[data-article-diagram]")).toHaveLength(2);
+
+      const hero = localizedDocument.querySelector<HTMLImageElement>("[data-article-hero-image]");
+      expect(hero?.getAttribute("loading")).toBe("eager");
+      expect(hero?.getAttribute("width")).not.toBeNull();
+      expect(hero?.getAttribute("height")).not.toBeNull();
+      for (const diagram of localizedDocument.querySelectorAll<HTMLImageElement>(
+        "[data-article-diagram]",
+      )) {
+        expect(diagram.getAttribute("src")).toContain(article.diagramPrefix);
+        expect(diagram.getAttribute("alt")).not.toBe("");
+        expect(diagram.getAttribute("loading")).toBe("lazy");
+      }
+
+      const graph = JSON.parse(
+        localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
+      ) as { "@graph": Array<Record<string, unknown>> };
+      expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
+        dateModified: "2026-08-26",
+        datePublished: "2026-08-26",
+        image: "https://markiro.app/og-offline-beer-marking.jpg",
+        inLanguage: article.lang,
+      });
+
+      const bodyText = localizedDocument.body.textContent?.replace(/\s+/g, " ") ?? "";
+      expect(bodyText).toContain(article.localBoundary);
+      expect(bodyText).toMatch(article.durableClaim);
+      expect(bodyText).toMatch(article.noFalseSuccess);
+      expect(bodyText).toMatch(/прямой обмен.*не.*действующ|direct.*connection.*must not.*live/i);
+      expect(bodyText).not.toMatch(
+        /Markiro работает без интернета без ограничений|Markiro runs without internet without limits/i,
+      );
+
+      for (const href of [
+        "https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/sroki-i-etapy-zapuska-obyazatelnoy-markirovki-piva-pivnykh-i-slaboalkogolnykh-napitkov",
+        "https://markirovka.ru/knowledge/tovarnyegruppy/obschie-voprosy-gis/pochemu-otklyuchena-vozmozhnost-polucheniya-kodov-markirovki-v-csv-formate-v-stantsii-upravleniya-za",
+        "https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/rezhim-proverok-na-kassakh-pivo",
+      ]) {
+        expect(localizedDocument.querySelector(`a[href="${href}"]`)).not.toBeNull();
+      }
+
+      const backlink = path.join(outputDirectory, article.backlinkRoute, "index.html");
+      const backlinkDocument = new JSDOM(readFileSync(backlink, "utf8")).window.document;
+      expect(backlinkDocument.querySelector(`a[href="/${article.route}/"]`)).not.toBeNull();
+    }
+  });
+
+  it("publishes a bilingual diagnostic guide for duplicate beer marking codes", () => {
+    for (const article of [
+      {
+        route: "stati/dubl-koda-markirovki-pivo",
+        lang: "ru",
+        heading: "Дубликат кода маркировки на пиве",
+        alternate: "/en/articles/duplicate-beer-marking-code-russia/",
+        alternateLang: "en",
+        diagramPrefix: "dubl-koda-markirovki-pivo",
+        chain: "единица → короб → SSCC",
+        reportClaim: /потерянный ответ не доказывает/i,
+        identityClaim: /один товар — одна уникальная идентичность/i,
+        backlinkRoute: "stati/markirovka-piva-bez-interneta",
+      },
+      {
+        route: "en/articles/duplicate-beer-marking-code-russia",
+        lang: "en",
+        heading: "Duplicate beer marking code in Russia",
+        alternate: "/stati/dubl-koda-markirovki-pivo/",
+        alternateLang: "ru",
+        diagramPrefix: "duplicate-beer-marking-code",
+        chain: "item → case → SSCC",
+        reportClaim: /missing response does not prove/i,
+        identityClaim: /one physical product, one unique identity/i,
+        backlinkRoute: "en/articles/offline-beer-marking-russia",
+      },
+    ] as const) {
+      const output = path.join(outputDirectory, article.route, "index.html");
+      expect(existsSync(output)).toBe(true);
+      if (!existsSync(output)) continue;
+
+      const localizedDocument = new JSDOM(readFileSync(output, "utf8")).window.document;
+      expect(localizedDocument.documentElement.lang).toBe(article.lang);
+      expect(localizedDocument.querySelectorAll("h1")).toHaveLength(1);
+      expect(localizedDocument.querySelector("h1")?.textContent).toContain(article.heading);
+      expect(localizedDocument.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+        `https://markiro.app/${article.route}/`,
+      );
+      expect(
+        localizedDocument
+          .querySelector(`link[rel="alternate"][hreflang="${article.alternateLang}"]`)
+          ?.getAttribute("href"),
+      ).toBe(`https://markiro.app${article.alternate}`);
+      expect(
+        localizedDocument.querySelectorAll("[data-key-takeaway]").length,
+      ).toBeGreaterThanOrEqual(5);
+      expect(localizedDocument.querySelectorAll("figure[data-article-visual]")).toHaveLength(3);
+      expect(localizedDocument.querySelectorAll("[data-article-diagram]")).toHaveLength(2);
+
+      const hero = localizedDocument.querySelector<HTMLImageElement>("[data-article-hero-image]");
+      expect(hero?.getAttribute("loading")).toBe("eager");
+      expect(hero?.getAttribute("width")).not.toBeNull();
+      expect(hero?.getAttribute("height")).not.toBeNull();
+      for (const diagram of localizedDocument.querySelectorAll<HTMLImageElement>(
+        "[data-article-diagram]",
+      )) {
+        expect(diagram.getAttribute("src")).toContain(article.diagramPrefix);
+        expect(diagram.getAttribute("alt")).not.toBe("");
+        expect(diagram.getAttribute("loading")).toBe("lazy");
+      }
+
+      const graph = JSON.parse(
+        localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
+      ) as { "@graph": Array<Record<string, unknown>> };
+      expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
+        dateModified: "2026-08-27",
+        datePublished: "2026-08-27",
+        image: "https://markiro.app/og-duplicate-beer-marking.jpg",
+        inLanguage: article.lang,
+      });
+
+      const bodyText = localizedDocument.body.textContent?.replace(/\s+/g, " ") ?? "";
+      expect(bodyText).toContain(article.chain);
+      expect(bodyText).toMatch(article.reportClaim);
+      expect(bodyText).toMatch(article.identityClaim);
+      expect(bodyText).toMatch(/повторн.*скан|repeated scan/i);
+      expect(bodyText).toMatch(/два.*товар|two.*product/i);
+      expect(bodyText).toMatch(/повторн.*печат|controlled reprint/i);
+      expect(bodyText).toMatch(
+        /прямой обмен.*не следует считать готовым|direct.*connection.*not.*live/i,
+      );
+
+      for (const href of [
+        "https://markirovka.ru/community/beer_producers/markirovka-piva-763",
+        "https://markirovka.ru/community/beer_producers/oshibka-pri-otpravke-otcheta-o-nanesenii-",
+        "https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/povtornaya-pechat-kodov-markirovki-pivo",
+        "https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/povtornaya-pechat-km-dlya-naneseniya-na-vneshnyuyu-upakovku-pivo",
+      ]) {
+        expect(localizedDocument.querySelector(`a[href="${href}"]`)).not.toBeNull();
+      }
+
+      const backlink = path.join(outputDirectory, article.backlinkRoute, "index.html");
+      const backlinkDocument = new JSDOM(readFileSync(backlink, "utf8")).window.document;
+      expect(backlinkDocument.querySelector(`a[href="/${article.route}/"]`)).not.toBeNull();
+    }
+  });
+
+  it("publishes a bilingual guide to the beer code application report", () => {
+    for (const article of [
+      {
+        route: "stati/otchet-o-nanesenii-kodov-pivo",
+        lang: "ru",
+        heading: "Отчёт о нанесении кодов маркировки пива",
+        alternate: "/en/articles/beer-code-application-report-russia/",
+        alternateLang: "en",
+        diagramPrefix: "otchet-nanesenie-pivo",
+        sourceClaim: /закрыт.*смен|смен.*закрыт/i,
+        partialClaim: /частичн.*только.*ошибочн|только.*ошибочн.*частичн/i,
+        commissioningClaim: /ввод в оборот.*автоматически|автоматически.*ввод в оборот/i,
+        backlinkRoute: "stati/dubl-koda-markirovki-pivo",
+      },
+      {
+        route: "en/articles/beer-code-application-report-russia",
+        lang: "en",
+        heading: "Beer code application report in Russia",
+        alternate: "/stati/otchet-o-nanesenii-kodov-pivo/",
+        alternateLang: "ru",
+        diagramPrefix: "beer-application-report",
+        sourceClaim: /closed.*shift|shift.*closed/i,
+        partialClaim: /partial.*only.*failed|only.*failed.*partial/i,
+        commissioningClaim: /commissioning document.*generated|generated.*commissioning document/i,
+        backlinkRoute: "en/articles/duplicate-beer-marking-code-russia",
+      },
+    ] as const) {
+      const output = path.join(outputDirectory, article.route, "index.html");
+      expect(existsSync(output)).toBe(true);
+      if (!existsSync(output)) continue;
+
+      const localizedDocument = new JSDOM(readFileSync(output, "utf8")).window.document;
+      expect(localizedDocument.documentElement.lang).toBe(article.lang);
+      expect(localizedDocument.querySelectorAll("h1")).toHaveLength(1);
+      expect(localizedDocument.querySelector("h1")?.textContent).toContain(article.heading);
+      expect(localizedDocument.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+        `https://markiro.app/${article.route}/`,
+      );
+      expect(
+        localizedDocument
+          .querySelector(`link[rel="alternate"][hreflang="${article.alternateLang}"]`)
+          ?.getAttribute("href"),
+      ).toBe(`https://markiro.app${article.alternate}`);
+      expect(
+        localizedDocument.querySelectorAll("[data-key-takeaway]").length,
+      ).toBeGreaterThanOrEqual(5);
+      expect(localizedDocument.querySelectorAll("figure[data-article-visual]")).toHaveLength(3);
+      expect(localizedDocument.querySelectorAll("[data-article-diagram]")).toHaveLength(2);
+
+      const hero = localizedDocument.querySelector<HTMLImageElement>("[data-article-hero-image]");
+      expect(hero?.getAttribute("loading")).toBe("eager");
+      expect(hero?.getAttribute("width")).not.toBeNull();
+      expect(hero?.getAttribute("height")).not.toBeNull();
+      for (const diagram of localizedDocument.querySelectorAll<HTMLImageElement>(
+        "[data-article-diagram]",
+      )) {
+        expect(diagram.getAttribute("src")).toContain(article.diagramPrefix);
+        expect(diagram.getAttribute("alt")).not.toBe("");
+        expect(diagram.getAttribute("loading")).toBe("lazy");
+      }
+
+      const graph = JSON.parse(
+        localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
+      ) as { "@graph": Array<Record<string, unknown>> };
+      expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
+        dateModified: "2026-08-27",
+        datePublished: "2026-08-27",
+        image: "https://markiro.app/og-beer-application-report.jpg",
+        inLanguage: article.lang,
+      });
+
+      const bodyText = localizedDocument.body.textContent?.replace(/\s+/g, " ") ?? "";
+      expect(bodyText).toMatch(article.sourceClaim);
+      expect(bodyText).toMatch(article.partialClaim);
+      expect(bodyText).toMatch(article.commissioningClaim);
+      expect(bodyText).toMatch(/GS.*ASCII 29|ASCII 29.*GS/i);
+      expect(bodyText).toMatch(/TXT.*CSV|CSV.*TXT/i);
+      expect(bodyText).toMatch(
+        /прямая подача.*требу.*отдельн|direct submission.*require.*separate/i,
+      );
+      expect(bodyText).toMatch(
+        /XML.*агрегац.*не.*отч[её]т.*нанес|aggregation XML.*not.*application report/i,
+      );
+
+      for (const href of [
+        "https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/kak-otpravit-otchet-o-nanesenii-pivo",
+        "https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/kogda-neobkhodimo-podavat-otchet-o-nanesenii-pivo",
+        "https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/chto-delat-esli-ne-sozdalsya-chernovik-otcheta-o-nanesenii-pivo",
+        "https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/instruktsiya-po-korrektirovke-svedeniy-o-kodakh-v-sisteme-markirovki-pivo",
+      ]) {
+        expect(localizedDocument.querySelector(`a[href="${href}"]`)).not.toBeNull();
+      }
+
+      const backlink = path.join(outputDirectory, article.backlinkRoute, "index.html");
+      const backlinkDocument = new JSDOM(readFileSync(backlink, "utf8")).window.document;
+      expect(backlinkDocument.querySelector(`a[href="/${article.route}/"]`)).not.toBeNull();
+    }
+  });
+
   it("renders the exact localized Markiro brand", () => {
     const ruBrand = documents.get("/")?.querySelector("header .brand-mark");
     const enBrand = documents.get("/en/")?.querySelector("header .brand-mark");

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Действия по результату обработки отчёта о нанесении</title>
+  <desc id="desc">Четыре результата: ожидание, обработан, обработан частично и обработан с ошибкой.</desc>
+  <rect width="1200" height="620" fill="#111014"/>
+  <text x="70" y="70" fill="#31e981" font-family="IBM Plex Mono, monospace" font-size="18" font-weight="700" letter-spacing="2">СТАТУС ОПРЕДЕЛЯЕТ СЛЕДУЮЩИЙ ШАГ</text>
+  <text x="70" y="112" fill="#f4f3f5" font-family="IBM Plex Sans, sans-serif" font-size="30" font-weight="700">Не повторяйте весь отчёт при любом сообщении</text>
+  <g font-family="IBM Plex Sans, sans-serif">
+    <g transform="translate(70 160)"><rect width="1060" height="86" fill="#1a191e" stroke="#e9b949"/><text x="24" y="34" fill="#e9b949" font-family="IBM Plex Mono, monospace" font-size="16" font-weight="700">ОЖИДАНИЕ / НЕТ ОТВЕТА</text><text x="370" y="35" fill="#f4f3f5" font-size="20" font-weight="700">Проверить подпись и карточку документа</text><text x="370" y="64" fill="#b8b5bd" font-size="16">Не создавать копию, пока исход первой отправки неизвестен.</text></g>
+    <g transform="translate(70 264)"><rect width="1060" height="86" fill="#1a191e" stroke="#31e981"/><text x="24" y="34" fill="#31e981" font-family="IBM Plex Mono, monospace" font-size="16" font-weight="700">ОБРАБОТАН</text><text x="370" y="35" fill="#f4f3f5" font-size="20" font-weight="700">Зафиксировать номер и сверить статусы КМ</text><text x="370" y="64" fill="#b8b5bd" font-size="16">Архивировать доказательство и закрыть контроль смены.</text></g>
+    <g transform="translate(70 368)"><rect width="1060" height="86" fill="#1a191e" stroke="#79b8ff"/><text x="24" y="34" fill="#79b8ff" font-family="IBM Plex Mono, monospace" font-size="16" font-weight="700">ОБРАБОТАН ЧАСТИЧНО</text><text x="370" y="35" fill="#f4f3f5" font-size="20" font-weight="700">Отделить успешные КМ от ошибочных</text><text x="370" y="64" fill="#b8b5bd" font-size="16">Новый отчёт — только по исправленным кодам с ошибками.</text></g>
+    <g transform="translate(70 472)"><rect width="1060" height="86" fill="#1a191e" stroke="#ff7a66"/><text x="24" y="34" fill="#ff7a66" font-family="IBM Plex Mono, monospace" font-size="16" font-weight="700">ОБРАБОТАН С ОШИБКОЙ</text><text x="370" y="35" fill="#f4f3f5" font-size="20" font-weight="700">Исправить причину для всего документа</text><text x="370" y="64" fill="#b8b5bd" font-size="16">Статусы не меняются; новый отчёт включает все исправленные КМ.</text></g>
+  </g>
+</svg>
