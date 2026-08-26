@@ -110,6 +110,17 @@ const releaseBucketReference = [
   "yandex_storage_bucket.releases.bucket",
   "yandex_storage_bucket.releases",
 ];
+// Mirrors the per-occurrence traversal list emitted by Terraform 1.15.8.
+const releasePolicyReference = [
+  ...releaseBucketReference,
+  ...releaseBucketReference,
+  ...releaseBucketReference,
+  ...releaseBucketReference,
+  ...releaseBucketReference,
+  ...publisherReference,
+  ...publisherReference,
+  "var.terraform_service_account_id",
+];
 const originGroupReference = [
   "yandex_cdn_origin_group.releases.id",
   "yandex_cdn_origin_group.releases",
@@ -139,13 +150,7 @@ function addExactReleaseConfiguration(plan) {
               {
                 address: "yandex_storage_bucket_policy.releases",
                 expressions: {
-                  policy: {
-                    references: [
-                      ...releaseBucketReference,
-                      ...publisherReference,
-                      "var.terraform_service_account_id",
-                    ],
-                  },
+                  policy: { references: releasePolicyReference },
                 },
               },
               {
@@ -243,6 +248,19 @@ test("production plan guard accepts provider-computed create edges only with exa
   const creation = await readFixture("safe");
   makeProviderComputedReleaseCreate(creation);
   assert.doesNotThrow(() => guardProductionPlan(creation));
+
+  for (const mutateReferences of [
+    (references) => references.pop(),
+    (references) => references.push("yandex_storage_bucket.releases.bucket"),
+  ]) {
+    const wrongMultiplicity = copy(creation);
+    const references =
+      wrongMultiplicity.configuration.root_module.module_calls.station_releases.module.resources.find(
+        (candidate) => candidate.address === "yandex_storage_bucket_policy.releases",
+      ).expressions.policy.references;
+    mutateReferences(references);
+    reject(wrongMultiplicity);
+  }
 
   const wholeBindingUnknown = copy(creation);
   const unknownBinding = resource(
