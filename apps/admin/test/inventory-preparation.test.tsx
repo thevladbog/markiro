@@ -41,6 +41,10 @@ const ACCESS: AccessDocument = {
   roles: ["manager"],
   capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
 };
+const READ_ACCESS: AccessDocument = {
+  roles: ["member"],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+};
 
 const BASE_INVENTORY = {
   id: ID.inventory,
@@ -152,8 +156,15 @@ function authClient(): AuthClientLike {
   };
 }
 
-function renderRoute(path: string, fetcher: typeof fetch) {
-  vi.stubGlobal("fetch", vi.fn(fetcher));
+function renderRoute(path: string, fetcher: typeof fetch, access = ACCESS) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/access/me")) return response(access);
+      return fetcher(input, init);
+    }),
+  );
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -174,8 +185,54 @@ function shellDependency(url: string): Response | null {
   if (url.endsWith("/api/profile")) {
     return response({ firstName: "Елена", lastName: "Ким", middleName: null, hasAvatar: false });
   }
-  if (url.endsWith("/api/access/me")) return response(ACCESS);
   if (url.includes("/api/pickup-orders")) return response({ items: [] });
+  return null;
+}
+
+function parameterDependency(url: string): Response | null {
+  if (url === "/api/products") {
+    return response({
+      items: [
+        {
+          id: ID.product,
+          gtin14: "04680089900383",
+          name: "Пиво светлое 0,45 л",
+          productGroup: "beer",
+          boxCapacity: 20,
+          palletCapacity: 60,
+          unitPrice: null,
+          printName: null,
+          egaisCode: null,
+          shelfLifeDays: 180,
+          externalRef: null,
+          status: "active",
+          defaultCounterpartyId: null,
+          createdAt: "2026-08-01T00:00:00.000Z",
+        },
+      ],
+    });
+  }
+  if (url === "/api/lines") {
+    return response({ items: [{ id: ID.line, name: "Упаковка А", createdAt: "2026-08-01" }] });
+  }
+  if (url === "/api/label-templates") {
+    return response({
+      items: [
+        {
+          id: ID.template,
+          name: "Короб 20 бутылок",
+          widthMm: 58,
+          heightMm: 40,
+          dpi: 203,
+          language: "zpl",
+          updatedAt: "2026-08-01T00:00:00.000Z",
+        },
+      ],
+    });
+  }
+  if (url === "/api/shifts/planning-config") {
+    return response({ defaultBoxLabelTemplateId: ID.template });
+  }
   return null;
 }
 
@@ -216,49 +273,8 @@ it("creates one-product parameters with inclusive dates, mode, template, and lin
     requests.push({ url, init });
     const dependency = shellDependency(url);
     if (dependency) return dependency;
-    if (url === "/api/products") {
-      return response({
-        items: [
-          {
-            id: ID.product,
-            gtin14: "04680089900383",
-            name: "Пиво светлое 0,45 л",
-            productGroup: "beer",
-            boxCapacity: 20,
-            palletCapacity: 60,
-            unitPrice: null,
-            printName: null,
-            egaisCode: null,
-            shelfLifeDays: 180,
-            externalRef: null,
-            status: "active",
-            defaultCounterpartyId: null,
-            createdAt: "2026-08-01T00:00:00.000Z",
-          },
-        ],
-      });
-    }
-    if (url === "/api/lines") {
-      return response({ items: [{ id: ID.line, name: "Упаковка А", createdAt: "2026-08-01" }] });
-    }
-    if (url === "/api/label-templates") {
-      return response({
-        items: [
-          {
-            id: ID.template,
-            name: "Короб 20 бутылок",
-            widthMm: 58,
-            heightMm: 40,
-            dpi: 203,
-            language: "zpl",
-            updatedAt: "2026-08-01T00:00:00.000Z",
-          },
-        ],
-      });
-    }
-    if (url === "/api/shifts/planning-config") {
-      return response({ defaultBoxLabelTemplateId: ID.template });
-    }
+    const parameter = parameterDependency(url);
+    if (parameter) return parameter;
     if (url === "/api/inventories" && init?.method === "POST") {
       return response({ ...BASE_INVENTORY, status: "draft" }, 201);
     }
@@ -385,6 +401,105 @@ it("keeps six independent slots, zero-row success, replacement history, and exac
   expect(await screen.findByText("Ожидается: 4 116")).toBeDefined();
 });
 
+it("refreshes persisted failed upload attempts and diagnostics after a 422 response", async () => {
+  let currentDetail = detail();
+  const failedAttempt = {
+    ...attempt(
+      "60000000-0000-4000-8000-000000000010",
+      "WRITTEN_OFF",
+      "written-off-persisted-failure.zip",
+      0,
+      "2026-08-26T09:13:00.000Z",
+    ),
+    parsedStatus: null,
+    result: "failed",
+    errorCount: 2,
+    diagnostics: [{ code: "MALFORMED_EXPORT", rowNumber: 8 }],
+  };
+  const { user } = renderRoute(`/inventory/${ID.inventory}`, async (input, init) => {
+    const url = String(input);
+    const dependency = shellDependency(url);
+    if (dependency) return dependency;
+    if (url === `/api/inventories/${ID.inventory}` && !init?.method) return response(currentDetail);
+    if (url.endsWith("/imports/WRITTEN_OFF") && init?.method === "POST") {
+      currentDetail = detail({ imports: [failedAttempt, ...IMPORTS] });
+      return response({ code: "INVALID_IMPORT", message: "Выписка содержит ошибки" }, 422);
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+
+  expect(await screen.findByRole("heading", { name: "Выписки по статусам кодов" })).toBeDefined();
+  await user.upload(
+    screen.getByLabelText("Файл WRITTEN_OFF"),
+    new File(["invalid"], "written-off-persisted-failure.zip", { type: "application/zip" }),
+  );
+
+  expect(await screen.findByText("written-off-persisted-failure.zip")).toBeDefined();
+  expect(screen.getByText(/MALFORMED_EXPORT/)).toBeDefined();
+  expect(screen.getByText(/ошибок: 2/)).toBeDefined();
+});
+
+it("updates editable parameters through PATCH and returns to exports", async () => {
+  let currentDetail = detail();
+  let patchBody: unknown;
+  const { user } = renderRoute(`/inventory/${ID.inventory}`, async (input, init) => {
+    const url = String(input);
+    const dependency = shellDependency(url) ?? parameterDependency(url);
+    if (dependency) return dependency;
+    if (url === `/api/inventories/${ID.inventory}` && !init?.method) return response(currentDetail);
+    if (url === `/api/inventories/${ID.inventory}` && init?.method === "PATCH") {
+      patchBody = JSON.parse(String(init.body));
+      currentDetail = detail({
+        mode: "check",
+        boxLabelTemplateId: null,
+        boxLabelTemplate: null,
+      });
+      return response({
+        ...BASE_INVENTORY,
+        mode: "check",
+        boxLabelTemplateId: null,
+        boxLabelTemplate: null,
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+
+  expect(await screen.findByRole("heading", { name: "Выписки по статусам кодов" })).toBeDefined();
+  await user.click(screen.getByRole("button", { name: "Назад к параметрам" }));
+  expect(await screen.findByRole("heading", { name: "Параметры задания" })).toBeDefined();
+  await user.click(screen.getByRole("radio", { name: "Без переупаковки" }));
+  await user.click(screen.getByRole("button", { name: "Сохранить и продолжить" }));
+
+  await waitFor(() =>
+    expect(patchBody).toEqual({
+      productId: ID.product,
+      lineId: ID.line,
+      mode: "check",
+      productionDateFrom: "2025-09-01",
+      productionDateTo: "2025-12-31",
+      boxLabelTemplateId: null,
+    }),
+  );
+  expect(await screen.findByRole("heading", { name: "Выписки по статусам кодов" })).toBeDefined();
+});
+
+it("hides parameter editing from inventory readers", async () => {
+  renderRoute(
+    `/inventory/${ID.inventory}`,
+    async (input) => {
+      const url = String(input);
+      const dependency = shellDependency(url);
+      if (dependency) return dependency;
+      if (url === `/api/inventories/${ID.inventory}`) return response(detail());
+      throw new Error(`Unexpected request: ${url}`);
+    },
+    READ_ACCESS,
+  );
+
+  expect(await screen.findByRole("heading", { name: "Выписки по статусам кодов" })).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Назад к параметрам" })).toBeNull();
+});
+
 it("recovers the active snapshot after reload and blocks start until warehouse confirmation", async () => {
   const snapshot = {
     id: ID.snapshot,
@@ -394,7 +509,7 @@ it("recovers the active snapshot after reload and blocks start until warehouse c
     fixedAt: "2026-08-26T09:15:00.000Z",
     inputs: {
       EMITTED: ID.emitted,
-      INTRODUCED: ID.introducedNew,
+      INTRODUCED: ID.introducedOld,
       APPLIED: ID.applied,
       RETIRED: ID.retired,
       WRITTEN_OFF: ID.writtenOff,
@@ -477,8 +592,8 @@ it("recovers the active snapshot after reload and blocks start until warehouse c
   expect(await screen.findByText("1 из 2 терминалов в сети")).toBeDefined();
   expect(screen.getByText("Форма-задание появится после реализации печатной формы")).toBeDefined();
   expect(screen.getByRole("button", { name: "Скачать PDF" }).hasAttribute("disabled")).toBe(true);
-
   await user.click(screen.getByRole("button", { name: "К запуску" }));
+
   const start = screen.getByRole("button", { name: "Запустить инвентаризацию" });
   expect(start.hasAttribute("disabled")).toBe(true);
   expect(screen.getByText("Снимок зафиксирован: 4 116 ожидаемых кодов")).toBeDefined();
@@ -486,6 +601,21 @@ it("recovers the active snapshot after reload and blocks start until warehouse c
   expect(start.hasAttribute("disabled")).toBe(false);
   await user.click(start);
   await waitFor(() => expect(starts).toBe(1));
+
+  await user.click(screen.getByRole("button", { name: "Назад" }));
+  expect(await screen.findByRole("heading", { name: "Доступ терминалов" })).toBeDefined();
+  await user.click(screen.getByRole("button", { name: "Назад" }));
+  expect(await screen.findByRole("heading", { name: "Проверка снимка" })).toBeDefined();
+  await user.click(screen.getByRole("button", { name: "Назад" }));
+  expect(
+    (await screen.findByRole("radio", { name: /introduced-old\.zip/ })).getAttribute(
+      "aria-checked",
+    ),
+  ).toBe("true");
+  expect(
+    screen.getByRole("radio", { name: /introduced-new\.zip/ }).getAttribute("aria-checked"),
+  ).toBe("false");
+  expect(screen.queryByRole("button", { name: "Назад к параметрам" })).toBeNull();
 });
 
 it("fails closed when the inventory API returns unknown fields", async () => {
@@ -495,6 +625,23 @@ it("fails closed when the inventory API returns unknown fields", async () => {
     if (dependency) return dependency;
     if (url === "/api/inventories") {
       return response({ items: [{ ...BASE_INVENTORY, privateObjectKey: "must-not-be-accepted" }] });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Не удалось загрузить инвентаризации",
+  );
+  expect(screen.queryByText("ИНВ-00042")).toBeNull();
+});
+
+it("fails closed when the inventory API returns an impossible civil date", async () => {
+  renderRoute("/inventory", async (input) => {
+    const url = String(input);
+    const dependency = shellDependency(url);
+    if (dependency) return dependency;
+    if (url === "/api/inventories") {
+      return response({ items: [{ ...BASE_INVENTORY, productionDateFrom: "2025-02-30" }] });
     }
     throw new Error(`Unexpected request: ${url}`);
   });

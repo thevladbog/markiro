@@ -16,7 +16,7 @@ import {
 import type { StatusChipStatus, TableColumn } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
-import { formatDate } from "../../lib/datetime.js";
+import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
 import { useInventories } from "./api.js";
 import type { Inventory } from "./schemas.js";
 import "./inventory.css";
@@ -78,7 +78,7 @@ export function InventoryPage() {
         key: "updatedAt",
         title: t("pages.inventory.list.updated"),
         render: (row) => (
-          <time dateTime={row.updatedAt}>{formatDate(row.updatedAt, i18n.language)}</time>
+          <time dateTime={row.updatedAt}>{formatCreatedAt(row.updatedAt, i18n.language)}</time>
         ),
       },
     ],

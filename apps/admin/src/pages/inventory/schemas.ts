@@ -24,7 +24,24 @@ export const inventoryStatusSchema = z.enum([
 ]);
 
 const uuid = z.string().uuid();
-const civilDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const civilDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((value) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return false;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    if (year < 1 || year > 9999) return false;
+    const parsed = new Date(0);
+    parsed.setUTCFullYear(year, month - 1, day);
+    return (
+      parsed.getUTCFullYear() === year &&
+      parsed.getUTCMonth() === month - 1 &&
+      parsed.getUTCDate() === day
+    );
+  });
 const dateTime = z.iso.datetime();
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
 const nonnegativeInteger = z.number().int().nonnegative();

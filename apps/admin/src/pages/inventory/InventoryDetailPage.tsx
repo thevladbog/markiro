@@ -24,8 +24,10 @@ import {
   useFixInventorySnapshot,
   useInventory,
   useStartInventory,
+  useUpdateInventory,
   useUploadInventoryImport,
 } from "./api.js";
+import { InventoryParametersForm } from "./InventoryParametersForm.js";
 import { PreparationSteps } from "./PreparationSteps.js";
 import {
   INVENTORY_CHZ_STATUSES,
@@ -65,12 +67,19 @@ export function InventoryDetailPage() {
   const { t } = useTranslation();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const query = useInventory(inventoryId);
+  const update = useUpdateInventory();
   const [step, setStep] = useState(2);
   const [selected, setSelected] = useState<Partial<InventorySnapshotInputs>>({});
   const [fixedSnapshot, setFixedSnapshot] = useState<InventorySnapshot | null>(null);
 
   useEffect(() => {
     if (!query.data) return;
+    if (query.data.activeSnapshot) {
+      setSelected(query.data.activeSnapshot.inputs);
+      setFixedSnapshot(query.data.activeSnapshot);
+      setStep((current) => (current < 4 ? 4 : current));
+      return;
+    }
     setSelected((current) => {
       const defaults = latestSuccessfulImports(query.data.imports);
       const next = { ...current };
@@ -82,10 +91,6 @@ export function InventoryDetailPage() {
       }
       return next;
     });
-    if (query.data.activeSnapshot) {
-      setFixedSnapshot(query.data.activeSnapshot);
-      setStep((current) => (current < 4 ? 4 : current));
-    }
   }, [query.data]);
 
   if (query.isPending) {
@@ -109,6 +114,8 @@ export function InventoryDetailPage() {
 
   const inventory = query.data;
   const snapshot = fixedSnapshot ?? inventory.activeSnapshot;
+  const canEditParameters =
+    canWrite && (inventory.status === "draft" || inventory.status === "preparing");
 
   return (
     <AdminPage className="mk-inventory-page">
@@ -126,12 +133,36 @@ export function InventoryDetailPage() {
         {t(`pages.inventory.mode.${inventory.mode}`)}
       </p>
       <PreparationSteps current={step} />
+      {step === 1 && canEditParameters ? (
+        <InventoryParametersForm
+          initialValue={{
+            productId: inventory.productId,
+            lineId: inventory.lineId,
+            mode: inventory.mode,
+            productionDateFrom: inventory.productionDateFrom,
+            productionDateTo: inventory.productionDateTo,
+            boxLabelTemplateId: inventory.boxLabelTemplateId,
+          }}
+          submitLabel={t("pages.inventory.detail.saveParameters")}
+          cancelLabel={t("common.cancel")}
+          pending={update.isPending}
+          requestError={update.isError ? update.error.message : null}
+          onCancel={() => setStep(2)}
+          onSubmit={(parameters) =>
+            update.mutate(
+              { inventoryId: inventory.id, parameters },
+              { onSuccess: () => setStep(2) },
+            )
+          }
+        />
+      ) : null}
       {step === 2 ? (
         <ExportsStep
           inventory={inventory}
           canWrite={canWrite}
           selected={selected}
           onSelect={(status, id) => setSelected((current) => ({ ...current, [status]: id }))}
+          {...(canEditParameters ? { onBack: () => setStep(1) } : {})}
           onContinue={() => setStep(3)}
         />
       ) : null}
@@ -180,12 +211,14 @@ function ExportsStep({
   inventory,
   canWrite,
   selected,
+  onBack,
   onSelect,
   onContinue,
 }: {
   inventory: InventoryDetail;
   canWrite: boolean;
   selected: Partial<InventorySnapshotInputs>;
+  onBack?: () => void;
   onSelect: (status: InventoryChzStatus, id: string) => void;
   onContinue: () => void;
 }) {
@@ -252,6 +285,11 @@ function ExportsStep({
       </div>
       {upload.isError ? <Alert tone="error">{upload.error.message}</Alert> : null}
       <div className="mk-inventory-actions">
+        {onBack ? (
+          <Button variant="secondary" type="button" onClick={onBack}>
+            {t("pages.inventory.exports.backToParameters")}
+          </Button>
+        ) : null}
         <Button type="button" disabled={!completeSelection(selected)} onClick={onContinue}>
           {t("pages.inventory.exports.review")}
         </Button>

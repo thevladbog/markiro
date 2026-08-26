@@ -342,6 +342,7 @@
       "detail": {
         "loadError": "Inventory unavailable",
         "loadErrorHint": "Check the address or retry loading.",
+        "saveParameters": "Save and continue",
         "backToList": "Back to inventories"
       },
       "chz": {
@@ -364,6 +365,7 @@
         "useFile": "Use {{file}}",
         "errors": "errors: {{count}}",
         "duplicates": "duplicates: {{count}}",
+        "backToParameters": "Back to parameters",
         "review": "Review snapshot"
       },
       "snapshot": {

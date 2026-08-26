@@ -342,6 +342,7 @@
       "detail": {
         "loadError": "Инвентаризация недоступна",
         "loadErrorHint": "Проверьте адрес или повторите загрузку.",
+        "saveParameters": "Сохранить и продолжить",
         "backToList": "К списку инвентаризаций"
       },
       "chz": {
@@ -364,6 +365,7 @@
         "useFile": "Использовать {{file}}",
         "errors": "ошибок: {{count}}",
         "duplicates": "дублей: {{count}}",
+        "backToParameters": "Назад к параметрам",
         "review": "Проверить снимок"
       },
       "snapshot": {

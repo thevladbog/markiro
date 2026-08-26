@@ -40,6 +40,17 @@ async function createInventory(input: CreateInventoryInput): Promise<Inventory> 
   return inventorySchema.parse(value);
 }
 
+async function updateInventory(input: {
+  inventoryId: string;
+  parameters: CreateInventoryInput;
+}): Promise<Inventory> {
+  const value = await apiFetch<unknown>(`/inventories/${input.inventoryId}`, {
+    method: "PATCH",
+    body: JSON.stringify(createInventoryInputSchema.parse(input.parameters)),
+  });
+  return inventorySchema.parse(value);
+}
+
 async function uploadInventoryImport(input: {
   inventoryId: string;
   status: InventoryChzStatus;
@@ -87,6 +98,23 @@ export function useCreateInventory(): UseMutationResult<Inventory, Error, Create
   });
 }
 
+export function useUpdateInventory(): UseMutationResult<
+  Inventory,
+  Error,
+  { inventoryId: string; parameters: CreateInventoryInput }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: updateInventory,
+    onSuccess: (_result, input) => {
+      void queryClient.invalidateQueries({ queryKey: INVENTORIES_QUERY_KEY });
+      void queryClient.invalidateQueries({
+        queryKey: [...INVENTORIES_QUERY_KEY, input.inventoryId],
+      });
+    },
+  });
+}
+
 export function useUploadInventoryImport(): UseMutationResult<
   InventoryImport,
   Error,
@@ -95,7 +123,7 @@ export function useUploadInventoryImport(): UseMutationResult<
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: uploadInventoryImport,
-    onSuccess: (_result, input) =>
+    onSettled: (_result, _error, input) =>
       queryClient.invalidateQueries({ queryKey: [...INVENTORIES_QUERY_KEY, input.inventoryId] }),
   });
 }

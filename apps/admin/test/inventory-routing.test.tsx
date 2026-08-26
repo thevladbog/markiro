@@ -151,8 +151,11 @@ afterEach(async () => {
 it("keeps inventory list/detail readable while exposing write controls only to writers", async () => {
   const reader = renderRoute("/inventory", READ_ACCESS);
   expect(await screen.findByRole("heading", { name: "Инвентаризации" })).toBeDefined();
+  expect(await screen.findByRole("link", { name: "ИНВ-00042" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Инвентаризации" })).toBeDefined();
   expect(screen.queryByRole("button", { name: "Создать инвентаризацию" })).toBeNull();
+  expect(screen.queryByText(INVENTORY.updatedAt)).toBeNull();
+  expect(await screen.findByText(/\d{2}:\d{2}/)).toBeDefined();
   reader.router.dispose();
   cleanup();
 
