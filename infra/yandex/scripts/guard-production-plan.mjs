@@ -1047,44 +1047,84 @@ function validateCertificateRecord(resource) {
   if (data !== null && (!Array.isArray(data) || data.length !== 1)) rejected();
 }
 
+function releaseCdnScoped(scope, callback) {
+  return scoped(`release-cdn-${scope}`, callback);
+}
+
 function validateCdn(plan, resource, expectedOriginGroupId) {
-  const value = after(resource);
-  const originGroupId = knownOrReferenced(plan, resource, "origin_group_id", originGroupReference);
-  if (
-    value.cname !== expectedReleaseDomain ||
-    value.active !== true ||
-    value.origin_protocol !== "https" ||
-    (originGroupId !== null && originGroupId !== expectedOriginGroupId)
-  )
-    rejected();
-  if (!Array.isArray(value.options) || value.options.length !== 1) rejected();
-  const options = value.options[0];
-  exactStrings(options.allowed_http_methods, ["GET", "HEAD"]);
-  if (
-    options.redirect_http_to_https !== true ||
-    options.redirect_https_to_http !== false ||
-    options.edge_cache_settings !== 0
-  )
-    rejected();
-  if (options.browser_cache_settings !== null && options.browser_cache_settings !== undefined)
-    rejected();
-  if (!object(options.static_response_headers)) rejected();
-  if (
-    options.static_response_headers["x-content-type-options"] !== "nosniff" ||
-    options.static_response_headers["content-security-policy"] !==
-      "default-src 'none'; frame-ancestors 'none'; sandbox"
-  )
-    rejected();
-  if (!Array.isArray(value.ssl_certificate) || value.ssl_certificate.length !== 1) rejected();
-  const certificate = value.ssl_certificate[0];
-  if (!object(certificate) || certificate.type !== "certificate_manager") rejected();
-  if (
-    certificate.certificate_manager_id !== null &&
-    certificate.certificate_manager_id !== undefined
-  )
-    nonblank(certificate.certificate_manager_id);
-  const providerCname = knownOrComputed(resource, "provider_cname");
-  return providerCname === null ? null : nonblank(providerCname).replace(/\.+$/, "");
+  const value = releaseCdnScoped("resource", () => after(resource));
+  const originGroupId = releaseCdnScoped("origin-group-reference", () =>
+    knownOrReferenced(plan, resource, "origin_group_id", originGroupReference),
+  );
+  releaseCdnScoped("cname", () => {
+    if (value.cname !== expectedReleaseDomain) rejected();
+  });
+  releaseCdnScoped("active", () => {
+    if (value.active !== true) rejected();
+  });
+  releaseCdnScoped("origin-protocol", () => {
+    if (value.origin_protocol !== "https") rejected();
+  });
+  releaseCdnScoped("origin-group-id", () => {
+    if (originGroupId !== null && originGroupId !== expectedOriginGroupId) rejected();
+  });
+  const options = releaseCdnScoped("options-count", () => {
+    if (!Array.isArray(value.options) || value.options.length !== 1) rejected();
+    return value.options[0];
+  });
+  releaseCdnScoped("options-shape", () => {
+    if (!object(options)) rejected();
+  });
+  releaseCdnScoped("methods", () => {
+    exactStrings(options.allowed_http_methods, ["GET", "HEAD"]);
+  });
+  releaseCdnScoped("redirect-http-to-https", () => {
+    if (options.redirect_http_to_https !== true) rejected();
+  });
+  releaseCdnScoped("redirect-https-to-http", () => {
+    if (options.redirect_https_to_http !== false) rejected();
+  });
+  releaseCdnScoped("edge-cache", () => {
+    if (options.edge_cache_settings !== 0) rejected();
+  });
+  releaseCdnScoped("browser-cache", () => {
+    if (options.browser_cache_settings !== null && options.browser_cache_settings !== undefined)
+      rejected();
+  });
+  const headers = releaseCdnScoped("headers-shape", () => {
+    if (!object(options.static_response_headers)) rejected();
+    return options.static_response_headers;
+  });
+  releaseCdnScoped("content-type-header", () => {
+    if (headers["x-content-type-options"] !== "nosniff") rejected();
+  });
+  releaseCdnScoped("content-security-policy-header", () => {
+    if (
+      headers["content-security-policy"] !== "default-src 'none'; frame-ancestors 'none'; sandbox"
+    )
+      rejected();
+  });
+  const certificate = releaseCdnScoped("certificate-count", () => {
+    if (!Array.isArray(value.ssl_certificate) || value.ssl_certificate.length !== 1) rejected();
+    return value.ssl_certificate[0];
+  });
+  releaseCdnScoped("certificate-shape", () => {
+    if (!object(certificate)) rejected();
+  });
+  releaseCdnScoped("certificate-type", () => {
+    if (certificate.type !== "certificate_manager") rejected();
+  });
+  releaseCdnScoped("certificate-id", () => {
+    if (
+      certificate.certificate_manager_id !== null &&
+      certificate.certificate_manager_id !== undefined
+    )
+      nonblank(certificate.certificate_manager_id);
+  });
+  return releaseCdnScoped("provider-cname", () => {
+    const providerCname = knownOrComputed(resource, "provider_cname");
+    return providerCname === null ? null : nonblank(providerCname).replace(/\.+$/, "");
+  });
 }
 
 function validatePublicDns(plan, resource, expectedProviderCname) {
@@ -1292,9 +1332,8 @@ export function guardProductionPlan(plan) {
     publicDns && (publicDns.change?.before !== null || publicDns.change?.after !== null);
   if (scoped("release-cdn-actions", () => includesDelete(cdn)) && publicDnsLive)
     rejected("release-cdn-delete");
-  const providerCname = scoped("release-cdn", () =>
-    cdn.change?.after !== null ? validateCdn(plan, cdn, releaseOriginGroupId) : null,
-  );
+  const providerCname =
+    cdn?.change?.after !== null ? validateCdn(plan, cdn, releaseOriginGroupId) : null;
   if (publicDns && publicDns.change?.after !== null) {
     scoped("release-public-dns", () => validatePublicDns(plan, publicDns, providerCname));
   }
