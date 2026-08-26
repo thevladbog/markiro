@@ -8,7 +8,12 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { schema, type Db } from "@markiro/db";
-import { INVENTORY_CHZ_STATUSES, type LabelTemplateSpec } from "@markiro/domain";
+import {
+  inventorySnapshotContentDigest,
+  INVENTORY_CHZ_STATUSES,
+  type LabelTemplateSpec,
+  type StationInventoryBundleCode,
+} from "@markiro/domain";
 
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -24,6 +29,44 @@ const ready = Boolean(
 
 const GTIN14 = "04680089900383";
 const SNAPSHOT_DIGEST = "a".repeat(64);
+const SNAPSHOT_CODES: StationInventoryBundleCode[] = [
+  ...Array.from({ length: 2 }, (_, index) => ({
+    sourceStatus: "EMITTED" as const,
+    sourceState: index === 0 ? "MOVING_BY_UD" : null,
+    sourceProductionDate: null,
+    expected: false,
+    protected: index === 0,
+  })),
+  ...Array.from({ length: 3 }, (_, index) => ({
+    sourceStatus: "INTRODUCED" as const,
+    sourceState: null,
+    sourceProductionDate: index < 2 ? `2026-08-0${index + 1}` : "2026-07-31",
+    expected: index < 2,
+    protected: false,
+  })),
+  ...Array.from({ length: 4 }, () => ({
+    sourceStatus: "RETIRED" as const,
+    sourceState: null,
+    sourceProductionDate: null,
+    expected: false,
+    protected: false,
+  })),
+  {
+    sourceStatus: "WRITTEN_OFF" as const,
+    sourceState: null,
+    sourceProductionDate: null,
+    expected: false,
+    protected: false,
+  },
+].map((facts, index) => ({
+  codeHash: index.toString(16).padStart(64, "0"),
+  canonicalRaw: `010468008990038321LIFECYCLE-${index}`,
+  gtin14: GTIN14,
+  serial: `LIFECYCLE-${index}`,
+  parentSscc: index === 0 ? "046000000000000012" : null,
+  ...facts,
+}));
+const CONTENT_DIGEST = inventorySnapshotContentDigest(SNAPSHOT_CODES);
 const BOX_LABEL_SPEC = {
   widthMm: 58,
   heightMm: 40,
@@ -58,10 +101,12 @@ interface ReadyInventoryFixture {
   productId: string;
   lineId: string;
   snapshotId: string;
+  snapshotFixedAt: string;
   templateId: string | null;
 }
 
 interface MutableStoredManifest {
+  boxCapacity?: number;
   productionDateFrom: string;
   productionDateTo: string;
   boxLabelTemplate: {
@@ -150,6 +195,10 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
       tenantId,
       gtin14: GTIN14,
       name: "Inventory Water",
+      printName: "Water 0.5 l",
+      egaisCode: "0101234567890123456",
+      shelfLifeDays: 184,
+      boxCapacity: 12,
       status: "active",
     });
     await db.insert(schema.lines).values({ id: lineId, tenantId, name: "Inventory line" });
@@ -208,8 +257,24 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
         looseCount: snapshotCounts.loose,
         fixedByUserId: actorId,
       })
-      .returning({ id: schema.inventorySnapshots.id });
+      .returning({ id: schema.inventorySnapshots.id, fixedAt: schema.inventorySnapshots.fixedAt });
     if (!snapshot) throw new Error("Expected snapshot fixture");
+    await db.insert(schema.inventorySnapshotCodes).values(
+      SNAPSHOT_CODES.map((code) => ({
+        tenantId,
+        snapshotId: snapshot.id,
+        canonicalRaw: code.canonicalRaw,
+        codeHash: code.codeHash,
+        gtin14: code.gtin14,
+        serial: code.serial,
+        sourceStatus: code.sourceStatus,
+        sourceState: code.sourceState,
+        sourceProductionDate: code.sourceProductionDate,
+        parentSscc: code.parentSscc,
+        expected: code.expected,
+        protected: code.protected,
+      })),
+    );
     await db.insert(schema.inventorySnapshotInputs).values(
       imports.map((input) => ({
         tenantId,
@@ -235,6 +300,7 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
       productId,
       lineId,
       snapshotId: snapshot.id,
+      snapshotFixedAt: snapshot.fixedAt.toISOString(),
       templateId,
     };
   }
@@ -271,11 +337,17 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
       inventoryNumber: fixture.inventoryNumber,
       snapshotId: fixture.snapshotId,
       snapshotRevision: 1,
+      snapshotFixedAt: fixture.snapshotFixedAt,
       combinedDigest: SNAPSHOT_DIGEST,
+      contentDigest: CONTENT_DIGEST,
       codeCount: 10,
       productId: fixture.productId,
       productName: "Inventory Water",
+      productPrintName: "Water 0.5 l",
+      egaisCode: "0101234567890123456",
+      shelfLifeDays: 184,
       gtin14: GTIN14,
+      boxCapacity: 12,
       mode: "check",
       lineId: fixture.lineId,
       lineName: "Inventory line",
@@ -346,6 +418,7 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
           productId: fixture.productId,
           productName: "Inventory Water",
           gtin14: GTIN14,
+          boxCapacity: 12,
           lineId: fixture.lineId,
           lineName: "Inventory line",
           mode: "check",
@@ -367,6 +440,51 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
       spec: BOX_LABEL_SPEC,
     });
     expect(response.body.boxLabelTemplate.id).not.toBe(replacement);
+    expect(response.body.boxCapacity).toBe(12);
+
+    await db
+      .update(schema.products)
+      .set({
+        boxCapacity: 48,
+        name: "Edited after start",
+        printName: "Edited print name",
+        egaisCode: null,
+        shelfLifeDays: 1,
+      })
+      .where(
+        and(
+          eq(schema.products.tenantId, fixture.tenantId),
+          eq(schema.products.id, fixture.productId),
+        ),
+      );
+    const duplicate = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+    expect(duplicate.body.boxCapacity).toBe(12);
+    expect(duplicate.body).toMatchObject({
+      productName: "Inventory Water",
+      productPrintName: "Water 0.5 l",
+      egaisCode: "0101234567890123456",
+      shelfLifeDays: 184,
+    });
+  });
+
+  it("requires a positive product box capacity before freezing either inventory mode", async () => {
+    for (const mode of ["check", "repack"] as const) {
+      const agent = request.agent(app!.getHttpServer());
+      const fixture = await seedReadyInventory(agent, mode);
+      await db
+        .update(schema.products)
+        .set({ boxCapacity: 0 })
+        .where(
+          and(
+            eq(schema.products.tenantId, fixture.tenantId),
+            eq(schema.products.id, fixture.productId),
+          ),
+        );
+
+      await agent
+        .post(`/inventories/${fixture.inventoryId}/start`)
+        .expect(409, { code: "INVENTORY_BOX_CAPACITY_INVALID" });
+    }
   });
 
   it("makes duplicate and concurrent starts idempotent without changing started fields or duplicating the success audit", async () => {
@@ -414,6 +532,41 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
         ),
       );
     expect(audits).toHaveLength(1);
+  });
+
+  it("idempotently backfills proof fields on a legacy running manifest", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedReadyInventory(agent);
+    const started = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+    const legacy = structuredClone(started.body) as Record<string, unknown>;
+    delete legacy.snapshotFixedAt;
+    delete legacy.contentDigest;
+    await overwriteStoredManifest(fixture, legacy);
+
+    const upgraded = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+    expect(upgraded.body).toEqual(started.body);
+    const repeated = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+    expect(repeated.body).toEqual(started.body);
+    const [stored] = await db
+      .select({ manifest: schema.inventories.stationManifest })
+      .from(schema.inventories)
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+    expect(stored?.manifest).toEqual(started.body);
+  });
+
+  it("rejects a legacy running manifest whose immutable snapshot anchor is corrupt", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedReadyInventory(agent);
+    const started = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+    const legacy = structuredClone(started.body) as Record<string, unknown>;
+    delete legacy.snapshotFixedAt;
+    delete legacy.contentDigest;
+    legacy.combinedDigest = "f".repeat(64);
+    await overwriteStoredManifest(fixture, legacy);
+
+    await agent
+      .post(`/inventories/${fixture.inventoryId}/start`)
+      .expect(409, { code: "INVENTORY_STORED_MANIFEST_INVALID" });
   });
 
   it("rejects an invalid newly generated manifest before persisting running state", async () => {
@@ -473,6 +626,20 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
     manifest.productionDateFrom = "2026-02-30";
 
     await expectStoredManifestRejected(agent, fixture, manifest);
+  });
+
+  it("rejects a stored manifest with missing or non-positive frozen box capacity", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedReadyInventory(agent, "repack");
+    const started = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+
+    const missing = structuredClone(started.body) as MutableStoredManifest;
+    delete missing.boxCapacity;
+    await expectStoredManifestRejected(agent, fixture, missing);
+
+    const nonPositive = structuredClone(started.body) as MutableStoredManifest;
+    nonPositive.boxCapacity = 0;
+    await expectStoredManifestRejected(agent, fixture, nonPositive);
   });
 
   it("rejects an inverted stored production date range", async () => {

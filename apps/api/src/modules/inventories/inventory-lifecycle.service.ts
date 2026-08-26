@@ -6,12 +6,13 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
 import {
   DomainError,
   INVENTORY_CHZ_STATUSES,
+  inventorySnapshotContentDigest,
   parseLabelTemplate,
   type LabelTemplateSpec,
 } from "@markiro/domain";
@@ -19,11 +20,15 @@ import {
 import { DB } from "../../auth/auth.module";
 import type { InventorySnapshotCountsDto } from "./dto";
 import {
-  parseStationInventoryManifest,
   STATION_INVENTORY_LIMITS,
+  parseStationInventoryManifest,
   type StationInventoryLabelTemplateDescriptor,
   type StationInventoryManifest,
 } from "./station-inventory.dto";
+import {
+  resolveStoredStationInventoryManifest,
+  type StoredStationManifestFacts,
+} from "./station-inventory-manifest-upgrade";
 
 type InventoryTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -47,10 +52,20 @@ interface StartFacts {
   snapshot: {
     id: string;
     revision: number;
+    fixedAt: Date;
     combinedDigest: string;
+    contentDigest: string;
     counts: InventorySnapshotCountsDto;
   };
-  product: { id: string; name: string; gtin14: string };
+  product: {
+    id: string;
+    name: string;
+    printName: string | null;
+    gtin14: string;
+    egaisCode: string | null;
+    shelfLifeDays: number | null;
+    boxCapacity: number;
+  };
   line: { id: string; name: string };
   boxLabelTemplate: StationInventoryLabelTemplateDescriptor | null;
 }
@@ -72,7 +87,8 @@ export class InventoryLifecycleService {
 
       if (inventory.status === "running") {
         try {
-          return parseStationInventoryManifest(inventory.stationManifest);
+          const facts = await this.loadStoredManifestFacts(tx, tenantId, inventory);
+          return await resolveStoredStationInventoryManifest(tx, tenantId, facts);
         } catch {
           throw new ConflictException({ code: "INVENTORY_STORED_MANIFEST_INVALID" });
         }
@@ -121,6 +137,7 @@ export class InventoryLifecycleService {
           productId: facts.product.id,
           productName: facts.product.name,
           gtin14: facts.product.gtin14,
+          boxCapacity: facts.product.boxCapacity,
           lineId: facts.line.id,
           lineName: facts.line.name,
           mode: inventory.mode,
@@ -171,6 +188,7 @@ export class InventoryLifecycleService {
         id: schema.inventorySnapshots.id,
         revision: schema.inventorySnapshots.revision,
         combinedDigest: schema.inventorySnapshots.combinedDigest,
+        fixedAt: schema.inventorySnapshots.fixedAt,
         emitted: schema.inventorySnapshots.emittedCount,
         introduced: schema.inventorySnapshots.introducedCount,
         applied: schema.inventorySnapshots.appliedCount,
@@ -214,11 +232,49 @@ export class InventoryLifecycleService {
       throw new ConflictException({ code: "INVENTORY_SNAPSHOT_INCOMPLETE" });
     }
 
+    const contentRows = await tx
+      .select({
+        codeHash: schema.inventorySnapshotCodes.codeHash,
+        canonicalRaw: schema.inventorySnapshotCodes.canonicalRaw,
+        gtin14: schema.inventorySnapshotCodes.gtin14,
+        serial: schema.inventorySnapshotCodes.serial,
+        sourceStatus: schema.inventorySnapshotCodes.sourceStatus,
+        sourceState: schema.inventorySnapshotCodes.sourceState,
+        sourceProductionDate: schema.inventorySnapshotCodes.sourceProductionDate,
+        parentSscc: schema.inventorySnapshotCodes.parentSscc,
+        expected: schema.inventorySnapshotCodes.expected,
+        protected: schema.inventorySnapshotCodes.protected,
+      })
+      .from(schema.inventorySnapshotCodes)
+      .where(
+        and(
+          eq(schema.inventorySnapshotCodes.tenantId, tenantId),
+          eq(schema.inventorySnapshotCodes.snapshotId, snapshot.id),
+        ),
+      )
+      .orderBy(asc(schema.inventorySnapshotCodes.codeHash))
+      .for("share");
+    if (
+      contentRows.length !==
+      snapshot.emitted +
+        snapshot.introduced +
+        snapshot.applied +
+        snapshot.retired +
+        snapshot.writtenOff +
+        snapshot.disaggregation
+    ) {
+      throw new ConflictException({ code: "INVENTORY_SNAPSHOT_INCOMPLETE" });
+    }
+
     const [product] = await tx
       .select({
         id: schema.products.id,
         name: schema.products.name,
+        printName: schema.products.printName,
         gtin14: schema.products.gtin14,
+        egaisCode: schema.products.egaisCode,
+        shelfLifeDays: schema.products.shelfLifeDays,
+        boxCapacity: schema.products.boxCapacity,
         status: schema.products.status,
       })
       .from(schema.products)
@@ -232,6 +288,13 @@ export class InventoryLifecycleService {
     }
     if (product.gtin14 !== inventory.gtin14Snapshot) {
       throw new ConflictException({ code: "INVENTORY_PRODUCT_GTIN_CHANGED" });
+    }
+    if (
+      !Number.isInteger(product.boxCapacity) ||
+      product.boxCapacity === null ||
+      product.boxCapacity <= 0
+    ) {
+      throw new ConflictException({ code: "INVENTORY_BOX_CAPACITY_INVALID" });
     }
 
     const [line] = await tx
@@ -258,12 +321,96 @@ export class InventoryLifecycleService {
       snapshot: {
         id: snapshot.id,
         revision: snapshot.revision,
+        fixedAt: snapshot.fixedAt,
         combinedDigest: snapshot.combinedDigest,
+        contentDigest: inventorySnapshotContentDigest(contentRows),
         counts,
       },
-      product: { id: product.id, name: product.name, gtin14: product.gtin14 },
+      product: {
+        id: product.id,
+        name: product.name,
+        printName: product.printName,
+        gtin14: product.gtin14,
+        egaisCode: product.egaisCode,
+        shelfLifeDays: product.shelfLifeDays,
+        boxCapacity: product.boxCapacity,
+      },
       line,
       boxLabelTemplate: await this.resolveBoxLabelTemplate(tx, tenantId, inventory),
+    };
+  }
+
+  private async loadStoredManifestFacts(
+    tx: InventoryTx,
+    tenantId: string,
+    inventory: LockedInventory,
+  ): Promise<StoredStationManifestFacts> {
+    if (inventory.activeSnapshotId === null) {
+      throw new Error("Running inventory has no active snapshot");
+    }
+    const [snapshot] = await tx
+      .select({
+        id: schema.inventorySnapshots.id,
+        revision: schema.inventorySnapshots.revision,
+        fixedAt: schema.inventorySnapshots.fixedAt,
+        combinedDigest: schema.inventorySnapshots.combinedDigest,
+        emitted: schema.inventorySnapshots.emittedCount,
+        introduced: schema.inventorySnapshots.introducedCount,
+        applied: schema.inventorySnapshots.appliedCount,
+        retired: schema.inventorySnapshots.retiredCount,
+        writtenOff: schema.inventorySnapshots.writtenOffCount,
+        disaggregation: schema.inventorySnapshots.disaggregationCount,
+      })
+      .from(schema.inventorySnapshots)
+      .where(
+        and(
+          eq(schema.inventorySnapshots.tenantId, tenantId),
+          eq(schema.inventorySnapshots.inventoryId, inventory.id),
+          eq(schema.inventorySnapshots.id, inventory.activeSnapshotId),
+        ),
+      )
+      .for("share");
+    if (!snapshot) throw new Error("Running inventory snapshot is missing");
+    const [product] = await tx
+      .select({
+        name: schema.products.name,
+        printName: schema.products.printName,
+        egaisCode: schema.products.egaisCode,
+        shelfLifeDays: schema.products.shelfLifeDays,
+      })
+      .from(schema.products)
+      .where(
+        and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, inventory.productId)),
+      )
+      .for("share");
+    if (!product) throw new Error("Running inventory product is missing");
+
+    return {
+      id: inventory.id,
+      number: inventory.number,
+      mode: inventory.mode,
+      productId: inventory.productId,
+      gtin14Snapshot: inventory.gtin14Snapshot,
+      lineId: inventory.lineId,
+      productionDateFrom: inventory.productionDateFrom,
+      productionDateTo: inventory.productionDateTo,
+      boxLabelTemplateId: inventory.boxLabelTemplateId,
+      activeSnapshotId: inventory.activeSnapshotId,
+      stationManifest: inventory.stationManifest,
+      authoritativeProductName: product.name,
+      authoritativeProductPrintName: product.printName,
+      authoritativeEgaisCode: product.egaisCode,
+      authoritativeShelfLifeDays: product.shelfLifeDays,
+      snapshotId: snapshot.id,
+      snapshotRevision: snapshot.revision,
+      snapshotFixedAt: snapshot.fixedAt,
+      snapshotCombinedDigest: snapshot.combinedDigest,
+      emitted: snapshot.emitted,
+      introduced: snapshot.introduced,
+      applied: snapshot.applied,
+      retired: snapshot.retired,
+      writtenOff: snapshot.writtenOff,
+      disaggregation: snapshot.disaggregation,
     };
   }
 
@@ -310,7 +457,9 @@ export class InventoryLifecycleService {
       inventoryNumber: inventory.number,
       snapshotId: snapshot.id,
       snapshotRevision: 1,
+      snapshotFixedAt: snapshot.fixedAt.toISOString(),
       combinedDigest: snapshot.combinedDigest,
+      contentDigest: snapshot.contentDigest,
       codeCount:
         snapshot.counts.emitted +
         snapshot.counts.introduced +
@@ -320,7 +469,11 @@ export class InventoryLifecycleService {
         snapshot.counts.disaggregation,
       productId: product.id,
       productName: product.name,
+      productPrintName: product.printName,
+      egaisCode: product.egaisCode,
+      shelfLifeDays: product.shelfLifeDays,
       gtin14: product.gtin14,
+      boxCapacity: product.boxCapacity,
       mode: inventory.mode,
       lineId: line.id,
       lineName: line.name,

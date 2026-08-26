@@ -17,6 +17,38 @@ const expected = [
   ["/station/conflicts/status", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/station/codes/releases", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/station/scans", "POST", "content-type,x-api-key,x-station-capabilities"],
+  ["/station/inventory-tasks", "GET", "content-type,x-api-key,x-station-capabilities"],
+  [
+    "/station/inventory-tasks/resolve-barcode",
+    "POST",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
+  ["/station/inventories/cors-probe/join", "POST", "content-type,x-api-key,x-station-capabilities"],
+  [
+    "/station/inventories/cors-probe/bundle/manifest",
+    "GET",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
+  [
+    "/station/inventories/cors-probe/bundle/codes",
+    "GET",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
+  [
+    "/station/inventories/cors-probe/event-batches",
+    "POST",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
+  [
+    "/station/inventories/cors-probe/progress",
+    "GET",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
+  [
+    "/station/inventories/cors-probe/leave",
+    "POST",
+    "content-type,x-api-key,x-station-capabilities",
+  ],
   ["/station/shift-closures", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts", "POST", "content-type,x-api-key,x-station-capabilities"],
@@ -36,7 +68,10 @@ test("matches the authoritative API Station CORS surface", async () => {
   const block = source.match(/const documentedStationSurface = \[([\s\S]*?)\] as const;/)?.[1];
   assert.ok(block, "API Station CORS surface must remain declarative");
   const apiSurface = [...block.matchAll(/\[\s*"(GET|POST)",\s*"([^"]+)",?\s*\]/g)].map(
-    ([, method, path]) => [path.replace("/shift-1/", "/cors-probe/"), method],
+    ([, method, path]) => [
+      path.replace("/shift-1/", "/cors-probe/").replace("/inventory-1/", "/cors-probe/"),
+      method,
+    ],
   );
 
   assert.deepEqual(

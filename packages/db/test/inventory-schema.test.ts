@@ -64,6 +64,17 @@ function indexColumns(tableName: string, indexName: string): string[] {
   );
 }
 
+function indexWhere(tableName: string, indexName: string): string | undefined {
+  const found = getTableConfig(table(tableName)).indexes.find(
+    (item) => item.config.name === indexName,
+  );
+  if (found === undefined) throw new Error(`missing index ${indexName}`);
+  const where = found.config.where;
+  return where === undefined
+    ? undefined
+    : new PgDialect().sqlToQuery(where).sql.replaceAll(/"[^"]+"\./g, "");
+}
+
 describe("inventory preparation schema", () => {
   it("exports the five preparation tables", () => {
     expect(
@@ -306,7 +317,9 @@ describe("inventory preparation schema", () => {
     expect(migration).toContain('ALTER TABLE "inventories" ADD COLUMN "station_manifest" jsonb');
     expect(migration).toContain('CONSTRAINT "inventories_station_manifest_lifecycle_check"');
     expect(snapshot).toContain('"station_manifest"');
-    expect(journal.entries.at(-1)?.tag).toBe("0069_inventory_station_manifest");
+    expect(journal.entries.some((entry) => entry.tag === "0069_inventory_station_manifest")).toBe(
+      true,
+    );
   });
 
   it("declares date, digest, count, lifecycle, mode, and classification checks", () => {
@@ -355,6 +368,399 @@ describe("inventory preparation schema", () => {
     expect(
       indexColumns("inventorySnapshotCodes", "inventory_snapshot_codes_expected_date_idx"),
     ).toEqual(["snapshot_id", "expected", "source_production_date"]);
+  });
+});
+
+describe("inventory execution schema", () => {
+  it("exports the per-code claim evidence with the execution fact tables", () => {
+    expect(
+      [
+        "inventoryDeviceParticipants",
+        "inventoryScanBatches",
+        "inventoryScanEvents",
+        "inventoryEventClaimOutcomes",
+        "inventoryCodeResults",
+        "inventoryRepackBoxes",
+        "inventoryRepackItems",
+        "inventoryRepackPrintAttempts",
+        "inventoryCorrections",
+        "inventoryLateEvents",
+      ].map((name) => getTableName(table(name))),
+    ).toEqual([
+      "inventory_device_participants",
+      "inventory_scan_batches",
+      "inventory_scan_events",
+      "inventory_event_claim_outcomes",
+      "inventory_code_results",
+      "inventory_repack_boxes",
+      "inventory_repack_items",
+      "inventory_repack_print_attempts",
+      "inventory_corrections",
+      "inventory_late_events",
+    ]);
+  });
+
+  it("pins execution, repack, correction, and quarantine state values", () => {
+    expect(enumValues("inventoryParticipantJoinMethodEnum")).toEqual([
+      "assigned_line",
+      "task_barcode",
+    ]);
+    expect(enumValues("inventoryScanBatchOutcomeEnum")).toEqual([
+      "applied",
+      "rejected",
+      "quarantined",
+    ]);
+    expect(enumValues("inventoryScanEventKindEnum")).toEqual([
+      "item",
+      "known_box",
+      "old_box",
+      "repack_action",
+    ]);
+    expect(enumValues("inventoryRepackBoxStateEnum")).toEqual(["open", "closed", "invalidated"]);
+    expect(enumValues("inventoryRepackPrintStateEnum")).toEqual([
+      "not_ready",
+      "pending",
+      "printing",
+      "printed",
+      "failed",
+    ]);
+    expect(enumValues("inventoryCorrectionActionEnum")).toEqual([
+      "void_scan",
+      "restore_scan",
+      "change_date",
+      "remove_item",
+      "invalidate_box",
+      "reprint",
+    ]);
+    expect(enumValues("inventoryLateEventResolutionEnum")).toEqual([
+      "pending",
+      "replayed",
+      "discarded",
+    ]);
+  });
+
+  it("tenant-scopes execution ownership through composite foreign keys", () => {
+    const expected = [
+      [
+        "inventoryDeviceParticipants",
+        "inventory_device_participants_tenant_inventory_fk",
+        ["tenant_id", "inventory_id"],
+        ["tenant_id", "id"],
+        "inventories",
+      ],
+      [
+        "inventoryDeviceParticipants",
+        "inventory_device_participants_tenant_device_fk",
+        ["tenant_id", "device_id"],
+        ["tenant_id", "id"],
+        "station_devices",
+      ],
+      [
+        "inventoryDeviceParticipants",
+        "inventory_device_participants_tenant_operator_fk",
+        ["tenant_id", "operator_id"],
+        ["tenant_id", "id"],
+        "employees",
+      ],
+      [
+        "inventoryDeviceParticipants",
+        "inventory_device_participants_tenant_line_fk",
+        ["tenant_id", "configured_line_id"],
+        ["tenant_id", "id"],
+        "lines",
+      ],
+      [
+        "inventoryScanBatches",
+        "inventory_scan_batches_tenant_inventory_fk",
+        ["tenant_id", "inventory_id"],
+        ["tenant_id", "id"],
+        "inventories",
+      ],
+      [
+        "inventoryScanBatches",
+        "inventory_scan_batches_tenant_device_fk",
+        ["tenant_id", "device_id"],
+        ["tenant_id", "id"],
+        "station_devices",
+      ],
+      [
+        "inventoryScanEvents",
+        "inventory_scan_events_tenant_batch_fk",
+        ["tenant_id", "inventory_id", "device_id", "batch_id"],
+        ["tenant_id", "inventory_id", "device_id", "batch_id"],
+        "inventory_scan_batches",
+      ],
+      [
+        "inventoryEventClaimOutcomes",
+        "inventory_event_claim_outcomes_winner_device_fk",
+        ["tenant_id", "winning_device_id"],
+        ["tenant_id", "id"],
+        "station_devices",
+      ],
+      [
+        "inventoryEventClaimOutcomes",
+        "inventory_event_claim_outcomes_winner_identity_fk",
+        [
+          "tenant_id",
+          "inventory_id",
+          "winning_event_id",
+          "winning_device_id",
+          "winning_scanned_at",
+        ],
+        ["tenant_id", "inventory_id", "event_id", "device_id", "scanned_at"],
+        "inventory_scan_events",
+      ],
+      [
+        "inventoryCodeResults",
+        "inventory_code_results_tenant_inventory_fk",
+        ["tenant_id", "inventory_id"],
+        ["tenant_id", "id"],
+        "inventories",
+      ],
+      [
+        "inventoryRepackItems",
+        "inventory_repack_items_tenant_box_date_fk",
+        ["tenant_id", "box_id", "inventory_id", "production_date"],
+        ["tenant_id", "id", "inventory_id", "production_date"],
+        "inventory_repack_boxes",
+      ],
+      [
+        "inventoryRepackItems",
+        "inventory_repack_items_tenant_result_fk",
+        ["tenant_id", "result_id", "inventory_id"],
+        ["tenant_id", "id", "inventory_id"],
+        "inventory_code_results",
+      ],
+      [
+        "inventoryRepackPrintAttempts",
+        "inventory_repack_print_attempts_tenant_box_fk",
+        ["tenant_id", "box_id", "inventory_id"],
+        ["tenant_id", "id", "inventory_id"],
+        "inventory_repack_boxes",
+      ],
+      [
+        "inventoryRepackPrintAttempts",
+        "inventory_repack_print_attempts_tenant_event_fk",
+        ["tenant_id", "inventory_id", "source_event_id"],
+        ["tenant_id", "inventory_id", "event_id"],
+        "inventory_scan_events",
+      ],
+      [
+        "inventoryRepackItems",
+        "inventory_repack_items_tenant_result_active_date_fk",
+        ["tenant_id", "result_id", "inventory_id", "active_observed_production_date"],
+        ["tenant_id", "id", "inventory_id", "observed_production_date"],
+        "inventory_code_results",
+      ],
+      [
+        "inventoryCorrections",
+        "inventory_corrections_tenant_inventory_fk",
+        ["tenant_id", "inventory_id"],
+        ["tenant_id", "id"],
+        "inventories",
+      ],
+      [
+        "inventoryLateEvents",
+        "inventory_late_events_tenant_device_fk",
+        ["tenant_id", "device_id"],
+        ["tenant_id", "id"],
+        "station_devices",
+      ],
+    ] as const;
+
+    for (const [tableName, keyName, columns, foreignColumns, foreignTable] of expected) {
+      expect(foreignKeyColumns(tableName, keyName)).toEqual({
+        columns,
+        foreignColumns,
+        foreignTable,
+      });
+    }
+  });
+
+  it("makes batch ids, winner identities, event ids, device sequences, and current claims unique", () => {
+    expect(
+      constraintColumns(
+        "inventoryDeviceParticipants",
+        "inventory_device_participants_tenant_inventory_device_uq",
+      ),
+    ).toEqual(["tenant_id", "inventory_id", "device_id"]);
+    expect(
+      constraintColumns("inventoryScanBatches", "inventory_scan_batches_scope_batch_uq"),
+    ).toEqual(["tenant_id", "inventory_id", "device_id", "batch_id"]);
+    expect(
+      getTableConfig(table("inventoryScanBatches")).uniqueConstraints.map((item) => item.getName()),
+    ).not.toContain("inventory_scan_batches_scope_digest_uq");
+    expect(
+      constraintColumns("inventoryScanEvents", "inventory_scan_events_tenant_inventory_event_uq"),
+    ).toEqual(["tenant_id", "inventory_id", "event_id"]);
+    expect(
+      constraintColumns(
+        "inventoryScanEvents",
+        "inventory_scan_events_tenant_inventory_winner_identity_uq",
+      ),
+    ).toEqual(["tenant_id", "inventory_id", "event_id", "device_id", "scanned_at"]);
+    expect(
+      constraintColumns(
+        "inventoryScanEvents",
+        "inventory_scan_events_tenant_inventory_device_sequence_uq",
+      ),
+    ).toEqual(["tenant_id", "inventory_id", "device_id", "device_sequence"]);
+    expect(
+      constraintColumns("inventoryCodeResults", "inventory_code_results_current_claim_uq"),
+    ).toEqual(["tenant_id", "inventory_id", "code_hash"]);
+    expect(
+      constraintColumns(
+        "inventoryCodeResults",
+        "inventory_code_results_tenant_id_inventory_observed_date_uq",
+      ),
+    ).toEqual(["tenant_id", "id", "inventory_id", "observed_production_date"]);
+    expect(
+      constraintColumns("inventoryRepackBoxes", "inventory_repack_boxes_tenant_id_inventory_uq"),
+    ).toEqual(["tenant_id", "id", "inventory_id"]);
+    expect(
+      constraintColumns("inventoryRepackItems", "inventory_repack_items_tenant_id_inventory_uq"),
+    ).toEqual(["tenant_id", "id", "inventory_id"]);
+    expect(
+      constraintColumns(
+        "inventoryRepackPrintAttempts",
+        "inventory_repack_print_attempts_box_number_uq",
+      ),
+    ).toEqual(["tenant_id", "inventory_id", "box_id", "attempt_number"]);
+    expect(
+      constraintColumns("inventoryLateEvents", "inventory_late_events_tenant_id_inventory_uq"),
+    ).toEqual(["tenant_id", "id", "inventory_id"]);
+  });
+
+  it("allows reassignment only after the previous repack membership is removed", () => {
+    expect(indexColumns("inventoryRepackItems", "inventory_repack_items_active_result_uq")).toEqual(
+      ["tenant_id", "inventory_id", "result_id"],
+    );
+    expect(indexWhere("inventoryRepackItems", "inventory_repack_items_active_result_uq")).toBe(
+      '"removed_at" is null',
+    );
+    const activeDate = checkExpression(
+      "inventoryRepackItems",
+      "inventory_repack_items_active_observed_date_check",
+    );
+    expect(activeDate).toContain('"removed_at" is null');
+    expect(activeDate).toContain('"active_observed_production_date" = "production_date"');
+    expect(activeDate).toContain('"removed_at" is not null');
+    expect(activeDate).toContain('"active_observed_production_date" is null');
+  });
+
+  it("requires complete replay, snapshot origin, print, and quarantine evidence", () => {
+    expect(schema.inventoryScanBatches.result.notNull).toBe(true);
+    expect(
+      checkExpression("inventoryScanBatches", "inventory_scan_batches_payload_digest_check"),
+    ).toContain("^[0-9a-f]{64}$");
+    expect(
+      checkExpression("inventoryScanEvents", "inventory_scan_events_normalized_identity_check"),
+    ).toContain("between 1 and 1024");
+    const claimIdentity = checkExpression(
+      "inventoryEventClaimOutcomes",
+      "inventory_event_claim_outcomes_identity_check",
+    );
+    expect(claimIdentity).toContain("\"status\" = 'claimed'");
+    expect(claimIdentity).toContain('"source_event_id" = "winning_event_id"');
+    expect(claimIdentity).toContain("\"status\" = 'duplicate'");
+    expect(claimIdentity).toContain('"source_event_id" <> "winning_event_id"');
+    expect(Object.keys(schema.inventoryCodeResults)).toContain("originClassification");
+    const snapshotOrigin = checkExpression(
+      "inventoryCodeResults",
+      "inventory_code_results_snapshot_origin_check",
+    );
+    expect(snapshotOrigin).toContain("\"origin_classification\" <> 'voided'");
+    expect(snapshotOrigin).toContain('"classification" = "origin_classification"');
+    expect(snapshotOrigin).toContain("\"classification\" = 'voided'");
+    expect(snapshotOrigin).toContain("\"origin_classification\" = 'unknown'");
+    expect(snapshotOrigin).toContain('"snapshot_id" is null');
+    expect(snapshotOrigin).toContain(
+      "\"origin_classification\" in ('expected', 'protected', 'ineligible')",
+    );
+    expect(snapshotOrigin).toContain('"snapshot_id" is not null');
+    const lifecyclePrint = checkExpression(
+      "inventoryRepackBoxes",
+      "inventory_repack_boxes_lifecycle_print_check",
+    );
+    expect(lifecyclePrint).toContain("\"state\" = 'open'");
+    expect(lifecyclePrint).toContain("\"print_state\" = 'not_ready'");
+    expect(lifecyclePrint).toContain("\"state\" = 'closed'");
+    expect(lifecyclePrint).toContain(
+      "\"print_state\" in ('pending', 'printing', 'printed', 'failed')",
+    );
+    expect(
+      checkExpression("inventoryRepackBoxes", "inventory_repack_boxes_print_state_check"),
+    ).toContain("\"print_state\" = 'failed'");
+    expect(
+      checkExpression("inventoryRepackBoxes", "inventory_repack_boxes_print_state_check"),
+    ).toContain('"print_error_code" is not null');
+    const attempts = checkExpression(
+      "inventoryRepackBoxes",
+      "inventory_repack_boxes_print_attempt_count_check",
+    );
+    expect(attempts).toContain("\"print_state\" = 'not_ready'");
+    expect(attempts).toContain('"print_attempt_count" = 0');
+    expect(attempts).toContain("\"print_state\" in ('printing', 'printed', 'failed')");
+    expect(attempts).toContain('"print_attempt_count" > 0');
+    const resolution = checkExpression(
+      "inventoryLateEvents",
+      "inventory_late_events_resolution_check",
+    );
+    expect(resolution).toContain("\"resolution\" = 'pending'");
+    expect(resolution).toContain('"resolved_at" is null');
+    expect(resolution).toContain('"resolved_by_user_id" is null');
+    expect(resolution).toContain("\"resolution\" in ('replayed', 'discarded')");
+    expect(resolution).toContain('"resolved_at" is not null');
+    expect(resolution).toContain('"resolved_by_user_id" is not null');
+  });
+
+  it("indexes batch replay, progress cursors, box membership, and close blockers", () => {
+    expect(
+      indexColumns("inventoryScanEvents", "inventory_scan_events_progress_cursor_idx"),
+    ).toEqual(["tenant_id", "inventory_id", "recorded_at", "event_id"]);
+    expect(indexColumns("inventoryRepackItems", "inventory_repack_items_box_active_idx")).toEqual([
+      "tenant_id",
+      "inventory_id",
+      "box_id",
+      "removed_at",
+    ]);
+    expect(
+      indexColumns("inventoryRepackBoxes", "inventory_repack_boxes_close_blockers_idx"),
+    ).toEqual(["tenant_id", "inventory_id", "state", "print_state"]);
+    expect(indexColumns("inventoryLateEvents", "inventory_late_events_resolution_idx")).toEqual([
+      "tenant_id",
+      "inventory_id",
+      "resolution",
+      "received_at",
+    ]);
+  });
+
+  it("packages migration 0070 and its generated execution snapshot in the journal", () => {
+    const migration = readFileSync(
+      new URL("../migrations/0070_curious_big_bertha.sql", import.meta.url),
+      "utf8",
+    );
+    const snapshot = JSON.parse(
+      readFileSync(new URL("../migrations/meta/0070_snapshot.json", import.meta.url), "utf8"),
+    ) as { tables: Record<string, unknown> };
+    const journal = JSON.parse(
+      readFileSync(new URL("../migrations/meta/_journal.json", import.meta.url), "utf8"),
+    ) as { entries: Array<{ tag: string }> };
+
+    expect(migration.length).toBeGreaterThan(0);
+    expect(Object.keys(snapshot.tables)).toEqual(
+      expect.arrayContaining([
+        "public.inventory_device_participants",
+        "public.inventory_scan_batches",
+        "public.inventory_scan_events",
+        "public.inventory_code_results",
+        "public.inventory_repack_boxes",
+        "public.inventory_repack_items",
+        "public.inventory_corrections",
+        "public.inventory_late_events",
+      ]),
+    );
+    expect(journal.entries.map((entry) => entry.tag)).toContain("0070_curious_big_bertha");
   });
 });
 

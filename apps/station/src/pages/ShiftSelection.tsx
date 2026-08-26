@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Pager } from "@markiro/ui";
 import { StationApiError, type StationClient } from "../lib/api-client.js";
@@ -69,6 +69,31 @@ export interface ShiftSelectionProps {
   onConflicts?: () => void;
   /** False once this credential generation is sealed or this floor is retired. */
   isCurrent?: () => boolean;
+  /** Exclusively retires selection work before another route starts. */
+  onRouteIntent?: (options?: ShiftSelectionRouteIntentOptions) => ShiftSelectionRouteIntent | null;
+  /** Disables route controls owned by the wider floor-task selection surface. */
+  routeControlsDisabled?: boolean;
+  /** Runs under the same initial/manual/poll request lock as the shift list. */
+  onCoordinatedRefresh?: () => Promise<void>;
+  /** Fixed category navigation receives the current visible production count. */
+  categoryNavigation?: (openShiftCount: number) => ReactNode;
+  alternateContent?: ReactNode;
+  alternateActive?: boolean;
+  productionActionsVisible?: boolean;
+  title?: string;
+  actionsLabel?: string;
+  refreshLabel?: string;
+}
+
+export interface ShiftSelectionRouteIntent {
+  ready: Promise<void>;
+  commit: () => boolean;
+  cancel: () => Promise<void>;
+}
+
+export interface ShiftSelectionRouteIntentOptions {
+  /** Setup remains reachable for legacy repair after production credentials are sealed. */
+  allowSealedCredential?: true;
 }
 
 export type ShiftSelectionPersistentState =
@@ -95,6 +120,16 @@ export function ShiftSelection({
   onSetup,
   onConflicts,
   isCurrent,
+  onRouteIntent,
+  routeControlsDisabled = false,
+  onCoordinatedRefresh,
+  categoryNavigation,
+  alternateContent,
+  alternateActive = false,
+  productionActionsVisible = true,
+  title,
+  actionsLabel,
+  refreshLabel,
 }: ShiftSelectionProps) {
   const { t, i18n } = useTranslation();
   const [items, setItems] = useState<ShiftListItem[]>([]);
@@ -145,7 +180,7 @@ export function ShiftSelection({
       if (manual) setManualRefreshing(true);
       setLoadFailed(false);
       setError(null);
-      void client
+      const shiftRequest = client
         .get<{ items: ShiftListItem[] }>("/shifts")
         .then(async (response) => {
           let visibleItems = response.items;
@@ -182,14 +217,19 @@ export function ShiftSelection({
             setLoadFailed(true);
             setLoading(false);
           }
-        })
-        .finally(() => {
-          if (!mounted.current || listRequest.current?.id !== id) return;
-          listRequest.current = null;
-          setManualRefreshing(false);
         });
+      const coordinatedRequest = Promise.resolve()
+        .then(() => onCoordinatedRefresh?.())
+        .catch((err: unknown) => {
+          console.error("station: coordinated floor-task refresh failed", err);
+        });
+      void Promise.all([shiftRequest, coordinatedRequest]).finally(() => {
+        if (!mounted.current || listRequest.current?.id !== id) return;
+        listRequest.current = null;
+        setManualRefreshing(false);
+      });
     },
-    [client, exec, t],
+    [client, exec, onCoordinatedRefresh, t],
   );
 
   useEffect(() => {
@@ -216,10 +256,25 @@ export function ShiftSelection({
     if (requestedPage !== currentPage.page) setRequestedPage(currentPage.page);
   }, [currentPage.page, requestedPage]);
 
-  async function open(shift: ShiftListItem) {
-    if (busy) return;
+  const controlsDisabled = busy || routeControlsDisabled;
+
+  function acquireRouteIntent(
+    options?: ShiftSelectionRouteIntentOptions,
+  ): ShiftSelectionRouteIntent | null {
+    if (controlsDisabled || (options?.allowSealedCredential !== true && isCurrent?.() === false))
+      return null;
+    return onRouteIntent?.(options) ?? null;
+  }
+
+  async function enterShift(
+    resolveShift: () => Promise<{ id: string; status: string; mode: string }>,
+  ): Promise<void> {
+    if (controlsDisabled) return;
+    const intent = acquireRouteIntent();
+    if (onRouteIntent && !intent) return;
     const operation = ++shiftEntryOperation.current;
     let lease: ShiftEntryLease | null = null;
+    let committed = false;
     const current = (): boolean =>
       mounted.current &&
       shiftEntryOperation.current === operation &&
@@ -228,54 +283,101 @@ export function ShiftSelection({
     setError(null);
     setBusy(true);
     try {
+      if (intent) {
+        await intent.ready;
+        if (!current()) return;
+      }
       if (acquireShiftEntry) {
         lease = await acquireShiftEntry();
         if (!current()) return;
       }
-      const opened = await client.post<{ id: string; status: string; mode: string }>(
-        `/shifts/${shift.id}/open`,
-      );
+      const entered = await resolveShift();
       if (!current()) return;
-      if (lease) await onSelected(opened, lease);
-      else await onSelected(opened);
-      if (!current()) return;
+      if (intent && !intent.commit()) return;
+      committed = true;
+      if (lease) await onSelected(entered, lease);
+      else await onSelected(entered);
     } catch (err) {
-      if (!current()) return;
-      setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
-    } finally {
-      lease?.release();
-      if (mounted.current && shiftEntryOperation.current === operation && isCurrent?.() !== false) {
-        setBusy(false);
+      if (current()) {
+        setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
       }
+    } finally {
+      if (!committed && intent) {
+        await intent.cancel().catch((cancelError: unknown) => {
+          console.error("station: route acquisition cancellation failed", cancelError);
+        });
+      }
+      const resetBusy =
+        mounted.current && shiftEntryOperation.current === operation && isCurrent?.() !== false;
+      lease?.release();
+      if (resetBusy) setBusy(false);
     }
   }
 
-  async function rejoin(shift: ShiftListItem) {
-    if (busy || isCurrent?.() === false) return;
-    const operation = ++shiftEntryOperation.current;
-    let lease: ShiftEntryLease | null = null;
-    const current = (): boolean =>
-      mounted.current &&
-      shiftEntryOperation.current === operation &&
-      isCurrent?.() !== false &&
-      (lease?.isCurrent() ?? true);
+  async function open(shift: ShiftListItem): Promise<void> {
+    await enterShift(() =>
+      client.post<{ id: string; status: string; mode: string }>(`/shifts/${shift.id}/open`),
+    );
+  }
+
+  async function rejoin(shift: ShiftListItem): Promise<void> {
+    if (!onRouteIntent && !acquireShiftEntry) {
+      if (controlsDisabled || isCurrent?.() === false) return;
+      setError(null);
+      setBusy(true);
+      try {
+        await onSelected(shift);
+      } catch {
+        if (mounted.current && isCurrent?.() !== false) setError(t("shifts.actionFailed"));
+      } finally {
+        if (mounted.current && isCurrent?.() !== false) setBusy(false);
+      }
+      return;
+    }
+    await enterShift(() => Promise.resolve(shift));
+  }
+
+  async function enterRoute(enter: () => void, options?: ShiftSelectionRouteIntentOptions) {
+    if (!onRouteIntent) {
+      if (controlsDisabled || (options?.allowSealedCredential !== true && isCurrent?.() === false))
+        return;
+      enter();
+      return;
+    }
+    const intent = acquireRouteIntent(options);
+    if (!intent) return;
     setError(null);
     setBusy(true);
+    let committed = false;
     try {
-      if (acquireShiftEntry) {
-        lease = await acquireShiftEntry();
-        if (!current()) return;
+      await intent.ready;
+      if (
+        !mounted.current ||
+        (options?.allowSealedCredential !== true && isCurrent?.() === false)
+      ) {
+        await intent.cancel();
+        return;
       }
-      if (lease) await onSelected(shift, lease);
-      else await onSelected(shift);
-      if (!current()) return;
-    } catch {
-      if (current()) setError(t("shifts.actionFailed"));
+      if (!intent.commit()) {
+        await intent.cancel();
+        return;
+      }
+      committed = true;
+      enter();
+    } catch (err) {
+      await intent.cancel().catch((cancelError: unknown) => {
+        console.error("station: route acquisition cancellation failed", cancelError);
+      });
+      if (mounted.current && (options?.allowSealedCredential === true || isCurrent?.() !== false)) {
+        setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
+      }
     } finally {
-      lease?.release();
-      if (mounted.current && shiftEntryOperation.current === operation && isCurrent?.() !== false) {
+      if (
+        !committed &&
+        mounted.current &&
+        (options?.allowSealedCredential === true || isCurrent?.() !== false)
+      )
         setBusy(false);
-      }
     }
   }
 
@@ -283,29 +385,43 @@ export function ShiftSelection({
 
   return (
     <StationScreen
-      title={t("shifts.title")}
+      title={title ?? t("shifts.title")}
       header={<div className="shift-selection__message">{message}</div>}
       actions={
-        <FloorFooter ariaLabel={t("shifts.actions")}>
-          <Button size="floor" disabled={busy} onClick={onNew}>
-            {t("shifts.new")}
-          </Button>
+        <FloorFooter ariaLabel={actionsLabel ?? t("shifts.actions")}>
+          {productionActionsVisible ? (
+            <Button size="floor" disabled={controlsDisabled} onClick={() => void enterRoute(onNew)}>
+              {t("shifts.new")}
+            </Button>
+          ) : (
+            <span aria-hidden="true" />
+          )}
           <div className="shift-selection__secondary-actions">
             <Button
               size="floor"
               variant="secondary"
-              disabled={busy || manualRefreshing}
+              disabled={manualRefreshing || controlsDisabled}
               onClick={() => refreshShifts({ manual: true })}
             >
-              {t("shifts.refresh")}
+              {refreshLabel ?? t("shifts.refresh")}
             </Button>
             {onSetup ? (
-              <Button size="floor" variant="secondary" disabled={busy} onClick={onSetup}>
+              <Button
+                size="floor"
+                variant="secondary"
+                disabled={controlsDisabled}
+                onClick={() => void enterRoute(onSetup, { allowSealedCredential: true })}
+              >
                 {t("shell.setup")}
               </Button>
             ) : null}
             {onConflicts ? (
-              <Button size="floor" variant="secondary" disabled={busy} onClick={onConflicts}>
+              <Button
+                size="floor"
+                variant="secondary"
+                disabled={controlsDisabled}
+                onClick={() => void enterRoute(onConflicts)}
+              >
                 {t("shell.conflicts")}
               </Button>
             ) : null}
@@ -313,9 +429,14 @@ export function ShiftSelection({
         </FloorFooter>
       }
     >
-      <div className="shift-selection__content">
+      <div
+        className={`shift-selection__content${categoryNavigation ? " shift-selection__content--categorized" : ""}${alternateActive ? " shift-selection__content--alternate" : ""}`}
+      >
+        {categoryNavigation?.(openItems.length)}
         <div className="shift-selection__slot">
-          {persistentState === "loading" ? (
+          {alternateActive ? (
+            alternateContent
+          ) : persistentState === "loading" ? (
             <p className="shift-selection__state" role="status">
               {t("shifts.loading")}
             </p>
@@ -363,7 +484,7 @@ export function ShiftSelection({
                   counterpartyLabel={t("shifts.forCounterparty")}
                   actionLabel={shift.status === "active" ? t("shifts.rejoin") : t("shifts.open")}
                   active={shift.status === "active"}
-                  disabled={busy}
+                  disabled={controlsDisabled}
                   onSelect={() =>
                     shift.status === "active" ? void rejoin(shift) : void open(shift)
                   }
@@ -376,16 +497,18 @@ export function ShiftSelection({
             </div>
           )}
         </div>
-        <Pager
-          page={currentPage.page}
-          pageCount={currentPage.pageCount}
-          onPageChange={setRequestedPage}
-          ariaLabel={t("shifts.pagination")}
-          previousLabel={t("shifts.previousPage")}
-          nextLabel={t("shifts.nextPage")}
-          pageLabel={(page, pageCount) => t("shifts.page", { page, pageCount })}
-          className="shift-selection__pager"
-        />
+        {alternateActive ? null : (
+          <Pager
+            page={currentPage.page}
+            pageCount={currentPage.pageCount}
+            onPageChange={setRequestedPage}
+            ariaLabel={t("shifts.pagination")}
+            previousLabel={t("shifts.previousPage")}
+            nextLabel={t("shifts.nextPage")}
+            pageLabel={(page, pageCount) => t("shifts.page", { page, pageCount })}
+            className="shift-selection__pager"
+          />
+        )}
       </div>
     </StationScreen>
   );

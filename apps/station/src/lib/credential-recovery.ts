@@ -8,6 +8,7 @@ import {
 
 export interface SealedWorkSummary {
   scans: number;
+  inventoryScans: number;
   boxes: number;
   exceptions: number;
   total: number;
@@ -59,6 +60,7 @@ interface CredentialGenerationLifecycle {
   phase: CredentialGeneration["phase"];
   activeCommits: number;
   rejectionPublished: boolean;
+  ownership: Promise<string> | null;
   settle: Promise<void> | null;
   resolveSettle: (() => void) | null;
 }
@@ -68,11 +70,18 @@ const credentialGenerationLifecycles = new WeakMap<
   CredentialGenerationLifecycle
 >();
 
-export function createCredentialGeneration(): CredentialGeneration {
+async function digestCredentialOwnership(credential: string): Promise<string> {
+  const source = new TextEncoder().encode(`markiro:station-credential-owner:v1\0${credential}`);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", source));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export function createCredentialGeneration(credential?: string): CredentialGeneration {
   const lifecycle: CredentialGenerationLifecycle = {
     phase: "active",
     activeCommits: 0,
     rejectionPublished: false,
+    ownership: credential === undefined ? null : digestCredentialOwnership(credential),
     settle: null,
     resolveSettle: null,
   };
@@ -90,6 +99,13 @@ export function credentialGenerationIsCurrent(generation: CredentialGeneration):
   return !generation.sealed;
 }
 
+/** Stable, non-secret ownership proof for durable work written by one device key. */
+export function credentialGenerationOwnership(
+  generation: CredentialGeneration,
+): Promise<string> | null {
+  return credentialLifecycle(generation).ownership;
+}
+
 function credentialLifecycle(generation: CredentialGeneration): CredentialGenerationLifecycle {
   const lifecycle = credentialGenerationLifecycles.get(generation);
   if (!lifecycle) throw new Error("unknown credential generation");
@@ -97,6 +113,8 @@ function credentialLifecycle(generation: CredentialGeneration): CredentialGenera
 }
 
 export interface CredentialCommitLease {
+  readonly generation: CredentialGeneration;
+  readonly active: boolean;
   release(): void;
 }
 
@@ -109,6 +127,10 @@ export function acquireCredentialCommitLease(
   lifecycle.activeCommits += 1;
   let released = false;
   return {
+    generation,
+    get active() {
+      return !released;
+    },
     release() {
       if (released) return;
       released = true;
@@ -162,6 +184,57 @@ export async function rejectCredentialGeneration(
 export interface FloorWorkBarrier {
   close?: () => Promise<void>;
   idle(): Promise<void>;
+}
+
+export interface FloorCommitLease {
+  release(): void;
+}
+
+export interface FloorCommitLifecycle {
+  open(): void;
+  acquire(): FloorCommitLease | null;
+  close(): Promise<void>;
+  idle(): Promise<void>;
+}
+
+/** Synchronous admission plus an awaitable drain boundary for local route commits. */
+export function createFloorCommitLifecycle(): FloorCommitLifecycle {
+  let accepting = true;
+  let active = 0;
+  let idleResolvers: Array<() => void> = [];
+
+  function idle(): Promise<void> {
+    if (active === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => idleResolvers.push(resolve));
+  }
+
+  return {
+    open() {
+      accepting = true;
+    },
+    acquire() {
+      if (!accepting) return null;
+      active += 1;
+      let released = false;
+      return {
+        release() {
+          if (released) return;
+          released = true;
+          active -= 1;
+          if (active === 0) {
+            const resolvers = idleResolvers;
+            idleResolvers = [];
+            for (const resolve of resolvers) resolve();
+          }
+        },
+      };
+    },
+    close() {
+      accepting = false;
+      return idle();
+    },
+    idle,
+  };
 }
 
 export interface FloorWorkRegistry {
@@ -263,22 +336,36 @@ export async function readSealedWorkSummary(
   timeoutMs = FLOOR_WORK_BARRIER_TIMEOUT_MS,
 ): Promise<SealedWorkSummary> {
   await waitForFloorWork(floorWork, timeoutMs);
-  const rows = await exec.all<{ scans: number; boxes: number; exceptions: number }>(
+  const rows = await exec.all<{
+    scans: number;
+    inventory_scans: number;
+    boxes: number;
+    exceptions: number;
+  }>(
     `SELECT
        (SELECT COUNT(*) FROM outbox) AS scans,
+       (SELECT COUNT(*) FROM inventory_outbox) AS inventory_scans,
        (SELECT COUNT(*) FROM boxes_mirror
          WHERE closed_at IS NOT NULL AND acked_at IS NULL) AS boxes,
        (SELECT COUNT(*) FROM box_exceptions_mirror) AS exceptions`,
   );
   const scans = rows[0]?.scans ?? 0;
+  const inventoryScans = rows[0]?.inventory_scans ?? 0;
   const boxes = rows[0]?.boxes ?? 0;
   const exceptions = rows[0]?.exceptions ?? 0;
-  return { scans, boxes, exceptions, total: scans + boxes + exceptions };
+  return {
+    scans,
+    inventoryScans,
+    boxes,
+    exceptions,
+    total: scans + inventoryScans + boxes + exceptions,
+  };
 }
 
 interface ClearRejectedCredentialStateDeps {
   exec: SqlExecutor;
   clearCredential: () => Promise<void>;
+  credentialGeneration?: CredentialGeneration;
 }
 
 /**
@@ -289,13 +376,18 @@ interface ClearRejectedCredentialStateDeps {
  *
  * - both operator slots and their selector contain only a downloaded roster;
  * - shift/product rows contain only downloaded API reference bundles;
+ * - inventory task/code rows and the floor pointer can be downloaded again;
  * - outbox, codes, scan events, boxes, exceptions, conflicts, SSCC ranges,
  *   install identity, and every sync ceiling/batch id are deliberately absent.
  */
 export async function clearRejectedCredentialState({
   exec,
   clearCredential,
+  credentialGeneration,
 }: ClearRejectedCredentialStateDeps): Promise<void> {
+  const rejectedOwnership = credentialGeneration
+    ? await credentialGenerationOwnership(credentialGeneration)
+    : null;
   await clearCredential();
   // A bundle request can have passed server authorization just before the
   // key was revoked. Let every already-started download/write settle, then
@@ -309,4 +401,42 @@ export async function clearRejectedCredentialState({
   await exec.run("DELETE FROM shift_mirror");
   await exec.run("DELETE FROM product_mirror");
   await clearStationProductImages(exec);
+  if (rejectedOwnership === null) {
+    await exec.run("DELETE FROM station_meta WHERE key = ?", ["active_inventory_floor_task_v1"]);
+    await exec.run("DELETE FROM inventory_snapshot_codes_mirror");
+    await exec.run("DELETE FROM inventory_task_mirror");
+    return;
+  }
+  const pointers = await exec.all<{ value: unknown }>(
+    "SELECT value FROM station_meta WHERE key = ?",
+    ["active_inventory_floor_task_v1"],
+  );
+  const pointerValue = pointers[0]?.value;
+  if (typeof pointerValue === "string") {
+    try {
+      const parsed = JSON.parse(pointerValue) as { credentialOwnership?: unknown };
+      if (parsed.credentialOwnership === rejectedOwnership) {
+        await exec.run("DELETE FROM station_meta WHERE key = ? AND value = ?", [
+          "active_inventory_floor_task_v1",
+          pointerValue,
+        ]);
+      }
+    } catch {
+      // A malformed pointer is not attributable to this rejected owner.
+    }
+  }
+  await exec.run(
+    `DELETE FROM inventory_snapshot_codes_mirror
+      WHERE snapshot_id IN (
+        SELECT active_snapshot_id FROM inventory_task_mirror
+         WHERE credential_ownership = ? AND active_snapshot_id IS NOT NULL
+        UNION
+        SELECT staged_snapshot_id FROM inventory_task_mirror
+         WHERE credential_ownership = ? AND staged_snapshot_id IS NOT NULL
+      )`,
+    [rejectedOwnership, rejectedOwnership],
+  );
+  await exec.run("DELETE FROM inventory_task_mirror WHERE credential_ownership = ?", [
+    rejectedOwnership,
+  ]);
 }

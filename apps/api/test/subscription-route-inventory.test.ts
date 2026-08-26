@@ -265,6 +265,14 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   {
     contract: customerContract(STATION_GUARDS, { mode: "recovery", kind: "station" }),
     routes: [
+      "GET /station/inventories/:id/bundle/codes (StationInventoriesController.codes)",
+      "GET /station/inventories/:id/bundle/manifest (StationInventoriesController.manifest)",
+      "GET /station/inventories/:id/progress (StationInventoriesController.progress)",
+      "GET /station/inventory-tasks (StationInventoriesController.list)",
+      "POST /station/inventories/:id/event-batches (StationInventoriesController.eventBatch)",
+      "POST /station/inventories/:id/join (StationInventoriesController.join)",
+      "POST /station/inventories/:id/leave (StationInventoriesController.leave)",
+      "POST /station/inventory-tasks/resolve-barcode (StationInventoriesController.resolveBarcode)",
       "POST /station/conflicts/status (StationScansController.conflictStatus)",
       "POST /station/codes/releases (StationScansController.codeReleases)",
       "POST /station/scans (StationScansController.ingest)",
@@ -625,6 +633,7 @@ describe("registered subscription route inventory", () => {
           route.controller.name === "KioskController"
             ? ["KioskDeviceGuard", "SubscriptionAccessGuard"]
             : route.controller.name === "StationScansController" ||
+                route.controller.name === "StationInventoriesController" ||
                 route.controller.name === "StationProductImagesController"
               ? ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"]
               : stationOnlyCabinetRoute

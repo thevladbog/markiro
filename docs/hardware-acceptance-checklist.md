@@ -320,6 +320,23 @@ and the browser gallery do not satisfy these checks.
       `renderLabelBytes`/`hw.print`, so confirm any later per-shift printing
       renders through the same path rather than a divergent one.
 
+## Inventory and repacking
+
+Keep every item unchecked until it has been exercised on the named packaged
+Windows Station and physical equipment. The automated browser/API record in
+`docs/acceptance/inventory-station.md` does not satisfy these checks.
+
+- [ ] Install the tested packaged Windows build and record its immutable commit, installer SHA-256, Windows version, display, and WebView2 version.
+- [ ] Scan production-like inventory bottle and box payloads with the real HID keyboard-wedge scanner, including GS separators and configured prefix/suffix bytes.
+- [ ] Repeat the inventory flow with the real serial scanner, including disconnect, reconnect, port change, and payload terminators.
+- [ ] Run the same inventory from two packaged terminals and confirm the deterministic same-code winner, visible loser conflict, shared progress, and terminal-local production dates.
+- [ ] Disconnect both terminals, continue scanning, restart each packaged app with queued work and an open repack box, then reconnect and confirm lossless idempotent drain.
+- [ ] Leave and rejoin with a fully synchronized open repack box; confirm only its owning terminal can resume or correct it and normal inventory close remains blocked.
+- [ ] Fill a real capacity-20 repack box, close it, and exercise the configured printer transport, driver, queue, disconnect, retry, and durable same-SSCC reprint path.
+- [ ] On the physical label stock, verify the printed production date, quantity, human-readable 18-digit SSCC, barcode readability, Cyrillic, margins, and adhesion.
+- [ ] At native 1024×768, 1280×800, and 1280×1024 where supported, verify every inventory/repack action with touch and production gloves, including corrections, date, leave, print recovery, and visible keyboard focus.
+- [ ] Have the customer operator complete the representative check and repack workflow and record explicit acceptance, failures, and operational limitations without copying codes or credentials.
+
 ## USB printer (plan 2026-08-19)
 
 - [ ] A USB-connected Zebra (ZPL) is detected in the setup list; test print
