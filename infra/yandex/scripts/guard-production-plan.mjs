@@ -955,15 +955,22 @@ function releaseOriginGroupScoped(scope, callback) {
 }
 
 function validateOriginSourceReferences(plan, resource) {
-  const expression = releaseOriginGroupScoped("source-references-configuration", () => {
+  const originExpressions = releaseOriginGroupScoped("source-references-configuration", () => {
     const resources = new Map();
     collectConfigurationResources(plan.configuration?.root_module, "", resources);
     const configuration = resources.get(configurationAddress(resource.address));
     if (!object(configuration) || !object(configuration.expressions)) rejected();
     return configuration.expressions.origin;
   });
-  releaseOriginGroupScoped("source-references-expression", () => {
-    if (!object(expression)) rejected();
+  const expression = releaseOriginGroupScoped("source-references-expression", () => {
+    if (
+      !Array.isArray(originExpressions) ||
+      originExpressions.length !== 1 ||
+      !object(originExpressions[0]) ||
+      !object(originExpressions[0].source)
+    )
+      rejected();
+    return originExpressions[0].source;
   });
   releaseOriginGroupScoped("source-references-shape", () => {
     exactKeys(expression, ["references"]);
