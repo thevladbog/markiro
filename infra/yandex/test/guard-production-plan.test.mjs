@@ -273,6 +273,13 @@ test("production plan guard accepts the exact non-destructive Station release gr
   assert.doesNotThrow(() => guardProductionPlan(creation));
 });
 
+test("production plan guard accepts the provider-normalized zero browser cache", async () => {
+  const safe = await readFixture("safe");
+  releaseCdnOptions(safe).browser_cache_settings = 0;
+
+  assert.doesNotThrow(() => guardProductionPlan(safe));
+});
+
 test("production plan guard accepts provider-computed create edges only with exact references", async () => {
   const creation = await readFixture("safe");
   makeProviderComputedReleaseCreate(creation);

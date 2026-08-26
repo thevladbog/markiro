@@ -199,6 +199,7 @@
               "redirect_http_to_https": true,
               "redirect_https_to_http": false,
               "edge_cache_settings": 0,
+              "browser_cache_settings": 0,
               "static_response_headers": {
                 "content-security-policy": "default-src 'none'; frame-ancestors 'none'; sandbox",
                 "x-content-type-options": "nosniff"
@@ -221,6 +222,7 @@
               "redirect_http_to_https": true,
               "redirect_https_to_http": false,
               "edge_cache_settings": 0,
+              "browser_cache_settings": 0,
               "static_response_headers": {
                 "content-security-policy": "default-src 'none'; frame-ancestors 'none'; sandbox",
                 "x-content-type-options": "nosniff"
