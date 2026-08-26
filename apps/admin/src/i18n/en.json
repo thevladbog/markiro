@@ -497,6 +497,7 @@
         "discard": "Exclude selected",
         "reopen": "Reopen for replay",
         "replay": "Replay {{batchId}}",
+        "replaySuccess": "Batch {{batchId}} was replayed",
         "replayError": "The batch could not be replayed. It remains saved and retryable.",
         "selectionLimit": "You can select at most 100 batches. Save this decision, then select the rest.",
         "previous": "Previous page",

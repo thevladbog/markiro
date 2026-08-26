@@ -2,6 +2,7 @@ import { ConflictException, Inject, Injectable, NotFoundException } from "@nestj
 import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
+import { parseInventoryEventBatchResponse } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
 import type {
@@ -234,8 +235,10 @@ export class InventoryCloseService {
     const [late] = await this.db
       .select({
         id: schema.inventoryLateEvents.id,
+        batchId: schema.inventoryLateEvents.batchId,
         deviceId: schema.inventoryLateEvents.deviceId,
         payload: schema.inventoryLateEvents.payload,
+        payloadDigest: schema.inventoryLateEvents.payloadDigest,
         resolution: schema.inventoryLateEvents.resolution,
         replayAuthorizedAt: schema.inventoryLateEvents.replayAuthorizedAt,
       })
@@ -249,11 +252,48 @@ export class InventoryCloseService {
       )
       .limit(1);
     if (!late) throw new NotFoundException();
+    if (late.resolution !== "pending") {
+      if (late.resolution === "replayed") {
+        const parsed = stationInventoryEventBatchSchema.safeParse(late.payload);
+        if (!parsed.success) {
+          throw new ConflictException({ code: "INVENTORY_LATE_EVENT_REPLAY_RESULT_INVALID" });
+        }
+        const [stored] = await this.db
+          .select({ result: schema.inventoryScanBatches.result })
+          .from(schema.inventoryScanBatches)
+          .where(
+            and(
+              eq(schema.inventoryScanBatches.tenantId, tenantId),
+              eq(schema.inventoryScanBatches.inventoryId, inventoryId),
+              eq(schema.inventoryScanBatches.deviceId, late.deviceId),
+              eq(schema.inventoryScanBatches.batchId, late.batchId),
+              eq(schema.inventoryScanBatches.payloadDigest, late.payloadDigest),
+              inArray(schema.inventoryScanBatches.outcome, ["applied", "rejected"]),
+            ),
+          )
+          .limit(1);
+        if (!stored) {
+          throw new ConflictException({ code: "INVENTORY_LATE_EVENT_REPLAY_RESULT_INVALID" });
+        }
+        try {
+          return {
+            lateEventId,
+            resolution: "replayed",
+            result: parseInventoryEventBatchResponse(
+              stored.result,
+              parsed.data,
+              inventoryId,
+              late.deviceId,
+            ),
+          };
+        } catch {
+          throw new ConflictException({ code: "INVENTORY_LATE_EVENT_REPLAY_RESULT_INVALID" });
+        }
+      }
+      throw new ConflictException({ code: "INVENTORY_LATE_EVENT_REPLAY_STALE" });
+    }
     if (inventory.status !== "running") {
       throw new ConflictException({ code: "INVENTORY_LATE_EVENT_REPLAY_REQUIRES_RUNNING" });
-    }
-    if (late.resolution !== "pending") {
-      throw new ConflictException({ code: "INVENTORY_LATE_EVENT_REPLAY_STALE" });
     }
     if (late.replayAuthorizedAt === null) {
       throw new ConflictException({ code: "INVENTORY_LATE_EVENT_REPLAY_NOT_AUTHORIZED" });

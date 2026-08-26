@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { INestApplication } from "@nestjs/common";
+import { ConflictException, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { and, eq } from "drizzle-orm";
 import express from "express";
@@ -27,6 +27,14 @@ const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
 const GTIN = "04600000000015";
+
+function errorCode(error: unknown): string | undefined {
+  if (!(error instanceof ConflictException)) return undefined;
+  const response = error.getResponse();
+  return typeof response === "object" && response !== null && "code" in response
+    ? String(response.code)
+    : undefined;
+}
 
 describe.skipIf(!ready)("inventory late events", () => {
   let app: INestApplication | undefined;
@@ -150,11 +158,15 @@ describe.skipIf(!ready)("inventory late events", () => {
     };
   }
 
-  function lateBatch(fixture: Awaited<ReturnType<typeof seedClosedInventory>>, batchId: string) {
+  function lateBatch(
+    fixture: Awaited<ReturnType<typeof seedClosedInventory>>,
+    batchId: string,
+    deviceSequence = 1,
+  ) {
     const canonical = canonicalizeKm(`01${GTIN}21LATE${batchId.toUpperCase()}`);
     const event: InventoryEvent = {
       eventId: randomUUID(),
-      deviceSequence: 1,
+      deviceSequence,
       operatorId: fixture.operatorId,
       scannedAt: "2026-08-26T09:05:00.000Z",
       kind: "item",
@@ -167,7 +179,7 @@ describe.skipIf(!ready)("inventory late events", () => {
     const payload: InventoryEventBatchPayload = {
       snapshotId: fixture.snapshotId,
       snapshotRevision: 1,
-      sequenceCeiling: 1,
+      sequenceCeiling: deviceSequence,
       pendingEventCount: 0,
       openBoxCount: 0,
       events: [event],
@@ -295,6 +307,146 @@ describe.skipIf(!ready)("inventory late events", () => {
     await expect(
       stationSync.ingest(fixture.tenantId, fixture.deviceId, fixture.inventoryId, batch),
     ).resolves.toEqual(replay.body.result);
+
+    const syncedBeforeRetry = await db
+      .select({ id: schema.tenantAuditEvents.id })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, fixture.tenantId),
+          eq(schema.tenantAuditEvents.targetId, fixture.inventoryId),
+          eq(schema.tenantAuditEvents.action, "inventory.station.events_synced"),
+        ),
+      );
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/emergency-close`)
+      .send({ reason: "Проверка идемпотентного ответа", acknowledgeBlockers: true })
+      .expect(201);
+    expect(
+      (
+        await fixture.agent
+          .post(`/inventories/${fixture.inventoryId}/late-events/${pending.id}/replay`)
+          .send({})
+          .expect(201)
+      ).body,
+    ).toEqual(replay.body);
+    const completedAt = new Date();
+    await db
+      .update(schema.inventories)
+      .set({
+        status: "completed",
+        completionAcknowledgedByUserId: fixture.userId,
+        completionAcknowledgedAt: completedAt,
+        completedByUserId: fixture.userId,
+        completedAt,
+      })
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+    expect(
+      (
+        await fixture.agent
+          .post(`/inventories/${fixture.inventoryId}/late-events/${pending.id}/replay`)
+          .send({})
+          .expect(201)
+      ).body,
+    ).toEqual(replay.body);
+    expect(
+      await db
+        .select({ id: schema.tenantAuditEvents.id })
+        .from(schema.tenantAuditEvents)
+        .where(
+          and(
+            eq(schema.tenantAuditEvents.organizationId, fixture.tenantId),
+            eq(schema.tenantAuditEvents.targetId, fixture.inventoryId),
+            eq(schema.tenantAuditEvents.action, "inventory.station.events_synced"),
+          ),
+        ),
+    ).toHaveLength(syncedBeforeRetry.length);
+  });
+
+  it("replays authorized evidence for a participant who already left but keeps ordinary ingest denied", async () => {
+    const fixture = await seedClosedInventory();
+    const retained = lateBatch(fixture, `left-replay-${randomUUID()}`);
+    await stationSync.ingest(fixture.tenantId, fixture.deviceId, fixture.inventoryId, retained);
+    await fixture.agent.post(`/inventories/${fixture.inventoryId}/reopen`).send({}).expect(201);
+    await db
+      .update(schema.inventoryDeviceParticipants)
+      .set({ leftAt: new Date() })
+      .where(
+        and(
+          eq(schema.inventoryDeviceParticipants.tenantId, fixture.tenantId),
+          eq(schema.inventoryDeviceParticipants.inventoryId, fixture.inventoryId),
+          eq(schema.inventoryDeviceParticipants.deviceId, fixture.deviceId),
+        ),
+      );
+    const [late] = await db
+      .select({ id: schema.inventoryLateEvents.id })
+      .from(schema.inventoryLateEvents)
+      .where(eq(schema.inventoryLateEvents.batchId, retained.batchId));
+    if (!late) throw new Error("Expected authorized late evidence");
+
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/late-events/${late.id}/replay`)
+      .send({})
+      .expect(201);
+    const ordinary = lateBatch(fixture, `left-ordinary-${randomUUID()}`, 2);
+    await expect(
+      stationSync.ingest(fixture.tenantId, fixture.deviceId, fixture.inventoryId, ordinary),
+    ).rejects.toSatisfy((error: unknown) => errorCode(error) === "INVENTORY_PARTICIPANT_LEFT");
+  });
+
+  it("replays authorized same-device batches out of order without weakening ordinary high-water", async () => {
+    const fixture = await seedClosedInventory();
+    const high = lateBatch(fixture, `late-high-${randomUUID()}`, 20);
+    const low = lateBatch(fixture, `late-low-${randomUUID()}`, 10);
+    const duplicateSequence = lateBatch(fixture, `late-duplicate-${randomUUID()}`, 20);
+    await stationSync.ingest(fixture.tenantId, fixture.deviceId, fixture.inventoryId, high);
+    await stationSync.ingest(fixture.tenantId, fixture.deviceId, fixture.inventoryId, low);
+    await stationSync.ingest(
+      fixture.tenantId,
+      fixture.deviceId,
+      fixture.inventoryId,
+      duplicateSequence,
+    );
+    await fixture.agent.post(`/inventories/${fixture.inventoryId}/reopen`).send({}).expect(201);
+    const retained = await db
+      .select({ id: schema.inventoryLateEvents.id, batchId: schema.inventoryLateEvents.batchId })
+      .from(schema.inventoryLateEvents)
+      .where(eq(schema.inventoryLateEvents.inventoryId, fixture.inventoryId));
+    const highId = retained.find((row) => row.batchId === high.batchId)?.id;
+    const lowId = retained.find((row) => row.batchId === low.batchId)?.id;
+    const duplicateId = retained.find((row) => row.batchId === duplicateSequence.batchId)?.id;
+    if (!highId || !lowId || !duplicateId) {
+      throw new Error("Expected all authorized late batches");
+    }
+
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/late-events/${highId}/replay`)
+      .send({})
+      .expect(201);
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/late-events/${duplicateId}/replay`)
+      .send({})
+      .expect(409, { code: "INVENTORY_EVENT_ID_OR_SEQUENCE_REUSED" });
+    const [stillPending] = await db
+      .select({ resolution: schema.inventoryLateEvents.resolution })
+      .from(schema.inventoryLateEvents)
+      .where(eq(schema.inventoryLateEvents.id, duplicateId));
+    expect(stillPending?.resolution).toBe("pending");
+    const liveNewer = lateBatch(fixture, `live-newer-${randomUUID()}`, 30);
+    await expect(
+      stationSync.ingest(fixture.tenantId, fixture.deviceId, fixture.inventoryId, liveNewer),
+    ).resolves.toBeDefined();
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/late-events/${lowId}/replay`)
+      .send({})
+      .expect(201);
+
+    const ordinaryOld = lateBatch(fixture, `ordinary-old-${randomUUID()}`, 9);
+    await expect(
+      stationSync.ingest(fixture.tenantId, fixture.deviceId, fixture.inventoryId, ordinaryOld),
+    ).rejects.toSatisfy(
+      (error: unknown) => errorCode(error) === "INVENTORY_EVENT_SEQUENCE_BELOW_HIGH_WATER",
+    );
   });
 
   it("keeps malformed retained payload pending and retryable", async () => {
@@ -405,6 +557,10 @@ describe.skipIf(!ready)("inventory late events", () => {
       .post(`/inventories/${fixture.inventoryId}/late-events/discard`)
       .send({ lateEventIds: [late.id], reason: "Проверено, оставить вне результата" })
       .expect(201, { discardedCount: 1 });
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/late-events/${late.id}/replay`)
+      .send({})
+      .expect(409, { code: "INVENTORY_LATE_EVENT_REPLAY_STALE" });
     await fixture.agent
       .post(`/inventories/${fixture.inventoryId}/complete`)
       .send({ documentsDownloadedAndChecked: true })

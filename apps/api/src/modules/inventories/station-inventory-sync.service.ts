@@ -501,7 +501,7 @@ export class StationInventorySyncService {
           );
         return response;
       }
-      if (participant.leftAt !== null) {
+      if (participant.leftAt !== null && replayAuthorization === null) {
         throw new ConflictException({ code: "INVENTORY_PARTICIPANT_LEFT" });
       }
 
@@ -519,6 +519,7 @@ export class StationInventorySyncService {
         .orderBy(desc(schema.inventoryScanBatches.sequenceCeiling))
         .limit(1);
       if (
+        replayAuthorization === null &&
         acceptedHighWater &&
         BigInt(input.events[0]?.deviceSequence ?? 0) <= acceptedHighWater.sequenceCeiling
       ) {

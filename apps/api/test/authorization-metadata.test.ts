@@ -150,10 +150,12 @@ const OPERATIONAL_CONTROLLERS: readonly [
     {
       list: readPolicy,
       progress: readPolicy,
+      closePreview: readPolicy,
       discrepancies: readPolicy,
       evidence: readPolicy,
       lateEvents: readPolicy,
       discardLateEvents: writePolicy,
+      replayLateEvent: writePolicy,
       close: writePolicy,
       emergencyClose: writePolicy,
       reopen: writePolicy,

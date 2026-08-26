@@ -193,6 +193,7 @@ it("explicitly replays authorized pending evidence while the inventory is runnin
   expect(String(replayCall?.[0])).toBe(
     `/api/inventories/${INVENTORY_ID}/late-events/${LATE_ID}/replay`,
   );
+  expect(screen.getByText("Пакет late-batch-replay обработан повторно")).toBeDefined();
 });
 
 it("caps selected late events at 100 across more than two pages", async () => {

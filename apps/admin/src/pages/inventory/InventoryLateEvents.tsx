@@ -32,6 +32,7 @@ export function InventoryLateEvents({
   const [selected, setSelected] = useState<string[]>([]);
   const [reason, setReason] = useState("");
   const [reopenConfirmation, setReopenConfirmation] = useState(false);
+  const [replaySuccessBatchId, setReplaySuccessBatchId] = useState<string | null>(null);
   const readOnly = inventoryStatus === "completed";
   const canDiscard = inventoryStatus === "closed";
   const reasonBytes = new TextEncoder().encode(reason.trim()).byteLength;
@@ -148,7 +149,13 @@ export function InventoryLateEvents({
                         size="compact"
                         variant="secondary"
                         loading={replay.isPending && replay.variables?.lateEventId === event.id}
-                        onClick={() => replay.mutate({ inventoryId, lateEventId: event.id })}
+                        onClick={() => {
+                          setReplaySuccessBatchId(null);
+                          replay.mutate(
+                            { inventoryId, lateEventId: event.id },
+                            { onSuccess: () => setReplaySuccessBatchId(event.batchId) },
+                          );
+                        }}
                       >
                         {t("pages.inventory.late.replay", { batchId: event.batchId })}
                       </Button>
@@ -185,6 +192,11 @@ export function InventoryLateEvents({
         ) : null}
         {replay.isError ? (
           <Alert tone="error">{t("pages.inventory.late.replayError")}</Alert>
+        ) : null}
+        {replaySuccessBatchId ? (
+          <Alert tone="ok">
+            {t("pages.inventory.late.replaySuccess", { batchId: replaySuccessBatchId })}
+          </Alert>
         ) : null}
         {canDiscard && selected.length > 0 ? (
           <div className="mk-inventory-late-decision">
