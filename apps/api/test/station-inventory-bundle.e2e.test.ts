@@ -176,8 +176,9 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
         inventoryId,
         revision: 1,
         combinedDigest: DIGEST,
-        productName: "Bundle product",
+        productName: "Bundle Water",
         lineName: "Bundle line",
+        boxCapacity: 12,
         emittedCount: 1,
         introducedCount: 2,
         appliedCount: 0,
@@ -406,6 +407,19 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
       .update(schema.inventories)
       .set({ stationManifest: legacy })
       .where(eq(schema.inventories.id, fixture.inventoryId));
+    await db
+      .update(schema.products)
+      .set({ name: "Changed after bundle start", boxCapacity: 48 })
+      .where(
+        and(
+          eq(schema.products.tenantId, fixture.tenantId),
+          eq(schema.products.id, fixture.productId),
+        ),
+      );
+    await db
+      .update(schema.lines)
+      .set({ name: "Changed line after bundle start" })
+      .where(and(eq(schema.lines.tenantId, fixture.tenantId), eq(schema.lines.id, fixture.lineId)));
 
     const response = await request(app!.getHttpServer())
       .get(`/station/inventories/${fixture.inventoryId}/bundle/manifest`)
@@ -414,6 +428,9 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
     expect(response.body).toMatchObject({
       snapshotFixedAt: fixture.snapshotFixedAt,
       contentDigest: CONTENT_DIGEST,
+      productName: "Bundle Water",
+      lineName: "Bundle line",
+      boxCapacity: 12,
     });
     const [stored] = await db
       .select({ manifest: schema.inventories.stationManifest })

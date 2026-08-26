@@ -25,6 +25,14 @@ const STATUS_LABEL: Record<InventoryTaskFormData["status"], string> = {
   completed: "Завершена",
 };
 
+const PRINT_TEXT_MAX_CODE_POINTS = 200;
+
+function boundPrintText(value: string): string {
+  const codePoints = Array.from(value);
+  if (codePoints.length <= PRINT_TEXT_MAX_CODE_POINTS) return value;
+  return `${codePoints.slice(0, PRINT_TEXT_MAX_CODE_POINTS - 1).join("")}…`;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -89,9 +97,12 @@ function step(number: number, text: string): string {
 
 export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string {
   const number = escapeHtml(data.inventoryNumber);
-  const organization = escapeHtml(data.organizationName);
-  const product = escapeHtml(data.productName);
-  const line = escapeHtml(data.lineName);
+  const organizationText = boundPrintText(data.organizationName);
+  const productText = boundPrintText(data.productName);
+  const lineText = boundPrintText(data.lineName);
+  const organization = escapeHtml(organizationText);
+  const product = escapeHtml(productText);
+  const line = escapeHtml(lineText);
   const token = formatInventoryTaskBarcode(data.inventoryId);
   const barcode = renderCode128Svg(token, { includeText: false }).replace(
     "<svg ",
@@ -101,8 +112,8 @@ export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string
   const mode = isRepack ? "С переупаковкой" : "Без переупаковки";
   const capacity = data.boxCapacity;
   const compact =
-    data.organizationName.length + data.productName.length + data.lineName.length > 240 ||
-    [data.organizationName, data.productName, data.lineName].some((value) => value.length > 100);
+    organizationText.length + productText.length + lineText.length > 240 ||
+    [organizationText, productText, lineText].some((value) => value.length > 100);
   const finalStep = isRepack
     ? `Отсканируйте старый короб, затем все бутылки. Новый короб закроется и напечатается автоматически после ${capacity ?? "заданного"}-го кода.`
     : "Сканируйте коды единиц. Закрытую упаковку можно проверить одним сканированием кода упаковки.";

@@ -23,6 +23,8 @@ export interface StoredStationManifestFacts {
   activeSnapshotId: string | null;
   stationManifest: unknown;
   authoritativeProductName: string | null;
+  authoritativeLineName: string | null;
+  authoritativeBoxCapacity: number | null;
   authoritativeProductPrintName: string | null;
   authoritativeEgaisCode: string | null;
   authoritativeShelfLifeDays: number | null;
@@ -65,6 +67,9 @@ function tryUpgradeFrozenPrintFacts(
   }
   return tryParseCurrentManifest({
     ...record,
+    productName: facts.authoritativeProductName,
+    lineName: facts.authoritativeLineName,
+    boxCapacity: facts.authoritativeBoxCapacity,
     productPrintName: facts.authoritativeProductPrintName,
     egaisCode: facts.authoritativeEgaisCode,
     shelfLifeDays: facts.authoritativeShelfLifeDays,
@@ -103,8 +108,11 @@ function anchorsMatch(
     manifest.codeCount === codeCount &&
     manifest.mode === facts.mode &&
     manifest.productId === facts.productId &&
+    manifest.productName === facts.authoritativeProductName &&
     manifest.gtin14 === facts.gtin14Snapshot &&
     manifest.lineId === facts.lineId &&
+    manifest.lineName === facts.authoritativeLineName &&
+    manifest.boxCapacity === facts.authoritativeBoxCapacity &&
     manifest.productionDateFrom === facts.productionDateFrom &&
     manifest.productionDateTo === facts.productionDateTo &&
     (manifest.boxLabelTemplate?.id ?? null) === facts.boxLabelTemplateId
@@ -194,6 +202,8 @@ export async function resolveStoredStationInventoryManifest(
   const upgraded = parseStationInventoryManifest({
     ...manifest,
     productName: facts.authoritativeProductName,
+    lineName: facts.authoritativeLineName,
+    boxCapacity: facts.authoritativeBoxCapacity,
     productPrintName: facts.authoritativeProductPrintName,
     egaisCode: facts.authoritativeEgaisCode,
     shelfLifeDays: facts.authoritativeShelfLifeDays,

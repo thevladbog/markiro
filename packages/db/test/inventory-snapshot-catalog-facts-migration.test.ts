@@ -13,6 +13,8 @@ import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
+const frozenManifestProductName = `Frozen manifest product ${"P".repeat(300)}`;
+const frozenManifestLineName = `Frozen manifest line ${"L".repeat(300)}`;
 
 function quoteIdentifier(identifier: string): string {
   if (!/^[a-z_][a-z0-9_]*$/.test(identifier)) throw new Error("Unsafe database identifier");
@@ -34,8 +36,12 @@ describe.skipIf(!databaseUrl)("inventory snapshot catalog facts migration", () =
   const userId = `snapshot-facts-user-${randomUUID()}`;
   const productId = randomUUID();
   const lineId = randomUUID();
-  const inventoryId = randomUUID();
-  const snapshotId = randomUUID();
+  const runningInventoryId = randomUUID();
+  const readyInventoryId = randomUUID();
+  const malformedInventoryId = randomUUID();
+  const runningSnapshotId = randomUUID();
+  const readySnapshotId = randomUUID();
+  const malformedSnapshotId = randomUUID();
 
   beforeAll(async () => {
     await maintenancePool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
@@ -67,22 +73,69 @@ describe.skipIf(!databaseUrl)("inventory snapshot catalog facts migration", () =
       lineId,
       tenantId,
     ]);
+    for (const inventoryId of [runningInventoryId, readyInventoryId, malformedInventoryId]) {
+      await pool.query(
+        `INSERT INTO inventories
+           (id, tenant_id, number, product_id, gtin14_snapshot, line_id, mode,
+            production_date_from, production_date_to, created_by_user_id)
+         VALUES ($1, $2, $3, $4, '04680089900383', $5, 'check',
+                 '2026-08-01', '2026-08-31', $6)`,
+        [inventoryId, tenantId, `INV-${randomUUID()}`, productId, lineId, userId],
+      );
+    }
+    for (const [inventoryId, snapshotId, digest] of [
+      [runningInventoryId, runningSnapshotId, "a".repeat(64)],
+      [readyInventoryId, readySnapshotId, "b".repeat(64)],
+      [malformedInventoryId, malformedSnapshotId, "c".repeat(64)],
+    ] as const) {
+      await pool.query(
+        `INSERT INTO inventory_snapshots
+           (id, tenant_id, inventory_id, combined_digest, emitted_count, introduced_count,
+            applied_count, retired_count, written_off_count, disaggregation_count,
+            protected_count, expected_count, package_count, loose_count, fixed_by_user_id)
+         VALUES ($1, $2, $3, $4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $5)`,
+        [snapshotId, tenantId, inventoryId, digest, userId],
+      );
+    }
     await pool.query(
-      `INSERT INTO inventories
-         (id, tenant_id, number, product_id, gtin14_snapshot, line_id, mode,
-          production_date_from, production_date_to, created_by_user_id)
-       VALUES ($1, $2, $3, $4, '04680089900383', $5, 'check',
-               '2026-08-01', '2026-08-31', $6)`,
-      [inventoryId, tenantId, `INV-${randomUUID()}`, productId, lineId, userId],
+      `UPDATE inventories
+          SET status = 'running', active_snapshot_id = $1,
+              station_manifest = $2::jsonb, started_by_user_id = $3, started_at = now()
+        WHERE tenant_id = $4 AND id = $5`,
+      [
+        runningSnapshotId,
+        `${JSON.stringify({
+          productName: frozenManifestProductName,
+          lineName: frozenManifestLineName,
+        }).slice(0, -1)},"boxCapacity":20.0}`,
+        userId,
+        tenantId,
+        runningInventoryId,
+      ],
     );
     await pool.query(
-      `INSERT INTO inventory_snapshots
-         (id, tenant_id, inventory_id, combined_digest, emitted_count, introduced_count,
-          applied_count, retired_count, written_off_count, disaggregation_count,
-          protected_count, expected_count, package_count, loose_count, fixed_by_user_id)
-       VALUES ($1, $2, $3, $4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $5)`,
-      [snapshotId, tenantId, inventoryId, "a".repeat(64), userId],
+      `UPDATE inventories
+          SET status = 'running', active_snapshot_id = $1,
+              station_manifest = $2::jsonb, started_by_user_id = $3, started_at = now()
+        WHERE tenant_id = $4 AND id = $5`,
+      [
+        malformedSnapshotId,
+        '{"productName":42,"lineName":{"unsafe":true},"boxCapacity":999999999999999999999999999999999999999999999999999999999999}',
+        userId,
+        tenantId,
+        malformedInventoryId,
+      ],
     );
+    await pool.query(
+      `UPDATE inventories SET status = 'ready', active_snapshot_id = $1
+        WHERE tenant_id = $2 AND id = $3`,
+      [readySnapshotId, tenantId, readyInventoryId],
+    );
+    await pool.query(
+      `UPDATE products SET name = 'Changed catalog product', box_capacity = 24 WHERE id = $1`,
+      [productId],
+    );
+    await pool.query(`UPDATE lines SET name = 'Changed catalog line' WHERE id = $1`, [lineId]);
 
     await migrate(db, { migrationsFolder });
   }, 120_000);
@@ -94,28 +147,59 @@ describe.skipIf(!databaseUrl)("inventory snapshot catalog facts migration", () =
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
   });
 
-  it("backfills immutable product, line, and capacity facts before enforcing names", async () => {
+  it("prefers valid running-manifest facts over catalog values changed before migration", async () => {
     await migrate(db, { migrationsFolder });
-    await pool.query(
-      `UPDATE products SET name = 'Changed product', box_capacity = 24 WHERE id = $1`,
-      [productId],
-    );
-    await pool.query(`UPDATE lines SET name = 'Changed line' WHERE id = $1`, [lineId]);
-
     const snapshot = await pool.query<{
       product_name: string;
       line_name: string;
       box_capacity: number | null;
     }>(
       `SELECT product_name, line_name, box_capacity
-         FROM inventory_snapshots
+        FROM inventory_snapshots
         WHERE tenant_id = $1 AND id = $2`,
-      [tenantId, snapshotId],
+      [tenantId, runningSnapshotId],
     );
     expect(snapshot.rows).toEqual([
-      { product_name: "Frozen product", line_name: "Frozen line", box_capacity: 20 },
+      {
+        product_name: frozenManifestProductName,
+        line_name: frozenManifestLineName,
+        box_capacity: 20,
+      },
     ]);
+  });
 
+  it("falls back to tenant-scoped catalog facts for ready and malformed-manifest rows", async () => {
+    const snapshots = await pool.query<{
+      id: string;
+      product_name: string;
+      line_name: string;
+      box_capacity: number | null;
+    }>(
+      `SELECT id, product_name, line_name, box_capacity
+         FROM inventory_snapshots
+        WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+        ORDER BY id`,
+      [tenantId, [readySnapshotId, malformedSnapshotId]],
+    );
+    expect(snapshots.rows).toEqual(
+      expect.arrayContaining([
+        {
+          id: readySnapshotId,
+          product_name: "Changed catalog product",
+          line_name: "Changed catalog line",
+          box_capacity: 24,
+        },
+        {
+          id: malformedSnapshotId,
+          product_name: "Changed catalog product",
+          line_name: "Changed catalog line",
+          box_capacity: 24,
+        },
+      ]),
+    );
+  });
+
+  it("enforces immutable snapshot name columns after backfill", async () => {
     const columns = await pool.query<{ column_name: string; is_nullable: string }>(
       `SELECT column_name, is_nullable
          FROM information_schema.columns

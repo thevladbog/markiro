@@ -112,4 +112,19 @@ describe("renderInventoryTaskFormHtml", () => {
     expect(html.match(new RegExp(lineName, "g"))).toHaveLength(1);
     expect(html).toMatch(/\.compact \.barcode\s*\{[^}]*width:\s*150mm[^}]*height:\s*17mm/s);
   });
+
+  it("bounds unbounded names by Unicode code points without retaining the raw tail", () => {
+    const organizationName = `${"😀".repeat(5_000)}ORGANIZATION_RAW_TAIL`;
+    const productName = `${"П".repeat(5_000)}PRODUCT_RAW_TAIL`;
+    const lineName = `${"Л".repeat(5_000)}LINE_RAW_TAIL`;
+    const html = renderInventoryTaskFormHtml(fixture({ organizationName, productName, lineName }));
+
+    expect(html).toContain('<main class="page compact" data-layout="compact">');
+    expect(html).toContain(`${"😀".repeat(199)}…`);
+    expect(html).toContain(`${"П".repeat(199)}…`);
+    expect(html).toContain(`${"Л".repeat(199)}…`);
+    expect(html).not.toContain("ORGANIZATION_RAW_TAIL");
+    expect(html).not.toContain("PRODUCT_RAW_TAIL");
+    expect(html).not.toContain("LINE_RAW_TAIL");
+  });
 });
