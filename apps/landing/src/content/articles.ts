@@ -25,7 +25,7 @@ export const BEER_CASE_AGGREGATION_ARTICLE = {
   navigationLabel: "Агрегация пива в короба",
   description:
     "Как организовать агрегацию пива в короба: проверка Data Matrix, SSCC, повторная печать, офлайн-работа и восстановление без остановки линии.",
-  socialImage: "/og-markiro.jpg",
+  socialImage: "/og-beer-case-aggregation.jpg",
   socialImageAlt: "Markiro — агрегация пива в короба на производственной линии",
   publishedAt: "2026-08-26",
   modifiedAt: "2026-08-26",

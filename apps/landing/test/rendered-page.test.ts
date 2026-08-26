@@ -111,6 +111,9 @@ describe("rendered landing page", () => {
       "article",
     );
     expect(
+      articleDocument.querySelector('meta[property="og:image"]')?.getAttribute("content"),
+    ).toBe("https://markiro.app/og-beer-case-aggregation.jpg");
+    expect(
       articleDocument
         .querySelector('meta[property="article:published_time"]')
         ?.getAttribute("content"),
@@ -123,6 +126,26 @@ describe("rendered landing page", () => {
     expect(articleDocument.querySelectorAll("[data-key-takeaway]").length).toBeGreaterThanOrEqual(
       5,
     );
+    expect(articleDocument.querySelectorAll("figure[data-article-visual]")).toHaveLength(3);
+
+    const heroImage = articleDocument.querySelector<HTMLImageElement>("[data-article-hero-image]");
+    expect(heroImage?.getAttribute("alt")).toContain("сканирует Data Matrix");
+    expect(heroImage?.getAttribute("loading")).toBe("eager");
+    expect(heroImage?.getAttribute("width")).not.toBeNull();
+    expect(heroImage?.getAttribute("height")).not.toBeNull();
+
+    for (const image of articleDocument.querySelectorAll<HTMLImageElement>(
+      "[data-article-diagram]",
+    )) {
+      expect(image.getAttribute("alt")).not.toBe("");
+      expect(image.getAttribute("loading")).toBe("lazy");
+      expect(image.getAttribute("width")).not.toBeNull();
+      expect(image.getAttribute("height")).not.toBeNull();
+    }
+    expect(articleDocument.querySelectorAll("[data-article-diagram]")).toHaveLength(2);
+    expect(articleDocument.querySelectorAll("figure[data-article-visual] figcaption")).toHaveLength(
+      3,
+    );
 
     const graph = JSON.parse(
       articleDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
@@ -131,6 +154,7 @@ describe("rendered landing page", () => {
       dateModified: "2026-08-26",
       datePublished: "2026-08-26",
       headline: "Агрегация пива в короба: как не остановить производственную линию",
+      image: "https://markiro.app/og-beer-case-aggregation.jpg",
       inLanguage: "ru",
     });
 

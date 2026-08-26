@@ -1,4 +1,7 @@
 ---
+import { Picture } from "astro:assets";
+
+import articleHero from "../../../assets/beer-case-aggregation-hero.png";
 import LandingFooter from "../../../components/LandingFooter.astro";
 import LandingHeader from "../../../components/LandingHeader.astro";
 import { BEER_CASE_AGGREGATION_ARTICLE } from "../../../content/articles";
@@ -21,13 +24,30 @@ const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE
             <li aria-current="page">{article.navigationLabel}</li>
           </ol>
         </nav>
-        <p class="section-index">{article.eyebrow}</p>
-        <h1>{article.heading}</h1>
-        <p class="article-hero__lead">{article.introduction}</p>
-        <div class="article-byline" aria-label="Сведения о публикации">
-          <span>{article.authorName}</span>
-          <time datetime={article.publishedAt}>26 августа 2026</time>
-          <span>{article.readingTimeMinutes} минут чтения</span>
+        <div class="article-hero__layout">
+          <div class="article-hero__copy">
+            <p class="section-index">{article.eyebrow}</p>
+            <h1>{article.heading}</h1>
+            <p class="article-hero__lead">{article.introduction}</p>
+            <div class="article-byline" aria-label="Сведения о публикации">
+              <span>{article.authorName}</span>
+              <time datetime={article.publishedAt}>26 августа 2026</time>
+              <span>{article.readingTimeMinutes} минут чтения</span>
+            </div>
+          </div>
+          <figure class="article-hero__media" data-article-visual>
+            <Picture
+              src={articleHero}
+              alt="Оператор сканирует Data Matrix на бутылке перед укладкой в короб и печатью SSCC"
+              widths={[480, 720, 1080]}
+              formats={["avif", "webp"]}
+              sizes="(max-width: 767px) 100vw, 45vw"
+              loading="eager"
+              fetchpriority="high"
+              data-article-hero-image
+            />
+            <figcaption>Проверка кода до укладки связывает физический короб с достоверным цифровым составом.</figcaption>
+          </figure>
         </div>
       </div>
     </header>
@@ -71,6 +91,18 @@ const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE
         <p><strong>Агрегация создаёт проверенную связь между кодами отдельных бутылок или банок и транспортной упаковкой, в которую они уложены.</strong> Для идентификации такой упаковки может использоваться SSCC — серийный номер транспортной упаковки.</p>
         <p><a href="https://www.gs1ru.org/gs1_system/capture/sscc/">Ассоциация GS1</a> описывает SSCC как уникальный идентификатор логистической единицы: короба, паллеты или другой упаковки, используемой для хранения и транспортировки продукции.</p>
         <p>В системе маркировки транспортной упаковке соответствует КИТУ. Для SSCC применяется идентификатор применения <code>(00)</code>. Код маркировки отдельной единицы и SSCC решают разные задачи: первый идентифицирует товар, второй — транспортный короб и его состав.</p>
+        <figure class="article-visual" data-article-visual>
+          <img
+            src="/images/articles/agregatsiya-piva-sscc-flow.svg"
+            width="1200"
+            height="520"
+            loading="lazy"
+            decoding="async"
+            alt="Схема: Data Matrix единицы проверяется, состав короба закрывается, затем печатается и проверяется уникальный SSCC"
+            data-article-diagram
+          />
+          <figcaption>Агрегация фиксирует проверенную связь: код единицы → состав короба → уникальная этикетка SSCC.</figcaption>
+        </figure>
         <div class="article-callout">
           <strong>SSCC нельзя возвращать в оборот.</strong>
           <p>Если закрытый короб расформирован, его номер остаётся в истории. Повторно собранный физический короб получает новый SSCC.</p>
@@ -111,6 +143,18 @@ const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE
         <p class="section-index">04 / Исключения</p>
         <h2 id="exceptions-title">Какие ошибки чаще всего нарушают агрегацию</h2>
         <p><strong>Производственную систему определяет не только успешное закрытие короба, но и поведение при неизбежной ошибке оператора или оборудования.</strong></p>
+        <figure class="article-visual" data-article-visual>
+          <img
+            src="/images/articles/agregatsiya-piva-exception-map.svg"
+            width="1200"
+            height="620"
+            loading="lazy"
+            decoding="async"
+            alt="Карта восстановления: повторный скан, сбой печати, потеря сети и перезапуск проходят через локальный журнал станции"
+            data-article-diagram
+          />
+          <figcaption>Ошибка не должна превращаться в остановку: станция сохраняет контекст и показывает оператору однозначный результат.</figcaption>
+        </figure>
         <div class="article-cases">
           <article>
             <h3>Повторный скан</h3>
