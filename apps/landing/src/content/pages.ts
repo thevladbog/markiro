@@ -20,7 +20,7 @@ export type Locale = "ru" | "en";
 
 export interface SearchPageRecord {
   readonly path: string;
-  readonly alternatePath: string;
+  readonly alternatePath?: string | undefined;
   readonly locale: Locale;
   readonly navigationLabel: string;
   readonly description: string;

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,6 +96,60 @@ afterAll(() => {
 });
 
 describe("rendered landing page", () => {
+  it("publishes the beer case aggregation guide as a self-contained article", () => {
+    const articleOutput = path.join(outputDirectory, "stati/agregatsiya-piva-v-koroba/index.html");
+    expect(existsSync(articleOutput)).toBe(true);
+    if (!existsSync(articleOutput)) return;
+
+    const articleDocument = new JSDOM(readFileSync(articleOutput, "utf8")).window.document;
+    expect(articleDocument.querySelectorAll("h1")).toHaveLength(1);
+    expect(articleDocument.querySelector("h1")?.textContent).toContain("Агрегация пива в короба");
+    expect(articleDocument.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+      "https://markiro.app/stati/agregatsiya-piva-v-koroba/",
+    );
+    expect(articleDocument.querySelector('meta[property="og:type"]')?.getAttribute("content")).toBe(
+      "article",
+    );
+    expect(
+      articleDocument
+        .querySelector('meta[property="article:published_time"]')
+        ?.getAttribute("content"),
+    ).toBe("2026-08-26");
+    expect(articleDocument.querySelector('link[rel="alternate"][hreflang="en"]')).toBeNull();
+    expect(articleDocument.querySelectorAll('meta[property="og:locale:alternate"]')).toHaveLength(
+      0,
+    );
+    expect(articleDocument.querySelector('nav[aria-label="Содержание статьи"]')).not.toBeNull();
+    expect(articleDocument.querySelectorAll("[data-key-takeaway]").length).toBeGreaterThanOrEqual(
+      5,
+    );
+
+    const graph = JSON.parse(
+      articleDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
+    ) as { "@graph": Array<Record<string, unknown>> };
+    expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
+      dateModified: "2026-08-26",
+      datePublished: "2026-08-26",
+      headline: "Агрегация пива в короба: как не остановить производственную линию",
+      inLanguage: "ru",
+    });
+
+    const bodyText = articleDocument.body.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(bodyText).toContain("Текущий контур Markiro — «единица → короб → SSCC»");
+    expect(bodyText).toContain("Паллетная агрегация относится к следующему этапу");
+    expect(bodyText).toContain("Новые товарные группы добавляются поэтапно");
+    expect(bodyText).not.toContain("внедряется для производителей");
+    expect(
+      articleDocument.querySelector('a[href="https://www.gs1ru.org/gs1_system/capture/sscc/"]'),
+    ).not.toBeNull();
+    expect(articleDocument.querySelector('a[href="/sscc-i-agregatsiya/"]')).not.toBeNull();
+    expect(
+      documents
+        .get("/sscc-i-agregatsiya/")
+        ?.querySelector('[data-related-pages] a[href="/stati/agregatsiya-piva-v-koroba/"]'),
+    ).not.toBeNull();
+  });
+
   it("renders the exact localized Markiro brand", () => {
     const ruBrand = documents.get("/")?.querySelector("header .brand-mark");
     const enBrand = documents.get("/en/")?.querySelector("header .brand-mark");

@@ -34,6 +34,7 @@ const routes = [
   "/",
   "/markirovka-chestny-znak/",
   "/sscc-i-agregatsiya/",
+  "/stati/agregatsiya-piva-v-koroba/",
   "/rabochee-mesto-upakovki/",
   "/kiosk-samovydachi/",
   "/integratsiya-1c/",
@@ -298,6 +299,21 @@ test("keyboard focus is visible on the first interactive control", async ({ page
   ).toBe(true);
 });
 
+test("article hero keeps a clear heading hierarchy", async ({ page }) => {
+  await page.goto("/stati/agregatsiya-piva-v-koroba/");
+  const sizes = await page.evaluate(() => ({
+    heading: Number.parseFloat(
+      getComputedStyle(document.querySelector(".article-hero h1")!).fontSize,
+    ),
+    lead: Number.parseFloat(
+      getComputedStyle(document.querySelector(".article-hero__lead")!).fontSize,
+    ),
+  }));
+
+  expect(sizes.heading).toBeGreaterThanOrEqual(42);
+  expect(sizes.heading).toBeGreaterThan(sizes.lead * 1.5);
+});
+
 for (const [route, wordmark] of [
   ["/", "маркиро"],
   ["/en/", "MARKIRO"],
@@ -442,6 +458,9 @@ test("crawler policy endpoints expose the approved search boundary", async ({ re
   );
   await expect((await request.get("/sitemap.xml")).text()).resolves.toContain(
     "https://markiro.app/privacy/",
+  );
+  await expect((await request.get("/sitemap.xml")).text()).resolves.toContain(
+    "https://markiro.app/stati/agregatsiya-piva-v-koroba/",
   );
   await expect((await request.get("/llms.txt")).text()).resolves.toContain("https://markiro.app/");
 });

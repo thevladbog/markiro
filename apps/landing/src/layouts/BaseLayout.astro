@@ -15,7 +15,7 @@ interface Props {
 const { metadata: page, graph, noindex = false } = Astro.props;
 const canonicalUrl = new URL(page.path, Astro.site);
 const socialImageUrl = new URL(page.socialImage, Astro.site);
-const alternateUrl = new URL(page.alternatePath, Astro.site);
+const alternateUrl = page.alternatePath === undefined ? null : new URL(page.alternatePath, Astro.site);
 const ruUrl = page.locale === "ru" ? canonicalUrl : alternateUrl;
 const enUrl = page.locale === "en" ? canonicalUrl : alternateUrl;
 const copy = getUiCopy(page.locale).common;
@@ -30,9 +30,11 @@ const jsonLd = serializeJsonLd(graph);
     <meta name="description" content={page.description} />
     <meta name="robots" content={noindex ? "noindex,follow" : "index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1"} />
     <meta name="theme-color" content="#131216" />
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={page.ogType ?? "website"} />
+    {page.publishedAt && <meta property="article:published_time" content={page.publishedAt} />}
+    {page.modifiedAt && <meta property="article:modified_time" content={page.modifiedAt} />}
     <meta property="og:locale" content={page.locale === "ru" ? "ru_RU" : "en_US"} />
-    <meta property="og:locale:alternate" content={page.locale === "ru" ? "en_US" : "ru_RU"} />
+    {alternateUrl && <meta property="og:locale:alternate" content={page.locale === "ru" ? "en_US" : "ru_RU"} />}
     <meta property="og:site_name" content="Markiro" />
     <meta property="og:title" content={page.title} />
     <meta property="og:description" content={page.description} />
@@ -47,9 +49,13 @@ const jsonLd = serializeJsonLd(graph);
     <meta name="twitter:image" content={socialImageUrl} />
     <meta name="twitter:image:alt" content={page.socialImageAlt} />
     <link rel="canonical" href={canonicalUrl} />
-    <link rel="alternate" hreflang="ru" href={ruUrl} />
-    <link rel="alternate" hreflang="en" href={enUrl} />
-    <link rel="alternate" hreflang="x-default" href={ruUrl} />
+    {ruUrl && enUrl && (
+      <>
+        <link rel="alternate" hreflang="ru" href={ruUrl} />
+        <link rel="alternate" hreflang="en" href={enUrl} />
+        <link rel="alternate" hreflang="x-default" href={ruUrl} />
+      </>
+    )}
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="manifest" href={page.locale === "ru" ? "/site.webmanifest" : "/site.en.webmanifest"} />
     <title>{page.title}</title>

@@ -32,10 +32,13 @@ describe("SEO generators", () => {
       /<loc>https:\/\/markiro\.app\/oflayn-rabota\/<\/loc>[\s\S]*?<lastmod>2026-08-14<\/lastmod>/,
     );
     expect(sitemap).toContain("<loc>https://markiro.app/en/offline-production/</loc>");
+    expect(sitemap).toMatch(
+      /<loc>https:\/\/markiro\.app\/stati\/agregatsiya-piva-v-koroba\/<\/loc>[\s\S]*?<lastmod>2026-08-26<\/lastmod>/,
+    );
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(38);
+    expect(sitemap.match(/<url>/g)).toHaveLength(39);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -46,6 +49,7 @@ describe("SEO generators", () => {
       "> Производственная система для маркировки, агрегации и прослеживаемости с локальной работой станций.",
     );
     expect(llms).toContain("https://markiro.app/sscc-i-agregatsiya/");
+    expect(llms).toContain("https://markiro.app/stati/agregatsiya-piva-v-koroba/");
     expect(llms).toContain("## English");
     expect(llms).toContain(
       "> Production serialization, aggregation, and traceability with offline-capable line stations.",
@@ -77,7 +81,7 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(38);
+    expect(sitemap.match(/<url>/g)).toHaveLength(39);
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
     );
