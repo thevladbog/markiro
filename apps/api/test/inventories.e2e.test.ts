@@ -10,6 +10,7 @@ import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { schema, type Db } from "@markiro/db";
+import { INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@markiro/domain";
 
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -377,6 +378,134 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       openRepackBoxCount: 1,
       unresolvedPrintBoxCount: 1,
     });
+  });
+
+  it("projects append-only import history and the exact active snapshot for reloadable preparation", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent);
+    const inventory = await createInventory(agent, productId, lineId);
+    const userId = await actorUserId(tenantId);
+    const createdAt = new Date("2026-08-26T09:00:00.000Z");
+    const selectedIds = Object.fromEntries(
+      INVENTORY_CHZ_STATUSES.map((status) => [status, randomUUID()]),
+    ) as Record<InventoryChzStatus, string>;
+    const replacedIntroducedId = randomUUID();
+    const succeededRows = [
+      ...INVENTORY_CHZ_STATUSES.map((status, index) => ({
+        id: selectedIds[status],
+        tenantId,
+        inventoryId: inventory.id,
+        declaredStatus: status,
+        fileName: `${status.toLowerCase()}.zip`,
+        containerKind: "zip" as const,
+        byteSize: 100 + index,
+        sha256: (index + 1).toString(16).repeat(64),
+        objectKey: `private/${selectedIds[status]}`,
+        parsedStatus: status,
+        includedGtin14: FIXTURE_GTIN,
+        parseOutcome: "succeeded" as const,
+        rowCount: status === "APPLIED" || status === "DISAGGREGATION" ? 0 : index + 10,
+        errorCount: 0,
+        duplicateCount: index,
+        errorCode: null,
+        createdByUserId: userId,
+        createdAt: new Date(createdAt.getTime() + index * 1_000),
+        parsedAt: new Date(createdAt.getTime() + index * 1_000),
+      })),
+      {
+        id: replacedIntroducedId,
+        tenantId,
+        inventoryId: inventory.id,
+        declaredStatus: "INTRODUCED" as const,
+        fileName: "introduced-replacement.zip",
+        containerKind: "zip" as const,
+        byteSize: 200,
+        sha256: "a".repeat(64),
+        objectKey: `private/${replacedIntroducedId}`,
+        parsedStatus: "INTRODUCED" as const,
+        includedGtin14: FIXTURE_GTIN,
+        parseOutcome: "succeeded" as const,
+        rowCount: 25,
+        errorCount: 0,
+        duplicateCount: 2,
+        errorCode: null,
+        createdByUserId: userId,
+        createdAt: new Date("2026-08-26T09:10:00.000Z"),
+        parsedAt: new Date("2026-08-26T09:10:00.000Z"),
+      },
+    ];
+    await db.insert(schema.inventoryImports).values(succeededRows);
+    const snapshotId = randomUUID();
+    await db.insert(schema.inventorySnapshots).values({
+      id: snapshotId,
+      tenantId,
+      inventoryId: inventory.id,
+      combinedDigest: "b".repeat(64),
+      emittedCount: 10,
+      introducedCount: 11,
+      appliedCount: 0,
+      retiredCount: 13,
+      writtenOffCount: 14,
+      disaggregationCount: 0,
+      protectedCount: 2,
+      expectedCount: 9,
+      packageCount: 1,
+      looseCount: 8,
+      fixedByUserId: userId,
+      fixedAt: new Date("2026-08-26T09:12:00.000Z"),
+    });
+    await db.insert(schema.inventorySnapshotInputs).values(
+      INVENTORY_CHZ_STATUSES.map((status) => ({
+        tenantId,
+        snapshotId,
+        inventoryId: inventory.id,
+        status,
+        importId: selectedIds[status],
+      })),
+    );
+    await db
+      .update(schema.inventories)
+      .set({ status: "ready", activeSnapshotId: snapshotId })
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventory.id)),
+      );
+
+    const detail = await agent.get(`/inventories/${inventory.id}`).expect(200);
+    expect(detail.body.imports).toHaveLength(7);
+    expect(detail.body.imports[0]).toEqual({
+      id: replacedIntroducedId,
+      declaredStatus: "INTRODUCED",
+      parsedStatus: "INTRODUCED",
+      fileName: "introduced-replacement.zip",
+      result: "succeeded",
+      rowCount: 25,
+      errorCount: 0,
+      duplicateCount: 2,
+      sha256: "a".repeat(64),
+      diagnostics: [],
+      createdAt: "2026-08-26T09:10:00.000Z",
+    });
+    expect(detail.body.activeSnapshot).toEqual({
+      id: snapshotId,
+      inventoryId: inventory.id,
+      revision: 1,
+      combinedDigest: "b".repeat(64),
+      fixedAt: "2026-08-26T09:12:00.000Z",
+      inputs: selectedIds,
+      counts: {
+        emitted: 10,
+        introduced: 11,
+        applied: 0,
+        retired: 13,
+        writtenOff: 14,
+        disaggregation: 0,
+        protected: 2,
+        expected: 9,
+        packages: 1,
+        loose: 8,
+      },
+    });
+    expect(JSON.stringify(detail.body)).not.toMatch(/objectKey|includedGtin14|createdByUserId/i);
   });
 
   it("returns not found for cross-tenant inventory ids before read, update, or upload side effects", async () => {

@@ -4,6 +4,9 @@
     "loading": "Loading…",
     "signOut": "Sign out",
     "close": "Close",
+    "cancel": "Cancel",
+    "back": "Back",
+    "retry": "Retry",
     "loadError": "Failed to load data. Refresh the page or sign in again.",
     "yes": "Yes",
     "no": "No",
@@ -220,6 +223,7 @@
     "catalog": "Catalog",
     "shifts": "Shifts",
     "lines": "Lines",
+    "inventory": "Inventories",
     "codes": "Code search",
     "conflicts": "Conflicts",
     "counterparties": "Counterparties",
@@ -281,6 +285,115 @@
     "lastEvent": "Last event: {{time}}"
   },
   "pages": {
+    "inventory": {
+      "title": "Inventories",
+      "description": "Preparation, station work, and final documents",
+      "createAction": "Create inventory",
+      "loadError": "Could not load inventories",
+      "emptyTitle": "No inventories yet",
+      "emptyHint": "Create a task for one product and an assigned line.",
+      "status": {
+        "draft": "Draft",
+        "preparing": "Preparing",
+        "ready": "Ready to start",
+        "running": "Running",
+        "closed": "Closed",
+        "completed": "Completed"
+      },
+      "mode": {
+        "check": "Without repacking",
+        "repack": "With repacking"
+      },
+      "list": {
+        "number": "Number / status",
+        "productDates": "Product / dates",
+        "lineMode": "Line / mode",
+        "updated": "Updated"
+      },
+      "steps": {
+        "label": "Inventory preparation steps",
+        "stage": "Step {{number}}",
+        "parameters": "Parameters",
+        "exports": "Chestny ZNAK exports",
+        "snapshot": "Snapshot review",
+        "terminals": "Stations",
+        "launch": "Launch"
+      },
+      "create": {
+        "title": "New inventory",
+        "cardTitle": "Task parameters",
+        "product": "Product",
+        "productPlaceholder": "Select one product",
+        "productSearch": "Search products",
+        "productEmpty": "No active products found",
+        "mode": "Inventory mode",
+        "line": "Line",
+        "linePlaceholder": "Select a line",
+        "template": "Box label template",
+        "templatePlaceholder": "Select a template",
+        "dateFrom": "Production date from",
+        "dateTo": "Production date to",
+        "inclusive": "The period is inclusive",
+        "requiredError": "Complete all required fields.",
+        "dateError": "The end date cannot be earlier than the start date.",
+        "dependenciesError": "Could not load products, lines, or templates.",
+        "next": "Continue to exports"
+      },
+      "detail": {
+        "loadError": "Inventory unavailable",
+        "loadErrorHint": "Check the address or retry loading.",
+        "backToList": "Back to inventories"
+      },
+      "chz": {
+        "EMITTED": "Emitted",
+        "INTRODUCED": "Introduced",
+        "APPLIED": "Applied",
+        "RETIRED": "Retired",
+        "WRITTEN_OFF": "Written off",
+        "DISAGGREGATION": "Disaggregated"
+      },
+      "exports": {
+        "title": "Code-status exports",
+        "description": "Provide one result for each of the six statuses. A valid zero-row export counts as successful.",
+        "ready": "Ready",
+        "missing": "Missing",
+        "chooseFile": "Choose file",
+        "fileLabel": "{{status}} file",
+        "selectFile": "Select {{status}} upload",
+        "noAttempts": "No uploads yet",
+        "useFile": "Use {{file}}",
+        "errors": "errors: {{count}}",
+        "duplicates": "duplicates: {{count}}",
+        "review": "Review snapshot"
+      },
+      "snapshot": {
+        "title": "Snapshot review",
+        "description": "Review the exact six selected uploads before fixing the immutable snapshot.",
+        "files": "Chestny ZNAK exports",
+        "expectedLabel": "Expected",
+        "expected": "Expected: {{count}}",
+        "fixHint": "The server calculates final counts and excluded MOVING_BY_UD codes during fixation.",
+        "fix": "Fix snapshot"
+      },
+      "terminals": {
+        "title": "Station access",
+        "description": "The task appears on stations assigned to this line after launch.",
+        "assigned": "Assigned stations: {{count}}",
+        "online": "{{online}} of {{total}} stations online",
+        "loadError": "Could not check line readiness.",
+        "formTitle": "Task form",
+        "formUnavailable": "The task form will become available with the printable-form implementation",
+        "downloadPdf": "Download PDF",
+        "next": "Continue to launch"
+      },
+      "launch": {
+        "title": "Launch inventory",
+        "snapshotReady": "Snapshot fixed: {{count}} expected codes",
+        "warehouseStopped": "Warehouse movements are stopped",
+        "blocked": "Confirm that warehouse movements are stopped before launch.",
+        "start": "Start inventory"
+      }
+    },
     "team": {
       "title": "Team",
       "inviteAction": "Invite",

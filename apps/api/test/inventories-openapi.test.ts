@@ -290,7 +290,7 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
     exactObject(template, ["id", "name"]);
     expect(template.nullable).toBe(true);
     const inventoryDetail = responseSchema(document, "/inventories/{id}", "get", "200");
-    exactObject(inventoryDetail, [...fields, "blockers"]);
+    exactObject(inventoryDetail, [...fields, "blockers", "imports", "activeSnapshot"]);
     exactObject(inventoryDetail.properties!.blockers!, [
       "activeParticipantCount",
       "pendingEventCount",
@@ -298,6 +298,34 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       "openRepackBoxCount",
       "unresolvedPrintBoxCount",
     ]);
+    const history = inventoryDetail.properties!.imports?.items;
+    if (!history) throw new Error("Missing inventory import history projection");
+    exactObject(history, [
+      "id",
+      "declaredStatus",
+      "parsedStatus",
+      "fileName",
+      "result",
+      "rowCount",
+      "errorCount",
+      "duplicateCount",
+      "sha256",
+      "diagnostics",
+      "createdAt",
+    ]);
+    expect(inventoryDetail.properties!.activeSnapshot?.nullable).toBe(true);
+    exactObject(inventoryDetail.properties!.activeSnapshot!, [
+      "id",
+      "inventoryId",
+      "revision",
+      "combinedDigest",
+      "fixedAt",
+      "inputs",
+      "counts",
+    ]);
+    expect(JSON.stringify(inventoryDetail)).not.toMatch(
+      /objectKey|includedGtin14|createdByUserId/i,
+    );
     exactObject(responseSchema(document, "/inventories/{id}", "patch", "200"), fields);
     const list = responseSchema(document, "/inventories", "get", "200");
     exactObject(list, ["items"]);

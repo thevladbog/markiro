@@ -104,6 +104,8 @@ export interface InventoryBlockerProjectionDto {
 
 export interface InventoryDetailDto extends InventoryDto {
   blockers: InventoryBlockerProjectionDto;
+  imports: InventoryImportHistoryDto[];
+  activeSnapshot: InventorySnapshotDto | null;
 }
 
 export interface ListInventoriesResponseDto {
@@ -125,6 +127,11 @@ export interface InventoryImportDto {
   duplicateCount: number;
   sha256: string;
   diagnostics: InventoryImportDiagnosticDto[];
+}
+
+export interface InventoryImportHistoryDto extends InventoryImportDto {
+  fileName: string;
+  createdAt: string;
 }
 
 const selectedInventoryImportsSchema = z
@@ -350,15 +357,6 @@ const inventoryBlockerProjectionOpenApiSchema: SchemaObject = {
   },
 };
 
-export const inventoryDetailOpenApiSchema: SchemaObject = {
-  ...inventoryOpenApiSchema,
-  required: [...(inventoryOpenApiSchema.required ?? []), "blockers"],
-  properties: {
-    ...inventoryOpenApiSchema.properties,
-    blockers: inventoryBlockerProjectionOpenApiSchema,
-  },
-};
-
 export const listInventoriesOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -457,6 +455,27 @@ export const inventorySnapshotOpenApiSchema: SchemaObject = {
       required: Object.keys(inventorySnapshotCountProperties),
       properties: inventorySnapshotCountProperties,
     },
+  },
+};
+
+const inventoryImportHistoryOpenApiSchema: SchemaObject = {
+  ...inventoryImportOpenApiSchema,
+  required: [...(inventoryImportOpenApiSchema.required ?? []), "fileName", "createdAt"],
+  properties: {
+    ...inventoryImportOpenApiSchema.properties,
+    fileName: { type: "string" },
+    createdAt: dateTimeSchema,
+  },
+};
+
+export const inventoryDetailOpenApiSchema: SchemaObject = {
+  ...inventoryOpenApiSchema,
+  required: [...(inventoryOpenApiSchema.required ?? []), "blockers", "imports", "activeSnapshot"],
+  properties: {
+    ...inventoryOpenApiSchema.properties,
+    blockers: inventoryBlockerProjectionOpenApiSchema,
+    imports: { type: "array", items: inventoryImportHistoryOpenApiSchema },
+    activeSnapshot: { ...inventorySnapshotOpenApiSchema, nullable: true },
   },
 };
 

@@ -57,6 +57,9 @@ import { LabelEditorPage } from "./pages/labels/editor/index.js";
 import { LabelTemplatesPage } from "./pages/labels/index.js";
 import { LinesPage } from "./pages/lines/index.js";
 import { LinePanelRoute } from "./pages/lines/LinePanelRoute.js";
+import { InventoryPage } from "./pages/inventory/index.js";
+import { InventoryCreatePage } from "./pages/inventory/InventoryCreatePage.js";
+import { InventoryDetailPage } from "./pages/inventory/InventoryDetailPage.js";
 import { OrderDetailPage } from "./pages/pickup/OrderDetail.js";
 import { RejectionsPage } from "./pages/pickup/Rejections.js";
 import { PickupPage } from "./pages/pickup/index.js";
@@ -167,6 +170,32 @@ function appRouteElements() {
             element={
               <RequireCapability capability={C.OPERATIONS_WRITE}>
                 <LinePanelRoute mode="edit" />
+              </RequireCapability>
+            }
+          />
+        </Route>
+        <Route path="inventory">
+          <Route
+            index
+            element={
+              <RequireCapability capability={C.OPERATIONS_READ}>
+                <InventoryPage />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path="new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <InventoryCreatePage />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":inventoryId"
+            element={
+              <RequireCapability capability={C.OPERATIONS_READ}>
+                <InventoryDetailPage />
               </RequireCapability>
             }
           />

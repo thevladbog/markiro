@@ -1,0 +1,200 @@
+.mk-inventory-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mk-inventory-page__description,
+.mk-inventory-section-description,
+.mk-inventory-note,
+.mk-inventory-back-link,
+.mk-inventory-list__stack small,
+.mk-inventory-upload-slot small,
+.mk-inventory-terminal-line small {
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.mk-inventory-steps {
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+  padding: 12px 16px;
+}
+
+.mk-inventory-steps ol {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-inventory-steps li,
+.mk-inventory-upload-slot__header,
+.mk-inventory-terminal-line,
+.mk-inventory-import-attempt,
+.mk-inventory-list__identity,
+.mk-inventory-list__stack {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mk-inventory-steps li > span:last-child,
+.mk-inventory-upload-slot__header > span,
+.mk-inventory-import-attempt > span,
+.mk-inventory-terminal-line > span,
+.mk-inventory-list__stack {
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.mk-inventory-steps small {
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.mk-inventory-steps__number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  color: var(--fg-2);
+  flex: 0 0 auto;
+}
+
+.mk-inventory-steps li[aria-current="step"] .mk-inventory-steps__number {
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+}
+
+.mk-inventory-workspace {
+  max-width: 860px;
+}
+.mk-inventory-form {
+  display: grid;
+  gap: 18px;
+}
+.mk-inventory-form__dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.mk-inventory-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+.mk-inventory-list__identity {
+  flex-wrap: wrap;
+}
+.mk-inventory-list__identity a {
+  color: var(--fg-1);
+  font-weight: 600;
+}
+
+.mk-inventory-upload-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.mk-inventory-upload-slot,
+.mk-inventory-task-form,
+.mk-inventory-terminal-line,
+.mk-inventory-metric {
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  padding: 14px;
+  background: var(--surface-page);
+}
+
+.mk-inventory-upload-slot__header,
+.mk-inventory-terminal-line {
+  justify-content: space-between;
+}
+.mk-inventory-file-control {
+  margin: 12px 0;
+}
+.mk-inventory-import-history {
+  display: grid;
+  gap: 8px;
+}
+.mk-inventory-import-attempt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.mk-inventory-error {
+  color: var(--err-fg) !important;
+}
+
+.mk-inventory-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 16px 0;
+}
+.mk-inventory-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mk-inventory-metric strong {
+  font: var(--text-h2);
+  font-family: var(--font-mono);
+}
+.mk-inventory-metric--accent {
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+.mk-inventory-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.mk-inventory-summary div {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+}
+.mk-inventory-summary dt {
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+.mk-inventory-summary dd {
+  margin: 4px 0 0;
+  font-weight: 600;
+}
+.mk-inventory-centered {
+  display: flex;
+  justify-content: center;
+  padding: 72px;
+}
+.mk-inventory-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+@media (max-width: 900px) {
+  .mk-inventory-steps ol {
+    grid-template-columns: 1fr;
+  }
+  .mk-inventory-upload-grid,
+  .mk-inventory-form__dates,
+  .mk-inventory-metrics,
+  .mk-inventory-summary {
+    grid-template-columns: 1fr;
+  }
+}
