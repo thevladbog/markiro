@@ -18,6 +18,9 @@ export const INVENTORY_DOCUMENT_FORMAT_AVAILABILITIES = ["available", "unavailab
 export type InventoryDocumentFormatAvailability =
   (typeof INVENTORY_DOCUMENT_FORMAT_AVAILABILITIES)[number];
 
+export const INVENTORY_DOCUMENT_MIME_TYPE_PATTERN =
+  "^[^\\s/;]+\\/[^\\s/;]+(?:; charset=[a-z0-9-]+)?$";
+
 export const inventoryDocumentFormatDescriptorSchema = z.strictObject({
   id: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
   version: z.number().int().min(1).max(2_147_483_647),
@@ -28,7 +31,7 @@ export const inventoryDocumentFormatDescriptorSchema = z.strictObject({
     .trim()
     .min(1)
     .max(128)
-    .regex(/^[^\s/;]+\/[^\s/;]+(?:; charset=[a-z0-9-]+)?$/),
+    .regex(new RegExp(INVENTORY_DOCUMENT_MIME_TYPE_PATTERN)),
   requiredSourceCategories: z
     .array(z.enum(INVENTORY_DOCUMENT_SOURCE_CATEGORIES))
     .min(1)

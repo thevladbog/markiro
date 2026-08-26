@@ -150,6 +150,9 @@ describe.skipIf(!ready)("inventory document formats e2e", () => {
     ]);
     expect(item?.properties?.availability?.enum).toEqual(["available"]);
     expect(item?.properties?.id?.enum).toBeUndefined();
+    expect(item?.properties?.mimeType?.pattern).toBe(
+      "^[^\\s/;]+\\/[^\\s/;]+(?:; charset=[a-z0-9-]+)?$",
+    );
     expect(item?.properties?.requiredSourceCategories).toMatchObject({
       type: "array",
       minItems: 1,

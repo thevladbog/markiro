@@ -128,6 +128,7 @@ export {
   getInventoryDocumentFormat,
   INVENTORY_DOCUMENT_FORMAT_AVAILABILITIES,
   INVENTORY_DOCUMENT_FORMATS,
+  INVENTORY_DOCUMENT_MIME_TYPE_PATTERN,
   INVENTORY_DOCUMENT_SOURCE_CATEGORIES,
   inventoryDocumentFormatDescriptorSchema,
   inventoryDocumentRegistry,

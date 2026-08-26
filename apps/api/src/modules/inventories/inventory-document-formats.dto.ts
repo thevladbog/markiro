@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { SchemaObject } from "@nestjs/swagger";
 
 import {
+  INVENTORY_DOCUMENT_MIME_TYPE_PATTERN,
   INVENTORY_DOCUMENT_SOURCE_CATEGORIES,
   inventoryDocumentFormatDescriptorSchema,
 } from "@markiro/domain";
@@ -38,7 +39,12 @@ export const inventoryDocumentFormatOpenApiSchema: SchemaObject = {
     version: { type: "integer", minimum: 1, maximum: 2_147_483_647 },
     label: { type: "string", minLength: 1, maxLength: 200 },
     extension: { type: "string", pattern: "^[a-z0-9]{1,16}$", maxLength: 16 },
-    mimeType: { type: "string", minLength: 1, maxLength: 128 },
+    mimeType: {
+      type: "string",
+      minLength: 1,
+      maxLength: 128,
+      pattern: INVENTORY_DOCUMENT_MIME_TYPE_PATTERN,
+    },
     requiredSourceCategories: {
       type: "array",
       minItems: 1,

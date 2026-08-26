@@ -149,6 +149,42 @@ artifacts remain governed by their recorded checksum and retention policy.
 - [ ] Add sanitized XLSX golden input/output, a human-readable cell-map fixture, and approval
       evidence from at least one independent XLSX reader.
 
+## Package contract: downloadable ZIP and `manifest.json`
+
+The ZIP is a delivery package over selected approved artifacts, not a separately advertised
+generator descriptor. It cannot be implemented from the candidate labels above. Approval requires
+an exact package contract and a sanitized golden archive:
+
+- [ ] Approve the `manifest.json` schema and schema version: exact top-level fields, artifact entry
+      fields, JSON encoding, key order/canonicalization, newline policy, integer bounds, and rules
+      for forward/backward compatibility.
+- [ ] For every artifact entry, approve the exact archive-relative filename, byte size, lowercase
+      SHA-256 digest, MIME type, format id/version, part number, physical row count, code count, and
+      box count. Define whether totals are repeated at package level and how they are verified.
+- [ ] Approve deterministic artifact and manifest ordering, the position/name of `manifest.json`,
+      ZIP member timestamps/timezone, permissions/platform bits, compression method/level, UTF-8
+      filename flag, extra fields, comments, and deterministic retry behavior.
+- [ ] Define path safety: filenames are relative single-root paths; reject absolute paths, drive
+      prefixes, `..`, empty/dot segments, NUL/control characters, separator ambiguity, Unicode
+      normalization collisions, case-fold collisions, duplicate member names, and collisions with
+      `manifest.json`.
+- [ ] Define selection and empty-package behavior: whether zero selected/ready artifacts is rejected
+      or produces an archive, whether a manifest-only archive is permitted, and how failed,
+      unavailable, invalidated, superseded, or duplicate requested formats are represented or
+      rejected.
+- [ ] Approve whole-package checksum placement and algorithm, signature/encryption requirements,
+      detached versus embedded signature naming, certificate/key identity, password/key delivery,
+      and whether encrypted member metadata may remain visible.
+- [ ] Approve package filename/version/revision grammar, maximum member count and compressed/
+      uncompressed bytes, total expansion-ratio bound, download content type/disposition, retention,
+      invalidation on reopen, regeneration, and deletion rules.
+- [ ] Add a sanitized golden ZIP containing only approved-format golden artifacts and an exact
+      `manifest.json`; include no customer KMs/SSCCs, credentials, personal data, secrets, or
+      production identifiers.
+- [ ] Record independent validation: safe extraction in at least two maintained ZIP readers,
+      duplicate/traversal/collision negative fixtures, recomputed size/SHA-256/count verification,
+      manifest schema validation, and byte-for-byte deterministic regeneration.
+
 ## Approval record template
 
 Copy this block into the versioned fixture directory only after approval:
