@@ -2350,6 +2350,10 @@ input:focus-visible {
     padding: 7rem 0 4rem;
   }
 
+  .article-hero h1 {
+    font-size: clamp(2.625rem, 10vw, 2.875rem);
+  }
+
   .article-summary,
   .article-toc,
   .article-body > section {
