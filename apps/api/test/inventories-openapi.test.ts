@@ -111,12 +111,21 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       ["/inventories", "get"],
       ["/inventories", "post"],
       ["/inventories/{id}", "get"],
+      ["/inventories/{id}/task-form", "get"],
       ["/inventories/{id}", "patch"],
       ["/inventories/{id}/imports/{status}", "post"],
       ["/inventories/{id}/snapshots", "post"],
       ["/inventories/{id}/start", "post"],
     ] as const;
     for (const [path, method] of paths) operation(document, path, method);
+
+    const taskForm = operation(document, "/inventories/{id}/task-form", "get");
+    const taskFormResponse = taskForm.responses["200"];
+    if (!taskFormResponse || "$ref" in taskFormResponse) {
+      throw new Error("Missing inline task-form response");
+    }
+    expect(Object.keys(taskFormResponse.content ?? {})).toEqual(["text/html"]);
+    expect(taskFormResponse.content?.["text/html"]?.schema).toEqual({ type: "string" });
 
     const upload = operation(document, "/inventories/{id}/imports/{status}", "post");
     const requestBody = upload.requestBody;

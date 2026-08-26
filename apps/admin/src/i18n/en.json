@@ -384,8 +384,8 @@
         "online": "{{online}} of {{total}} stations online",
         "loadError": "Could not check line readiness.",
         "formTitle": "Task form",
-        "formUnavailable": "The task form will become available with the printable-form implementation",
-        "downloadPdf": "Download PDF",
+        "formDescription": "Print-ready A4 form with a barcode that opens the task on a station.",
+        "openForm": "Open task form",
         "next": "Continue to launch"
       },
       "launch": {

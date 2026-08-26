@@ -8,6 +8,7 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UnprocessableEntityException,
   UploadedFile,
   UseGuards,
@@ -21,10 +22,12 @@ import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiParam,
+  ApiProduces,
   ApiQuery,
   ApiTags,
   ApiUnprocessableEntityResponse,
 } from "@nestjs/swagger";
+import type { Response } from "express";
 import { memoryStorage } from "multer";
 
 import {
@@ -124,6 +127,7 @@ import { InventoryLifecycleService } from "./inventory-lifecycle.service";
 import { InventoryReconciliationService } from "./inventory-reconciliation.service";
 import { InventoryCorrectionsService } from "./inventory-corrections.service";
 import { InventoryCloseService } from "./inventory-close.service";
+import { renderInventoryTaskFormHtml } from "./inventory-task-form";
 import {
   stationInventoryEventBatchResponseOpenApiSchema,
   stationInventoryManifestOpenApiSchema,
@@ -170,6 +174,22 @@ export class InventoriesController {
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
   ): Promise<InventoryClosePreviewDto> {
     return this.closeService.preview(req.tenantId!, id);
+  }
+
+  @Get(":id/task-form")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiProduces("text/html")
+  @ApiOkResponse({ schema: { type: "string" } })
+  async taskForm(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const data = await this.inventories.taskFormData(req.tenantId!, id);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "private, no-store");
+    return renderInventoryTaskFormHtml(data);
   }
 
   @Get(":id/discrepancies")

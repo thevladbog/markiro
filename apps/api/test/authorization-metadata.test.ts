@@ -162,6 +162,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
       complete: writePolicy,
       correct: writePolicy,
       create: writePolicy,
+      taskForm: readPolicy,
       get: readPolicy,
       update: writePolicy,
       importEvidence: writePolicy,

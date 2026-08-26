@@ -228,7 +228,11 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     return uploadNamed(agent, inventoryId, status, bytes, filename);
   }
 
-  async function markReady(tenantId: string, inventoryId: string): Promise<void> {
+  async function markReady(
+    tenantId: string,
+    inventoryId: string,
+    expectedCount = 0,
+  ): Promise<string> {
     const userId = await actorUserId(tenantId);
     const [snapshot] = await db
       .insert(schema.inventorySnapshots)
@@ -243,7 +247,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
         writtenOffCount: 0,
         disaggregationCount: 0,
         protectedCount: 0,
-        expectedCount: 0,
+        expectedCount,
         packageCount: 0,
         looseCount: 0,
         fixedByUserId: userId,
@@ -256,6 +260,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       .where(
         and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
       );
+    return snapshot.id;
   }
 
   it("requires cabinet operations permissions and gives read routes no mutation capability", async () => {
@@ -378,6 +383,121 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       openRepackBoxCount: 1,
       unresolvedPrintBoxCount: 1,
     });
+  });
+
+  it("serves a tenant-scoped print-ready task form only after a fixed snapshot exists", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId, templateId } = await seedPreparation(owner, {
+      mode: "repack",
+    });
+    await db
+      .update(schema.organization)
+      .set({ name: "ООО «Пивоварня»" })
+      .where(eq(schema.organization.id, tenantId));
+    await db
+      .update(schema.products)
+      .set({ boxCapacity: 20 })
+      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
+    const inventory = await createInventory(owner, productId, lineId, "repack", templateId);
+
+    await owner
+      .get(`/inventories/${inventory.id}/task-form`)
+      .expect(409, { code: "INVENTORY_TASK_FORM_SNAPSHOT_REQUIRED" });
+
+    const snapshotId = await markReady(tenantId, inventory.id, 4_116);
+    const form = await owner
+      .get(`/inventories/${inventory.id}/task-form`)
+      .expect("Content-Type", /text\/html/)
+      .expect(200);
+    expect(form.text).toContain("ООО «Пивоварня»");
+    expect(form.text).toContain("04680089900383");
+    expect(form.text).toContain("Задание на инвентаризацию");
+    expect(form.text).toContain("4&nbsp;116 кодов");
+    expect(form.text).toContain("20 бутылок");
+    expect(form.text).toContain(`markiro:inventory:v1:${inventory.id}`);
+
+    const userId = await actorUserId(tenantId);
+    const startedAt = new Date("2026-08-26T09:30:00.000Z");
+    await db
+      .update(schema.products)
+      .set({ name: "Changed after start", boxCapacity: 24 })
+      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
+    await db
+      .update(schema.lines)
+      .set({ name: "Changed line after start" })
+      .where(and(eq(schema.lines.tenantId, tenantId), eq(schema.lines.id, lineId)));
+    await db
+      .update(schema.inventories)
+      .set({
+        status: "running",
+        stationManifest: {
+          inventoryId: inventory.id,
+          inventoryNumber: inventory.number,
+          snapshotId,
+          snapshotRevision: 1,
+          snapshotFixedAt: "2026-08-26T09:12:00.000Z",
+          combinedDigest: "a".repeat(64),
+          contentDigest: "b".repeat(64),
+          codeCount: 0,
+          productId,
+          productName: "Inventory Water",
+          productPrintName: null,
+          egaisCode: null,
+          shelfLifeDays: null,
+          gtin14: FIXTURE_GTIN,
+          boxCapacity: 20,
+          mode: "repack",
+          lineId,
+          lineName: "Inventory line",
+          productionDateFrom: "2026-08-01",
+          productionDateTo: "2026-08-31",
+          boxLabelTemplate: {
+            id: templateId,
+            name: "Inventory box label",
+            spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+          },
+          limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
+        },
+        startedByUserId: userId,
+        startedAt,
+      })
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventory.id)),
+      );
+    const running = await owner.get(`/inventories/${inventory.id}/task-form`).expect(200);
+    expect(running.text).toContain("Inventory Water");
+    expect(running.text).toContain("Inventory line");
+    expect(running.text).toContain("20 бутылок");
+    expect(running.text).not.toContain("Changed after start");
+    expect(running.text).not.toContain("Changed line after start");
+
+    const closedAt = new Date("2026-08-26T10:00:00.000Z");
+    await db
+      .update(schema.inventories)
+      .set({ status: "closed", closedByUserId: userId, closedAt })
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventory.id)),
+      );
+    await owner.get(`/inventories/${inventory.id}/task-form`).expect(200);
+
+    const completedAt = new Date("2026-08-26T10:30:00.000Z");
+    await db
+      .update(schema.inventories)
+      .set({
+        status: "completed",
+        completionAcknowledgedByUserId: userId,
+        completionAcknowledgedAt: completedAt,
+        completedByUserId: userId,
+        completedAt,
+      })
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventory.id)),
+      );
+    await owner.get(`/inventories/${inventory.id}/task-form`).expect(200);
+
+    const other = request.agent(app!.getHttpServer());
+    await seedPreparation(other);
+    await other.get(`/inventories/${inventory.id}/task-form`).expect(404);
   });
 
   it("projects append-only import history and the exact active snapshot for reloadable preparation", async () => {
@@ -555,6 +675,8 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
 
     await agent.get("/inventories").expect(200);
     await agent.get(`/inventories/${inventory.id}`).expect(200);
+    await markReady(tenantId, inventory.id);
+    await agent.get(`/inventories/${inventory.id}/task-form`).expect(200);
     await agent
       .post("/inventories")
       .send(createBody(productId, lineId))

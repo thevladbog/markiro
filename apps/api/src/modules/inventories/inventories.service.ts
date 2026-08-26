@@ -34,6 +34,8 @@ import type {
   UpdateInventoryDto,
 } from "./dto";
 import { InventorySnapshotService } from "./inventory-snapshot.service";
+import type { InventoryTaskFormData } from "./inventory-task-form";
+import { parseStationInventoryManifest } from "./station-inventory.dto";
 
 type InventoryTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type InventoryImport = typeof schema.inventoryImports.$inferSelect;
@@ -217,6 +219,117 @@ export class InventoriesService {
         importRows.map((row) => this.importHistoryDtoWithStoredDiagnostic(row)),
       ),
       activeSnapshot,
+    };
+  }
+
+  async taskFormData(
+    tenantId: string,
+    id: string,
+    generatedAt = new Date(),
+  ): Promise<InventoryTaskFormData> {
+    const [row] = await this.db
+      .select({
+        id: schema.inventories.id,
+        number: schema.inventories.number,
+        status: schema.inventories.status,
+        mode: schema.inventories.mode,
+        gtin14: schema.inventories.gtin14Snapshot,
+        productionDateFrom: schema.inventories.productionDateFrom,
+        productionDateTo: schema.inventories.productionDateTo,
+        activeSnapshotId: schema.inventories.activeSnapshotId,
+        stationManifest: schema.inventories.stationManifest,
+        organizationName: schema.organization.name,
+        productName: schema.products.name,
+        productBoxCapacity: schema.products.boxCapacity,
+        lineName: schema.lines.name,
+        snapshotId: schema.inventorySnapshots.id,
+        expectedCount: schema.inventorySnapshots.expectedCount,
+      })
+      .from(schema.inventories)
+      .innerJoin(schema.organization, eq(schema.organization.id, schema.inventories.tenantId))
+      .innerJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.inventories.tenantId),
+          eq(schema.products.id, schema.inventories.productId),
+        ),
+      )
+      .innerJoin(
+        schema.lines,
+        and(
+          eq(schema.lines.tenantId, schema.inventories.tenantId),
+          eq(schema.lines.id, schema.inventories.lineId),
+        ),
+      )
+      .leftJoin(
+        schema.inventorySnapshots,
+        and(
+          eq(schema.inventorySnapshots.tenantId, schema.inventories.tenantId),
+          eq(schema.inventorySnapshots.inventoryId, schema.inventories.id),
+          eq(schema.inventorySnapshots.id, schema.inventories.activeSnapshotId),
+        ),
+      )
+      .where(and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, id)))
+      .limit(1);
+    if (!row) throw new NotFoundException();
+    if (
+      row.activeSnapshotId === null ||
+      row.snapshotId === null ||
+      row.expectedCount === null ||
+      (row.status !== "ready" &&
+        row.status !== "running" &&
+        row.status !== "closed" &&
+        row.status !== "completed")
+    ) {
+      throw new ConflictException({ code: "INVENTORY_TASK_FORM_SNAPSHOT_REQUIRED" });
+    }
+
+    if (row.status === "running" || row.status === "closed" || row.status === "completed") {
+      let manifest;
+      try {
+        manifest = parseStationInventoryManifest(row.stationManifest);
+      } catch {
+        throw new ConflictException({ code: "INVENTORY_STORED_MANIFEST_INVALID" });
+      }
+      return {
+        inventoryId: row.id,
+        inventoryNumber: row.number,
+        status: row.status,
+        organizationName: row.organizationName,
+        productName: manifest.productName,
+        gtin14: manifest.gtin14,
+        lineName: manifest.lineName,
+        mode: manifest.mode,
+        productionDateFrom: manifest.productionDateFrom,
+        productionDateTo: manifest.productionDateTo,
+        expectedCount: row.expectedCount,
+        boxCapacity: manifest.mode === "repack" ? manifest.boxCapacity : null,
+        generatedAt,
+      };
+    }
+
+    if (
+      row.mode === "repack" &&
+      (!Number.isInteger(row.productBoxCapacity) ||
+        row.productBoxCapacity === null ||
+        row.productBoxCapacity <= 0)
+    ) {
+      throw new ConflictException({ code: "INVENTORY_TASK_FORM_CONFIGURATION_INVALID" });
+    }
+    return {
+      inventoryId: row.id,
+      inventoryNumber: row.number,
+      status: row.status,
+      organizationName: row.organizationName,
+      productName: row.productName,
+      gtin14: row.gtin14,
+      lineName: row.lineName,
+      mode: row.mode,
+      productionDateFrom: row.productionDateFrom,
+      productionDateTo: row.productionDateTo,
+      expectedCount: row.expectedCount,
+      boxCapacity: row.mode === "repack" ? row.productBoxCapacity : null,
+      generatedAt,
     };
   }
 

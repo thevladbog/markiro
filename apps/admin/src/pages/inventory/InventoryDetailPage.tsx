@@ -446,9 +446,19 @@ function TerminalsStep({
       </Alert>
       <div className="mk-inventory-task-form">
         <strong>{t("pages.inventory.terminals.formTitle")}</strong>
-        <p>{t("pages.inventory.terminals.formUnavailable")}</p>
-        <Button type="button" variant="secondary" disabled>
-          {t("pages.inventory.terminals.downloadPdf")}
+        <p>{t("pages.inventory.terminals.formDescription")}</p>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() =>
+            window.open(
+              `/api/inventories/${inventory.id}/task-form`,
+              "_blank",
+              "noopener,noreferrer",
+            )
+          }
+        >
+          {t("pages.inventory.terminals.openForm")}
         </Button>
       </div>
       <div className="mk-inventory-actions">

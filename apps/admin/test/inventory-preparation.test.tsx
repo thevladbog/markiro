@@ -590,8 +590,12 @@ it("recovers the active snapshot after reload and blocks start until warehouse c
 
   expect(await screen.findByRole("heading", { name: "Доступ терминалов" })).toBeDefined();
   expect(await screen.findByText("1 из 2 терминалов в сети")).toBeDefined();
-  expect(screen.getByText("Форма-задание появится после реализации печатной формы")).toBeDefined();
-  expect(screen.getByRole("button", { name: "Скачать PDF" }).hasAttribute("disabled")).toBe(true);
+  expect(
+    screen.getByText("Печатная A4-форма со штрихкодом для открытия задания на терминале."),
+  ).toBeDefined();
+  expect(
+    screen.getByRole("button", { name: "Открыть форму-задание" }).hasAttribute("disabled"),
+  ).toBe(false);
   await user.click(screen.getByRole("button", { name: "К запуску" }));
 
   const start = screen.getByRole("button", { name: "Запустить инвентаризацию" });
