@@ -184,13 +184,7 @@ export class InventoryResultSourceService {
       .filter((row) => row.protected)
       .map((row) => resultCode(row, "protected"));
     const ineligible = snapshotRows
-      .filter(
-        (row) =>
-          !row.expected &&
-          !row.protected &&
-          row.resultId !== null &&
-          row.classification !== "voided",
-      )
+      .filter((row) => !row.expected && !row.protected && row.resultId !== null)
       .map((row) => resultCode(row, "ineligible"));
 
     const unknownRows = await tx
@@ -226,7 +220,7 @@ export class InventoryResultSourceService {
     const observedDateGroups = groupByObservedDate([
       ...verified,
       ...protectedCodes.filter((row) => row.found),
-      ...ineligible,
+      ...ineligible.filter((row) => row.found),
       ...unknown.filter((row) => row.found),
     ]);
 

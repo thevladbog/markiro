@@ -27,6 +27,7 @@ describe.skipIf(!databaseUrl)("closed inventory result source", () => {
   const verifiedEventId = randomUUID();
   const protectedEventId = randomUUID();
   const ineligibleEventId = randomUUID();
+  const voidedIneligibleEventId = randomUUID();
   const unknownEventId = randomUUID();
   const voidedEventId = randomUUID();
   const duplicateEventId = randomUUID();
@@ -36,6 +37,7 @@ describe.skipIf(!databaseUrl)("closed inventory result source", () => {
   const protectedFoundHash = "3".repeat(64);
   const protectedMissingHash = "4".repeat(64);
   const ineligibleHash = "5".repeat(64);
+  const voidedIneligibleHash = "9".repeat(64);
   const unknownCanonical = canonicalizeKm(`01${GTIN}21UNKNOWN-SOURCE`);
   const unknownHash = kmHash(unknownCanonical);
   const voidedHash = "7".repeat(64);
@@ -131,6 +133,7 @@ describe.skipIf(!databaseUrl)("closed inventory result source", () => {
         sourceState: "MOVING_BY_UD",
       }),
       snapshotCode(ineligibleHash, "INELIGIBLE", { sourceStatus: "RETIRED" }),
+      snapshotCode(voidedIneligibleHash, "VOIDED-INELIGIBLE", { sourceStatus: "RETIRED" }),
       snapshotCode(voidedHash, "VOIDED", {
         expected: true,
         sourceProductionDate: "2026-08-07",
@@ -156,6 +159,14 @@ describe.skipIf(!databaseUrl)("closed inventory result source", () => {
       scanEvent(verifiedEventId, deviceAId, "source-a", 1n, verifiedHash, "2026-08-05"),
       scanEvent(protectedEventId, deviceAId, "source-a", 2n, protectedFoundHash, "2026-08-05"),
       scanEvent(ineligibleEventId, deviceAId, "source-a", 3n, ineligibleHash, "2026-08-05"),
+      scanEvent(
+        voidedIneligibleEventId,
+        deviceAId,
+        "source-a",
+        6n,
+        voidedIneligibleHash,
+        "2026-08-10",
+      ),
       scanEvent(unknownEventId, deviceAId, "source-a", 4n, unknownHash, "2026-08-05", {
         rawPayload: unknownCanonical.raw,
       }),
@@ -176,6 +187,15 @@ describe.skipIf(!databaseUrl)("closed inventory result source", () => {
         result(verifiedEventId, deviceAId, verifiedHash, "expected", snapshotId, "2026-08-08"),
         result(protectedEventId, deviceAId, protectedFoundHash, "protected", snapshotId),
         result(ineligibleEventId, deviceAId, ineligibleHash, "ineligible", snapshotId),
+        result(
+          voidedIneligibleEventId,
+          deviceAId,
+          voidedIneligibleHash,
+          "voided",
+          snapshotId,
+          "2026-08-10",
+          "ineligible",
+        ),
         result(unknownEventId, deviceAId, unknownHash, "unknown", null),
         result(
           voidedEventId,
@@ -391,7 +411,6 @@ describe.skipIf(!databaseUrl)("closed inventory result source", () => {
         { codeHash: protectedFoundHash, found: true },
         { codeHash: protectedMissingHash, found: false },
       ],
-      ineligible: [{ codeHash: ineligibleHash }],
       unknown: [{ codeHash: unknownHash }],
       oldBoxes: [{ sscc: oldSscc, winner: { terminalId: deviceBId } }],
       newBoxes: [
@@ -417,6 +436,29 @@ describe.skipIf(!databaseUrl)("closed inventory result source", () => {
       "2026-08-08",
     ]);
     expect(frozen.observedDateGroups[1]?.codeHashes).toEqual([verifiedHash]);
+  });
+
+  it("retains a voided known ineligible code as non-found without grouping its observed date", async () => {
+    const frozen = await service.load(tenantId, inventoryId);
+
+    expect(frozen.ineligible).toEqual([
+      expect.objectContaining({
+        codeHash: ineligibleHash,
+        classification: "ineligible",
+        found: true,
+      }),
+      expect.objectContaining({
+        codeHash: voidedIneligibleHash,
+        classification: "voided",
+        found: false,
+      }),
+    ]);
+    expect(frozen.observedDateGroups).not.toContainEqual(
+      expect.objectContaining({ observedProductionDate: "2026-08-10" }),
+    );
+    expect(frozen.observedDateGroups.flatMap((group) => group.codeHashes)).not.toContain(
+      voidedIneligibleHash,
+    );
   });
 
   it("keeps a closed result source stable after a terminal display-name change", async () => {
