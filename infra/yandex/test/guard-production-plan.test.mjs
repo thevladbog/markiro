@@ -110,6 +110,10 @@ const releaseBucketReference = [
   "yandex_storage_bucket.releases.bucket",
   "yandex_storage_bucket.releases",
 ];
+const releaseBucketDomainReference = [
+  "yandex_storage_bucket.releases.bucket_domain_name",
+  "yandex_storage_bucket.releases",
+];
 // Mirrors the per-occurrence traversal list emitted by Terraform 1.15.8.
 const releasePolicyReference = [
   ...releaseBucketReference,
@@ -152,6 +156,10 @@ function addExactReleaseConfiguration(plan) {
                 expressions: {
                   policy: { references: releasePolicyReference },
                 },
+              },
+              {
+                address: "yandex_cdn_origin_group.releases",
+                expressions: { origin: { references: releaseBucketDomainReference } },
               },
               {
                 address: "yandex_cdn_resource.releases",
@@ -200,7 +208,8 @@ function makeProviderComputedReleaseCreate(plan) {
   policy.change.after_unknown = { policy: true };
   const origin = resource(plan, "module.station_releases.yandex_cdn_origin_group.releases");
   origin.change.after.id = null;
-  origin.change.after_unknown = { id: true };
+  origin.change.after.origin[0].source = null;
+  origin.change.after_unknown = { id: true, origin: [{ source: true }] };
   const cdn = resource(plan, "module.station_releases.yandex_cdn_resource.releases");
   cdn.change.after.origin_group_id = null;
   cdn.change.after.provider_cname = null;
@@ -324,11 +333,38 @@ test("production plan guard accepts provider-computed create edges only with exa
         (candidate) => candidate.address === "yandex_storage_bucket_policy.releases",
       ).expressions.policy.references = releaseBucketReference;
     },
+    (plan) => {
+      plan.configuration.root_module.module_calls.station_releases.module.resources.find(
+        (candidate) => candidate.address === "yandex_cdn_origin_group.releases",
+      ).expressions.origin.references = [
+        "yandex_storage_bucket.media.bucket_domain_name",
+        "yandex_storage_bucket.media",
+      ];
+    },
+    (plan) => {
+      plan.configuration.root_module.module_calls.station_releases.module.resources
+        .find((candidate) => candidate.address === "yandex_cdn_origin_group.releases")
+        .expressions.origin.references.push("var.release_bucket_name");
+    },
   ]) {
     const invalid = copy(creation);
     mutate(invalid);
     reject(invalid);
   }
+
+  const sourceWithoutUnknownMarker = copy(creation);
+  delete resource(
+    sourceWithoutUnknownMarker,
+    "module.station_releases.yandex_cdn_origin_group.releases",
+  ).change.after_unknown.origin[0].source;
+  reject(sourceWithoutUnknownMarker);
+
+  const computedSourceUpdate = copy(creation);
+  resource(
+    computedSourceUpdate,
+    "module.station_releases.yandex_cdn_origin_group.releases",
+  ).change.actions = ["update"];
+  reject(computedSourceUpdate);
 
   for (const references of [undefined, ["yandex_iam_service_account.application.id"]]) {
     const invalid = copy(wholeBindingUnknown);
@@ -588,6 +624,37 @@ test("guard CLI exposes a fixed release-origin-group subscope without leaking pl
     }
     assert.equal(stdout, "::error title=Production plan rejected::release-origin-group-source\n");
     assert.equal(stderr, "production plan rejected (release-origin-group-source)\n");
+    assert.doesNotMatch(stdout, /do-not-print-this-plan-value/);
+    assert.doesNotMatch(stderr, /do-not-print-this-plan-value/);
+  });
+});
+
+test("guard CLI rejects computed release origin references without leaking them", async () => {
+  const computed = await readFixture("safe");
+  makeProviderComputedReleaseCreate(computed);
+  computed.configuration.root_module.module_calls.station_releases.module.resources
+    .find((candidate) => candidate.address === "yandex_cdn_origin_group.releases")
+    .expressions.origin.references.push("do-not-print-this-plan-value");
+
+  await withPlan(computed, (planPath) => {
+    let stdout = "";
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [script, planPath], {
+        cwd: root,
+        env: { ...process.env, GITHUB_ACTIONS: "true" },
+        stdio: "pipe",
+      });
+      assert.fail("guard CLI unexpectedly accepted invalid release origin references");
+    } catch (error) {
+      stdout = String(error.stdout);
+      stderr = String(error.stderr);
+    }
+    assert.equal(
+      stdout,
+      "::error title=Production plan rejected::release-origin-group-source-references\n",
+    );
+    assert.equal(stderr, "production plan rejected (release-origin-group-source-references)\n");
     assert.doesNotMatch(stdout, /do-not-print-this-plan-value/);
     assert.doesNotMatch(stderr, /do-not-print-this-plan-value/);
   });
