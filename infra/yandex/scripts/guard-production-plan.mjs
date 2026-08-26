@@ -235,6 +235,10 @@ const releaseBucketReference = [
   "yandex_storage_bucket.releases.bucket",
   "yandex_storage_bucket.releases",
 ];
+const releaseBucketDomainReference = [
+  "yandex_storage_bucket.releases.bucket_domain_name",
+  "yandex_storage_bucket.releases",
+];
 // Terraform 1.15.8 preserves one full traversal pair for every reference
 // occurrence in the jsonencode expression: five bucket uses and two publisher uses.
 const releasePolicyReference = [
@@ -680,6 +684,10 @@ function computed(resource, attribute) {
   return resource.change?.after_unknown?.[attribute] === true;
 }
 
+function nestedComputed(resource, block, index, attribute) {
+  return resource.change?.after_unknown?.[block]?.[index]?.[attribute] === true;
+}
+
 function knownOrComputed(resource, attribute) {
   const value = resource.change?.after?.[attribute];
   if (value === null || value === undefined) {
@@ -946,7 +954,7 @@ function releaseOriginGroupScoped(scope, callback) {
   return scoped(`release-origin-group-${scope}`, callback);
 }
 
-function validateOriginGroup(resource, bucketName) {
+function validateOriginGroup(plan, resource, bucketName) {
   const value = releaseOriginGroupScoped("resource", () => after(resource));
   releaseOriginGroupScoped("name", () => {
     if (value.name !== "markiro-station-releases") rejected();
@@ -967,9 +975,20 @@ function validateOriginGroup(resource, bucketName) {
   releaseOriginGroupScoped("backup", () => {
     if (origin.backup !== false) rejected();
   });
-  releaseOriginGroupScoped("source", () => {
-    if (origin.source !== `${bucketName}.storage.yandexcloud.net`) rejected();
+  const computedSource = releaseOriginGroupScoped("source", () => {
+    if (origin.source === `${bucketName}.storage.yandexcloud.net`) return false;
+    if (
+      (origin.source !== null && origin.source !== undefined) ||
+      !onlyCreate(resource) ||
+      !nestedComputed(resource, "origin", 0, "source")
+    )
+      rejected();
+    return true;
   });
+  if (computedSource)
+    releaseOriginGroupScoped("source-references", () => {
+      proveExactReferences(plan, resource, "origin", releaseBucketDomainReference);
+    });
   return releaseOriginGroupScoped("id", () => {
     const id = knownOrComputed(resource, "id");
     return id === null ? null : nonblank(id);
@@ -1223,6 +1242,7 @@ export function guardProductionPlan(plan) {
     appRuntimeId,
   );
   const releaseOriginGroupId = validateOriginGroup(
+    plan,
     resources.get("module.station_releases.yandex_cdn_origin_group.releases"),
     bucketName,
   );
