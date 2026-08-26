@@ -44,7 +44,8 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json"
+        "https://releases.markiro.app/station/beta/latest.json",
+        "https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVEQ0ZDNzNGOTg0QUE5RjkKUldUNXFVcVlQOGZQN1ptZW0zdmtpbCtQTW85M21wNGUrNHJNeUFja2JhZm5lM0pSZG4wUzFLcVgK"
     }

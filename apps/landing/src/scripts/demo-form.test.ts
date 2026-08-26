@@ -93,6 +93,19 @@ afterEach(() => {
 });
 
 describe("initDemoForm", () => {
+  it("tracks a keyboard-compatible submit attempt before validation", async () => {
+    const form = renderForm();
+    const currentRuntime = runtime();
+    const name = form.elements.namedItem("name") as HTMLInputElement;
+    name.value = "";
+    initDemoForm(form, currentRuntime);
+
+    await submit(form);
+
+    expect(currentRuntime.track).toHaveBeenNthCalledWith(1, "landing_form_submit", {});
+    expect(currentRuntime.request).not.toHaveBeenCalled();
+  });
+
   it("shows field errors, focuses the first invalid field, and does not send", async () => {
     const form = renderForm();
     const currentRuntime = runtime();

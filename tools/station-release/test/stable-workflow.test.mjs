@@ -1,94 +1,530 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFile as execFileCallback } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { load } from "js-yaml";
 
 const root = new URL("../../../", import.meta.url);
+const execFile = promisify(execFileCallback);
 const source = () =>
   readFile(new URL(".github/workflows/station-stable-release.yml", root), "utf8");
+const distributionRepository = "thevladbog/markiro-station-releases";
 
-test("station stable publication promotes an explicit accepted beta channel-last", async () => {
+function workflowStep(workflow, job, name) {
+  const step = workflow.jobs[job].steps.find((candidate) => candidate.name === name);
+  assert.ok(step, `missing ${job} step: ${name}`);
+  return step;
+}
+
+test("publishes stable GitHub release state only to the fixed public binary repository", async () => {
+  const text = await source();
+  const workflow = load(text);
+  assert.equal(workflow.jobs.build.env.STATION_RELEASE_REPOSITORY, distributionRepository);
+  assert.equal(workflow.jobs.release.env.STATION_RELEASE_REPOSITORY, distributionRepository);
+  const legacySeed = workflowStep(workflow, "release", "Seed legacy stable rollback baseline");
+  const normalReleaseState = workflow.jobs.build.steps
+    .concat(workflow.jobs.release.steps.filter((step) => step !== legacySeed))
+    .map((step) => step.run ?? "")
+    .join("\n");
+  assert.doesNotMatch(normalReleaseState, /gh release[^\n]*--repo "\$GITHUB_REPOSITORY"/);
+  assert.equal(legacySeed.env.GH_TOKEN, "${{ github.token }}");
+  assert.match(
+    legacySeed.run,
+    /gh release download "\$seed_stable_tag" --repo "\$GITHUB_REPOSITORY"/,
+  );
+  assert.match(text, /GH_TOKEN:\s*\$\{\{ secrets\.STATION_RELEASE_REPOSITORY_TOKEN \}\}/);
+  assert.match(text, /repos\/\$STATION_RELEASE_REPOSITORY\/git\/ref\/heads\/main/);
+  assert.match(text, /gh release create "\$tag"[\s\S]*--target "\$distribution_sha"/);
+  assert.match(text, /gh run list[\s\S]*--repo "\$GITHUB_REPOSITORY"/);
+  assert.match(text, /https:\/\/github\.com\/\$GITHUB_REPOSITORY\/compare/);
+  assert.match(text, /repos\/\$GITHUB_REPOSITORY\/git\/refs\/heads\/\$candidate_ref/);
+});
+
+test("stable signing and dual-origin publication use separate protected environments", async () => {
   const text = await source();
   const workflow = load(text);
 
   assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), [
     "mode",
+    "owner_confirmation",
     "source_beta_tag",
     "acceptance_confirmed",
     "highlights",
+    "seed_stable_tag",
+    "seed_infrastructure_evidence",
   ]);
   assert.deepEqual(workflow.on.workflow_dispatch.inputs.mode.options, [
     "publish",
     "promote-existing",
+    "seed-baseline",
   ]);
   assert.equal(workflow.on.workflow_dispatch.inputs.acceptance_confirmed.default, false);
   assert.equal(workflow.concurrency.group, "station-stable-release");
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
-  assert.equal(workflow.jobs.release.environment, "station-stable");
+  assert.deepEqual(Object.keys(workflow.jobs), ["authorize", "build", "release"]);
+  assert.equal(workflow.jobs.build.needs, "authorize");
+  assert.equal(workflow.jobs.build.environment, "station-stable");
+  assert.equal(workflow.jobs.build["runs-on"], "windows-latest");
+  assert.deepEqual(workflow.jobs.build.permissions, { actions: "read", contents: "read" });
+  assert.equal(workflow.jobs.release.environment, "station-release");
   assert.equal(workflow.jobs.release["runs-on"], "windows-latest");
+  assert.equal(workflow.jobs.release.needs, "build");
   assert.deepEqual(workflow.jobs.release.permissions, { actions: "read", contents: "write" });
-  assert.equal(workflow.jobs.release.env.VITE_STATION_API_URL, "https://admin.markiro.app");
-  assert.equal(workflow.jobs.release.env.TAURI_SIGNING_PRIVATE_KEY, undefined);
-  assert.equal(workflow.jobs.release.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD, undefined);
+  assert.equal(workflow.jobs.build.env.VITE_STATION_API_URL, "https://admin.markiro.app");
+  assert.equal(workflow.jobs.build.env.TAURI_SIGNING_PRIVATE_KEY, undefined);
+  assert.equal(workflow.jobs.release.env.AWS_ACCESS_KEY_ID, undefined);
+  assert.equal(workflow.jobs.release.env.AWS_SECRET_ACCESS_KEY, undefined);
+  assert.doesNotMatch(JSON.stringify(workflow.jobs.build), /YANDEX_STATION_RELEASE/);
 
-  const steps = workflow.jobs.release.steps;
-  const acceptedBeta = steps.find((step) => step.name === "Resolve and verify accepted beta");
-  const build = steps.find((step) => step.name === "Build signed stable Windows artifacts");
-  const immutable = steps.find((step) => step.name === "Publish immutable stable release");
-  const existing = steps.find(
-    (step) => step.name === "Prepare existing stable release for channel recovery",
-  );
-  const channel = steps.find((step) => step.name === "Promote stable channel");
-  const cleanup = steps.find((step) => step.name === "Cleanup owned stable release material");
-  assert.ok(acceptedBeta);
-  assert.ok(build);
-  assert.ok(immutable);
-  assert.ok(existing);
-  assert.ok(channel);
-  assert.ok(cleanup);
-  assert.equal(cleanup.if, "always()");
-  assert.ok(steps.indexOf(acceptedBeta) < steps.indexOf(build));
-  assert.ok(steps.indexOf(build) < steps.indexOf(immutable));
-  assert.ok(steps.indexOf(immutable) < steps.indexOf(channel));
-
-  assert.match(text, /refs\/heads\/main/);
-  assert.match(text, /test "\$acceptance_confirmed" = "true"/);
-  assert.match(text, /source_beta_tag.*station-v.*-beta/s);
-  assert.match(text, /gh release view "\$source_beta_tag"/);
-  assert.match(text, /gh release download "\$source_beta_tag"/);
-  assert.match(text, /artifacts\.mjs validate beta/);
-  assert.match(text, /promotion\.mjs validate-beta/);
-  assert.match(text, /git merge-base --is-ancestor "\$base_sha" origin\/main/);
-  assert.match(text, /--commit "\$base_sha"/);
-  assert.match(text, /tauri\.stable\.conf\.json/);
-  assert.match(text, /tauri build[\s\S]*--config src-tauri\/tauri\.stable\.conf\.json/);
+  const signing = workflowStep(workflow, "build", "Build signed stable Windows artifacts");
+  assert.equal(signing.if, "inputs.mode == 'publish'");
+  assert.equal((signing.run.match(/tauri build/g) ?? []).length, 1);
+  assert.match(signing.run, /--config src-tauri\/tauri\.stable\.conf\.json/);
   assert.match(
-    build.run,
+    signing.run,
     /printf '%s' "\$TAURI_SIGNING_PRIVATE_KEY" \| node tools\/station-release\/normalize-signing-key\.mjs > \/dev\/null/,
   );
-  assert.match(text, /signing_key_file="\$RUNNER_TEMP\/station-stable-updater\.key"/);
-  assert.match(text, /printf '%s' "\$TAURI_SIGNING_PRIVATE_KEY" > "\$signing_key_file"/);
-  assert.match(text, /export TAURI_SIGNING_PRIVATE_KEY="\$signing_key_file"/);
-  assert.doesNotMatch(build.run, /normalized_key=/);
-  assert.match(text, /artifacts\.mjs stage-stable/);
-  assert.match(text, /artifacts\.mjs validate stable/);
-  assert.match(text, /changelog\.mjs generate/);
-  assert.match(text, /gh release create "\$tag"[^\n]*--draft[^\n]*--target "\$release_sha"/);
-  assert.match(text, /gh release edit "\$tag"[^\n]*--draft=false/);
-  assert.match(text, /gh release create station-stable-channel[^\n]*--prerelease/);
-  assert.match(text, /station-channel-backup/);
-  assert.match(channel.run, /cmp "\$verify_dir\/latest\.json"/);
-  assert.match(
-    channel.run,
-    /channel_manifest="\$RUNNER_TEMP\/station-stable-channel\/latest\.json"/,
+  assert.match(signing.run, /printf '%s' "\$TAURI_SIGNING_PRIVATE_KEY" > "\$signing_key_file"/);
+  assert.doesNotMatch(signing.run, /normalized_key=/);
+
+  const credentialSteps = workflow.jobs.release.steps.filter((step) =>
+    JSON.stringify(step.env ?? {}).includes("YANDEX_STATION_RELEASE_ACCESS_KEY_ID"),
   );
-  assert.match(text, /station-stable-channel.*latest\.json/s);
-  assert.match(existing.run, /e\.betaEvidenceSha256!==process\.env\.BETA_EVIDENCE_SHA256/);
-  assert.match(channel.run, /--json tagName,isDraft,isPrerelease,assets/);
-  assert.doesNotMatch(channel.run, /--pattern latest\.json --dir "\$backup_dir" \|\| true/);
-  assert.match(text, /candidate_ref="station-stable-release-candidate-\$\{GITHUB_RUN_ID\}"/);
+  assert.equal(credentialSteps.length, 4);
+  for (const step of credentialSteps) {
+    assert.equal(step.env.AWS_ACCESS_KEY_ID, "${{ secrets.YANDEX_STATION_RELEASE_ACCESS_KEY_ID }}");
+    assert.equal(
+      step.env.AWS_SECRET_ACCESS_KEY,
+      "${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}",
+    );
+    assert.equal(
+      step.env.YANDEX_STATION_RELEASE_BUCKET,
+      "${{ vars.YANDEX_STATION_RELEASE_BUCKET }}",
+    );
+    assert.equal(
+      step.env.YANDEX_STATION_RELEASE_ENDPOINT,
+      "${{ vars.YANDEX_STATION_RELEASE_ENDPOINT }}",
+    );
+    assert.match(step.run, /::add-mask::\$AWS_ACCESS_KEY_ID/);
+    assert.match(step.run, /::add-mask::\$AWS_SECRET_ACCESS_KEY/);
+    assert.match(step.run, /unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN/);
+  }
+
+  assert.match(text, /refs\/heads\/main/);
   assert.match(text, /persist-credentials:\s*false/);
+  assert.doesNotMatch(text, /--access-key|--secret-access-key|--credentials/i);
   assert.doesNotMatch(text, /pull_request_target|self-hosted|id-token|continue-on-error/i);
-  assert.doesNotMatch(text, /git[^\n]*(?:--force|-f\b)|gh release upload "\$tag"[^\n]*--clobber/i);
+});
+
+test("stable publication requires the repository owner, main, and the exact confirmation", async () => {
+  const workflow = load(await source());
+  const input = workflow.on.workflow_dispatch.inputs.owner_confirmation;
+  const authorize = workflow.jobs.authorize;
+  const step = authorize.steps.find(
+    (candidate) => candidate.name === "Authorize station stable release owner",
+  );
+
+  assert.equal(input.required, true);
+  assert.equal(input.type, "string");
+  assert.equal(authorize.environment, undefined);
+  assert.deepEqual(authorize.permissions, {});
+  assert.equal(authorize.if, "github.ref == 'refs/heads/main'");
+  assert.equal(authorize["runs-on"], "ubuntu-latest");
+  assert.equal(authorize["timeout-minutes"], 5);
+  assert.ok(step);
+  assert.deepEqual(step.env, {
+    OWNER_CONFIRMATION: "${{ inputs.owner_confirmation }}",
+    RELEASE_ACTOR: "${{ github.actor }}",
+    RELEASE_OWNER: "${{ github.repository_owner }}",
+  });
+
+  const run = (env) =>
+    execFile("bash", ["-c", step.run], {
+      env: {
+        ...process.env,
+        GITHUB_REF: "refs/heads/main",
+        OWNER_CONFIRMATION: "PUBLISH-STATION-STABLE",
+        RELEASE_ACTOR: "thevladbog",
+        RELEASE_OWNER: "thevladbog",
+        ...env,
+      },
+    });
+
+  await assert.doesNotReject(run({}));
+  await assert.rejects(run({ RELEASE_ACTOR: "another-user" }));
+  await assert.rejects(run({ OWNER_CONFIRMATION: "publish-station-stable" }));
+  await assert.rejects(run({ GITHUB_REF: "refs/heads/feature" }));
+});
+
+test("normal stable modes validate the exact beta at both origins before rebuilding baseSha", async () => {
+  const workflow = load(await source());
+  const steps = workflow.jobs.build.steps;
+  const accepted = workflowStep(workflow, "build", "Resolve and verify dual-origin accepted beta");
+  const prepare = workflowStep(workflow, "build", "Prepare stable release source");
+  const build = workflowStep(workflow, "build", "Build and verify stable source");
+  const signing = workflowStep(workflow, "build", "Build signed stable Windows artifacts");
+
+  assert.equal(accepted.if, "inputs.mode == 'publish' || inputs.mode == 'promote-existing'");
+  assert.ok(steps.indexOf(accepted) < steps.indexOf(prepare));
+  assert.ok(steps.indexOf(prepare) < steps.indexOf(build));
+  assert.ok(steps.indexOf(build) < steps.indexOf(signing));
+  assert.match(accepted.run, /gh release view "\$source_beta_tag"/);
+  assert.match(
+    accepted.run,
+    /env -u GH_TOKEN -u GITHUB_TOKEN node tools\/station-release\/github-public\.mjs[\s\\]*download-release beta "\$beta_version"/,
+  );
+  assert.doesNotMatch(accepted.run, /mkdir "\$github_beta_dir"/);
+  assert.doesNotMatch(accepted.run, /gh release download "\$source_beta_tag"/);
+  assert.match(
+    accepted.run,
+    /https:\/\/releases\.markiro\.app\/station\/beta\/releases\/\$beta_version/,
+  );
+  assert.match(accepted.run, /artifacts\.mjs validate-origin github beta/);
+  assert.match(accepted.run, /artifacts\.mjs validate-origin yandex beta/);
+  assert.match(accepted.run, /artifacts\.mjs compare-origins/);
+  assert.match(
+    accepted.run,
+    /promotion\.mjs validate-beta[\s\\]*"\$beta_release_json"[\s\\]*"\$github_evidence_path"[\s\\]*"\$yandex_evidence_path"/,
+  );
+  assert.match(
+    accepted.run,
+    /gh api "repos\/\$STATION_RELEASE_REPOSITORY\/commits\/\$beta_target_sha"/,
+  );
+  assert.match(accepted.run, /git merge-base --is-ancestor "\$base_sha" origin\/main/);
+  assert.match(accepted.run, /--commit "\$base_sha"/);
+  assert.match(accepted.run, /stable-boundary\.mjs resolve-state/);
+  assert.match(accepted.run, /gh release list[\s\S]*--limit 10001/);
+  assert.match(accepted.run, /--json tagName,isDraft,isPrerelease,publishedAt > "\$releases_file"/);
+  assert.doesNotMatch(accepted.run, /gh release list[^\n]*targetCommitish/);
+  assert.equal(prepare.if, "inputs.mode == 'publish'");
+  assert.match(prepare.run, /git checkout --detach "\$base_sha"/);
+  assert.match(prepare.run, /git rev-parse HEAD\^/);
+  assert.equal(build.if, "inputs.mode == 'publish'");
+});
+
+test("stable dispatch validation rejects adversarial mode and rollback input combinations", async (t) => {
+  const workflow = load(await source());
+  const validate = workflowStep(workflow, "build", "Validate stable dispatch inputs");
+  const runnerTemp = await mkdtemp(join(tmpdir(), "markiro-stable-dispatch-"));
+  t.after(() => rm(runnerTemp, { recursive: true, force: true }));
+  const repository = join(runnerTemp, "repository");
+  await execFile("git", ["init", repository]);
+  await writeFile(join(repository, "fixture"), "stable dispatch fixture\n");
+  await execFile("git", ["add", "fixture"], { cwd: repository });
+  await execFile(
+    "git",
+    [
+      "-c",
+      "user.name=Station Release Tests",
+      "-c",
+      "user.email=station-release-tests@invalid.example",
+      "commit",
+      "-m",
+      "test fixture",
+    ],
+    { cwd: repository },
+  );
+  const mainSha = (await execFile("git", ["rev-parse", "HEAD"], { cwd: repository })).stdout.trim();
+  await execFile("git", ["update-ref", "refs/remotes/origin/main", mainSha], { cwd: repository });
+  const run = ({
+    mode,
+    sourceBetaTag = "",
+    acceptanceConfirmed = "false",
+    highlights = "",
+    seedStableTag = "",
+    seedEvidence = "",
+  }) =>
+    execFile("bash", ["-c", validate.run], {
+      cwd: repository,
+      env: {
+        ...process.env,
+        GITHUB_REF: "refs/heads/main",
+        GITHUB_SHA: mainSha,
+        MODE: mode,
+        SOURCE_BETA_TAG: sourceBetaTag,
+        ACCEPTANCE_CONFIRMED: acceptanceConfirmed,
+        HIGHLIGHTS: highlights,
+        SEED_STABLE_TAG: seedStableTag,
+        SEED_INFRASTRUCTURE_EVIDENCE: seedEvidence,
+        RUNNER_TEMP: runnerTemp,
+        GITHUB_ENV: join(runnerTemp, "github-env"),
+      },
+    });
+
+  const normal = {
+    sourceBetaTag: "station-v1.2.3-beta.4",
+    acceptanceConfirmed: "true",
+  };
+  await assert.doesNotReject(run({ mode: "publish", ...normal }));
+  await assert.doesNotReject(run({ mode: "promote-existing", ...normal }));
+  await assert.doesNotReject(
+    run({ mode: "seed-baseline", seedStableTag: "station-v1.2.3", seedEvidence: "{}" }),
+  );
+  for (const input of [
+    { mode: "publish", sourceBetaTag: normal.sourceBetaTag },
+    { mode: "publish", ...normal, sourceBetaTag: "station-v1.2.3" },
+    { mode: "publish", ...normal, seedStableTag: "station-v1.1.0" },
+    { mode: "promote-existing", sourceBetaTag: normal.sourceBetaTag },
+    {
+      mode: "seed-baseline",
+      sourceBetaTag: normal.sourceBetaTag,
+      seedStableTag: "station-v1.2.3",
+      seedEvidence: "{}",
+    },
+    {
+      mode: "seed-baseline",
+      acceptanceConfirmed: "true",
+      seedStableTag: "station-v1.2.3",
+      seedEvidence: "{}",
+    },
+    { mode: "seed-baseline", seedStableTag: "station-v1.2.3" },
+    { mode: "seed-baseline", seedStableTag: "station-v1.2.3-beta.1", seedEvidence: "{}" },
+    {
+      mode: "seed-baseline",
+      highlights: "not allowed",
+      seedStableTag: "station-v1.2.3",
+      seedEvidence: "{}",
+    },
+    { mode: "repair", ...normal },
+  ]) {
+    await assert.rejects(run(input), /Command failed/, JSON.stringify(input));
+  }
+});
+
+test("publish stages two stable trees from one build and keeps stable provenance identical", async () => {
+  const workflow = load(await source());
+  const stage = workflowStep(workflow, "build", "Stage and validate dual-origin stable trees");
+  const upload = workflowStep(workflow, "build", "Upload dual-origin stable candidate");
+
+  assert.equal(stage.if, "inputs.mode == 'publish'");
+  assert.match(stage.run, /github_tree="\$RUNNER_TEMP\/station-stable-github"/);
+  assert.match(stage.run, /yandex_tree="\$RUNNER_TEMP\/station-stable-yandex"/);
+  assert.match(
+    stage.run,
+    /artifacts\.mjs stage-origin github stable[\s\\]*"\$RUNNER_TEMP\/station-stable-input" "\$github_tree"/,
+  );
+  assert.match(
+    stage.run,
+    /artifacts\.mjs stage-origin yandex stable[\s\\]*"\$RUNNER_TEMP\/station-stable-input" "\$yandex_tree"/,
+  );
+  assert.match(stage.run, /"\$notes_path" "\$provenance_path"/);
+  assert.match(stage.run, /artifacts\.mjs validate-origin github stable/);
+  assert.match(stage.run, /artifacts\.mjs validate-origin yandex stable/);
+  assert.match(stage.run, /artifacts\.mjs compare-origins/);
+  assert.match(stage.run, /stable-boundary\.mjs resolve-changelog/);
+  assert.match(stage.run, /github-public\.mjs[\s\\]*download-release/);
+  assert.doesNotMatch(stage.run, /git tag --list|candidate_release_sha|earliest_base_sha/);
+  assert.match(
+    stage.run,
+    /git bundle create "\$RUNNER_TEMP\/station-stable-candidate\/source\.bundle"[\s\\]*HEAD "\^\$base_sha"/,
+  );
+  assert.equal(upload.if, "inputs.mode == 'publish'");
+  assert.match(upload.uses, /actions\/upload-artifact@043fb46d/);
+  assert.doesNotMatch(JSON.stringify(workflow.jobs.release), /tauri build|normalize-signing-key/);
+});
+
+test("both public stable trees are proven before the complete mutable transaction", async () => {
+  const workflow = load(await source());
+  const steps = workflow.jobs.release.steps;
+  const github = workflowStep(workflow, "release", "Publish immutable GitHub stable");
+  const yandex = workflowStep(workflow, "release", "Publish immutable Yandex stable");
+  const publicValidation = workflowStep(
+    workflow,
+    "release",
+    "Download and validate public immutable stable trees",
+  );
+  const promote = workflowStep(workflow, "release", "Promote stable mutable targets");
+  const resolve = workflowStep(workflow, "release", "Resolve stable publication candidate");
+
+  assert.equal(github.if, "inputs.mode == 'publish'");
+  assert.equal(yandex.if, "inputs.mode == 'publish'");
+  assert.equal(
+    publicValidation.if,
+    "inputs.mode == 'publish' || inputs.mode == 'promote-existing'",
+  );
+  assert.ok(steps.indexOf(github) < steps.indexOf(yandex));
+  assert.ok(steps.indexOf(yandex) < steps.indexOf(publicValidation));
+  assert.ok(steps.indexOf(publicValidation) < steps.indexOf(promote));
+  assert.match(github.run, /gh release view "\$tag"[\s\S]*exit 1[\s\S]*gh release create/);
+  assert.doesNotMatch(github.run, /release upload[^\n]*--clobber/);
+  assert.match(github.run, /github-public\.mjs[\s\\]*download-release stable "\$version"/);
+  assert.match(
+    yandex.run,
+    /yandex-publisher\.mjs publish-immutable[\s\\]*"\$RUNNER_TEMP\/station-stable-candidate\/yandex" stable "\$version"/,
+  );
+  assert.match(publicValidation.run, /station-stable-github-public/);
+  assert.match(publicValidation.run, /station-stable-yandex-public/);
+  assert.match(publicValidation.run, /unset GH_TOKEN GITHUB_TOKEN/);
+  assert.match(
+    publicValidation.run,
+    /github-public\.mjs[\s\\]*download-release[\s\\]*stable "\$version"/,
+  );
+  assert.doesNotMatch(publicValidation.run, /gh release download/);
+  assert.match(
+    publicValidation.run,
+    /https:\/\/releases\.markiro\.app\/station\/stable\/releases\/\$version/,
+  );
+  assert.match(publicValidation.run, /artifacts\.mjs validate-origin github stable/);
+  assert.match(publicValidation.run, /artifacts\.mjs validate-origin yandex stable/);
+  assert.match(publicValidation.run, /artifacts\.mjs compare-origins/);
+  assert.match(
+    publicValidation.run,
+    /yandex-publisher\.mjs validate-public[\s\\]*"\$yandex_public" stable "\$version"/,
+  );
+  assert.ok(
+    steps.indexOf(publicValidation) < steps.indexOf(promote) &&
+      publicValidation.run.indexOf("yandex-publisher.mjs validate-public") >= 0 &&
+      promote.run.indexOf("yandex-publisher.mjs backup-mutables stable") >= 0,
+  );
+  assert.match(resolve.run, /summary_source_beta_tag="\$source_beta_tag"/);
+  assert.match(resolve.run, /summary_base_sha="\$base_sha"/);
+  assert.match(resolve.run, /summary_github_beta_evidence_sha256="\$github_beta_evidence_sha256"/);
+  assert.match(resolve.run, /summary_yandex_beta_evidence_sha256="\$yandex_beta_evidence_sha256"/);
+  assert.match(resolve.run, /sourceBetaTag "\$summary_source_beta_tag"/);
+  assert.match(resolve.run, /baseSha "\$summary_base_sha"/);
+  assert.match(resolve.run, /releaseSha "\$release_sha"/);
+  assert.match(resolve.run, /githubBetaEvidenceSha256 "\$summary_github_beta_evidence_sha256"/);
+  assert.match(resolve.run, /yandexBetaEvidenceSha256 "\$summary_yandex_beta_evidence_sha256"/);
+  assert.doesNotMatch(publicValidation.run, /publish-immutable|tauri build/);
+  assert.doesNotMatch(promote.run, /gh release create "\$tag"|publish-immutable|tauri build/);
+});
+
+test("stable mutables promote GitHub, Yandex manifest, then the default stable alias and roll back in reverse", async () => {
+  const workflow = load(await source());
+  const step = workflowStep(workflow, "release", "Promote stable mutable targets");
+  const run = step.run;
+  const githubBackup = run.indexOf(
+    '"$RUNNER_TEMP/station-stable-github-channel-backup/latest.json"',
+    run.indexOf("trap rollback_transaction EXIT"),
+  );
+  const yandexBackup = run.indexOf("yandex-publisher.mjs backup-mutables stable");
+  const githubPromotion = run.indexOf(
+    'gh release upload station-stable-channel --repo "$STATION_RELEASE_REPOSITORY"',
+    githubBackup + 1,
+  );
+  const yandexPromotion = run.indexOf("yandex-publisher.mjs promote", yandexBackup + 1);
+  assert.ok(githubBackup >= 0 && githubBackup < yandexBackup);
+  assert.ok(yandexBackup < githubPromotion && githubPromotion < yandexPromotion);
+  assert.doesNotMatch(run.slice(githubBackup, yandexBackup), /\|\| true/);
+  assert.match(run, /trap rollback_transaction EXIT/);
+  assert.match(run, /github_may_have_changed=true[\s\S]*gh release upload station-stable-channel/);
+  assert.match(run, /yandex_may_have_changed=true[\s\S]*yandex-publisher\.mjs promote/);
+  const rollback = run.slice(
+    run.indexOf("rollback_transaction()"),
+    run.indexOf("trap rollback_transaction EXIT"),
+  );
+  assert.ok(
+    rollback.indexOf("yandex-publisher.mjs rollback stable") <
+      rollback.indexOf("station-stable-github-channel-backup/latest.json"),
+  );
+  assert.match(rollback, /station-stable-github-rollback-verify/);
+  assert.match(rollback, /github-public\.mjs download-channel stable/);
+  assert.doesNotMatch(rollback, /gh release download station-stable-channel/);
+  assert.match(rollback, /station release mutable restoration failed/);
+  assert.match(
+    rollback,
+    /github_channel_preexisting[\s\S]*gh release delete station-stable-channel/,
+  );
+  assert.match(run, /https:\/\/releases\.markiro\.app\/station\/stable\/latest\.json/);
+  assert.match(run, /https:\/\/releases\.markiro\.app\/station\/download/);
+  assert.match(run, /github-public\.mjs download-channel stable/);
+  assert.doesNotMatch(run, /station\/beta\/download/);
+  assert.match(
+    run,
+    /if \[ "\$github_channel_preexisting" = false \]; then[\s\S]*gh release create station-stable-channel[\s\S]*else[\s\S]*gh release upload station-stable-channel/,
+  );
+  assert.match(run, /test -z "\$previous_stable_tag"/);
+  assert.doesNotMatch(run, /delete-object|DeleteObject/);
+});
+
+test("one-time stable seed uses the latest legacy stable only while release DNS is disabled", async () => {
+  const workflow = load(await source());
+  const validate = workflowStep(workflow, "build", "Validate stable dispatch inputs");
+  const seed = workflowStep(workflow, "release", "Seed legacy stable rollback baseline");
+  const immutable = workflowStep(workflow, "release", "Publish immutable Yandex stable");
+  const publicValidation = workflowStep(
+    workflow,
+    "release",
+    "Download and validate public immutable stable trees",
+  );
+  const promote = workflowStep(workflow, "release", "Promote stable mutable targets");
+
+  assert.match(validate.run, /if \[ "\$MODE" = "seed-baseline" \]/);
+  assert.match(validate.run, /test -z "\$SOURCE_BETA_TAG"/);
+  assert.match(validate.run, /test "\$ACCEPTANCE_CONFIRMED" = "false"/);
+  assert.match(validate.run, /SEED_STABLE_TAG/);
+  assert.match(validate.run, /SEED_INFRASTRUCTURE_EVIDENCE/);
+  assert.equal(seed.if, "inputs.mode == 'seed-baseline'");
+  assert.match(seed.run, /gh release list[\s\S]*--limit 10001/);
+  assert.match(seed.run, /stable-boundary\.mjs resolve-latest-stable/);
+  assert.match(seed.run, /test "\$seed_stable_tag" = "\$latest_stable_tag"/);
+  assert.match(
+    seed.run,
+    /gh release download "\$seed_stable_tag"[\s\S]*--repo "\$GITHUB_REPOSITORY"/,
+  );
+  assert.match(
+    seed.run,
+    /yandex-publisher\.mjs seed-baseline[\s\S]* stable[\s\\]*[\s\S]*--confirm-empty-channel-bootstrap/,
+  );
+  assert.match(seed.run, /SEED_INFRASTRUCTURE_EVIDENCE/);
+  assert.doesNotMatch(
+    seed.run,
+    /promotion\.mjs validate-beta|station-beta\/releases|station\/beta/,
+  );
+  assert.doesNotMatch(seed.run, /gh release upload station-stable-channel|gh release create/);
+  assert.equal(immutable.if, "inputs.mode == 'publish'");
+  assert.equal(
+    publicValidation.if,
+    "inputs.mode == 'publish' || inputs.mode == 'promote-existing'",
+  );
+  assert.equal(promote.if, "inputs.mode == 'publish' || inputs.mode == 'promote-existing'");
+});
+
+test("always emits a bounded publication and compensation summary", async () => {
+  const workflow = load(await source());
+  const summary = workflowStep(workflow, "release", "Summarize stable release");
+  const github = workflowStep(workflow, "release", "Publish immutable GitHub stable");
+  const yandex = workflowStep(workflow, "release", "Publish immutable Yandex stable");
+  const publicValidation = workflowStep(
+    workflow,
+    "release",
+    "Download and validate public immutable stable trees",
+  );
+  const promote = workflowStep(workflow, "release", "Promote stable mutable targets");
+
+  assert.equal(summary.if, "always()");
+  assert.match(summary.run, /release-summary\.mjs render/);
+  assert.doesNotMatch(summary.run, /\$\{\{ toJSON\(|error\.message|stderr|stdout/);
+  const githubAttempted = github.run.indexOf("github-publication-attempted");
+  const githubCreate = github.run.indexOf('gh release create "$tag"');
+  const githubCreated = github.run.indexOf("github-draft-created");
+  const githubUpload = github.run.indexOf('gh release upload "$tag"');
+  const githubAssetsValidated = github.run.indexOf("github-draft-assets-validated");
+  const githubUndraftAttempted = github.run.indexOf("github-undraft-attempted");
+  const githubUndraft = github.run.indexOf('gh release edit "$tag"');
+  const githubPublicValidated = github.run.indexOf("github-public-validated");
+  assert.ok(githubAttempted >= 0 && githubAttempted < githubCreate);
+  assert.ok(githubCreate < githubCreated && githubCreated < githubUpload);
+  assert.ok(githubUpload < githubAssetsValidated);
+  assert.ok(githubAssetsValidated < githubUndraftAttempted);
+  assert.ok(githubUndraftAttempted < githubUndraft && githubUndraft < githubPublicValidated);
+  const yandexAttempted = yandex.run.indexOf("yandex-publication-attempted");
+  const yandexPublish = yandex.run.indexOf("yandex-publisher.mjs publish-immutable");
+  const bothPublished = yandex.run.indexOf("both-origin-published");
+  assert.ok(yandexAttempted >= 0 && yandexAttempted < yandexPublish);
+  assert.ok(yandexPublish < bothPublished);
+  assert.match(publicValidation.run, /githubManifestSha256/);
+  assert.match(publicValidation.run, /yandexEvidenceSha256/);
+  assert.match(publicValidation.run, /installerSha256/);
+  assert.match(publicValidation.run, /existing-public-validation-started/);
+  assert.match(publicValidation.run, /both-public-validated/);
+  assert.match(promote.run, /github-promoted/);
+  assert.match(promote.run, /all-promoted/);
+  assert.match(promote.run, /restored/);
+  assert.match(promote.run, /restoration-failed/);
 });

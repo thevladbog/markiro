@@ -31,6 +31,7 @@ const legalPaths = page.locale === "ru"
       ["/en/privacy/", "Processing policy"],
       ["/en/personal-data-consent/", "Consent"],
     ];
+const consentSettingsLabel = page.locale === "ru" ? "Настройки cookies" : "Cookie settings";
 ---
 
 <footer class="landing-footer">
@@ -44,6 +45,7 @@ const legalPaths = page.locale === "ru"
     </nav>
     <nav class="landing-footer__legal" aria-label={page.locale === "ru" ? "Юридические документы" : "Legal documents"}>
       {legalPaths.map(([path, label]) => <a href={path}>{label}</a>)}
+      <button type="button" data-consent-settings>{consentSettingsLabel}</button>
     </nav>
   </div>
 </footer>

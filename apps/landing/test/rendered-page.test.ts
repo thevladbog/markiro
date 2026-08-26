@@ -144,6 +144,23 @@ describe("rendered landing page", () => {
     );
   });
 
+  it("renders localized cookie choices and a persistent settings control", () => {
+    for (const [route, labels] of [
+      ["/", ["Отклонить", "Настроить", "Принять все", "Настройки cookies"]],
+      ["/en/", ["Reject", "Customize", "Accept all", "Cookie settings"]],
+    ] as const) {
+      const localizedDocument = documents.get(route);
+      const panel = localizedDocument?.querySelector("[data-consent-panel]");
+      expect(panel?.hasAttribute("hidden")).toBe(true);
+      expect(panel?.querySelector("[data-consent-reject]")?.textContent?.trim()).toBe(labels[0]);
+      expect(panel?.querySelector("[data-consent-customize]")?.textContent?.trim()).toBe(labels[1]);
+      expect(panel?.querySelector("[data-consent-accept]")?.textContent?.trim()).toBe(labels[2]);
+      expect(
+        localizedDocument?.querySelector("footer [data-consent-settings]")?.textContent?.trim(),
+      ).toBe(labels[3]);
+    }
+  });
+
   it("renders the approved semantic section hierarchy", () => {
     expect(document.querySelectorAll("h1")).toHaveLength(1);
     expect(document.querySelector("nav[aria-label]")).not.toBeNull();
@@ -161,6 +178,46 @@ describe("rendered landing page", () => {
     ]) {
       expect(document.querySelector(`section#${sectionId}[aria-labelledby]`)).not.toBeNull();
     }
+  });
+
+  it("publishes the current product-category boundary on the home and SSCC pages", () => {
+    const ruCategory = "Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки";
+    const enCategory = "Beer, beverages made from beer and low-alcohol beverages";
+
+    for (const route of ["/", "/sscc-i-agregatsiya/"] as const) {
+      const text = documents.get(route)?.body.textContent?.replace(/\s+/g, " ") ?? "";
+      expect(text).toContain(ruCategory);
+      expect(text.toLowerCase()).toContain("сидр");
+      expect(text).toContain("Новые товарные группы добавляются поэтапно");
+      expect(text).not.toContain("внедряется для производителей");
+    }
+
+    for (const route of ["/en/", "/en/sscc-and-aggregation/"] as const) {
+      const text = documents.get(route)?.body.textContent?.replace(/\s+/g, " ") ?? "";
+      expect(text).toContain(enCategory);
+      expect(text.toLowerCase()).toContain("cider");
+      expect(text).toContain("Additional product categories are being added gradually");
+      expect(text).not.toContain("is currently deployed");
+    }
+
+    const ruSscc = documents.get("/sscc-i-agregatsiya/")?.body.textContent ?? "";
+    expect(ruSscc).toContain("Текущий поддерживаемый уровень — цепочка «единица → короб»");
+    expect(ruSscc).toContain("Паллетная агрегация");
+    expect(ruSscc).toContain("будет добавлена отдельным следующим этапом");
+
+    const enSscc = documents.get("/en/sscc-and-aggregation/")?.body.textContent ?? "";
+    expect(enSscc).toContain("The currently supported level is the item-to-case chain");
+    expect(enSscc).toContain("Pallet aggregation");
+    expect(enSscc).toContain("will be added as a separate next stage");
+
+    const ruSerialization = documents.get("/markirovka-chestny-znak/")?.body.textContent ?? "";
+    expect(ruSerialization).toContain("связь единицы с коробом");
+    expect(ruSerialization).not.toContain("связь единицы с коробом или паллетой");
+
+    const enSerialization =
+      documents.get("/en/chestny-znak-serialization/")?.body.textContent ?? "";
+    expect(enSerialization).toContain("the relationship between an item and its case");
+    expect(enSerialization).not.toContain("the relationship between an item, case, or pallet");
   });
 
   it("renders the four visible fields in the accessible order with optional phone copy", () => {

@@ -20,6 +20,10 @@ export function isStationBetaVersion(value: unknown): value is string {
   return typeof value === "string" && VERSION.test(value) && value.includes("-beta.");
 }
 
+export function isStationVersion(value: unknown): value is string {
+  return typeof value === "string" && VERSION.test(value);
+}
+
 export function compareStationVersions(left: string, right: string): number {
   const a = parseStationVersion(left);
   const b = parseStationVersion(right);

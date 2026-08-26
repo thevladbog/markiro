@@ -51,6 +51,18 @@ describe("station update state", () => {
     expect(await loadUpdateState(exec)).toBeNull();
   });
 
+  it("round-trips a canonical stable update for stable Station builds", async () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec("CREATE TABLE station_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    const exec = makeExec(db);
+    const state = recordCheckSuccess(null, "2026-08-11T00:00:00.000Z", {
+      version: "1.1.0",
+      publishedAt: "2026-08-10T00:00:00.000Z",
+    });
+    await saveUpdateState(exec, state);
+    expect(await loadUpdateState(exec)).toEqual(state);
+  });
+
   it("rejects malformed and future metadata", () => {
     expect(() =>
       updateSeverity(Date.parse("2026-08-11T00:00:00.000Z"), {
@@ -60,7 +72,7 @@ describe("station update state", () => {
     ).toThrow(/invalid station update state/);
     expect(() =>
       recordCheckSuccess(null, "2026-08-11T00:00:00.000Z", {
-        version: "0.1.0",
+        version: "0.1.0-rc.1",
         publishedAt: "2026-08-10T00:00:00.000Z",
       }),
     ).toThrow(/invalid station update state/);

@@ -9,7 +9,7 @@ const expectedApplicationCsp =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://storage.yandexcloud.net; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
 const smartCaptchaOrigin = "https://smartcaptcha.cloud.yandex.ru";
 const expectedLandingCsp =
-  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
+  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://www.googletagmanager.com https://mc.yandex.ru; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru https://www.googletagmanager.com https://mc.yandex.ru https://yastatic.net; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://mc.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
 const expectedVbtechCsp =
   "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; frame-src https://smartcaptcha.cloud.yandex.ru; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline' https://smartcaptcha.cloud.yandex.ru; style-src 'self' 'unsafe-inline'; upgrade-insecure-requests";
 const publicLandingBuildVariables = Object.freeze([
@@ -441,6 +441,16 @@ function assertAuthorityContract(adapted, { alb }) {
         3,
         "landing CSP must add SmartCaptcha only to script, frame and connect sources",
       );
+      assert.match(
+        contentSecurityPolicies[0],
+        /script-src[^;]*https:\/\/www\.googletagmanager\.com/,
+      );
+      assert.match(
+        contentSecurityPolicies[0],
+        /connect-src[^;]*https:\/\/\*\.google-analytics\.com/,
+      );
+      assert.match(contentSecurityPolicies[0], /script-src[^;]*https:\/\/mc\.yandex\.ru/);
+      assert.match(contentSecurityPolicies[0], /connect-src[^;]*https:\/\/mc\.yandex\.ru/);
     } else {
       assert.doesNotMatch(contentSecurityPolicies[0], /smartcaptcha/i);
     }

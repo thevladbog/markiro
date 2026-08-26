@@ -144,7 +144,7 @@ A service release/tag named `station-beta-channel` owns only the current beta
 `latest.json`. The application reads this stable URL:
 
 ```text
-https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json
+https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json
 ```
 
 The manifest points to immutable assets on the versioned beta release. Its

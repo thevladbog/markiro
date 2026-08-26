@@ -32,4 +32,37 @@ describe("i18n lockstep", () => {
       "Не удалось обновить список операторов. Проверьте связь или войдите с ранее синхронизированными данными.",
     );
   });
+
+  it("keeps every closed updater terminal distinct from transient origin availability", () => {
+    expect(en.updates.errors["check-failed"]).toBe(
+      "Could not reach either update source. Local work continues.",
+    );
+    expect(ru.updates.errors["check-failed"]).toBe(
+      "Не удалось связаться ни с одним источником обновлений. Локальная работа продолжается.",
+    );
+    expect(en.updates.errors["policy-denied"]).toBe(
+      "Update policy rejected this release. Installation was stopped; Station work continues.",
+    );
+    expect(ru.updates.errors["policy-denied"]).toBe(
+      "Политика обновлений отклонила этот релиз. Установка остановлена, работа станции продолжается.",
+    );
+    expect(en.updates.errors["candidate-invalid"]).toBe(
+      "This update request is no longer current. Check again.",
+    );
+    expect(ru.updates.errors["candidate-invalid"]).toBe(
+      "Этот запрос обновления больше не актуален. Проверьте обновления ещё раз.",
+    );
+    expect(en.updates.errors["check-superseded"]).toBe(
+      "A newer update check replaced this one. Check again.",
+    );
+    expect(ru.updates.errors["check-superseded"]).toBe(
+      "Эту проверку заменила более новая. Проверьте обновления ещё раз.",
+    );
+    expect(en.updates.errors["internal-error"]).toBe(
+      "The update service encountered an internal error. Station work continues.",
+    );
+    expect(ru.updates.errors["internal-error"]).toBe(
+      "Внутренняя ошибка службы обновлений. Работа станции продолжается.",
+    );
+  });
 });

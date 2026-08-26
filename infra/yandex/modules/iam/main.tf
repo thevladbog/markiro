@@ -8,11 +8,12 @@ terraform {
 }
 
 locals {
-  github_owner                  = split("/", var.github_repository)[0]
-  github_repository_name        = split("/", var.github_repository)[1]
-  github_repository_subject     = "${local.github_owner}@${var.github_repository_owner_id}/${local.github_repository_name}@${var.github_repository_id}"
-  github_audience               = "https://github.com/${local.github_owner}"
-  github_infrastructure_subject = "repo:${local.github_repository_subject}:environment:${var.github_infrastructure_environment}"
+  github_owner                        = split("/", var.github_repository)[0]
+  github_repository_name              = split("/", var.github_repository)[1]
+  github_repository_subject           = "${local.github_owner}@${var.github_repository_owner_id}/${local.github_repository_name}@${var.github_repository_id}"
+  github_audience                     = "https://github.com/${local.github_owner}"
+  github_infrastructure_subject       = "repo:${local.github_repository_subject}:environment:${var.github_infrastructure_environment}"
+  github_infrastructure_apply_subject = "repo:${local.github_repository_subject}:environment:${var.github_infrastructure_apply_environment}"
 }
 
 resource "yandex_iam_service_account" "terraform" {
@@ -58,6 +59,12 @@ resource "yandex_iam_workload_identity_federated_credential" "github_infrastruct
   service_account_id  = yandex_iam_service_account.terraform.id
   federation_id       = yandex_iam_workload_identity_oidc_federation.github.id
   external_subject_id = local.github_infrastructure_subject
+}
+
+resource "yandex_iam_workload_identity_federated_credential" "github_infrastructure_apply" {
+  service_account_id  = yandex_iam_service_account.terraform.id
+  federation_id       = yandex_iam_workload_identity_oidc_federation.github.id
+  external_subject_id = local.github_infrastructure_apply_subject
 }
 
 resource "yandex_storage_bucket_iam_binding" "state_backend" {

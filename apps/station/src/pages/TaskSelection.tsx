@@ -15,6 +15,7 @@ import {
 import type { StationClient } from "../lib/api-client.js";
 import type { SqlExecutor } from "../lib/mirror.js";
 import type { ScanSource } from "../lib/scan-source.js";
+import type { ShiftEntryLease } from "../lib/shift-entry-lease.js";
 import {
   acquireCredentialCommitLease,
   createFloorCommitLifecycle,
@@ -47,11 +48,12 @@ interface SelectionRouteIntentRecord {
 export interface TaskSelectionProps {
   client: StationClient;
   exec: SqlExecutor;
+  acquireShiftEntry?: ShiftSelectionProps["acquireShiftEntry"];
   source: ScanSource;
   operatorId: string;
   currentLineName: string | null;
   onShiftSelected: ShiftSelectionProps["onSelected"];
-  onInventorySelected: (task: InventoryFloorTask) => void;
+  onInventorySelected: (task: InventoryFloorTask, lease?: ShiftEntryLease) => void;
   onNew: () => void;
   onSetup?: () => void;
   onConflicts?: () => void;
@@ -79,6 +81,7 @@ function taskMatchesManifest(
 export function TaskSelection({
   client,
   exec,
+  acquireShiftEntry,
   source,
   operatorId,
   currentLineName,
@@ -350,11 +353,13 @@ export function TaskSelection({
       if (!intakeOpen.current || busyRef.current || isCurrentRef.current?.() === false) return;
       const originGeneration = lifecycleGeneration.current;
       const activationId = crypto.randomUUID();
+      let shiftEntryLease: ShiftEntryLease | null = null;
       const lease = {
         isCurrent: () =>
           mounted.current &&
           lifecycleGeneration.current === originGeneration &&
-          isCurrentRef.current?.() !== false,
+          isCurrentRef.current?.() !== false &&
+          (shiftEntryLease?.isCurrent() ?? true),
       };
       busyRef.current = true;
       setBusy(true);
@@ -406,6 +411,21 @@ export function TaskSelection({
           },
         });
         if (!published || !lease.isCurrent()) return;
+        // Keep bundle publication retireable from the task selector. The updater
+        // lease is only needed when the verified local task is handed to App.
+        if (acquireShiftEntry) {
+          try {
+            shiftEntryLease = await acquireShiftEntry();
+          } catch (error) {
+            const pointer = ownedPointer.current;
+            if (pointer !== null) {
+              await clearOwnedInventoryFloorTask(exec, pointer);
+              if (ownedPointer.current === pointer) ownedPointer.current = null;
+            }
+            throw error;
+          }
+          if (!lease.isCurrent()) return;
+        }
         if (!active) throw new Error("inventory floor task activation unavailable");
         if (!lease.isCurrent()) return;
         if (mounted.current) {
@@ -413,7 +433,8 @@ export function TaskSelection({
           const transferredPointer = ownedPointer.current;
           ownedPointer.current = null;
           try {
-            onInventorySelected(active);
+            if (shiftEntryLease) onInventorySelected(active, shiftEntryLease);
+            else onInventorySelected(active);
           } catch (error) {
             ownedPointer.current = transferredPointer;
             throw error;
@@ -427,13 +448,23 @@ export function TaskSelection({
         )
           setError(t("inventory.joinFailed"));
       } finally {
+        shiftEntryLease?.release();
         if (lifecycleGeneration.current === originGeneration) {
           busyRef.current = false;
           if (mounted.current && isCurrentRef.current?.() !== false) setBusy(false);
         }
       }
     },
-    [client, commitLifecycle, credentialGeneration, exec, onInventorySelected, operatorId, t],
+    [
+      acquireShiftEntry,
+      client,
+      commitLifecycle,
+      credentialGeneration,
+      exec,
+      onInventorySelected,
+      operatorId,
+      t,
+    ],
   );
 
   const joinTask = useCallback(
@@ -580,6 +611,7 @@ export function TaskSelection({
       <ShiftSelection
         client={client}
         exec={exec}
+        {...(acquireShiftEntry ? { acquireShiftEntry } : {})}
         onSelected={onShiftSelected}
         onNew={onNew}
         {...(onSetup ? { onSetup } : {})}

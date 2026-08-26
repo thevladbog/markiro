@@ -157,6 +157,20 @@ test("release publication is main-only, digest-bound and writes the immutable ma
   );
 });
 
+test("release image cleanup survives downstream evidence failures after a successful publish", async () => {
+  const workflow = await parse(".github/workflows/release-images.yml");
+  const steps = workflow.jobs.publish.steps;
+  const publish = namedStep(workflow, "publish", "Publish the exact verified production images");
+  const cleanup = namedStep(
+    workflow,
+    "publish",
+    "Delete the verified images artifact after publish",
+  );
+
+  assert.ok(steps.indexOf(publish) < steps.indexOf(cleanup));
+  assert.equal(cleanup.if, "${{ always() && steps.published-images.outcome == 'success' }}");
+});
+
 test("release builds legal verifier dependencies immediately before production contracts", async () => {
   assertLegalVerifierBuildsImmediatelyBeforeProductionContracts(
     await parse(".github/workflows/release-images.yml"),

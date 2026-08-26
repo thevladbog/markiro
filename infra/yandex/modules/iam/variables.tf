@@ -44,13 +44,24 @@ variable "github_repository_id" {
 }
 
 variable "github_infrastructure_environment" {
-  description = "Protected GitHub environment allowed to manage Terraform."
+  description = "Protected GitHub environment allowed to create Terraform plans."
   type        = string
   nullable    = false
 
   validation {
     condition     = var.github_infrastructure_environment == "production-infrastructure"
     error_message = "github_infrastructure_environment must be exactly production-infrastructure."
+  }
+}
+
+variable "github_infrastructure_apply_environment" {
+  description = "Separately protected GitHub environment allowed to apply reviewed Terraform plans."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = var.github_infrastructure_apply_environment == "production-infrastructure-apply"
+    error_message = "github_infrastructure_apply_environment must be exactly production-infrastructure-apply."
   }
 }
 

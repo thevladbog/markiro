@@ -1,89 +1,241 @@
 # Station stable release runbook
 
 Ручной выпуск Windows x64 stable-версии Markiro Station из одной явно принятой
-beta. Workflow не выбирает «последнюю beta», не добавляет более новые изменения
-из `main` и не устанавливает обновление на станции автоматически.
+dual-origin beta. Workflow не выбирает newest beta, не добавляет более новые
+изменения из `main` и не устанавливает обновление на станции автоматически.
 
-## Однократная настройка
+## Защищённые environments и исходные условия
 
-1. Создайте GitHub Environment `station-stable` без required reviewers. Он
-   сохраняет отдельную историю stable deployment, но не требует второго
-   пользователя для запуска.
-2. Добавьте в environment секреты `TAURI_SIGNING_PRIVATE_KEY` и
-   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, используя ту же пару ключей, что у
-   beta-канала. Private key должен оставаться в исходном base64-формате из
-   `tauri signer generate` байт-в-байт: не декодируйте, не перекодируйте и не
-   нормализуйте его. Не печатайте, не скачивайте и не сравнивайте значения через
-   логи или терминал. Публичный ключ остаётся в Tauri-конфигурации.
-3. Убедитесь, что production API принимает Windows origin
-   `http://tauri.localhost`, и выполните `pnpm verify:station-production-cors`.
+1. GitHub Environment `station-stable` хранит только
+   `TAURI_SIGNING_PRIVATE_KEY` и `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` и даёт
+   отдельную историю stable build/sign. В нём нет required reviewers, поэтому
+   второй пользователь для build/sign не нужен. Приватный ключ остаётся в
+   исходном base64-формате из `tauri signer generate` байт-в-байт: не
+   декодируйте, не перекодируйте и не нормализуйте его. Не печатайте значение и
+   не переносите его в publisher job.
+2. Environment `station-release` разрешён только для `main` и содержит
+   fine-grained secret `STATION_RELEASE_REPOSITORY_TOKEN` с Contents
+   read/write только для публичного binary-only repository
+   `thevladbog/markiro-station-releases`, secrets `YANDEX_STATION_RELEASE_ACCESS_KEY_ID`,
+   `YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY`, variables
+   `YANDEX_STATION_RELEASE_BUCKET`, `YANDEX_STATION_RELEASE_ENDPOINT`. Signing
+   secrets туда не копируются; publisher credentials не попадают в build job,
+   аргументы, artifacts или логи.
+3. На текущем GitHub plan нативные required reviewers недоступны для private
+   repository. До build/sign и до доступа к `station-release` отдельный job без
+   Environment и secrets требует от владельца репозитория
+   `owner_confirmation=PUBLISH-STATION-STABLE` и точного совпадения
+   `github.actor` с `github.repository_owner`. Это одно-владельческое ручное
+   подтверждение, а не двухпользовательский approval; нативный reviewer потребует
+   подходящего GitHub Enterprise plan.
+4. Production API должен принимать `http://tauri.localhost`. До обычной
+   публикации или repair выполните `pnpm verify:station-production-cors`.
+5. Для normal flow уже существует полный Yandex stable rollback baseline:
+   `station/stable/latest.json` и `station/download`. Отсутствующий или
+   неполный baseline останавливает workflow до первой mutable mutation.
 
-## Первый stable после внедрения workflow
+## Одноразовый legacy stable rollback baseline
 
-Сначала смержите stable tooling, затем выпустите новую beta из этого baseline.
-Beta, чей `baseSha` предшествует файлам stable overlay/workflow, не допускается
-к promotion. На новой beta выполните Windows/hardware checklist либо явно
-примите оставшиеся ограничения; CI не доказывает работу сканера, принтера,
-WebView2, touch, SmartScreen и сохранение локальных данных.
+`mode=seed-baseline` — отдельный защищённый режим до включения release DNS. Он
+нужен только для переноса текущего legacy GitHub-only stable в полный Yandex
+rollback baseline. Это не retrofit старой beta и не доказательство, будто у
+исторической beta существовали dual-origin evidence.
 
-## Публикация
+Это first-run rollback baseline, а не обычная публикация. Его exact accepted
+stable tag и backup/record сохраняются до первого dual-origin stable; immutable
+historical releases не retrofit и не получают задним числом Yandex evidence.
 
-1. Откройте workflow `Publish station stable` только на ветке `main`.
-2. Выберите `mode=publish`.
-3. В `source_beta_tag` укажите точный принятый immutable tag, например
-   `station-v1.0.0-beta.5`. Workflow никогда не подставляет newest beta.
-4. Установите `acceptance_confirmed=true`. Это утверждение владельца релиза о
-   принятии beta и известных ограничений, а не автоматически полученное
-   доказательство hardware acceptance.
-5. При необходимости добавьте короткие русские `highlights`; поле необязательно.
-6. Workflow проверит release flags, все beta assets и хеши, evidence,
-   `baseSha`, release-only diff и успешный CI ровно для `baseSha`. Stable
-   пересобирается из этого source с `tauri.stable.conf.json`, а не из текущего
-   более нового `main`.
-7. Сначала публикуется обычный immutable release `station-vX.Y.Z`. Только после
-   повторного скачивания и проверки всех файлов обновляется prerelease service
-   release `station-stable-channel` и его `latest.json`:
-   `https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json`.
+Передайте:
 
-После запуска проверьте, что versioned release не Draft и не Pre-release, tag
-указывает на `releaseSha`, а комплект содержит NSIS installer, updater bundle,
-signature, `latest.json`, `SHA256SUMS`, `release-notes.md` и
-`release-evidence.json`. Сверьте `sourceBetaTag`, beta evidence digest,
-`baseSha`, `releaseSha`, compare URL и SHA-256. Manifest stable-channel должен
-байт-в-байт совпадать с `latest.json` immutable release.
+- пустой `source_beta_tag`;
+- `acceptance_confirmed=false`;
+- пустые `highlights`;
+- точный `seed_stable_tag` текущего последнего normal stable release;
+- точный applied infrastructure evidence JSON, где
+  `enableStationReleasePublicDns` равно `false`.
 
-## Восстановление channel promotion
+Workflow проверяет, что `seed_stable_tag` является последним canonical stable,
+скачивает его GitHub release в чистый каталог и вызывает общий закрытый
+`seed-baseline ... stable ... --confirm-empty-channel-bootstrap`. Команда Task 5
+сама валидирует legacy GitHub tree, строит Yandex metadata вокруг тех же bytes,
+публикует только полностью отсутствующий immutable prefix, перечитывает его
+через provider host, создаёт manifest и server-side-copy alias и сохраняет
+bounded bootstrap record с recovery backup. DNS workflow не включает.
 
-Если immutable stable опубликован, но channel не обновился, повторите workflow
-с тем же `source_beta_tag`, `acceptance_confirmed=true` и
-`mode=promote-existing`. Режим заново проверяет beta и существующий normal
-stable release, ничего не пересобирает и не изменяет versioned tag/assets. Он
-заменяет только `station-stable-channel/latest.json`; при ошибке предыдущий
-manifest восстанавливается. Не используйте этот режим для выбора более старого
-stable или для обхода неуспешной публикации.
+Если первая seed-попытка прервалась, не удаляйте objects и не перезаписывайте
+immutable keys. Повтор разрешён только с тем же exact stable; generic seed gate
+принимает пустое состояние либо полную уже совпадающую pair и обязан снова
+публично доказать known-good baseline. До отдельного одобренного DNS apply
+`releases.markiro.app` не направляет трафик на baseline.
 
-## Установка beta → stable и stable → stable
+## Публикация принятой beta как stable
 
-Переход с beta выполняется вручную immutable NSIS installer поверх текущей
-Station и только вне активной смены. Перед установкой зафиксируйте состояние
-pairing, SQLite, scanner/printer settings, scan journal, boxes, exceptions и
-pending outbox. После перезапуска убедитесь, что эти данные сохранились и клиент
-проверяет только stable channel.
+1. До публикации завершите validation/candidate beta acceptance record: bootstrap
+   beta `BOOTSTRAP_READY` и candidate Overall должны быть `PASS`, а все строки
+   `BETA_SIGN_OFF` относятся именно к строго более новому candidate. Stable-строки,
+   `PUBLISH-01` и stable rollback ещё остаются `NOT_RUN` и не блокируют саму
+   первую stable publication, потому что проверяются после неё.
+2. Откройте `Publish station stable` из `main`, выберите `mode=publish` и введите
+   `owner_confirmation=PUBLISH-STATION-STABLE`.
+3. В `source_beta_tag` укажите точный immutable validation/candidate beta tag из
+   принятой identity table и установите `acceptance_confirmed=true`. Он обязан
+   совпасть с записанным candidate tag, `baseSha`, `releaseSha` и двумя origin
+   evidence hashes; bootstrap beta или newest/latest inference запрещены.
+   `highlights` остаётся необязательным.
+4. Workflow скачивает GitHub и Yandex beta evidence и assets в разные чистые
+   каталоги, валидирует обе trees и сравнивает common assets. Только matching
+   GitHub и Yandex beta evidence допускают дальнейшую работу. Публичный GitHub
+   tag target обязан принадлежать binary-only repository; source `releaseSha`
+   берётся из совпадающих evidence и приватного source tag. Release-only diff
+   ограничен stable overlay, а CI для verified `baseSha` обязан завершиться успешно.
+5. Только после этого workflow checkout-ит принятый `baseSha`, применяет
+   `tauri.stable.conf.json`, создаёт один release commit и ровно один раз
+   собирает/подписывает Windows NSIS. Stable не строится из текущего более
+   нового `main`.
+6. Changelog и release notes строятся детерминированно от предыдущего stable
+   source; optional highlights не меняют provenance. Один общий installer,
+   updater bundle, detached signature, notes и accepted-beta provenance
+   оборачиваются в GitHub и Yandex stable trees. Различаться могут только
+   origin URL, manifest/checksum/evidence digests и `distribution`.
+7. Immutable GitHub release `station-vX.Y.Z` создаётся без `--clobber`, затем
+   absent Yandex prefix `station/stable/releases/X.Y.Z/` публикуется общим
+   publisher. Обе публичные trees повторно скачиваются, независимо валидируются
+   и сравниваются до любой mutable backup.
 
-Stable updater остаётся manual-only: разрешена проверка наличия версии, но нет
-фоновой загрузки, установки, restart или блокировки линии. Установка во время
-активной смены запрещена. Для stable → stable повторите проверку сохранности
-данных, offline/reconnect и outbox.
+Mutable transaction имеет ровно такой порядок:
 
-## SmartScreen, откат и границы доказательства
+1. GitHub `station-stable-channel/latest.json`;
+2. Yandex `station/stable/latest.json`;
+3. default stable alias `station/download` — server-side copy проверенного
+   immutable installer и всегда последний target.
 
-Первая версия не имеет Authenticode. Tauri updater signature защищает
-целостность updater bundle, но Windows может показать SmartScreen или
-«неизвестный издатель». Сверьте SHA-256 и release provenance до ручного
-подтверждения; не учите оператора обходить предупреждение вслепую.
+Для первого strict stable в новом binary-only repository GitHub channel release
+ещё отсутствует. Workflow разрешает это только при пустом
+`previous_stable_tag`, создаёт `station-stable-channel` первым и при последующей
+ошибке удаляет только этот новый channel release. Для всех следующих stable
+channel обязан существовать и восстанавливается из полного read-back backup.
 
-Откат выполняется только вручную сохранённым immutable NSIS installer и только
-в документированном совместимом окне схемы. Удаление Station SQLite или outbox
-не является откатом. Все реальные результаты записываются в
-`docs/acceptance/station-stable-release.md`; непроведённые проверки остаются
-`NOT RUN`.
+Публичные URL:
+
+- GitHub channel:
+  `https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json`;
+- Yandex channel: `https://releases.markiro.app/station/stable/latest.json`;
+- default installer: `https://releases.markiro.app/station/download`.
+
+Beta alias `station/beta/download` в stable transaction не используется и не
+может стать default installer.
+
+## Mutable-only repair и rollback
+
+Если обе immutable stable trees опубликованы, а pointer transaction не
+завершился, повторите exact `source_beta_tag`, `acceptance_confirmed=true` и
+выберите `mode=promote-existing`. Этот режим снова строго валидирует dual-origin
+accepted beta и обе уже опубликованные stable trees, не пересобирает и не
+подписывает package, не создаёт release commit и не загружает immutable object.
+После полных GitHub/Yandex backups он повторяет только mutable transaction.
+Для `promote-existing` exact stable выводится из переданного
+`source_beta_tag`; это может быть предыдущий опубликованный stable, а не только
+newest stable. Workflow требует, чтобы выбранная beta была опубликованным
+non-draft prerelease, а соответствующий stable — опубликованным non-draft
+normal release. Оба stable origin и записанный accepted-beta provenance должны
+совпасть.
+
+Единый trap восстанавливает изменённые targets в точном обратном порядке:
+Yandex alias, Yandex manifest, затем GitHub manifest. Каждый restored target
+перечитывается публично и сравнивается с backup; ошибка restoration verification
+становится отдельным hard failure. Immutable releases/objects не удаляются и не
+перезаписываются. Partial-origin mismatch нельзя «чинить» копированием surviving
+tree: сохраните evidence, расследуйте collision/audit и выпустите новую версию.
+
+## Restricted network и ручной install-over
+
+В ограниченной сети (restricted network), где GitHub заблокирован, скачайте
+проверенный installer только по `https://releases.markiro.app/station/download`
+и выполните ручной install-over, то есть установку поверх существующей
+установки. Сверьте SHA-256 с origin evidence вне станции. Переход beta → stable
+и stable → stable выполняется только вне активной смены; фоновой загрузки,
+автоматической установки или restart нет.
+
+До и после установки зафиксируйте application ID `app.markiro.station`,
+фактический абсолютный путь к базе и относительное имя
+`sqlite:station-mirror.db`, pairing, settings, journals, boxes, exceptions и
+pending outbox. Не выводите путь из предположения о Windows user profile:
+снимите его с установленной Station до и после install-over.
+Проверьте offline restart/reconnect и последующую синхронизацию outbox. Нельзя
+считать удаление SQLite или outbox допустимым rollback.
+
+Update остается manual-only: автоматической загрузки, установки, restart или
+forced downgrade нет. При active shift установка запрещена, но Station должна
+продолжать production work — сканирование, печать, локальные journals, boxes,
+exceptions и outbox.
+
+## SmartScreen и границы доказательства
+
+NSIS не имеет Authenticode: Tauri updater signature защищает updater bundle, но
+Windows может показать SmartScreen или «неизвестный издатель». Не учите
+оператора обходить предупреждение вслепую. Автоматизированные contracts не
+доказывают Windows install-over, WebView2, scanner, printer, sound, touch,
+сохранение данных или работу из реальной restricted network. Все такие строки
+остаются `NOT_RUN` в
+[`station-dual-origin-release.md`](../acceptance/station-dual-origin-release.md),
+пока не появятся оператор, UTC timestamp и evidence path/hash.
+
+## Exact rollback
+
+Для незавершённой mutable transaction при обеих валидных и совпадающих
+immutable trees повторите точные release inputs с `mode=promote-existing`.
+Режим не строит, не подписывает и не загружает immutable assets. При ошибке
+восстановите только изменённые targets в точном обратном порядке: Yandex
+`station/download` alias, Yandex stable manifest, GitHub stable manifest. Каждый
+target публично сравнивается с сохранённым backup. Partial-origin incident не
+лечится `promote-existing`, overwrite или копированием surviving tree.
+
+Для отдельной post-success acceptance-проверки rollback выберите предыдущий
+принятый strict dual-origin stable и текущий candidate stable. Возьмите точный
+`source_beta_tag` каждого из обоих совпадающих `release-evidence.json`, поместите
+их соответственно в `PREVIOUS_STABLE_SOURCE_BETA_TAG` и
+`CANDIDATE_STABLE_SOURCE_BETA_TAG`. До dispatch повторно проверьте обе immutable
+trees, stable tag/target и evidence hashes для обоих releases. Сначала выполните:
+
+```bash
+gh workflow run station-stable-release.yml --ref main \
+  -f mode=promote-existing \
+  -f owner_confirmation=PUBLISH-STATION-STABLE \
+  -f source_beta_tag="$PREVIOUS_STABLE_SOURCE_BETA_TAG" \
+  -f acceptance_confirmed=true
+```
+
+Protected run валидирует exact beta и derived stable, создаёт полные временные
+backup текущих mutables и продвигает GitHub manifest, Yandex manifest и default
+stable alias последним. После успеха публично скачайте оба stable channel
+manifest и `https://releases.markiro.app/station/download`, сравните с выбранной
+previous immutable stable и сохраните workflow URL/evidence hashes как
+`ROLLBACK-01`. Затем немедленно восстановите current candidate stable:
+
+```bash
+gh workflow run station-stable-release.yml --ref main \
+  -f mode=promote-existing \
+  -f owner_confirmation=PUBLISH-STATION-STABLE \
+  -f source_beta_tag="$CANDIDATE_STABLE_SOURCE_BETA_TAG" \
+  -f acceptance_confirmed=true
+```
+
+После candidate restoration публично скачайте оба stable manifests и default
+alias, сравните их с current candidate immutable stable и сохраните отдельные
+workflow/evidence как `ROLLBACK-02`. Backup нужен для in-run compensation,
+очищается после каждого успешного run и не является durable artifact. При любом
+mismatch остановитесь; не overwrite/cross-copy immutable tree. При ошибке
+mutation порядок compensation остаётся прежним: Yandex alias, Yandex manifest,
+GitHub manifest, с публичным сравнением каждого временного backup.
+
+Если восстановление candidate или финальный read-back не прошли, установите
+stable Overall `FAIL`, остановитесь для incident recovery и не оставляйте channel
+в rollback, одновременно отмечая acceptance `PASS`. Overall может стать `PASS`
+только когда exact current candidate stable снова является подтверждённой целью
+обоих manifests и default alias.
+
+Rollback channel pointer влияет только на ещё не обновившихся клиентов. Для уже
+обновлённой Station закройте активную смену, проверьте SQLite compatibility
+window и SHA-256, затем вручную установите предыдущий accepted immutable stable.
+Application ID, SQLite path, pairing, settings, journals, boxes, exceptions и
+outbox сохраняются; удаление данных запрещено.

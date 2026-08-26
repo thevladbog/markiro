@@ -57,6 +57,10 @@ function assertDirectGraph({ production, network, compute }) {
     instance,
     /lifecycle\s*\{[\s\S]*ignore_changes\s*=\s*\[[\s\S]*boot_disk\[0\]\.initialize_params\[0\]\.image_id[\s\S]*\]/,
   );
+  assert.match(
+    instance,
+    /lifecycle\s*\{[\s\S]*ignore_changes\s*=\s*\[[\s\S]*metadata\["user-data"\][\s\S]*\]/,
+  );
   assert.match(compute, /nat_ip_address\s*=\s*yandex_vpc_address\.app/);
   assert.doesNotMatch(compute, /replace_triggered_by/);
 
@@ -64,12 +68,14 @@ function assertDirectGraph({ production, network, compute }) {
   for (const port of [22, 80, 443]) {
     assert.match(
       network,
-      new RegExp(
-        `from_port\\s*=\\s*${port}[\\s\\S]{0,120}to_port\\s*=\\s*${port}[\\s\\S]{0,160}0\\.0\\.0\\.0/0`,
-      ),
+      new RegExp(`(?:^|\\n)\\s*port\\s*=\\s*${port}[\\s\\S]{0,160}0\\.0\\.0\\.0/0`),
     );
   }
-  assert.doesNotMatch(network, /from_port\s*=\s*8080/);
+  assert.match(
+    network,
+    /(?:^|\n)\s*port\s*=\s*6432[\s\S]{0,160}security_group_id\s*=\s*yandex_vpc_security_group\.app\.id/,
+  );
+  assert.doesNotMatch(network, /(?:from_port|to_port)\s*=/);
 }
 
 test("production graph is the direct VM MVP and cannot reintroduce managed edge machinery", async () => {
@@ -123,6 +129,18 @@ test("all public names are gated together and resolve only to the retained app a
   const variables = await source("infra/yandex/production/variables.tf");
   const publicDns = block(variables, 'variable "public_dns_enabled"');
   assert.match(publicDns, /default\s*=\s*false/);
+
+  const publicDomainIsolation = block(production, 'check "public_domains_are_distinct"');
+  assert.match(publicDomainIsolation, /length\(toset\(\[/);
+  for (const domain of [
+    "var.domain",
+    "var.saas_admin_domain",
+    "var.kiosk_domain",
+    "var.landing_domain",
+    "var.station_release_domain",
+  ])
+    assert.match(publicDomainIsolation, new RegExp(domain.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(publicDomainIsolation, /\]\)\)\s*==\s*5/);
 });
 
 test("PostgreSQL and application database remain private, encrypted, backed up and protected", async () => {
@@ -155,9 +173,220 @@ test("media and temporarily retained audit data are private, versioned, encrypte
   assert.doesNotMatch(storage, /audit_writer|audit_uploader|audit_service_account/);
 });
 
+test("Station releases use one protected versioned bucket and a prefix-limited publisher identity", async () => {
+  const [releases, variables, outputs] = await Promise.all([
+    source("infra/yandex/modules/station-releases/main.tf"),
+    source("infra/yandex/modules/station-releases/variables.tf"),
+    source("infra/yandex/modules/station-releases/outputs.tf"),
+  ]);
+
+  assert.match(
+    releases,
+    /required_providers\s*\{[\s\S]*source\s*=\s*"yandex-cloud\/yandex"[\s\S]*version\s*=\s*"= 0\.215\.0"/,
+  );
+  const bucket = block(releases, 'resource "yandex_storage_bucket" "releases"');
+  assert.match(bucket, /bucket\s*=\s*var\.bucket_name/);
+  assert.match(bucket, /folder_id\s*=\s*var\.folder_id/);
+  assert.match(bucket, /force_destroy\s*=\s*false/);
+  assert.match(bucket, /acl\s*=\s*"private"/);
+  assert.doesNotMatch(bucket, /\bgrant\s*\{/);
+  assert.match(
+    bucket,
+    /anonymous_access_flags\s*\{[\s\S]*read\s*=\s*true[\s\S]*list\s*=\s*false[\s\S]*config_read\s*=\s*false/,
+  );
+  assert.match(bucket, /versioning\s*\{[\s\S]*enabled\s*=\s*true/);
+  assert.match(bucket, /lifecycle\s*\{[\s\S]*prevent_destroy\s*=\s*true/);
+  assert.doesNotMatch(bucket, /lifecycle_rule|expiration|noncurrent_version_expiration/);
+
+  const publisher = block(
+    releases,
+    'resource "yandex_iam_service_account" "station_release_publisher"',
+  );
+  assert.match(publisher, /folder_id\s*=\s*var\.folder_id/);
+  const publisherKey = block(
+    releases,
+    'resource "yandex_iam_service_account_static_access_key" "publisher"',
+  );
+  assert.match(
+    publisherKey,
+    /service_account_id\s*=\s*yandex_iam_service_account\.station_release_publisher\.id/,
+  );
+  assert.match(publisherKey, /pgp_key\s*=\s*var\.publisher_pgp_key/);
+  assert.doesNotMatch(publisherKey, /\bsecret_key\s*=/);
+
+  const uploader = block(
+    releases,
+    'resource "yandex_storage_bucket_iam_binding" "publisher_uploader"',
+  );
+  assert.match(uploader, /bucket\s*=\s*yandex_storage_bucket\.releases\.bucket/);
+  assert.match(uploader, /role\s*=\s*"storage\.uploader"/);
+  assert.match(
+    uploader,
+    /members\s*=\s*\["serviceAccount:\$\{yandex_iam_service_account\.station_release_publisher\.id\}"\]/,
+  );
+
+  const policy = block(releases, 'resource "yandex_storage_bucket_policy" "releases"');
+  assert.match(policy, /AllowPublicStationReleaseObjects/);
+  assert.match(policy, /Principal\s*=\s*"\*"/);
+  assert.match(policy, /Action\s*=\s*\["s3:GetObject"\]/);
+  assert.match(
+    policy,
+    /AllowPublisherStationObjects[\s\S]*Action\s*=\s*\["s3:GetObject",\s*"s3:PutObject"\]/,
+  );
+  assert.match(
+    policy,
+    /AllowPublisherStationBucketPreflight[\s\S]*Action\s*=\s*\["s3:GetBucketLocation",\s*"s3:ListBucket"\]/,
+  );
+  assert.match(
+    policy,
+    /Condition\s*=\s*\{[\s\S]*StringLike\s*=\s*\{[\s\S]*"s3:prefix"\s*=\s*\["station\/\*"\]/,
+  );
+  assert.match(
+    policy,
+    /Resource\s*=\s*\["arn:aws:s3:::\$\{yandex_storage_bucket\.releases\.bucket\}\/station\/\*"\]/,
+  );
+  assert.match(
+    policy,
+    /AllowTerraformReleaseManagement[\s\S]*CanonicalUser\s*=\s*var\.terraform_service_account_id/,
+  );
+  assert.doesNotMatch(policy, /DeleteObject|DeleteObjectVersion|s3:Delete/);
+  assert.doesNotMatch(
+    releases,
+    /app_service_account|runtime_service_account|deploy_service_account|backup_service_account/,
+  );
+
+  const pgpVariable = block(variables, 'variable "publisher_pgp_key"');
+  assert.match(pgpVariable, /type\s*=\s*string/);
+  assert.match(pgpVariable, /sensitive\s*=\s*true/);
+  for (const outputName of ["publisher_access_key_id", "publisher_encrypted_secret_key"]) {
+    assert.match(block(outputs, `output "${outputName}"`), /sensitive\s*=\s*true/);
+  }
+  assert.match(
+    block(outputs, 'output "publisher_encrypted_secret_key"'),
+    /yandex_iam_service_account_static_access_key\.publisher\.encrypted_secret_key/,
+  );
+});
+
+test("Station release CDN uses HTTPS GET/HEAD and origin-owned cache metadata behind an issued certificate", async () => {
+  const releases = await source("infra/yandex/modules/station-releases/main.tf");
+
+  const originGroup = block(releases, 'resource "yandex_cdn_origin_group" "releases"');
+  assert.match(
+    originGroup,
+    /origin\s*\{[\s\S]*source\s*=\s*yandex_storage_bucket\.releases\.bucket_domain_name[\s\S]*enabled\s*=\s*true[\s\S]*backup\s*=\s*false/,
+  );
+  const certificate = block(releases, 'resource "yandex_cm_certificate" "releases"');
+  assert.match(certificate, /domains\s*=\s*\[var\.domain\]/);
+  assert.match(
+    certificate,
+    /managed\s*\{[\s\S]*challenge_type\s*=\s*"DNS_CNAME"[\s\S]*challenge_count\s*=\s*1/,
+  );
+  const validation = block(releases, 'resource "yandex_dns_recordset" "certificate_validation"');
+  assert.match(validation, /count\s*=\s*1/);
+  assert.doesNotMatch(validation, /public_dns_enabled/);
+  assert.match(validation, /yandex_cm_certificate\.releases\.challenges\[count\.index\]\.dns_name/);
+  assert.match(validation, /yandex_cm_certificate\.releases\.challenges\[count\.index\]\.dns_type/);
+  assert.match(
+    validation,
+    /yandex_cm_certificate\.releases\.challenges\[count\.index\]\.dns_value/,
+  );
+  assert.match(
+    releases,
+    /data\s+"yandex_cm_certificate"\s+"issued"\s*\{[\s\S]*certificate_id\s*=\s*yandex_cm_certificate\.releases\.id[\s\S]*wait_validation\s*=\s*true[\s\S]*depends_on\s*=\s*\[yandex_dns_recordset\.certificate_validation\]/,
+  );
+
+  const cdn = block(releases, 'resource "yandex_cdn_resource" "releases"');
+  assert.match(cdn, /cname\s*=\s*var\.domain/);
+  assert.match(cdn, /active\s*=\s*true/);
+  assert.match(cdn, /origin_protocol\s*=\s*"https"/);
+  assert.match(cdn, /origin_group_id\s*=\s*yandex_cdn_origin_group\.releases\.id/);
+  assert.match(cdn, /redirect_http_to_https\s*=\s*true/);
+  assert.match(cdn, /redirect_https_to_http\s*=\s*false/);
+  assert.match(cdn, /allowed_http_methods\s*=\s*\["GET",\s*"HEAD"\]/);
+  assert.match(cdn, /edge_cache_settings\s*=\s*0/);
+  assert.doesNotMatch(cdn, /browser_cache_settings|cache_http_headers/);
+  assert.match(
+    cdn,
+    /static_response_headers\s*=\s*\{[\s\S]*"x-content-type-options"\s*=\s*"nosniff"/,
+  );
+  assert.match(
+    cdn,
+    /static_response_headers\s*=\s*\{[\s\S]*"content-security-policy"\s*=\s*"default-src 'none'; frame-ancestors 'none'; sandbox"/,
+  );
+  assert.match(
+    cdn,
+    /ssl_certificate\s*\{[\s\S]*type\s*=\s*"certificate_manager"[\s\S]*certificate_manager_id\s*=\s*data\.yandex_cm_certificate\.issued\.id/,
+  );
+
+  const publicDns = block(releases, 'resource "yandex_dns_recordset" "public_release"');
+  assert.match(publicDns, /count\s*=\s*var\.public_dns_enabled\s*\?\s*1\s*:\s*0/);
+  assert.match(publicDns, /name\s*=\s*local\.release_dns_name/);
+  assert.match(publicDns, /type\s*=\s*"CNAME"/);
+  assert.match(
+    publicDns,
+    /data\s*=\s*\["\$\{trimsuffix\(yandex_cdn_resource\.releases\.provider_cname, "\."\)\}\."\]/,
+  );
+  assert.match(publicDns, /depends_on\s*=\s*\[data\.yandex_cm_certificate\.issued\]/);
+});
+
+test("production wires the fixed Station release origin behind a separate public DNS gate", async () => {
+  const [production, variables, outputs, tfvars] = await Promise.all([
+    source("infra/yandex/production/main.tf"),
+    source("infra/yandex/production/variables.tf"),
+    source("infra/yandex/production/outputs.tf"),
+    source("infra/yandex/production/terraform.tfvars.example"),
+  ]);
+
+  const releaseModule = block(production, 'module "station_releases"');
+  assert.match(releaseModule, /source\s*=\s*"\.\.\/modules\/station-releases"/);
+  assert.match(releaseModule, /bucket_name\s*=\s*var\.station_release_bucket_name/);
+  assert.match(releaseModule, /domain\s*=\s*var\.station_release_domain/);
+  assert.match(releaseModule, /publisher_pgp_key\s*=\s*var\.station_release_publisher_pgp_key/);
+  assert.match(releaseModule, /public_dns_enabled\s*=\s*var\.station_release_public_dns_enabled/);
+  assert.doesNotMatch(
+    releaseModule,
+    /app_service_account_id|runtime_secret_id|module\.compute|public_dns_enabled\s*=\s*var\.public_dns_enabled/,
+  );
+
+  for (const variableName of [
+    "station_release_bucket_name",
+    "station_release_domain",
+    "station_release_publisher_pgp_key",
+    "station_release_public_dns_enabled",
+  ]) {
+    assert.match(variables, new RegExp(`variable\\s+"${variableName}"\\s*\\{`));
+    assert.match(tfvars, new RegExp(`^${variableName}\\s*=`, "m"));
+  }
+  assert.match(
+    block(variables, 'variable "station_release_domain"'),
+    /var\.station_release_domain\s*==\s*"releases\.markiro\.app"/,
+  );
+  assert.match(
+    block(variables, 'variable "station_release_publisher_pgp_key"'),
+    /sensitive\s*=\s*true/,
+  );
+  assert.match(
+    block(variables, 'variable "station_release_public_dns_enabled"'),
+    /default\s*=\s*false/,
+  );
+  for (const outputName of [
+    "station_release_publisher_access_key_id",
+    "station_release_publisher_encrypted_secret_key",
+  ]) {
+    assert.match(block(outputs, `output "${outputName}"`), /sensitive\s*=\s*true/);
+  }
+  assert.match(outputs, /module\.station_releases\.cdn_provider_cname/);
+  assert.match(outputs, /module\.station_releases\.certificate_id/);
+});
+
 test("bootstrap retains only state, runtime and the three necessary service accounts", async () => {
-  const bootstrap = await source("infra/yandex/bootstrap/main.tf");
-  const iam = await source("infra/yandex/modules/iam/main.tf");
+  const [bootstrap, bootstrapVariables, bootstrapTfvars, iam, iamVariables] = await Promise.all([
+    source("infra/yandex/bootstrap/main.tf"),
+    source("infra/yandex/bootstrap/variables.tf"),
+    source("infra/yandex/bootstrap/terraform.tfvars.example"),
+    source("infra/yandex/modules/iam/main.tf"),
+    source("infra/yandex/modules/iam/variables.tf"),
+  ]);
   const active = `${bootstrap}\n${iam}`;
   for (const retained of [
     'resource "yandex_storage_bucket" "state"',
@@ -167,9 +396,48 @@ test("bootstrap retains only state, runtime and the three necessary service acco
     'resource "yandex_iam_service_account" "state"',
     'resource "yandex_iam_service_account" "app"',
     'resource "yandex_iam_workload_identity_federated_credential" "github_infrastructure"',
+    'resource "yandex_iam_workload_identity_federated_credential" "github_infrastructure_apply"',
   ])
     assert.match(active, new RegExp(retained.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.equal([...iam.matchAll(/resource\s+"yandex_iam_service_account"/g)].length, 3);
+  assert.equal(
+    [...iam.matchAll(/resource\s+"yandex_iam_workload_identity_federated_credential"/g)].length,
+    2,
+  );
+  assert.match(
+    block(
+      iam,
+      'resource "yandex_iam_workload_identity_federated_credential" "github_infrastructure"',
+    ),
+    /external_subject_id\s*=\s*local\.github_infrastructure_subject/,
+  );
+  assert.match(
+    block(
+      iam,
+      'resource "yandex_iam_workload_identity_federated_credential" "github_infrastructure_apply"',
+    ),
+    /external_subject_id\s*=\s*local\.github_infrastructure_apply_subject/,
+  );
+  for (const [variables, name, exact] of [
+    [iamVariables, "github_infrastructure_environment", "production-infrastructure"],
+    [iamVariables, "github_infrastructure_apply_environment", "production-infrastructure-apply"],
+    [bootstrapVariables, "github_infrastructure_environment", "production-infrastructure"],
+    [
+      bootstrapVariables,
+      "github_infrastructure_apply_environment",
+      "production-infrastructure-apply",
+    ],
+  ]) {
+    assert.match(block(variables, `variable "${name}"`), new RegExp(`== "${exact}"`));
+  }
+  assert.match(
+    bootstrap,
+    /github_infrastructure_apply_environment\s*=\s*var\.github_infrastructure_apply_environment/,
+  );
+  assert.match(
+    bootstrapTfvars,
+    /^github_infrastructure_apply_environment\s*=\s*"production-infrastructure-apply"$/m,
+  );
   assert.doesNotMatch(
     active,
     /deployment_controller|github_deploy|runner_registration|registry_secret|yandex_lockbox_secret"\s+"registry|yandex_logging_group|audit_trails|smart-web-security|certificate-manager|monitoring\./,
@@ -224,7 +492,7 @@ test("app cloud-init is key-only, fail-fast and writes completion last", async (
   );
 });
 
-test("active Terraform configuration contains no literal secret payloads or local credential backend", async () => {
+test("active Terraform contains no literal credentials and managed release edge resources stay allowlisted", async () => {
   const paths = [
     "infra/yandex/bootstrap/main.tf",
     "infra/yandex/bootstrap/providers.tf",
@@ -233,15 +501,23 @@ test("active Terraform configuration contains no literal secret payloads or loca
     "infra/yandex/modules/iam/main.tf",
     "infra/yandex/modules/compute/main.tf",
   ];
-  const active = (await Promise.all(paths.map(source))).join("\n");
+  const general = (await Promise.all(paths.map(source))).join("\n");
+  const releases = await source("infra/yandex/modules/station-releases/main.tf");
+  const active = `${general}\n${releases}`;
   assert.doesNotMatch(
     active,
     /access_key\s*=\s*"|secret_key\s*=\s*"|iam_token\s*=\s*"|token\s*=\s*"/i,
   );
-  assert.doesNotMatch(active, /static_access_key|hmac_key/);
+  assert.doesNotMatch(general, /static_access_key|hmac_key|yandex_cdn_|yandex_cm_certificate/);
+  assert.equal(
+    [...releases.matchAll(/resource\s+"yandex_iam_service_account_static_access_key"/g)].length,
+    1,
+  );
+  assert.equal([...releases.matchAll(/resource\s+"yandex_cdn_resource"/g)].length, 1);
+  assert.equal([...releases.matchAll(/resource\s+"yandex_cm_certificate"/g)].length, 1);
 });
 
-test("infrastructure workflow has one protected manual apply without legacy phases", async () => {
+test("infrastructure workflow protects validation, plan and apply without legacy phases", async () => {
   const workflow = await source(".github/workflows/yandex-infrastructure.yml");
   assert.match(workflow, /workflow_dispatch:[\s\S]*target_sha:[\s\S]*enable_public_dns:/);
   assert.match(workflow, /environment:\s*production-infrastructure/);
@@ -250,8 +526,8 @@ test("infrastructure workflow has one protected manual apply without legacy phas
   assert.match(workflow, /terraform[^\n]+plan[^\n]+-out="\$plan"/);
   assert.equal(
     [...workflow.matchAll(/name:\s*Configure provider mirror/g)].length,
-    2,
-    "both validation and apply must use the Yandex provider mirror",
+    3,
+    "validation, plan and apply must use the Yandex provider mirror",
   );
   const payloadFilter = workflow.match(/jq -e '([\s\S]*?)' <<<"\$payload" > \/dev\/null/)?.[1];
   assert.ok(payloadFilter, "workflow must validate the Lockbox payload before exporting it");
@@ -287,6 +563,192 @@ test("infrastructure workflow has one protected manual apply without legacy phas
   assert.doesNotMatch(
     workflow,
     /observability_phase|postgres_provisioning_phase|self-hosted|deployment.controller|ALB|SWS|certificate|rehearsal/i,
+  );
+});
+
+test("infrastructure workflow escrows one reviewed plan between separately protected runs", async () => {
+  const workflow = await source(".github/workflows/yandex-infrastructure.yml");
+
+  assert.match(
+    workflow,
+    /workflow_dispatch:[\s\S]*mode:[\s\S]*options:[\s\S]*- plan[\s\S]*- apply/,
+  );
+  assert.match(workflow, /plan_key:[\s\S]*type:\s*string/);
+  assert.match(workflow, /plan_sha256:[\s\S]*type:\s*string/);
+  assert.match(workflow, /plan_version_id:[\s\S]*type:\s*string/);
+  assert.match(workflow, /plan_json_key:[\s\S]*type:\s*string/);
+  assert.match(workflow, /plan_json_sha256:[\s\S]*type:\s*string/);
+  assert.match(workflow, /plan_json_version_id:[\s\S]*type:\s*string/);
+  assert.match(workflow, /plan_review_confirmed:[\s\S]*type:\s*boolean/);
+  const ownerConfirmationInput = workflow.match(
+    /owner_confirmation:([\s\S]*?)\n      enable_station_release_public_dns:/,
+  )?.[1];
+  assert.ok(ownerConfirmationInput);
+  assert.match(ownerConfirmationInput, /required:\s*false/);
+  assert.match(ownerConfirmationInput, /default:\s*""/);
+  assert.match(ownerConfirmationInput, /type:\s*string/);
+  const releaseDnsInput = workflow.match(
+    /enable_station_release_public_dns:([\s\S]*?)\n\npermissions:/,
+  )?.[1];
+  assert.ok(releaseDnsInput);
+  assert.match(releaseDnsInput, /required:\s*true/);
+  assert.match(releaseDnsInput, /default:\s*false/);
+  assert.match(releaseDnsInput, /type:\s*boolean/);
+
+  const authorizeStart = workflow.indexOf("  authorize-apply:\n");
+  const planStart = workflow.indexOf("  plan:\n");
+  const applyStart = workflow.indexOf("  apply:\n");
+  assert.ok(authorizeStart > -1 && planStart > authorizeStart && applyStart > planStart);
+  const authorizeJob = workflow.slice(authorizeStart, planStart);
+  const planJob = workflow.slice(planStart, applyStart);
+  const applyJob = workflow.slice(applyStart);
+
+  assert.match(authorizeJob, /if:.*workflow_dispatch.*inputs\.mode == 'apply'/);
+  assert.match(authorizeJob, /permissions:\s*\{\}/);
+  assert.doesNotMatch(authorizeJob, /environment:|id-token:/);
+  assert.doesNotMatch(planJob, /needs:\s*authorize-apply/);
+  assert.match(planJob, /if:.*inputs\.mode == 'plan'/);
+  assert.match(planJob, /environment:\s*production-infrastructure/);
+  assert.match(applyJob, /needs:\s*authorize-apply/);
+  assert.match(applyJob, /if:.*inputs\.mode == 'apply'/);
+  assert.match(applyJob, /environment:\s*production-infrastructure-apply/);
+
+  const authorizationScript = authorizeJob.match(
+    /- name: Authorize Yandex infrastructure apply owner[\s\S]*?run: \|\n([\s\S]*?)\n\n/,
+  )?.[1];
+  assert.ok(authorizationScript, "owner authorization shell step must exist");
+  const runAuthorization = (environment = {}) =>
+    execFileSync("bash", ["-c", authorizationScript], {
+      env: {
+        ...process.env,
+        GITHUB_REF: "refs/heads/main",
+        OWNER_CONFIRMATION: "APPLY-YANDEX-INFRASTRUCTURE",
+        INFRASTRUCTURE_ACTOR: "thevladbog",
+        INFRASTRUCTURE_OWNER: "thevladbog",
+        ...environment,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  assert.doesNotThrow(() => runAuthorization());
+  assert.throws(() => runAuthorization({ INFRASTRUCTURE_ACTOR: "another-user" }));
+  assert.throws(() => runAuthorization({ OWNER_CONFIRMATION: "apply-yandex-infrastructure" }));
+  assert.throws(() => runAuthorization({ GITHUB_REF: "refs/heads/feature" }));
+
+  assert.match(planJob, /terraform[^\n]+plan[^\n]+-out="\$plan"/);
+  assert.doesNotMatch(planJob, /terraform[^\n]+\sapply(?:\s|$)/);
+  assert.match(applyJob, /terraform[^\n]+apply[^\n]+"\$plan"/);
+  assert.doesNotMatch(applyJob, /terraform[^\n]+\splan(?:\s|$)/);
+
+  for (const job of [planJob, applyJob]) {
+    assert.match(job, /actions\/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020/);
+    assert.match(job, /pnpm install --frozen-lockfile/);
+    assert.match(job, /\[\[ "\$TARGET_SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+    assert.match(job, /\[\[ "\$GITHUB_REF" == "refs\/heads\/main" \]\]/);
+    assert.match(job, /\[\[ "\$\(git rev-parse HEAD\)" == "\$TARGET_SHA" \]\]/);
+    assert.match(
+      job,
+      /export TF_VAR_public_dns_enabled="\$ENABLE_PUBLIC_DNS"[\s\S]*export TF_VAR_station_release_public_dns_enabled="\$ENABLE_STATION_RELEASE_PUBLIC_DNS"/,
+    );
+    assert.match(
+      job,
+      /node infra\/yandex\/scripts\/guard-production-plan\.mjs "\$(?:plan_json|regenerated_plan_json)"/,
+    );
+  }
+  assert.match(planJob, /case "\$ENABLE_PUBLIC_DNS" in true\|false\)/);
+  assert.match(planJob, /case "\$ENABLE_STATION_RELEASE_PUBLIC_DNS" in true\|false\)/);
+
+  assert.match(
+    planJob,
+    /plan_key="production\/plans\/\$\{GITHUB_RUN_ID\}\/\$\{GITHUB_RUN_ATTEMPT\}\/\$\{TARGET_SHA\}\/\$\{ENABLE_PUBLIC_DNS\}-\$\{ENABLE_STATION_RELEASE_PUBLIC_DNS\}\/production\.tfplan"/,
+  );
+  assert.match(planJob, /\[\[ "\$GITHUB_RUN_ATTEMPT" =~ \^\[1-9\]\[0-9\]\*\$ \]\]/);
+  assert.match(planJob, /plan_sha256=.*sha256sum "\$plan"/);
+  assert.match(planJob, /plan_json_sha256=.*sha256sum "\$plan_json"/);
+  assert.match(planJob, /\(\( plan_size <= 268435456 \)\)/);
+  assert.match(planJob, /\(\( plan_json_size <= 67108864 \)\)/);
+  assert.match(planJob, /aws s3api put-object[\s\S]*--bucket "\$YC_STATE_BUCKET_NAME"/);
+  assert.match(planJob, /--key "\$plan_key"[\s\S]*--body "\$plan"/);
+  assert.match(planJob, /--key "\$plan_json_key"[\s\S]*--body "\$plan_json"/);
+  assert.match(planJob, /--metadata[\s\S]*target-sha=.*enable-public-dns=.*source-run-attempt=/);
+  assert.match(planJob, /plan_version_id="\$\(jq -er '\.VersionId' "\$put_response"\)"/);
+  assert.match(planJob, /\[\[ "\$plan_version_id" =~ \^\[A-Za-z0-9\._\+\/=\-\]\{1,256\}\$ \]\]/);
+  assert.match(planJob, /\[\[ "\$plan_version_id" != "null" \]\]/);
+  assert.match(planJob, /printf 'plan_version_id=%s\\n' "\$plan_version_id" >> "\$GITHUB_OUTPUT"/);
+  assert.match(
+    planJob,
+    /printf 'plan_json_version_id=%s\\n' "\$plan_json_version_id" >> "\$GITHUB_OUTPUT"/,
+  );
+  assert.match(
+    planJob,
+    /Terraform plan escrow::plan_key=%s plan_sha256=%s plan_version_id=%s plan_json_key=%s plan_json_sha256=%s plan_json_version_id=%s/,
+  );
+  assert.match(planJob, /\[\[ "\$PLAN_REVIEW_CONFIRMED" == "false" \]\]/);
+
+  assert.match(applyJob, /PLAN_KEY:\s*\$\{\{ inputs\.plan_key \}\}/);
+  assert.match(applyJob, /PLAN_SHA256:\s*\$\{\{ inputs\.plan_sha256 \}\}/);
+  assert.match(applyJob, /PLAN_VERSION_ID:\s*\$\{\{ inputs\.plan_version_id \}\}/);
+  assert.match(applyJob, /PLAN_JSON_KEY:\s*\$\{\{ inputs\.plan_json_key \}\}/);
+  assert.match(applyJob, /PLAN_JSON_SHA256:\s*\$\{\{ inputs\.plan_json_sha256 \}\}/);
+  assert.match(applyJob, /PLAN_JSON_VERSION_ID:\s*\$\{\{ inputs\.plan_json_version_id \}\}/);
+  assert.match(applyJob, /PLAN_REVIEW_CONFIRMED:\s*\$\{\{ inputs\.plan_review_confirmed \}\}/);
+  assert.match(
+    applyJob,
+    /terraform-plan-binding\.mjs validate[\s\\]*"\$TARGET_SHA" "\$ENABLE_PUBLIC_DNS" "\$ENABLE_STATION_RELEASE_PUBLIC_DNS"[\s\\]*"\$PLAN_KEY" "\$PLAN_SHA256" "\$PLAN_VERSION_ID"[\s\\]*"\$PLAN_JSON_KEY" "\$PLAN_JSON_SHA256" "\$PLAN_JSON_VERSION_ID"[\s\\]*"\$PLAN_REVIEW_CONFIRMED" "\$binding"/,
+  );
+  assert.ok(
+    applyJob.indexOf("terraform-plan-binding.mjs validate") <
+      applyJob.indexOf('github_oidc_token="$(curl'),
+    "both reviewer-supplied objects and review confirmation must be validated before authentication",
+  );
+  assert.match(applyJob, /aws s3api head-object[\s\S]*--key "\$PLAN_KEY"/);
+  assert.match(applyJob, /aws s3api get-object[\s\S]*--key "\$PLAN_KEY"/);
+  assert.match(
+    applyJob,
+    /--arg plan_version_id "\$PLAN_VERSION_ID"[\s\S]*\.VersionId == \$plan_version_id/,
+  );
+  assert.match(applyJob, /\.Metadata[\s\S]*target-sha[\s\S]*source-run-attempt/);
+  assert.equal((applyJob.match(/aws s3api head-object/g) ?? []).length, 2);
+  assert.equal((applyJob.match(/aws s3api get-object/g) ?? []).length, 2);
+  assert.match(applyJob, /--key "\$PLAN_KEY"[\s\S]*--version-id "\$PLAN_VERSION_ID"/);
+  assert.match(applyJob, /--key "\$PLAN_JSON_KEY"[\s\S]*--version-id "\$PLAN_JSON_VERSION_ID"/);
+  assert.doesNotMatch(applyJob, /plan_version_id="\$\(jq/);
+  const hashGuard = applyJob.lastIndexOf("sha256sum --check --status");
+  const byteCompare = applyJob.indexOf('cmp --silent "$plan_json" "$regenerated_plan_json"');
+  const semanticCompare = applyJob.indexOf("jq --slurp -e '.[0] == .[1]'");
+  const apply = applyJob.indexOf("terraform -chdir=infra/yandex/production apply");
+  assert.ok(hashGuard > -1 && byteCompare > hashGuard && semanticCompare > byteCompare);
+  assert.ok(apply > semanticCompare, "both exact escrow objects must be compared before apply");
+  const cleanup = applyJob.indexOf("terraform-plan-escrow.mjs cleanup", apply);
+  assert.ok(cleanup > apply, "both exact escrow versions must be typed-cleaned after apply");
+  assert.match(
+    applyJob,
+    /terraform-plan-escrow\.mjs cleanup[\s\\]*"\$YC_STATE_BUCKET_NAME"[\s\\]*"\$PLAN_KEY" "\$PLAN_VERSION_ID"[\s\\]*"\$PLAN_JSON_KEY" "\$PLAN_JSON_VERSION_ID"/,
+  );
+  assert.doesNotMatch(applyJob, /aws s3api delete-object|head-object[^]*2>&1/);
+
+  assert.match(
+    workflow,
+    /ENABLE_STATION_RELEASE_PUBLIC_DNS:\s*\$\{\{ inputs\.enable_station_release_public_dns \}\}/,
+  );
+  assert.match(
+    workflow,
+    /TF_VAR_station_release_bucket_name:\s*\$\{\{ vars\.YC_STATION_RELEASE_BUCKET_NAME \}\}/,
+  );
+  assert.match(
+    workflow,
+    /TF_VAR_station_release_domain:\s*\$\{\{ vars\.MARKIRO_STATION_RELEASE_DOMAIN \}\}/,
+  );
+  assert.match(
+    workflow,
+    /TF_VAR_station_release_publisher_pgp_key:\s*\$\{\{ vars\.YC_STATION_RELEASE_PUBLISHER_PGP_KEY \}\}/,
+  );
+  assert.doesNotMatch(workflow, /YANDEX_STATION_RELEASE_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY)/);
+  assert.doesNotMatch(workflow, /terraform[^\n]*\soutput(?:\s|$)/);
+  assert.doesNotMatch(workflow, /actions\/upload-artifact/);
+  assert.doesNotMatch(workflow, /GITHUB_STEP_SUMMARY/);
+  assert.doesNotMatch(
+    workflow,
+    /(?:--access-key|--secret-key|access_key\s*=\s*\$\{\{|secret_key\s*=\s*\$\{\{)/i,
   );
 });
 

@@ -1,0 +1,77 @@
+---
+import type { Locale } from "../content/pages";
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const copy = locale === "ru"
+  ? {
+      label: "Настройки cookies",
+      title: "Вы выбираете, какие данные можно использовать",
+      description:
+        "Необходимые технологии обеспечивают работу и защиту сайта. Аналитика и маркетинг включаются только после вашего выбора.",
+      privacy: "Подробнее в политике обработки данных",
+      reject: "Отклонить",
+      customize: "Настроить",
+      accept: "Принять все",
+      necessary: "Необходимые",
+      necessaryNote: "Работа сайта и защита формы. Всегда включены.",
+      analytics: "Аналитика",
+      analyticsNote: "Помогает понять, какие страницы и действия полезны посетителям.",
+      marketing: "Маркетинг",
+      marketingNote: "Измерение рекламы и источников обращений.",
+      save: "Сохранить выбор",
+    }
+  : {
+      label: "Cookie settings",
+      title: "Choose which data may be used",
+      description:
+        "Necessary technologies keep the site working and secure. Analytics and marketing activate only after your choice.",
+      privacy: "Read the personal-data processing policy",
+      reject: "Reject",
+      customize: "Customize",
+      accept: "Accept all",
+      necessary: "Necessary",
+      necessaryNote: "Site operation and form security. Always enabled.",
+      analytics: "Analytics",
+      analyticsNote: "Helps us understand which pages and actions visitors find useful.",
+      marketing: "Marketing",
+      marketingNote: "Measures advertising and lead sources.",
+      save: "Save choice",
+    };
+const privacyPath = locale === "ru" ? "/privacy/" : "/en/privacy/";
+---
+
+<section class="consent-panel" data-consent-panel aria-label={copy.label} hidden>
+  <div class="container consent-panel__inner">
+    <div class="consent-panel__intro">
+      <p class="consent-panel__eyebrow">{copy.label}</p>
+      <h2>{copy.title}</h2>
+      <p>{copy.description} <a href={privacyPath}>{copy.privacy}</a>.</p>
+    </div>
+
+    <div class="consent-panel__summary" data-consent-summary>
+      <button class="button button--quiet" type="button" data-consent-reject>{copy.reject}</button>
+      <button class="button button--quiet" type="button" data-consent-customize>{copy.customize}</button>
+      <button class="button" type="button" data-consent-accept>{copy.accept}</button>
+    </div>
+
+    <div class="consent-panel__details" data-consent-details hidden>
+      <label class="consent-choice consent-choice--locked">
+        <input type="checkbox" checked disabled />
+        <span><strong>{copy.necessary}</strong><small>{copy.necessaryNote}</small></span>
+      </label>
+      <label class="consent-choice">
+        <input type="checkbox" data-consent-analytics />
+        <span><strong>{copy.analytics}</strong><small>{copy.analyticsNote}</small></span>
+      </label>
+      <label class="consent-choice">
+        <input type="checkbox" data-consent-marketing />
+        <span><strong>{copy.marketing}</strong><small>{copy.marketingNote}</small></span>
+      </label>
+      <button class="button" type="button" data-consent-save>{copy.save}</button>
+    </div>
+  </div>
+</section>
