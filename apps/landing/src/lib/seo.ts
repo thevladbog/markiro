@@ -1,4 +1,5 @@
 import { LEGAL_SEARCH_PAGES } from "../content/legal-pages";
+import { ARTICLE_SEARCH_PAGES, type ArticlePageDefinition } from "../content/articles";
 import {
   MARKETING_SEARCH_PAGES,
   SEO_PAGES,
@@ -9,6 +10,7 @@ import {
 const SITE_URL = "https://markiro.app";
 const INDEXABLE_PAGES: readonly SearchPageRecord[] = [
   ...MARKETING_SEARCH_PAGES,
+  ...ARTICLE_SEARCH_PAGES,
   ...LEGAL_SEARCH_PAGES,
 ];
 
@@ -16,12 +18,15 @@ type JsonLdObject = Record<string, unknown>;
 
 export interface PageMetadata {
   path: string;
-  alternatePath: string;
+  alternatePath?: string;
   locale: "ru" | "en";
   title: string;
   description: string;
   socialImage: string;
   socialImageAlt: string;
+  ogType?: "article" | "website";
+  publishedAt?: string;
+  modifiedAt?: string;
 }
 
 export interface PageGraph extends JsonLdObject {
@@ -98,6 +103,58 @@ export function buildPageGraph(page: SeoPageDefinition): PageGraph {
   }
 
   return { "@context": "https://schema.org", "@graph": graph };
+}
+
+export function buildArticlePageGraph(page: ArticlePageDefinition): PageGraph {
+  const pageUrl = absoluteUrl(page.path);
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": `${SITE_URL}/#website`,
+        url: `${SITE_URL}/`,
+        name: "Markiro",
+        inLanguage: ["ru", "en"],
+        publisher: { "@id": `${SITE_URL}/#organization` },
+      },
+      {
+        "@type": "Organization",
+        "@id": `${SITE_URL}/#organization`,
+        name: "Markiro",
+        url: `${SITE_URL}/`,
+      },
+      {
+        "@type": "WebPage",
+        "@id": `${pageUrl}#webpage`,
+        url: pageUrl,
+        name: page.title,
+        description: page.description,
+        inLanguage: page.locale,
+        isPartOf: { "@id": `${SITE_URL}/#website` },
+      },
+      {
+        "@type": "Article",
+        "@id": `${pageUrl}#article`,
+        headline: page.heading,
+        description: page.description,
+        image: absoluteUrl(page.socialImage),
+        datePublished: page.publishedAt,
+        dateModified: page.modifiedAt,
+        inLanguage: page.locale,
+        mainEntityOfPage: { "@id": `${pageUrl}#webpage` },
+        author: { "@id": `${SITE_URL}/#organization` },
+        publisher: { "@id": `${SITE_URL}/#organization` },
+      },
+      {
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Markiro", item: `${SITE_URL}/` },
+          { "@type": "ListItem", position: 2, name: page.navigationLabel, item: pageUrl },
+        ],
+      },
+    ],
+  };
 }
 
 export function buildLegalPageGraph(
@@ -177,15 +234,20 @@ Sitemap: ${SITE_URL}/sitemap.xml
 }
 
 export function renderSitemapXml(): string {
-  const urls = INDEXABLE_PAGES.map(
-    (page) => `  <url>
-    <loc>${absoluteUrl(page.path)}</loc>
-    <xhtml:link rel="alternate" hreflang="${page.locale}" href="${absoluteUrl(page.path)}" />
+  const urls = INDEXABLE_PAGES.map((page) => {
+    const alternateLinks =
+      page.alternatePath === undefined
+        ? `    <xhtml:link rel="alternate" hreflang="${page.locale}" href="${absoluteUrl(page.path)}" />`
+        : `    <xhtml:link rel="alternate" hreflang="${page.locale}" href="${absoluteUrl(page.path)}" />
     <xhtml:link rel="alternate" hreflang="${page.locale === "ru" ? "en" : "ru"}" href="${absoluteUrl(page.alternatePath)}" />
-    <xhtml:link rel="alternate" hreflang="x-default" href="${absoluteUrl(page.locale === "ru" ? page.path : page.alternatePath)}" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="${absoluteUrl(page.locale === "ru" ? page.path : page.alternatePath)}" />`;
+
+    return `  <url>
+    <loc>${absoluteUrl(page.path)}</loc>
+${alternateLinks}
     <lastmod>${page.lastModified}</lastmod>
-  </url>`,
-  ).join("\n");
+  </url>`;
+  }).join("\n");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">

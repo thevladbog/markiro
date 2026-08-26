@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title description">
+  <title id="title">Карта восстановления операций агрегации на производственной линии</title>
+  <desc id="description">Повторный скан, сбой печати, потеря сети и перезапуск станции обрабатываются локально и сохраняются в журнале без остановки линии.</desc>
+  <rect width="1200" height="620" fill="#131216"/>
+  <rect x="1" y="1" width="1198" height="618" fill="none" stroke="#343238" stroke-width="2"/>
+
+  <g font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" letter-spacing="1.5" fill="#8f8c95">
+    <text x="68" y="58">СОБЫТИЕ НА ЛИНИИ</text>
+    <text x="488" y="58">ЛОКАЛЬНАЯ СТАНЦИЯ</text>
+    <text x="927" y="58">РЕЗУЛЬТАТ</text>
+  </g>
+
+  <g font-family="IBM Plex Sans, sans-serif">
+    <g transform="translate(68 94)">
+      <rect width="300" height="92" fill="#1b1a1f" stroke="#45434a"/>
+      <circle cx="37" cy="46" r="16" fill="#2a282e" stroke="#f0b45f" stroke-width="2"/>
+      <path d="M29 46h16M37 38v16" stroke="#f0b45f" stroke-width="3"/>
+      <text x="70" y="41" font-size="20" font-weight="600" fill="#f5f4f1">Повторный скан</text>
+      <text x="70" y="67" font-size="16" fill="#aaa7af">Код уже принят</text>
+    </g>
+    <g transform="translate(68 206)">
+      <rect width="300" height="92" fill="#1b1a1f" stroke="#45434a"/>
+      <rect x="23" y="29" width="29" height="26" rx="2" fill="none" stroke="#f0b45f" stroke-width="2"/>
+      <path d="M28 24h19v9H28zm2 31h15v10H30z" fill="none" stroke="#f0b45f" stroke-width="2"/>
+      <text x="70" y="41" font-size="20" font-weight="600" fill="#f5f4f1">Сбой печати</text>
+      <text x="70" y="67" font-size="16" fill="#aaa7af">Этикетка не вышла</text>
+    </g>
+    <g transform="translate(68 318)">
+      <rect width="300" height="92" fill="#1b1a1f" stroke="#45434a"/>
+      <path d="M21 42c11-12 25-12 36 0M27 49c7-7 17-7 24 0M38 58h2" fill="none" stroke="#f0b45f" stroke-linecap="square" stroke-width="3"/>
+      <path d="m22 25 34 40" stroke="#f0b45f" stroke-width="2"/>
+      <text x="70" y="41" font-size="20" font-weight="600" fill="#f5f4f1">Потеря сети</text>
+      <text x="70" y="67" font-size="16" fill="#aaa7af">Сервер недоступен</text>
+    </g>
+    <g transform="translate(68 430)">
+      <rect width="300" height="92" fill="#1b1a1f" stroke="#45434a"/>
+      <path d="M38 27a19 19 0 1 0 17 11M38 18v17l12-9" fill="none" stroke="#f0b45f" stroke-width="3"/>
+      <text x="70" y="41" font-size="20" font-weight="600" fill="#f5f4f1">Перезапуск</text>
+      <text x="70" y="67" font-size="16" fill="#aaa7af">Питание восстановлено</text>
+    </g>
+  </g>
+
+  <g stroke="#3ddc7a" stroke-width="3" fill="none">
+    <path d="M368 140h92"/><path d="m449 130 11 10-11 10"/>
+    <path d="M368 252h54q38 0 38 38v2"/><path d="m450 281 10 11 10-11"/>
+    <path d="M368 364h54q38 0 38-38v-2"/><path d="m450 335 10-11 10 11"/>
+    <path d="M368 476h92"/><path d="m449 466 11 10-11 10"/>
+  </g>
+
+  <g transform="translate(460 112)">
+    <rect width="320" height="382" fill="#202026" stroke="#3ddc7a" stroke-width="2"/>
+    <rect x="38" y="42" width="244" height="122" fill="#121115" stroke="#45434a"/>
+    <circle cx="66" cy="69" r="8" fill="#3ddc7a"/>
+    <text x="86" y="75" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" fill="#3ddc7a">СТАНЦИЯ В РАБОТЕ</text>
+    <text x="59" y="116" font-family="IBM Plex Sans, sans-serif" font-size="25" font-weight="600" fill="#f5f4f1">Короб 18 / 24</text>
+    <text x="59" y="143" font-family="IBM Plex Sans, sans-serif" font-size="16" fill="#aaa7af">События сохранены локально</text>
+    <g transform="translate(38 202)" font-family="IBM Plex Sans, sans-serif">
+      <rect width="244" height="50" fill="#18171c" stroke="#343238"/>
+      <text x="18" y="31" font-size="17" fill="#f5f4f1">Журнал операций</text>
+      <circle cx="218" cy="25" r="8" fill="#3ddc7a"/>
+      <rect y="64" width="244" height="50" fill="#18171c" stroke="#343238"/>
+      <text x="18" y="95" font-size="17" fill="#f5f4f1">Очередь отправки</text>
+      <text x="219" y="95" text-anchor="middle" font-size="15" font-weight="600" fill="#3ddc7a">04</text>
+    </g>
+    <text x="160" y="351" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" letter-spacing="1" fill="#8f8c95">БЕЗ ОСТАНОВКИ ЛИНИИ</text>
+  </g>
+
+  <g stroke="#3ddc7a" stroke-width="3" fill="none">
+    <path d="M780 303h82"/><path d="m851 293 11 10-11 10"/>
+  </g>
+
+  <g transform="translate(862 183)" font-family="IBM Plex Sans, sans-serif">
+    <rect width="270" height="240" fill="#1b1a1f" stroke="#45434a"/>
+    <circle cx="135" cy="74" r="38" fill="#3ddc7a"/>
+    <path d="m116 74 13 13 25-29" fill="none" stroke="#131216" stroke-linecap="square" stroke-width="7"/>
+    <text x="135" y="151" text-anchor="middle" font-size="23" font-weight="600" fill="#f5f4f1">Операция понятна</text>
+    <text x="135" y="181" text-anchor="middle" font-size="17" fill="#aaa7af">Принята или отклонена</text>
+    <text x="135" y="207" text-anchor="middle" font-size="17" fill="#aaa7af">с явной причиной</text>
+  </g>
+
+  <text x="68" y="575" font-family="IBM Plex Mono, monospace" font-size="15" letter-spacing="1" fill="#8f8c95">MARKIRO / КОНТРОЛИРУЕМОЕ ВОССТАНОВЛЕНИЕ</text>
+</svg>

@@ -12,8 +12,8 @@ interface Props {
 const { page, phone } = Astro.props;
 const copy = getUiCopy(page.locale).common;
 const homePath = page.locale === "ru" ? "/" : "/en/";
-const ruPath = page.locale === "ru" ? page.path : page.alternatePath;
-const enPath = page.locale === "en" ? page.path : page.alternatePath;
+const ruPath = page.locale === "ru" ? page.path : (page.alternatePath ?? "/");
+const enPath = page.locale === "en" ? page.path : (page.alternatePath ?? "/en/");
 const paths = page.locale === "ru"
   ? {
       aggregation: "/sscc-i-agregatsiya/",
