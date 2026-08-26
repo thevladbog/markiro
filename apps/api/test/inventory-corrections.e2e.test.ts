@@ -16,6 +16,7 @@ import { loadEnv } from "../src/env";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { setOnlyOrganizationMemberRole, signUpAndActivate } from "./support/auth";
 import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
+import { StationInventorySyncService } from "../src/modules/inventories/station-inventory-sync.service";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -27,6 +28,7 @@ const CHANGED_DATE = "2026-08-06";
 type Agent = ReturnType<typeof request.agent>;
 type JsonSchema = {
   type?: string;
+  enum?: unknown[];
   additionalProperties?: boolean;
   required?: string[];
   properties?: Record<string, JsonSchema>;
@@ -45,6 +47,7 @@ interface RunningFixture {
   boxId: string;
   repackItemId: string;
   sourceDate: string;
+  deviceId: string;
 }
 
 describe.skipIf(!ready)("inventory administrative corrections", () => {
@@ -52,6 +55,7 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
   let setup: AuthSetup;
   let db: Db;
   let document: OpenAPIObject;
+  let stationSync: StationInventorySyncService;
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -65,6 +69,7 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
     mountAuth(server, setup.auth);
     server.use(express.json());
     await app.init();
+    stationSync = app.get(StationInventorySyncService);
     await listenOnLoopback(app);
     document = SwaggerModule.createDocument(
       app,
@@ -223,6 +228,16 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
       classification: "expected",
       originClassification: "expected",
     });
+    await db.insert(schema.inventoryDeviceParticipants).values({
+      tenantId,
+      inventoryId,
+      deviceId,
+      operatorId,
+      configuredLineId: lineId,
+      joinMethod: "assigned_line",
+      joinedAt: new Date("2026-08-20T09:30:00.000Z"),
+      heartbeatAt: new Date(),
+    });
     await db.insert(schema.inventoryRepackBoxes).values({
       id: boxId,
       tenantId,
@@ -262,6 +277,7 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
       boxId,
       repackItemId,
       sourceDate: SOURCE_DATE,
+      deviceId,
     } satisfies RunningFixture;
   }
 
@@ -341,6 +357,10 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
       .expect(400);
     await fixture.agent
       .post(`/inventories/${fixture.inventoryId}/corrections`)
+      .send(correctionBody(fixture, "void_scan", { reason: "я".repeat(513) }))
+      .expect(400);
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/corrections`)
       .send(correctionBody(fixture, "void_scan", { expectedResultRevision: 3 }))
       .expect(409, { code: "INVENTORY_CORRECTION_STALE_REVISION", resultRevision: 4 });
     await fixture.agent
@@ -348,6 +368,16 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
       .send(correctionBody(fixture, "void_scan", { unexpected: true }))
       .expect(400);
     expect(await correctionRows(fixture)).toHaveLength(0);
+  });
+
+  it("accepts a reason at exactly 1024 UTF-8 bytes including Cyrillic", async () => {
+    const fixture = await seedRunningInventory();
+    const reason = "я".repeat(512);
+    const response = await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/corrections`)
+      .send(correctionBody(fixture, "void_scan", { reason }))
+      .expect(201);
+    expect(response.body.reason).toBe(reason);
   });
 
   it("voids and restores a scan without deleting its immutable source event", async () => {
@@ -423,7 +453,23 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
   });
 
   it("removes an active repack item append-only and invalidates a box", async () => {
+    const closedFixture = await seedRunningInventory();
+    await closedFixture.agent
+      .post(`/inventories/${closedFixture.inventoryId}/corrections`)
+      .send(correctionBody(closedFixture, "remove_item"))
+      .expect(409, { code: "INVENTORY_CORRECTION_STATE_CONFLICT" });
+
     const removeFixture = await seedRunningInventory();
+    await db
+      .update(schema.inventoryRepackBoxes)
+      .set({
+        state: "open",
+        printState: "not_ready",
+        printAttemptCount: 0,
+        closedAt: null,
+        printedAt: null,
+      })
+      .where(eq(schema.inventoryRepackBoxes.id, removeFixture.boxId));
     await removeFixture.agent
       .post(`/inventories/${removeFixture.inventoryId}/corrections`)
       .send(correctionBody(removeFixture, "remove_item"))
@@ -450,7 +496,7 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
     expect(box?.state).toBe("invalidated");
   });
 
-  it("records reprint only as durable pending work and never as physical print success", async () => {
+  it("records reprint work without changing the printed server projection", async () => {
     const fixture = await seedRunningInventory();
     const response = await fixture.agent
       .post(`/inventories/${fixture.inventoryId}/corrections`)
@@ -464,7 +510,73 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
       })
       .from(schema.inventoryRepackBoxes)
       .where(eq(schema.inventoryRepackBoxes.id, fixture.boxId));
-    expect(box).toEqual({ printState: "pending", printedAt: null });
+    if (!box) throw new Error("Expected reprint box projection");
+    expect(box.printState).toBe("printed");
+    expect(box.printedAt).toBeInstanceOf(Date);
+    expect(
+      await db
+        .select()
+        .from(schema.inventoryRepackPrintAttempts)
+        .where(eq(schema.inventoryRepackPrintAttempts.boxId, fixture.boxId)),
+    ).toHaveLength(0);
+  });
+
+  it("publishes every member and box correction as a consumable ordered Station delta", async () => {
+    const removeFixture = await seedRunningInventory();
+    await db
+      .update(schema.inventoryRepackBoxes)
+      .set({
+        state: "open",
+        printState: "not_ready",
+        printAttemptCount: 0,
+        closedAt: null,
+        printedAt: null,
+      })
+      .where(eq(schema.inventoryRepackBoxes.id, removeFixture.boxId));
+    await removeFixture.agent
+      .post(`/inventories/${removeFixture.inventoryId}/corrections`)
+      .send(correctionBody(removeFixture, "remove_item"))
+      .expect(201);
+    const removePage = await stationSync.progress(
+      removeFixture.tenantId,
+      removeFixture.deviceId,
+      removeFixture.inventoryId,
+      { limit: 200 },
+    );
+    expect(removePage.items).toEqual([
+      expect.objectContaining({
+        revision: 5,
+        kind: "remove_item",
+        boxId: removeFixture.boxId,
+        resultId: removeFixture.resultId,
+        codeHash: removeFixture.codeHash,
+        ownerDeviceId: removeFixture.deviceId,
+      }),
+    ]);
+    expect(removePage.nextCursor).toBe(`5:${removePage.items[0]!.id}`);
+
+    for (const action of ["invalidate_box", "reprint"] as const) {
+      const fixture = await seedRunningInventory();
+      await fixture.agent
+        .post(`/inventories/${fixture.inventoryId}/corrections`)
+        .send(correctionBody(fixture, action))
+        .expect(201);
+      const page = await stationSync.progress(
+        fixture.tenantId,
+        fixture.deviceId,
+        fixture.inventoryId,
+        { limit: 200 },
+      );
+      expect(page.items).toEqual([
+        expect.objectContaining({
+          revision: 5,
+          kind: action,
+          boxId: fixture.boxId,
+          ownerDeviceId: fixture.deviceId,
+        }),
+      ]);
+      expect(page.nextCursor).toBe(`5:${page.items[0]!.id}`);
+    }
   });
 
   it("namespaces idempotency by tenant and inventory, replays exactly, and rejects mismatch", async () => {
@@ -497,6 +609,35 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
     expect(await correctionRows(first)).toHaveLength(1);
   });
 
+  it("includes the normalized observed production date in exact idempotency replay", async () => {
+    const fixture = await seedRunningInventory();
+    const [membership] = await db
+      .select({ addedAt: schema.inventoryRepackItems.addedAt })
+      .from(schema.inventoryRepackItems)
+      .where(eq(schema.inventoryRepackItems.id, fixture.repackItemId));
+    await db
+      .update(schema.inventoryRepackItems)
+      .set({
+        removedAt: new Date(membership!.addedAt.getTime() + 1),
+        activeObservedProductionDate: null,
+      })
+      .where(eq(schema.inventoryRepackItems.id, fixture.repackItemId));
+    const idempotencyKey = randomUUID();
+    const body = correctionBody(fixture, "change_date", { idempotencyKey });
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/corrections`)
+      .send(body)
+      .expect(201);
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/corrections`)
+      .send(body)
+      .expect(201);
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/corrections`)
+      .send({ ...body, observedProductionDate: "2026-08-07" })
+      .expect(409, { code: "INVENTORY_CORRECTION_IDEMPOTENCY_MISMATCH" });
+  });
+
   it("denies cross-tenant targets and rejects closed and completed inventories", async () => {
     const owned = await seedRunningInventory();
     const foreign = await seedRunningInventory();
@@ -519,6 +660,10 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
 
   it("increments the result revision once and stores exact canonical before/after digests", async () => {
     const fixture = await seedRunningInventory();
+    const [beforeResult] = await db
+      .select({ updatedAt: schema.inventoryCodeResults.updatedAt })
+      .from(schema.inventoryCodeResults)
+      .where(eq(schema.inventoryCodeResults.id, fixture.resultId));
     const response = await fixture.agent
       .post(`/inventories/${fixture.inventoryId}/corrections`)
       .send(correctionBody(fixture, "void_scan"))
@@ -528,12 +673,14 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
       id: fixture.resultId,
       classification: "expected",
       observedProductionDate: SOURCE_DATE,
+      updatedAt: beforeResult!.updatedAt.toISOString(),
     });
     const expectedAfter = digest({
       kind: "code_result",
       id: fixture.resultId,
       classification: "voided",
       observedProductionDate: SOURCE_DATE,
+      updatedAt: response.body.createdAt,
     });
     expect(response.body).toMatchObject({
       beforeProjectionDigest: expectedBefore,
@@ -554,6 +701,118 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
       afterProjectionDigest: expectedAfter,
       resultRevision: 5,
     });
+  });
+
+  it("digests the exact membership and box fields changed at the one correction timestamp", async () => {
+    const memberFixture = await seedRunningInventory();
+    await db
+      .update(schema.inventoryRepackBoxes)
+      .set({
+        state: "open",
+        printState: "not_ready",
+        printAttemptCount: 0,
+        closedAt: null,
+        printedAt: null,
+      })
+      .where(eq(schema.inventoryRepackBoxes.id, memberFixture.boxId));
+    const removed = await memberFixture.agent
+      .post(`/inventories/${memberFixture.inventoryId}/corrections`)
+      .send(correctionBody(memberFixture, "remove_item"))
+      .expect(201);
+    expect(removed.body).toMatchObject({
+      beforeProjectionDigest: digest({
+        kind: "repack_item",
+        id: memberFixture.repackItemId,
+        boxId: memberFixture.boxId,
+        resultId: memberFixture.resultId,
+        removedAt: null,
+        activeObservedProductionDate: SOURCE_DATE,
+      }),
+      afterProjectionDigest: digest({
+        kind: "repack_item",
+        id: memberFixture.repackItemId,
+        boxId: memberFixture.boxId,
+        resultId: memberFixture.resultId,
+        removedAt: removed.body.createdAt,
+        activeObservedProductionDate: null,
+      }),
+    });
+
+    const boxFixture = await seedRunningInventory();
+    const [beforeBox] = await db
+      .select()
+      .from(schema.inventoryRepackBoxes)
+      .where(eq(schema.inventoryRepackBoxes.id, boxFixture.boxId));
+    const invalidated = await boxFixture.agent
+      .post(`/inventories/${boxFixture.inventoryId}/corrections`)
+      .send(correctionBody(boxFixture, "invalidate_box"))
+      .expect(201);
+    const boxProjection = (state: {
+      state: string;
+      invalidatedAt: Date | null;
+      updatedAt: Date;
+    }) => ({
+      kind: "repack_box",
+      id: boxFixture.boxId,
+      state: state.state,
+      printState: beforeBox!.printState,
+      printAttemptCount: beforeBox!.printAttemptCount,
+      printErrorCode: beforeBox!.printErrorCode,
+      invalidatedAt: state.invalidatedAt?.toISOString() ?? null,
+      printedAt: beforeBox!.printedAt?.toISOString() ?? null,
+      updatedAt: state.updatedAt.toISOString(),
+    });
+    expect(invalidated.body).toMatchObject({
+      beforeProjectionDigest: digest(boxProjection(beforeBox!)),
+      afterProjectionDigest: digest(
+        boxProjection({
+          state: "invalidated",
+          invalidatedAt: new Date(invalidated.body.createdAt),
+          updatedAt: new Date(invalidated.body.createdAt),
+        }),
+      ),
+    });
+  });
+
+  it("clamps removedAt to a future offline addedAt and digests the actual stored timestamp", async () => {
+    const fixture = await seedRunningInventory();
+    const futureAddedAt = new Date("2099-08-25T10:00:00.000Z");
+    await db
+      .update(schema.inventoryRepackBoxes)
+      .set({
+        state: "open",
+        printState: "not_ready",
+        printAttemptCount: 0,
+        closedAt: null,
+        printedAt: null,
+      })
+      .where(eq(schema.inventoryRepackBoxes.id, fixture.boxId));
+    await db
+      .update(schema.inventoryRepackItems)
+      .set({ addedAt: futureAddedAt })
+      .where(eq(schema.inventoryRepackItems.id, fixture.repackItemId));
+
+    const removed = await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/corrections`)
+      .send(correctionBody(fixture, "remove_item"))
+      .expect(201);
+
+    const [membership] = await db
+      .select()
+      .from(schema.inventoryRepackItems)
+      .where(eq(schema.inventoryRepackItems.id, fixture.repackItemId));
+    expect(membership?.removedAt).toEqual(futureAddedAt);
+    expect(removed.body.createdAt).not.toBe(futureAddedAt.toISOString());
+    expect(removed.body.afterProjectionDigest).toBe(
+      digest({
+        kind: "repack_item",
+        id: fixture.repackItemId,
+        boxId: fixture.boxId,
+        resultId: fixture.resultId,
+        removedAt: futureAddedAt.toISOString(),
+        activeObservedProductionDate: null,
+      }),
+    );
   });
 
   it("rolls back the inserted correction, projection, and revision when projection update fails", async () => {
@@ -609,17 +868,27 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
         : operation!.requestBody?.content["application/json"]?.schema
     ) as JsonSchema | undefined;
     if (!requestSchema) throw new Error("Missing correction request schema");
-    exactObject(requestSchema, [
-      "action",
-      "target",
-      "reason",
-      "expectedResultRevision",
-      "idempotencyKey",
-      "observedProductionDate",
-    ]);
-    expect(requestSchema.required?.sort()).toEqual(
-      ["action", "target", "reason", "expectedResultRevision", "idempotencyKey"].sort(),
-    );
+    expect(requestSchema.oneOf).toHaveLength(6);
+    for (const branch of requestSchema.oneOf ?? []) {
+      expect(branch.additionalProperties).toBe(false);
+      expect(branch.required).toContain("action");
+      expect(branch.required).toContain("target");
+      expect(branch.required).toContain("reason");
+      expect(branch.required).toContain("expectedResultRevision");
+      expect(branch.required).toContain("idempotencyKey");
+      const action = branch.properties?.action?.enum?.[0];
+      expect(typeof action).toBe("string");
+      expect(branch.properties?.target?.required).toHaveLength(1);
+      expect(Object.keys(branch.properties?.target?.properties ?? {})).toEqual(
+        action === "void_scan" || action === "restore_scan"
+          ? ["eventId"]
+          : action === "change_date" || action === "remove_item"
+            ? ["codeResultId"]
+            : ["repackBoxId"],
+      );
+      expect(branch.required?.includes("observedProductionDate")).toBe(action === "change_date");
+      expect("observedProductionDate" in (branch.properties ?? {})).toBe(action === "change_date");
+    }
     const response = operation!.responses["201"];
     if (!response || "$ref" in response) throw new Error("Missing correction response");
     const responseSchema = response.content?.["application/json"]?.schema as JsonSchema | undefined;

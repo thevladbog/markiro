@@ -235,6 +235,69 @@ describe("inventory station sync contract", () => {
     );
   });
 
+  it("accepts durable member, box, and owner-bound reprint corrections in cursor order", () => {
+    const page = {
+      inventoryId: "44444444-4444-4444-8444-444444444444",
+      snapshotId: payload.snapshotId,
+      snapshotRevision: 1 as const,
+      cursor: null,
+      resultRevision: 3,
+      items: [
+        {
+          id: "10000000-0000-4000-8000-000000000001",
+          revision: 1,
+          kind: "remove_item" as const,
+          boxId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          resultId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          codeHash: "b".repeat(64),
+          ownerDeviceId: "55555555-5555-4555-8555-555555555555",
+          correctedAt: "2026-08-25T10:01:00.000Z",
+        },
+        {
+          id: "10000000-0000-4000-8000-000000000002",
+          revision: 2,
+          kind: "invalidate_box" as const,
+          boxId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          ownerDeviceId: "55555555-5555-4555-8555-555555555555",
+          correctedAt: "2026-08-25T10:02:00.000Z",
+        },
+        {
+          id: "10000000-0000-4000-8000-000000000003",
+          revision: 3,
+          kind: "reprint" as const,
+          boxId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          ownerDeviceId: "55555555-5555-4555-8555-555555555555",
+          correctedAt: "2026-08-25T10:03:00.000Z",
+        },
+      ],
+      nextCursor: "3:10000000-0000-4000-8000-000000000003",
+    };
+
+    expect(
+      parseInventoryProgressPage(page, {
+        inventoryId: page.inventoryId,
+        snapshotId: page.snapshotId,
+        cursor: null,
+        minimumResultRevision: 0,
+      }),
+    ).toEqual(page);
+    expect(() =>
+      parseInventoryProgressPage(
+        {
+          ...page,
+          items: [{ ...page.items[2], codeHash: "a".repeat(64) }],
+          nextCursor: "3:10000000-0000-4000-8000-000000000003",
+        },
+        {
+          inventoryId: page.inventoryId,
+          snapshotId: page.snapshotId,
+          cursor: null,
+          minimumResultRevision: 0,
+        },
+      ),
+    ).toThrow("Invalid inventory progress page");
+  });
+
   it("rejects unordered, duplicate, oversized, and open event shapes", () => {
     const reversed = {
       ...payload,

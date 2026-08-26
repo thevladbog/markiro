@@ -50,6 +50,8 @@ import {
   fixInventorySnapshotOpenApiSchema,
   fixInventorySnapshotSchema,
   INVENTORY_DISCREPANCY_CATEGORIES,
+  INVENTORY_EVIDENCE_CLASSIFICATIONS,
+  INVENTORY_EVIDENCE_KINDS,
   inventoryDetailOpenApiSchema,
   inventoryIdSchema,
   inventoryImportOpenApiSchema,
@@ -60,6 +62,8 @@ import {
   inventorySnapshotOpenApiSchema,
   listInventoryDiscrepanciesOpenApiSchema,
   listInventoryDiscrepanciesQuerySchema,
+  listInventoryEvidenceOpenApiSchema,
+  listInventoryEvidenceQuerySchema,
   listInventoriesOpenApiSchema,
   updateInventoryOpenApiSchema,
   updateInventorySchema,
@@ -73,6 +77,8 @@ import {
   type InventoryProgressDto,
   type ListInventoryDiscrepanciesQueryDto,
   type ListInventoryDiscrepanciesResponseDto,
+  type ListInventoryEvidenceQueryDto,
+  type ListInventoryEvidenceResponseDto,
   type ListInventoriesResponseDto,
   type InventorySnapshotDto,
   type UpdateInventoryDto,
@@ -134,6 +140,32 @@ export class InventoriesController {
     query: ListInventoryDiscrepanciesQueryDto,
   ): Promise<ListInventoryDiscrepanciesResponseDto> {
     return this.reconciliation.listDiscrepancies(req.tenantId!, id, query);
+  }
+
+  @Get(":id/evidence")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiQuery({ name: "search", required: false, schema: { type: "string", maxLength: 128 } })
+  @ApiQuery({ name: "kind", required: false, enum: INVENTORY_EVIDENCE_KINDS })
+  @ApiQuery({
+    name: "classification",
+    required: false,
+    enum: INVENTORY_EVIDENCE_CLASSIFICATIONS,
+  })
+  @ApiQuery({ name: "page", required: false, schema: { type: "integer", minimum: 1, default: 1 } })
+  @ApiQuery({
+    name: "pageSize",
+    required: false,
+    schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+  })
+  @ApiOkResponse({ schema: listInventoryEvidenceOpenApiSchema })
+  evidence(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Query(new ZodValidationPipe(listInventoryEvidenceQuerySchema))
+    query: ListInventoryEvidenceQueryDto,
+  ): Promise<ListInventoryEvidenceResponseDto> {
+    return this.reconciliation.listEvidence(req.tenantId!, id, query);
   }
 
   @Post(":id/corrections")

@@ -2,13 +2,19 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 
-import { AdminPage, Alert, Button, Card, Input, Spinner, Textarea } from "@markiro/ui";
+import { AdminPage, Alert, Button, Card, Input, Select, Spinner, Textarea } from "@markiro/ui";
 
-import { useCreateInventoryCorrection, useInventory, useInventoryProgress } from "./api.js";
-import type {
-  CreateInventoryCorrectionInput,
-  InventoryLiveBox,
-  InventoryRecentEvent,
+import {
+  useCreateInventoryCorrection,
+  useInventory,
+  useInventoryEvidence,
+  useInventoryProgress,
+} from "./api.js";
+import {
+  createInventoryCorrectionInputSchema,
+  type CreateInventoryCorrectionInput,
+  type InventoryEvidenceEvent,
+  type InventoryLiveBox,
 } from "./schemas.js";
 
 type CorrectionAction = CreateInventoryCorrectionInput["action"];
@@ -28,14 +34,32 @@ export function InventoryCorrections() {
   const { inventoryId = "" } = useParams();
   const { t } = useTranslation();
   const inventory = useInventory(inventoryId);
-  const running = inventory.data?.status === "running";
-  const progress = useInventoryProgress(inventoryId, running);
+  const detailRunning = inventory.data?.status === "running";
+  const progress = useInventoryProgress(inventoryId, detailRunning);
   const correction = useCreateInventoryCorrection();
   const [selection, setSelection] = useState<Selection | null>(null);
   const [reason, setReason] = useState("");
   const [observedProductionDate, setObservedProductionDate] = useState("");
   const [saved, setSaved] = useState(false);
+  const [search, setSearch] = useState("");
+  const [kind, setKind] = useState<"" | "item" | "known_box" | "old_box">("");
+  const [classification, setClassification] = useState<
+    "" | "expected" | "protected" | "ineligible" | "unknown" | "voided"
+  >("");
+  const [page, setPage] = useState(1);
   const idempotencyKey = useRef(newIdempotencyKey());
+  const running = (progress.data?.status ?? inventory.data?.status) === "running";
+  const evidence = useInventoryEvidence(
+    inventoryId,
+    {
+      page,
+      pageSize: 50,
+      ...(search.trim() ? { search: search.trim() } : {}),
+      ...(kind ? { kind } : {}),
+      ...(classification ? { classification } : {}),
+    },
+    running && progress.data !== undefined,
+  );
 
   if (inventory.isPending) {
     return (
@@ -65,7 +89,7 @@ export function InventoryCorrections() {
     );
   }
 
-  if (progress.isPending) {
+  if (progress.isPending || evidence.isPending) {
     return (
       <div className="mk-inventory-centered">
         <Spinner label={t("pages.inventory.live.loading")} />
@@ -73,7 +97,7 @@ export function InventoryCorrections() {
     );
   }
 
-  if (progress.isError || !progress.data) {
+  if (progress.isError || !progress.data || evidence.isError || !evidence.data) {
     return (
       <AdminPage className="mk-inventory-page">
         <Alert tone="error">{t("pages.inventory.live.loadError")}</Alert>
@@ -89,15 +113,16 @@ export function InventoryCorrections() {
   };
 
   const submit = () => {
-    if (!selection || !reason.trim()) return;
-    const input: CreateInventoryCorrectionInput = {
+    if (!selection || !reason.trim() || new TextEncoder().encode(reason.trim()).byteLength > 1024)
+      return;
+    const input = createInventoryCorrectionInputSchema.parse({
       action: selection.action,
       target: selection.target,
       reason,
       expectedResultRevision: progress.data.resultRevision,
       idempotencyKey: idempotencyKey.current,
       ...(selection.action === "change_date" ? { observedProductionDate } : {}),
-    };
+    });
     correction.mutate(
       { inventoryId, correction: input },
       {
@@ -125,11 +150,73 @@ export function InventoryCorrections() {
 
       <div className="mk-inventory-live__columns">
         <Card title={t("pages.inventory.corrections.events")} titleAs="h2">
+          <div className="mk-inventory-correction-filters">
+            <Input
+              label={t("pages.inventory.corrections.search")}
+              value={search}
+              onChange={(event) => {
+                setSearch(event.currentTarget.value);
+                setPage(1);
+              }}
+            />
+            <Select
+              label={t("pages.inventory.corrections.kind")}
+              value={kind}
+              options={[
+                { value: "", label: t("pages.inventory.corrections.all") },
+                { value: "item", label: t("pages.inventory.corrections.kindItem") },
+                { value: "known_box", label: t("pages.inventory.corrections.kindKnownBox") },
+                { value: "old_box", label: t("pages.inventory.corrections.kindOldBox") },
+              ]}
+              onValueChange={(value) => {
+                setKind(value);
+                setPage(1);
+              }}
+            />
+            <Select
+              label={t("pages.inventory.corrections.classification")}
+              value={classification}
+              options={[
+                { value: "", label: t("pages.inventory.corrections.all") },
+                ...(["expected", "protected", "ineligible", "unknown", "voided"] as const).map(
+                  (value) => ({
+                    value,
+                    label: t(`pages.inventory.live.classification.${value}`),
+                  }),
+                ),
+              ]}
+              onValueChange={(value) => {
+                setClassification(value);
+                setPage(1);
+              }}
+            />
+          </div>
           <ul className="mk-inventory-correction-list">
-            {progress.data.recentEvents.map((event) => (
+            {evidence.data.items.map((event) => (
               <CorrectionEvent key={event.eventId} event={event} onSelect={select} />
             ))}
           </ul>
+          <div className="mk-inventory-correction-pagination">
+            <Button
+              size="compact"
+              variant="secondary"
+              disabled={page === 1}
+              onClick={() => setPage((value) => Math.max(1, value - 1))}
+            >
+              {t("pages.inventory.corrections.previous")}
+            </Button>
+            <span>
+              {t("pages.inventory.corrections.page", { page, total: evidence.data.total })}
+            </span>
+            <Button
+              size="compact"
+              variant="secondary"
+              disabled={!evidence.data.hasMore}
+              onClick={() => setPage((value) => value + 1)}
+            >
+              {t("pages.inventory.corrections.next")}
+            </Button>
+          </div>
         </Card>
         <Card title={t("pages.inventory.corrections.boxes")} titleAs="h2">
           <ul className="mk-inventory-correction-list">
@@ -149,10 +236,12 @@ export function InventoryCorrections() {
             <Textarea
               label={t("pages.inventory.corrections.reason")}
               value={reason}
-              maxLength={1024}
               required
               onChange={(event) => setReason(event.currentTarget.value)}
             />
+            {new TextEncoder().encode(reason.trim()).byteLength > 1024 ? (
+              <Alert tone="error">{t("pages.inventory.corrections.reasonTooLong")}</Alert>
+            ) : null}
             {selection.action === "change_date" ? (
               <Input
                 type="date"
@@ -175,6 +264,7 @@ export function InventoryCorrections() {
                 }
                 disabled={
                   !reason.trim() ||
+                  new TextEncoder().encode(reason.trim()).byteLength > 1024 ||
                   (selection.action === "change_date" && observedProductionDate.length === 0)
                 }
                 loading={correction.isPending}
@@ -194,13 +284,10 @@ function CorrectionEvent({
   event,
   onSelect,
 }: {
-  event: InventoryRecentEvent;
+  event: InventoryEvidenceEvent;
   onSelect: (selection: Selection) => void;
 }) {
   const { t } = useTranslation();
-  const primaryAction: CorrectionAction =
-    event.classification === "voided" ? "restore_scan" : "void_scan";
-  const codeResultId = event.codeResultId;
   return (
     <li>
       <span>
@@ -208,50 +295,27 @@ function CorrectionEvent({
         <small>{event.terminalName}</small>
       </span>
       <div className="mk-inventory-correction-list__actions">
-        <Button
-          size="compact"
-          variant="secondary"
-          aria-label={t("pages.inventory.corrections.select", { identity: event.displayIdentity })}
-          onClick={() =>
-            onSelect({
-              action: primaryAction,
-              target: { eventId: event.eventId },
-              identity: event.displayIdentity,
-            })
-          }
-        >
-          {t(`pages.inventory.corrections.action.${primaryAction}`)}
-        </Button>
-        {codeResultId ? (
-          <>
-            <Button
-              size="compact"
-              variant="secondary"
-              onClick={() =>
-                onSelect({
-                  action: "change_date",
-                  target: { codeResultId },
-                  identity: event.displayIdentity,
-                })
-              }
-            >
-              {t("pages.inventory.corrections.action.change_date")}
-            </Button>
-            <Button
-              size="compact"
-              variant="destructive-outline"
-              onClick={() =>
-                onSelect({
-                  action: "remove_item",
-                  target: { codeResultId },
-                  identity: event.displayIdentity,
-                })
-              }
-            >
-              {t("pages.inventory.corrections.action.remove_item")}
-            </Button>
-          </>
-        ) : null}
+        {event.actions.map((action, index) => (
+          <Button
+            key={action}
+            size="compact"
+            variant={action === "remove_item" ? "destructive-outline" : "secondary"}
+            aria-label={
+              index === 0
+                ? t("pages.inventory.corrections.select", { identity: event.displayIdentity })
+                : undefined
+            }
+            onClick={() => {
+              const target =
+                action === "void_scan" || action === "restore_scan"
+                  ? { eventId: event.eventId }
+                  : { codeResultId: event.codeResultId! };
+              onSelect({ action, target, identity: event.displayIdentity });
+            }}
+          >
+            {t(`pages.inventory.corrections.action.${action}`)}
+          </Button>
+        ))}
       </div>
     </li>
   );
@@ -287,19 +351,21 @@ function CorrectionBox({
             {t("pages.inventory.corrections.action.invalidate_box")}
           </Button>
         ) : null}
-        <Button
-          size="compact"
-          variant="secondary"
-          onClick={() =>
-            onSelect({
-              action: "reprint",
-              target: { repackBoxId: box.id },
-              identity: box.sscc,
-            })
-          }
-        >
-          {t("pages.inventory.corrections.action.reprint")}
-        </Button>
+        {box.state === "closed" && box.printState === "printed" ? (
+          <Button
+            size="compact"
+            variant="secondary"
+            onClick={() =>
+              onSelect({
+                action: "reprint",
+                target: { repackBoxId: box.id },
+                identity: box.sscc,
+              })
+            }
+          >
+            {t("pages.inventory.corrections.action.reprint")}
+          </Button>
+        ) : null}
       </div>
     </li>
   );

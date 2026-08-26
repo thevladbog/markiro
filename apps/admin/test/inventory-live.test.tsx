@@ -79,6 +79,8 @@ const progress = {
   invalidatedBoxCount: 0,
   pendingEventCount: 3,
   openBoxCount: 1,
+  boxTotal: 1,
+  boxesTruncated: false,
   participants: [
     {
       deviceId: "77777777-7777-4777-8777-777777777777",

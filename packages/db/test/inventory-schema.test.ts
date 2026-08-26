@@ -439,6 +439,17 @@ describe("inventory execution schema", () => {
     ]);
   });
 
+  it("persists a full normalized correction request digest for exact replay", () => {
+    const columns = getTableConfig(table("inventoryCorrections")).columns.map((column) => ({
+      name: column.name,
+      notNull: column.notNull,
+    }));
+    expect(columns).toContainEqual({ name: "request_digest", notNull: true });
+    expect(
+      checkExpression("inventoryCorrections", "inventory_corrections_request_digest_check"),
+    ).toContain("request_digest");
+  });
+
   it("tenant-scopes execution ownership through composite foreign keys", () => {
     const expected = [
       [

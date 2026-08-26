@@ -357,16 +357,42 @@ export const inventoryProgressCursorSchema = z
   .string()
   .regex(new RegExp(INVENTORY_PROGRESS_CURSOR_PATTERN));
 
-export const inventoryProgressChangeSchema = z.strictObject({
+const inventoryProgressIdentityShape = {
   id: uuidSchema,
   revision: z.number().int().positive().safe(),
-  kind: z.enum(["claim", "correction"]),
-  codeHash: hashSchema,
-  classification: z.enum(["expected", "protected", "ineligible", "unknown", "voided"]),
-  observedProductionDate: civilDateSchema.nullable(),
-  winner: inventoryClaimWinnerSchema.nullable(),
   correctedAt: instantSchema,
-});
+};
+
+export const inventoryProgressChangeSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    ...inventoryProgressIdentityShape,
+    kind: z.enum(["claim", "correction"]),
+    codeHash: hashSchema,
+    classification: z.enum(["expected", "protected", "ineligible", "unknown", "voided"]),
+    observedProductionDate: civilDateSchema.nullable(),
+    winner: inventoryClaimWinnerSchema.nullable(),
+  }),
+  z.strictObject({
+    ...inventoryProgressIdentityShape,
+    kind: z.literal("remove_item"),
+    boxId: uuidSchema,
+    resultId: uuidSchema,
+    codeHash: hashSchema,
+    ownerDeviceId: uuidSchema,
+  }),
+  z.strictObject({
+    ...inventoryProgressIdentityShape,
+    kind: z.literal("invalidate_box"),
+    boxId: uuidSchema,
+    ownerDeviceId: uuidSchema,
+  }),
+  z.strictObject({
+    ...inventoryProgressIdentityShape,
+    kind: z.literal("reprint"),
+    boxId: uuidSchema,
+    ownerDeviceId: uuidSchema,
+  }),
+]);
 
 export type InventoryProgressChange = z.infer<typeof inventoryProgressChangeSchema>;
 
@@ -510,7 +536,9 @@ export function parseInventoryProgressPage(
   for (const item of parsed.data.items) {
     if (
       item.revision > parsed.data.resultRevision ||
-      (item.winner !== null && item.winner.codeHash !== item.codeHash) ||
+      ((item.kind === "claim" || item.kind === "correction") &&
+        item.winner !== null &&
+        item.winner.codeHash !== item.codeHash) ||
       (previous !== null &&
         (item.revision < previous.revision ||
           (item.revision === previous.revision && item.id <= previous.id)))

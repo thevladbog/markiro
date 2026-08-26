@@ -22,7 +22,9 @@ export const INVENTORY_LIFECYCLE_STATUSES = [
 ] as const;
 export type InventoryLifecycleStatus = (typeof INVENTORY_LIFECYCLE_STATUSES)[number];
 
-export function inventoryCivilDateSchema(field: "productionDateFrom" | "productionDateTo") {
+export function inventoryCivilDateSchema(
+  field: "productionDateFrom" | "productionDateTo" | "observedProductionDate",
+) {
   return z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, `${field} must be YYYY-MM-DD`)
@@ -228,6 +230,8 @@ export interface InventoryProgressDto {
   invalidatedBoxCount: number;
   pendingEventCount: number;
   openBoxCount: number;
+  boxTotal: number;
+  boxesTruncated: boolean;
   participants: InventoryParticipantDto[];
   boxes: InventoryLiveBoxDto[];
   recentEvents: InventoryRecentEventDto[];
@@ -271,6 +275,36 @@ export interface InventoryRecentEventDto {
   observedProductionDate: string | null;
 }
 
+export const INVENTORY_EVIDENCE_CLASSIFICATIONS = [
+  "expected",
+  "protected",
+  "ineligible",
+  "unknown",
+  "voided",
+] as const;
+export const INVENTORY_EVIDENCE_KINDS = ["item", "known_box", "old_box"] as const;
+export const listInventoryEvidenceQuerySchema = z.strictObject({
+  search: z.string().trim().min(1).max(128).optional(),
+  kind: z.enum(INVENTORY_EVIDENCE_KINDS).optional(),
+  classification: z.enum(INVENTORY_EVIDENCE_CLASSIFICATIONS).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+});
+export type ListInventoryEvidenceQueryDto = z.infer<typeof listInventoryEvidenceQuerySchema>;
+
+export type InventoryEvidenceAction = "void_scan" | "restore_scan" | "change_date" | "remove_item";
+export interface InventoryEvidenceEventDto extends InventoryRecentEventDto {
+  actions: InventoryEvidenceAction[];
+}
+
+export interface ListInventoryEvidenceResponseDto {
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+  items: InventoryEvidenceEventDto[];
+}
+
 export interface InventoryDiscrepancyWinnerDto {
   terminalId: string;
   terminalName: string;
@@ -307,53 +341,55 @@ export const INVENTORY_CORRECTION_ACTIONS = [
 ] as const;
 export type InventoryCorrectionAction = (typeof INVENTORY_CORRECTION_ACTIONS)[number];
 
-const inventoryCorrectionTargetSchema = z
-  .strictObject({
-    eventId: z.string().uuid().optional(),
-    codeResultId: z.string().uuid().optional(),
-    repackBoxId: z.string().uuid().optional(),
-  })
-  .superRefine((target, context) => {
-    const selected = [target.eventId, target.codeResultId, target.repackBoxId].filter(
-      (value) => value !== undefined,
-    );
-    if (selected.length !== 1) {
-      context.addIssue({ code: "custom", message: "exactly one correction target is required" });
-    }
+const correctionReasonSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((value) => new TextEncoder().encode(value).byteLength <= 1024, {
+    message: "reason exceeds 1024 UTF-8 bytes",
   });
+const correctionRequestShape = {
+  reason: correctionReasonSchema,
+  expectedResultRevision: z.number().int().nonnegative(),
+  idempotencyKey: z.string().trim().min(1).max(128),
+};
+const eventCorrectionTargetSchema = z.strictObject({ eventId: z.string().uuid() });
+const resultCorrectionTargetSchema = z.strictObject({ codeResultId: z.string().uuid() });
+const boxCorrectionTargetSchema = z.strictObject({ repackBoxId: z.string().uuid() });
 
-export const createInventoryCorrectionSchema = z
-  .strictObject({
-    action: z.enum(INVENTORY_CORRECTION_ACTIONS),
-    target: inventoryCorrectionTargetSchema,
-    reason: z.string().trim().min(1).max(1024),
-    expectedResultRevision: z.number().int().nonnegative(),
-    idempotencyKey: z.string().trim().min(1).max(128),
-    observedProductionDate: inventoryCivilDateSchema("productionDateFrom").optional(),
-  })
-  .superRefine((input, context) => {
-    const targetMatches =
-      ((input.action === "void_scan" || input.action === "restore_scan") &&
-        input.target.eventId !== undefined) ||
-      ((input.action === "change_date" || input.action === "remove_item") &&
-        input.target.codeResultId !== undefined) ||
-      ((input.action === "invalidate_box" || input.action === "reprint") &&
-        input.target.repackBoxId !== undefined);
-    if (!targetMatches) {
-      context.addIssue({
-        code: "custom",
-        path: ["target"],
-        message: "target does not match action",
-      });
-    }
-    if ((input.action === "change_date") !== (input.observedProductionDate !== undefined)) {
-      context.addIssue({
-        code: "custom",
-        path: ["observedProductionDate"],
-        message: "observedProductionDate is required only for change_date",
-      });
-    }
-  });
+export const createInventoryCorrectionSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    action: z.literal("void_scan"),
+    target: eventCorrectionTargetSchema,
+    ...correctionRequestShape,
+  }),
+  z.strictObject({
+    action: z.literal("restore_scan"),
+    target: eventCorrectionTargetSchema,
+    ...correctionRequestShape,
+  }),
+  z.strictObject({
+    action: z.literal("change_date"),
+    target: resultCorrectionTargetSchema,
+    observedProductionDate: inventoryCivilDateSchema("observedProductionDate"),
+    ...correctionRequestShape,
+  }),
+  z.strictObject({
+    action: z.literal("remove_item"),
+    target: resultCorrectionTargetSchema,
+    ...correctionRequestShape,
+  }),
+  z.strictObject({
+    action: z.literal("invalidate_box"),
+    target: boxCorrectionTargetSchema,
+    ...correctionRequestShape,
+  }),
+  z.strictObject({
+    action: z.literal("reprint"),
+    target: boxCorrectionTargetSchema,
+    ...correctionRequestShape,
+  }),
+]);
 export type CreateInventoryCorrectionDto = z.infer<typeof createInventoryCorrectionSchema>;
 
 export interface InventoryCorrectionTargetDto {
@@ -377,29 +413,53 @@ const uuidSchema = { type: "string", format: "uuid" } as const;
 const dateSchema = { type: "string", format: "date" } as const;
 const dateTimeSchema = { type: "string", format: "date-time" } as const;
 
-const inventoryCorrectionTargetOpenApiSchema: SchemaObject = {
-  type: "object",
-  additionalProperties: false,
-  required: [],
-  properties: {
-    eventId: uuidSchema,
-    codeResultId: uuidSchema,
-    repackBoxId: uuidSchema,
-  },
-};
+function correctionRequestOpenApiBranch(
+  action: InventoryCorrectionAction,
+  targetProperty: "eventId" | "codeResultId" | "repackBoxId",
+  includesObservedDate = false,
+): SchemaObject {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "action",
+      "target",
+      "reason",
+      "expectedResultRevision",
+      "idempotencyKey",
+      ...(includesObservedDate ? ["observedProductionDate"] : []),
+    ],
+    properties: {
+      action: { type: "string", enum: [action] },
+      target: {
+        type: "object",
+        additionalProperties: false,
+        required: [targetProperty],
+        properties: { [targetProperty]: uuidSchema },
+      },
+      reason: {
+        type: "string",
+        minLength: 1,
+        maxLength: 1024,
+        "x-maxUtf8Bytes": 1024,
+      } as SchemaObject & { "x-maxUtf8Bytes": number },
+      expectedResultRevision: { type: "integer", minimum: 0 },
+      idempotencyKey: { type: "string", minLength: 1, maxLength: 128 },
+      ...(includesObservedDate ? { observedProductionDate: dateSchema } : {}),
+    },
+  };
+}
 
 export const createInventoryCorrectionOpenApiSchema: SchemaObject = {
-  type: "object",
-  additionalProperties: false,
-  required: ["action", "target", "reason", "expectedResultRevision", "idempotencyKey"],
-  properties: {
-    action: { type: "string", enum: [...INVENTORY_CORRECTION_ACTIONS] },
-    target: inventoryCorrectionTargetOpenApiSchema,
-    reason: { type: "string", minLength: 1, maxLength: 1024 },
-    expectedResultRevision: { type: "integer", minimum: 0 },
-    idempotencyKey: { type: "string", minLength: 1, maxLength: 128 },
-    observedProductionDate: dateSchema,
-  },
+  oneOf: [
+    correctionRequestOpenApiBranch("void_scan", "eventId"),
+    correctionRequestOpenApiBranch("restore_scan", "eventId"),
+    correctionRequestOpenApiBranch("change_date", "codeResultId", true),
+    correctionRequestOpenApiBranch("remove_item", "codeResultId"),
+    correctionRequestOpenApiBranch("invalidate_box", "repackBoxId"),
+    correctionRequestOpenApiBranch("reprint", "repackBoxId"),
+  ],
+  discriminator: { propertyName: "action" },
 };
 
 export const inventoryCorrectionOpenApiSchema: SchemaObject = {
@@ -672,6 +732,7 @@ const inventoryCountProperties = {
   invalidatedBoxCount: { type: "integer", minimum: 0 },
   pendingEventCount: { type: "integer", minimum: 0 },
   openBoxCount: { type: "integer", minimum: 0 },
+  boxTotal: { type: "integer", minimum: 0 },
 } satisfies Record<
   Exclude<
     keyof InventoryProgressDto,
@@ -682,6 +743,7 @@ const inventoryCountProperties = {
     | "participants"
     | "boxes"
     | "recentEvents"
+    | "boxesTruncated"
   >,
   SchemaObject
 >;
@@ -774,6 +836,35 @@ const inventoryRecentEventOpenApiSchema: SchemaObject = {
   },
 };
 
+const inventoryEvidenceEventOpenApiSchema: SchemaObject = {
+  ...inventoryRecentEventOpenApiSchema,
+  required: [...(inventoryRecentEventOpenApiSchema.required ?? []), "actions"],
+  properties: {
+    ...inventoryRecentEventOpenApiSchema.properties,
+    actions: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: ["void_scan", "restore_scan", "change_date", "remove_item"],
+      },
+      uniqueItems: true,
+    },
+  },
+};
+
+export const listInventoryEvidenceOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["page", "pageSize", "total", "hasMore", "items"],
+  properties: {
+    page: { type: "integer", minimum: 1 },
+    pageSize: { type: "integer", minimum: 1, maximum: 100 },
+    total: { type: "integer", minimum: 0 },
+    hasMore: { type: "boolean" },
+    items: { type: "array", items: inventoryEvidenceEventOpenApiSchema },
+  },
+};
+
 export const inventoryProgressOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -783,6 +874,7 @@ export const inventoryProgressOpenApiSchema: SchemaObject = {
     "status",
     "resultRevision",
     ...Object.keys(inventoryCountProperties),
+    "boxesTruncated",
     "participants",
     "boxes",
     "recentEvents",
@@ -793,6 +885,7 @@ export const inventoryProgressOpenApiSchema: SchemaObject = {
     status: { type: "string", enum: [...INVENTORY_LIFECYCLE_STATUSES] },
     resultRevision: { type: "integer", minimum: 0 },
     ...inventoryCountProperties,
+    boxesTruncated: { type: "boolean" },
     participants: { type: "array", items: inventoryParticipantOpenApiSchema },
     boxes: { type: "array", items: inventoryLiveBoxOpenApiSchema },
     recentEvents: { type: "array", items: inventoryRecentEventOpenApiSchema },

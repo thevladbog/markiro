@@ -1,5 +1,5 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
 import {
@@ -32,6 +32,100 @@ interface ClaimTarget {
   codeHash: string;
   snapshotId: string | null;
   classification: "expected" | "protected" | "ineligible" | "unknown";
+}
+
+interface ProgressStreamRow {
+  id: string;
+  resultRevision: number;
+  kind: "claim" | "correction" | "remove_item" | "invalidate_box" | "reprint";
+  codeHash: string | null;
+  classification: "expected" | "protected" | "ineligible" | "unknown" | "voided" | null;
+  observedProductionDate: string | null;
+  winningEventId: string | null;
+  winningDeviceId: string | null;
+  winningScannedAt: Date | string | null;
+  resultId: string | null;
+  boxId: string | null;
+  ownerDeviceId: string | null;
+  changedAt: Date | string;
+}
+
+function readProgressDate(value: Date | string): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error("Inventory progress timestamp is invalid");
+  return date.toISOString();
+}
+
+function parseProgressStreamRow(value: unknown): ProgressStreamRow {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Inventory progress row is unavailable");
+  }
+  const read = (key: string): unknown => Reflect.get(value, key);
+  const requiredString = (key: string): string => {
+    const field = read(key);
+    if (typeof field !== "string" || field.length === 0) {
+      throw new Error(`Inventory progress ${key} is invalid`);
+    }
+    return field;
+  };
+  const nullableString = (key: string): string | null => {
+    const field = read(key);
+    if (field === null) return null;
+    if (typeof field !== "string") throw new Error(`Inventory progress ${key} is invalid`);
+    return field;
+  };
+  const kind = requiredString("kind");
+  if (
+    kind !== "claim" &&
+    kind !== "correction" &&
+    kind !== "remove_item" &&
+    kind !== "invalidate_box" &&
+    kind !== "reprint"
+  ) {
+    throw new Error("Inventory progress kind is invalid");
+  }
+  const classification = nullableString("classification");
+  if (
+    classification !== null &&
+    classification !== "expected" &&
+    classification !== "protected" &&
+    classification !== "ineligible" &&
+    classification !== "unknown" &&
+    classification !== "voided"
+  ) {
+    throw new Error("Inventory progress classification is invalid");
+  }
+  const revision = read("resultRevision");
+  if (typeof revision !== "number" || !Number.isInteger(revision) || revision < 1) {
+    throw new Error("Inventory progress revision is invalid");
+  }
+  const changedAt = read("changedAt");
+  if (!(changedAt instanceof Date) && typeof changedAt !== "string") {
+    throw new Error("Inventory progress changedAt is invalid");
+  }
+  const winningScannedAt = read("winningScannedAt");
+  if (
+    winningScannedAt !== null &&
+    !(winningScannedAt instanceof Date) &&
+    typeof winningScannedAt !== "string"
+  ) {
+    throw new Error("Inventory progress winningScannedAt is invalid");
+  }
+  return {
+    id: requiredString("id"),
+    resultRevision: revision,
+    kind,
+    codeHash: nullableString("codeHash"),
+    classification,
+    observedProductionDate: nullableString("observedProductionDate"),
+    winningEventId: nullableString("winningEventId"),
+    winningDeviceId: nullableString("winningDeviceId"),
+    winningScannedAt,
+    resultId: nullableString("resultId"),
+    boxId: nullableString("boxId"),
+    ownerDeviceId: nullableString("ownerDeviceId"),
+    changedAt,
+  };
 }
 
 interface RepackInventoryFacts {
@@ -721,49 +815,119 @@ export class StationInventorySyncService {
     void participant;
     const [revisionText, id] = query.cursor?.split(":") ?? [];
     const revision = revisionText ? Number(revisionText) : null;
-    const whereCursor =
+    const cursorCondition =
       revision === null || id === undefined
-        ? undefined
-        : or(
-            gt(schema.inventoryProgressChanges.resultRevision, revision),
-            and(
-              eq(schema.inventoryProgressChanges.resultRevision, revision),
-              gt(schema.inventoryProgressChanges.id, id),
-            ),
-          );
-    const rows = await this.db
-      .select()
-      .from(schema.inventoryProgressChanges)
-      .where(
-        and(
-          eq(schema.inventoryProgressChanges.tenantId, tenantId),
-          eq(schema.inventoryProgressChanges.inventoryId, inventoryId),
-          whereCursor,
-        ),
-      )
-      .orderBy(
-        asc(schema.inventoryProgressChanges.resultRevision),
-        asc(schema.inventoryProgressChanges.id),
-      )
-      .limit(query.limit);
-    const items = rows.map((row) => ({
-      id: row.id,
-      revision: row.resultRevision,
-      kind: row.kind,
-      codeHash: row.codeHash,
-      classification: row.classification,
-      observedProductionDate: row.observedProductionDate,
-      winner:
-        row.winningEventId && row.winningDeviceId && row.winningScannedAt
-          ? {
-              codeHash: row.codeHash,
-              eventId: row.winningEventId,
-              deviceId: row.winningDeviceId,
-              scannedAt: row.winningScannedAt.toISOString(),
-            }
-          : null,
-      correctedAt: row.changedAt.toISOString(),
-    }));
+        ? sql`true`
+        : sql`(stream."resultRevision" > ${revision}
+          or (stream."resultRevision" = ${revision} and stream.id > ${id}))`;
+    const rowsResult = await this.db.execute(sql<ProgressStreamRow>`
+      select *
+      from (
+        select
+          change.id,
+          change.result_revision as "resultRevision",
+          change.kind::text as kind,
+          change.code_hash as "codeHash",
+          change.classification::text as classification,
+          change.observed_production_date as "observedProductionDate",
+          change.winning_event_id as "winningEventId",
+          change.winning_device_id as "winningDeviceId",
+          change.winning_scanned_at as "winningScannedAt",
+          null::uuid as "resultId",
+          null::uuid as "boxId",
+          null::uuid as "ownerDeviceId",
+          change.changed_at as "changedAt"
+        from inventory_progress_changes change
+        where change.tenant_id = ${tenantId}
+          and change.inventory_id = ${inventoryId}
+
+        union all
+
+        select
+          correction.id,
+          correction.result_revision,
+          correction.action::text,
+          result.code_hash,
+          null::text,
+          null::date,
+          null::uuid,
+          null::uuid,
+          null::timestamptz,
+          correction.target_code_result_id,
+          correction.target_repack_box_id,
+          box.owner_device_id,
+          correction.created_at
+        from inventory_corrections correction
+        left join inventory_code_results result
+          on result.tenant_id = correction.tenant_id
+         and result.inventory_id = correction.inventory_id
+         and result.id = correction.target_code_result_id
+        left join inventory_repack_boxes box
+          on box.tenant_id = correction.tenant_id
+         and box.inventory_id = correction.inventory_id
+         and box.id = correction.target_repack_box_id
+        where correction.tenant_id = ${tenantId}
+          and correction.inventory_id = ${inventoryId}
+          and correction.action in ('remove_item', 'invalidate_box', 'reprint')
+      ) stream
+      where ${cursorCondition}
+      order by stream."resultRevision", stream.id
+      limit ${query.limit}
+    `);
+    const items: StationInventoryProgressDto["items"] = rowsResult.rows
+      .map(parseProgressStreamRow)
+      .map((row) => {
+        const correctedAt = readProgressDate(row.changedAt);
+        if (row.kind === "claim" || row.kind === "correction") {
+          if (!row.codeHash || !row.classification) {
+            throw new Error("Inventory progress code projection is incomplete");
+          }
+          return {
+            id: row.id,
+            revision: row.resultRevision,
+            kind: row.kind,
+            codeHash: row.codeHash,
+            classification: row.classification,
+            observedProductionDate: row.observedProductionDate,
+            winner:
+              row.winningEventId && row.winningDeviceId && row.winningScannedAt
+                ? {
+                    codeHash: row.codeHash,
+                    eventId: row.winningEventId,
+                    deviceId: row.winningDeviceId,
+                    scannedAt: readProgressDate(row.winningScannedAt),
+                  }
+                : null,
+            correctedAt,
+          };
+        }
+        if (!row.boxId || !row.ownerDeviceId) {
+          throw new Error("Inventory progress box correction is incomplete");
+        }
+        if (row.kind === "remove_item") {
+          if (!row.resultId || !row.codeHash) {
+            throw new Error("Inventory progress membership correction is incomplete");
+          }
+          return {
+            id: row.id,
+            revision: row.resultRevision,
+            kind: row.kind,
+            boxId: row.boxId,
+            resultId: row.resultId,
+            codeHash: row.codeHash,
+            ownerDeviceId: row.ownerDeviceId,
+            correctedAt,
+          };
+        }
+        return {
+          id: row.id,
+          revision: row.resultRevision,
+          kind: row.kind,
+          boxId: row.boxId,
+          ownerDeviceId: row.ownerDeviceId,
+          correctedAt,
+        };
+      });
     const last = items.at(-1);
     return {
       inventoryId,

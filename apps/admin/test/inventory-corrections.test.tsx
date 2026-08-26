@@ -83,6 +83,8 @@ const progress = {
   invalidatedBoxCount: 0,
   pendingEventCount: 0,
   openBoxCount: 0,
+  boxTotal: 0,
+  boxesTruncated: false,
   participants: [],
   boxes: [],
   recentEvents: [
@@ -97,6 +99,24 @@ const progress = {
       scannedAt: "2026-08-26T09:10:00.000Z",
       classification: "unknown",
       observedProductionDate: "2025-09-19",
+    },
+  ],
+};
+
+const evidence = {
+  page: 1,
+  pageSize: 50,
+  total: 2,
+  hasMore: false,
+  items: [
+    { ...progress.recentEvents[0], actions: ["void_scan", "change_date"] },
+    {
+      ...progress.recentEvents[0],
+      eventId: "99999999-9999-4999-8999-999999999999",
+      codeResultId: null,
+      authoritativeVerdict: "duplicate",
+      displayIdentity: "duplicate evidence",
+      actions: [],
     },
   ],
 };
@@ -142,6 +162,7 @@ function renderCorrections(access: AccessDocument = WRITE_ACCESS) {
       if (url.includes("/api/pickup-orders")) return response({ items: [] });
       if (url === `/api/inventories/${INVENTORY_ID}`) return response(detail);
       if (url === `/api/inventories/${INVENTORY_ID}/progress`) return response(progress);
+      if (url.startsWith(`/api/inventories/${INVENTORY_ID}/evidence`)) return response(evidence);
       if (url === `/api/inventories/${INVENTORY_ID}/corrections` && init?.method === "POST") {
         writes.push(JSON.parse(String(init.body)));
         return response(
@@ -221,3 +242,63 @@ it("does not expose mutation controls after the inventory is no longer running",
   expect(screen.queryByRole("button", { name: "Отменить скан" })).toBeNull();
   detail.status = "running";
 });
+
+it("derives immutability from the latest progress status and hides all controls after runtime close", async () => {
+  progress.status = "closed";
+  renderCorrections();
+  expect(
+    await screen.findByText("Исправления доступны только пока инвентаризация идёт"),
+  ).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Выбрать …00000042 / …4831" })).toBeNull();
+  progress.status = "running";
+});
+
+it("uses paginated evidence actions and never offers controls for duplicate nonwinning events", async () => {
+  renderCorrections();
+  expect(await screen.findByText("duplicate evidence")).toBeDefined();
+  expect(screen.getByRole("button", { name: "Выбрать …00000042 / …4831" })).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Выбрать duplicate evidence" })).toBeNull();
+  fireEvent.change(screen.getByLabelText("Поиск по событиям"), {
+    target: { value: "00000042" },
+  });
+  await waitFor(() => {
+    const requested = vi
+      .mocked(fetch)
+      .mock.calls.map(([input]) => String(input))
+      .find((url) => url.includes("/evidence?") && url.includes("search=00000042"));
+    expect(requested).toBeDefined();
+  });
+});
+
+it("offers reprint only for a closed printed box and never for open, invalidated, or pending boxes", async () => {
+  const mutableProgress = progress as unknown as {
+    boxTotal: number;
+    boxes: ReturnType<typeof box>[];
+  };
+  mutableProgress.boxTotal = 4;
+  mutableProgress.boxes = [
+    box("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1", "146000000000000012", "open", "not_ready"),
+    box("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2", "246000000000000019", "closed", "printed"),
+    box("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3", "346000000000000016", "invalidated", "printed"),
+    box("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4", "446000000000000013", "closed", "pending"),
+  ];
+  renderCorrections();
+  expect(
+    await screen.findAllByRole("button", { name: "Поставить перепечать в очередь" }),
+  ).toHaveLength(1);
+  mutableProgress.boxes = [];
+  mutableProgress.boxTotal = 0;
+});
+
+function box(id: string, sscc: string, state: string, printState: string) {
+  return {
+    id,
+    sscc,
+    terminalId: "77777777-7777-4777-8777-777777777777",
+    terminalName: "СТ-А-02",
+    productionDate: "2025-09-19",
+    state,
+    printState,
+    itemCount: 1,
+  };
+}

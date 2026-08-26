@@ -51,6 +51,7 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
   let terminalBId: string;
   let terminalCId: string;
   let unknownEventId: string;
+  let unknownResultId: string;
 
   const verifiedHash = "1".repeat(64);
   const missingHash = "2".repeat(64);
@@ -197,6 +198,7 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       oldBox: randomUUID(),
     };
     unknownEventId = eventIds.unknown;
+    unknownResultId = randomUUID();
     await db.insert(schema.inventoryScanEvents).values([
       event(eventIds.verified, terminalAId, "reconciliation-a", 1n, verifiedHash),
       event(eventIds.duplicate, terminalBId, "reconciliation-b", 1n, verifiedHash, {
@@ -216,16 +218,17 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
         rawPayload: sourceSscc,
       }),
     ]);
-    await db
-      .insert(schema.inventoryCodeResults)
-      .values([
-        result(eventIds.verified, verifiedHash, "expected", snapshotId, "2026-08-05"),
-        result(eventIds.protected, protectedFoundHash, "protected", snapshotId, "2026-08-05"),
-        result(eventIds.ineligible, ineligibleHash, "ineligible", snapshotId, "2026-08-05"),
-        result(eventIds.unknown, unknownHash, "unknown", null, "2026-08-05"),
-        result(eventIds.dateMismatch, dateMismatchHash, "expected", snapshotId, "2026-08-09"),
-        result(eventIds.voided, voidedHash, "voided", snapshotId, "2026-08-08", "expected"),
-      ]);
+    await db.insert(schema.inventoryCodeResults).values([
+      result(eventIds.verified, verifiedHash, "expected", snapshotId, "2026-08-05"),
+      result(eventIds.protected, protectedFoundHash, "protected", snapshotId, "2026-08-05"),
+      result(eventIds.ineligible, ineligibleHash, "ineligible", snapshotId, "2026-08-05"),
+      {
+        ...result(eventIds.unknown, unknownHash, "unknown", null, "2026-08-05"),
+        id: unknownResultId,
+      },
+      result(eventIds.dateMismatch, dateMismatchHash, "expected", snapshotId, "2026-08-09"),
+      result(eventIds.voided, voidedHash, "voided", snapshotId, "2026-08-08", "expected"),
+    ]);
     await db
       .insert(schema.inventoryEventClaimOutcomes)
       .values([
@@ -417,6 +420,8 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       invalidatedBoxCount: 1,
       pendingEventCount: 3,
       openBoxCount: 1,
+      boxTotal: 1,
+      boxesTruncated: false,
       participants: [
         expect.objectContaining({
           deviceId: terminalAId,
@@ -459,6 +464,63 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
         }),
       ]),
     });
+  });
+
+  it("pages, searches, and filters evidence while exposing actions only for current winners", async () => {
+    const openBoxId = randomUUID();
+    await db.insert(schema.inventoryRepackBoxes).values({
+      id: openBoxId,
+      tenantId,
+      inventoryId,
+      newSscc: "346000000000000016",
+      ownerDeviceId: terminalAId,
+      capacity: 12,
+      productionDate: "2026-08-05",
+      state: "open",
+      printState: "not_ready",
+    });
+    await db.insert(schema.inventoryRepackItems).values({
+      tenantId,
+      inventoryId,
+      boxId: openBoxId,
+      resultId: unknownResultId,
+      productionDate: "2026-08-05",
+      activeObservedProductionDate: "2026-08-05",
+    });
+
+    const first = await agent
+      .get(`/inventories/${inventoryId}/evidence?page=1&pageSize=3`)
+      .expect(200);
+    expect(first.body).toMatchObject({ page: 1, pageSize: 3, total: 8, hasMore: true });
+    const duplicate = await agent
+      .get(`/inventories/${inventoryId}/evidence?search=${verifiedHash}&pageSize=20`)
+      .expect(200);
+    expect(duplicate.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          authoritativeVerdict: "duplicate",
+          codeResultId: null,
+          actions: [],
+        }),
+        expect.objectContaining({
+          authoritativeVerdict: "applied",
+          actions: ["void_scan", "change_date"],
+        }),
+      ]),
+    );
+    const actionableMember = await agent
+      .get(`/inventories/${inventoryId}/evidence?classification=unknown&kind=item`)
+      .expect(200);
+    expect(actionableMember.body.items).toEqual([
+      expect.objectContaining({
+        eventId: unknownEventId,
+        codeResultId: unknownResultId,
+        actions: ["void_scan", "remove_item"],
+      }),
+    ]);
+    await agent
+      .get(`/inventories/${inventoryId}/evidence?page=0&pageSize=101&search=${"x".repeat(129)}`)
+      .expect(400);
   });
 
   it("paginates audit-safe discrepancy rows in category, SSCC, and code-hash order", async () => {
@@ -538,6 +600,7 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
   it("denies cross-tenant UUID possession and malformed pagination", async () => {
     await foreignAgent.get(`/inventories/${inventoryId}/progress`).expect(404);
     await foreignAgent.get(`/inventories/${inventoryId}/discrepancies`).expect(404);
+    await foreignAgent.get(`/inventories/${inventoryId}/evidence`).expect(404);
     await agent.get(`/inventories/${inventoryId}/discrepancies?page=0&pageSize=1000`).expect(400);
     expect(foreignTenantId).not.toBe(tenantId);
   });
@@ -546,6 +609,7 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
     await setOnlyOrganizationMemberRole(db, tenantId, "member");
     await agent.get(`/inventories/${inventoryId}/progress`).expect(403);
     await agent.get(`/inventories/${inventoryId}/discrepancies`).expect(403);
+    await agent.get(`/inventories/${inventoryId}/evidence`).expect(403);
   });
 
   it("documents exact closed response objects without private evidence fields", () => {
@@ -569,6 +633,8 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       "invalidatedBoxCount",
       "pendingEventCount",
       "openBoxCount",
+      "boxTotal",
+      "boxesTruncated",
       "participants",
       "boxes",
       "recentEvents",
@@ -586,7 +652,22 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       "observedProductionDate",
       "winner",
     ]);
-    const serialized = JSON.stringify({ progress, discrepancies });
+    const evidence = responseSchema(document, "/inventories/{id}/evidence");
+    exactObject(evidence, ["page", "pageSize", "total", "hasMore", "items"]);
+    exactObject(evidence.properties!.items!.items!, [
+      "eventId",
+      "codeResultId",
+      "kind",
+      "displayIdentity",
+      "authoritativeVerdict",
+      "terminalId",
+      "terminalName",
+      "scannedAt",
+      "classification",
+      "observedProductionDate",
+      "actions",
+    ]);
+    const serialized = JSON.stringify({ progress, discrepancies, evidence });
     expect(serialized).not.toMatch(
       /rawPayload|canonicalRaw|objectKey|credential|apiKey|batchId|operatorId/i,
     );

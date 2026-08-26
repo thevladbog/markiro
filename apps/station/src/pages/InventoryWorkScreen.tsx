@@ -17,6 +17,7 @@ import {
   attemptInventoryBoxPrint,
   findInventoryPrintedBoxBySscc,
   listInventoryBoxPrintAttempts,
+  processNextInventoryRemoteReprint,
   readInventoryBoxPrintFacts,
   readUnresolvedInventoryReprint,
   recoverInterruptedInventoryPrint,
@@ -621,6 +622,8 @@ function RepackInventoryWorkScreen({
   const automaticPrints = useRef(new Set<string>());
   const automaticRecoveries = useRef(new Set<string>());
   const printInvocationBusy = useRef(false);
+  const remoteReprintBusy = useRef(false);
+  const [refreshRevision, setRefreshRevision] = useState(0);
 
   const refresh = useCallback(async () => {
     const [nextState, nextRecent, nextReprint] = await Promise.all([
@@ -636,6 +639,7 @@ function RepackInventoryWorkScreen({
       setState(nextState);
       setRecent(nextRecent);
       setUnresolvedReprint(nextReprint);
+      setRefreshRevision((current) => current + 1);
     }
   }, [deviceId, exec, inventory.inventoryId, inventory.snapshotId]);
 
@@ -920,6 +924,55 @@ function RepackInventoryWorkScreen({
     },
     [createEventId, deviceId, exec, inventory, now, operatorId, printing, queue, nudge, refresh],
   );
+
+  useEffect(() => {
+    if (gallery || printInvocationBusy.current || unresolvedReprint || remoteReprintBusy.current)
+      return;
+    remoteReprintBusy.current = true;
+    void (async () => {
+      setPrintBusy(true);
+      try {
+        await queue.idle();
+        const outcome = await processNextInventoryRemoteReprint({
+          exec,
+          manifest: inventory,
+          inventoryId: inventory.inventoryId,
+          snapshotId: inventory.snapshotId,
+          deviceId,
+          operatorId,
+          createEventId,
+          now,
+          printing,
+        });
+        if (outcome && mounted.current) {
+          setPrintResult(outcome);
+          setWriteFailed(false);
+          nudge();
+          await refresh();
+        }
+      } catch {
+        console.error("station: remote inventory reprint failed");
+        if (mounted.current) setWriteFailed(true);
+      } finally {
+        remoteReprintBusy.current = false;
+        if (mounted.current) setPrintBusy(false);
+      }
+    })();
+  }, [
+    createEventId,
+    deviceId,
+    exec,
+    gallery,
+    inventory,
+    now,
+    nudge,
+    operatorId,
+    printing,
+    queue,
+    refresh,
+    refreshRevision,
+    unresolvedReprint,
+  ]);
 
   useEffect(() => {
     const box = state.box;

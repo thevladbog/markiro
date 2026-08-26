@@ -779,6 +779,30 @@ export const inventoryRepackPrintJournal = sqliteTable(
   ],
 );
 
+/** Durable admin-originated reprint work received through the progress stream. */
+export const inventoryRemoteReprintRequests = sqliteTable(
+  "inventory_remote_reprint_requests",
+  {
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    correctionId: text("correction_id").notNull(),
+    boxId: text("box_id").notNull(),
+    ownerDeviceId: text("owner_device_id").notNull(),
+    requestedAt: text("requested_at").notNull(),
+    completedAt: text("completed_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.inventoryId, table.snapshotId, table.correctionId] }),
+    index("inventory_remote_reprint_pending_idx").on(
+      table.inventoryId,
+      table.snapshotId,
+      table.ownerDeviceId,
+      table.completedAt,
+      table.requestedAt,
+    ),
+  ],
+);
+
 /** Recoverable local/remote claim conflicts for one inventory snapshot. */
 export const inventoryConflictsMirror = sqliteTable(
   "inventory_conflicts_mirror",

@@ -1321,6 +1321,7 @@ export const inventoryCorrections = pgTable(
     inventoryId: uuid("inventory_id").notNull(),
     action: inventoryCorrectionActionEnum("action").notNull(),
     reason: text("reason").notNull(),
+    requestDigest: char("request_digest", { length: 64 }).notNull(),
     actorUserId: text("actor_user_id").references(() => user.id),
     actorOperatorId: uuid("actor_operator_id"),
     targetEventId: uuid("target_event_id"),
@@ -1399,6 +1400,10 @@ export const inventoryCorrections = pgTable(
       "inventory_corrections_digests_check",
       sql`${table.beforeProjectionDigest} ~ '^[0-9a-f]{64}$'
         and ${table.afterProjectionDigest} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "inventory_corrections_request_digest_check",
+      sql`${table.requestDigest} ~ '^[0-9a-f]{64}$'`,
     ),
     check("inventory_corrections_revision_check", sql`${table.resultRevision} > 0`),
   ],

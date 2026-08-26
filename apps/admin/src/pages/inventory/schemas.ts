@@ -295,6 +295,8 @@ export const inventoryProgressSchema = z.strictObject({
   invalidatedBoxCount: nonnegativeInteger,
   pendingEventCount: nonnegativeInteger,
   openBoxCount: nonnegativeInteger,
+  boxTotal: nonnegativeInteger,
+  boxesTruncated: z.boolean(),
   participants: z.array(inventoryParticipantSchema),
   boxes: z.array(inventoryLiveBoxSchema),
   recentEvents: z.array(inventoryRecentEventSchema),
@@ -309,48 +311,61 @@ export const INVENTORY_CORRECTION_ACTIONS = [
   "reprint",
 ] as const;
 
-const inventoryCorrectionTargetSchema = z
-  .strictObject({
-    eventId: uuid.optional(),
-    codeResultId: uuid.optional(),
-    repackBoxId: uuid.optional(),
-  })
-  .refine((target) => Object.values(target).filter(Boolean).length === 1, {
-    message: "exactly one correction target is required",
-  });
+const inventoryEvidenceEventSchema = inventoryRecentEventSchema.extend({
+  actions: z.array(z.enum(["void_scan", "restore_scan", "change_date", "remove_item"])),
+});
 
-export const createInventoryCorrectionInputSchema = z
-  .strictObject({
-    action: z.enum(INVENTORY_CORRECTION_ACTIONS),
-    target: inventoryCorrectionTargetSchema,
-    reason: z.string().trim().min(1).max(1024),
-    expectedResultRevision: nonnegativeInteger,
-    idempotencyKey: uuid,
-    observedProductionDate: civilDate.optional(),
-  })
-  .superRefine((input, context) => {
-    const targetMatches =
-      ((input.action === "void_scan" || input.action === "restore_scan") &&
-        input.target.eventId !== undefined) ||
-      ((input.action === "change_date" || input.action === "remove_item") &&
-        input.target.codeResultId !== undefined) ||
-      ((input.action === "invalidate_box" || input.action === "reprint") &&
-        input.target.repackBoxId !== undefined);
-    if (!targetMatches) {
-      context.addIssue({
-        code: "custom",
-        path: ["target"],
-        message: "target does not match action",
-      });
-    }
-    if ((input.action === "change_date") !== (input.observedProductionDate !== undefined)) {
-      context.addIssue({
-        code: "custom",
-        path: ["observedProductionDate"],
-        message: "observedProductionDate is required only for change_date",
-      });
-    }
-  });
+export const inventoryEvidenceResponseSchema = z.strictObject({
+  page: z.number().int().min(1),
+  pageSize: z.number().int().min(1).max(100),
+  total: nonnegativeInteger,
+  hasMore: z.boolean(),
+  items: z.array(inventoryEvidenceEventSchema),
+});
+
+const correctionReason = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((value) => new TextEncoder().encode(value).byteLength <= 1024);
+const correctionRequest = {
+  reason: correctionReason,
+  expectedResultRevision: nonnegativeInteger,
+  idempotencyKey: uuid,
+};
+export const createInventoryCorrectionInputSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    action: z.literal("void_scan"),
+    target: z.strictObject({ eventId: uuid }),
+    ...correctionRequest,
+  }),
+  z.strictObject({
+    action: z.literal("restore_scan"),
+    target: z.strictObject({ eventId: uuid }),
+    ...correctionRequest,
+  }),
+  z.strictObject({
+    action: z.literal("change_date"),
+    target: z.strictObject({ codeResultId: uuid }),
+    observedProductionDate: civilDate,
+    ...correctionRequest,
+  }),
+  z.strictObject({
+    action: z.literal("remove_item"),
+    target: z.strictObject({ codeResultId: uuid }),
+    ...correctionRequest,
+  }),
+  z.strictObject({
+    action: z.literal("invalidate_box"),
+    target: z.strictObject({ repackBoxId: uuid }),
+    ...correctionRequest,
+  }),
+  z.strictObject({
+    action: z.literal("reprint"),
+    target: z.strictObject({ repackBoxId: uuid }),
+    ...correctionRequest,
+  }),
+]);
 
 export const inventoryCorrectionSchema = z.strictObject({
   id: uuid,
@@ -411,5 +426,7 @@ export type InventoryProgress = z.infer<typeof inventoryProgressSchema>;
 export type InventoryParticipant = z.infer<typeof inventoryParticipantSchema>;
 export type InventoryLiveBox = z.infer<typeof inventoryLiveBoxSchema>;
 export type InventoryRecentEvent = z.infer<typeof inventoryRecentEventSchema>;
+export type InventoryEvidenceEvent = z.infer<typeof inventoryEvidenceEventSchema>;
+export type InventoryEvidenceResponse = z.infer<typeof inventoryEvidenceResponseSchema>;
 export type CreateInventoryCorrectionInput = z.infer<typeof createInventoryCorrectionInputSchema>;
 export type InventoryCorrection = z.infer<typeof inventoryCorrectionSchema>;

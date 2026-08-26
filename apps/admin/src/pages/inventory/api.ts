@@ -7,6 +7,7 @@ import {
   createInventoryCorrectionInputSchema,
   inventoryCorrectionSchema,
   inventoryDetailSchema,
+  inventoryEvidenceResponseSchema,
   inventoryImportSchema,
   inventorySchema,
   inventoryProgressSchema,
@@ -20,6 +21,7 @@ import {
   type InventoryCorrection,
   type InventoryChzStatus,
   type InventoryDetail,
+  type InventoryEvidenceResponse,
   type InventoryImport,
   type InventoryProgress,
   type InventorySnapshot,
@@ -30,6 +32,18 @@ export const INVENTORIES_QUERY_KEY = ["inventories"] as const;
 
 export function inventoryProgressQueryKey(id: string) {
   return [...INVENTORIES_QUERY_KEY, id, "progress"] as const;
+}
+
+export interface InventoryEvidenceQuery {
+  search?: string;
+  kind?: "item" | "known_box" | "old_box";
+  classification?: "expected" | "protected" | "ineligible" | "unknown" | "voided";
+  page: number;
+  pageSize: number;
+}
+
+function inventoryEvidenceQueryKey(id: string, query: InventoryEvidenceQuery) {
+  return [...INVENTORIES_QUERY_KEY, id, "evidence", query] as const;
 }
 
 async function listInventories(): Promise<Inventory[]> {
@@ -45,6 +59,21 @@ async function getInventory(id: string): Promise<InventoryDetail> {
 async function getInventoryProgress(id: string): Promise<InventoryProgress> {
   const value = await apiFetch<unknown>(`/inventories/${id}/progress`);
   return inventoryProgressSchema.parse(value);
+}
+
+async function getInventoryEvidence(
+  id: string,
+  query: InventoryEvidenceQuery,
+): Promise<InventoryEvidenceResponse> {
+  const params = new URLSearchParams({
+    page: String(query.page),
+    pageSize: String(query.pageSize),
+  });
+  if (query.search) params.set("search", query.search);
+  if (query.kind) params.set("kind", query.kind);
+  if (query.classification) params.set("classification", query.classification);
+  const value = await apiFetch<unknown>(`/inventories/${id}/evidence?${params.toString()}`);
+  return inventoryEvidenceResponseSchema.parse(value);
 }
 
 async function createInventoryCorrection(input: {
@@ -126,6 +155,18 @@ export function useInventoryProgress(
     queryFn: () => getInventoryProgress(id),
     enabled: enabled && id.length > 0,
     refetchInterval: (query) => (query.state.data?.status === "running" ? 5_000 : false),
+  });
+}
+
+export function useInventoryEvidence(
+  id: string,
+  query: InventoryEvidenceQuery,
+  enabled = true,
+): UseQueryResult<InventoryEvidenceResponse> {
+  return useQuery({
+    queryKey: inventoryEvidenceQueryKey(id, query),
+    queryFn: () => getInventoryEvidence(id, query),
+    enabled: enabled && id.length > 0,
   });
 }
 

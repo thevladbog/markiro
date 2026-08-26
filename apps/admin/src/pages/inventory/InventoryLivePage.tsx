@@ -129,6 +129,14 @@ export function InventoryLivePage({ inventory }: { inventory: InventoryDetail })
         </Card>
 
         <Card title={t("pages.inventory.live.boxes")} titleAs="h2">
+          {data.boxesTruncated ? (
+            <Alert tone="warn">
+              {t("pages.inventory.live.boxesTruncated", {
+                shown: data.boxes.length,
+                total: data.boxTotal,
+              })}
+            </Alert>
+          ) : null}
           {data.boxes.length === 0 ? (
             <p className="mk-inventory-section-description">{t("pages.inventory.live.none")}</p>
           ) : (

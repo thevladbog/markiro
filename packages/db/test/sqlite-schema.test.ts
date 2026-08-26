@@ -89,6 +89,7 @@ describe("STATION_MIGRATIONS", () => {
       "inventory_repack_journal",
       "inventory_repack_print_attempts",
       "inventory_repack_print_journal",
+      "inventory_remote_reprint_requests",
       "inventory_conflicts_mirror",
       "inventory_event_claim_outcomes_mirror",
       "inventory_sync_ack_receipts",
@@ -303,6 +304,18 @@ describe("STATION_MIGRATIONS", () => {
       "2026-08-25T07:59:00.000Z",
       "2026-08-25T08:00:00.000Z",
       "open",
+    );
+    db.prepare(
+      `INSERT INTO inventory_remote_reprint_requests
+         (inventory_id, snapshot_id, correction_id, box_id, owner_device_id, requested_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "correction-1",
+      "box-1",
+      "device-1",
+      "2026-08-25T08:01:00.000Z",
     );
 
     expect(

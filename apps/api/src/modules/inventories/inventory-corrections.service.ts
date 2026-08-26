@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
 
@@ -44,18 +44,29 @@ function correctionId(tenantId: string, inventoryId: string, idempotencyKey: str
 }
 
 function codeResultProjection(
-  result: Pick<CodeResult, "id" | "classification" | "observedProductionDate">,
+  result: Pick<CodeResult, "id" | "classification" | "observedProductionDate" | "updatedAt">,
 ) {
   return {
     kind: "code_result",
     id: result.id,
     classification: result.classification,
     observedProductionDate: result.observedProductionDate,
+    updatedAt: result.updatedAt.toISOString(),
   };
 }
 
 function repackBoxProjection(
-  box: Pick<RepackBox, "id" | "state" | "printState" | "printAttemptCount" | "productionDate">,
+  box: Pick<
+    RepackBox,
+    | "id"
+    | "state"
+    | "printState"
+    | "printAttemptCount"
+    | "printErrorCode"
+    | "invalidatedAt"
+    | "printedAt"
+    | "updatedAt"
+  >,
 ) {
   return {
     kind: "repack_box",
@@ -63,18 +74,40 @@ function repackBoxProjection(
     state: box.state,
     printState: box.printState,
     printAttemptCount: box.printAttemptCount,
-    productionDate: box.productionDate,
+    printErrorCode: box.printErrorCode,
+    invalidatedAt: box.invalidatedAt?.toISOString() ?? null,
+    printedAt: box.printedAt?.toISOString() ?? null,
+    updatedAt: box.updatedAt.toISOString(),
   };
 }
 
-function repackItemProjection(item: Pick<RepackItem, "id" | "boxId" | "resultId" | "removedAt">) {
+function repackItemProjection(
+  item: Pick<
+    RepackItem,
+    "id" | "boxId" | "resultId" | "removedAt" | "activeObservedProductionDate"
+  >,
+) {
   return {
     kind: "repack_item",
     id: item.id,
     boxId: item.boxId,
     resultId: item.resultId,
-    active: item.removedAt === null,
+    removedAt: item.removedAt?.toISOString() ?? null,
+    activeObservedProductionDate: item.activeObservedProductionDate,
   };
+}
+
+function normalizedRequestDigest(input: CreateInventoryCorrectionDto): string {
+  return digest({
+    action: input.action,
+    target: input.target,
+    reason: input.reason,
+    expectedResultRevision: input.expectedResultRevision,
+    idempotencyKey: input.idempotencyKey,
+    ...(input.action === "change_date"
+      ? { observedProductionDate: input.observedProductionDate }
+      : {}),
+  });
 }
 
 function targetFromStored(correction: StoredCorrection): InventoryCorrectionTargetDto {
@@ -134,6 +167,7 @@ export class InventoryCorrectionsService {
     if (!inventory) throw new NotFoundException({ code: "INVENTORY_NOT_FOUND" });
 
     const id = correctionId(tenantId, inventoryId, input.idempotencyKey);
+    const requestDigest = normalizedRequestDigest(input);
     const [existing] = await tx
       .select()
       .from(schema.inventoryCorrections)
@@ -146,7 +180,7 @@ export class InventoryCorrectionsService {
       )
       .limit(1);
     if (existing) {
-      if (!this.isExactReplay(existing, input)) {
+      if (existing.requestDigest !== requestDigest) {
         throw new ConflictException({ code: "INVENTORY_CORRECTION_IDEMPOTENCY_MISMATCH" });
       }
       return toDto(existing);
@@ -166,7 +200,23 @@ export class InventoryCorrectionsService {
     }
 
     const nextRevision = inventory.resultRevision + 1;
-    const createdAt = new Date();
+    const timestampResult = await tx.execute(
+      sql<{ changedAt: Date | string }>`select clock_timestamp() as "changedAt"`,
+    );
+    const timestampRow = timestampResult.rows[0];
+    const rawChangedAt =
+      typeof timestampRow === "object" && timestampRow !== null
+        ? Reflect.get(timestampRow, "changedAt")
+        : undefined;
+    const changedAt =
+      rawChangedAt instanceof Date
+        ? rawChangedAt
+        : typeof rawChangedAt === "string"
+          ? new Date(rawChangedAt)
+          : new Date(Number.NaN);
+    if (Number.isNaN(changedAt.getTime())) {
+      throw new Error("Database did not return a correction timestamp");
+    }
     const prepared = await this.prepareMutation(
       tx,
       tenantId,
@@ -174,7 +224,7 @@ export class InventoryCorrectionsService {
       inventory.activeSnapshotId,
       nextRevision,
       input,
-      createdAt,
+      changedAt,
     );
     const [correction] = await tx
       .insert(schema.inventoryCorrections)
@@ -184,6 +234,7 @@ export class InventoryCorrectionsService {
         inventoryId,
         action: input.action,
         reason: input.reason,
+        requestDigest,
         actorUserId,
         targetEventId: prepared.target.eventId,
         targetCodeResultId: prepared.target.codeResultId,
@@ -191,7 +242,7 @@ export class InventoryCorrectionsService {
         beforeProjectionDigest: prepared.beforeProjectionDigest,
         afterProjectionDigest: prepared.afterProjectionDigest,
         resultRevision: nextRevision,
-        createdAt,
+        createdAt: changedAt,
       })
       .returning();
     if (!correction) throw new Error("Inventory correction insert returned no row");
@@ -199,26 +250,11 @@ export class InventoryCorrectionsService {
     await prepared.apply();
     await tx
       .update(schema.inventories)
-      .set({ resultRevision: nextRevision, updatedAt: createdAt })
+      .set({ resultRevision: nextRevision, updatedAt: changedAt })
       .where(
         and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
       );
     return toDto(correction);
-  }
-
-  private isExactReplay(existing: StoredCorrection, input: CreateInventoryCorrectionDto): boolean {
-    const targetMatches =
-      input.target.eventId !== undefined
-        ? existing.targetEventId === input.target.eventId
-        : input.target.codeResultId !== undefined
-          ? existing.targetCodeResultId === input.target.codeResultId
-          : existing.targetRepackBoxId === input.target.repackBoxId;
-    return (
-      existing.action === input.action &&
-      existing.reason === input.reason &&
-      existing.resultRevision === input.expectedResultRevision + 1 &&
-      targetMatches
-    );
   }
 
   private async prepareMutation(
@@ -258,7 +294,7 @@ export class InventoryCorrectionsService {
       ) {
         throw new ConflictException({ code: "INVENTORY_CORRECTION_STATE_CONFLICT" });
       }
-      const after = { ...result, classification };
+      const after = { ...result, classification, updatedAt: changedAt };
       return {
         target: { eventId, codeResultId: result.id, repackBoxId: null },
         beforeProjectionDigest: digest(codeResultProjection(result)),
@@ -310,7 +346,7 @@ export class InventoryCorrectionsService {
       if (activeMembership) {
         throw new ConflictException({ code: "INVENTORY_CORRECTION_ACTIVE_BOX_CONFLICT" });
       }
-      const after = { ...result, observedProductionDate };
+      const after = { ...result, observedProductionDate, updatedAt: changedAt };
       return {
         target: { eventId: null, codeResultId: result.id, repackBoxId: null },
         beforeProjectionDigest: digest(codeResultProjection(result)),
@@ -356,8 +392,12 @@ export class InventoryCorrectionsService {
         .limit(1)
         .for("update");
       if (!item) throw new NotFoundException({ code: "INVENTORY_CORRECTION_TARGET_NOT_FOUND" });
-      const removedAt = new Date(Math.max(changedAt.getTime(), item.addedAt.getTime()) + 1);
-      const after = { ...item, removedAt };
+      const box = await this.lockRepackBox(tx, tenantId, inventoryId, item.boxId);
+      if (box.state !== "open") {
+        throw new ConflictException({ code: "INVENTORY_CORRECTION_STATE_CONFLICT" });
+      }
+      const removedAt = item.addedAt > changedAt ? item.addedAt : changedAt;
+      const after = { ...item, removedAt, activeObservedProductionDate: null };
       return {
         target: { eventId: null, codeResultId: resultId, repackBoxId: item.boxId },
         beforeProjectionDigest: digest(repackItemProjection(item)),
@@ -384,7 +424,12 @@ export class InventoryCorrectionsService {
       if (box.state === "invalidated") {
         throw new ConflictException({ code: "INVENTORY_CORRECTION_STATE_CONFLICT" });
       }
-      const after = { ...box, state: "invalidated" as const };
+      const after = {
+        ...box,
+        state: "invalidated" as const,
+        invalidatedAt: changedAt,
+        updatedAt: changedAt,
+      };
       return {
         target: { eventId: null, codeResultId: null, repackBoxId: box.id },
         beforeProjectionDigest: digest(repackBoxProjection(box)),
@@ -404,31 +449,14 @@ export class InventoryCorrectionsService {
       };
     }
 
-    if (box.state !== "closed") {
+    if (box.state !== "closed" || box.printState !== "printed") {
       throw new ConflictException({ code: "INVENTORY_CORRECTION_STATE_CONFLICT" });
     }
-    const after = { ...box, printState: "pending" as const };
     return {
       target: { eventId: null, codeResultId: null, repackBoxId: box.id },
       beforeProjectionDigest: digest(repackBoxProjection(box)),
-      afterProjectionDigest: digest(repackBoxProjection(after)),
-      apply: async () => {
-        await tx
-          .update(schema.inventoryRepackBoxes)
-          .set({
-            printState: "pending",
-            printErrorCode: null,
-            printedAt: null,
-            updatedAt: changedAt,
-          })
-          .where(
-            and(
-              eq(schema.inventoryRepackBoxes.tenantId, tenantId),
-              eq(schema.inventoryRepackBoxes.inventoryId, inventoryId),
-              eq(schema.inventoryRepackBoxes.id, box.id),
-            ),
-          );
-      },
+      afterProjectionDigest: digest(repackBoxProjection(box)),
+      apply: () => Promise.resolve(),
     };
   }
 

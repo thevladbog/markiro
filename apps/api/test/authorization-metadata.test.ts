@@ -151,6 +151,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
       list: readPolicy,
       progress: readPolicy,
       discrepancies: readPolicy,
+      evidence: readPolicy,
       correct: writePolicy,
       create: writePolicy,
       get: readPolicy,

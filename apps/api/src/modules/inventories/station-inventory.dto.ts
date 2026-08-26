@@ -310,32 +310,73 @@ export const stationInventoryEventBatchResponseOpenApiSchema: SchemaObject = {
   },
 };
 
+const progressIdentityProperties = {
+  id: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+  revision: { type: "integer", minimum: 1 },
+  correctedAt: { type: "string", format: "date-time" },
+};
 const inventoryProgressChangeOpenApiSchema: SchemaObject = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "id",
-    "revision",
-    "kind",
-    "codeHash",
-    "classification",
-    "observedProductionDate",
-    "winner",
-    "correctedAt",
-  ],
-  properties: {
-    id: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
-    revision: { type: "integer", minimum: 1 },
-    kind: { type: "string", enum: ["claim", "correction"] },
-    codeHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
-    classification: {
-      type: "string",
-      enum: ["expected", "protected", "ineligible", "unknown", "voided"],
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "id",
+        "revision",
+        "kind",
+        "codeHash",
+        "classification",
+        "observedProductionDate",
+        "winner",
+        "correctedAt",
+      ],
+      properties: {
+        ...progressIdentityProperties,
+        kind: { type: "string", enum: ["claim", "correction"] },
+        codeHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+        classification: {
+          type: "string",
+          enum: ["expected", "protected", "ineligible", "unknown", "voided"],
+        },
+        observedProductionDate: { type: "string", format: "date", nullable: true },
+        winner: { ...inventoryClaimWinnerOpenApiSchema, nullable: true },
+      },
     },
-    observedProductionDate: { type: "string", format: "date", nullable: true },
-    winner: { ...inventoryClaimWinnerOpenApiSchema, nullable: true },
-    correctedAt: { type: "string", format: "date-time" },
-  },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "id",
+        "revision",
+        "kind",
+        "boxId",
+        "resultId",
+        "codeHash",
+        "ownerDeviceId",
+        "correctedAt",
+      ],
+      properties: {
+        ...progressIdentityProperties,
+        kind: { type: "string", enum: ["remove_item"] },
+        boxId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+        resultId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+        codeHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+        ownerDeviceId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+      },
+    },
+    ...["invalidate_box", "reprint"].map((kind): SchemaObject => ({
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "revision", "kind", "boxId", "ownerDeviceId", "correctedAt"],
+      properties: {
+        ...progressIdentityProperties,
+        kind: { type: "string", enum: [kind] },
+        boxId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+        ownerDeviceId: { type: "string", format: "uuid", pattern: CANONICAL_UUID_PATTERN },
+      },
+    })),
+  ],
+  discriminator: { propertyName: "kind" },
 };
 
 export const stationInventoryProgressOpenApiSchema: SchemaObject = {

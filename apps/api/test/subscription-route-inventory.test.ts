@@ -76,6 +76,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /inventories (InventoriesController.list)",
       "GET /inventories/:id (InventoriesController.get)",
       "GET /inventories/:id/discrepancies (InventoriesController.discrepancies)",
+      "GET /inventories/:id/evidence (InventoriesController.evidence)",
       "GET /inventories/:id/progress (InventoriesController.progress)",
       "GET /kiosks (KiosksController.listKiosks)",
       "GET /label-templates (LabelTemplatesController.listLabelTemplates)",
