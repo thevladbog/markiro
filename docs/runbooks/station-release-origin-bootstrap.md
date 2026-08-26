@@ -25,9 +25,9 @@ releases, создание channel assets или запуск release workflow.
    инфраструктурный plan, применить его только после STOP 1, перенести
    credentials только после STOP 2, проверить certificate/provider host, но
    оставить `enable_station_release_public_dns=false`. Сам infrastructure apply
-   не переключает clients или publication. Legacy endpoint уже недоступен из-за
-   private source repository; ручной переход существующих установок выполняется
-   только в Phase 3.
+   не переключает clients или publication. Пока source repository публичный,
+   legacy GitHub endpoint остаётся доступен; переход GitHub-blocked установок
+   выполняется отдельно в Phase 3.
 2. **Phase 2 — dual-publish tooling and seed.** Сначала интегрировать Tasks 1–7,
    затем при выключенном release DNS создать независимые first-run rollback
    baseline для stable и beta. Stable baseline использует точный принятый
@@ -37,10 +37,10 @@ releases, создание channel assets или запуск release workflow.
    отдельным plan/apply за STOP 3.
 3. **Phase 3 — transitional beta.** Это явно двух-beta переход, а не один
    release. Сначала публикуется **bootstrap beta**, first dual-origin-adapter
-   build. Старый updater endpoint теперь находится в приватном source repository,
-   поэтому GitHub-reachable legacy clients используют manual install-over из
-   нового публичного binary-only repository, а GitHub-blocked clients — verified
-   explicit Yandex beta installer и manual install-over. Bounded gate
+   build. GitHub-reachable legacy clients могут получить его через доступный
+   legacy updater либо новый публичный binary-only repository, а GitHub-blocked
+   clients используют verified explicit Yandex beta installer и manual
+   install-over. Bounded gate
    `BOOTSTRAP_READY` проверяет publication, preservation и basic operation этого
    build и только после Overall `PASS` разрешает публиковать next beta. Затем
    публикуется строго более новая **validation/candidate beta**. Только она
@@ -100,9 +100,10 @@ summary.
 `owner_confirmation=APPLY-YANDEX-INFRASTRUCTURE`. Dispatch выполняет владелец
 репозитория из `main`; workflow проверяет `github.actor ==
 github.repository_owner`, ref и точную фразу до входа в Environment, OIDC и
-Terraform. На текущем GitHub plan это одно-владельческое подтверждение, не
-двухпользовательский approval. Изменение кода не заменяет явное подтверждение на
-точный reviewed plan.
+Terraform. `production-infrastructure-apply` требует approval от `thevladbog`
+или `thevladbog-2` при включённом `prevent self-review`, поэтому author dispatch
+не может одобрить его сам. Изменение кода и owner-confirmation не заменяют явное
+подтверждение другого reviewer на точный reviewed plan.
 
 Workflow не печатает и не сохраняет Terraform outputs. Дождитесь успешного apply
 до локального доступа к защищённому state.
@@ -178,20 +179,20 @@ test -s "$secret_key_file"
 ## 5. Остановиться перед записью GitHub secrets
 
 Сначала вручную убедитесь, что GitHub Environment `station-release` уже создан и
-ограничен веткой `main`. На текущем GitHub plan required reviewers для private
-repository недоступны, поэтому release workflow до build/sign и publisher
+ограничен веткой `main`, требует reviewers `thevladbog` и `thevladbog-2` и
+включает `prevent self-review`. Те же правила обязательны для `station-beta` и
+`station-stable`. Дополнительно release workflow до build/sign и publisher
 secrets проверяет владельца репозитория и точный dispatch input:
 `owner_confirmation=PUBLISH-STATION-BETA` либо
-`owner_confirmation=PUBLISH-STATION-STABLE`. Это одно-владельческое
-подтверждение, не двухпользовательский approval. Эта задача Environment и secrets
-не создаёт.
+`owner_confirmation=PUBLISH-STATION-STABLE`. Эта задача Environment и secrets не
+создаёт.
 
 До release dispatch отдельно создайте fine-grained token с Contents read/write
 только для публичного binary-only repository
 `thevladbog/markiro-station-releases` и сохраните его в Environment secret
 `STATION_RELEASE_REPOSITORY_TOKEN` через GitHub UI. Не выдавайте ему доступ к
-приватному `thevladbog/markiro`, не передавайте значение в workflow input и не
-используйте токен из локальной `gh auth` session как неявную замену.
+source repository `thevladbog/markiro`, не передавайте значение в workflow input
+и не используйте токен из локальной `gh auth` session как неявную замену.
 
 **STOP 2 — SECRETS.** Получите явное подтверждение release owner, затем введите
 маркер и передайте значения только через stdin:

@@ -126,15 +126,15 @@ Windows.
   значением `https://storage.yandexcloud.net`. Не переносите signing secrets в
   `station-release`, а publisher credentials — в `station-beta`, job-wide env,
   аргументы, логи или artifacts. Обычный `${{ github.token }}` используется
-  только для CI и сохранения source tag в приватном `thevladbog/markiro`; он не
+  только для CI и сохранения source tag в `thevladbog/markiro`; он не
   публикует бинарные releases.
-- На текущем GitHub plan нативные required reviewers недоступны для private
-  repository. Поэтому до build/sign и до доступа к `station-release` workflow
-  запускает отдельный job без Environment и secrets: владелец репозитория должен
-  передать `owner_confirmation=PUBLISH-STATION-BETA`, а `github.actor` должен
-  точно совпасть с `github.repository_owner`. Это одно-владельческое ручное
-  подтверждение, а не двухпользовательский approval; нативный reviewer потребует
-  подходящего GitHub Enterprise plan.
+- `station-beta` и `station-release` требуют required reviewers `thevladbog` и
+  `thevladbog-2` с включённым `prevent self-review`. До build/sign и до доступа
+  к `station-release` workflow также запускает отдельный job без Environment и
+  secrets: владелец репозитория должен передать
+  `owner_confirmation=PUBLISH-STATION-BETA`, а `github.actor` должен точно
+  совпасть с `github.repository_owner`. Этот gate не заменяет approval другого
+  reviewer.
 - `STATION_ORIGIN` — production runtime secret, а не signing secret environment:
   перед beta он обязан быть равен `http://tauri.localhost`. Значение
   `tauri://localhost` не является Windows origin для этой сборки.
@@ -190,7 +190,7 @@ restoration — отдельный жёсткий отказ; immutable release 
 вида `station-vX.Y.Z-beta.N`. Workflow не ищет newest/latest release: он
 запрашивает именно этот опубликованный non-draft prerelease, проверяет, что его
 target SHA принадлежит публичному binary-only repository, а source `releaseSha`
-берёт из evidence и приватного source tag, затем скачивает обе уже существующие public immutable
+берёт из evidence и source tag, затем скачивает обе уже существующие public immutable
 trees в новые каталоги, валидирует их и сравнивает common assets. Пустой или
 неканонический `repair_tag` запрещён для `promote-existing`; непустой
 `repair_tag` запрещён для `publish` и `seed-baseline`.
@@ -255,13 +255,13 @@ cookie, query или referrer и доступна только по явному
 `https://releases.markiro.app/station/beta/download`.
 
 Установленные старые GitHub-only клиенты не узнают новый origin от изменения на
-сервере, а их прежний endpoint находится в теперь приватном source repository.
-Поэтому автоматический переход через existing updater больше не считается
-доступным. Для GitHub-reachable станции скачайте точный bootstrap beta installer
-из публичного binary-only repository `thevladbog/markiro-station-releases`; в
-restricted network, где GitHub заблокирован, используйте проверенный явный
-Yandex beta URL. В обоих случаях выполните ручной install-over поверх
-существующей установки и отдельно зафиксируйте путь доставки. Лишь после
+сервере. Пока source repository остаётся публичным, GitHub-reachable станции
+могут получить bootstrap beta через существующий updater; дополнительно доступен
+точный installer из публичного binary-only repository
+`thevladbog/markiro-station-releases`. В restricted network, где GitHub
+заблокирован, используйте проверенный явный Yandex beta URL и ручной
+install-over поверх существующей установки. В каждом случае отдельно
+зафиксируйте путь доставки. Лишь после
 `BOOTSTRAP_READY` установите строго более новую validation/candidate beta через
 новый dual-origin adapter и выполните beta → beta acceptance.
 

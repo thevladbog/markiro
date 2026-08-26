@@ -440,7 +440,7 @@ test("bootstrap retains only state, runtime and the three necessary service acco
   );
   assert.doesNotMatch(
     active,
-    /deployment_controller|github_deploy|runner_registration|registry_secret|yandex_lockbox_secret"\s+"registry|yandex_logging_group|audit_trails|smart-web-security|certificate-manager|monitoring\./,
+    /deployment_controller|github_deploy|runner_registration|registry_secret|yandex_lockbox_secret"\s+"registry|yandex_logging_group|audit_trails|smart-web-security|monitoring\./,
   );
   for (const resource of [
     block(bootstrap, 'resource "yandex_storage_bucket" "state"'),
@@ -453,8 +453,12 @@ test("bootstrap retains only state, runtime and the three necessary service acco
 test("Terraform identity has infrastructure roles only and deploy has no cloud-plane credential", async () => {
   const iam = await source("infra/yandex/modules/iam/main.tf");
   for (const role of [
+    "cdn.editor",
+    "certificate-manager.certificates.downloader",
+    "certificate-manager.editor",
     "compute.admin",
     "dns.editor",
+    "iam.serviceAccounts.admin",
     "managed-postgresql.editor",
     "storage.admin",
     "vpc.privateAdmin",
@@ -464,7 +468,7 @@ test("Terraform identity has infrastructure roles only and deploy has no cloud-p
   }
   assert.doesNotMatch(
     iam,
-    /alb\.|smart-web-security|certificate-manager|audit-trails|logging\.|monitoring\.|lockbox\.admin/,
+    /alb\.|smart-web-security|audit-trails|logging\.|monitoring\.|lockbox\.admin/,
   );
   assert.doesNotMatch(iam, /github_deploy|production-deploy/);
 });
@@ -750,6 +754,72 @@ test("infrastructure workflow escrows one reviewed plan between separately prote
     workflow,
     /(?:--access-key|--secret-key|access_key\s*=\s*\$\{\{|secret_key\s*=\s*\$\{\{)/i,
   );
+});
+
+test("infrastructure apply reports a fixed failure stage without reviewer inputs", async () => {
+  const workflow = await source(".github/workflows/yandex-infrastructure.yml");
+  const applyStart = workflow.indexOf("  apply:\n");
+  assert.ok(applyStart > -1);
+  const applyJob = workflow.slice(applyStart);
+  const applyScript = applyJob.match(
+    /- name: Authenticate, revalidate and apply the exact escrowed plan[\s\S]*?run: \|\n([\s\S]*)$/,
+  )?.[1];
+  assert.ok(applyScript, "apply shell step must exist");
+
+  let failure;
+  try {
+    execFileSync("bash", ["-c", applyScript], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        MODE: "plan",
+        TARGET_SHA: "not-a-sha",
+        GITHUB_REF: "refs/heads/main",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    failure = error;
+  }
+  assert.ok(failure, "invalid apply input must fail");
+  assert.match(
+    String(failure.stderr),
+    /::error title=Yandex infrastructure apply failed::stage=input-validation exit=1/,
+  );
+  assert.doesNotMatch(
+    String(failure.stderr),
+    /not-a-sha|PLAN_KEY|PLAN_SHA256|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY/,
+  );
+
+  const stages = [
+    "input-validation",
+    "plan-binding",
+    "github-oidc",
+    "yandex-token-exchange",
+    "lockbox-payload",
+    "backend-configuration",
+    "binary-plan-head",
+    "binary-plan-download",
+    "binary-plan-hash",
+    "json-plan-head",
+    "json-plan-download",
+    "json-plan-hash",
+    "terraform-init",
+    "terraform-validate",
+    "plan-json-regeneration",
+    "byte-comparison",
+    "semantic-comparison",
+    "production-plan-guard",
+    "approved-change-summary",
+    "terraform-apply",
+    "escrow-cleanup",
+  ];
+  let previous = -1;
+  for (const stage of stages) {
+    const index = applyScript.indexOf(`apply_stage="${stage}"`);
+    assert.ok(index > previous, `missing or unordered apply stage ${stage}`);
+    previous = index;
+  }
 });
 
 test("MVP design and plan retain only identities and secrets that still exist", async () => {

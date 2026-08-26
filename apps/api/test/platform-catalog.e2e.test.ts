@@ -698,13 +698,13 @@ describe.skipIf(!ready)("platform catalog", () => {
     try {
       const archiving = catalog.archive(principal(), code);
       await waitForBarrier("item");
-      const creating = catalog.createVersion(principal(), code, basicPlan);
-      await release();
-      await archiving;
-      const error = await creating.then(
+      const creating = catalog.createVersion(principal(), code, basicPlan).then(
         () => null,
         (reason: unknown) => reason,
       );
+      await release();
+      await archiving;
+      const error = await creating;
       expect(error).toBeInstanceOf(ConflictException);
       expect((error as ConflictException).getResponse()).toEqual({
         code: "catalog_item_archived",

@@ -24,10 +24,11 @@
    byte-for-byte и семантически с escrow JSON, повторяет fail-closed guard и
    только затем применяет saved plan.
 
-На текущем GitHub plan required reviewers для private repository недоступны.
-Gate является одно-владельческим подтверждением, не двухпользовательским
-approval. Явное подтверждение на точный reviewed plan всё равно получают до
-dispatch; фраза не заменяет содержательный review.
+Public repository использует нативные required reviewers для
+`production-infrastructure-apply`: разрешены `thevladbog` и `thevladbog-2`,
+включён `prevent self-review`, поэтому approve даёт не автор dispatch. Явное
+подтверждение на точный reviewed plan всё равно получают до dispatch;
+owner-confirmation не заменяет содержательный review или Environment approval.
 
 ## Полный локальный review точных защищённых версий
 

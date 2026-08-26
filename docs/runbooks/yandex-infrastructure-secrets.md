@@ -10,12 +10,12 @@ Environment `production-infrastructure` используется только з
 `mode=plan`. Отдельный Environment `production-infrastructure-apply`
 используется только запуском `mode=apply`, после проверки точного сохранённого
 плана. Оба Environment должны разрешать deployment только из `main` и содержать
-один и тот же утверждённый набор GitHub variables. На текущем GitHub plan
-required reviewers для private repository недоступны, поэтому до входа в apply
-Environment workflow требует `github.actor == github.repository_owner` и точный
-`owner_confirmation=APPLY-YANDEX-INFRASTRUCTURE`. Это одно-владельческое
-подтверждение, не двухпользовательский approval; нативный reviewer требует
-подходящего GitHub Enterprise plan.
+один и тот же утверждённый набор GitHub variables. Оба требуют required
+reviewers `thevladbog` и `thevladbog-2` с включённым `prevent self-review`.
+Дополнительно до входа в apply Environment workflow требует
+`github.actor == github.repository_owner` и точный
+`owner_confirmation=APPLY-YANDEX-INFRASTRUCTURE`; этот gate не заменяет approval
+другого reviewer.
 
 - `YC_CLOUD_ID`
 - `YC_FOLDER_ID`
@@ -57,18 +57,18 @@ subject и не переносите state-backend credentials в GitHub. Эта
 ## GitHub Environment `station-release`
 
 GitHub Environment `station-release` должен разрешать deployment только из
-`main`. На текущем GitHub plan для private repository нативные required
-reviewers недоступны. Их заменяет проверяемый workflow gate до build/sign и до
-доступа к publisher secrets: `github.actor` обязан совпасть с
-`github.repository_owner`, а `owner_confirmation` — с точным маркером канала
-`PUBLISH-STATION-BETA` или `PUBLISH-STATION-STABLE`. Это одно-владельческая
-ручная защита, не двухпользовательский approval. Для нативного required reviewer
-нужен подходящий GitHub Enterprise plan. Точный инвентарь Environment:
+`main`, требовать required reviewers `thevladbog` и `thevladbog-2` и запрещать
+самоодобрение через `prevent self-review`. Такой же reviewer gate обязателен для
+`station-beta` и `station-stable`. Проверяемый workflow gate до build/sign и до
+доступа к publisher secrets остаётся дополнительным: `github.actor` обязан
+совпасть с `github.repository_owner`, а `owner_confirmation` — с точным маркером
+канала `PUBLISH-STATION-BETA` или `PUBLISH-STATION-STABLE`. Точный инвентарь
+Environment:
 
 - secret `STATION_RELEASE_REPOSITORY_TOKEN`: fine-grained token с Contents
   read/write только для публичного binary-only repository
-  `thevladbog/markiro-station-releases`; доступ к приватному source repository
-  этому token не выдаётся;
+  `thevladbog/markiro-station-releases`; доступ к source repository
+  `thevladbog/markiro` этому token не выдаётся;
 - secret `YANDEX_STATION_RELEASE_ACCESS_KEY_ID`;
 - secret `YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY`;
 - variable `YANDEX_STATION_RELEASE_BUCKET`;

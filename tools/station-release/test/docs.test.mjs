@@ -1307,8 +1307,10 @@ test("Station release origin bootstrap separates protected credentials and appro
   }
   assert.match(secrets, /GitHub Environment `station-release`/);
   assert.match(secrets, /защит.*environment|environment.*защит/is);
-  assert.match(secrets, /private.*required\s+reviewers.*недоступ/is);
-  assert.match(secrets, /одно.*владел.*не.*двух.*approval/is);
+  assert.match(secrets, /required\s+reviewers/is);
+  assert.match(secrets, /prevent self-review|запрет.*самоодобрен/is);
+  assert.match(secrets, /thevladbog-2/);
+  assert.doesNotMatch(secrets, /private.*required\s+reviewers.*недоступ/is);
   assert.match(bootstrap, /owner_confirmation.*PUBLISH-STATION-(?:BETA|STABLE)/is);
   assert.match(secrets, /не созда(?:е|ё|ю)т.*Environment|Environment.*созда(?:е|ё|ю)т/is);
   const stationReleaseInventory = secrets.match(
