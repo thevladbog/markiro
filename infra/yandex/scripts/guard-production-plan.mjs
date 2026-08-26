@@ -954,6 +954,34 @@ function releaseOriginGroupScoped(scope, callback) {
   return scoped(`release-origin-group-${scope}`, callback);
 }
 
+function validateOriginSourceReferences(plan, resource) {
+  const expression = releaseOriginGroupScoped("source-references-configuration", () => {
+    const resources = new Map();
+    collectConfigurationResources(plan.configuration?.root_module, "", resources);
+    const configuration = resources.get(configurationAddress(resource.address));
+    if (!object(configuration) || !object(configuration.expressions)) rejected();
+    return configuration.expressions.origin;
+  });
+  releaseOriginGroupScoped("source-references-expression", () => {
+    if (!object(expression)) rejected();
+  });
+  releaseOriginGroupScoped("source-references-shape", () => {
+    exactKeys(expression, ["references"]);
+  });
+  const references = releaseOriginGroupScoped("source-references-count", () => {
+    if (
+      !Array.isArray(expression.references) ||
+      expression.references.some((reference) => typeof reference !== "string") ||
+      expression.references.length !== releaseBucketDomainReference.length
+    )
+      rejected();
+    return expression.references;
+  });
+  releaseOriginGroupScoped("source-references-values", () => {
+    exactStrings(references, releaseBucketDomainReference);
+  });
+}
+
 function validateOriginGroup(plan, resource, bucketName) {
   const value = releaseOriginGroupScoped("resource", () => after(resource));
   releaseOriginGroupScoped("name", () => {
@@ -985,10 +1013,7 @@ function validateOriginGroup(plan, resource, bucketName) {
       rejected();
     return true;
   });
-  if (computedSource)
-    releaseOriginGroupScoped("source-references", () => {
-      proveExactReferences(plan, resource, "origin", releaseBucketDomainReference);
-    });
+  if (computedSource) validateOriginSourceReferences(plan, resource);
   return releaseOriginGroupScoped("id", () => {
     const id = knownOrComputed(resource, "id");
     return id === null ? null : nonblank(id);
