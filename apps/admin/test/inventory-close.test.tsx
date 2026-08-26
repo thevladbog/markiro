@@ -66,25 +66,38 @@ afterEach(async () => {
 });
 
 it("safely closes a blocker-free running inventory without an emergency acknowledgement", async () => {
-  const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-    response({
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    if (String(input).endsWith("/close-preview")) {
+      return new Response(
+        JSON.stringify({
+          inventoryId: INVENTORY_ID,
+          status: "running",
+          resultRevision: 8,
+          blockers: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    return response({
       inventoryId: INVENTORY_ID,
       status: "closed",
       resultRevision: 8,
       closedAt: "2026-08-26T12:00:00.000Z",
       emergency: false,
       blockers: [],
-    }),
-  );
+    });
+  });
   vi.stubGlobal("fetch", fetchMock);
   renderPanel("running");
 
   await userEvent.click(screen.getByRole("button", { name: "Закрыть инвентаризацию" }));
   expect(screen.getByRole("dialog")).toBeDefined();
-  await userEvent.click(screen.getByRole("button", { name: "Закрыть безопасно" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Закрыть безопасно" }));
 
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-  const [url, init] = fetchMock.mock.calls[0]!;
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true),
+  );
+  const [url, init] = fetchMock.mock.calls.find(([, candidate]) => candidate?.method === "POST")!;
   expect(String(url)).toBe(`/api/inventories/${INVENTORY_ID}/close`);
   expect(init).toMatchObject({ method: "POST", body: "{}" });
   expect(await screen.findByText("Инвентаризация закрыта")).toBeDefined();
@@ -108,21 +121,50 @@ it("requires a reason and explicit blocker acknowledgement for emergency close",
       },
     ],
   };
-  const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-    response({
+  const blockers = [
+    {
+      code: "ACTIVE_PARTICIPANT",
+      count: 1,
+      participantId: null,
+      deviceId: null,
+      boxId: null,
+      discrepancyCategory: null,
+    },
+    {
+      code: "PENDING_OUTBOX",
+      count: 3,
+      participantId: null,
+      deviceId: null,
+      boxId: null,
+      discrepancyCategory: null,
+    },
+  ];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+    if (String(input).endsWith("/close-preview")) {
+      return new Response(
+        JSON.stringify({
+          inventoryId: INVENTORY_ID,
+          status: "running",
+          resultRevision: 8,
+          blockers,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    return response({
       inventoryId: INVENTORY_ID,
       status: "closed",
       resultRevision: 8,
       closedAt: "2026-08-26T12:00:00.000Z",
       emergency: true,
-      blockers: [],
-    }),
-  );
+      blockers,
+    });
+  });
   vi.stubGlobal("fetch", fetchMock);
   renderPanel("running", blocked);
 
   await userEvent.click(screen.getByRole("button", { name: "Закрыть инвентаризацию" }));
-  expect(screen.getByText("Активные терминалы: 1")).toBeDefined();
+  expect(await screen.findByText("Активные терминалы: 1")).toBeDefined();
   expect(screen.getByText("Несинхронизированные события: 3")).toBeDefined();
   expect(screen.getByRole("button", { name: "Закрыть безопасно" }).hasAttribute("disabled")).toBe(
     true,
@@ -137,38 +179,76 @@ it("requires a reason and explicit blocker acknowledgement for emergency close",
   );
   await userEvent.click(screen.getByRole("button", { name: "Закрыть аварийно" }));
 
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-  expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).toEqual({
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true),
+  );
+  const [, emergencyInit] = fetchMock.mock.calls.find(
+    ([, candidate]) => candidate?.method === "POST",
+  )!;
+  expect(JSON.parse(String(emergencyInit?.body))).toEqual({
     reason: "Склад остановлен",
     acknowledgeBlockers: true,
   });
 });
 
-it("requires a separate document acknowledgement before completion and freezes completed controls", async () => {
+it("confirms reopen before mutation and does not offer completion before Task 8", async () => {
   const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
     response({
       inventoryId: INVENTORY_ID,
-      status: "completed",
-      resultRevision: 8,
-      completedAt: "2026-08-26T12:00:00.000Z",
+      status: "running",
+      resultRevision: 9,
+      invalidatedArtifactCount: 0,
     }),
   );
   vi.stubGlobal("fetch", fetchMock);
   renderPanel("closed", { ...progress, status: "closed" });
 
-  expect(
-    screen.getByRole("button", { name: "Завершить инвентаризацию" }).hasAttribute("disabled"),
-  ).toBe(true);
-  await userEvent.click(screen.getByRole("checkbox", { name: /документы скачаны и проверены/ }));
-  await userEvent.click(screen.getByRole("button", { name: "Завершить инвентаризацию" }));
+  expect(screen.queryByRole("button", { name: "Завершить инвентаризацию" })).toBeNull();
+  expect(screen.getByText(/завершение станет доступно после формирования,/i)).toBeDefined();
+  await userEvent.click(screen.getByRole("button", { name: "Возобновить" }));
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(screen.getByText(/ревизия результата увеличится/i)).toBeDefined();
+  await userEvent.click(screen.getByRole("button", { name: "Подтвердить возобновление" }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-  expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).toEqual({
-    documentsDownloadedAndChecked: true,
-  });
+  expect(String(fetchMock.mock.calls[0]![0])).toBe(`/api/inventories/${INVENTORY_ID}/reopen`);
 
   cleanup();
   renderPanel("completed", { ...progress, status: "completed" });
   expect(screen.getByText("Инвентаризация завершена и недоступна для изменений")).toBeDefined();
   expect(screen.queryByRole("button", { name: "Возобновить" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Завершить инвентаризацию" })).toBeNull();
+});
+
+it("allows an authoritative close after preview failure and shows its 409 blockers", async () => {
+  const serverBlocker = {
+    code: "VOIDED",
+    count: 2,
+    participantId: null,
+    deviceId: null,
+    boxId: null,
+    discrepancyCategory: "voided",
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input).endsWith("/close-preview")) {
+      return new Response("preview unavailable", { status: 503, statusText: "Unavailable" });
+    }
+    return new Response(
+      JSON.stringify({
+        code: "INVENTORY_CLOSE_BLOCKED",
+        resultRevision: 9,
+        blockers: [{ ...serverBlocker, code: "UNRESOLVED_DISCREPANCY" }],
+      }),
+      { status: 409, statusText: "Conflict", headers: { "content-type": "application/json" } },
+    );
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderPanel("running");
+
+  await userEvent.click(screen.getByRole("button", { name: "Закрыть инвентаризацию" }));
+  expect(await screen.findByText(/Не удалось получить предварительную проверку/)).toBeDefined();
+  const safeClose = screen.getByRole("button", { name: "Закрыть безопасно" });
+  expect(safeClose.getAttribute("disabled")).toBeNull();
+  await userEvent.click(safeClose);
+  expect(await screen.findByText("Обязательные расхождения без решения: 2")).toBeDefined();
+  expect(screen.getByRole("button", { name: "Закрыть аварийно" })).toBeDefined();
 });

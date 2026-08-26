@@ -302,7 +302,7 @@ export const inventoryProgressSchema = z.strictObject({
   recentEvents: z.array(inventoryRecentEventSchema),
 });
 
-const inventoryCloseBlockerSchema = z.strictObject({
+export const inventoryCloseBlockerSchema = z.strictObject({
   code: z.enum([
     "ACTIVE_PARTICIPANT",
     "STALE_PARTICIPANT",
@@ -326,6 +326,19 @@ export const inventoryCloseResponseSchema = z.strictObject({
   resultRevision: nonnegativeInteger,
   closedAt: dateTime,
   emergency: z.boolean(),
+  blockers: z.array(inventoryCloseBlockerSchema),
+});
+
+export const inventoryClosePreviewResponseSchema = z.strictObject({
+  inventoryId: uuid,
+  status: z.literal("running"),
+  resultRevision: nonnegativeInteger,
+  blockers: z.array(inventoryCloseBlockerSchema),
+});
+
+export const inventoryCloseBlockedErrorSchema = z.strictObject({
+  code: z.literal("INVENTORY_CLOSE_BLOCKED"),
+  resultRevision: nonnegativeInteger,
   blockers: z.array(inventoryCloseBlockerSchema),
 });
 
@@ -354,6 +367,7 @@ const inventoryLateEventSchema = z.strictObject({
   reason: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/),
   resolution: z.enum(["pending", "replayed", "discarded"]),
   resolvedAt: dateTime.nullable(),
+  replayAvailable: z.boolean(),
 });
 
 export const inventoryLateEventsResponseSchema = z.strictObject({
@@ -366,6 +380,30 @@ export const inventoryLateEventsResponseSchema = z.strictObject({
 
 export const inventoryLateEventsDiscardResponseSchema = z.strictObject({
   discardedCount: z.number().int().positive().max(100),
+});
+
+export const inventoryLateEventReplayResponseSchema = z.strictObject({
+  lateEventId: uuid,
+  resolution: z.literal("replayed"),
+  result: z.strictObject({
+    inventoryId: uuid,
+    snapshotId: uuid,
+    snapshotRevision: z.literal(1),
+    batchId: z.string().min(1).max(128),
+    payloadDigest: digest,
+    sequenceCeiling: z.number().int().positive(),
+    resultRevision: nonnegativeInteger,
+    outcomes: z.array(
+      z.strictObject({
+        eventId: uuid,
+        status: z.enum(["applied", "duplicate", "replay", "rejected", "quarantined"]),
+        reasonCode: z.string().min(1),
+        claimedCount: nonnegativeInteger,
+        conflictCount: nonnegativeInteger,
+        claims: z.array(z.unknown()),
+      }),
+    ),
+  }),
 });
 
 export const INVENTORY_CORRECTION_ACTIONS = [
@@ -490,10 +528,15 @@ export type InventorySnapshotInputs = z.infer<typeof inventorySnapshotInputsSche
 export type CreateInventoryInput = z.infer<typeof createInventoryInputSchema>;
 export type InventoryProgress = z.infer<typeof inventoryProgressSchema>;
 export type InventoryCloseResponse = z.infer<typeof inventoryCloseResponseSchema>;
+export type InventoryClosePreviewResponse = z.infer<typeof inventoryClosePreviewResponseSchema>;
+export type InventoryCloseBlocker = z.infer<typeof inventoryCloseBlockerSchema>;
 export type InventoryReopenResponse = z.infer<typeof inventoryReopenResponseSchema>;
 export type InventoryCompleteResponse = z.infer<typeof inventoryCompleteResponseSchema>;
 export type InventoryLateEvent = z.infer<typeof inventoryLateEventSchema>;
 export type InventoryLateEventsResponse = z.infer<typeof inventoryLateEventsResponseSchema>;
+export type InventoryLateEventReplayResponse = z.infer<
+  typeof inventoryLateEventReplayResponseSchema
+>;
 export type InventoryParticipant = z.infer<typeof inventoryParticipantSchema>;
 export type InventoryLiveBox = z.infer<typeof inventoryLiveBoxSchema>;
 export type InventoryRecentEvent = z.infer<typeof inventoryRecentEventSchema>;

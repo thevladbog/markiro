@@ -6,8 +6,11 @@ import { Alert, Button, Checkbox, Modal, Spinner, StatusChip, Textarea } from "@
 import {
   useDiscardInventoryLateEvents,
   useInventoryLateEvents,
+  useReplayInventoryLateEvent,
   useReopenInventory,
 } from "./api.js";
+
+const MAX_SELECTED_LATE_EVENTS = 100;
 
 export function InventoryLateEvents({
   inventoryId,
@@ -16,7 +19,7 @@ export function InventoryLateEvents({
   onClose,
 }: {
   inventoryId: string;
-  inventoryStatus: "closed" | "completed";
+  inventoryStatus: "running" | "closed" | "completed";
   open: boolean;
   onClose: () => void;
 }) {
@@ -24,17 +27,22 @@ export function InventoryLateEvents({
   const [page, setPage] = useState(1);
   const events = useInventoryLateEvents(inventoryId, open, page);
   const discard = useDiscardInventoryLateEvents();
+  const replay = useReplayInventoryLateEvent();
   const reopen = useReopenInventory();
   const [selected, setSelected] = useState<string[]>([]);
   const [reason, setReason] = useState("");
+  const [reopenConfirmation, setReopenConfirmation] = useState(false);
   const readOnly = inventoryStatus === "completed";
+  const canDiscard = inventoryStatus === "closed";
   const reasonBytes = new TextEncoder().encode(reason.trim()).byteLength;
   const reasonValid = reasonBytes > 0 && reasonBytes <= 4096;
 
   const toggle = (id: string, checked: boolean) => {
-    setSelected((current) =>
-      checked ? [...new Set([...current, id])] : current.filter((value) => value !== id),
-    );
+    setSelected((current) => {
+      if (!checked) return current.filter((value) => value !== id);
+      if (current.includes(id) || current.length >= MAX_SELECTED_LATE_EVENTS) return current;
+      return [...current, id];
+    });
   };
 
   const discardSelected = () => {
@@ -49,6 +57,12 @@ export function InventoryLateEvents({
     );
   };
 
+  const reopenInventory = () => {
+    reopen.mutate(inventoryId, {
+      onSuccess: () => setReopenConfirmation(false),
+    });
+  };
+
   return (
     <Modal
       open={open}
@@ -58,12 +72,8 @@ export function InventoryLateEvents({
       width={720}
       footer={
         <>
-          {!readOnly ? (
-            <Button
-              variant="warning-outline"
-              loading={reopen.isPending}
-              onClick={() => reopen.mutate(inventoryId)}
-            >
+          {inventoryStatus === "closed" ? (
+            <Button variant="warning-outline" onClick={() => setReopenConfirmation(true)}>
               {t("pages.inventory.late.reopen")}
             </Button>
           ) : null}
@@ -75,6 +85,26 @@ export function InventoryLateEvents({
     >
       <div className="mk-inventory-late-events">
         {readOnly ? <Alert tone="info">{t("pages.inventory.late.readOnly")}</Alert> : null}
+        {reopenConfirmation ? (
+          <div className="mk-inventory-late-decision">
+            <Alert tone="warn">{t("pages.inventory.close.reopenExplanation")}</Alert>
+            {reopen.isError ? (
+              <Alert tone="error">{t("pages.inventory.late.actionError")}</Alert>
+            ) : null}
+            <div className="mk-inventory-actions">
+              <Button variant="secondary" onClick={() => setReopenConfirmation(false)}>
+                {t("common.cancel")}
+              </Button>
+              <Button
+                variant="warning-outline"
+                loading={reopen.isPending}
+                onClick={reopenInventory}
+              >
+                {t("pages.inventory.close.reopenConfirm")}
+              </Button>
+            </div>
+          </div>
+        ) : null}
         {events.isPending ? <Spinner label={t("pages.inventory.late.loading")} /> : null}
         {events.isError ? <Alert tone="error">{t("pages.inventory.late.loadError")}</Alert> : null}
         {events.data?.items.length === 0 ? (
@@ -83,7 +113,9 @@ export function InventoryLateEvents({
         {events.data && events.data.items.length > 0 ? (
           <ul className="mk-inventory-late-list">
             {events.data.items.map((event) => {
-              const canDecide = !readOnly && event.resolution === "pending";
+              const canDecide = canDiscard && event.resolution === "pending";
+              const selectionDisabled =
+                !selected.includes(event.id) && selected.length >= MAX_SELECTED_LATE_EVENTS;
               return (
                 <li key={event.id}>
                   {canDecide ? (
@@ -91,6 +123,7 @@ export function InventoryLateEvents({
                       aria-label={t("pages.inventory.late.select", { batchId: event.batchId })}
                       label=""
                       checked={selected.includes(event.id)}
+                      disabled={selectionDisabled}
                       onCheckedChange={(checked) => toggle(event.id, checked)}
                     />
                   ) : null}
@@ -110,6 +143,16 @@ export function InventoryLateEvents({
                       status={event.resolution === "pending" ? "warn" : "neutral"}
                       label={t(`pages.inventory.late.resolution.${event.resolution}`)}
                     />
+                    {inventoryStatus === "running" && event.replayAvailable ? (
+                      <Button
+                        size="compact"
+                        variant="secondary"
+                        loading={replay.isPending && replay.variables?.lateEventId === event.id}
+                        onClick={() => replay.mutate({ inventoryId, lateEventId: event.id })}
+                      >
+                        {t("pages.inventory.late.replay", { batchId: event.batchId })}
+                      </Button>
+                    ) : null}
                   </span>
                 </li>
               );
@@ -137,7 +180,13 @@ export function InventoryLateEvents({
             </Button>
           </div>
         ) : null}
-        {!readOnly && selected.length > 0 ? (
+        {selected.length >= MAX_SELECTED_LATE_EVENTS ? (
+          <Alert tone="info">{t("pages.inventory.late.selectionLimit")}</Alert>
+        ) : null}
+        {replay.isError ? (
+          <Alert tone="error">{t("pages.inventory.late.replayError")}</Alert>
+        ) : null}
+        {canDiscard && selected.length > 0 ? (
           <div className="mk-inventory-late-decision">
             <Textarea
               label={t("pages.inventory.late.reason")}
@@ -153,7 +202,7 @@ export function InventoryLateEvents({
             ) : null}
             <Button
               variant="destructive-outline"
-              disabled={!reasonValid}
+              disabled={!reasonValid || selected.length > MAX_SELECTED_LATE_EVENTS}
               loading={discard.isPending}
               onClick={discardSelected}
             >

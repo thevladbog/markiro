@@ -2,7 +2,11 @@ import { z } from "zod";
 
 import type { SchemaObject } from "@nestjs/swagger";
 
-import { INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@markiro/domain";
+import {
+  INVENTORY_CHZ_STATUSES,
+  type InventoryChzStatus,
+  type InventoryEventBatchResponse,
+} from "@markiro/domain";
 
 export type {
   StationInventoryLabelTemplateDescriptor,
@@ -149,6 +153,13 @@ export interface InventoryCloseDto {
   blockers: InventoryCloseBlockerDto[];
 }
 
+export interface InventoryClosePreviewDto {
+  inventoryId: string;
+  status: "running";
+  resultRevision: number;
+  blockers: InventoryCloseBlockerDto[];
+}
+
 export interface InventoryReopenDto {
   inventoryId: string;
   status: "running";
@@ -165,6 +176,12 @@ export interface InventoryCompleteDto {
 
 export interface InventoryLateEventsDiscardDto {
   discardedCount: number;
+}
+
+export interface InventoryLateEventReplayDto {
+  lateEventId: string;
+  resolution: "replayed";
+  result: InventoryEventBatchResponse;
 }
 
 const boundedLifecycleReasonSchema = z
@@ -184,6 +201,8 @@ export const emergencyCloseInventorySchema = z.strictObject({
 export type EmergencyCloseInventoryDto = z.infer<typeof emergencyCloseInventorySchema>;
 export const reopenInventorySchema = z.strictObject({});
 export type ReopenInventoryDto = z.infer<typeof reopenInventorySchema>;
+export const replayInventoryLateEventSchema = z.strictObject({});
+export type ReplayInventoryLateEventDto = z.infer<typeof replayInventoryLateEventSchema>;
 export const completeInventorySchema = z.strictObject({
   documentsDownloadedAndChecked: z.literal(true),
 });
@@ -219,6 +238,7 @@ export interface InventoryLateEventDto {
   reason: string;
   resolution: "pending" | "replayed" | "discarded";
   resolvedAt: string | null;
+  replayAvailable: boolean;
 }
 
 export interface ListInventoryLateEventsResponseDto {
@@ -688,6 +708,18 @@ export const inventoryCloseBlockedOpenApiSchema: SchemaObject = {
   },
 };
 
+export const inventoryClosePreviewOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["inventoryId", "status", "resultRevision", "blockers"],
+  properties: {
+    inventoryId: uuidSchema,
+    status: { type: "string", enum: ["running"] },
+    resultRevision: { type: "integer", minimum: 0 },
+    blockers: { type: "array", items: inventoryCloseBlockerOpenApiSchema },
+  },
+};
+
 export const inventoryReopenOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -712,6 +744,16 @@ export const inventoryCompleteOpenApiSchema: SchemaObject = {
   },
 };
 
+export const inventoryCompletionUnavailableOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["code", "requiredTask"],
+  properties: {
+    code: { type: "string", enum: ["INVENTORY_DOCUMENT_ARTIFACTS_UNAVAILABLE"] },
+    requiredTask: { type: "integer", enum: [8] },
+  },
+};
+
 const inventoryLateEventOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
@@ -726,6 +768,7 @@ const inventoryLateEventOpenApiSchema: SchemaObject = {
     "reason",
     "resolution",
     "resolvedAt",
+    "replayAvailable",
   ],
   properties: {
     id: uuidSchema,
@@ -738,6 +781,7 @@ const inventoryLateEventOpenApiSchema: SchemaObject = {
     reason: { type: "string", pattern: "^[A-Z][A-Z0-9_]{0,127}$" },
     resolution: { type: "string", enum: ["pending", "replayed", "discarded"] },
     resolvedAt: { ...dateTimeSchema, nullable: true },
+    replayAvailable: { type: "boolean" },
   },
 };
 
@@ -766,7 +810,12 @@ export const discardInventoryLateEventsOpenApiSchema: SchemaObject = {
       uniqueItems: true,
       items: uuidSchema,
     },
-    reason: { type: "string", minLength: 1, maxLength: 4096 },
+    reason: {
+      type: "string",
+      minLength: 1,
+      maxLength: 4096,
+      "x-maxUtf8Bytes": 4096,
+    } as SchemaObject & { "x-maxUtf8Bytes": number },
   },
 };
 
@@ -776,6 +825,19 @@ export const inventoryLateEventsDiscardOpenApiSchema: SchemaObject = {
   required: ["discardedCount"],
   properties: { discardedCount: { type: "integer", minimum: 1, maximum: 100 } },
 };
+
+export function inventoryLateEventReplayOpenApiSchema(resultSchema: SchemaObject): SchemaObject {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["lateEventId", "resolution", "result"],
+    properties: {
+      lateEventId: uuidSchema,
+      resolution: { type: "string", enum: ["replayed"] },
+      result: resultSchema,
+    },
+  };
+}
 
 export const createInventoryOpenApiSchema: SchemaObject = {
   type: "object",

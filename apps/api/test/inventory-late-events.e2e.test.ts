@@ -225,7 +225,7 @@ describe.skipIf(!ready)("inventory late events", () => {
     await owner.agent.get(`/inventories/${owner.inventoryId}/late-events?pageSize=101`).expect(400);
   });
 
-  it("reprocesses an exact quarantined batch only after reopen and resolves evidence after actual replay", async () => {
+  it("explicitly replays retained evidence after reopen and survives a same-cycle revision bump", async () => {
     const fixture = await seedClosedInventory();
     const batch = lateBatch(fixture, `replay-${randomUUID()}`);
     const quarantined = await stationSync.ingest(
@@ -239,15 +239,34 @@ describe.skipIf(!ready)("inventory late events", () => {
       reasonCode: "INVENTORY_CLOSED",
     });
     await fixture.agent.post(`/inventories/${fixture.inventoryId}/reopen`).send({}).expect(201);
-
-    const replayed = await stationSync.ingest(
-      fixture.tenantId,
-      fixture.deviceId,
-      fixture.inventoryId,
-      batch,
-    );
-    expect(replayed.outcomes[0]).toMatchObject({ status: "applied" });
-    expect(replayed).not.toEqual(quarantined);
+    await db
+      .update(schema.inventories)
+      .set({ resultRevision: 6 })
+      .where(
+        and(
+          eq(schema.inventories.tenantId, fixture.tenantId),
+          eq(schema.inventories.id, fixture.inventoryId),
+        ),
+      );
+    const [pending] = await db
+      .select({ id: schema.inventoryLateEvents.id })
+      .from(schema.inventoryLateEvents)
+      .where(eq(schema.inventoryLateEvents.batchId, batch.batchId));
+    if (!pending) throw new Error("Expected authorized late evidence");
+    const replay = await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/late-events/${pending.id}/replay`)
+      .send({})
+      .expect(201);
+    expect(replay.body).toMatchObject({
+      lateEventId: pending.id,
+      resolution: "replayed",
+      result: {
+        batchId: batch.batchId,
+        resultRevision: 7,
+        outcomes: [expect.objectContaining({ status: "applied" })],
+      },
+    });
+    expect(replay.body.result).not.toEqual(quarantined);
     const [late] = await db
       .select({
         resolution: schema.inventoryLateEvents.resolution,
@@ -275,7 +294,66 @@ describe.skipIf(!ready)("inventory late events", () => {
     ).toHaveLength(1);
     await expect(
       stationSync.ingest(fixture.tenantId, fixture.deviceId, fixture.inventoryId, batch),
-    ).resolves.toEqual(replayed);
+    ).resolves.toEqual(replay.body.result);
+  });
+
+  it("keeps malformed retained payload pending and retryable", async () => {
+    const fixture = await seedClosedInventory();
+    const batch = lateBatch(fixture, `malformed-${randomUUID()}`);
+    await stationSync.ingest(fixture.tenantId, fixture.deviceId, fixture.inventoryId, batch);
+    await fixture.agent.post(`/inventories/${fixture.inventoryId}/reopen`).send({}).expect(201);
+    const [late] = await db
+      .select({ id: schema.inventoryLateEvents.id })
+      .from(schema.inventoryLateEvents)
+      .where(eq(schema.inventoryLateEvents.batchId, batch.batchId));
+    if (!late) throw new Error("Expected authorized late evidence");
+    await db
+      .update(schema.inventoryLateEvents)
+      .set({ payload: { batchId: batch.batchId, events: "not-an-array" } })
+      .where(eq(schema.inventoryLateEvents.id, late.id));
+
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/late-events/${late.id}/replay`)
+      .send({})
+      .expect(409, { code: "INVENTORY_LATE_EVENT_PAYLOAD_INVALID" });
+    const [pending] = await db
+      .select({ resolution: schema.inventoryLateEvents.resolution })
+      .from(schema.inventoryLateEvents)
+      .where(eq(schema.inventoryLateEvents.id, late.id));
+    expect(pending?.resolution).toBe("pending");
+  });
+
+  it("revokes replay authorization on close and denies a later status-only hack", async () => {
+    const fixture = await seedClosedInventory();
+    const batch = lateBatch(fixture, `revoked-${randomUUID()}`);
+    await stationSync.ingest(fixture.tenantId, fixture.deviceId, fixture.inventoryId, batch);
+    await fixture.agent.post(`/inventories/${fixture.inventoryId}/reopen`).send({}).expect(201);
+    const [late] = await db
+      .select({ id: schema.inventoryLateEvents.id })
+      .from(schema.inventoryLateEvents)
+      .where(eq(schema.inventoryLateEvents.batchId, batch.batchId));
+    if (!late) throw new Error("Expected authorized late evidence");
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/emergency-close`)
+      .send({ reason: "Повторное закрытие", acknowledgeBlockers: true })
+      .expect(201);
+    await db
+      .update(schema.inventories)
+      .set({ status: "running", closedByUserId: null, closedAt: null })
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/late-events/${late.id}/replay`)
+      .send({})
+      .expect(409, { code: "INVENTORY_LATE_EVENT_REPLAY_NOT_AUTHORIZED" });
+    const [pending] = await db
+      .select({
+        resolution: schema.inventoryLateEvents.resolution,
+        replayAuthorizedAt: schema.inventoryLateEvents.replayAuthorizedAt,
+      })
+      .from(schema.inventoryLateEvents)
+      .where(eq(schema.inventoryLateEvents.id, late.id));
+    expect(pending).toEqual({ resolution: "pending", replayAuthorizedAt: null });
   });
 
   it("does not replay quarantined evidence merely because status changed without an admin authorization", async () => {
@@ -330,7 +408,7 @@ describe.skipIf(!ready)("inventory late events", () => {
     await fixture.agent
       .post(`/inventories/${fixture.inventoryId}/complete`)
       .send({ documentsDownloadedAndChecked: true })
-      .expect(201);
+      .expect(409, { code: "INVENTORY_DOCUMENT_ARTIFACTS_UNAVAILABLE", requiredTask: 8 });
     const [resolved] = await db
       .select({
         resolution: schema.inventoryLateEvents.resolution,

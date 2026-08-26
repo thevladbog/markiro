@@ -7,6 +7,7 @@ import {
   createInventoryCorrectionInputSchema,
   inventoryCorrectionSchema,
   inventoryCloseResponseSchema,
+  inventoryClosePreviewResponseSchema,
   inventoryCompleteResponseSchema,
   inventoryDetailSchema,
   inventoryEvidenceResponseSchema,
@@ -15,6 +16,7 @@ import {
   inventoryProgressSchema,
   inventoryLateEventsDiscardResponseSchema,
   inventoryLateEventsResponseSchema,
+  inventoryLateEventReplayResponseSchema,
   inventoryReopenResponseSchema,
   inventorySnapshotInputsSchema,
   inventorySnapshotSchema,
@@ -25,6 +27,7 @@ import {
   type Inventory,
   type InventoryCorrection,
   type InventoryCloseResponse,
+  type InventoryClosePreviewResponse,
   type InventoryCompleteResponse,
   type InventoryChzStatus,
   type InventoryDetail,
@@ -32,6 +35,7 @@ import {
   type InventoryImport,
   type InventoryProgress,
   type InventoryLateEventsResponse,
+  type InventoryLateEventReplayResponse,
   type InventoryReopenResponse,
   type InventorySnapshot,
   type InventorySnapshotInputs,
@@ -50,6 +54,10 @@ export function inventoryLateEventsQueryKey(id: string, page?: number) {
     "late-events",
     ...(page === undefined ? [] : [page]),
   ] as const;
+}
+
+export function inventoryClosePreviewQueryKey(id: string) {
+  return [...INVENTORIES_QUERY_KEY, id, "close-preview"] as const;
 }
 
 export interface InventoryEvidenceQuery {
@@ -173,6 +181,13 @@ async function closeInventory(input: {
   return inventoryCloseResponseSchema.parse(value);
 }
 
+async function getInventoryClosePreview(
+  inventoryId: string,
+): Promise<InventoryClosePreviewResponse> {
+  const value = await apiFetch<unknown>(`/inventories/${inventoryId}/close-preview`);
+  return inventoryClosePreviewResponseSchema.parse(value);
+}
+
 async function reopenInventory(inventoryId: string): Promise<InventoryReopenResponse> {
   const value = await apiFetch<unknown>(`/inventories/${inventoryId}/reopen`, {
     method: "POST",
@@ -209,6 +224,17 @@ async function discardInventoryLateEvents(input: {
     body: JSON.stringify({ lateEventIds: input.lateEventIds, reason: input.reason }),
   });
   return inventoryLateEventsDiscardResponseSchema.parse(value).discardedCount;
+}
+
+async function replayInventoryLateEvent(input: {
+  inventoryId: string;
+  lateEventId: string;
+}): Promise<InventoryLateEventReplayResponse> {
+  const value = await apiFetch<unknown>(
+    `/inventories/${input.inventoryId}/late-events/${input.lateEventId}/replay`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+  return inventoryLateEventReplayResponseSchema.parse(value);
 }
 
 function invalidateInventory(queryClient: ReturnType<typeof useQueryClient>, inventoryId: string) {
@@ -343,6 +369,17 @@ export function useCloseInventory(): UseMutationResult<
   });
 }
 
+export function useInventoryClosePreview(
+  inventoryId: string,
+  enabled: boolean,
+): UseQueryResult<InventoryClosePreviewResponse> {
+  return useQuery({
+    queryKey: inventoryClosePreviewQueryKey(inventoryId),
+    queryFn: () => getInventoryClosePreview(inventoryId),
+    enabled: enabled && inventoryId.length > 0,
+  });
+}
+
 export function useReopenInventory(): UseMutationResult<InventoryReopenResponse, Error, string> {
   const queryClient = useQueryClient();
   return useMutation({
@@ -386,6 +423,25 @@ export function useDiscardInventoryLateEvents(): UseMutationResult<
     onSuccess: (_result, input) => {
       void queryClient.invalidateQueries({
         queryKey: inventoryLateEventsQueryKey(input.inventoryId),
+      });
+    },
+  });
+}
+
+export function useReplayInventoryLateEvent(): UseMutationResult<
+  InventoryLateEventReplayResponse,
+  Error,
+  { inventoryId: string; lateEventId: string }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: replayInventoryLateEvent,
+    onSuccess: (_result, input) => {
+      void queryClient.invalidateQueries({
+        queryKey: inventoryLateEventsQueryKey(input.inventoryId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: inventoryProgressQueryKey(input.inventoryId),
       });
     },
   });

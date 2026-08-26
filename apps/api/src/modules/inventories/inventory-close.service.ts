@@ -1,5 +1,5 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
 
@@ -9,13 +9,17 @@ import type {
   DiscardInventoryLateEventsDto,
   InventoryCloseBlockerDto,
   InventoryCloseDto,
+  InventoryClosePreviewDto,
   InventoryCompleteDto,
+  InventoryLateEventReplayDto,
   InventoryLateEventDto,
   InventoryLateEventsDiscardDto,
   InventoryReopenDto,
   ListInventoryLateEventsQueryDto,
   ListInventoryLateEventsResponseDto,
 } from "./dto";
+import { stationInventoryEventBatchSchema } from "./station-inventory.dto";
+import { StationInventorySyncService } from "./station-inventory-sync.service";
 
 type InventoryTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -23,21 +27,24 @@ interface LockedInventory {
   id: string;
   status: "draft" | "preparing" | "ready" | "running" | "closed" | "completed";
   resultRevision: number;
+  closedByUserId: string | null;
+  closedAt: Date | string | null;
+  emergencyCloseReason: string | null;
+  emergencyClosedByUserId: string | null;
+  emergencyClosedAt: Date | string | null;
 }
 
 interface ParticipantBlockerRow {
-  participantId: string;
-  deviceId: string;
-  heartbeatAt: Date | string;
-  stale: boolean;
-  pendingEventCount: number;
-  openBoxCount: number;
+  active: number;
+  stale: number;
+  pending: number;
+  reportedOpenBoxes: number;
 }
 
 interface BoxBlockerRow {
-  id: string;
-  state: "open" | "closed" | "invalidated";
-  printState: "not_ready" | "pending" | "printing" | "printed" | "failed";
+  open: number;
+  invalidated: number;
+  unresolvedPrint: number;
 }
 
 interface DiscrepancyBlockerRow {
@@ -49,7 +56,39 @@ interface DiscrepancyBlockerRow {
 
 @Injectable()
 export class InventoryCloseService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly stationSync: StationInventorySyncService,
+  ) {}
+
+  preview(tenantId: string, inventoryId: string): Promise<InventoryClosePreviewDto> {
+    return this.db.transaction(
+      async (tx) => {
+        const [inventory] = await tx
+          .select({
+            id: schema.inventories.id,
+            status: schema.inventories.status,
+            resultRevision: schema.inventories.resultRevision,
+          })
+          .from(schema.inventories)
+          .where(
+            and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
+          )
+          .limit(1);
+        if (!inventory) throw new NotFoundException();
+        if (inventory.status !== "running") {
+          throw new ConflictException({ code: "INVENTORY_CLOSE_REQUIRES_RUNNING" });
+        }
+        return {
+          inventoryId,
+          status: "running",
+          resultRevision: inventory.resultRevision,
+          blockers: await this.loadBlockers(tx, tenantId, inventoryId),
+        };
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
+  }
 
   close(tenantId: string, actorUserId: string, inventoryId: string): Promise<InventoryCloseDto> {
     return this.closeUnderLock(tenantId, actorUserId, inventoryId, null);
@@ -118,10 +157,24 @@ export class InventoryCloseService {
         outcome: "success",
         targetType: "inventory",
         targetId: inventoryId,
-        before: { status: "closed", resultRevision: inventory.resultRevision },
+        before: {
+          status: "closed",
+          resultRevision: inventory.resultRevision,
+          closedByUserId: inventory.closedByUserId,
+          closedAt: requiredIso(inventory.closedAt, "closedAt"),
+          emergencyCloseReason: inventory.emergencyCloseReason,
+          emergencyClosedByUserId: inventory.emergencyClosedByUserId,
+          emergencyClosedAt:
+            inventory.emergencyClosedAt === null ? null : toIso(inventory.emergencyClosedAt),
+        },
         after: {
           status: "running",
           resultRevision,
+          closedByUserId: null,
+          closedAt: null,
+          emergencyCloseReason: null,
+          emergencyClosedByUserId: null,
+          emergencyClosedAt: null,
           invalidatedArtifactCount,
           replayAuthorizedLateEventCount: authorizedLateEvents.length,
           reopenedAt: reopenedAt.toISOString(),
@@ -158,48 +211,79 @@ export class InventoryCloseService {
           pendingLateEventCount: pendingLateEvent?.count ?? 0,
         });
       }
-      // There cannot be a running inventory document job before Task 8 adds
-      // that schema. Task 8 extends this same lock boundary with the real check.
-      const completedAt = new Date();
-      await tx
-        .update(schema.inventories)
-        .set({
-          status: "completed",
-          completionAcknowledgedByUserId: actorUserId,
-          completionAcknowledgedAt: completedAt,
-          completedByUserId: actorUserId,
-          completedAt,
-          updatedAt: completedAt,
-        })
-        .where(
-          and(
-            eq(schema.inventories.tenantId, tenantId),
-            eq(schema.inventories.id, inventoryId),
-            eq(schema.inventories.status, "closed"),
-          ),
-        );
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId: tenantId,
-        actorUserId,
-        action: "inventory.completed",
-        outcome: "success",
-        targetType: "inventory",
-        targetId: inventoryId,
-        before: { status: "closed", resultRevision: inventory.resultRevision },
-        after: {
-          status: "completed",
-          resultRevision: inventory.resultRevision,
-          documentsDownloadedAndChecked: true,
-          completedAt: completedAt.toISOString(),
-        },
+      void actorUserId;
+      throw new ConflictException({
+        code: "INVENTORY_DOCUMENT_ARTIFACTS_UNAVAILABLE",
+        requiredTask: 8,
       });
-      return {
-        inventoryId,
-        status: "completed",
-        resultRevision: inventory.resultRevision,
-        completedAt: completedAt.toISOString(),
-      };
     });
+  }
+
+  async replayLateEvent(
+    tenantId: string,
+    actorUserId: string,
+    inventoryId: string,
+    lateEventId: string,
+  ): Promise<InventoryLateEventReplayDto> {
+    const [inventory] = await this.db
+      .select({ status: schema.inventories.status })
+      .from(schema.inventories)
+      .where(and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)))
+      .limit(1);
+    if (!inventory) throw new NotFoundException();
+    const [late] = await this.db
+      .select({
+        id: schema.inventoryLateEvents.id,
+        deviceId: schema.inventoryLateEvents.deviceId,
+        payload: schema.inventoryLateEvents.payload,
+        resolution: schema.inventoryLateEvents.resolution,
+        replayAuthorizedAt: schema.inventoryLateEvents.replayAuthorizedAt,
+      })
+      .from(schema.inventoryLateEvents)
+      .where(
+        and(
+          eq(schema.inventoryLateEvents.tenantId, tenantId),
+          eq(schema.inventoryLateEvents.inventoryId, inventoryId),
+          eq(schema.inventoryLateEvents.id, lateEventId),
+        ),
+      )
+      .limit(1);
+    if (!late) throw new NotFoundException();
+    if (inventory.status !== "running") {
+      throw new ConflictException({ code: "INVENTORY_LATE_EVENT_REPLAY_REQUIRES_RUNNING" });
+    }
+    if (late.resolution !== "pending") {
+      throw new ConflictException({ code: "INVENTORY_LATE_EVENT_REPLAY_STALE" });
+    }
+    if (late.replayAuthorizedAt === null) {
+      throw new ConflictException({ code: "INVENTORY_LATE_EVENT_REPLAY_NOT_AUTHORIZED" });
+    }
+    const parsed = stationInventoryEventBatchSchema.safeParse(late.payload);
+    if (!parsed.success) {
+      throw new ConflictException({ code: "INVENTORY_LATE_EVENT_PAYLOAD_INVALID" });
+    }
+    const result = await this.stationSync.replayAuthorizedLateEvent(
+      tenantId,
+      actorUserId,
+      inventoryId,
+      late.deviceId,
+      late.id,
+      parsed.data,
+    );
+    const [resolved] = await this.db
+      .select({ resolution: schema.inventoryLateEvents.resolution })
+      .from(schema.inventoryLateEvents)
+      .where(
+        and(
+          eq(schema.inventoryLateEvents.tenantId, tenantId),
+          eq(schema.inventoryLateEvents.inventoryId, inventoryId),
+          eq(schema.inventoryLateEvents.id, lateEventId),
+        ),
+      );
+    if (resolved?.resolution !== "replayed") {
+      throw new ConflictException({ code: "INVENTORY_LATE_EVENT_REPLAY_NOT_AUTHORIZED" });
+    }
+    return { lateEventId, resolution: "replayed", result };
   }
 
   async listLateEvents(
@@ -208,7 +292,7 @@ export class InventoryCloseService {
     query: ListInventoryLateEventsQueryDto,
   ): Promise<ListInventoryLateEventsResponseDto> {
     const [inventory] = await this.db
-      .select({ id: schema.inventories.id })
+      .select({ id: schema.inventories.id, status: schema.inventories.status })
       .from(schema.inventories)
       .where(and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)))
       .limit(1);
@@ -239,7 +323,10 @@ export class InventoryCloseService {
         late.closed_revision as "closedRevision",
         late.reason,
         late.resolution::text as resolution,
-        late.resolved_at as "resolvedAt"
+        late.resolved_at as "resolvedAt",
+        (late.resolution = 'pending'
+          and late.replay_authorized_at is not null
+          and ${inventory.status === "running"}) as "replayAvailable"
       from inventory_late_events late
       join station_devices device
         on device.tenant_id = late.tenant_id
@@ -370,6 +457,20 @@ export class InventoryCloseService {
             eq(schema.inventories.status, "running"),
           ),
         );
+      await tx
+        .update(schema.inventoryLateEvents)
+        .set({
+          replayAuthorizedAt: null,
+          replayAuthorizedByUserId: null,
+          replayAuthorizedRevision: null,
+        })
+        .where(
+          and(
+            eq(schema.inventoryLateEvents.tenantId, tenantId),
+            eq(schema.inventoryLateEvents.inventoryId, inventoryId),
+            eq(schema.inventoryLateEvents.resolution, "pending"),
+          ),
+        );
       await tx.insert(schema.tenantAuditEvents).values({
         organizationId: tenantId,
         actorUserId,
@@ -408,6 +509,11 @@ export class InventoryCloseService {
         id: schema.inventories.id,
         status: schema.inventories.status,
         resultRevision: schema.inventories.resultRevision,
+        closedByUserId: schema.inventories.closedByUserId,
+        closedAt: schema.inventories.closedAt,
+        emergencyCloseReason: schema.inventories.emergencyCloseReason,
+        emergencyClosedByUserId: schema.inventories.emergencyClosedByUserId,
+        emergencyClosedAt: schema.inventories.emergencyClosedAt,
       })
       .from(schema.inventories)
       .where(and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)))
@@ -427,38 +533,31 @@ export class InventoryCloseService {
     tenantId: string,
     inventoryId: string,
   ): Promise<InventoryCloseBlockerDto[]> {
-    const participants = await tx
-      .select({
-        participantId: schema.inventoryDeviceParticipants.id,
-        deviceId: schema.inventoryDeviceParticipants.deviceId,
-        heartbeatAt: schema.inventoryDeviceParticipants.heartbeatAt,
-        stale: sql<boolean>`${schema.inventoryDeviceParticipants.heartbeatAt} < transaction_timestamp() - interval '45 seconds'`,
-        pendingEventCount: schema.inventoryDeviceParticipants.pendingEventCount,
-        openBoxCount: schema.inventoryDeviceParticipants.openBoxCount,
-      })
-      .from(schema.inventoryDeviceParticipants)
-      .where(
-        and(
-          eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
-          eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
-          sql`${schema.inventoryDeviceParticipants.leftAt} is null`,
-        ),
-      )
-      .orderBy(asc(schema.inventoryDeviceParticipants.id));
-    const boxes = await tx
-      .select({
-        id: schema.inventoryRepackBoxes.id,
-        state: schema.inventoryRepackBoxes.state,
-        printState: schema.inventoryRepackBoxes.printState,
-      })
-      .from(schema.inventoryRepackBoxes)
-      .where(
-        and(
-          eq(schema.inventoryRepackBoxes.tenantId, tenantId),
-          eq(schema.inventoryRepackBoxes.inventoryId, inventoryId),
-        ),
-      )
-      .orderBy(asc(schema.inventoryRepackBoxes.id));
+    const participantResult = await tx.execute(sql<ParticipantBlockerRow>`
+      select
+        count(*) filter (
+          where heartbeat_at >= transaction_timestamp() - interval '45 seconds'
+        )::int as active,
+        count(*) filter (
+          where heartbeat_at < transaction_timestamp() - interval '45 seconds'
+        )::int as stale,
+        coalesce(sum(pending_event_count), 0)::int as pending,
+        coalesce(sum(open_box_count), 0)::int as "reportedOpenBoxes"
+      from inventory_device_participants
+      where tenant_id = ${tenantId}
+        and inventory_id = ${inventoryId}
+        and left_at is null
+    `);
+    const boxResult = await tx.execute(sql<BoxBlockerRow>`
+      select
+        count(*) filter (where state = 'open')::int as open,
+        count(*) filter (where state = 'invalidated')::int as invalidated,
+        count(*) filter (where state = 'closed' and print_state <> 'printed')::int
+          as "unresolvedPrint"
+      from inventory_repack_boxes
+      where tenant_id = ${tenantId}
+        and inventory_id = ${inventoryId}
+    `);
     const discrepancyResult = await tx.execute(sql<DiscrepancyBlockerRow>`
       select
         count(*) filter (where result.classification = 'unknown')::int as unknown,
@@ -479,40 +578,26 @@ export class InventoryCloseService {
         and result.inventory_id = ${inventoryId}
     `);
     const blockers: InventoryCloseBlockerDto[] = [];
-    for (const participant of participants as ParticipantBlockerRow[]) {
-      blockers.push(
-        blocker(participant.stale ? "STALE_PARTICIPANT" : "ACTIVE_PARTICIPANT", {
-          participantId: participant.participantId,
-          deviceId: participant.deviceId,
-        }),
-      );
-      if (participant.pendingEventCount > 0) {
-        blockers.push(
-          blocker("PENDING_OUTBOX", {
-            count: participant.pendingEventCount,
-            participantId: participant.participantId,
-            deviceId: participant.deviceId,
-          }),
-        );
-      }
-      if (participant.openBoxCount > 0) {
-        blockers.push(
-          blocker("PARTICIPANT_OPEN_BOX", {
-            count: participant.openBoxCount,
-            participantId: participant.participantId,
-            deviceId: participant.deviceId,
-          }),
-        );
-      }
+    const participant = parseParticipantBlockerRow(participantResult.rows[0]);
+    if (participant.active > 0) {
+      blockers.push(blocker("ACTIVE_PARTICIPANT", { count: participant.active }));
     }
-    for (const box of boxes as BoxBlockerRow[]) {
-      if (box.state === "open") blockers.push(blocker("OPEN_REPACK_BOX", { boxId: box.id }));
-      if (box.state === "invalidated") {
-        blockers.push(blocker("INVALIDATED_REPACK_BOX", { boxId: box.id }));
-      }
-      if (box.state === "closed" && box.printState !== "printed") {
-        blockers.push(blocker("UNRESOLVED_BOX_PRINT", { boxId: box.id }));
-      }
+    if (participant.stale > 0) {
+      blockers.push(blocker("STALE_PARTICIPANT", { count: participant.stale }));
+    }
+    if (participant.pending > 0) {
+      blockers.push(blocker("PENDING_OUTBOX", { count: participant.pending }));
+    }
+    if (participant.reportedOpenBoxes > 0) {
+      blockers.push(blocker("PARTICIPANT_OPEN_BOX", { count: participant.reportedOpenBoxes }));
+    }
+    const boxes = parseBoxBlockerRow(boxResult.rows[0]);
+    if (boxes.open > 0) blockers.push(blocker("OPEN_REPACK_BOX", { count: boxes.open }));
+    if (boxes.invalidated > 0) {
+      blockers.push(blocker("INVALIDATED_REPACK_BOX", { count: boxes.invalidated }));
+    }
+    if (boxes.unresolvedPrint > 0) {
+      blockers.push(blocker("UNRESOLVED_BOX_PRINT", { count: boxes.unresolvedPrint }));
     }
     const discrepancy = parseDiscrepancyBlockerRow(discrepancyResult.rows[0]);
     if (discrepancy) {
@@ -547,6 +632,46 @@ function blocker(
   };
 }
 
+function parseAggregateCountRow(value: unknown, fields: readonly string[]): Record<string, number> {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Inventory close aggregate row is unavailable");
+  }
+  return Object.fromEntries(
+    fields.map((field) => {
+      const count: unknown = Reflect.get(value, field);
+      if (typeof count !== "number" || !Number.isInteger(count) || count < 0) {
+        throw new Error(`Inventory close aggregate ${field} is invalid`);
+      }
+      return [field, count];
+    }),
+  );
+}
+
+function parseParticipantBlockerRow(value: unknown): ParticipantBlockerRow {
+  const row = parseAggregateCountRow(value, ["active", "stale", "pending", "reportedOpenBoxes"]);
+  return {
+    active: aggregateCount(row, "active"),
+    stale: aggregateCount(row, "stale"),
+    pending: aggregateCount(row, "pending"),
+    reportedOpenBoxes: aggregateCount(row, "reportedOpenBoxes"),
+  };
+}
+
+function parseBoxBlockerRow(value: unknown): BoxBlockerRow {
+  const row = parseAggregateCountRow(value, ["open", "invalidated", "unresolvedPrint"]);
+  return {
+    open: aggregateCount(row, "open"),
+    invalidated: aggregateCount(row, "invalidated"),
+    unresolvedPrint: aggregateCount(row, "unresolvedPrint"),
+  };
+}
+
+function aggregateCount(row: Record<string, number>, field: string): number {
+  const value = row[field];
+  if (value === undefined) throw new Error(`Inventory close aggregate ${field} is unavailable`);
+  return value;
+}
+
 function parseLateEventRow(value: unknown): InventoryLateEventDto {
   if (typeof value !== "object" || value === null) {
     throw new Error("Inventory late-event row is unavailable");
@@ -574,6 +699,10 @@ function parseLateEventRow(value: unknown): InventoryLateEventDto {
   if (resolvedAt !== null && !(resolvedAt instanceof Date) && typeof resolvedAt !== "string") {
     throw new Error("Inventory late-event resolvedAt is invalid");
   }
+  const replayAvailable = read("replayAvailable");
+  if (typeof replayAvailable !== "boolean") {
+    throw new Error("Inventory late-event replayAvailable is invalid");
+  }
   return {
     id: text("id"),
     batchId: text("batchId"),
@@ -585,6 +714,7 @@ function parseLateEventRow(value: unknown): InventoryLateEventDto {
     reason: text("reason"),
     resolution,
     resolvedAt: resolvedAt === null ? null : toIso(resolvedAt),
+    replayAvailable,
   };
 }
 
@@ -617,4 +747,9 @@ function toIso(value: Date | string): string {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) throw new Error("Inventory lifecycle timestamp is invalid");
   return date.toISOString();
+}
+
+function requiredIso(value: Date | string | null, field: string): string {
+  if (value === null) throw new Error(`Inventory lifecycle ${field} is unavailable`);
+  return toIso(value);
 }

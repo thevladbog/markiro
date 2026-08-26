@@ -1,21 +1,31 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, Checkbox, Modal, Textarea } from "@markiro/ui";
+import { Alert, Button, Card, Checkbox, Modal, Spinner, Textarea } from "@markiro/ui";
 
-import { useCloseInventory, useCompleteInventory, useReopenInventory } from "./api.js";
+import { ApiRequestError } from "../../api/client.js";
+import { useCloseInventory, useInventoryClosePreview, useReopenInventory } from "./api.js";
 import { InventoryLateEvents } from "./InventoryLateEvents.js";
-import type { InventoryProgress } from "./schemas.js";
+import {
+  inventoryCloseBlockedErrorSchema,
+  type InventoryCloseBlocker,
+  type InventoryProgress,
+} from "./schemas.js";
 
-interface ClosePreviewItem {
-  key: string;
-  count: number;
-}
+const BLOCKER_KEYS: Record<InventoryCloseBlocker["code"], string> = {
+  ACTIVE_PARTICIPANT: "active",
+  STALE_PARTICIPANT: "stale",
+  PENDING_OUTBOX: "pending",
+  PARTICIPANT_OPEN_BOX: "participantBoxes",
+  OPEN_REPACK_BOX: "openBoxes",
+  INVALIDATED_REPACK_BOX: "invalidated",
+  UNRESOLVED_BOX_PRINT: "unresolvedPrint",
+  UNRESOLVED_DISCREPANCY: "discrepancies",
+};
 
 export function InventoryClosePanel({
   inventoryId,
   status,
-  progress,
 }: {
   inventoryId: string;
   status: "running" | "closed" | "completed";
@@ -24,14 +34,17 @@ export function InventoryClosePanel({
   const { t } = useTranslation();
   const close = useCloseInventory();
   const reopen = useReopenInventory();
-  const complete = useCompleteInventory();
   const [closeOpen, setCloseOpen] = useState(false);
+  const [reopenOpen, setReopenOpen] = useState(false);
   const [lateOpen, setLateOpen] = useState(false);
   const [emergencyReason, setEmergencyReason] = useState("");
   const [acknowledgeBlockers, setAcknowledgeBlockers] = useState(false);
-  const [documentsChecked, setDocumentsChecked] = useState(false);
-  const [success, setSuccess] = useState<"closed" | "reopened" | "completed" | null>(null);
-  const blockers = useMemo(() => closePreview(progress), [progress]);
+  const [authoritativeBlockers, setAuthoritativeBlockers] = useState<
+    InventoryCloseBlocker[] | null
+  >(null);
+  const [success, setSuccess] = useState<"closed" | "reopened" | null>(null);
+  const preview = useInventoryClosePreview(inventoryId, closeOpen && status === "running");
+  const blockers = authoritativeBlockers ?? preview.data?.blockers ?? [];
   const hasBlockers = blockers.length > 0;
   const emergencyReasonBytes = new TextEncoder().encode(emergencyReason.trim()).byteLength;
   const emergencyReasonValid = emergencyReasonBytes > 0 && emergencyReasonBytes <= 4096;
@@ -47,15 +60,30 @@ export function InventoryClosePanel({
           setSuccess("closed");
           setCloseOpen(false);
         },
+        onError: (error) => {
+          if (error instanceof ApiRequestError && error.code === "INVENTORY_CLOSE_BLOCKED") {
+            const parsed = inventoryCloseBlockedErrorSchema.safeParse(error.details);
+            if (parsed.success) setAuthoritativeBlockers(parsed.data.blockers);
+          }
+        },
       },
     );
+  };
+
+  const reopenInventory = () => {
+    reopen.mutate(inventoryId, {
+      onSuccess: () => {
+        setSuccess("reopened");
+        setReopenOpen(false);
+      },
+    });
   };
 
   return (
     <Card title={t("pages.inventory.close.title")} titleAs="h2">
       <div className="mk-inventory-close-panel">
         {success ? <Alert tone="ok">{t(`pages.inventory.close.success.${success}`)}</Alert> : null}
-        {close.isError || reopen.isError || complete.isError ? (
+        {close.isError || reopen.isError ? (
           <Alert tone="error">{t("pages.inventory.close.actionError")}</Alert>
         ) : null}
 
@@ -64,9 +92,20 @@ export function InventoryClosePanel({
             <p className="mk-inventory-section-description">
               {t("pages.inventory.close.runningHint")}
             </p>
-            <Button variant="secondary" onClick={() => setCloseOpen(true)}>
-              {t("pages.inventory.close.open")}
-            </Button>
+            <div className="mk-inventory-actions">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setAuthoritativeBlockers(null);
+                  setCloseOpen(true);
+                }}
+              >
+                {t("pages.inventory.close.open")}
+              </Button>
+              <Button variant="secondary" onClick={() => setLateOpen(true)}>
+                {t("pages.inventory.late.open")}
+              </Button>
+            </div>
           </>
         ) : null}
 
@@ -77,30 +116,11 @@ export function InventoryClosePanel({
               <Button variant="secondary" onClick={() => setLateOpen(true)}>
                 {t("pages.inventory.late.open")}
               </Button>
-              <Button
-                variant="warning-outline"
-                loading={reopen.isPending}
-                onClick={() =>
-                  reopen.mutate(inventoryId, { onSuccess: () => setSuccess("reopened") })
-                }
-              >
+              <Button variant="warning-outline" onClick={() => setReopenOpen(true)}>
                 {t("pages.inventory.close.reopen")}
               </Button>
             </div>
-            <Checkbox
-              checked={documentsChecked}
-              onCheckedChange={setDocumentsChecked}
-              label={t("pages.inventory.close.documentsChecked")}
-            />
-            <Button
-              disabled={!documentsChecked}
-              loading={complete.isPending}
-              onClick={() =>
-                complete.mutate(inventoryId, { onSuccess: () => setSuccess("completed") })
-              }
-            >
-              {t("pages.inventory.close.complete")}
-            </Button>
+            <Alert tone="info">{t("pages.inventory.close.completionUnavailable")}</Alert>
           </>
         ) : null}
 
@@ -125,7 +145,7 @@ export function InventoryClosePanel({
               {t("common.cancel")}
             </Button>
             <Button
-              disabled={hasBlockers}
+              disabled={preview.isPending || hasBlockers}
               loading={close.isPending}
               onClick={() => closeInventory(false)}
             >
@@ -144,13 +164,24 @@ export function InventoryClosePanel({
           </>
         }
       >
+        {preview.isPending && authoritativeBlockers === null ? (
+          <Spinner label={t("pages.inventory.close.previewLoading")} />
+        ) : null}
+        {preview.isError && authoritativeBlockers === null ? (
+          <Alert tone="error">{t("pages.inventory.close.previewError")}</Alert>
+        ) : null}
+        {!preview.isPending && !preview.isError && !hasBlockers ? (
+          <Alert tone="ok">{t("pages.inventory.close.ready")}</Alert>
+        ) : null}
         {hasBlockers ? (
           <div className="mk-inventory-close-panel">
             <Alert tone="warn">{t("pages.inventory.close.blocked")}</Alert>
             <ul className="mk-inventory-close-blockers">
               {blockers.map((item) => (
-                <li key={item.key}>
-                  {t(`pages.inventory.close.blocker.${item.key}`, { count: item.count })}
+                <li key={`${item.code}:${item.discrepancyCategory ?? "all"}`}>
+                  {t(`pages.inventory.close.blocker.${BLOCKER_KEYS[item.code]}`, {
+                    count: item.count,
+                  })}
                 </li>
               ))}
             </ul>
@@ -169,49 +200,37 @@ export function InventoryClosePanel({
               label={t("pages.inventory.close.acknowledgeBlockers")}
             />
           </div>
-        ) : (
-          <Alert tone="ok">{t("pages.inventory.close.ready")}</Alert>
-        )}
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={reopenOpen}
+        title={t("pages.inventory.close.reopenConfirmTitle")}
+        closeLabel={t("common.cancel")}
+        onClose={() => setReopenOpen(false)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setReopenOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="warning-outline" loading={reopen.isPending} onClick={reopenInventory}>
+              {t("pages.inventory.close.reopenConfirm")}
+            </Button>
+          </>
+        }
+      >
+        <Alert tone="warn">{t("pages.inventory.close.reopenExplanation")}</Alert>
+        {reopen.isError ? (
+          <Alert tone="error">{t("pages.inventory.close.actionError")}</Alert>
+        ) : null}
       </Modal>
 
       <InventoryLateEvents
         inventoryId={inventoryId}
-        inventoryStatus={status === "running" ? "closed" : status}
+        inventoryStatus={status}
         open={lateOpen}
         onClose={() => setLateOpen(false)}
       />
     </Card>
   );
-}
-
-function closePreview(progress: InventoryProgress): ClosePreviewItem[] {
-  const active = progress.participants.filter(
-    (participant) => participant.leftAt === null && participant.state === "active",
-  ).length;
-  const stale = progress.participants.filter(
-    (participant) => participant.leftAt === null && participant.state === "stale",
-  ).length;
-  const participantOpenBoxes = progress.participants.reduce(
-    (sum, participant) => sum + (participant.leftAt === null ? participant.openBoxCount : 0),
-    0,
-  );
-  const invalidated = progress.boxes.filter((box) => box.state === "invalidated").length;
-  const unresolvedPrint = progress.boxes.filter(
-    (box) => box.state === "closed" && box.printState !== "printed",
-  ).length;
-  const discrepancies =
-    progress.unknownCount +
-    progress.ineligibleCount +
-    progress.dateMismatchCount +
-    progress.voidedCount;
-  return [
-    { key: "active", count: active },
-    { key: "stale", count: stale },
-    { key: "pending", count: progress.pendingEventCount },
-    { key: "participantBoxes", count: participantOpenBoxes },
-    { key: "openBoxes", count: progress.openBoxCount },
-    { key: "invalidated", count: invalidated },
-    { key: "unresolvedPrint", count: unresolvedPrint },
-    { key: "discrepancies", count: discrepancies },
-  ].filter((item) => item.count > 0);
 }

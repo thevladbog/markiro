@@ -60,6 +60,7 @@ import {
   inventoryImportOpenApiSchema,
   inventoryImportStatusSchema,
   inventoryLateEventsDiscardOpenApiSchema,
+  inventoryLateEventReplayOpenApiSchema,
   inventoryOpenApiSchema,
   inventoryCorrectionOpenApiSchema,
   closeInventoryOpenApiSchema,
@@ -70,7 +71,9 @@ import {
   emergencyCloseInventorySchema,
   inventoryCloseBlockedOpenApiSchema,
   inventoryCloseOpenApiSchema,
+  inventoryClosePreviewOpenApiSchema,
   inventoryCompleteOpenApiSchema,
+  inventoryCompletionUnavailableOpenApiSchema,
   inventoryProgressOpenApiSchema,
   inventoryReopenOpenApiSchema,
   inventorySnapshotOpenApiSchema,
@@ -85,6 +88,7 @@ import {
   updateInventorySchema,
   reopenInventoryOpenApiSchema,
   reopenInventorySchema,
+  replayInventoryLateEventSchema,
   type CloseInventoryDto,
   type CompleteInventoryDto,
   type CreateInventoryDto,
@@ -95,10 +99,12 @@ import {
   type InventoryCorrectionDto,
   type EmergencyCloseInventoryDto,
   type InventoryCloseDto,
+  type InventoryClosePreviewDto,
   type InventoryCompleteDto,
   type InventoryDetailDto,
   type InventoryImportDto,
   type InventoryLateEventsDiscardDto,
+  type InventoryLateEventReplayDto,
   type InventoryProgressDto,
   type InventoryReopenDto,
   type ListInventoryDiscrepanciesQueryDto,
@@ -111,6 +117,7 @@ import {
   type InventorySnapshotDto,
   type UpdateInventoryDto,
   type ReopenInventoryDto,
+  type ReplayInventoryLateEventDto,
 } from "./dto";
 import { InventoriesService } from "./inventories.service";
 import { InventoryLifecycleService } from "./inventory-lifecycle.service";
@@ -118,6 +125,7 @@ import { InventoryReconciliationService } from "./inventory-reconciliation.servi
 import { InventoryCorrectionsService } from "./inventory-corrections.service";
 import { InventoryCloseService } from "./inventory-close.service";
 import {
+  stationInventoryEventBatchResponseOpenApiSchema,
   stationInventoryManifestOpenApiSchema,
   type StationInventoryManifest,
 } from "./station-inventory.dto";
@@ -151,6 +159,17 @@ export class InventoriesController {
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
   ): Promise<InventoryProgressDto> {
     return this.reconciliation.getProgress(req.tenantId!, id);
+  }
+
+  @Get(":id/close-preview")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiOkResponse({ schema: inventoryClosePreviewOpenApiSchema })
+  closePreview(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+  ): Promise<InventoryClosePreviewDto> {
+    return this.closeService.preview(req.tenantId!, id);
   }
 
   @Get(":id/discrepancies")
@@ -233,6 +252,24 @@ export class InventoriesController {
     return this.closeService.discardLateEvents(req.tenantId!, req.userId!, id, body);
   }
 
+  @Post(":id/late-events/:lateEventId/replay")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiParam({ name: "lateEventId", schema: { type: "string", format: "uuid" } })
+  @ApiBody({ schema: reopenInventoryOpenApiSchema })
+  @ApiCreatedResponse({
+    schema: inventoryLateEventReplayOpenApiSchema(stationInventoryEventBatchResponseOpenApiSchema),
+  })
+  replayLateEvent(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Param("lateEventId", new ZodValidationPipe(inventoryIdSchema)) lateEventId: string,
+    @Body(new ZodValidationPipe(replayInventoryLateEventSchema)) _body: ReplayInventoryLateEventDto,
+  ): Promise<InventoryLateEventReplayDto> {
+    return this.closeService.replayLateEvent(req.tenantId!, req.userId!, id, lateEventId);
+  }
+
   @Post(":id/close")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
@@ -283,6 +320,7 @@ export class InventoriesController {
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: completeInventoryOpenApiSchema })
   @ApiCreatedResponse({ schema: inventoryCompleteOpenApiSchema })
+  @ApiConflictResponse({ schema: inventoryCompletionUnavailableOpenApiSchema })
   complete(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,

@@ -286,8 +286,16 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
 
   it("returns exact active/stale, pending and participant-open blocker codes without closing", async () => {
     const fixture = await seedRunningInventory();
-    const activeDeviceId = await seedParticipant(fixture, { pending: 3, open: 1 });
-    const staleDeviceId = await seedParticipant(fixture, { stale: true });
+    await seedParticipant(fixture, { pending: 3, open: 1 });
+    await seedParticipant(fixture, { stale: true });
+    const preview = await fixture.agent
+      .get(`/inventories/${fixture.inventoryId}/close-preview`)
+      .expect(200);
+    expect(preview.body).toMatchObject({
+      inventoryId: fixture.inventoryId,
+      status: "running",
+      resultRevision: 7,
+    });
     const response = await fixture.agent
       .post(`/inventories/${fixture.inventoryId}/close`)
       .send({})
@@ -296,16 +304,13 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
       code: "INVENTORY_CLOSE_BLOCKED",
       resultRevision: 7,
     });
+    expect(response.body.blockers).toEqual(preview.body.blockers);
     expect(response.body.blockers).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: "ACTIVE_PARTICIPANT", deviceId: activeDeviceId }),
-        expect.objectContaining({ code: "STALE_PARTICIPANT", deviceId: staleDeviceId }),
-        expect.objectContaining({ code: "PENDING_OUTBOX", deviceId: activeDeviceId, count: 3 }),
-        expect.objectContaining({
-          code: "PARTICIPANT_OPEN_BOX",
-          deviceId: activeDeviceId,
-          count: 1,
-        }),
+        expect.objectContaining({ code: "ACTIVE_PARTICIPANT", count: 1, deviceId: null }),
+        expect.objectContaining({ code: "STALE_PARTICIPANT", count: 1, deviceId: null }),
+        expect.objectContaining({ code: "PENDING_OUTBOX", count: 3, deviceId: null }),
+        expect.objectContaining({ code: "PARTICIPANT_OPEN_BOX", count: 1, deviceId: null }),
       ]),
     );
     const [row] = await db
@@ -317,9 +322,10 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
 
   it("reports actual box, print and required discrepancy blockers but treats missing expected codes as output", async () => {
     const fixture = await seedRunningInventory();
-    const openBoxId = await seedBox(fixture, "open", "not_ready");
-    const invalidatedBoxId = await seedBox(fixture, "invalidated", "not_ready");
-    const printBoxId = await seedBox(fixture, "closed", "failed");
+    await seedBox(fixture, "open", "not_ready");
+    await seedBox(fixture, "open", "not_ready");
+    await seedBox(fixture, "invalidated", "not_ready");
+    await seedBox(fixture, "closed", "failed");
     await seedRequiredDiscrepancies(fixture);
     const response = await fixture.agent
       .post(`/inventories/${fixture.inventoryId}/close`)
@@ -327,9 +333,9 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
       .expect(409);
     expect(response.body.blockers).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: "OPEN_REPACK_BOX", boxId: openBoxId }),
-        expect.objectContaining({ code: "INVALIDATED_REPACK_BOX", boxId: invalidatedBoxId }),
-        expect.objectContaining({ code: "UNRESOLVED_BOX_PRINT", boxId: printBoxId }),
+        expect.objectContaining({ code: "OPEN_REPACK_BOX", count: 2, boxId: null }),
+        expect.objectContaining({ code: "INVALIDATED_REPACK_BOX", count: 1, boxId: null }),
+        expect.objectContaining({ code: "UNRESOLVED_BOX_PRINT", count: 1, boxId: null }),
         expect.objectContaining({
           code: "UNRESOLVED_DISCREPANCY",
           discrepancyCategory: "unknown",
@@ -361,7 +367,7 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
 
   it("requires emergency reason and explicit blocker acknowledgement, then stores the exact snapshot", async () => {
     const fixture = await seedRunningInventory();
-    const deviceId = await seedParticipant(fixture, { pending: 2 });
+    await seedParticipant(fixture, { pending: 2 });
     await fixture.agent
       .post(`/inventories/${fixture.inventoryId}/emergency-close`)
       .send({ reason: "Аварийная остановка", acknowledgeBlockers: false })
@@ -377,8 +383,8 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
     });
     expect(response.body.blockers).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: "ACTIVE_PARTICIPANT", deviceId }),
-        expect.objectContaining({ code: "PENDING_OUTBOX", deviceId, count: 2 }),
+        expect.objectContaining({ code: "ACTIVE_PARTICIPANT", count: 1, deviceId: null }),
+        expect.objectContaining({ code: "PENDING_OUTBOX", count: 2, deviceId: null }),
       ]),
     );
     const [inventory] = await db
@@ -406,9 +412,25 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
     });
   });
 
-  it("reopens a closed inventory, clears close facts and increments the result revision once", async () => {
+  it("reopens a closed inventory, audits every cleared close fact and increments revision once", async () => {
     const fixture = await seedRunningInventory();
-    await fixture.agent.post(`/inventories/${fixture.inventoryId}/close`).send({}).expect(201);
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/emergency-close`)
+      .send({ reason: "Проверка точного аудита", acknowledgeBlockers: true })
+      .expect(201);
+    const [closed] = await db
+      .select({
+        status: schema.inventories.status,
+        resultRevision: schema.inventories.resultRevision,
+        closedByUserId: schema.inventories.closedByUserId,
+        closedAt: schema.inventories.closedAt,
+        emergencyCloseReason: schema.inventories.emergencyCloseReason,
+        emergencyClosedByUserId: schema.inventories.emergencyClosedByUserId,
+        emergencyClosedAt: schema.inventories.emergencyClosedAt,
+      })
+      .from(schema.inventories)
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+    if (!closed?.closedAt || !closed.emergencyClosedAt) throw new Error("Expected close facts");
     const response = await fixture.agent
       .post(`/inventories/${fixture.inventoryId}/reopen`)
       .send({})
@@ -425,10 +447,42 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
         revision: schema.inventories.resultRevision,
         closedAt: schema.inventories.closedAt,
         closedBy: schema.inventories.closedByUserId,
+        updatedAt: schema.inventories.updatedAt,
       })
       .from(schema.inventories)
       .where(eq(schema.inventories.id, fixture.inventoryId));
-    expect(row).toEqual({ status: "running", revision: 8, closedAt: null, closedBy: null });
+    expect(row).toMatchObject({ status: "running", revision: 8, closedAt: null, closedBy: null });
+    const [audit] = await db
+      .select({ before: schema.tenantAuditEvents.before, after: schema.tenantAuditEvents.after })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, fixture.tenantId),
+          eq(schema.tenantAuditEvents.action, "inventory.reopened"),
+          eq(schema.tenantAuditEvents.targetId, fixture.inventoryId),
+        ),
+      );
+    expect(audit?.before).toEqual({
+      status: "closed",
+      resultRevision: 7,
+      closedByUserId: fixture.userId,
+      closedAt: closed.closedAt.toISOString(),
+      emergencyCloseReason: "Проверка точного аудита",
+      emergencyClosedByUserId: fixture.userId,
+      emergencyClosedAt: closed.emergencyClosedAt.toISOString(),
+    });
+    expect(audit?.after).toEqual({
+      status: "running",
+      resultRevision: 8,
+      closedByUserId: null,
+      closedAt: null,
+      emergencyCloseReason: null,
+      emergencyClosedByUserId: null,
+      emergencyClosedAt: null,
+      invalidatedArtifactCount: 0,
+      replayAuthorizedLateEventCount: 0,
+      reopenedAt: row?.updatedAt.toISOString(),
+    });
     await fixture.agent.post(`/inventories/${fixture.inventoryId}/close`).send({}).expect(201);
     const [secondClose] = await db
       .select({ revision: schema.inventories.resultRevision })
@@ -437,22 +491,31 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
     expect(secondClose?.revision).toBe(8);
   });
 
-  it("requires a separate downloaded-and-checked acknowledgement and makes completion immutable", async () => {
+  it("fails completion closed until Task 8 provides verified document artifacts", async () => {
     const fixture = await seedRunningInventory();
     await fixture.agent.post(`/inventories/${fixture.inventoryId}/close`).send({}).expect(201);
     await fixture.agent
       .post(`/inventories/${fixture.inventoryId}/complete`)
       .send({ documentsDownloadedAndChecked: false })
       .expect(400);
-    const response = await fixture.agent
+    await fixture.agent
       .post(`/inventories/${fixture.inventoryId}/complete`)
       .send({ documentsDownloadedAndChecked: true })
-      .expect(201);
-    expect(response.body).toMatchObject({
-      inventoryId: fixture.inventoryId,
-      status: "completed",
-      resultRevision: 7,
-    });
+      .expect(409, {
+        code: "INVENTORY_DOCUMENT_ARTIFACTS_UNAVAILABLE",
+        requiredTask: 8,
+      });
+    const completedAt = new Date("2026-08-26T13:00:00.000Z");
+    await db
+      .update(schema.inventories)
+      .set({
+        status: "completed",
+        completionAcknowledgedByUserId: fixture.userId,
+        completionAcknowledgedAt: completedAt,
+        completedByUserId: fixture.userId,
+        completedAt,
+      })
+      .where(eq(schema.inventories.id, fixture.inventoryId));
     await fixture.agent.post(`/inventories/${fixture.inventoryId}/reopen`).send({}).expect(409, {
       code: "INVENTORY_COMPLETED_IMMUTABLE",
     });

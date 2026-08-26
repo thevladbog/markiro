@@ -191,6 +191,30 @@ export class StationInventorySyncService {
     inventoryId: string,
     input: StationInventoryEventBatchDto,
   ): Promise<StationInventoryEventBatchResponseDto> {
+    return this.ingestBatch(tenantId, deviceId, inventoryId, input, null);
+  }
+
+  replayAuthorizedLateEvent(
+    tenantId: string,
+    actorUserId: string,
+    inventoryId: string,
+    deviceId: string,
+    lateEventId: string,
+    input: StationInventoryEventBatchDto,
+  ): Promise<StationInventoryEventBatchResponseDto> {
+    return this.ingestBatch(tenantId, deviceId, inventoryId, input, {
+      lateEventId,
+      actorUserId,
+    });
+  }
+
+  private ingestBatch(
+    tenantId: string,
+    deviceId: string,
+    inventoryId: string,
+    input: StationInventoryEventBatchDto,
+    replayRequest: { lateEventId: string; actorUserId: string } | null,
+  ): Promise<StationInventoryEventBatchResponseDto> {
     return this.db.transaction(async (tx) => {
       let replayAuthorization: { lateEventId: string; actorUserId: string } | null = null;
       const [inventory] = await tx
@@ -247,7 +271,11 @@ export class StationInventorySyncService {
         if (sameBatch.payloadDigest !== input.payloadDigest) {
           throw new ConflictException({ code: "INVENTORY_BATCH_DIGEST_CONFLICT" });
         }
-        if (sameBatch.outcome === "quarantined" && inventory.status === "running") {
+        if (
+          sameBatch.outcome === "quarantined" &&
+          inventory.status === "running" &&
+          replayRequest !== null
+        ) {
           const [lateEvent] = await tx
             .select({
               id: schema.inventoryLateEvents.id,
@@ -262,13 +290,14 @@ export class StationInventorySyncService {
                 eq(schema.inventoryLateEvents.batchId, input.batchId),
                 eq(schema.inventoryLateEvents.payloadDigest, input.payloadDigest),
                 eq(schema.inventoryLateEvents.resolution, "pending"),
+                eq(schema.inventoryLateEvents.id, replayRequest.lateEventId),
               ),
             )
             .for("update");
           if (lateEvent?.replayAuthorizedByUserId) {
             replayAuthorization = {
               lateEventId: lateEvent.id,
-              actorUserId: lateEvent.replayAuthorizedByUserId,
+              actorUserId: replayRequest.actorUserId,
             };
             await tx
               .delete(schema.inventoryScanBatches)
@@ -814,7 +843,7 @@ export class StationInventorySyncService {
         );
       await tx.insert(schema.tenantAuditEvents).values({
         organizationId: tenantId,
-        actorUserId: null,
+        actorUserId: replayRequest?.actorUserId ?? null,
         action: "inventory.station.events_synced",
         outcome: "success",
         targetType: "inventory",

@@ -38,7 +38,7 @@ function responseSchema(
   document: OpenAPIObject,
   path: string,
   method: "get" | "patch" | "post",
-  status: "200" | "201",
+  status: "200" | "201" | "409",
 ): JsonSchema {
   const response = operation(document, path, method).responses[status];
   if (!response || "$ref" in response) throw new Error(`Missing inline ${status} response`);
@@ -166,10 +166,12 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       "/inventories/{id}/reopen",
       "/inventories/{id}/complete",
       "/inventories/{id}/late-events/discard",
+      "/inventories/{id}/late-events/{lateEventId}/replay",
     ]) {
       operation(document, path, "post");
     }
     operation(document, "/inventories/{id}/late-events", "get");
+    operation(document, "/inventories/{id}/close-preview", "get");
 
     const discard = operation(document, "/inventories/{id}/late-events/discard", "post");
     const requestBody = discard.requestBody;
@@ -190,6 +192,7 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       type: "string",
       minLength: 1,
       maxLength: 4096,
+      "x-maxUtf8Bytes": 4096,
     });
     exactClosedObject(
       responseSchema(document, "/inventories/{id}/late-events/discard", "post", "201"),
@@ -209,6 +212,11 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       ["documentsDownloadedAndChecked"],
     );
     expect(completeSchema.properties?.documentsDownloadedAndChecked?.enum).toEqual([true]);
+    exactClosedObject(
+      responseSchema(document, "/inventories/{id}/complete", "post", "409"),
+      ["code", "requiredTask"],
+      ["code", "requiredTask"],
+    );
 
     const lateList = responseSchema(document, "/inventories/{id}/late-events", "get", "200");
     exactClosedObject(
@@ -217,6 +225,17 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       ["page", "pageSize", "total", "hasMore", "items"],
     );
     expect(JSON.stringify(lateList)).not.toMatch(/payloadDigest|canonicalRaw|payload/i);
+
+    exactClosedObject(
+      responseSchema(document, "/inventories/{id}/close-preview", "get", "200"),
+      ["inventoryId", "status", "resultRevision", "blockers"],
+      ["inventoryId", "status", "resultRevision", "blockers"],
+    );
+    exactClosedObject(
+      responseSchema(document, "/inventories/{id}/late-events/{lateEventId}/replay", "post", "201"),
+      ["lateEventId", "resolution", "result"],
+      ["lateEventId", "resolution", "result"],
+    );
   });
 
   it("documents strict six-slot fixation input and the immutable snapshot summary", () => {
