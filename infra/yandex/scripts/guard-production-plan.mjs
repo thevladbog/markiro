@@ -235,6 +235,18 @@ const releaseBucketReference = [
   "yandex_storage_bucket.releases.bucket",
   "yandex_storage_bucket.releases",
 ];
+// Terraform 1.15.8 preserves one full traversal pair for every reference
+// occurrence in the jsonencode expression: five bucket uses and two publisher uses.
+const releasePolicyReference = [
+  ...releaseBucketReference,
+  ...releaseBucketReference,
+  ...releaseBucketReference,
+  ...releaseBucketReference,
+  ...releaseBucketReference,
+  ...publisherReference,
+  ...publisherReference,
+  "var.terraform_service_account_id",
+];
 const originGroupReference = [
   "yandex_cdn_origin_group.releases.id",
   "yandex_cdn_origin_group.releases",
@@ -761,11 +773,7 @@ function validateReleasePolicy(plan, resource, bucketName, expectedTerraformId, 
       if (!onlyCreate(resource) || !computed(resource, "policy")) rejected();
     });
     releasePolicyScoped("computed-references", () => {
-      proveExactReferences(plan, resource, "policy", [
-        ...releaseBucketReference,
-        ...publisherReference,
-        "var.terraform_service_account_id",
-      ]);
+      proveExactReferences(plan, resource, "policy", releasePolicyReference);
     });
     return;
   }
