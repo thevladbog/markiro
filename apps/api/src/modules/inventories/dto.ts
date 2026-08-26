@@ -182,6 +182,71 @@ export interface InventorySnapshotDto {
   counts: InventorySnapshotCountsDto;
 }
 
+export const INVENTORY_DISCREPANCY_CATEGORIES = [
+  "missing",
+  "protected",
+  "ineligible",
+  "unknown",
+  "date_mismatch",
+  "voided",
+  "invalidated_box",
+] as const;
+export type InventoryDiscrepancyCategory = (typeof INVENTORY_DISCREPANCY_CATEGORIES)[number];
+
+export const listInventoryDiscrepanciesQuerySchema = z.strictObject({
+  category: z.enum(INVENTORY_DISCREPANCY_CATEGORIES).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+});
+export type ListInventoryDiscrepanciesQueryDto = z.infer<
+  typeof listInventoryDiscrepanciesQuerySchema
+>;
+
+export interface InventoryProgressDto {
+  inventoryId: string;
+  snapshotId: string;
+  status: InventoryLifecycleStatus;
+  resultRevision: number;
+  expectedCount: number;
+  verifiedCount: number;
+  missingCount: number;
+  protectedCount: number;
+  protectedFoundCount: number;
+  ineligibleCount: number;
+  unknownCount: number;
+  dateMismatchCount: number;
+  voidedCount: number;
+  oldBoxCount: number;
+  newBoxCount: number;
+  invalidatedBoxCount: number;
+}
+
+export interface InventoryDiscrepancyWinnerDto {
+  terminalId: string;
+  terminalName: string;
+  scannedAt: string;
+}
+
+export interface InventoryDiscrepancyDto {
+  category: InventoryDiscrepancyCategory;
+  displayIdentity: string;
+  codeHash: string | null;
+  sscc: string | null;
+  found: boolean;
+  sourceStatus: InventoryChzStatus | null;
+  sourceProductionDate: string | null;
+  observedProductionDate: string | null;
+  winner: InventoryDiscrepancyWinnerDto | null;
+}
+
+export interface ListInventoryDiscrepanciesResponseDto {
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+  items: InventoryDiscrepancyDto[];
+}
+
 const uuidSchema = { type: "string", format: "uuid" } as const;
 const dateSchema = { type: "string", format: "date" } as const;
 const dateTimeSchema = { type: "string", format: "date-time" } as const;
@@ -392,5 +457,94 @@ export const inventorySnapshotOpenApiSchema: SchemaObject = {
       required: Object.keys(inventorySnapshotCountProperties),
       properties: inventorySnapshotCountProperties,
     },
+  },
+};
+
+const inventoryCountProperties = {
+  expectedCount: { type: "integer", minimum: 0 },
+  verifiedCount: { type: "integer", minimum: 0 },
+  missingCount: { type: "integer", minimum: 0 },
+  protectedCount: { type: "integer", minimum: 0 },
+  protectedFoundCount: { type: "integer", minimum: 0 },
+  ineligibleCount: { type: "integer", minimum: 0 },
+  unknownCount: { type: "integer", minimum: 0 },
+  dateMismatchCount: { type: "integer", minimum: 0 },
+  voidedCount: { type: "integer", minimum: 0 },
+  oldBoxCount: { type: "integer", minimum: 0 },
+  newBoxCount: { type: "integer", minimum: 0 },
+  invalidatedBoxCount: { type: "integer", minimum: 0 },
+} satisfies Record<
+  Exclude<keyof InventoryProgressDto, "inventoryId" | "snapshotId" | "status" | "resultRevision">,
+  SchemaObject
+>;
+
+export const inventoryProgressOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "inventoryId",
+    "snapshotId",
+    "status",
+    "resultRevision",
+    ...Object.keys(inventoryCountProperties),
+  ],
+  properties: {
+    inventoryId: uuidSchema,
+    snapshotId: uuidSchema,
+    status: { type: "string", enum: [...INVENTORY_LIFECYCLE_STATUSES] },
+    resultRevision: { type: "integer", minimum: 0 },
+    ...inventoryCountProperties,
+  },
+};
+
+const inventoryDiscrepancyWinnerOpenApiSchema: SchemaObject = {
+  type: "object",
+  nullable: true,
+  additionalProperties: false,
+  required: ["terminalId", "terminalName", "scannedAt"],
+  properties: {
+    terminalId: uuidSchema,
+    terminalName: { type: "string" },
+    scannedAt: dateTimeSchema,
+  },
+};
+
+const inventoryDiscrepancyOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "category",
+    "displayIdentity",
+    "codeHash",
+    "sscc",
+    "found",
+    "sourceStatus",
+    "sourceProductionDate",
+    "observedProductionDate",
+    "winner",
+  ],
+  properties: {
+    category: { type: "string", enum: [...INVENTORY_DISCREPANCY_CATEGORIES] },
+    displayIdentity: { type: "string" },
+    codeHash: { type: "string", pattern: "^[0-9a-f]{64}$", nullable: true },
+    sscc: { type: "string", pattern: "^[0-9]{18}$", nullable: true },
+    found: { type: "boolean" },
+    sourceStatus: { type: "string", enum: [...INVENTORY_CHZ_STATUSES], nullable: true },
+    sourceProductionDate: { ...dateSchema, nullable: true },
+    observedProductionDate: { ...dateSchema, nullable: true },
+    winner: inventoryDiscrepancyWinnerOpenApiSchema,
+  },
+};
+
+export const listInventoryDiscrepanciesOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["page", "pageSize", "total", "hasMore", "items"],
+  properties: {
+    page: { type: "integer", minimum: 1 },
+    pageSize: { type: "integer", minimum: 1, maximum: 100 },
+    total: { type: "integer", minimum: 0 },
+    hasMore: { type: "boolean" },
+    items: { type: "array", items: inventoryDiscrepancyOpenApiSchema },
   },
 };

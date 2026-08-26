@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UnprocessableEntityException,
   UploadedFile,
@@ -19,6 +20,7 @@ import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiParam,
+  ApiQuery,
   ApiTags,
   ApiUnprocessableEntityResponse,
 } from "@nestjs/swagger";
@@ -45,12 +47,16 @@ import {
   createInventorySchema,
   fixInventorySnapshotOpenApiSchema,
   fixInventorySnapshotSchema,
+  INVENTORY_DISCREPANCY_CATEGORIES,
   inventoryDetailOpenApiSchema,
   inventoryIdSchema,
   inventoryImportOpenApiSchema,
   inventoryImportStatusSchema,
   inventoryOpenApiSchema,
+  inventoryProgressOpenApiSchema,
   inventorySnapshotOpenApiSchema,
+  listInventoryDiscrepanciesOpenApiSchema,
+  listInventoryDiscrepanciesQuerySchema,
   listInventoriesOpenApiSchema,
   updateInventoryOpenApiSchema,
   updateInventorySchema,
@@ -59,12 +65,16 @@ import {
   type InventoryDto,
   type InventoryDetailDto,
   type InventoryImportDto,
+  type InventoryProgressDto,
+  type ListInventoryDiscrepanciesQueryDto,
+  type ListInventoryDiscrepanciesResponseDto,
   type ListInventoriesResponseDto,
   type InventorySnapshotDto,
   type UpdateInventoryDto,
 } from "./dto";
 import { InventoriesService } from "./inventories.service";
 import { InventoryLifecycleService } from "./inventory-lifecycle.service";
+import { InventoryReconciliationService } from "./inventory-reconciliation.service";
 import {
   stationInventoryManifestOpenApiSchema,
   type StationInventoryManifest,
@@ -78,6 +88,7 @@ export class InventoriesController {
   constructor(
     private readonly inventories: InventoriesService,
     private readonly lifecycle: InventoryLifecycleService,
+    private readonly reconciliation: InventoryReconciliationService,
   ) {}
 
   @Get()
@@ -85,6 +96,37 @@ export class InventoriesController {
   @ApiOkResponse({ schema: listInventoriesOpenApiSchema })
   list(@Req() req: RequestWithTenant): Promise<ListInventoriesResponseDto> {
     return this.inventories.list(req.tenantId!);
+  }
+
+  @Get(":id/progress")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiOkResponse({ schema: inventoryProgressOpenApiSchema })
+  progress(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+  ): Promise<InventoryProgressDto> {
+    return this.reconciliation.getProgress(req.tenantId!, id);
+  }
+
+  @Get(":id/discrepancies")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiQuery({ name: "category", required: false, enum: INVENTORY_DISCREPANCY_CATEGORIES })
+  @ApiQuery({ name: "page", required: false, schema: { type: "integer", minimum: 1, default: 1 } })
+  @ApiQuery({
+    name: "pageSize",
+    required: false,
+    schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+  })
+  @ApiOkResponse({ schema: listInventoryDiscrepanciesOpenApiSchema })
+  discrepancies(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Query(new ZodValidationPipe(listInventoryDiscrepanciesQuerySchema))
+    query: ListInventoryDiscrepanciesQueryDto,
+  ): Promise<ListInventoryDiscrepanciesResponseDto> {
+    return this.reconciliation.listDiscrepancies(req.tenantId!, id, query);
   }
 
   @Post()
