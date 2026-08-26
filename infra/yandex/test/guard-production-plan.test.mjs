@@ -903,6 +903,69 @@ test("guard CLI distinguishes release CDN failure classes without leaking plan v
   }
 });
 
+test("guard CLI reports every independent release CDN failure without leaking plan values", async () => {
+  const invalid = await readFixture("safe");
+  invalid.do_not_print_this_plan_value = "do-not-print-this-plan-value";
+  releaseCdnAfter(invalid).cname = "do-not-print-this-plan-value";
+  releaseCdnAfter(invalid).active = false;
+  releaseCdnAfter(invalid).origin_protocol = "do-not-print-this-plan-value";
+  releaseCdnAfter(invalid).origin_group_id = "do-not-print-this-plan-value";
+  releaseCdnOptions(invalid).allowed_http_methods.push("do-not-print-this-plan-value");
+  releaseCdnOptions(invalid).redirect_http_to_https = false;
+  releaseCdnOptions(invalid).redirect_https_to_http = true;
+  releaseCdnOptions(invalid).edge_cache_settings = 1;
+  releaseCdnOptions(invalid).browser_cache_settings = "do-not-print-this-plan-value";
+  releaseCdnOptions(invalid).static_response_headers["x-content-type-options"] =
+    "do-not-print-this-plan-value";
+  releaseCdnOptions(invalid).static_response_headers["content-security-policy"] =
+    "do-not-print-this-plan-value";
+  releaseCdnCertificate(invalid).type = "do-not-print-this-plan-value";
+  releaseCdnCertificate(invalid).certificate_manager_id = {
+    do_not_print_this_plan_value: true,
+  };
+  releaseCdnAfter(invalid).provider_cname = { do_not_print_this_plan_value: true };
+
+  await withPlan(invalid, (planPath) => {
+    let stdout = "";
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [script, planPath], {
+        cwd: root,
+        env: { ...process.env, GITHUB_ACTIONS: "true" },
+        stdio: "pipe",
+      });
+      assert.fail("guard CLI unexpectedly accepted invalid release CDN");
+    } catch (error) {
+      stdout = String(error.stdout);
+      stderr = String(error.stderr);
+    }
+
+    const scopes = [
+      "release-cdn-cname",
+      "release-cdn-active",
+      "release-cdn-origin-protocol",
+      "release-cdn-origin-group-id",
+      "release-cdn-methods",
+      "release-cdn-redirect-http-to-https",
+      "release-cdn-redirect-https-to-http",
+      "release-cdn-edge-cache",
+      "release-cdn-browser-cache",
+      "release-cdn-content-type-header",
+      "release-cdn-content-security-policy-header",
+      "release-cdn-certificate-type",
+      "release-cdn-certificate-id",
+      "release-cdn-provider-cname",
+    ];
+    assert.equal(
+      stdout,
+      scopes.map((scope) => `::error title=Production plan rejected::${scope}\n`).join(""),
+    );
+    assert.equal(stderr, `production plan rejected (${scopes.join(",")})\n`);
+    assert.doesNotMatch(stdout, /do-not-print-this-plan-value/);
+    assert.doesNotMatch(stderr, /do-not-print-this-plan-value/);
+  });
+});
+
 test("production plan guard distinguishes release-policy failure classes", async () => {
   const safe = await readFixture("safe");
   const cases = [

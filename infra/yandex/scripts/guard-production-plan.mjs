@@ -260,8 +260,24 @@ const cdnReference = [
   "yandex_cdn_resource.releases",
 ];
 
+class ProductionPlanRejection extends Error {
+  constructor(scopes = []) {
+    const uniqueScopes = [...new Set(scopes)];
+    super(
+      uniqueScopes.length > 0
+        ? `production plan rejected (${uniqueScopes.join(",")})`
+        : "production plan rejected",
+    );
+    this.scopes = uniqueScopes;
+  }
+}
+
 function rejected(scope) {
-  throw new Error(scope ? `production plan rejected (${scope})` : "production plan rejected");
+  throw new ProductionPlanRejection(scope ? [scope] : []);
+}
+
+function rejectedScopes(scopes) {
+  throw new ProductionPlanRejection(scopes);
 }
 
 function scoped(scope, callback) {
@@ -1047,84 +1063,116 @@ function validateCertificateRecord(resource) {
   if (data !== null && (!Array.isArray(data) || data.length !== 1)) rejected();
 }
 
-function releaseCdnScoped(scope, callback) {
-  return scoped(`release-cdn-${scope}`, callback);
-}
-
 function validateCdn(plan, resource, expectedOriginGroupId) {
-  const value = releaseCdnScoped("resource", () => after(resource));
-  const originGroupId = releaseCdnScoped("origin-group-reference", () =>
+  const failures = [];
+  const capture = (scope, callback) => {
+    try {
+      return { ok: true, value: callback() };
+    } catch {
+      failures.push(`release-cdn-${scope}`);
+      return { ok: false };
+    }
+  };
+  const check = (scope, callback) => {
+    capture(scope, callback);
+  };
+
+  const valueResult = capture("resource", () => after(resource));
+  if (!valueResult.ok) rejectedScopes(failures);
+  const value = valueResult.value;
+  const originGroupIdResult = capture("origin-group-reference", () =>
     knownOrReferenced(plan, resource, "origin_group_id", originGroupReference),
   );
-  releaseCdnScoped("cname", () => {
+  check("cname", () => {
     if (value.cname !== expectedReleaseDomain) rejected();
   });
-  releaseCdnScoped("active", () => {
+  check("active", () => {
     if (value.active !== true) rejected();
   });
-  releaseCdnScoped("origin-protocol", () => {
+  check("origin-protocol", () => {
     if (value.origin_protocol !== "https") rejected();
   });
-  releaseCdnScoped("origin-group-id", () => {
-    if (originGroupId !== null && originGroupId !== expectedOriginGroupId) rejected();
-  });
-  const options = releaseCdnScoped("options-count", () => {
+  if (originGroupIdResult.ok) {
+    check("origin-group-id", () => {
+      if (originGroupIdResult.value !== null && originGroupIdResult.value !== expectedOriginGroupId)
+        rejected();
+    });
+  }
+  const optionsResult = capture("options-count", () => {
     if (!Array.isArray(value.options) || value.options.length !== 1) rejected();
     return value.options[0];
   });
-  releaseCdnScoped("options-shape", () => {
-    if (!object(options)) rejected();
-  });
-  releaseCdnScoped("methods", () => {
-    exactStrings(options.allowed_http_methods, ["GET", "HEAD"]);
-  });
-  releaseCdnScoped("redirect-http-to-https", () => {
-    if (options.redirect_http_to_https !== true) rejected();
-  });
-  releaseCdnScoped("redirect-https-to-http", () => {
-    if (options.redirect_https_to_http !== false) rejected();
-  });
-  releaseCdnScoped("edge-cache", () => {
-    if (options.edge_cache_settings !== 0) rejected();
-  });
-  releaseCdnScoped("browser-cache", () => {
-    if (options.browser_cache_settings !== null && options.browser_cache_settings !== undefined)
-      rejected();
-  });
-  const headers = releaseCdnScoped("headers-shape", () => {
-    if (!object(options.static_response_headers)) rejected();
-    return options.static_response_headers;
-  });
-  releaseCdnScoped("content-type-header", () => {
-    if (headers["x-content-type-options"] !== "nosniff") rejected();
-  });
-  releaseCdnScoped("content-security-policy-header", () => {
-    if (
-      headers["content-security-policy"] !== "default-src 'none'; frame-ancestors 'none'; sandbox"
-    )
-      rejected();
-  });
-  const certificate = releaseCdnScoped("certificate-count", () => {
+  if (optionsResult.ok) {
+    const optionsShape = capture("options-shape", () => {
+      if (!object(optionsResult.value)) rejected();
+      return optionsResult.value;
+    });
+    if (optionsShape.ok) {
+      const options = optionsShape.value;
+      check("methods", () => {
+        exactStrings(options.allowed_http_methods, ["GET", "HEAD"]);
+      });
+      check("redirect-http-to-https", () => {
+        if (options.redirect_http_to_https !== true) rejected();
+      });
+      check("redirect-https-to-http", () => {
+        if (options.redirect_https_to_http !== false) rejected();
+      });
+      check("edge-cache", () => {
+        if (options.edge_cache_settings !== 0) rejected();
+      });
+      check("browser-cache", () => {
+        if (options.browser_cache_settings !== null && options.browser_cache_settings !== undefined)
+          rejected();
+      });
+      const headersResult = capture("headers-shape", () => {
+        if (!object(options.static_response_headers)) rejected();
+        return options.static_response_headers;
+      });
+      if (headersResult.ok) {
+        const headers = headersResult.value;
+        check("content-type-header", () => {
+          if (headers["x-content-type-options"] !== "nosniff") rejected();
+        });
+        check("content-security-policy-header", () => {
+          if (
+            headers["content-security-policy"] !==
+            "default-src 'none'; frame-ancestors 'none'; sandbox"
+          )
+            rejected();
+        });
+      }
+    }
+  }
+  const certificateResult = capture("certificate-count", () => {
     if (!Array.isArray(value.ssl_certificate) || value.ssl_certificate.length !== 1) rejected();
     return value.ssl_certificate[0];
   });
-  releaseCdnScoped("certificate-shape", () => {
-    if (!object(certificate)) rejected();
-  });
-  releaseCdnScoped("certificate-type", () => {
-    if (certificate.type !== "certificate_manager") rejected();
-  });
-  releaseCdnScoped("certificate-id", () => {
-    if (
-      certificate.certificate_manager_id !== null &&
-      certificate.certificate_manager_id !== undefined
-    )
-      nonblank(certificate.certificate_manager_id);
-  });
-  return releaseCdnScoped("provider-cname", () => {
+  if (certificateResult.ok) {
+    const certificateShape = capture("certificate-shape", () => {
+      if (!object(certificateResult.value)) rejected();
+      return certificateResult.value;
+    });
+    if (certificateShape.ok) {
+      const certificate = certificateShape.value;
+      check("certificate-type", () => {
+        if (certificate.type !== "certificate_manager") rejected();
+      });
+      check("certificate-id", () => {
+        if (
+          certificate.certificate_manager_id !== null &&
+          certificate.certificate_manager_id !== undefined
+        )
+          nonblank(certificate.certificate_manager_id);
+      });
+    }
+  }
+  const providerCnameResult = capture("provider-cname", () => {
     const providerCname = knownOrComputed(resource, "provider_cname");
     return providerCname === null ? null : nonblank(providerCname).replace(/\.+$/, "");
   });
+  if (failures.length > 0) rejectedScopes(failures);
+  return providerCnameResult.value;
 }
 
 function validatePublicDns(plan, resource, expectedProviderCname) {
@@ -1368,12 +1416,14 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   } catch (error) {
     const safeRejection =
       error instanceof Error
-        ? /^production plan rejected(?: \(([a-z0-9-]+)\))?$/.exec(error.message)
+        ? /^production plan rejected(?: \(([a-z0-9-]+(?:,[a-z0-9-]+)*)\))?$/.exec(error.message)
         : null;
     const message = safeRejection ? error.message : "production plan rejected";
-    const scope = safeRejection?.[1];
-    if (process.env.GITHUB_ACTIONS === "true" && scope) {
-      process.stdout.write(`::error title=Production plan rejected::${scope}\n`);
+    const scopes = safeRejection?.[1]?.split(",") ?? [];
+    if (process.env.GITHUB_ACTIONS === "true") {
+      for (const scope of scopes) {
+        process.stdout.write(`::error title=Production plan rejected::${scope}\n`);
+      }
     }
     process.stderr.write(`${message}\n`);
     process.exitCode = 1;
