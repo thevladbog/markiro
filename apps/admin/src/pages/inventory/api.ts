@@ -4,23 +4,33 @@ import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client.js";
 import {
   createInventoryInputSchema,
+  createInventoryCorrectionInputSchema,
+  inventoryCorrectionSchema,
   inventoryDetailSchema,
   inventoryImportSchema,
   inventorySchema,
+  inventoryProgressSchema,
   inventorySnapshotInputsSchema,
   inventorySnapshotSchema,
   listInventoriesSchema,
   stationInventoryManifestSchema,
   type CreateInventoryInput,
+  type CreateInventoryCorrectionInput,
   type Inventory,
+  type InventoryCorrection,
   type InventoryChzStatus,
   type InventoryDetail,
   type InventoryImport,
+  type InventoryProgress,
   type InventorySnapshot,
   type InventorySnapshotInputs,
 } from "./schemas.js";
 
 export const INVENTORIES_QUERY_KEY = ["inventories"] as const;
+
+export function inventoryProgressQueryKey(id: string) {
+  return [...INVENTORIES_QUERY_KEY, id, "progress"] as const;
+}
 
 async function listInventories(): Promise<Inventory[]> {
   const value = await apiFetch<unknown>("/inventories");
@@ -30,6 +40,23 @@ async function listInventories(): Promise<Inventory[]> {
 async function getInventory(id: string): Promise<InventoryDetail> {
   const value = await apiFetch<unknown>(`/inventories/${id}`);
   return inventoryDetailSchema.parse(value);
+}
+
+async function getInventoryProgress(id: string): Promise<InventoryProgress> {
+  const value = await apiFetch<unknown>(`/inventories/${id}/progress`);
+  return inventoryProgressSchema.parse(value);
+}
+
+async function createInventoryCorrection(input: {
+  inventoryId: string;
+  correction: CreateInventoryCorrectionInput;
+}): Promise<InventoryCorrection> {
+  const correction = createInventoryCorrectionInputSchema.parse(input.correction);
+  const value = await apiFetch<unknown>(`/inventories/${input.inventoryId}/corrections`, {
+    method: "POST",
+    body: JSON.stringify(correction),
+  });
+  return inventoryCorrectionSchema.parse(value);
 }
 
 async function createInventory(input: CreateInventoryInput): Promise<Inventory> {
@@ -88,6 +115,37 @@ export function useInventories(): UseQueryResult<Inventory[]> {
 
 export function useInventory(id: string): UseQueryResult<InventoryDetail> {
   return useQuery({ queryKey: [...INVENTORIES_QUERY_KEY, id], queryFn: () => getInventory(id) });
+}
+
+export function useInventoryProgress(
+  id: string,
+  enabled = true,
+): UseQueryResult<InventoryProgress> {
+  return useQuery({
+    queryKey: inventoryProgressQueryKey(id),
+    queryFn: () => getInventoryProgress(id),
+    enabled: enabled && id.length > 0,
+    refetchInterval: (query) => (query.state.data?.status === "running" ? 5_000 : false),
+  });
+}
+
+export function useCreateInventoryCorrection(): UseMutationResult<
+  InventoryCorrection,
+  Error,
+  { inventoryId: string; correction: CreateInventoryCorrectionInput }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createInventoryCorrection,
+    onSuccess: (_result, input) => {
+      void queryClient.invalidateQueries({
+        queryKey: [...INVENTORIES_QUERY_KEY, input.inventoryId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: inventoryProgressQueryKey(input.inventoryId),
+      });
+    },
+  });
 }
 
 export function useCreateInventory(): UseMutationResult<Inventory, Error, CreateInventoryInput> {

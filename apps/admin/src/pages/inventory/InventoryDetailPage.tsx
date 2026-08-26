@@ -28,6 +28,7 @@ import {
   useUploadInventoryImport,
 } from "./api.js";
 import { InventoryParametersForm } from "./InventoryParametersForm.js";
+import { InventoryLivePage } from "./InventoryLivePage.js";
 import { PreparationSteps } from "./PreparationSteps.js";
 import {
   INVENTORY_CHZ_STATUSES,
@@ -113,6 +114,13 @@ export function InventoryDetailPage() {
   }
 
   const inventory = query.data;
+  if (
+    inventory.status === "running" ||
+    inventory.status === "closed" ||
+    inventory.status === "completed"
+  ) {
+    return <InventoryLivePage inventory={inventory} />;
+  }
   const snapshot = fixedSnapshot ?? inventory.activeSnapshot;
   const isMutable = inventory.status === "draft" || inventory.status === "preparing";
   const canEditParameters = canWrite && isMutable;
@@ -122,10 +130,7 @@ export function InventoryDetailPage() {
       <PageHeader
         title={inventory.number}
         actions={
-          <StatusChip
-            status={inventory.status === "running" ? "ok" : "neutral"}
-            label={t(`pages.inventory.status.${inventory.status}`)}
-          />
+          <StatusChip status="neutral" label={t(`pages.inventory.status.${inventory.status}`)} />
         }
       />
       <p className="mk-inventory-page__description">

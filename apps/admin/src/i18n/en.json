@@ -394,6 +394,72 @@
         "warehouseStopped": "Warehouse movements are stopped",
         "blocked": "Confirm that warehouse movements are stopped before launch.",
         "start": "Start inventory"
+      },
+      "live": {
+        "title": "Inventory {{number}}",
+        "loading": "Loading inventory progress",
+        "loadError": "Could not load inventory progress",
+        "corrections": "Corrections",
+        "summary": "Current results",
+        "expected": "Expected",
+        "verified": "Verified",
+        "missing": "Missing",
+        "discrepancies": "Discrepancies",
+        "pending_one": "{{count}} event on stations has not synced yet",
+        "pending_few": "{{count}} events on stations have not synced yet",
+        "pending_many": "{{count}} events on stations have not synced yet",
+        "pending_other": "{{count}} events on stations have not synced yet",
+        "participants": "Participants",
+        "boxes": "Boxes",
+        "recentEvents": "Recent events",
+        "none": "No data yet",
+        "localPending_one": "{{count}} local event",
+        "localPending_few": "{{count}} local events",
+        "localPending_many": "{{count}} local events",
+        "localPending_other": "{{count}} local events",
+        "items_one": "{{count}} code",
+        "items_few": "{{count}} codes",
+        "items_many": "{{count}} codes",
+        "items_other": "{{count}} codes",
+        "participantState": {
+          "active": "Active",
+          "stale": "Offline",
+          "left": "Left"
+        },
+        "boxState": {
+          "open": "Open",
+          "closed": "Closed",
+          "invalidated": "Invalidated"
+        },
+        "classification": {
+          "expected": "Expected",
+          "protected": "Protected",
+          "ineligible": "Ineligible",
+          "unknown": "Unknown",
+          "voided": "Voided"
+        }
+      },
+      "corrections": {
+        "title": "Corrections · {{number}}",
+        "runningOnly": "Corrections are available only while the inventory is running",
+        "auditHint": "Every action requires a reason and is retained as immutable audit evidence.",
+        "back": "Back to inventory progress",
+        "events": "Events and codes",
+        "boxes": "Boxes",
+        "select": "Select {{identity}}",
+        "formTitle": "Correction · {{identity}}",
+        "reason": "Correction reason",
+        "observedDate": "Observed production date",
+        "saved": "Correction saved to the audit trail",
+        "saveError": "Could not save the correction. Refresh the data and try again.",
+        "action": {
+          "void_scan": "Void scan",
+          "restore_scan": "Restore scan",
+          "change_date": "Change date",
+          "remove_item": "Remove from box",
+          "invalidate_box": "Invalidate box",
+          "reprint": "Queue reprint request"
+        }
       }
     },
     "team": {

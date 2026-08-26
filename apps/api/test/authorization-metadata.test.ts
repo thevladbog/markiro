@@ -149,6 +149,9 @@ const OPERATIONAL_CONTROLLERS: readonly [
     InventoriesController,
     {
       list: readPolicy,
+      progress: readPolicy,
+      discrepancies: readPolicy,
+      correct: writePolicy,
       create: writePolicy,
       get: readPolicy,
       update: writePolicy,

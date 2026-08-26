@@ -49,6 +49,8 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
   let operatorId: string;
   let terminalAId: string;
   let terminalBId: string;
+  let terminalCId: string;
+  let unknownEventId: string;
 
   const verifiedHash = "1".repeat(64);
   const missingHash = "2".repeat(64);
@@ -96,6 +98,7 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
     operatorId = randomUUID();
     terminalAId = randomUUID();
     terminalBId = randomUUID();
+    terminalCId = randomUUID();
     const productId = randomUUID();
 
     await db.insert(schema.products).values({
@@ -113,6 +116,7 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
     await db.insert(schema.stationDevices).values([
       { id: terminalAId, tenantId, name: "Terminal A", lineId },
       { id: terminalBId, tenantId, name: "Terminal B", lineId },
+      { id: terminalCId, tenantId, name: "Terminal C", lineId },
     ]);
     await db.insert(schema.inventories).values({
       id: inventoryId,
@@ -192,6 +196,7 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       voided: randomUUID(),
       oldBox: randomUUID(),
     };
+    unknownEventId = eventIds.unknown;
     await db.insert(schema.inventoryScanEvents).values([
       event(eventIds.verified, terminalAId, "reconciliation-a", 1n, verifiedHash),
       event(eventIds.duplicate, terminalBId, "reconciliation-b", 1n, verifiedHash, {
@@ -238,6 +243,45 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       printState: "not_ready",
       invalidatedAt: new Date("2026-08-20T11:00:00.000Z"),
     });
+    await db.insert(schema.inventoryDeviceParticipants).values([
+      {
+        tenantId,
+        inventoryId,
+        deviceId: terminalAId,
+        operatorId,
+        configuredLineId: lineId,
+        joinMethod: "assigned_line",
+        joinedAt: new Date(Date.now() - 300_000),
+        heartbeatAt: new Date(),
+        pendingEventCount: 3,
+        openBoxCount: 1,
+      },
+      {
+        tenantId,
+        inventoryId,
+        deviceId: terminalBId,
+        operatorId,
+        configuredLineId: lineId,
+        joinMethod: "assigned_line",
+        joinedAt: new Date(Date.now() - 300_000),
+        heartbeatAt: new Date(Date.now() - 120_000),
+        pendingEventCount: 0,
+        openBoxCount: 0,
+      },
+      {
+        tenantId,
+        inventoryId,
+        deviceId: terminalCId,
+        operatorId,
+        configuredLineId: lineId,
+        joinMethod: "assigned_line",
+        joinedAt: new Date(Date.now() - 300_000),
+        heartbeatAt: new Date(Date.now() - 180_000),
+        leftAt: new Date(Date.now() - 60_000),
+        pendingEventCount: 0,
+        openBoxCount: 0,
+      },
+    ]);
   });
 
   afterAll(async () => {
@@ -371,6 +415,49 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       oldBoxCount: 1,
       newBoxCount: 1,
       invalidatedBoxCount: 1,
+      pendingEventCount: 3,
+      openBoxCount: 1,
+      participants: [
+        expect.objectContaining({
+          deviceId: terminalAId,
+          terminalName: "Terminal A",
+          state: "active",
+          pendingEventCount: 3,
+          openBoxCount: 1,
+        }),
+        expect.objectContaining({
+          deviceId: terminalBId,
+          terminalName: "Terminal B",
+          state: "stale",
+          pendingEventCount: 0,
+        }),
+        expect.objectContaining({
+          deviceId: terminalCId,
+          terminalName: "Terminal C",
+          state: "left",
+          leftAt: expect.any(String),
+        }),
+      ],
+      boxes: [
+        expect.objectContaining({
+          id: expect.any(String),
+          sscc: invalidatedSscc,
+          terminalId: terminalBId,
+          terminalName: "Terminal B",
+          state: "invalidated",
+          printState: "not_ready",
+          itemCount: 0,
+        }),
+      ],
+      recentEvents: expect.arrayContaining([
+        expect.objectContaining({
+          eventId: unknownEventId,
+          codeResultId: expect.any(String),
+          terminalId: terminalAId,
+          terminalName: "Terminal A",
+          classification: "unknown",
+        }),
+      ]),
     });
   });
 
@@ -480,6 +567,11 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       "oldBoxCount",
       "newBoxCount",
       "invalidatedBoxCount",
+      "pendingEventCount",
+      "openBoxCount",
+      "participants",
+      "boxes",
+      "recentEvents",
     ]);
     const discrepancies = responseSchema(document, "/inventories/{id}/discrepancies");
     exactObject(discrepancies, ["page", "pageSize", "total", "hasMore", "items"]);

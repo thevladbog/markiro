@@ -45,6 +45,8 @@ import { CHZ_MAX_COMPRESSED_BYTES } from "./chz-tabular-reader";
 import {
   createInventoryOpenApiSchema,
   createInventorySchema,
+  createInventoryCorrectionOpenApiSchema,
+  createInventoryCorrectionSchema,
   fixInventorySnapshotOpenApiSchema,
   fixInventorySnapshotSchema,
   INVENTORY_DISCREPANCY_CATEGORIES,
@@ -53,6 +55,7 @@ import {
   inventoryImportOpenApiSchema,
   inventoryImportStatusSchema,
   inventoryOpenApiSchema,
+  inventoryCorrectionOpenApiSchema,
   inventoryProgressOpenApiSchema,
   inventorySnapshotOpenApiSchema,
   listInventoryDiscrepanciesOpenApiSchema,
@@ -61,8 +64,10 @@ import {
   updateInventoryOpenApiSchema,
   updateInventorySchema,
   type CreateInventoryDto,
+  type CreateInventoryCorrectionDto,
   type FixInventorySnapshotDto,
   type InventoryDto,
+  type InventoryCorrectionDto,
   type InventoryDetailDto,
   type InventoryImportDto,
   type InventoryProgressDto,
@@ -75,6 +80,7 @@ import {
 import { InventoriesService } from "./inventories.service";
 import { InventoryLifecycleService } from "./inventory-lifecycle.service";
 import { InventoryReconciliationService } from "./inventory-reconciliation.service";
+import { InventoryCorrectionsService } from "./inventory-corrections.service";
 import {
   stationInventoryManifestOpenApiSchema,
   type StationInventoryManifest,
@@ -89,6 +95,7 @@ export class InventoriesController {
     private readonly inventories: InventoriesService,
     private readonly lifecycle: InventoryLifecycleService,
     private readonly reconciliation: InventoryReconciliationService,
+    private readonly corrections: InventoryCorrectionsService,
   ) {}
 
   @Get()
@@ -127,6 +134,21 @@ export class InventoriesController {
     query: ListInventoryDiscrepanciesQueryDto,
   ): Promise<ListInventoryDiscrepanciesResponseDto> {
     return this.reconciliation.listDiscrepancies(req.tenantId!, id, query);
+  }
+
+  @Post(":id/corrections")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiBody({ schema: createInventoryCorrectionOpenApiSchema })
+  @ApiCreatedResponse({ schema: inventoryCorrectionOpenApiSchema })
+  correct(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Body(new ZodValidationPipe(createInventoryCorrectionSchema))
+    body: CreateInventoryCorrectionDto,
+  ): Promise<InventoryCorrectionDto> {
+    return this.corrections.correct(req.tenantId!, req.userId!, id, body);
   }
 
   @Post()

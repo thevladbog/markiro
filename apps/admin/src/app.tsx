@@ -59,6 +59,7 @@ import { LinesPage } from "./pages/lines/index.js";
 import { LinePanelRoute } from "./pages/lines/LinePanelRoute.js";
 import { InventoryPage } from "./pages/inventory/index.js";
 import { InventoryCreatePage } from "./pages/inventory/InventoryCreatePage.js";
+import { InventoryCorrections } from "./pages/inventory/InventoryCorrections.js";
 import { InventoryDetailPage } from "./pages/inventory/InventoryDetailPage.js";
 import { OrderDetailPage } from "./pages/pickup/OrderDetail.js";
 import { RejectionsPage } from "./pages/pickup/Rejections.js";
@@ -196,6 +197,14 @@ function appRouteElements() {
             element={
               <RequireCapability capability={C.OPERATIONS_READ}>
                 <InventoryDetailPage />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":inventoryId/corrections"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <InventoryCorrections />
               </RequireCapability>
             }
           />

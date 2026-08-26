@@ -240,6 +240,133 @@ export const inventoryDetailSchema = inventorySchema.safeExtend({
 
 export const listInventoriesSchema = z.strictObject({ items: z.array(inventorySchema) });
 
+const inventoryParticipantSchema = z.strictObject({
+  deviceId: uuid,
+  terminalName: z.string().min(1),
+  operatorName: z.string().min(1),
+  joinedAt: dateTime,
+  leftAt: dateTime.nullable(),
+  heartbeatAt: dateTime,
+  state: z.enum(["active", "stale", "left"]),
+  pendingEventCount: nonnegativeInteger,
+  openBoxCount: nonnegativeInteger,
+});
+
+const inventoryLiveBoxSchema = z.strictObject({
+  id: uuid,
+  sscc: z.string().regex(/^\d{18}$/),
+  terminalId: uuid,
+  terminalName: z.string().min(1),
+  productionDate: civilDate,
+  state: z.enum(["open", "closed", "invalidated"]),
+  printState: z.enum(["not_ready", "pending", "printing", "printed", "failed"]),
+  itemCount: nonnegativeInteger,
+});
+
+const inventoryRecentEventSchema = z.strictObject({
+  eventId: uuid,
+  codeResultId: uuid.nullable(),
+  kind: z.enum(["item", "known_box", "old_box"]),
+  displayIdentity: z.string().min(1),
+  authoritativeVerdict: z.string().min(1),
+  terminalId: uuid,
+  terminalName: z.string().min(1),
+  scannedAt: dateTime,
+  classification: z.enum(["expected", "protected", "ineligible", "unknown", "voided"]).nullable(),
+  observedProductionDate: civilDate.nullable(),
+});
+
+export const inventoryProgressSchema = z.strictObject({
+  inventoryId: uuid,
+  snapshotId: uuid,
+  status: inventoryStatusSchema,
+  resultRevision: nonnegativeInteger,
+  expectedCount: nonnegativeInteger,
+  verifiedCount: nonnegativeInteger,
+  missingCount: nonnegativeInteger,
+  protectedCount: nonnegativeInteger,
+  protectedFoundCount: nonnegativeInteger,
+  ineligibleCount: nonnegativeInteger,
+  unknownCount: nonnegativeInteger,
+  dateMismatchCount: nonnegativeInteger,
+  voidedCount: nonnegativeInteger,
+  oldBoxCount: nonnegativeInteger,
+  newBoxCount: nonnegativeInteger,
+  invalidatedBoxCount: nonnegativeInteger,
+  pendingEventCount: nonnegativeInteger,
+  openBoxCount: nonnegativeInteger,
+  participants: z.array(inventoryParticipantSchema),
+  boxes: z.array(inventoryLiveBoxSchema),
+  recentEvents: z.array(inventoryRecentEventSchema),
+});
+
+export const INVENTORY_CORRECTION_ACTIONS = [
+  "void_scan",
+  "restore_scan",
+  "change_date",
+  "remove_item",
+  "invalidate_box",
+  "reprint",
+] as const;
+
+const inventoryCorrectionTargetSchema = z
+  .strictObject({
+    eventId: uuid.optional(),
+    codeResultId: uuid.optional(),
+    repackBoxId: uuid.optional(),
+  })
+  .refine((target) => Object.values(target).filter(Boolean).length === 1, {
+    message: "exactly one correction target is required",
+  });
+
+export const createInventoryCorrectionInputSchema = z
+  .strictObject({
+    action: z.enum(INVENTORY_CORRECTION_ACTIONS),
+    target: inventoryCorrectionTargetSchema,
+    reason: z.string().trim().min(1).max(1024),
+    expectedResultRevision: nonnegativeInteger,
+    idempotencyKey: uuid,
+    observedProductionDate: civilDate.optional(),
+  })
+  .superRefine((input, context) => {
+    const targetMatches =
+      ((input.action === "void_scan" || input.action === "restore_scan") &&
+        input.target.eventId !== undefined) ||
+      ((input.action === "change_date" || input.action === "remove_item") &&
+        input.target.codeResultId !== undefined) ||
+      ((input.action === "invalidate_box" || input.action === "reprint") &&
+        input.target.repackBoxId !== undefined);
+    if (!targetMatches) {
+      context.addIssue({
+        code: "custom",
+        path: ["target"],
+        message: "target does not match action",
+      });
+    }
+    if ((input.action === "change_date") !== (input.observedProductionDate !== undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["observedProductionDate"],
+        message: "observedProductionDate is required only for change_date",
+      });
+    }
+  });
+
+export const inventoryCorrectionSchema = z.strictObject({
+  id: uuid,
+  action: z.enum(INVENTORY_CORRECTION_ACTIONS),
+  reason: z.string().min(1).max(1024),
+  target: z.strictObject({
+    eventId: uuid.nullable(),
+    codeResultId: uuid.nullable(),
+    repackBoxId: uuid.nullable(),
+  }),
+  beforeProjectionDigest: digest,
+  afterProjectionDigest: digest,
+  resultRevision: nonnegativeInteger,
+  createdAt: dateTime,
+});
+
 export const createInventoryInputSchema = z
   .strictObject({
     productId: uuid,
@@ -280,3 +407,9 @@ export type InventoryImportHistory = z.infer<typeof inventoryImportHistorySchema
 export type InventorySnapshot = z.infer<typeof inventorySnapshotSchema>;
 export type InventorySnapshotInputs = z.infer<typeof inventorySnapshotInputsSchema>;
 export type CreateInventoryInput = z.infer<typeof createInventoryInputSchema>;
+export type InventoryProgress = z.infer<typeof inventoryProgressSchema>;
+export type InventoryParticipant = z.infer<typeof inventoryParticipantSchema>;
+export type InventoryLiveBox = z.infer<typeof inventoryLiveBoxSchema>;
+export type InventoryRecentEvent = z.infer<typeof inventoryRecentEventSchema>;
+export type CreateInventoryCorrectionInput = z.infer<typeof createInventoryCorrectionInputSchema>;
+export type InventoryCorrection = z.infer<typeof inventoryCorrectionSchema>;

@@ -226,6 +226,49 @@ export interface InventoryProgressDto {
   oldBoxCount: number;
   newBoxCount: number;
   invalidatedBoxCount: number;
+  pendingEventCount: number;
+  openBoxCount: number;
+  participants: InventoryParticipantDto[];
+  boxes: InventoryLiveBoxDto[];
+  recentEvents: InventoryRecentEventDto[];
+}
+
+export type InventoryParticipantState = "active" | "stale" | "left";
+
+export interface InventoryParticipantDto {
+  deviceId: string;
+  terminalName: string;
+  operatorName: string;
+  joinedAt: string;
+  leftAt: string | null;
+  heartbeatAt: string;
+  state: InventoryParticipantState;
+  pendingEventCount: number;
+  openBoxCount: number;
+}
+
+export interface InventoryLiveBoxDto {
+  id: string;
+  sscc: string;
+  terminalId: string;
+  terminalName: string;
+  productionDate: string;
+  state: "open" | "closed" | "invalidated";
+  printState: "not_ready" | "pending" | "printing" | "printed" | "failed";
+  itemCount: number;
+}
+
+export interface InventoryRecentEventDto {
+  eventId: string;
+  codeResultId: string | null;
+  kind: "item" | "known_box" | "old_box";
+  displayIdentity: string;
+  authoritativeVerdict: string;
+  terminalId: string;
+  terminalName: string;
+  scannedAt: string;
+  classification: "expected" | "protected" | "ineligible" | "unknown" | "voided" | null;
+  observedProductionDate: string | null;
 }
 
 export interface InventoryDiscrepancyWinnerDto {
@@ -254,9 +297,144 @@ export interface ListInventoryDiscrepanciesResponseDto {
   items: InventoryDiscrepancyDto[];
 }
 
+export const INVENTORY_CORRECTION_ACTIONS = [
+  "void_scan",
+  "restore_scan",
+  "change_date",
+  "remove_item",
+  "invalidate_box",
+  "reprint",
+] as const;
+export type InventoryCorrectionAction = (typeof INVENTORY_CORRECTION_ACTIONS)[number];
+
+const inventoryCorrectionTargetSchema = z
+  .strictObject({
+    eventId: z.string().uuid().optional(),
+    codeResultId: z.string().uuid().optional(),
+    repackBoxId: z.string().uuid().optional(),
+  })
+  .superRefine((target, context) => {
+    const selected = [target.eventId, target.codeResultId, target.repackBoxId].filter(
+      (value) => value !== undefined,
+    );
+    if (selected.length !== 1) {
+      context.addIssue({ code: "custom", message: "exactly one correction target is required" });
+    }
+  });
+
+export const createInventoryCorrectionSchema = z
+  .strictObject({
+    action: z.enum(INVENTORY_CORRECTION_ACTIONS),
+    target: inventoryCorrectionTargetSchema,
+    reason: z.string().trim().min(1).max(1024),
+    expectedResultRevision: z.number().int().nonnegative(),
+    idempotencyKey: z.string().trim().min(1).max(128),
+    observedProductionDate: inventoryCivilDateSchema("productionDateFrom").optional(),
+  })
+  .superRefine((input, context) => {
+    const targetMatches =
+      ((input.action === "void_scan" || input.action === "restore_scan") &&
+        input.target.eventId !== undefined) ||
+      ((input.action === "change_date" || input.action === "remove_item") &&
+        input.target.codeResultId !== undefined) ||
+      ((input.action === "invalidate_box" || input.action === "reprint") &&
+        input.target.repackBoxId !== undefined);
+    if (!targetMatches) {
+      context.addIssue({
+        code: "custom",
+        path: ["target"],
+        message: "target does not match action",
+      });
+    }
+    if ((input.action === "change_date") !== (input.observedProductionDate !== undefined)) {
+      context.addIssue({
+        code: "custom",
+        path: ["observedProductionDate"],
+        message: "observedProductionDate is required only for change_date",
+      });
+    }
+  });
+export type CreateInventoryCorrectionDto = z.infer<typeof createInventoryCorrectionSchema>;
+
+export interface InventoryCorrectionTargetDto {
+  eventId: string | null;
+  codeResultId: string | null;
+  repackBoxId: string | null;
+}
+
+export interface InventoryCorrectionDto {
+  id: string;
+  action: InventoryCorrectionAction;
+  reason: string;
+  target: InventoryCorrectionTargetDto;
+  beforeProjectionDigest: string;
+  afterProjectionDigest: string;
+  resultRevision: number;
+  createdAt: string;
+}
+
 const uuidSchema = { type: "string", format: "uuid" } as const;
 const dateSchema = { type: "string", format: "date" } as const;
 const dateTimeSchema = { type: "string", format: "date-time" } as const;
+
+const inventoryCorrectionTargetOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [],
+  properties: {
+    eventId: uuidSchema,
+    codeResultId: uuidSchema,
+    repackBoxId: uuidSchema,
+  },
+};
+
+export const createInventoryCorrectionOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["action", "target", "reason", "expectedResultRevision", "idempotencyKey"],
+  properties: {
+    action: { type: "string", enum: [...INVENTORY_CORRECTION_ACTIONS] },
+    target: inventoryCorrectionTargetOpenApiSchema,
+    reason: { type: "string", minLength: 1, maxLength: 1024 },
+    expectedResultRevision: { type: "integer", minimum: 0 },
+    idempotencyKey: { type: "string", minLength: 1, maxLength: 128 },
+    observedProductionDate: dateSchema,
+  },
+};
+
+export const inventoryCorrectionOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "action",
+    "reason",
+    "target",
+    "beforeProjectionDigest",
+    "afterProjectionDigest",
+    "resultRevision",
+    "createdAt",
+  ],
+  properties: {
+    id: uuidSchema,
+    action: { type: "string", enum: [...INVENTORY_CORRECTION_ACTIONS] },
+    reason: { type: "string" },
+    target: {
+      type: "object",
+      additionalProperties: false,
+      required: ["eventId", "codeResultId", "repackBoxId"],
+      properties: {
+        eventId: { ...uuidSchema, nullable: true },
+        codeResultId: { ...uuidSchema, nullable: true },
+        repackBoxId: { ...uuidSchema, nullable: true },
+      },
+    },
+    beforeProjectionDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    afterProjectionDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    resultRevision: { type: "integer", minimum: 1 },
+    createdAt: dateTimeSchema,
+  },
+};
 
 export const createInventoryOpenApiSchema: SchemaObject = {
   type: "object",
@@ -492,10 +670,109 @@ const inventoryCountProperties = {
   oldBoxCount: { type: "integer", minimum: 0 },
   newBoxCount: { type: "integer", minimum: 0 },
   invalidatedBoxCount: { type: "integer", minimum: 0 },
+  pendingEventCount: { type: "integer", minimum: 0 },
+  openBoxCount: { type: "integer", minimum: 0 },
 } satisfies Record<
-  Exclude<keyof InventoryProgressDto, "inventoryId" | "snapshotId" | "status" | "resultRevision">,
+  Exclude<
+    keyof InventoryProgressDto,
+    | "inventoryId"
+    | "snapshotId"
+    | "status"
+    | "resultRevision"
+    | "participants"
+    | "boxes"
+    | "recentEvents"
+  >,
   SchemaObject
 >;
+
+const inventoryParticipantOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "deviceId",
+    "terminalName",
+    "operatorName",
+    "joinedAt",
+    "leftAt",
+    "heartbeatAt",
+    "state",
+    "pendingEventCount",
+    "openBoxCount",
+  ],
+  properties: {
+    deviceId: uuidSchema,
+    terminalName: { type: "string" },
+    operatorName: { type: "string" },
+    joinedAt: dateTimeSchema,
+    leftAt: { ...dateTimeSchema, nullable: true },
+    heartbeatAt: dateTimeSchema,
+    state: { type: "string", enum: ["active", "stale", "left"] },
+    pendingEventCount: { type: "integer", minimum: 0 },
+    openBoxCount: { type: "integer", minimum: 0 },
+  },
+};
+
+const inventoryLiveBoxOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "sscc",
+    "terminalId",
+    "terminalName",
+    "productionDate",
+    "state",
+    "printState",
+    "itemCount",
+  ],
+  properties: {
+    id: uuidSchema,
+    sscc: { type: "string", pattern: "^[0-9]{18}$" },
+    terminalId: uuidSchema,
+    terminalName: { type: "string" },
+    productionDate: dateSchema,
+    state: { type: "string", enum: ["open", "closed", "invalidated"] },
+    printState: {
+      type: "string",
+      enum: ["not_ready", "pending", "printing", "printed", "failed"],
+    },
+    itemCount: { type: "integer", minimum: 0 },
+  },
+};
+
+const inventoryRecentEventOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "eventId",
+    "codeResultId",
+    "kind",
+    "displayIdentity",
+    "authoritativeVerdict",
+    "terminalId",
+    "terminalName",
+    "scannedAt",
+    "classification",
+    "observedProductionDate",
+  ],
+  properties: {
+    eventId: uuidSchema,
+    codeResultId: { ...uuidSchema, nullable: true },
+    kind: { type: "string", enum: ["item", "known_box", "old_box"] },
+    displayIdentity: { type: "string" },
+    authoritativeVerdict: { type: "string" },
+    terminalId: uuidSchema,
+    terminalName: { type: "string" },
+    scannedAt: dateTimeSchema,
+    classification: {
+      type: "string",
+      enum: ["expected", "protected", "ineligible", "unknown", "voided"],
+      nullable: true,
+    },
+    observedProductionDate: { ...dateSchema, nullable: true },
+  },
+};
 
 export const inventoryProgressOpenApiSchema: SchemaObject = {
   type: "object",
@@ -506,6 +783,9 @@ export const inventoryProgressOpenApiSchema: SchemaObject = {
     "status",
     "resultRevision",
     ...Object.keys(inventoryCountProperties),
+    "participants",
+    "boxes",
+    "recentEvents",
   ],
   properties: {
     inventoryId: uuidSchema,
@@ -513,6 +793,9 @@ export const inventoryProgressOpenApiSchema: SchemaObject = {
     status: { type: "string", enum: [...INVENTORY_LIFECYCLE_STATUSES] },
     resultRevision: { type: "integer", minimum: 0 },
     ...inventoryCountProperties,
+    participants: { type: "array", items: inventoryParticipantOpenApiSchema },
+    boxes: { type: "array", items: inventoryLiveBoxOpenApiSchema },
+    recentEvents: { type: "array", items: inventoryRecentEventOpenApiSchema },
   },
 };
 

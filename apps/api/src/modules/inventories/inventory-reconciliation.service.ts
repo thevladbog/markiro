@@ -9,7 +9,10 @@ import type {
   InventoryDiscrepancyCategory,
   InventoryDiscrepancyDto,
   InventoryDiscrepancyWinnerDto,
+  InventoryLiveBoxDto,
+  InventoryParticipantDto,
   InventoryProgressDto,
+  InventoryRecentEventDto,
   ListInventoryDiscrepanciesQueryDto,
   ListInventoryDiscrepanciesResponseDto,
 } from "./dto";
@@ -42,6 +45,42 @@ interface DiscrepancyRow {
   terminalId: string | null;
   terminalName: string | null;
   winningScannedAt: Date | string | null;
+}
+
+interface ParticipantRow {
+  deviceId: string;
+  terminalName: string;
+  operatorName: string;
+  joinedAt: Date | string;
+  leftAt: Date | string | null;
+  heartbeatAt: Date | string;
+  state: "active" | "stale" | "left";
+  pendingEventCount: number;
+  openBoxCount: number;
+}
+
+interface LiveBoxRow {
+  id: string;
+  sscc: string;
+  terminalId: string;
+  terminalName: string;
+  productionDate: string;
+  state: "open" | "closed" | "invalidated";
+  printState: "not_ready" | "pending" | "printing" | "printed" | "failed";
+  itemCount: number;
+}
+
+interface RecentEventRow {
+  eventId: string;
+  codeResultId: string | null;
+  kind: "item" | "known_box" | "old_box";
+  displayIdentity: string;
+  authoritativeVerdict: string;
+  terminalId: string;
+  terminalName: string;
+  scannedAt: Date | string;
+  classification: "expected" | "protected" | "ineligible" | "unknown" | "voided" | null;
+  observedProductionDate: string | null;
 }
 
 type ReconciliationTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -134,12 +173,98 @@ export class InventoryReconciliationService {
         and sc.snapshot_id = ${inventory.snapshotId}
     `);
     const counts = parseProgressCountRow(result.rows[0]);
+    const participantResult = await tx.execute(sql<ParticipantRow>`
+        select
+          p.device_id as "deviceId",
+          d.name as "terminalName",
+          e.full_name as "operatorName",
+          p.joined_at as "joinedAt",
+          p.left_at as "leftAt",
+          p.heartbeat_at as "heartbeatAt",
+          case
+            when p.left_at is not null then 'left'
+            when p.heartbeat_at < transaction_timestamp() - interval '45 seconds' then 'stale'
+            else 'active'
+          end as state,
+          p.pending_event_count as "pendingEventCount",
+          p.open_box_count as "openBoxCount"
+        from inventory_device_participants p
+        join station_devices d
+          on d.tenant_id = p.tenant_id
+         and d.id = p.device_id
+        join employees e
+          on e.tenant_id = p.tenant_id
+         and e.id = p.operator_id
+        where p.tenant_id = ${tenantId}
+          and p.inventory_id = ${inventoryId}
+        order by
+          case when p.left_at is null then 0 else 1 end,
+          d.name,
+          p.device_id
+      `);
+    const boxResult = await tx.execute(sql<LiveBoxRow>`
+        select
+          b.id,
+          b.new_sscc as sscc,
+          b.owner_device_id as "terminalId",
+          d.name as "terminalName",
+          b.production_date as "productionDate",
+          b.state::text as state,
+          b.print_state::text as "printState",
+          count(i.id) filter (where i.removed_at is null)::int as "itemCount"
+        from inventory_repack_boxes b
+        join station_devices d
+          on d.tenant_id = b.tenant_id
+         and d.id = b.owner_device_id
+        left join inventory_repack_items i
+          on i.tenant_id = b.tenant_id
+         and i.inventory_id = b.inventory_id
+         and i.box_id = b.id
+        where b.tenant_id = ${tenantId}
+          and b.inventory_id = ${inventoryId}
+        group by b.id, d.name
+        order by
+          case b.state when 'open' then 0 when 'invalidated' then 1 else 2 end,
+          b.opened_at desc,
+          b.id
+      `);
+    const recentEventResult = await tx.execute(sql<RecentEventRow>`
+        select
+          e.event_id as "eventId",
+          r.id as "codeResultId",
+          e.kind::text as kind,
+          e.normalized_identity as "displayIdentity",
+          e.authoritative_verdict as "authoritativeVerdict",
+          e.device_id as "terminalId",
+          d.name as "terminalName",
+          e.scanned_at as "scannedAt",
+          r.classification::text as classification,
+          r.observed_production_date as "observedProductionDate"
+        from inventory_scan_events e
+        join station_devices d
+          on d.tenant_id = e.tenant_id
+         and d.id = e.device_id
+        left join inventory_code_results r
+          on r.tenant_id = e.tenant_id
+         and r.inventory_id = e.inventory_id
+         and r.first_accepted_event_id = e.event_id
+        where e.tenant_id = ${tenantId}
+          and e.inventory_id = ${inventoryId}
+        order by e.scanned_at desc, e.event_id desc, r.id
+        limit 50
+      `);
+    const participants = participantResult.rows.map(parseParticipantRow);
     return {
       inventoryId,
       snapshotId: inventory.snapshotId,
       status: inventory.status,
       resultRevision: inventory.resultRevision,
       ...counts,
+      pendingEventCount: participants.reduce((sum, row) => sum + row.pendingEventCount, 0),
+      openBoxCount: participants.reduce((sum, row) => sum + row.openBoxCount, 0),
+      participants,
+      boxes: boxResult.rows.map(parseLiveBoxRow),
+      recentEvents: recentEventResult.rows.map(parseRecentEventRow),
     };
   }
 
@@ -458,6 +583,84 @@ function parseProgressCountRow(value: unknown): ProgressCountRow {
   };
 }
 
+function parseParticipantRow(value: unknown): InventoryParticipantDto {
+  const record = asRecord(value, "Inventory participant row is unavailable");
+  const state = readString(record, "state");
+  if (state !== "active" && state !== "stale" && state !== "left") {
+    throw new Error("Inventory participant state is invalid");
+  }
+  return {
+    deviceId: readString(record, "deviceId"),
+    terminalName: readString(record, "terminalName"),
+    operatorName: readString(record, "operatorName"),
+    joinedAt: readDate(record, "joinedAt").toISOString(),
+    leftAt: readNullableDateAsIso(record, "leftAt"),
+    heartbeatAt: readDate(record, "heartbeatAt").toISOString(),
+    state,
+    pendingEventCount: readInteger(record, "pendingEventCount"),
+    openBoxCount: readInteger(record, "openBoxCount"),
+  };
+}
+
+function parseLiveBoxRow(value: unknown): InventoryLiveBoxDto {
+  const record = asRecord(value, "Inventory box row is unavailable");
+  const state = readString(record, "state");
+  if (state !== "open" && state !== "closed" && state !== "invalidated") {
+    throw new Error("Inventory box state is invalid");
+  }
+  const printState = readString(record, "printState");
+  if (
+    printState !== "not_ready" &&
+    printState !== "pending" &&
+    printState !== "printing" &&
+    printState !== "printed" &&
+    printState !== "failed"
+  ) {
+    throw new Error("Inventory box print state is invalid");
+  }
+  return {
+    id: readString(record, "id"),
+    sscc: readString(record, "sscc"),
+    terminalId: readString(record, "terminalId"),
+    terminalName: readString(record, "terminalName"),
+    productionDate: readString(record, "productionDate"),
+    state,
+    printState,
+    itemCount: readInteger(record, "itemCount"),
+  };
+}
+
+function parseRecentEventRow(value: unknown): InventoryRecentEventDto {
+  const record = asRecord(value, "Inventory recent event row is unavailable");
+  const kind = readString(record, "kind");
+  if (kind !== "item" && kind !== "known_box" && kind !== "old_box") {
+    throw new Error("Inventory event kind is invalid");
+  }
+  const classification = readNullableString(record, "classification");
+  if (
+    classification !== null &&
+    classification !== "expected" &&
+    classification !== "protected" &&
+    classification !== "ineligible" &&
+    classification !== "unknown" &&
+    classification !== "voided"
+  ) {
+    throw new Error("Inventory event classification is invalid");
+  }
+  return {
+    eventId: readString(record, "eventId"),
+    codeResultId: readNullableString(record, "codeResultId"),
+    kind,
+    displayIdentity: readString(record, "displayIdentity"),
+    authoritativeVerdict: readString(record, "authoritativeVerdict"),
+    terminalId: readString(record, "terminalId"),
+    terminalName: readString(record, "terminalName"),
+    scannedAt: readDate(record, "scannedAt").toISOString(),
+    classification,
+    observedProductionDate: readNullableString(record, "observedProductionDate"),
+  };
+}
+
 function parseDiscrepancyRow(value: unknown): DiscrepancyRow {
   const record = asRecord(value, "Inventory discrepancy row is unavailable");
   const category = record.category;
@@ -533,6 +736,19 @@ function readNullableDate(value: unknown, key: string): Date | string | null {
     throw new Error(`Invalid ${key}`);
   }
   return field;
+}
+
+function readDate(value: unknown, key: string): Date {
+  const field = Reflect.get(asRecord(value, `Missing ${key}`), key);
+  const date = field instanceof Date ? field : typeof field === "string" ? new Date(field) : null;
+  if (date === null || Number.isNaN(date.getTime())) throw new Error(`Invalid ${key}`);
+  return date;
+}
+
+function readNullableDateAsIso(value: unknown, key: string): string | null {
+  const field = Reflect.get(asRecord(value, `Missing ${key}`), key);
+  if (field === null) return null;
+  return readDate({ [key]: field }, key).toISOString();
 }
 
 function asRecord(value: unknown, message: string): Record<string, unknown> {
