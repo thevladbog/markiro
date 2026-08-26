@@ -1043,6 +1043,125 @@ test("guard CLI classifies an unmatched ingress source without exposing its valu
   });
 });
 
+function addApprovedExternalDataIngressRemoval(plan) {
+  const desiredRule = {
+    description: "Only the application may reach the PostgreSQL pooler.",
+    from_port: -1,
+    id: "desired-rule-id",
+    labels: {},
+    port: 6432,
+    predefined_target: "",
+    protocol: "TCP",
+    security_group_id: "app-security-group-id",
+    to_port: -1,
+    v4_cidr_blocks: [],
+    v6_cidr_blocks: [],
+  };
+  const externalRule = {
+    ...desiredRule,
+    description: "manual-external-access",
+    id: "external-rule-id",
+    security_group_id: "",
+    v4_cidr_blocks: ["203.0.113.42/32"],
+  };
+  plan.resource_changes.push(
+    {
+      address: "module.network.yandex_vpc_security_group.app",
+      type: "yandex_vpc_security_group",
+      change: {
+        actions: ["no-op"],
+        before: { id: "app-security-group-id" },
+        after: { id: "app-security-group-id" },
+      },
+    },
+    {
+      address: "module.network.yandex_vpc_security_group.data",
+      type: "yandex_vpc_security_group",
+      change: {
+        actions: ["update"],
+        before: {
+          egress: [{ protocol: "ANY" }],
+          ingress: [structuredClone(desiredRule), externalRule],
+        },
+        after: { egress: [{ protocol: "ANY" }], ingress: [desiredRule] },
+        after_unknown: {},
+      },
+    },
+  );
+}
+
+test("production plan guard permits only the confirmed external data ingress removal", async () => {
+  const plan = await readFixture("safe");
+  addApprovedExternalDataIngressRemoval(plan);
+  assert.doesNotThrow(() => guardProductionPlan(plan));
+});
+
+test("production plan guard rejects broader variants of the external data ingress removal", async () => {
+  const mutations = [
+    (plan) => {
+      resource(plan, "module.network.yandex_vpc_security_group.data").change.after.egress = [];
+    },
+    (plan) => {
+      resource(plan, "module.network.yandex_vpc_security_group.data").change.after.ingress[0].port =
+        6433;
+    },
+    (plan) => {
+      resource(
+        plan,
+        "module.network.yandex_vpc_security_group.data",
+      ).change.before.ingress[1].protocol = "UDP";
+    },
+    (plan) => {
+      resource(
+        plan,
+        "module.network.yandex_vpc_security_group.data",
+      ).change.before.ingress[1].security_group_id = "other-security-group-id";
+    },
+    (plan) => {
+      resource(
+        plan,
+        "module.network.yandex_vpc_security_group.data",
+      ).change.before.ingress[1].v4_cidr_blocks = ["10.20.0.0/16"];
+    },
+    (plan) => {
+      resource(
+        plan,
+        "module.network.yandex_vpc_security_group.data",
+      ).change.before.ingress[1].v4_cidr_blocks = ["0.0.0.0/0"];
+    },
+    (plan) => {
+      resource(
+        plan,
+        "module.network.yandex_vpc_security_group.data",
+      ).change.before.ingress[1].unexpected = "new-provider-field";
+    },
+    (plan) => {
+      resource(
+        plan,
+        "module.network.yandex_vpc_security_group.data",
+      ).change.before.ingress[0].unexpected = "new-provider-field";
+    },
+    (plan) => {
+      resource(
+        plan,
+        "module.network.yandex_vpc_security_group.data",
+      ).change.after.ingress[0].security_group_id = "literal-or-wrong-security-group-id";
+    },
+    (plan) => {
+      resource(plan, "module.network.yandex_vpc_security_group.data").change.after_unknown = {
+        ingress: true,
+      };
+    },
+  ];
+
+  for (const mutate of mutations) {
+    const plan = await readFixture("safe");
+    addApprovedExternalDataIngressRemoval(plan);
+    mutate(plan);
+    reject(plan);
+  }
+});
+
 test("production plan guard permits direct-VM DNS flag enable and disable transitions", async () => {
   const safe = await readFixture("safe");
   for (const address of directVmDnsAddresses) {

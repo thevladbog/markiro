@@ -98,6 +98,7 @@ const appComputeMetadataFieldScopes = new Map([
 ]);
 const appSecurityGroupAddress = "module.network.yandex_vpc_security_group.app";
 const dataSecurityGroupAddress = "module.network.yandex_vpc_security_group.data";
+const dataSecurityGroupIngressDescription = "Only the application may reach the PostgreSQL pooler.";
 const securityGroupFieldScopes = new Map([
   ["description", "description"],
   ["egress", "egress"],
@@ -131,6 +132,19 @@ const securityGroupRuleSemanticFieldScopes = new Map([
   ["v4Cidrs", "v4-cidrs"],
   ["v6Cidrs", "v6-cidrs"],
 ]);
+const securityGroupRuleKeys = [
+  "description",
+  "from_port",
+  "id",
+  "labels",
+  "port",
+  "predefined_target",
+  "protocol",
+  "security_group_id",
+  "to_port",
+  "v4_cidr_blocks",
+  "v6_cidr_blocks",
+];
 
 const retiredProductionResources = new Map([
   ["yandex_logging_group.application", "yandex_logging_group"],
@@ -404,6 +418,103 @@ function unmatchedSecurityGroupSourceScope(rule) {
   const v4Scope = uniqueV4Scopes.length === 0 ? "none" : uniqueV4Scopes.join("-and-");
   const securityGroupScope = value.securityGroupId === "" ? "empty" : "present";
   return `security-group-${securityGroupScope}-v4-cidrs-count-${value.v4Cidrs.length}-v4-scopes-${v4Scope}`;
+}
+
+function hasExactKeys(value, expected) {
+  if (!object(value)) return false;
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
+}
+
+function exactPortRange(value, port) {
+  return Array.isArray(value) && value.length === 2 && value.every((item) => item === port);
+}
+
+function isConfirmedExternalDataIngressRemoval(plan, resource, resourceActions) {
+  if (
+    resource.address !== dataSecurityGroupAddress ||
+    resource.type !== "yandex_vpc_security_group" ||
+    resourceActions.length !== 1 ||
+    resourceActions[0] !== "update" ||
+    containsUnknown(resource.change?.after_unknown)
+  )
+    return false;
+
+  const beforeValue = resource.change?.before;
+  const afterValue = resource.change?.after;
+  const fields = changedKeys(beforeValue, afterValue);
+  if (
+    !fields ||
+    fields.length !== 1 ||
+    fields[0] !== "ingress" ||
+    !Array.isArray(beforeValue.ingress) ||
+    beforeValue.ingress.length !== 2 ||
+    !Array.isArray(afterValue.ingress) ||
+    afterValue.ingress.length !== 1
+  )
+    return false;
+
+  const desiredRule = afterValue.ingress[0];
+  if (!hasExactKeys(desiredRule, securityGroupRuleKeys)) return false;
+  const desiredValue = securityGroupRuleSemanticValue(desiredRule);
+  if (
+    desiredValue === null ||
+    desiredValue.description !== dataSecurityGroupIngressDescription ||
+    !exactPortRange(desiredValue.portRange, 6432) ||
+    desiredValue.predefinedTarget !== "" ||
+    desiredValue.protocol !== "TCP" ||
+    desiredValue.v4Cidrs.length !== 0 ||
+    desiredValue.v6Cidrs.length !== 0
+  )
+    return false;
+
+  const appResources = plan.resource_changes.filter(
+    (candidate) =>
+      candidate?.address === appSecurityGroupAddress &&
+      candidate?.type === "yandex_vpc_security_group",
+  );
+  if (appResources.length !== 1) return false;
+  const appResource = appResources[0];
+  if (
+    !Array.isArray(appResource.change?.actions) ||
+    appResource.change.actions.length !== 1 ||
+    appResource.change.actions[0] !== "no-op" ||
+    !object(appResource.change?.after) ||
+    typeof appResource.change.after.id !== "string" ||
+    appResource.change.after.id.length === 0 ||
+    desiredValue.securityGroupId !== appResource.change.after.id
+  )
+    return false;
+
+  const desiredSignature = securityGroupRuleSemanticSignature(desiredRule);
+  const matchingRules = beforeValue.ingress.filter(
+    (rule) => securityGroupRuleSemanticSignature(rule) === desiredSignature,
+  );
+  if (
+    desiredSignature === null ||
+    matchingRules.length !== 1 ||
+    !hasExactKeys(matchingRules[0], securityGroupRuleKeys)
+  )
+    return false;
+  const unmatchedRules = beforeValue.ingress.filter(
+    (rule) => securityGroupRuleSemanticSignature(rule) !== desiredSignature,
+  );
+  if (unmatchedRules.length !== 1) return false;
+  const unmatchedRule = unmatchedRules[0];
+  if (!hasExactKeys(unmatchedRule, securityGroupRuleKeys)) return false;
+  const unmatchedValue = securityGroupRuleSemanticValue(unmatchedRule);
+  return (
+    unmatchedValue !== null &&
+    unmatchedValue.description !== dataSecurityGroupIngressDescription &&
+    exactPortRange(unmatchedValue.portRange, 6432) &&
+    unmatchedValue.predefinedTarget === "" &&
+    unmatchedValue.protocol === "TCP" &&
+    unmatchedValue.securityGroupId === "" &&
+    unmatchedValue.v4Cidrs.length === 1 &&
+    ipv4CidrScope(unmatchedValue.v4Cidrs[0]) === "other" &&
+    unmatchedValue.v6Cidrs.length === 0
+  );
 }
 
 function appComputeActionScope(resource) {
@@ -958,15 +1069,17 @@ export function guardProductionPlan(plan) {
           ? ["no-op", "read"]
           : ["no-op"];
       if (!onlyAllowedAction(resourceActions, allowed)) {
-        const scope =
-          resource.address === appComputeAddress
-            ? appComputeActionScope(resource)
-            : resource.address === appSecurityGroupAddress
-              ? securityGroupActionScope(resource, "safe-action-app-security-group")
-              : resource.address === dataSecurityGroupAddress
-                ? securityGroupActionScope(resource, "safe-action-data-security-group")
-                : (safeProductionActionScopes.get(resource.address) ?? "safe-resource-action");
-        rejected(scope);
+        if (!isConfirmedExternalDataIngressRemoval(plan, resource, resourceActions)) {
+          const scope =
+            resource.address === appComputeAddress
+              ? appComputeActionScope(resource)
+              : resource.address === appSecurityGroupAddress
+                ? securityGroupActionScope(resource, "safe-action-app-security-group")
+                : resource.address === dataSecurityGroupAddress
+                  ? securityGroupActionScope(resource, "safe-action-data-security-group")
+                  : (safeProductionActionScopes.get(resource.address) ?? "safe-resource-action");
+          rejected(scope);
+        }
       }
     }
     if (
