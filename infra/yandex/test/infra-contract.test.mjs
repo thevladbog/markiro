@@ -822,6 +822,67 @@ test("infrastructure apply reports a fixed failure stage without reviewer inputs
   }
 });
 
+test("infrastructure apply accepts exact S3 metadata regardless of AWS CLI header casing", async () => {
+  const workflow = await source(".github/workflows/yandex-infrastructure.yml");
+  const filters = [
+    ...workflow.matchAll(
+      /--arg plan_version_id "\$PLAN(?:_JSON)?_VERSION_ID" '\n([\s\S]*?)\n\s+' "\$(?:plan_head|plan_json_head)" > \/dev\/null/g,
+    ),
+  ].map((match) => match[1]);
+  assert.equal(filters.length, 2, "binary and JSON plan metadata guards must both be testable");
+
+  const targetSha = "d".repeat(40);
+  const versionId = "000659F7A25C8D43";
+  const metadata = {
+    "Enable-Public-Dns": "true",
+    "Enable-Station-Release-Public-Dns": "false",
+    "Source-Run-Attempt": "1",
+    "Source-Run-Id": "33001053948",
+    "Target-Sha": targetSha,
+  };
+  const lowercaseMetadata = Object.fromEntries(
+    Object.entries(metadata).map(([key, value]) => [key.toLowerCase(), value]),
+  );
+  const runFilter = (filter, Metadata) =>
+    execFileSync(
+      "jq",
+      [
+        "-e",
+        "--arg",
+        "target_sha",
+        targetSha,
+        "--arg",
+        "enable_public_dns",
+        "true",
+        "--arg",
+        "enable_station_release_public_dns",
+        "false",
+        "--arg",
+        "source_run_id",
+        "33001053948",
+        "--arg",
+        "source_run_attempt",
+        "1",
+        "--arg",
+        "plan_version_id",
+        versionId,
+        filter,
+      ],
+      {
+        encoding: "utf8",
+        input: JSON.stringify({ ContentLength: 87001, Metadata, VersionId: versionId }),
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+
+  for (const filter of filters) {
+    assert.doesNotThrow(() => runFilter(filter, metadata));
+    assert.doesNotThrow(() => runFilter(filter, lowercaseMetadata));
+    assert.throws(() => runFilter(filter, { ...metadata, Unexpected: "extra" }));
+    assert.throws(() => runFilter(filter, { ...metadata, "target-sha": targetSha }));
+  }
+});
+
 test("MVP design and plan retain only identities and secrets that still exist", async () => {
   const [plan, design] = await Promise.all([
     source("docs/superpowers/plans/2026-08-09-yandex-direct-vm-mvp.md"),

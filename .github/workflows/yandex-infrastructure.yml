@@ -574,7 +574,9 @@ jobs:
             --arg source_run_attempt "$source_run_attempt" \
             --arg plan_version_id "$PLAN_VERSION_ID" '
               (.ContentLength | type == "number" and . > 0 and . <= 268435456) and
-              (.Metadata == {
+              ((.Metadata | type) == "object") and
+              ((.Metadata | length) == 5) and
+              ((.Metadata | with_entries(.key |= ascii_downcase)) == {
                 "target-sha": $target_sha,
                 "enable-public-dns": $enable_public_dns,
                 "enable-station-release-public-dns": $enable_station_release_public_dns,
@@ -609,7 +611,9 @@ jobs:
             --arg source_run_attempt "$source_run_attempt" \
             --arg plan_version_id "$PLAN_JSON_VERSION_ID" '
               (.ContentLength | type == "number" and . > 0 and . <= 67108864) and
-              (.Metadata == {
+              ((.Metadata | type) == "object") and
+              ((.Metadata | length) == 5) and
+              ((.Metadata | with_entries(.key |= ascii_downcase)) == {
                 "target-sha": $target_sha,
                 "enable-public-dns": $enable_public_dns,
                 "enable-station-release-public-dns": $enable_station_release_public_dns,
