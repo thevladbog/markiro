@@ -191,7 +191,7 @@ it("requires a reason and explicit blocker acknowledgement for emergency close",
   });
 });
 
-it("confirms reopen before mutation and does not offer completion before Task 8", async () => {
+it("confirms reopen before mutation and keeps completion out of the close panel", async () => {
   const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
     response({
       inventoryId: INVENTORY_ID,
@@ -204,7 +204,6 @@ it("confirms reopen before mutation and does not offer completion before Task 8"
   renderPanel("closed", { ...progress, status: "closed" });
 
   expect(screen.queryByRole("button", { name: "Завершить инвентаризацию" })).toBeNull();
-  expect(screen.getByText(/завершение станет доступно после формирования,/i)).toBeDefined();
   await userEvent.click(screen.getByRole("button", { name: "Возобновить" }));
   expect(fetchMock).not.toHaveBeenCalled();
   expect(screen.getByText(/ревизия результата увеличится/i)).toBeDefined();

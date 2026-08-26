@@ -1,21 +1,25 @@
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
-import { CABINET_CAPABILITY } from "@markiro/domain";
 import { AdminPage, Alert, Card, Spinner, StatusChip } from "@markiro/ui";
 
-import { useCan } from "../../access/context.js";
 import { useInventoryProgress } from "./api.js";
 import { InventoryClosePanel } from "./InventoryClosePanel.js";
+import { InventoryDocuments } from "./InventoryDocuments.js";
 import type { InventoryDetail } from "./schemas.js";
 
 function formatCount(value: number, locale: string): string {
   return new Intl.NumberFormat(locale).format(value);
 }
 
-export function InventoryLivePage({ inventory }: { inventory: InventoryDetail }) {
+export function InventoryLivePage({
+  inventory,
+  canWrite,
+}: {
+  inventory: InventoryDetail;
+  canWrite: boolean;
+}) {
   const { t, i18n } = useTranslation();
-  const canCorrect = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const progress = useInventoryProgress(inventory.id);
 
   if (progress.isPending) {
@@ -50,7 +54,7 @@ export function InventoryLivePage({ inventory }: { inventory: InventoryDetail })
             status={data.status === "running" ? "ok" : "neutral"}
             label={t(`pages.inventory.status.${data.status}`)}
           />
-          {canCorrect && data.status === "running" ? (
+          {canWrite && data.status === "running" ? (
             <Link className="mk-inventory-action-link" to="corrections">
               {t("pages.inventory.live.corrections")}
             </Link>
@@ -92,10 +96,17 @@ export function InventoryLivePage({ inventory }: { inventory: InventoryDetail })
         </Alert>
       ) : null}
 
-      {canCorrect &&
+      {canWrite &&
       (data.status === "running" || data.status === "closed" || data.status === "completed") ? (
         <InventoryClosePanel inventoryId={inventory.id} status={data.status} progress={data} />
       ) : null}
+
+      <InventoryDocuments
+        inventoryId={inventory.id}
+        inventoryStatus={data.status}
+        resultRevision={data.resultRevision}
+        canWrite={canWrite}
+      />
 
       <div className="mk-inventory-live__columns">
         <Card title={t("pages.inventory.live.participants")} titleAs="h2">

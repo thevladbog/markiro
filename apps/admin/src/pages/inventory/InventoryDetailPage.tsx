@@ -119,7 +119,7 @@ export function InventoryDetailPage() {
     inventory.status === "closed" ||
     inventory.status === "completed"
   ) {
-    return <InventoryLivePage inventory={inventory} />;
+    return <InventoryLivePage inventory={inventory} canWrite={canWrite} />;
   }
   const snapshot = fixedSnapshot ?? inventory.activeSnapshot;
   const isMutable = inventory.status === "draft" || inventory.status === "preparing";

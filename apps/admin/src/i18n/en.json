@@ -480,6 +480,48 @@
           "discrepancies": "Required discrepancies without a decision: {{count}}"
         }
       },
+      "documents": {
+        "title": "Final documents",
+        "completedReadOnly": "The inventory is completed — documents are available for viewing and download only",
+        "catalogEmptyTitle": "Document formats have not been approved yet",
+        "catalogEmptyHint": "Generation will become available after formats and control fixtures are approved. The system does not create files from unverified rules.",
+        "selectionTitle": "Documents to generate",
+        "selectionHint": "Select one or more formats from the approved server catalog.",
+        "generate": "Generate documents",
+        "history": "Generation history",
+        "historyEmpty": "No documents have been generated yet.",
+        "runRevision": "Result revision {{revision}}",
+        "previousRevision": "These documents belong to a previous result revision.",
+        "status": {
+          "queued": "Queued",
+          "processing": "Processing",
+          "ready": "Ready",
+          "failed": "Failed"
+        },
+        "failed": "Document generation failed ({{code}}).",
+        "retry": "Retry generation",
+        "artifactMeta": "codes: {{codes}} · boxes: {{boxes}} · {{bytes}} bytes",
+        "invalidated": "Document invalidated after reopening",
+        "downloaded": "Downloaded",
+        "unavailable": "Unavailable",
+        "downloadArtifact": "Download {{filename}}",
+        "downloadZip": "Download ZIP",
+        "completionTitle": "Completion",
+        "downloadFirst": "Download every document for the current result first",
+        "errors": {
+          "load": "Could not load the document catalog or history. Refresh the page and try again.",
+          "action": "The document action could not be completed. Refresh the data and try again.",
+          "formatChanged": "The format catalog changed. Refresh the page and select documents again.",
+          "requiresClosed": "Close the inventory first.",
+          "notRetryable": "This failure cannot be retried safely. Start a new generation.",
+          "runsActive": "Wait for the current document generation to finish.",
+          "invalidated": "The document was invalidated after the inventory reopened.",
+          "catalogUnavailable": "Approved document formats are not available yet.",
+          "notReady": "Current documents are not ready or have not been downloaded yet.",
+          "notAcknowledged": "Confirm that the downloaded documents were checked.",
+          "lateEvents": "Resolve every late inventory event first."
+        }
+      },
       "late": {
         "title": "Late events",
         "open": "Late events",

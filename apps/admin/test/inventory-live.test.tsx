@@ -184,6 +184,10 @@ function renderLive(progressResponses: unknown[] = [progress]) {
       if (url.endsWith("/api/access/me")) return response(ACCESS);
       if (url.includes("/api/pickup-orders")) return response({ items: [] });
       if (url === `/api/inventories/${INVENTORY_ID}`) return response(detail);
+      if (url === "/api/inventory-document-formats") return response({ items: [] });
+      if (url === `/api/inventories/${INVENTORY_ID}/document-runs`) {
+        return response({ items: [] });
+      }
       if (url === `/api/inventories/${INVENTORY_ID}/progress`) {
         const body = progressResponses[Math.min(progressRequest, progressResponses.length - 1)];
         progressRequest += 1;

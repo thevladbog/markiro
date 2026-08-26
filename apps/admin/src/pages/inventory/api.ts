@@ -4,12 +4,17 @@ import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client.js";
 import {
   createInventoryInputSchema,
+  createInventoryDocumentRunInputSchema,
   createInventoryCorrectionInputSchema,
   inventoryCorrectionSchema,
   inventoryCloseResponseSchema,
   inventoryClosePreviewResponseSchema,
   inventoryCompleteResponseSchema,
   inventoryDetailSchema,
+  inventoryDocumentDownloadSchema,
+  inventoryDocumentFormatsResponseSchema,
+  inventoryDocumentRunSchema,
+  inventoryDocumentRunsResponseSchema,
   inventoryEvidenceResponseSchema,
   inventoryImportSchema,
   inventorySchema,
@@ -31,9 +36,14 @@ import {
   type InventoryCompleteResponse,
   type InventoryChzStatus,
   type InventoryDetail,
+  type InventoryDocumentDownload,
+  type InventoryDocumentFormat,
+  type InventoryDocumentFormatSelection,
+  type InventoryDocumentRun,
   type InventoryEvidenceResponse,
   type InventoryImport,
   type InventoryProgress,
+  type InventoryStatus,
   type InventoryLateEventsResponse,
   type InventoryLateEventReplayResponse,
   type InventoryReopenResponse,
@@ -42,6 +52,11 @@ import {
 } from "./schemas.js";
 
 export const INVENTORIES_QUERY_KEY = ["inventories"] as const;
+export const INVENTORY_DOCUMENT_FORMATS_QUERY_KEY = ["inventory-document-formats"] as const;
+
+export function inventoryDocumentRunsQueryKey(id: string) {
+  return [...INVENTORIES_QUERY_KEY, id, "document-runs"] as const;
+}
 
 export function inventoryProgressQueryKey(id: string) {
   return [...INVENTORIES_QUERY_KEY, id, "progress"] as const;
@@ -202,6 +217,57 @@ async function completeInventory(inventoryId: string): Promise<InventoryComplete
     body: JSON.stringify({ documentsDownloadedAndChecked: true }),
   });
   return inventoryCompleteResponseSchema.parse(value);
+}
+
+async function listInventoryDocumentFormats(): Promise<InventoryDocumentFormat[]> {
+  const value = await apiFetch<unknown>("/inventory-document-formats");
+  return inventoryDocumentFormatsResponseSchema.parse(value).items;
+}
+
+async function listInventoryDocumentRuns(inventoryId: string): Promise<InventoryDocumentRun[]> {
+  const value = await apiFetch<unknown>(`/inventories/${inventoryId}/document-runs`);
+  return inventoryDocumentRunsResponseSchema.parse(value).items;
+}
+
+async function createInventoryDocumentRun(input: {
+  inventoryId: string;
+  selectedFormats: InventoryDocumentFormatSelection[];
+  idempotencyKey: string;
+}): Promise<InventoryDocumentRun> {
+  const request = createInventoryDocumentRunInputSchema.parse({
+    selectedFormats: input.selectedFormats,
+    idempotencyKey: input.idempotencyKey,
+  });
+  const value = await apiFetch<unknown>(`/inventories/${input.inventoryId}/document-runs`, {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+  return inventoryDocumentRunSchema.parse(value);
+}
+
+async function retryInventoryDocumentRun(runId: string): Promise<InventoryDocumentRun> {
+  const value = await apiFetch<unknown>(`/inventory-document-runs/${runId}/retry`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return inventoryDocumentRunSchema.parse(value);
+}
+
+export async function downloadInventoryDocumentArtifact(
+  runId: string,
+  artifactId: string,
+): Promise<InventoryDocumentDownload> {
+  const value = await apiFetch<unknown>(
+    `/inventory-document-runs/${runId}/artifacts/${artifactId}/download`,
+  );
+  return inventoryDocumentDownloadSchema.parse(value);
+}
+
+export async function downloadInventoryDocumentZip(
+  runId: string,
+): Promise<InventoryDocumentDownload> {
+  const value = await apiFetch<unknown>(`/inventory-document-runs/${runId}/download`);
+  return inventoryDocumentDownloadSchema.parse(value);
 }
 
 async function getInventoryLateEvents(
@@ -397,6 +463,57 @@ export function useCompleteInventory(): UseMutationResult<
   return useMutation({
     mutationFn: completeInventory,
     onSuccess: (_result, inventoryId) => invalidateInventory(queryClient, inventoryId),
+  });
+}
+
+export function useInventoryDocumentFormats(): UseQueryResult<InventoryDocumentFormat[]> {
+  return useQuery({
+    queryKey: INVENTORY_DOCUMENT_FORMATS_QUERY_KEY,
+    queryFn: listInventoryDocumentFormats,
+  });
+}
+
+export function useInventoryDocumentRuns(
+  inventoryId: string,
+  inventoryStatus: InventoryStatus,
+): UseQueryResult<InventoryDocumentRun[]> {
+  return useQuery({
+    queryKey: inventoryDocumentRunsQueryKey(inventoryId),
+    queryFn: () => listInventoryDocumentRuns(inventoryId),
+    enabled: inventoryId.length > 0,
+    refetchInterval: (query) =>
+      inventoryStatus === "closed" &&
+      query.state.data?.some((run) => run.status === "queued" || run.status === "processing")
+        ? 2_000
+        : false,
+  });
+}
+
+export function useCreateInventoryDocumentRun(): UseMutationResult<
+  InventoryDocumentRun,
+  Error,
+  {
+    inventoryId: string;
+    selectedFormats: InventoryDocumentFormatSelection[];
+    idempotencyKey: string;
+  }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createInventoryDocumentRun,
+    onSuccess: (_result, input) =>
+      queryClient.invalidateQueries({ queryKey: inventoryDocumentRunsQueryKey(input.inventoryId) }),
+  });
+}
+
+export function useRetryInventoryDocumentRun(
+  inventoryId: string,
+): UseMutationResult<InventoryDocumentRun, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: retryInventoryDocumentRun,
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: inventoryDocumentRunsQueryKey(inventoryId) }),
   });
 }
 

@@ -120,7 +120,6 @@ export function InventoryClosePanel({
                 {t("pages.inventory.close.reopen")}
               </Button>
             </div>
-            <Alert tone="info">{t("pages.inventory.close.completionUnavailable")}</Alert>
           </>
         ) : null}
 

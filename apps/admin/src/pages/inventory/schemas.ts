@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { parseLabelTemplate } from "@markiro/domain";
+import {
+  INVENTORY_DOCUMENT_MIME_TYPE_PATTERN,
+  INVENTORY_DOCUMENT_SOURCE_CATEGORIES,
+  parseLabelTemplate,
+} from "@markiro/domain";
 
 export const INVENTORY_CHZ_STATUSES = [
   "EMITTED",
@@ -22,6 +26,7 @@ export const inventoryStatusSchema = z.enum([
   "closed",
   "completed",
 ]);
+export type InventoryStatus = z.infer<typeof inventoryStatusSchema>;
 
 const uuid = z.string().uuid();
 const civilDate = z
@@ -356,6 +361,88 @@ export const inventoryCompleteResponseSchema = z.strictObject({
   completedAt: dateTime,
 });
 
+export const inventoryDocumentFormatSelectionSchema = z.strictObject({
+  id: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
+  version: z.number().int().min(1).max(2_147_483_647),
+});
+
+export const createInventoryDocumentRunInputSchema = z.strictObject({
+  selectedFormats: z
+    .array(inventoryDocumentFormatSelectionSchema)
+    .min(1)
+    .max(32)
+    .refine((formats) => new Set(formats.map((format) => format.id)).size === formats.length),
+  idempotencyKey: uuid,
+});
+
+export const inventoryDocumentFormatSchema = z.strictObject({
+  id: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
+  version: z.number().int().min(1).max(2_147_483_647),
+  label: z.string().trim().min(1).max(200),
+  extension: z.string().regex(/^[a-z0-9]{1,16}$/),
+  mimeType: z
+    .string()
+    .trim()
+    .min(1)
+    .max(128)
+    .regex(new RegExp(INVENTORY_DOCUMENT_MIME_TYPE_PATTERN)),
+  requiredSourceCategories: z
+    .array(z.enum(INVENTORY_DOCUMENT_SOURCE_CATEGORIES))
+    .min(1)
+    .max(INVENTORY_DOCUMENT_SOURCE_CATEGORIES.length)
+    .refine((categories) => new Set(categories).size === categories.length),
+  supportsParts: z.boolean(),
+  availability: z.literal("available"),
+});
+
+export const inventoryDocumentFormatsResponseSchema = z.strictObject({
+  items: z.array(inventoryDocumentFormatSchema),
+});
+
+export const inventoryDocumentArtifactSchema = z.strictObject({
+  id: uuid,
+  formatId: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
+  formatVersion: z.number().int().min(1),
+  partNumber: z.number().int().min(1),
+  filename: z.string().min(1).max(200),
+  mimeType: z.string().min(1).max(128),
+  rowCount: nonnegativeInteger,
+  codeCount: nonnegativeInteger,
+  boxCount: nonnegativeInteger,
+  byteSize: z.number().int().positive(),
+  sha256: digest,
+  downloadedAt: dateTime.nullable(),
+  invalidatedAt: dateTime.nullable(),
+});
+
+export const inventoryDocumentRunSchema = z.strictObject({
+  id: uuid,
+  inventoryId: uuid,
+  resultRevision: nonnegativeInteger,
+  selectedFormats: z.array(inventoryDocumentFormatSelectionSchema).min(1).max(32),
+  status: z.enum(["queued", "processing", "ready", "failed"]),
+  errorCode: z
+    .string()
+    .regex(/^[A-Z][A-Z0-9_]{0,127}$/)
+    .nullable(),
+  sourceSnapshotStartedAt: dateTime.nullable(),
+  sourceSnapshotCompletedAt: dateTime.nullable(),
+  completedAt: dateTime.nullable(),
+  attemptCount: nonnegativeInteger,
+  createdAt: dateTime,
+  artifacts: z.array(inventoryDocumentArtifactSchema),
+});
+
+export const inventoryDocumentRunsResponseSchema = z.strictObject({
+  items: z.array(inventoryDocumentRunSchema),
+});
+
+export const inventoryDocumentDownloadSchema = z.strictObject({
+  url: z.url(),
+  filename: z.string().min(1).max(200),
+  expiresInSeconds: z.literal(300),
+});
+
 const inventoryLateEventSchema = z.strictObject({
   id: uuid,
   batchId: z.string().min(1),
@@ -532,6 +619,14 @@ export type InventoryClosePreviewResponse = z.infer<typeof inventoryClosePreview
 export type InventoryCloseBlocker = z.infer<typeof inventoryCloseBlockerSchema>;
 export type InventoryReopenResponse = z.infer<typeof inventoryReopenResponseSchema>;
 export type InventoryCompleteResponse = z.infer<typeof inventoryCompleteResponseSchema>;
+export type InventoryDocumentFormatSelection = z.infer<
+  typeof inventoryDocumentFormatSelectionSchema
+>;
+export type CreateInventoryDocumentRunInput = z.infer<typeof createInventoryDocumentRunInputSchema>;
+export type InventoryDocumentFormat = z.infer<typeof inventoryDocumentFormatSchema>;
+export type InventoryDocumentArtifact = z.infer<typeof inventoryDocumentArtifactSchema>;
+export type InventoryDocumentRun = z.infer<typeof inventoryDocumentRunSchema>;
+export type InventoryDocumentDownload = z.infer<typeof inventoryDocumentDownloadSchema>;
 export type InventoryLateEvent = z.infer<typeof inventoryLateEventSchema>;
 export type InventoryLateEventsResponse = z.infer<typeof inventoryLateEventsResponseSchema>;
 export type InventoryLateEventReplayResponse = z.infer<
