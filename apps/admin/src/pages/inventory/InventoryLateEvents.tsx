@@ -32,6 +32,7 @@ export function InventoryLateEvents({
   const [selected, setSelected] = useState<string[]>([]);
   const [reason, setReason] = useState("");
   const [reopenConfirmation, setReopenConfirmation] = useState(false);
+  const [reopenSucceeded, setReopenSucceeded] = useState(false);
   const [replaySuccessBatchId, setReplaySuccessBatchId] = useState<string | null>(null);
   const readOnly = inventoryStatus === "completed";
   const canDiscard = inventoryStatus === "closed";
@@ -60,7 +61,10 @@ export function InventoryLateEvents({
 
   const reopenInventory = () => {
     reopen.mutate(inventoryId, {
-      onSuccess: () => setReopenConfirmation(false),
+      onSuccess: () => {
+        setReopenConfirmation(false);
+        setReopenSucceeded(true);
+      },
     });
   };
 
@@ -74,7 +78,13 @@ export function InventoryLateEvents({
       footer={
         <>
           {inventoryStatus === "closed" ? (
-            <Button variant="warning-outline" onClick={() => setReopenConfirmation(true)}>
+            <Button
+              variant="warning-outline"
+              onClick={() => {
+                setReopenSucceeded(false);
+                setReopenConfirmation(true);
+              }}
+            >
               {t("pages.inventory.late.reopen")}
             </Button>
           ) : null}
@@ -86,6 +96,9 @@ export function InventoryLateEvents({
     >
       <div className="mk-inventory-late-events">
         {readOnly ? <Alert tone="info">{t("pages.inventory.late.readOnly")}</Alert> : null}
+        {reopenSucceeded ? (
+          <Alert tone="ok">{t("pages.inventory.late.reopenSuccess")}</Alert>
+        ) : null}
         {reopenConfirmation ? (
           <div className="mk-inventory-late-decision">
             <Alert tone="warn">{t("pages.inventory.close.reopenExplanation")}</Alert>

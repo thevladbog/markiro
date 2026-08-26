@@ -496,6 +496,7 @@
         "reasonTooLong": "The reason must not exceed 4096 UTF-8 bytes",
         "discard": "Exclude selected",
         "reopen": "Reopen for replay",
+        "reopenSuccess": "Inventory reopened for replay",
         "replay": "Replay {{batchId}}",
         "replaySuccess": "Batch {{batchId}} was replayed",
         "replayError": "The batch could not be replayed. It remains saved and retryable.",

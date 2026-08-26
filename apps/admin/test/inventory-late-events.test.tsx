@@ -120,6 +120,9 @@ it("confirms whole-operation reopen before mutation, while completed evidence st
   );
   const reopenCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
   expect(String(reopenCall?.[0])).toBe(`/api/inventories/${INVENTORY_ID}/reopen`);
+  expect(
+    await screen.findByText("Инвентаризация возобновлена для повторной обработки"),
+  ).toBeDefined();
 
   cleanup();
   renderLateEvents("completed");
