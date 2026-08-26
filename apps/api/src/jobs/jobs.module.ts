@@ -24,6 +24,12 @@ import { MailModule } from "../modules/mail/mail.module";
 import { MailRetentionService } from "../modules/mail/mail-retention.service";
 import { ShiftExportRunnerService } from "../modules/shift-exports/shift-export-runner.service";
 import { ShiftExportSourceService } from "../modules/shift-exports/shift-export-source.service";
+import {
+  INVENTORY_DOCUMENT_GENERATOR_REGISTRY,
+  InventoryDocumentRunnerService,
+  productionInventoryDocumentGeneratorRegistry,
+} from "../modules/inventories/inventory-document-runner.service";
+import { InventoryResultSourceService } from "../modules/inventories/inventory-result-source.service";
 import { currentMonthUTC, nextMonthUTC } from "./months";
 import {
   MATERIALIZE_SUBSCRIPTION_STATUSES_CRON,
@@ -33,6 +39,7 @@ import {
 
 export const PG_CONNECTION_STRING = "JOBS_PG_CONNECTION_STRING";
 export const BUILD_SHIFT_EXPORT_QUEUE = "build-shift-export";
+export const BUILD_INVENTORY_DOCUMENT_QUEUE = "build-inventory-document-run";
 
 const QUEUE_NAME = "ensure-partitions";
 const QUEUE_CRON = "0 4 * * *";
@@ -89,7 +96,7 @@ const PRUNE_EMAIL_DELIVERIES_QUEUE_CRON = "30 2 * * *";
 
 /**
  * Boots a dedicated pg-boss instance (its own `pgboss` schema, same
- * database as the app), two request-driven workers, and nine schedules on it:
+ * database as the app), three request-driven workers, and nine schedules on it:
  *  - keeps the `codes`/`scan_events` monthly partitions ahead of traffic:
  *    ensures the current + next month exist once at startup, then again
  *    every day at 04:00 UTC.
@@ -113,6 +120,8 @@ const PRUNE_EMAIL_DELIVERIES_QUEUE_CRON = "30 2 * * *";
  *    every minute while request-time entitlement checks remain authoritative.
  *  - generates shift export artifacts on demand with bounded retries; this
  *    queue is deliberately not scheduled because export requests enqueue it.
+ *  - generates inventory document artifacts on demand with the same bounded
+ *    retry and boot-reconciliation guarantees.
  *
  * pg-boss v12 requires a queue to be created (`createQueue`) before it can
  * be scheduled or worked -- scheduling against a queue that doesn't exist
@@ -137,6 +146,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     private readonly mailRetention: MailRetentionService,
     private readonly subscriptionStatus: SubscriptionStatusJob,
     private readonly shiftExportRunner: ShiftExportRunnerService,
+    private readonly inventoryDocumentRunner: InventoryDocumentRunnerService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -278,6 +288,29 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       );
       await this.reconcileQueuedShiftExports(boss);
 
+      await boss.createQueue(BUILD_INVENTORY_DOCUMENT_QUEUE, {
+        retryLimit: 5,
+        retryDelay: 30,
+        retryBackoff: true,
+        retryDelayMax: 900,
+        expireInSeconds: 900,
+      });
+      this.workerIds.push(
+        await boss.work(
+          BUILD_INVENTORY_DOCUMENT_QUEUE,
+          { includeMetadata: true },
+          async (jobs: JobWithMetadata<{ runId: string }>[]) => {
+            for (const job of jobs) {
+              await this.inventoryDocumentRunner.run(job.data.runId, {
+                retryCount: job.retryCount,
+                retryLimit: job.retryLimit,
+              });
+            }
+          },
+        ),
+      );
+      await this.reconcileQueuedInventoryDocumentRuns(boss);
+
       // Also run all nine maintenance paths once immediately at boot rather
       // than waiting for the first tick of any schedule.
       await this.runEnsurePartitions();
@@ -319,6 +352,13 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     return jobId;
   }
 
+  async enqueueInventoryDocumentRun(runId: string): Promise<string> {
+    if (!this.boss || !this.started) throw new Error("pg-boss is not started");
+    const jobId = await this.boss.send(BUILD_INVENTORY_DOCUMENT_QUEUE, { runId });
+    if (!jobId) throw new Error("inventory document run enqueue failed");
+    return jobId;
+  }
+
   private async reconcileQueuedShiftExports(boss: PgBoss): Promise<void> {
     let queued: { id: string }[];
     try {
@@ -348,6 +388,35 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async reconcileQueuedInventoryDocumentRuns(boss: PgBoss): Promise<void> {
+    let queued: { id: string }[];
+    try {
+      queued = await this.db
+        .select({ id: schema.inventoryDocumentRuns.id })
+        .from(schema.inventoryDocumentRuns)
+        .where(eq(schema.inventoryDocumentRuns.status, "queued"))
+        .orderBy(asc(schema.inventoryDocumentRuns.createdAt))
+        .limit(SHIFT_EXPORT_RECONCILE_LIMIT);
+    } catch (error) {
+      this.logger.error(
+        "inventory document reconciliation query failed",
+        error instanceof Error ? error.stack : undefined,
+      );
+      return;
+    }
+    for (const row of queued) {
+      try {
+        const jobId = await boss.send(BUILD_INVENTORY_DOCUMENT_QUEUE, { runId: row.id });
+        if (!jobId) throw new Error("inventory document enqueue returned no job id");
+      } catch (error) {
+        this.logger.error(
+          `inventory document reconciliation failed for ${row.id}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+    }
+  }
+
   async checkReady(): Promise<void> {
     if (!this.started || !this.boss) throw new Error("pg-boss is not started");
     try {
@@ -356,7 +425,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 11 ||
+      this.workerIds.length !== 12 ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {
@@ -458,8 +527,14 @@ export class JobsModule {
         ExchangeSessionService,
         ShiftExportSourceService,
         ShiftExportRunnerService,
+        InventoryResultSourceService,
+        {
+          provide: INVENTORY_DOCUMENT_GENERATOR_REGISTRY,
+          useValue: productionInventoryDocumentGeneratorRegistry,
+        },
+        InventoryDocumentRunnerService,
       ],
-      exports: [PgBossService],
+      exports: [PgBossService, INVENTORY_DOCUMENT_GENERATOR_REGISTRY],
     };
   }
 }

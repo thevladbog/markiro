@@ -804,6 +804,104 @@ describe("inventory execution schema", () => {
   });
 });
 
+describe("inventory document schema", () => {
+  it("persists tenant-scoped revision-frozen document runs and verified artifacts", () => {
+    expect(getTableName(table("inventoryDocumentRuns"))).toBe("inventory_document_runs");
+    expect(getTableName(table("inventoryDocumentArtifacts"))).toBe("inventory_document_artifacts");
+    expect(enumValues("inventoryDocumentRunStatusEnum")).toEqual([
+      "queued",
+      "processing",
+      "ready",
+      "failed",
+    ]);
+    expect(
+      constraintColumns("inventoryDocumentRuns", "inventory_document_runs_tenant_id_uq"),
+    ).toEqual(["tenant_id", "id"]);
+    expect(
+      constraintColumns(
+        "inventoryDocumentRuns",
+        "inventory_document_runs_tenant_actor_idempotency_uq",
+      ),
+    ).toEqual(["tenant_id", "created_by_user_id", "idempotency_key"]);
+    expect(
+      foreignKeyColumns("inventoryDocumentRuns", "inventory_document_runs_tenant_inventory_fk"),
+    ).toEqual({
+      columns: ["tenant_id", "inventory_id"],
+      foreignColumns: ["tenant_id", "id"],
+      foreignTable: "inventories",
+    });
+    expect(
+      foreignKeyColumns("inventoryDocumentArtifacts", "inventory_document_artifacts_tenant_run_fk"),
+    ).toEqual({
+      columns: ["tenant_id", "run_id"],
+      foreignColumns: ["tenant_id", "id"],
+      foreignTable: "inventory_document_runs",
+    });
+    expect(
+      constraintColumns(
+        "inventoryDocumentArtifacts",
+        "inventory_document_artifacts_tenant_run_format_part_uq",
+      ),
+    ).toEqual(["tenant_id", "run_id", "format_id", "part_number"]);
+
+    const runColumns = Object.keys(schema.inventoryDocumentRuns);
+    expect(runColumns).toEqual(
+      expect.arrayContaining([
+        "selectedFormats",
+        "resultRevision",
+        "requestDigest",
+        "sourceSnapshotStartedAt",
+        "attemptCount",
+        "errorCode",
+      ]),
+    );
+    const artifactColumns = Object.keys(schema.inventoryDocumentArtifacts);
+    expect(artifactColumns).toEqual(
+      expect.arrayContaining([
+        "formatId",
+        "formatVersion",
+        "filename",
+        "mimeType",
+        "rowCount",
+        "codeCount",
+        "boxCount",
+        "byteSize",
+        "sha256",
+        "objectKey",
+        "downloadedAt",
+        "invalidatedAt",
+      ]),
+    );
+  });
+
+  it("packages the forward document migration and generated snapshot", () => {
+    const migration = readFileSync(
+      new URL("../migrations/0082_slow_skreet.sql", import.meta.url),
+      "utf8",
+    );
+    const snapshot = readFileSync(
+      new URL("../migrations/meta/0082_snapshot.json", import.meta.url),
+      "utf8",
+    );
+    const journal = JSON.parse(
+      readFileSync(new URL("../migrations/meta/_journal.json", import.meta.url), "utf8"),
+    ) as { entries: Array<{ idx: number; tag: string }> };
+
+    expect(migration).toContain('CREATE TABLE "inventory_document_runs"');
+    expect(migration).toContain('CREATE TABLE "inventory_document_artifacts"');
+    expect(migration).toContain('CONSTRAINT "inventory_document_runs_tenant_inventory_fk"');
+    expect(snapshot).toContain('"inventory_document_runs"');
+    expect(snapshot).toContain('"inventory_document_artifacts"');
+    expect(journal.entries).toContainEqual({
+      idx: 82,
+      tag: "0082_slow_skreet",
+      version: "7",
+      when: expect.any(Number),
+      breakpoints: true,
+    });
+  });
+});
+
 const databaseUrl = process.env.DATABASE_URL;
 
 const inventoryTestTables = [

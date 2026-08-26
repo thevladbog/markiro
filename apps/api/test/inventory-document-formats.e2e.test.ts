@@ -1,4 +1,5 @@
 import type { INestApplication } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import { Test } from "@nestjs/testing";
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
 import { eq } from "drizzle-orm";
@@ -79,6 +80,13 @@ describe.skipIf(!ready)("inventory document formats e2e", () => {
   it("advertises no format until an approved checked-in contract fixture exists", async () => {
     const { agent } = await owner();
     await agent.get("/inventory-document-formats").expect(200, { items: [] });
+    await agent
+      .post(`/inventories/${randomUUID()}/document-runs`)
+      .send({
+        selectedFormats: [{ id: "synthetic_stock", version: 1 }],
+        idempotencyKey: randomUUID(),
+      })
+      .expect(400, { code: "INVENTORY_DOCUMENT_FORMAT_UNKNOWN" });
   });
 
   it("requires operations.read and rejects station credentials", async () => {

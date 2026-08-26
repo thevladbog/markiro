@@ -49,6 +49,10 @@ import { CHZ_MAX_COMPRESSED_BYTES } from "./chz-tabular-reader";
 import {
   createInventoryOpenApiSchema,
   createInventorySchema,
+  createInventoryDocumentRunOpenApiSchema,
+  createInventoryDocumentRunSchema,
+  retryInventoryDocumentRunOpenApiSchema,
+  retryInventoryDocumentRunSchema,
   createInventoryCorrectionOpenApiSchema,
   createInventoryCorrectionSchema,
   discardInventoryLateEventsOpenApiSchema,
@@ -61,6 +65,9 @@ import {
   inventoryDetailOpenApiSchema,
   inventoryIdSchema,
   inventoryImportOpenApiSchema,
+  inventoryDocumentDownloadOpenApiSchema,
+  inventoryDocumentRunOpenApiSchema,
+  inventoryDocumentRunsOpenApiSchema,
   inventoryImportStatusSchema,
   inventoryLateEventsDiscardOpenApiSchema,
   inventoryLateEventReplayOpenApiSchema,
@@ -95,10 +102,15 @@ import {
   type CloseInventoryDto,
   type CompleteInventoryDto,
   type CreateInventoryDto,
+  type CreateInventoryDocumentRunDto,
   type CreateInventoryCorrectionDto,
   type DiscardInventoryLateEventsDto,
   type FixInventorySnapshotDto,
   type InventoryDto,
+  type InventoryDocumentDownloadDto,
+  type InventoryDocumentRunDto,
+  type InventoryDocumentRunsResponseDto,
+  type RetryInventoryDocumentRunDto,
   type InventoryCorrectionDto,
   type EmergencyCloseInventoryDto,
   type InventoryCloseDto,
@@ -127,6 +139,7 @@ import { InventoryLifecycleService } from "./inventory-lifecycle.service";
 import { InventoryReconciliationService } from "./inventory-reconciliation.service";
 import { InventoryCorrectionsService } from "./inventory-corrections.service";
 import { InventoryCloseService } from "./inventory-close.service";
+import { InventoryDocumentsService } from "./inventory-documents.service";
 import { renderInventoryTaskFormHtml } from "./inventory-task-form";
 import {
   stationInventoryEventBatchResponseOpenApiSchema,
@@ -145,6 +158,7 @@ export class InventoriesController {
     private readonly reconciliation: InventoryReconciliationService,
     private readonly corrections: InventoryCorrectionsService,
     private readonly closeService: InventoryCloseService,
+    private readonly documents: InventoryDocumentsService,
   ) {}
 
   @Get()
@@ -257,6 +271,32 @@ export class InventoriesController {
     return this.closeService.listLateEvents(req.tenantId!, id, query);
   }
 
+  @Get(":id/document-runs")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiOkResponse({ schema: inventoryDocumentRunsOpenApiSchema })
+  documentRuns(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+  ): Promise<InventoryDocumentRunsResponseDto> {
+    return this.documents.list(req.tenantId!, id);
+  }
+
+  @Post(":id/document-runs")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiBody({ schema: createInventoryDocumentRunOpenApiSchema })
+  @ApiCreatedResponse({ schema: inventoryDocumentRunOpenApiSchema })
+  createDocumentRun(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Body(new ZodValidationPipe(createInventoryDocumentRunSchema))
+    body: CreateInventoryDocumentRunDto,
+  ): Promise<InventoryDocumentRunDto> {
+    return this.documents.create(req.tenantId!, req.userId!, id, body);
+  }
+
   @Post(":id/late-events/discard")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
@@ -344,9 +384,9 @@ export class InventoriesController {
   complete(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
-    @Body(new ZodValidationPipe(completeInventorySchema)) _body: CompleteInventoryDto,
+    @Body(new ZodValidationPipe(completeInventorySchema)) body: CompleteInventoryDto,
   ): Promise<InventoryCompleteDto> {
-    return this.closeService.complete(req.tenantId!, req.userId!, id);
+    return this.closeService.complete(req.tenantId!, req.userId!, id, body);
   }
 
   @Post(":id/corrections")
@@ -472,5 +512,52 @@ export class InventoriesController {
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
   ): Promise<StationInventoryManifest> {
     return this.lifecycle.start(req.tenantId!, req.userId!, id);
+  }
+}
+
+@ApiTags("inventory-documents")
+@Controller("inventory-document-runs")
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
+export class InventoryDocumentRunsController {
+  constructor(private readonly documents: InventoryDocumentsService) {}
+
+  @Post(":runId/retry")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
+  @ApiParam({ name: "runId", schema: { type: "string", format: "uuid" } })
+  @ApiBody({ schema: retryInventoryDocumentRunOpenApiSchema })
+  @ApiCreatedResponse({ schema: inventoryDocumentRunOpenApiSchema })
+  retry(
+    @Req() req: RequestWithTenant,
+    @Param("runId", new ZodValidationPipe(inventoryIdSchema)) runId: string,
+    @Body(new ZodValidationPipe(retryInventoryDocumentRunSchema))
+    _body: RetryInventoryDocumentRunDto,
+  ): Promise<InventoryDocumentRunDto> {
+    return this.documents.retry(req.tenantId!, req.userId!, runId);
+  }
+
+  @Get(":runId/artifacts/:artifactId/download")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiParam({ name: "runId", schema: { type: "string", format: "uuid" } })
+  @ApiParam({ name: "artifactId", schema: { type: "string", format: "uuid" } })
+  @ApiOkResponse({ schema: inventoryDocumentDownloadOpenApiSchema })
+  downloadArtifact(
+    @Req() req: RequestWithTenant,
+    @Param("runId", new ZodValidationPipe(inventoryIdSchema)) runId: string,
+    @Param("artifactId", new ZodValidationPipe(inventoryIdSchema)) artifactId: string,
+  ): Promise<InventoryDocumentDownloadDto> {
+    return this.documents.downloadArtifact(req.tenantId!, req.userId!, runId, artifactId);
+  }
+
+  @Get(":runId/download")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiParam({ name: "runId", schema: { type: "string", format: "uuid" } })
+  @ApiOkResponse({ schema: inventoryDocumentDownloadOpenApiSchema })
+  downloadZip(
+    @Req() req: RequestWithTenant,
+    @Param("runId", new ZodValidationPipe(inventoryIdSchema)) runId: string,
+  ): Promise<InventoryDocumentDownloadDto> {
+    return this.documents.downloadZip(req.tenantId!, req.userId!, runId);
   }
 }

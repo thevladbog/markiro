@@ -11,6 +11,7 @@ import type { MailJobsService } from "../src/modules/mail/mail-jobs.service";
 import type { MailRetentionService } from "../src/modules/mail/mail-retention.service";
 import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
 import type { ShiftExportRunnerService } from "../src/modules/shift-exports/shift-export-runner.service";
+import type { InventoryDocumentRunnerService } from "../src/modules/inventories/inventory-document-runner.service";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -51,6 +52,7 @@ describe.skipIf(!ready)("PgBossService: prune exchange_attempts", () => {
       mailRetention,
       {} as SubscriptionStatusJob,
       shiftExportRunner,
+      {} as InventoryDocumentRunnerService,
     );
   });
 

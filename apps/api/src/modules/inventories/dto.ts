@@ -207,6 +207,75 @@ export const completeInventorySchema = z.strictObject({
   documentsDownloadedAndChecked: z.literal(true),
 });
 export type CompleteInventoryDto = z.infer<typeof completeInventorySchema>;
+
+export const inventoryDocumentFormatSelectionSchema = z.strictObject({
+  id: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
+  version: z.number().int().min(1).max(2_147_483_647),
+});
+export const createInventoryDocumentRunSchema = z.strictObject({
+  selectedFormats: z
+    .array(inventoryDocumentFormatSelectionSchema)
+    .min(1)
+    .max(32)
+    .superRefine((formats, context) => {
+      if (new Set(formats.map((format) => format.id)).size !== formats.length) {
+        context.addIssue({ code: "custom", message: "selectedFormats ids must be unique" });
+      }
+    }),
+  idempotencyKey: z.string().uuid(),
+});
+export type CreateInventoryDocumentRunDto = z.infer<typeof createInventoryDocumentRunSchema>;
+export const retryInventoryDocumentRunSchema = z.strictObject({});
+export type RetryInventoryDocumentRunDto = z.infer<typeof retryInventoryDocumentRunSchema>;
+
+const nullableDateTimeStringSchema = z.iso.datetime().nullable();
+export const inventoryDocumentArtifactResponseSchema = z.strictObject({
+  id: z.string().uuid(),
+  formatId: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
+  formatVersion: z.number().int().min(1),
+  partNumber: z.number().int().min(1),
+  filename: z.string().min(1).max(200),
+  mimeType: z.string().min(1).max(128),
+  rowCount: z.number().int().min(0),
+  codeCount: z.number().int().min(0),
+  boxCount: z.number().int().min(0),
+  byteSize: z.number().int().min(1),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  downloadedAt: nullableDateTimeStringSchema,
+  invalidatedAt: nullableDateTimeStringSchema,
+});
+export type InventoryDocumentArtifactDto = z.infer<typeof inventoryDocumentArtifactResponseSchema>;
+
+export const inventoryDocumentRunResponseSchema = z.strictObject({
+  id: z.string().uuid(),
+  inventoryId: z.string().uuid(),
+  resultRevision: z.number().int().min(0),
+  selectedFormats: z.array(inventoryDocumentFormatSelectionSchema).min(1).max(32),
+  status: z.enum(["queued", "processing", "ready", "failed"]),
+  errorCode: z
+    .string()
+    .regex(/^[A-Z][A-Z0-9_]{0,127}$/)
+    .nullable(),
+  sourceSnapshotStartedAt: nullableDateTimeStringSchema,
+  sourceSnapshotCompletedAt: nullableDateTimeStringSchema,
+  completedAt: nullableDateTimeStringSchema,
+  attemptCount: z.number().int().min(0),
+  createdAt: z.iso.datetime(),
+  artifacts: z.array(inventoryDocumentArtifactResponseSchema),
+});
+export type InventoryDocumentRunDto = z.infer<typeof inventoryDocumentRunResponseSchema>;
+
+export const inventoryDocumentRunsResponseSchema = z.strictObject({
+  items: z.array(inventoryDocumentRunResponseSchema),
+});
+export type InventoryDocumentRunsResponseDto = z.infer<typeof inventoryDocumentRunsResponseSchema>;
+
+export const inventoryDocumentDownloadResponseSchema = z.strictObject({
+  url: z.url(),
+  filename: z.string().min(1).max(200),
+  expiresInSeconds: z.literal(300),
+});
+export type InventoryDocumentDownloadDto = z.infer<typeof inventoryDocumentDownloadResponseSchema>;
 export const discardInventoryLateEventsSchema = z.strictObject({
   lateEventIds: z
     .array(z.string().uuid())
@@ -551,6 +620,121 @@ export interface InventoryCorrectionDto {
 const uuidSchema = { type: "string", format: "uuid" } as const;
 const dateSchema = { type: "string", format: "date" } as const;
 const dateTimeSchema = { type: "string", format: "date-time" } as const;
+
+export const createInventoryDocumentRunOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["selectedFormats", "idempotencyKey"],
+  properties: {
+    selectedFormats: {
+      type: "array",
+      minItems: 1,
+      maxItems: 32,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "version"],
+        properties: {
+          id: { type: "string", pattern: "^[a-z][a-z0-9_]{0,63}$" },
+          version: { type: "integer", minimum: 1, maximum: 2_147_483_647 },
+        },
+      },
+    },
+    idempotencyKey: uuidSchema,
+  },
+};
+
+export const retryInventoryDocumentRunOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+};
+
+export const inventoryDocumentArtifactOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "formatId",
+    "formatVersion",
+    "partNumber",
+    "filename",
+    "mimeType",
+    "rowCount",
+    "codeCount",
+    "boxCount",
+    "byteSize",
+    "sha256",
+    "downloadedAt",
+    "invalidatedAt",
+  ],
+  properties: {
+    id: uuidSchema,
+    formatId: { type: "string", pattern: "^[a-z][a-z0-9_]{0,63}$" },
+    formatVersion: { type: "integer", minimum: 1 },
+    partNumber: { type: "integer", minimum: 1 },
+    filename: { type: "string", minLength: 1, maxLength: 200 },
+    mimeType: { type: "string", minLength: 1, maxLength: 128 },
+    rowCount: { type: "integer", minimum: 0 },
+    codeCount: { type: "integer", minimum: 0 },
+    boxCount: { type: "integer", minimum: 0 },
+    byteSize: { type: "integer", minimum: 1 },
+    sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    downloadedAt: { ...dateTimeSchema, nullable: true },
+    invalidatedAt: { ...dateTimeSchema, nullable: true },
+  },
+};
+
+export const inventoryDocumentRunOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "inventoryId",
+    "resultRevision",
+    "selectedFormats",
+    "status",
+    "errorCode",
+    "sourceSnapshotStartedAt",
+    "sourceSnapshotCompletedAt",
+    "completedAt",
+    "attemptCount",
+    "createdAt",
+    "artifacts",
+  ],
+  properties: {
+    id: uuidSchema,
+    inventoryId: uuidSchema,
+    resultRevision: { type: "integer", minimum: 0 },
+    selectedFormats: createInventoryDocumentRunOpenApiSchema.properties!.selectedFormats!,
+    status: { type: "string", enum: ["queued", "processing", "ready", "failed"] },
+    errorCode: { type: "string", nullable: true, pattern: "^[A-Z][A-Z0-9_]{0,127}$" },
+    sourceSnapshotStartedAt: { ...dateTimeSchema, nullable: true },
+    sourceSnapshotCompletedAt: { ...dateTimeSchema, nullable: true },
+    completedAt: { ...dateTimeSchema, nullable: true },
+    attemptCount: { type: "integer", minimum: 0 },
+    createdAt: dateTimeSchema,
+    artifacts: { type: "array", items: inventoryDocumentArtifactOpenApiSchema },
+  },
+};
+
+export const inventoryDocumentRunsOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: { items: { type: "array", items: inventoryDocumentRunOpenApiSchema } },
+};
+
+export const inventoryDocumentDownloadOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["url", "filename", "expiresInSeconds"],
+  properties: {
+    url: { type: "string", format: "uri" },
+    filename: { type: "string", minLength: 1, maxLength: 200 },
+    expiresInSeconds: { type: "integer", enum: [300] },
+  },
+};
 
 function correctionRequestOpenApiBranch(
   action: InventoryCorrectionAction,

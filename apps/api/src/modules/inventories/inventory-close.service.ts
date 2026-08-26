@@ -1,5 +1,5 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
 import { parseInventoryEventBatchResponse } from "@markiro/domain";
@@ -12,6 +12,7 @@ import type {
   InventoryCloseDto,
   InventoryClosePreviewDto,
   InventoryCompleteDto,
+  CompleteInventoryDto,
   InventoryLateEventReplayDto,
   InventoryLateEventDto,
   InventoryLateEventsDiscardDto,
@@ -21,6 +22,10 @@ import type {
 } from "./dto";
 import { stationInventoryEventBatchSchema } from "./station-inventory.dto";
 import { StationInventorySyncService } from "./station-inventory-sync.service";
+import {
+  INVENTORY_DOCUMENT_GENERATOR_REGISTRY,
+  InventoryDocumentGeneratorRegistry,
+} from "./inventory-document-runner.service";
 
 type InventoryTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -60,6 +65,8 @@ export class InventoryCloseService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly stationSync: StationInventorySyncService,
+    @Inject(INVENTORY_DOCUMENT_GENERATOR_REGISTRY)
+    private readonly documentGenerators: InventoryDocumentGeneratorRegistry,
   ) {}
 
   preview(tenantId: string, inventoryId: string): Promise<InventoryClosePreviewDto> {
@@ -113,10 +120,19 @@ export class InventoryCloseService {
       }
       const reopenedAt = new Date();
       const resultRevision = inventory.resultRevision + 1;
-      // Task 8 adds document tables and extends this row-locked transaction with
-      // the real invalidation update. Before that schema exists the count is
-      // necessarily zero; no placeholder artifact evidence is invented here.
-      const invalidatedArtifactCount = 0;
+      const invalidated = await tx.execute(sql<{ id: string }>`
+        update inventory_document_artifacts artifact
+        set invalidated_at = ${reopenedAt}
+        from inventory_document_runs run
+        where artifact.tenant_id = ${tenantId}
+          and artifact.invalidated_at is null
+          and run.tenant_id = artifact.tenant_id
+          and run.id = artifact.run_id
+          and run.inventory_id = ${inventoryId}
+          and run.result_revision = ${inventory.resultRevision}
+        returning artifact.id
+      `);
+      const invalidatedArtifactCount = invalidated.rows.length;
       await tx
         .update(schema.inventories)
         .set({
@@ -189,6 +205,7 @@ export class InventoryCloseService {
     tenantId: string,
     actorUserId: string,
     inventoryId: string,
+    input: CompleteInventoryDto,
   ): Promise<InventoryCompleteDto> {
     return this.db.transaction(async (tx) => {
       const inventory = await this.lockInventory(tx, tenantId, inventoryId);
@@ -212,11 +229,106 @@ export class InventoryCloseService {
           pendingLateEventCount: pendingLateEvent?.count ?? 0,
         });
       }
-      void actorUserId;
-      throw new ConflictException({
-        code: "INVENTORY_DOCUMENT_ARTIFACTS_UNAVAILABLE",
-        requiredTask: 8,
+      const [activeRun] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.inventoryDocumentRuns)
+        .where(
+          and(
+            eq(schema.inventoryDocumentRuns.tenantId, tenantId),
+            eq(schema.inventoryDocumentRuns.inventoryId, inventoryId),
+            eq(schema.inventoryDocumentRuns.resultRevision, inventory.resultRevision),
+            inArray(schema.inventoryDocumentRuns.status, ["queued", "processing"]),
+          ),
+        );
+      if ((activeRun?.count ?? 0) > 0) {
+        throw new ConflictException({ code: "INVENTORY_DOCUMENT_RUNS_ACTIVE" });
+      }
+      const requiredFormats = this.documentGenerators.listAvailable();
+      if (requiredFormats.length === 0) {
+        throw new ConflictException({
+          code: "INVENTORY_DOCUMENT_ARTIFACTS_UNAVAILABLE",
+          requiredTask: 8,
+        });
+      }
+      const readyArtifacts = await tx
+        .select({
+          formatId: schema.inventoryDocumentArtifacts.formatId,
+          formatVersion: schema.inventoryDocumentArtifacts.formatVersion,
+          downloadedAt: schema.inventoryDocumentArtifacts.downloadedAt,
+        })
+        .from(schema.inventoryDocumentArtifacts)
+        .innerJoin(
+          schema.inventoryDocumentRuns,
+          and(
+            eq(schema.inventoryDocumentRuns.tenantId, schema.inventoryDocumentArtifacts.tenantId),
+            eq(schema.inventoryDocumentRuns.id, schema.inventoryDocumentArtifacts.runId),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.inventoryDocumentRuns.tenantId, tenantId),
+            eq(schema.inventoryDocumentRuns.inventoryId, inventoryId),
+            eq(schema.inventoryDocumentRuns.resultRevision, inventory.resultRevision),
+            eq(schema.inventoryDocumentRuns.status, "ready"),
+            isNull(schema.inventoryDocumentArtifacts.invalidatedAt),
+          ),
+        );
+      const readyKeys = new Set(
+        readyArtifacts.map((artifact) => `${artifact.formatId}@${artifact.formatVersion}`),
+      );
+      const missing = requiredFormats.filter(
+        (format) => !readyKeys.has(`${format.id}@${format.version}`),
+      );
+      if (missing.length > 0 || readyArtifacts.some((artifact) => artifact.downloadedAt === null)) {
+        throw new ConflictException({
+          code: "INVENTORY_DOCUMENT_ARTIFACTS_NOT_READY",
+          missingFormats: missing.map((format) => ({ id: format.id, version: format.version })),
+        });
+      }
+      if (!input.documentsDownloadedAndChecked) {
+        throw new ConflictException({ code: "INVENTORY_DOCUMENTS_NOT_ACKNOWLEDGED" });
+      }
+      const completedAt = new Date();
+      const updated = await tx
+        .update(schema.inventories)
+        .set({
+          status: "completed",
+          completionAcknowledgedByUserId: actorUserId,
+          completionAcknowledgedAt: completedAt,
+          completedByUserId: actorUserId,
+          completedAt,
+          updatedAt: completedAt,
+        })
+        .where(
+          and(
+            eq(schema.inventories.tenantId, tenantId),
+            eq(schema.inventories.id, inventoryId),
+            eq(schema.inventories.status, "closed"),
+          ),
+        )
+        .returning({ id: schema.inventories.id });
+      if (updated.length === 0) throw new ConflictException({ code: "INVENTORY_COMPLETION_STALE" });
+      await tx.insert(schema.tenantAuditEvents).values({
+        organizationId: tenantId,
+        actorUserId,
+        action: "inventory.completed",
+        outcome: "success",
+        targetType: "inventory",
+        targetId: inventoryId,
+        before: { status: "closed", resultRevision: inventory.resultRevision },
+        after: {
+          status: "completed",
+          resultRevision: inventory.resultRevision,
+          documentsDownloadedAndChecked: true,
+          completedAt: completedAt.toISOString(),
+        },
       });
+      return {
+        inventoryId,
+        status: "completed",
+        resultRevision: inventory.resultRevision,
+        completedAt: completedAt.toISOString(),
+      };
     });
   }
 
