@@ -942,15 +942,38 @@ function validatePublisherBinding(plan, resource, bucketName, publisherId) {
   exactStrings(members, [`serviceAccount:${publisherId}`]);
 }
 
+function releaseOriginGroupScoped(scope, callback) {
+  return scoped(`release-origin-group-${scope}`, callback);
+}
+
 function validateOriginGroup(resource, bucketName) {
-  const value = after(resource);
-  if (value.name !== "markiro-station-releases" || value.use_next !== false) rejected();
-  if (!Array.isArray(value.origin) || value.origin.length !== 1) rejected();
+  const value = releaseOriginGroupScoped("resource", () => after(resource));
+  releaseOriginGroupScoped("name", () => {
+    if (value.name !== "markiro-station-releases") rejected();
+  });
+  releaseOriginGroupScoped("use-next", () => {
+    if (value.use_next !== false) rejected();
+  });
+  releaseOriginGroupScoped("origin-count", () => {
+    if (!Array.isArray(value.origin) || value.origin.length !== 1) rejected();
+  });
   const origin = value.origin[0];
-  if (!object(origin) || origin.enabled !== true || origin.backup !== false) rejected();
-  if (origin.source !== `${bucketName}.storage.yandexcloud.net`) rejected();
-  const id = knownOrComputed(resource, "id");
-  return id === null ? null : nonblank(id);
+  releaseOriginGroupScoped("origin-shape", () => {
+    if (!object(origin)) rejected();
+  });
+  releaseOriginGroupScoped("enabled", () => {
+    if (origin.enabled !== true) rejected();
+  });
+  releaseOriginGroupScoped("backup", () => {
+    if (origin.backup !== false) rejected();
+  });
+  releaseOriginGroupScoped("source", () => {
+    if (origin.source !== `${bucketName}.storage.yandexcloud.net`) rejected();
+  });
+  return releaseOriginGroupScoped("id", () => {
+    const id = knownOrComputed(resource, "id");
+    return id === null ? null : nonblank(id);
+  });
 }
 
 function validateCertificate(resource) {
@@ -1199,11 +1222,9 @@ export function guardProductionPlan(plan) {
     expectedTerraformId,
     appRuntimeId,
   );
-  const releaseOriginGroupId = scoped("release-origin-group", () =>
-    validateOriginGroup(
-      resources.get("module.station_releases.yandex_cdn_origin_group.releases"),
-      bucketName,
-    ),
+  const releaseOriginGroupId = validateOriginGroup(
+    resources.get("module.station_releases.yandex_cdn_origin_group.releases"),
+    bucketName,
   );
   scoped("release-certificate", () =>
     validateCertificate(resources.get("module.station_releases.yandex_cm_certificate.releases")),

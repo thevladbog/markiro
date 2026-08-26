@@ -565,6 +565,34 @@ test("guard CLI exposes a fixed release-policy subscope without leaking plan val
   });
 });
 
+test("guard CLI exposes a fixed release-origin-group subscope without leaking plan values", async () => {
+  const safe = await readFixture("safe");
+  resource(
+    safe,
+    "module.station_releases.yandex_cdn_origin_group.releases",
+  ).change.after.origin[0].source = "do-not-print-this-plan-value";
+
+  await withPlan(safe, (planPath) => {
+    let stdout = "";
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [script, planPath], {
+        cwd: root,
+        env: { ...process.env, GITHUB_ACTIONS: "true" },
+        stdio: "pipe",
+      });
+      assert.fail("guard CLI unexpectedly accepted invalid release origin group");
+    } catch (error) {
+      stdout = String(error.stdout);
+      stderr = String(error.stderr);
+    }
+    assert.equal(stdout, "::error title=Production plan rejected::release-origin-group-source\n");
+    assert.equal(stderr, "production plan rejected (release-origin-group-source)\n");
+    assert.doesNotMatch(stdout, /do-not-print-this-plan-value/);
+    assert.doesNotMatch(stderr, /do-not-print-this-plan-value/);
+  });
+});
+
 test("production plan guard distinguishes release-policy failure classes", async () => {
   const safe = await readFixture("safe");
   const cases = [
