@@ -393,7 +393,7 @@ describe.skipIf(!databaseUrl)("closed inventory result source", () => {
       ],
       ineligible: [{ codeHash: ineligibleHash }],
       unknown: [{ codeHash: unknownHash }],
-      oldBoxes: [{ sscc: oldSscc, winner: { terminalId: deviceBId, terminalName: "Terminal B" } }],
+      oldBoxes: [{ sscc: oldSscc, winner: { terminalId: deviceBId } }],
       newBoxes: [
         { sscc: newSscc, state: "closed", codeHashes: [verifiedHash] },
         { sscc: invalidatedSscc, state: "invalidated", codeHashes: [] },
@@ -401,7 +401,6 @@ describe.skipIf(!databaseUrl)("closed inventory result source", () => {
     });
     expect(frozen.verified[0]?.winner).toMatchObject({
       terminalId: deviceAId,
-      terminalName: "Terminal A",
       scannedAt: "2026-08-20T10:00:00.000Z",
     });
     expect(frozen.verified).toHaveLength(1);
@@ -418,5 +417,26 @@ describe.skipIf(!databaseUrl)("closed inventory result source", () => {
       "2026-08-08",
     ]);
     expect(frozen.observedDateGroups[1]?.codeHashes).toEqual([verifiedHash]);
+  });
+
+  it("keeps a closed result source stable after a terminal display-name change", async () => {
+    const beforeRename = await service.load(tenantId, inventoryId);
+
+    await db
+      .update(schema.stationDevices)
+      .set({ name: "Renamed after inventory close" })
+      .where(eq(schema.stationDevices.tenantId, tenantId));
+
+    const afterRename = await service.load(tenantId, inventoryId);
+    expect(afterRename).toEqual({
+      ...beforeRename,
+      sourceSnapshotStartedAt: afterRename.sourceSnapshotStartedAt,
+    });
+  });
+
+  it("rejects cross-tenant UUID possession after the inventory is closed", async () => {
+    await expect(service.load(foreignTenantId, inventoryId)).rejects.toMatchObject({
+      code: "INVENTORY_RESULT_NOT_CLOSED",
+    });
   });
 });

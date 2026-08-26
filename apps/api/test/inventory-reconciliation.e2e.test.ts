@@ -13,6 +13,7 @@ import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { InventoryReconciliationService } from "../src/modules/inventories/inventory-reconciliation.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { setOnlyOrganizationMemberRole, signUpAndActivate } from "./support/auth";
 
@@ -22,6 +23,8 @@ const ready = Boolean(
 const GTIN = "04600000000015";
 
 type Agent = ReturnType<typeof request.agent>;
+type DbTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
+type DbTransactionConfig = Parameters<Db["transaction"]>[1];
 type JsonSchema = {
   type?: string;
   additionalProperties?: boolean;
@@ -414,6 +417,37 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
     ]);
   });
 
+  it("returns one discrepancy snapshot when a row commits between count and page reads", async () => {
+    const concurrentSscc = "246000000000000019";
+    let mutationRan = false;
+    const mutateAfterCount = async () => {
+      mutationRan = true;
+      await db.insert(schema.inventoryRepackBoxes).values({
+        tenantId,
+        inventoryId,
+        newSscc: concurrentSscc,
+        ownerDeviceId: terminalBId,
+        capacity: 12,
+        productionDate: "2026-08-10",
+        state: "invalidated",
+        printState: "not_ready",
+        invalidatedAt: new Date("2026-08-20T11:10:00.000Z"),
+      });
+    };
+    const snapshotDb = withMutationAfterFirstExecute(db, mutateAfterCount);
+    const reconciliation = new InventoryReconciliationService(snapshotDb);
+
+    const response = await reconciliation.listDiscrepancies(tenantId, inventoryId, {
+      page: 1,
+      pageSize: 100,
+    });
+
+    expect(mutationRan).toBe(true);
+    expect(response.total).toBe(8);
+    expect(response.items).toHaveLength(8);
+    expect(response.items.map((item) => item.sscc)).not.toContain(concurrentSscc);
+  });
+
   it("denies cross-tenant UUID possession and malformed pagination", async () => {
     await foreignAgent.get(`/inventories/${inventoryId}/progress`).expect(404);
     await foreignAgent.get(`/inventories/${inventoryId}/discrepancies`).expect(404);
@@ -466,6 +500,41 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
     );
   });
 });
+
+function withMutationAfterFirstExecute(db: Db, mutate: () => Promise<void>): Db {
+  let executed = false;
+  const interceptExecute = <T extends object>(target: T): T =>
+    new Proxy(target, {
+      get(current, property, receiver) {
+        const value = Reflect.get(current, property, receiver);
+        if (typeof value !== "function") return value;
+        if (property !== "execute") return value.bind(current);
+        return async (...args: unknown[]) => {
+          const result: unknown = await Reflect.apply(value, current, args);
+          if (!executed) {
+            executed = true;
+            await mutate();
+          }
+          return result;
+        };
+      },
+    });
+
+  return new Proxy(db, {
+    get(current, property, receiver) {
+      if (property === "transaction") {
+        return <T>(
+          callback: (tx: DbTransaction) => Promise<T>,
+          config?: DbTransactionConfig,
+        ): Promise<T> => current.transaction((tx) => callback(interceptExecute(tx)), config);
+      }
+      const value = Reflect.get(current, property, receiver);
+      if (typeof value !== "function") return value;
+      if (property === "execute") return Reflect.get(interceptExecute(current), property);
+      return value.bind(current);
+    },
+  });
+}
 
 function responseSchema(document: OpenAPIObject, path: string): JsonSchema {
   const operation = document.paths[path]?.get;

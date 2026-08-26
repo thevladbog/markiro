@@ -44,13 +44,26 @@ interface DiscrepancyRow {
   winningScannedAt: Date | string | null;
 }
 
+type ReconciliationTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
 @Injectable()
 export class InventoryReconciliationService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   async getProgress(tenantId: string, inventoryId: string): Promise<InventoryProgressDto> {
-    const inventory = await this.getInventoryProjection(tenantId, inventoryId);
-    const result = await this.db.execute(sql<ProgressCountRow>`
+    return this.db.transaction((tx) => this.getProgressFromTransaction(tx, tenantId, inventoryId), {
+      isolationLevel: "repeatable read",
+      accessMode: "read only",
+    });
+  }
+
+  private async getProgressFromTransaction(
+    tx: ReconciliationTransaction,
+    tenantId: string,
+    inventoryId: string,
+  ): Promise<InventoryProgressDto> {
+    const inventory = await this.getInventoryProjection(tx, tenantId, inventoryId);
+    const result = await tx.execute(sql<ProgressCountRow>`
       select
         count(*) filter (where sc.expected)::int as "expectedCount",
         count(*) filter (
@@ -135,12 +148,24 @@ export class InventoryReconciliationService {
     inventoryId: string,
     query: ListInventoryDiscrepanciesQueryDto,
   ): Promise<ListInventoryDiscrepanciesResponseDto> {
-    const inventory = await this.getInventoryProjection(tenantId, inventoryId);
+    return this.db.transaction(
+      (tx) => this.listDiscrepanciesFromTransaction(tx, tenantId, inventoryId, query),
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
+  }
+
+  private async listDiscrepanciesFromTransaction(
+    tx: ReconciliationTransaction,
+    tenantId: string,
+    inventoryId: string,
+    query: ListInventoryDiscrepanciesQueryDto,
+  ): Promise<ListInventoryDiscrepanciesResponseDto> {
+    const inventory = await this.getInventoryProjection(tx, tenantId, inventoryId);
     const rowsQuery = discrepancyRows(tenantId, inventoryId, inventory.snapshotId);
     const categoryFilter = query.category
       ? sql`where discrepancy.category = ${query.category}`
       : sql``;
-    const countResult = await this.db.execute(sql<{ total: number }>`
+    const countResult = await tx.execute(sql<{ total: number }>`
       with discrepancy as (${rowsQuery})
       select count(*)::int as total
       from discrepancy
@@ -148,7 +173,7 @@ export class InventoryReconciliationService {
     `);
     const total = readInteger(countResult.rows[0], "total");
     const offset = (query.page - 1) * query.pageSize;
-    const pageResult = await this.db.execute(sql<DiscrepancyRow>`
+    const pageResult = await tx.execute(sql<DiscrepancyRow>`
       with discrepancy as (${rowsQuery})
       select *
       from discrepancy
@@ -170,8 +195,12 @@ export class InventoryReconciliationService {
     };
   }
 
-  private async getInventoryProjection(tenantId: string, inventoryId: string) {
-    const [inventory] = await this.db
+  private async getInventoryProjection(
+    tx: ReconciliationTransaction,
+    tenantId: string,
+    inventoryId: string,
+  ) {
+    const [inventory] = await tx
       .select({
         status: schema.inventories.status,
         snapshotId: schema.inventories.activeSnapshotId,

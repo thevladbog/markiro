@@ -17,7 +17,6 @@ export class InventoryResultSourceError extends Error {
 
 export interface InventoryResultWinner {
   terminalId: string;
-  terminalName: string;
   scannedAt: string;
 }
 
@@ -88,7 +87,6 @@ interface SnapshotCodeRow {
   observedProductionDate: string | null;
   classification: "expected" | "protected" | "ineligible" | "unknown" | "voided" | null;
   terminalId: string | null;
-  terminalName: string | null;
   winningScannedAt: Date | null;
 }
 
@@ -152,7 +150,6 @@ export class InventoryResultSourceService {
         observedProductionDate: schema.inventoryCodeResults.observedProductionDate,
         classification: schema.inventoryCodeResults.classification,
         terminalId: schema.inventoryCodeResults.winningDeviceId,
-        terminalName: schema.stationDevices.name,
         winningScannedAt: schema.inventoryCodeResults.winningScannedAt,
       })
       .from(schema.inventorySnapshotCodes)
@@ -163,13 +160,6 @@ export class InventoryResultSourceService {
           eq(schema.inventoryCodeResults.inventoryId, inventoryId),
           eq(schema.inventoryCodeResults.snapshotId, schema.inventorySnapshotCodes.snapshotId),
           eq(schema.inventoryCodeResults.codeHash, schema.inventorySnapshotCodes.codeHash),
-        ),
-      )
-      .leftJoin(
-        schema.stationDevices,
-        and(
-          eq(schema.stationDevices.tenantId, schema.inventoryCodeResults.tenantId),
-          eq(schema.stationDevices.id, schema.inventoryCodeResults.winningDeviceId),
         ),
       )
       .where(
@@ -210,7 +200,6 @@ export class InventoryResultSourceService {
         observedProductionDate: schema.inventoryCodeResults.observedProductionDate,
         classification: schema.inventoryCodeResults.classification,
         terminalId: schema.inventoryCodeResults.winningDeviceId,
-        terminalName: schema.stationDevices.name,
         winningScannedAt: schema.inventoryCodeResults.winningScannedAt,
       })
       .from(schema.inventoryCodeResults)
@@ -220,13 +209,6 @@ export class InventoryResultSourceService {
           eq(schema.inventoryScanEvents.tenantId, schema.inventoryCodeResults.tenantId),
           eq(schema.inventoryScanEvents.inventoryId, schema.inventoryCodeResults.inventoryId),
           eq(schema.inventoryScanEvents.eventId, schema.inventoryCodeResults.firstAcceptedEventId),
-        ),
-      )
-      .innerJoin(
-        schema.stationDevices,
-        and(
-          eq(schema.stationDevices.tenantId, schema.inventoryCodeResults.tenantId),
-          eq(schema.stationDevices.id, schema.inventoryCodeResults.winningDeviceId),
         ),
       )
       .where(
@@ -274,18 +256,10 @@ export class InventoryResultSourceService {
       .select({
         normalizedIdentity: schema.inventoryScanEvents.normalizedIdentity,
         terminalId: schema.inventoryScanEvents.deviceId,
-        terminalName: schema.stationDevices.name,
         winningScannedAt: schema.inventoryScanEvents.scannedAt,
         eventId: schema.inventoryScanEvents.eventId,
       })
       .from(schema.inventoryScanEvents)
-      .innerJoin(
-        schema.stationDevices,
-        and(
-          eq(schema.stationDevices.tenantId, schema.inventoryScanEvents.tenantId),
-          eq(schema.stationDevices.id, schema.inventoryScanEvents.deviceId),
-        ),
-      )
       .where(
         and(
           eq(schema.inventoryScanEvents.tenantId, tenantId),
@@ -310,7 +284,6 @@ export class InventoryResultSourceService {
           sscc,
           winner: {
             terminalId: row.terminalId,
-            terminalName: row.terminalName,
             scannedAt: row.winningScannedAt.toISOString(),
           },
         });
@@ -405,7 +378,6 @@ function unknownResultCode(row: {
   observedProductionDate: string | null;
   classification: "expected" | "protected" | "ineligible" | "unknown" | "voided";
   terminalId: string;
-  terminalName: string;
   winningScannedAt: Date;
 }): InventoryResultCode {
   if (row.canonicalRaw === null) {
@@ -435,13 +407,11 @@ function unknownResultCode(row: {
 
 function winner(row: {
   terminalId: string | null;
-  terminalName: string | null;
   winningScannedAt: Date | null;
 }): InventoryResultWinner | null {
-  return row.terminalId !== null && row.terminalName !== null && row.winningScannedAt !== null
+  return row.terminalId !== null && row.winningScannedAt !== null
     ? {
         terminalId: row.terminalId,
-        terminalName: row.terminalName,
         scannedAt: row.winningScannedAt.toISOString(),
       }
     : null;
