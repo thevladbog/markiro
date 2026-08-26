@@ -162,6 +162,10 @@ describe.skipIf(!ready)("inventory late events", () => {
     fixture: Awaited<ReturnType<typeof seedClosedInventory>>,
     batchId: string,
     deviceSequence = 1,
+    counters: Pick<InventoryEventBatchPayload, "pendingEventCount" | "openBoxCount"> = {
+      pendingEventCount: 0,
+      openBoxCount: 0,
+    },
   ) {
     const canonical = canonicalizeKm(`01${GTIN}21LATE${batchId.toUpperCase()}`);
     const event: InventoryEvent = {
@@ -180,8 +184,8 @@ describe.skipIf(!ready)("inventory late events", () => {
       snapshotId: fixture.snapshotId,
       snapshotRevision: 1,
       sequenceCeiling: deviceSequence,
-      pendingEventCount: 0,
-      openBoxCount: 0,
+      pendingEventCount: counters.pendingEventCount,
+      openBoxCount: counters.openBoxCount,
       events: [event],
     };
     return { batchId, payloadDigest: inventoryEventBatchDigest(payload), ...payload };
@@ -368,9 +372,20 @@ describe.skipIf(!ready)("inventory late events", () => {
     const retained = lateBatch(fixture, `left-replay-${randomUUID()}`);
     await stationSync.ingest(fixture.tenantId, fixture.deviceId, fixture.inventoryId, retained);
     await fixture.agent.post(`/inventories/${fixture.inventoryId}/reopen`).send({}).expect(201);
+    const [participant] = await db
+      .select({ joinedAt: schema.inventoryDeviceParticipants.joinedAt })
+      .from(schema.inventoryDeviceParticipants)
+      .where(
+        and(
+          eq(schema.inventoryDeviceParticipants.tenantId, fixture.tenantId),
+          eq(schema.inventoryDeviceParticipants.inventoryId, fixture.inventoryId),
+          eq(schema.inventoryDeviceParticipants.deviceId, fixture.deviceId),
+        ),
+      );
+    if (!participant) throw new Error("Expected inventory participant");
     await db
       .update(schema.inventoryDeviceParticipants)
-      .set({ leftAt: new Date() })
+      .set({ leftAt: new Date(participant.joinedAt.getTime() + 1_000) })
       .where(
         and(
           eq(schema.inventoryDeviceParticipants.tenantId, fixture.tenantId),
@@ -392,6 +407,106 @@ describe.skipIf(!ready)("inventory late events", () => {
     await expect(
       stationSync.ingest(fixture.tenantId, fixture.deviceId, fixture.inventoryId, ordinary),
     ).rejects.toSatisfy((error: unknown) => errorCode(error) === "INVENTORY_PARTICIPANT_LEFT");
+  });
+
+  it("replays retained evidence under its old operator without mutating a rejoined session", async () => {
+    const fixture = await seedClosedInventory();
+    const retained = lateBatch(fixture, `rejoined-replay-${randomUUID()}`, 1, {
+      pendingEventCount: 7,
+      openBoxCount: 3,
+    });
+    await stationSync.ingest(fixture.tenantId, fixture.deviceId, fixture.inventoryId, retained);
+    await fixture.agent.post(`/inventories/${fixture.inventoryId}/reopen`).send({}).expect(201);
+
+    const rejoinedOperatorId = randomUUID();
+    await db.insert(schema.employees).values({
+      id: rejoinedOperatorId,
+      tenantId: fixture.tenantId,
+      fullName: "Rejoined operator",
+    });
+    await db
+      .update(schema.inventoryDeviceParticipants)
+      .set({
+        operatorId: rejoinedOperatorId,
+        joinedAt: new Date("2026-08-26T10:00:00.000Z"),
+        leftAt: null,
+        heartbeatAt: new Date("2026-08-26T10:01:00.000Z"),
+        pendingEventCount: 11,
+        openBoxCount: 5,
+      })
+      .where(
+        and(
+          eq(schema.inventoryDeviceParticipants.tenantId, fixture.tenantId),
+          eq(schema.inventoryDeviceParticipants.inventoryId, fixture.inventoryId),
+          eq(schema.inventoryDeviceParticipants.deviceId, fixture.deviceId),
+        ),
+      );
+    const participantSelection = {
+      operatorId: schema.inventoryDeviceParticipants.operatorId,
+      joinedAt: schema.inventoryDeviceParticipants.joinedAt,
+      leftAt: schema.inventoryDeviceParticipants.leftAt,
+      heartbeatAt: schema.inventoryDeviceParticipants.heartbeatAt,
+      pendingEventCount: schema.inventoryDeviceParticipants.pendingEventCount,
+      openBoxCount: schema.inventoryDeviceParticipants.openBoxCount,
+    };
+    const [sessionBeforeReplay] = await db
+      .select(participantSelection)
+      .from(schema.inventoryDeviceParticipants)
+      .where(
+        and(
+          eq(schema.inventoryDeviceParticipants.tenantId, fixture.tenantId),
+          eq(schema.inventoryDeviceParticipants.inventoryId, fixture.inventoryId),
+          eq(schema.inventoryDeviceParticipants.deviceId, fixture.deviceId),
+        ),
+      );
+    const [late] = await db
+      .select({ id: schema.inventoryLateEvents.id })
+      .from(schema.inventoryLateEvents)
+      .where(eq(schema.inventoryLateEvents.batchId, retained.batchId));
+    if (!late || !sessionBeforeReplay) throw new Error("Expected authorized retained evidence");
+
+    await fixture.agent
+      .post(`/inventories/${fixture.inventoryId}/late-events/${late.id}/replay`)
+      .send({})
+      .expect(201);
+
+    const [sessionAfterReplay] = await db
+      .select(participantSelection)
+      .from(schema.inventoryDeviceParticipants)
+      .where(
+        and(
+          eq(schema.inventoryDeviceParticipants.tenantId, fixture.tenantId),
+          eq(schema.inventoryDeviceParticipants.inventoryId, fixture.inventoryId),
+          eq(schema.inventoryDeviceParticipants.deviceId, fixture.deviceId),
+        ),
+      );
+    expect(sessionAfterReplay).toEqual(sessionBeforeReplay);
+    const [syncAudit] = await db
+      .select({ after: schema.tenantAuditEvents.after })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, fixture.tenantId),
+          eq(schema.tenantAuditEvents.targetId, fixture.inventoryId),
+          eq(schema.tenantAuditEvents.action, "inventory.station.events_synced"),
+        ),
+      );
+    expect(syncAudit?.after).toMatchObject({
+      operatorId: fixture.operatorId,
+      replayedLateEventId: late.id,
+    });
+
+    const ordinaryOldOperator = lateBatch(fixture, `rejoined-ordinary-${randomUUID()}`, 2);
+    await expect(
+      stationSync.ingest(
+        fixture.tenantId,
+        fixture.deviceId,
+        fixture.inventoryId,
+        ordinaryOldOperator,
+      ),
+    ).rejects.toSatisfy(
+      (error: unknown) => errorCode(error) === "INVENTORY_PARTICIPANT_OPERATOR_MISMATCH",
+    );
   });
 
   it("replays authorized same-device batches out of order without weakening ordinary high-water", async () => {

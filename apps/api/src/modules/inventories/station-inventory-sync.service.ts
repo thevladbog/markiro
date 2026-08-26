@@ -378,8 +378,16 @@ export class StationInventorySyncService {
       if (inventory.activeSnapshotId !== input.snapshotId || input.snapshotRevision !== 1) {
         throw new ConflictException({ code: "INVENTORY_SNAPSHOT_MISMATCH" });
       }
-      if (input.events.some((event) => event.operatorId !== participant.operatorId)) {
+      if (
+        replayAuthorization === null &&
+        input.events.some((event) => event.operatorId !== participant.operatorId)
+      ) {
         throw new ConflictException({ code: "INVENTORY_PARTICIPANT_OPERATOR_MISMATCH" });
+      }
+      const syncOperatorId =
+        replayAuthorization === null ? participant.operatorId : input.events[0]?.operatorId;
+      if (syncOperatorId === undefined) {
+        throw new Error("Validated inventory event batch has no operator identity");
       }
 
       const repackFacts = repackInventoryFacts(inventory.mode, inventory.stationManifest);
@@ -816,20 +824,22 @@ export class StationInventorySyncService {
           })),
         );
       }
-      await tx
-        .update(schema.inventoryDeviceParticipants)
-        .set({
-          heartbeatAt: new Date(),
-          pendingEventCount: input.pendingEventCount,
-          openBoxCount: input.openBoxCount,
-        })
-        .where(
-          and(
-            eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
-            eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
-            eq(schema.inventoryDeviceParticipants.deviceId, deviceId),
-          ),
-        );
+      if (replayAuthorization === null) {
+        await tx
+          .update(schema.inventoryDeviceParticipants)
+          .set({
+            heartbeatAt: new Date(),
+            pendingEventCount: input.pendingEventCount,
+            openBoxCount: input.openBoxCount,
+          })
+          .where(
+            and(
+              eq(schema.inventoryDeviceParticipants.tenantId, tenantId),
+              eq(schema.inventoryDeviceParticipants.inventoryId, inventoryId),
+              eq(schema.inventoryDeviceParticipants.deviceId, deviceId),
+            ),
+          );
+      }
       const response = this.response(inventoryId, input, nextRevision, outcomes);
       await tx
         .update(schema.inventoryScanBatches)
@@ -853,7 +863,7 @@ export class StationInventorySyncService {
           tenantId,
           inventoryId,
           deviceId,
-          operatorId: participant.operatorId,
+          operatorId: syncOperatorId,
           snapshotId: input.snapshotId,
           snapshotRevision: 1,
           batchId: input.batchId,
