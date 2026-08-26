@@ -40,10 +40,26 @@ describe("SEO generators", () => {
     );
     expect(sitemap).toContain("<loc>https://markiro.app/en/articles/beer-case-aggregation/</loc>");
     expect(sitemap).toContain("<loc>https://markiro.app/en/articles/beer-marking-2026/</loc>");
+    expect(sitemap).toContain(
+      "<loc>https://markiro.app/stati/data-matrix-pivo-ne-schityvaetsya/</loc>",
+    );
+    expect(sitemap).toContain(
+      "<loc>https://markiro.app/en/articles/beer-data-matrix-not-scanning/</loc>",
+    );
+    expect(sitemap).toContain(
+      "<loc>https://markiro.app/stati/oborudovanie-dlya-markirovki-piva/</loc>",
+    );
+    expect(sitemap).toContain(
+      "<loc>https://markiro.app/en/articles/beer-marking-line-equipment/</loc>",
+    );
+    expect(sitemap).toContain("<loc>https://markiro.app/stati/stoimost-markirovki-piva/</loc>");
+    expect(sitemap).toContain(
+      "<loc>https://markiro.app/en/articles/beer-marking-cost-russia/</loc>",
+    );
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(42);
+    expect(sitemap.match(/<url>/g)).toHaveLength(48);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -58,6 +74,12 @@ describe("SEO generators", () => {
     expect(llms).toContain("https://markiro.app/stati/markirovka-piva-2026/");
     expect(llms).toContain("https://markiro.app/en/articles/beer-case-aggregation/");
     expect(llms).toContain("https://markiro.app/en/articles/beer-marking-2026/");
+    expect(llms).toContain("https://markiro.app/stati/data-matrix-pivo-ne-schityvaetsya/");
+    expect(llms).toContain("https://markiro.app/en/articles/beer-data-matrix-not-scanning/");
+    expect(llms).toContain("https://markiro.app/stati/oborudovanie-dlya-markirovki-piva/");
+    expect(llms).toContain("https://markiro.app/en/articles/beer-marking-line-equipment/");
+    expect(llms).toContain("https://markiro.app/stati/stoimost-markirovki-piva/");
+    expect(llms).toContain("https://markiro.app/en/articles/beer-marking-cost-russia/");
     expect(llms).toContain("## English");
     expect(llms).toContain(
       "> Production serialization, aggregation, and traceability with offline-capable line stations.",
@@ -89,7 +111,7 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(42);
+    expect(sitemap.match(/<url>/g)).toHaveLength(48);
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
     );
