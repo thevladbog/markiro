@@ -114,8 +114,8 @@ export function InventoryDetailPage() {
 
   const inventory = query.data;
   const snapshot = fixedSnapshot ?? inventory.activeSnapshot;
-  const canEditParameters =
-    canWrite && (inventory.status === "draft" || inventory.status === "preparing");
+  const isMutable = inventory.status === "draft" || inventory.status === "preparing";
+  const canEditParameters = canWrite && isMutable;
 
   return (
     <AdminPage className="mk-inventory-page">
@@ -159,7 +159,7 @@ export function InventoryDetailPage() {
       {step === 2 ? (
         <ExportsStep
           inventory={inventory}
-          canWrite={canWrite}
+          canMutate={canWrite && isMutable}
           selected={selected}
           onSelect={(status, id) => setSelected((current) => ({ ...current, [status]: id }))}
           {...(canEditParameters ? { onBack: () => setStep(1) } : {})}
@@ -209,14 +209,14 @@ function CenteredState({ children }: { children: React.ReactNode }) {
 
 function ExportsStep({
   inventory,
-  canWrite,
+  canMutate,
   selected,
   onBack,
   onSelect,
   onContinue,
 }: {
   inventory: InventoryDetail;
-  canWrite: boolean;
+  canMutate: boolean;
   selected: Partial<InventorySnapshotInputs>;
   onBack?: () => void;
   onSelect: (status: InventoryChzStatus, id: string) => void;
@@ -249,7 +249,7 @@ function ExportsStep({
                   <Badge>{t("pages.inventory.exports.missing")}</Badge>
                 )}
               </div>
-              {canWrite ? (
+              {canMutate ? (
                 <Input
                   className="mk-inventory-file-control"
                   label={t("pages.inventory.exports.chooseFile")}
@@ -271,7 +271,8 @@ function ExportsStep({
                   className="mk-inventory-import-history"
                   aria-label={t("pages.inventory.exports.selectFile", { status })}
                   value={selected[status] ?? ""}
-                  onValueChange={(id) => onSelect(status, id)}
+                  {...(canMutate ? { onValueChange: (id: string) => onSelect(status, id) } : {})}
+                  disabled={!canMutate}
                   options={attempts.map((attempt) => ({
                     value: attempt.id,
                     disabled: attempt.result !== "succeeded",

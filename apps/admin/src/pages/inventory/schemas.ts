@@ -48,25 +48,67 @@ const nonnegativeInteger = z.number().int().nonnegative();
 
 const labelTemplateSchema = z.strictObject({ id: uuid, name: z.string() });
 
-export const inventorySchema = z.strictObject({
-  id: uuid,
-  number: z.string().min(1),
-  status: inventoryStatusSchema,
-  mode: inventoryModeSchema,
-  productId: uuid,
-  gtin14: z.string().regex(/^[0-9]{14}$/),
-  productName: z.string(),
-  lineId: uuid,
-  lineName: z.string(),
-  productionDateFrom: civilDate,
-  productionDateTo: civilDate,
-  boxLabelTemplateId: uuid.nullable(),
-  boxLabelTemplate: labelTemplateSchema.nullable(),
-  activeSnapshotId: uuid.nullable(),
-  resultRevision: nonnegativeInteger,
-  createdAt: dateTime,
-  updatedAt: dateTime,
-});
+interface InventoryResponseSemantics {
+  mode: "check" | "repack";
+  productionDateFrom: string;
+  productionDateTo: string;
+  boxLabelTemplateId: string | null;
+  boxLabelTemplate: { id: string; name: string } | null;
+}
+
+function validateInventoryResponseSemantics(
+  value: InventoryResponseSemantics,
+  context: z.RefinementCtx,
+): void {
+  if (value.productionDateFrom > value.productionDateTo) {
+    context.addIssue({
+      code: "custom",
+      path: ["productionDateTo"],
+      message: "production date range is inverted",
+    });
+  }
+  if (
+    (value.mode === "repack" &&
+      (value.boxLabelTemplateId === null || value.boxLabelTemplate === null)) ||
+    (value.mode === "check" &&
+      (value.boxLabelTemplateId !== null || value.boxLabelTemplate !== null))
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["boxLabelTemplate"],
+      message: "mode and box label template are inconsistent",
+    });
+  }
+  if (value.boxLabelTemplate !== null && value.boxLabelTemplate.id !== value.boxLabelTemplateId) {
+    context.addIssue({
+      code: "custom",
+      path: ["boxLabelTemplate", "id"],
+      message: "box label template descriptor id does not match",
+    });
+  }
+}
+
+export const inventorySchema = z
+  .strictObject({
+    id: uuid,
+    number: z.string().min(1),
+    status: inventoryStatusSchema,
+    mode: inventoryModeSchema,
+    productId: uuid,
+    gtin14: z.string().regex(/^[0-9]{14}$/),
+    productName: z.string(),
+    lineId: uuid,
+    lineName: z.string(),
+    productionDateFrom: civilDate,
+    productionDateTo: civilDate,
+    boxLabelTemplateId: uuid.nullable(),
+    boxLabelTemplate: labelTemplateSchema.nullable(),
+    activeSnapshotId: uuid.nullable(),
+    resultRevision: nonnegativeInteger,
+    createdAt: dateTime,
+    updatedAt: dateTime,
+  })
+  .superRefine(validateInventoryResponseSemantics);
 
 const importDiagnosticSchema = z.strictObject({
   code: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/),
@@ -190,7 +232,7 @@ const blockersSchema = z.strictObject({
   unresolvedPrintBoxCount: nonnegativeInteger,
 });
 
-export const inventoryDetailSchema = inventorySchema.extend({
+export const inventoryDetailSchema = inventorySchema.safeExtend({
   blockers: blockersSchema,
   imports: z.array(inventoryImportHistorySchema),
   activeSnapshot: inventorySnapshotSchema.nullable(),

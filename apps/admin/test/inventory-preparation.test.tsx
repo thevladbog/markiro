@@ -615,6 +615,18 @@ it("recovers the active snapshot after reload and blocks start until warehouse c
   expect(
     screen.getByRole("radio", { name: /introduced-new\.zip/ }).getAttribute("aria-checked"),
   ).toBe("false");
+  expect(
+    screen.queryAllByLabelText(
+      /^Файл (?:EMITTED|INTRODUCED|APPLIED|RETIRED|WRITTEN_OFF|DISAGGREGATION)$/,
+    ),
+  ).toHaveLength(0);
+  expect(screen.getAllByRole("radio").every((control) => control.hasAttribute("disabled"))).toBe(
+    true,
+  );
+  await user.click(screen.getByRole("radio", { name: /introduced-new\.zip/ }));
+  expect(
+    screen.getByRole("radio", { name: /introduced-old\.zip/ }).getAttribute("aria-checked"),
+  ).toBe("true");
   expect(screen.queryByRole("button", { name: "Назад к параметрам" })).toBeNull();
 });
 
@@ -642,6 +654,50 @@ it("fails closed when the inventory API returns an impossible civil date", async
     if (dependency) return dependency;
     if (url === "/api/inventories") {
       return response({ items: [{ ...BASE_INVENTORY, productionDateFrom: "2025-02-30" }] });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Не удалось загрузить инвентаризации",
+  );
+  expect(screen.queryByText("ИНВ-00042")).toBeNull();
+});
+
+it.each([
+  [
+    "has an inverted production range",
+    { productionDateFrom: "2025-12-31", productionDateTo: "2025-09-01" },
+  ],
+  [
+    "uses repack mode without a template",
+    { mode: "repack", boxLabelTemplateId: null, boxLabelTemplate: null },
+  ],
+  [
+    "uses check mode with a template",
+    {
+      mode: "check",
+      boxLabelTemplateId: ID.template,
+      boxLabelTemplate: { id: ID.template, name: "Короб 20 бутылок" },
+    },
+  ],
+  [
+    "has a template descriptor for a different id",
+    {
+      boxLabelTemplateId: ID.template,
+      boxLabelTemplate: {
+        id: "44444444-4444-4444-8444-444444444445",
+        name: "Чужой шаблон",
+      },
+    },
+  ],
+])("fails closed when the inventory API response %s", async (_description, overrides) => {
+  renderRoute("/inventory", async (input) => {
+    const url = String(input);
+    const dependency = shellDependency(url);
+    if (dependency) return dependency;
+    if (url === "/api/inventories") {
+      return response({ items: [{ ...BASE_INVENTORY, ...overrides }] });
     }
     throw new Error(`Unexpected request: ${url}`);
   });
