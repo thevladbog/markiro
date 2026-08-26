@@ -510,6 +510,107 @@ test("guard CLI exposes a fixed rejection scope as a GitHub annotation", async (
   });
 });
 
+test("guard CLI exposes a fixed release-policy subscope without leaking plan values", async () => {
+  const safe = await readFixture("safe");
+  const invalidPolicy = copy(safe);
+  const policyChange = resource(
+    invalidPolicy,
+    "module.station_releases.yandex_storage_bucket_policy.releases",
+  ).change;
+  const policy = JSON.parse(policyChange.after.policy);
+  policy.Statement.find(
+    (statement) => statement.Sid === "AllowPublisherStationObjects",
+  ).Action.push("do-not-print-this-plan-value");
+  policyChange.after.policy = JSON.stringify(policy);
+
+  await withPlan(invalidPolicy, (planPath) => {
+    let stdout = "";
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [script, planPath], {
+        cwd: root,
+        env: { ...process.env, GITHUB_ACTIONS: "true" },
+        stdio: "pipe",
+      });
+      assert.fail("guard CLI unexpectedly accepted invalid release policy");
+    } catch (error) {
+      stdout = String(error.stdout);
+      stderr = String(error.stderr);
+    }
+    assert.equal(
+      stdout,
+      "::error title=Production plan rejected::release-policy-publisher-objects-action\n",
+    );
+    assert.equal(stderr, "production plan rejected (release-policy-publisher-objects-action)\n");
+    assert.doesNotMatch(stdout, /do-not-print-this-plan-value/);
+    assert.doesNotMatch(stderr, /do-not-print-this-plan-value/);
+  });
+});
+
+test("production plan guard distinguishes release-policy failure classes", async () => {
+  const safe = await readFixture("safe");
+  const cases = [
+    {
+      scope: "release-policy-json",
+      makePlan() {
+        const plan = copy(safe);
+        resource(
+          plan,
+          "module.station_releases.yandex_storage_bucket_policy.releases",
+        ).change.after.policy = "not-json";
+        return plan;
+      },
+    },
+    {
+      scope: "release-policy-statement-count",
+      makePlan() {
+        const plan = copy(safe);
+        const policyChange = resource(
+          plan,
+          "module.station_releases.yandex_storage_bucket_policy.releases",
+        ).change;
+        const policy = JSON.parse(policyChange.after.policy);
+        policy.Statement.pop();
+        policyChange.after.policy = JSON.stringify(policy);
+        return plan;
+      },
+    },
+    {
+      scope: "release-policy-terraform-identity",
+      makePlan() {
+        const plan = copy(safe);
+        const policyChange = resource(
+          plan,
+          "module.station_releases.yandex_storage_bucket_policy.releases",
+        ).change;
+        const policy = JSON.parse(policyChange.after.policy);
+        policy.Statement.find(
+          (statement) => statement.Sid === "AllowTerraformReleaseManagement",
+        ).Principal.CanonicalUser = "app-runtime-sa-id";
+        policyChange.after.policy = JSON.stringify(policy);
+        return plan;
+      },
+    },
+    {
+      scope: "release-policy-computed-references",
+      makePlan() {
+        const plan = copy(safe);
+        makeProviderComputedReleaseCreate(plan);
+        plan.configuration.root_module.module_calls.station_releases.module.resources.find(
+          (candidate) => candidate.address === "yandex_storage_bucket_policy.releases",
+        ).expressions.policy.references = releaseBucketReference;
+        return plan;
+      },
+    },
+  ];
+
+  for (const { scope, makePlan } of cases) {
+    assert.throws(() => guardProductionPlan(makePlan()), {
+      message: `production plan rejected (${scope})`,
+    });
+  }
+});
+
 test("guard CLI does not annotate unscoped errors in GitHub Actions", () => {
   let stdout = "";
   let stderr = "";
