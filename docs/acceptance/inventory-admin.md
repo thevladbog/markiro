@@ -97,7 +97,7 @@ Focused connected inventory API journey on disposable PostgreSQL:
 40 files passed; 256 tests passed; all remaining gates passed
 
 @markiro/api test on a fresh disposable PostgreSQL database:
-205 files passed, 1 skipped; 2090 tests passed, 2 skipped
+206 files total: 205 passed, 1 skipped; 2093 tests total: 2091 passed, 2 skipped
 @markiro/api typecheck / lint / build: PASS
 
 @markiro/admin test / typecheck / lint / build:
