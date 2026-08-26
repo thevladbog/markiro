@@ -87,16 +87,20 @@ resource "yandex_lockbox_secret_iam_member" "terraform_state_backend" {
 
 locals {
   terraform_production_action_roles = {
-    "compute.instances-and-access.manage" = "compute.admin"
-    "dns.recordsets.manage"               = "dns.editor"
-    "managed-postgresql.resources.manage" = "managed-postgresql.editor"
-    "storage.buckets-and-policies.manage" = "storage.admin"
-    "vpc.gateways.attach-to-routes"       = "vpc.gateways.user"
-    "vpc.gateways.manage"                 = "vpc.gateways.editor"
-    "vpc.networks-subnets-routes.manage"  = "vpc.privateAdmin"
-    "vpc.public-addresses.manage"         = "vpc.publicAdmin"
-    "vpc.resources.use"                   = "vpc.user"
-    "vpc.security-groups.manage"          = "vpc.securityGroups.admin"
+    "cdn.origins-and-resources.manage"          = "cdn.editor"
+    "certificate-manager.certificates.download" = "certificate-manager.certificates.downloader"
+    "certificate-manager.certificates.manage"   = "certificate-manager.editor"
+    "compute.instances-and-access.manage"       = "compute.admin"
+    "dns.recordsets.manage"                     = "dns.editor"
+    "iam.service-accounts-and-keys.manage"      = "iam.serviceAccounts.admin"
+    "managed-postgresql.resources.manage"       = "managed-postgresql.editor"
+    "storage.buckets-and-policies.manage"       = "storage.admin"
+    "vpc.gateways.attach-to-routes"             = "vpc.gateways.user"
+    "vpc.gateways.manage"                       = "vpc.gateways.editor"
+    "vpc.networks-subnets-routes.manage"        = "vpc.privateAdmin"
+    "vpc.public-addresses.manage"               = "vpc.publicAdmin"
+    "vpc.resources.use"                         = "vpc.user"
+    "vpc.security-groups.manage"                = "vpc.securityGroups.admin"
   }
   terraform_folder_roles = toset(values(local.terraform_production_action_roles))
 }

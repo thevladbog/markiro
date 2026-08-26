@@ -61,12 +61,12 @@ GitHub artifact и не печатаются в log/summary.
    `github.actor == github.repository_owner`, точную фразу и ветку `main` до
    входа в Environment, OIDC и Terraform.
 4. Environment `production-infrastructure-apply` должен быть ограничен веткой
-   `main` и содержать только утверждённые variables.
+   `main`, содержать только утверждённые variables и требовать approval от
+   `thevladbog` или `thevladbog-2` при включённом `prevent self-review`.
 
-На текущем GitHub plan required reviewers для private repository недоступны.
-Поэтому это одно-владельческое подтверждение, не двухпользовательский approval.
-Нативный reviewer можно вернуть при переходе на подходящий GitHub Enterprise
-plan, не ослабляя owner-confirmation gate.
+Репозиторий публичный, поэтому required reviewers доступны и являются
+обязательным внешним gate. Owner-confirmation остаётся независимой защитой:
+dispatch выполняет владелец, но approve должен дать другой разрешённый reviewer.
 
 Apply run повторно проверяет SHA/ref и оба boolean input, ограниченный формат и
 metadata object key, загружает только точную версию plan по переданному reviewer

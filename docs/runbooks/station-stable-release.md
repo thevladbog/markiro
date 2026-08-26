@@ -8,8 +8,8 @@ dual-origin beta. Workflow не выбирает newest beta, не добавл�
 
 1. GitHub Environment `station-stable` хранит только
    `TAURI_SIGNING_PRIVATE_KEY` и `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` и даёт
-   отдельную историю stable build/sign. В нём нет required reviewers, поэтому
-   второй пользователь для build/sign не нужен. Приватный ключ остаётся в
+   отдельную историю stable build/sign. Он требует required reviewers
+   `thevladbog` и `thevladbog-2` с включённым `prevent self-review`. Приватный ключ остаётся в
    исходном base64-формате из `tauri signer generate` байт-в-байт: не
    декодируйте, не перекодируйте и не нормализуйте его. Не печатайте значение и
    не переносите его в publisher job.
@@ -21,13 +21,12 @@ dual-origin beta. Workflow не выбирает newest beta, не добавл�
    `YANDEX_STATION_RELEASE_BUCKET`, `YANDEX_STATION_RELEASE_ENDPOINT`. Signing
    secrets туда не копируются; publisher credentials не попадают в build job,
    аргументы, artifacts или логи.
-3. На текущем GitHub plan нативные required reviewers недоступны для private
-   repository. До build/sign и до доступа к `station-release` отдельный job без
-   Environment и secrets требует от владельца репозитория
+3. `station-release` использует тот же required-reviewer и `prevent self-review`
+   gate. До build/sign и до доступа к `station-release` отдельный job без
+   Environment и secrets дополнительно требует от владельца репозитория
    `owner_confirmation=PUBLISH-STATION-STABLE` и точного совпадения
-   `github.actor` с `github.repository_owner`. Это одно-владельческое ручное
-   подтверждение, а не двухпользовательский approval; нативный reviewer потребует
-   подходящего GitHub Enterprise plan.
+   `github.actor` с `github.repository_owner`. Owner-confirmation не заменяет
+   approval другого reviewer.
 4. Production API должен принимать `http://tauri.localhost`. До обычной
    публикации или repair выполните `pnpm verify:station-production-cors`.
 5. Для normal flow уже существует полный Yandex stable rollback baseline:
@@ -86,7 +85,7 @@ immutable keys. Повтор разрешён только с тем же exact 
    каталоги, валидирует обе trees и сравнивает common assets. Только matching
    GitHub и Yandex beta evidence допускают дальнейшую работу. Публичный GitHub
    tag target обязан принадлежать binary-only repository; source `releaseSha`
-   берётся из совпадающих evidence и приватного source tag. Release-only diff
+   берётся из совпадающих evidence и source tag. Release-only diff
    ограничен stable overlay, а CI для verified `baseSha` обязан завершиться успешно.
 5. Только после этого workflow checkout-ит принятый `baseSha`, применяет
    `tauri.stable.conf.json`, создаёт один release commit и ровно один раз

@@ -70,8 +70,9 @@ Dispatch выполняет владелец репозитория из `main`.
 Environment `production-infrastructure-apply` workflow проверит владельца и
 точную фразу, затем повторно проверит binding, оба SHA-256 и byte/semantic
 совпадение полного JSON, применит точный escrowed plan и удалит обе точные
-версии после успеха. На текущем GitHub plan это одно-владельческая защита, а не
-двухпользовательский approval.
+версии после успеха. Environment требует approve от `thevladbog` или
+`thevladbog-2` при включённом `prevent self-review`; owner-confirmation остаётся
+дополнительным gate и не заменяет approval другого reviewer.
 
 ## 4. Проверить прямой DNS
 

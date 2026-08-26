@@ -456,10 +456,26 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          [[ "$MODE" == "apply" ]]
-          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$GITHUB_REF" == "refs/heads/main" ]]
-          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]]
+
+          apply_stage="input-validation"
+          fail_apply_stage() {
+            local status="${1:-1}"
+            trap - ERR
+            printf '::error title=Yandex infrastructure apply failed::stage=%s exit=%s\n' \
+              "$apply_stage" "$status" >&2
+            exit "$status"
+          }
+          on_apply_error() {
+            local status="$?"
+            fail_apply_stage "$status"
+          }
+          trap on_apply_error ERR
+
+          [[ "$MODE" == "apply" ]] || fail_apply_stage 1
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || fail_apply_stage 1
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || fail_apply_stage 1
+          [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]] || fail_apply_stage 1
+          apply_stage="plan-binding"
           binding="$RUNNER_TEMP/terraform-plan-binding.env"
           node infra/yandex/scripts/terraform-plan-binding.mjs validate \
             "$TARGET_SHA" "$ENABLE_PUBLIC_DNS" "$ENABLE_STATION_RELEASE_PUBLIC_DNS" \
@@ -470,14 +486,15 @@ jobs:
           export TF_VAR_public_dns_enabled="$ENABLE_PUBLIC_DNS"
           export TF_VAR_station_release_public_dns_enabled="$ENABLE_STATION_RELEASE_PUBLIC_DNS"
 
+          apply_stage="github-oidc"
           if ! github_oidc_token="$(curl --fail --silent --show-error --max-time 30 --get \
             --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             --data-urlencode "audience=$YC_OIDC_AUDIENCE" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -er '.value | select(type == "string" and length > 0)')"; then
-            printf '%s\n' '::error::GitHub OIDC token request failed' >&2
-            exit 1
+            fail_apply_stage 1
           fi
           echo "::add-mask::$github_oidc_token"
+          apply_stage="yandex-token-exchange"
           if ! iam_token="$(curl --fail --silent --show-error --max-time 30 \
             --request POST \
             --header "Content-Type: application/x-www-form-urlencoded" \
@@ -487,12 +504,12 @@ jobs:
             --data-urlencode "subject_token=$github_oidc_token" \
             --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
             https://auth.yandex.cloud/oauth/token | jq -er '.access_token | select(type == "string" and length > 0)')"; then
-            printf '%s\n' '::error::Yandex token exchange failed' >&2
-            exit 1
+            fail_apply_stage 1
           fi
           echo "::add-mask::$iam_token"
           export YC_TOKEN="$iam_token"
 
+          apply_stage="lockbox-payload"
           payload="$(curl --fail --silent --show-error --max-time 30 \
             --header "Authorization: Bearer $iam_token" \
             "https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets/$YC_STATE_BACKEND_SECRET_ID/payload")"
@@ -527,6 +544,7 @@ jobs:
             rm -rf -- "$tf_data"
           }
           trap cleanup EXIT
+          apply_stage="backend-configuration"
           install -d -m 700 "$tf_data"
           export TF_DATA_DIR="$tf_data"
           printf '%s\n' \
@@ -541,6 +559,7 @@ jobs:
             'use_path_style = true' > "$backend"
           chmod 600 "$backend"
 
+          apply_stage="binary-plan-head"
           aws s3api head-object \
             --endpoint-url https://storage.yandexcloud.net \
             --bucket "$YC_STATE_BUCKET_NAME" \
@@ -564,6 +583,7 @@ jobs:
               }) and
               (.VersionId == $plan_version_id)
             ' "$plan_head" > /dev/null
+          apply_stage="binary-plan-download"
           aws s3api get-object \
             --endpoint-url https://storage.yandexcloud.net \
             --bucket "$YC_STATE_BUCKET_NAME" \
@@ -571,8 +591,10 @@ jobs:
             --version-id "$PLAN_VERSION_ID" \
             "$plan" \
             > /dev/null
+          apply_stage="binary-plan-hash"
           printf '%s  %s\n' "$PLAN_SHA256" "$plan" | sha256sum --check --status
 
+          apply_stage="json-plan-head"
           aws s3api head-object \
             --endpoint-url https://storage.yandexcloud.net \
             --bucket "$YC_STATE_BUCKET_NAME" \
@@ -596,6 +618,7 @@ jobs:
               }) and
               (.VersionId == $plan_version_id)
             ' "$plan_json_head" > /dev/null
+          apply_stage="json-plan-download"
           aws s3api get-object \
             --endpoint-url https://storage.yandexcloud.net \
             --bucket "$YC_STATE_BUCKET_NAME" \
@@ -603,17 +626,27 @@ jobs:
             --version-id "$PLAN_JSON_VERSION_ID" \
             "$plan_json" \
             > /dev/null
+          apply_stage="json-plan-hash"
           printf '%s  %s\n' "$PLAN_JSON_SHA256" "$plan_json" | sha256sum --check --status
 
+          apply_stage="terraform-init"
           terraform -chdir=infra/yandex/production init -input=false -lockfile=readonly -backend-config="$backend"
+          apply_stage="terraform-validate"
           terraform -chdir=infra/yandex/production validate
+          apply_stage="plan-json-regeneration"
           terraform -chdir=infra/yandex/production show -json "$plan" > "$regenerated_plan_json"
+          apply_stage="byte-comparison"
           cmp --silent "$plan_json" "$regenerated_plan_json"
+          apply_stage="semantic-comparison"
           jq --slurp -e '.[0] == .[1]' "$plan_json" "$regenerated_plan_json" > /dev/null
+          apply_stage="production-plan-guard"
           node infra/yandex/scripts/guard-production-plan.mjs "$regenerated_plan_json"
+          apply_stage="approved-change-summary"
           jq -c '[.resource_changes[]? | select(.change.actions != ["no-op"]) | {address, actions: .change.actions}]' "$regenerated_plan_json"
+          apply_stage="terraform-apply"
           terraform -chdir=infra/yandex/production apply -input=false -auto-approve "$plan"
 
+          apply_stage="escrow-cleanup"
           node infra/yandex/scripts/terraform-plan-escrow.mjs cleanup \
             "$YC_STATE_BUCKET_NAME" \
             "$PLAN_KEY" "$PLAN_VERSION_ID" \
