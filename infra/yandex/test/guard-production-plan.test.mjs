@@ -630,34 +630,82 @@ test("guard CLI exposes a fixed release-origin-group subscope without leaking pl
 });
 
 test("guard CLI rejects computed release origin references without leaking them", async () => {
-  const computed = await readFixture("safe");
-  makeProviderComputedReleaseCreate(computed);
-  computed.configuration.root_module.module_calls.station_releases.module.resources
-    .find((candidate) => candidate.address === "yandex_cdn_origin_group.releases")
-    .expressions.origin.references.push("do-not-print-this-plan-value");
+  const cases = [
+    {
+      scope: "configuration",
+      mutate(plan) {
+        const resources =
+          plan.configuration.root_module.module_calls.station_releases.module.resources;
+        plan.configuration.root_module.module_calls.station_releases.module.resources =
+          resources.filter((candidate) => candidate.address !== "yandex_cdn_origin_group.releases");
+      },
+    },
+    {
+      scope: "expression",
+      mutate(plan) {
+        delete plan.configuration.root_module.module_calls.station_releases.module.resources.find(
+          (candidate) => candidate.address === "yandex_cdn_origin_group.releases",
+        ).expressions.origin;
+      },
+    },
+    {
+      scope: "shape",
+      mutate(plan) {
+        plan.configuration.root_module.module_calls.station_releases.module.resources.find(
+          (candidate) => candidate.address === "yandex_cdn_origin_group.releases",
+        ).expressions.origin.do_not_print_this_plan_value = true;
+      },
+    },
+    {
+      scope: "count",
+      mutate(plan) {
+        plan.configuration.root_module.module_calls.station_releases.module.resources
+          .find((candidate) => candidate.address === "yandex_cdn_origin_group.releases")
+          .expressions.origin.references.push("do-not-print-this-plan-value");
+      },
+    },
+    {
+      scope: "values",
+      mutate(plan) {
+        plan.configuration.root_module.module_calls.station_releases.module.resources.find(
+          (candidate) => candidate.address === "yandex_cdn_origin_group.releases",
+        ).expressions.origin.references[0] = "do-not-print-this-plan-value";
+      },
+    },
+  ];
 
-  await withPlan(computed, (planPath) => {
-    let stdout = "";
-    let stderr = "";
-    try {
-      execFileSync(process.execPath, [script, planPath], {
-        cwd: root,
-        env: { ...process.env, GITHUB_ACTIONS: "true" },
-        stdio: "pipe",
-      });
-      assert.fail("guard CLI unexpectedly accepted invalid release origin references");
-    } catch (error) {
-      stdout = String(error.stdout);
-      stderr = String(error.stderr);
-    }
-    assert.equal(
-      stdout,
-      "::error title=Production plan rejected::release-origin-group-source-references\n",
-    );
-    assert.equal(stderr, "production plan rejected (release-origin-group-source-references)\n");
-    assert.doesNotMatch(stdout, /do-not-print-this-plan-value/);
-    assert.doesNotMatch(stderr, /do-not-print-this-plan-value/);
-  });
+  for (const { scope, mutate } of cases) {
+    const model = await readFixture("safe");
+    makeProviderComputedReleaseCreate(model);
+    const computed = copy(model);
+    mutate(computed);
+
+    await withPlan(computed, (planPath) => {
+      let stdout = "";
+      let stderr = "";
+      try {
+        execFileSync(process.execPath, [script, planPath], {
+          cwd: root,
+          env: { ...process.env, GITHUB_ACTIONS: "true" },
+          stdio: "pipe",
+        });
+        assert.fail("guard CLI unexpectedly accepted invalid release origin references");
+      } catch (error) {
+        stdout = String(error.stdout);
+        stderr = String(error.stderr);
+      }
+      assert.equal(
+        stdout,
+        `::error title=Production plan rejected::release-origin-group-source-references-${scope}\n`,
+      );
+      assert.equal(
+        stderr,
+        `production plan rejected (release-origin-group-source-references-${scope})\n`,
+      );
+      assert.doesNotMatch(stdout, /do-not-print-this-plan-value/);
+      assert.doesNotMatch(stderr, /do-not-print-this-plan-value/);
+    });
+  }
 });
 
 test("production plan guard distinguishes release-policy failure classes", async () => {
