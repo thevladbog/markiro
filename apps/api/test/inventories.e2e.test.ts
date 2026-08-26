@@ -305,6 +305,80 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     expect(rows.map((row) => row.number).sort()).toEqual(numbers);
   });
 
+  it("projects tenant-scoped station close blockers through the cabinet inventory detail", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId, templateId } = await seedPreparation(agent, {
+      mode: "repack",
+    });
+    const inventory = await createInventory(agent, productId, lineId, "repack", templateId);
+    const operatorId = randomUUID();
+    const deviceAId = randomUUID();
+    const deviceBId = randomUUID();
+    await db.insert(schema.employees).values({
+      id: operatorId,
+      tenantId,
+      fullName: "Inventory blocker operator",
+    });
+    await db.insert(schema.stationDevices).values([
+      { id: deviceAId, tenantId, name: "Inventory blocker A", lineId },
+      { id: deviceBId, tenantId, name: "Inventory blocker B", lineId },
+    ]);
+    await db.insert(schema.inventoryDeviceParticipants).values([
+      {
+        tenantId,
+        inventoryId: inventory.id,
+        deviceId: deviceAId,
+        operatorId,
+        configuredLineId: lineId,
+        joinMethod: "assigned_line",
+        pendingEventCount: 3,
+        openBoxCount: 1,
+      },
+      {
+        tenantId,
+        inventoryId: inventory.id,
+        deviceId: deviceBId,
+        operatorId,
+        configuredLineId: lineId,
+        joinMethod: "assigned_line",
+        joinedAt: new Date("2026-08-19T10:00:00.000Z"),
+        leftAt: new Date(),
+      },
+    ]);
+    await db.insert(schema.inventoryRepackBoxes).values([
+      {
+        tenantId,
+        inventoryId: inventory.id,
+        newSscc: "046000000000000015",
+        ownerDeviceId: deviceAId,
+        capacity: 20,
+        productionDate: "2026-08-19",
+      },
+      {
+        tenantId,
+        inventoryId: inventory.id,
+        newSscc: "046000000000000022",
+        ownerDeviceId: deviceBId,
+        capacity: 20,
+        productionDate: "2026-08-20",
+        state: "closed",
+        printState: "failed",
+        printAttemptCount: 1,
+        printErrorCode: "PRINT_TRANSPORT_FAILED",
+        closedAt: new Date(),
+      },
+    ]);
+
+    const detail = await agent.get(`/inventories/${inventory.id}`).expect(200);
+    expect(detail.body.blockers).toEqual({
+      activeParticipantCount: 1,
+      pendingEventCount: 3,
+      participantOpenBoxCount: 1,
+      openRepackBoxCount: 1,
+      unresolvedPrintBoxCount: 1,
+    });
+  });
+
   it("returns not found for cross-tenant inventory ids before read, update, or upload side effects", async () => {
     const owner = request.agent(app!.getHttpServer());
     const ownerSeed = await seedPreparation(owner);

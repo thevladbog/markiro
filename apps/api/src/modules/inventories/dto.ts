@@ -94,6 +94,18 @@ export interface InventoryDto {
   updatedAt: string;
 }
 
+export interface InventoryBlockerProjectionDto {
+  activeParticipantCount: number;
+  pendingEventCount: number;
+  participantOpenBoxCount: number;
+  openRepackBoxCount: number;
+  unresolvedPrintBoxCount: number;
+}
+
+export interface InventoryDetailDto extends InventoryDto {
+  blockers: InventoryBlockerProjectionDto;
+}
+
 export interface ListInventoriesResponseDto {
   items: InventoryDto[];
 }
@@ -251,6 +263,34 @@ export const inventoryOpenApiSchema: SchemaObject = {
     resultRevision: { type: "integer", minimum: 0 },
     createdAt: dateTimeSchema,
     updatedAt: dateTimeSchema,
+  },
+};
+
+const inventoryBlockerProjectionOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "activeParticipantCount",
+    "pendingEventCount",
+    "participantOpenBoxCount",
+    "openRepackBoxCount",
+    "unresolvedPrintBoxCount",
+  ],
+  properties: {
+    activeParticipantCount: { type: "integer", minimum: 0 },
+    pendingEventCount: { type: "integer", minimum: 0 },
+    participantOpenBoxCount: { type: "integer", minimum: 0 },
+    openRepackBoxCount: { type: "integer", minimum: 0 },
+    unresolvedPrintBoxCount: { type: "integer", minimum: 0 },
+  },
+};
+
+export const inventoryDetailOpenApiSchema: SchemaObject = {
+  ...inventoryOpenApiSchema,
+  required: [...(inventoryOpenApiSchema.required ?? []), "blockers"],
+  properties: {
+    ...inventoryOpenApiSchema.properties,
+    blockers: inventoryBlockerProjectionOpenApiSchema,
   },
 };
 

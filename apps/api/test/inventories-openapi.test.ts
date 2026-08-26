@@ -289,7 +289,15 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
     if (!template) throw new Error("Missing boxLabelTemplate projection");
     exactObject(template, ["id", "name"]);
     expect(template.nullable).toBe(true);
-    exactObject(responseSchema(document, "/inventories/{id}", "get", "200"), fields);
+    const inventoryDetail = responseSchema(document, "/inventories/{id}", "get", "200");
+    exactObject(inventoryDetail, [...fields, "blockers"]);
+    exactObject(inventoryDetail.properties!.blockers!, [
+      "activeParticipantCount",
+      "pendingEventCount",
+      "participantOpenBoxCount",
+      "openRepackBoxCount",
+      "unresolvedPrintBoxCount",
+    ]);
     exactObject(responseSchema(document, "/inventories/{id}", "patch", "200"), fields);
     const list = responseSchema(document, "/inventories", "get", "200");
     exactObject(list, ["items"]);
@@ -305,11 +313,17 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       "inventoryNumber",
       "snapshotId",
       "snapshotRevision",
+      "snapshotFixedAt",
       "combinedDigest",
+      "contentDigest",
       "codeCount",
       "productId",
       "productName",
+      "productPrintName",
+      "egaisCode",
+      "shelfLifeDays",
       "gtin14",
+      "boxCapacity",
       "mode",
       "lineId",
       "lineName",
@@ -325,11 +339,17 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       inventoryNumber: { type: "string" },
       snapshotId: { type: "string", format: "uuid" },
       snapshotRevision: { type: "integer", minimum: 1, maximum: 1 },
+      snapshotFixedAt: { type: "string", format: "date-time" },
       combinedDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+      contentDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
       codeCount: { type: "integer", minimum: 0 },
       productId: { type: "string", format: "uuid" },
       productName: { type: "string" },
+      productPrintName: { type: "string", nullable: true },
+      egaisCode: { type: "string", nullable: true },
+      shelfLifeDays: { type: "integer", minimum: 1, nullable: true },
       gtin14: { type: "string", pattern: "^[0-9]{14}$" },
+      boxCapacity: { type: "integer", minimum: 1 },
       mode: { type: "string", enum: ["check", "repack"] },
       lineId: { type: "string", format: "uuid" },
       lineName: { type: "string" },

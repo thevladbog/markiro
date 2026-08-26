@@ -559,6 +559,42 @@ test("the workflow CORS gate pins the production API and Windows webview origin"
     ["/station/conflicts/status", "POST", "content-type,x-api-key,x-station-capabilities"],
     ["/station/codes/releases", "POST", "content-type,x-api-key,x-station-capabilities"],
     ["/station/scans", "POST", "content-type,x-api-key,x-station-capabilities"],
+    ["/station/inventory-tasks", "GET", "content-type,x-api-key,x-station-capabilities"],
+    [
+      "/station/inventory-tasks/resolve-barcode",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/inventories/cors-probe/join",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/inventories/cors-probe/bundle/manifest",
+      "GET",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/inventories/cors-probe/bundle/codes",
+      "GET",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/inventories/cors-probe/event-batches",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/inventories/cors-probe/progress",
+      "GET",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/inventories/cors-probe/leave",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
     ["/station/shift-closures", "POST", "content-type,x-api-key,x-station-capabilities"],
     ["/shifts", "GET", "content-type,x-api-key,x-station-capabilities"],
     ["/shifts", "POST", "content-type,x-api-key,x-station-capabilities"],

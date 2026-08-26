@@ -661,6 +661,7 @@ export const ssccBlocks = pgTable(
   "sscc_blocks",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    allocationOrder: bigint("allocation_order", { mode: "number" }).notNull(),
     tenantId: tenantId(),
     issuerPrefix: char("issuer_prefix", { length: 9 }).notNull(),
     extensionDigit: integer("extension_digit").notNull(),
@@ -701,6 +702,13 @@ export const ssccBlocks = pgTable(
     issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    uniqueIndex("sscc_blocks_stream_allocation_order_uq").on(
+      t.tenantId,
+      t.issuerPrefix,
+      t.extensionDigit,
+      t.deviceId,
+      t.allocationOrder,
+    ),
     // Composite FK: device_id must belong to the same tenant as the sscc
     // block referencing it — same shape as shifts' own FKs above. Unlike
     // those, device_id is NOT NULL: a block always records the device that

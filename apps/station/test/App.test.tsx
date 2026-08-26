@@ -116,6 +116,7 @@ import {
   pickScanSource,
   scannerIndicator,
 } from "../src/App.js";
+import { productionFloorTask, readPersistedInventoryFloorTask } from "../src/lib/floor-task.js";
 import type { StationConfig } from "../src/lib/config.js";
 import { hashSecret } from "../src/lib/crypto.js";
 import type { HardwareConfig } from "../src/lib/hardware-config.js";
@@ -128,6 +129,7 @@ import { BACKOFF_START_MS } from "../src/lib/sync.js";
 import { OPERATOR_IDLE_TIMEOUT_MS } from "../src/lib/operator-idle-lock.js";
 import * as WorkScreenModule from "../src/pages/WorkScreen.js";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
+import { inventorySnapshotContentDigest, inventorySnapshotPageDigest } from "@markiro/domain";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -162,6 +164,12 @@ afterEach(() => {
     lockdownMock.publish({ ...lockdownMock.snapshot, error: null });
   });
   lockdownMock.whenSettled.mockReset().mockResolvedValue(undefined);
+});
+
+it("adapts the unchanged shift callback payload into the closed floor-task route", () => {
+  const shift = { id: "shift-1", status: "active", mode: "validation" };
+
+  expect(productionFloorTask(shift)).toEqual({ kind: "production", shift });
 });
 
 // No `tenantId` here on purpose: `Enrollment` never persists one (the
@@ -289,6 +297,7 @@ function mockInvokeForFloor(
   onInvoke?: (cmd: string, payload: unknown) => void,
   recoverySnapshotFailure?: Error,
   configWriteFailure?: Error,
+  inventoryOutboxCount = 0,
 ): OutboxSeedRow[] {
   const outbox = [...outboxRows];
   // Mutated by a real `recordConflicts`/`conflictCount` round-trip through
@@ -354,7 +363,14 @@ function mockInvokeForFloor(
       const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
       if (query.includes("AS scans")) {
         if (recoverySnapshotFailure) return Promise.reject(recoverySnapshotFailure);
-        return Promise.resolve([{ scans: outbox.length, boxes: 0, exceptions: 0 }]);
+        return Promise.resolve([
+          {
+            scans: outbox.length,
+            inventory_scans: inventoryOutboxCount,
+            boxes: 0,
+            exceptions: 0,
+          },
+        ]);
       }
       // Checked before every other branch: none of the other queries below
       // reference the outbox table, so matching on it first is just the
@@ -421,6 +437,8 @@ async function signInAsOperator(login = OPERATOR_LOGIN, pin = OPERATOR_PIN) {
   clickDigits(pin);
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
   await waitFor(() => expect(screen.getByTestId("scanner-status")).toBeDefined());
+  await waitFor(() => expect(screen.queryByText("Operator sign-in")).toBeNull());
+  await waitFor(() => expect(screen.queryByTestId("floor-route-loading")).toBeNull());
 }
 
 /**
@@ -621,13 +639,90 @@ async function mockBackfilledActiveShiftRecovery(pinHash: string) {
   return { exec, executed };
 }
 
+async function mockInventoryEntryDatabase(
+  pinHash: string,
+  suspendQuery: (query: string, values: unknown[]) => boolean = (query) =>
+    query.includes("SET active_snapshot_id = staged_snapshot_id"),
+) {
+  const db = new DatabaseSync(":memory:");
+  const exec = {
+    async run(sql: string, values: unknown[] = []) {
+      db.prepare(sql).run(...(values as never[]));
+    },
+    async all<T>(sql: string, values: unknown[] = []): Promise<T[]> {
+      return db.prepare(sql).all(...(values as never[])) as T[];
+    },
+  };
+  await applyMigrations(exec);
+  await exec.run(
+    `INSERT INTO operators_mirror
+       (operator_id, name, login, role, pin_hash, badge_hash, active)
+     VALUES (?,?,?,?,?,?,?)`,
+    ["op1", "Ivan", OPERATOR_LOGIN, "operator", pinHash, null, 1],
+  );
+  await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [
+    "hardware_config",
+    JSON.stringify({
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    }),
+  ]);
+  await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [
+    "install_id",
+    "test-install-id",
+  ]);
+  const persistedConfig: Record<string, unknown> = {
+    machine_id: "m1",
+    device_id: "device-1",
+    line_id: "33333333-3333-4333-8333-333333333333",
+    line_name: "Line 1",
+    api_key: "mk_inventory_key",
+    server_url: "https://api.factory.example",
+  };
+  let releasePublication!: () => void;
+  const publicationGate = new Promise<void>((resolve) => {
+    releasePublication = resolve;
+  });
+  let markPublicationStarted!: () => void;
+  const publicationStarted = new Promise<void>((resolve) => {
+    markPublicationStarted = resolve;
+  });
+  const executed: Array<{ query: string; values: unknown[] }> = [];
+  invokeMock.mockImplementation(async (cmd: string, payload?: unknown): Promise<unknown> => {
+    if (cmd === "read_config") return persistedConfig;
+    if (cmd === "clear_credential") {
+      delete persistedConfig.api_key;
+      return undefined;
+    }
+    if (cmd === "plugin:sql|load") return "sqlite:station-mirror.db";
+    if (cmd === "plugin:sql|execute") {
+      const { query, values = [] } = (payload ?? {}) as { query: string; values?: unknown[] };
+      executed.push({ query, values });
+      if (suspendQuery(query, values)) {
+        markPublicationStarted();
+        await publicationGate;
+      }
+      db.prepare(query).run(...(values as never[]));
+      return [0, 0];
+    }
+    if (cmd === "plugin:sql|select") {
+      const { query, values = [] } = (payload ?? {}) as { query: string; values?: unknown[] };
+      return db.prepare(query).all(...(values as never[]));
+    }
+    return undefined;
+  });
+  return { exec, executed, persistedConfig, publicationStarted, releasePublication };
+}
+
 async function expectEmptyQueueCredentialRecovery(
   persistedConfig: Record<string, unknown>,
   outbox: OutboxSeedRow[],
 ): Promise<void> {
   await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
   expect(screen.getByTestId("sealed-work-summary").textContent).toBe(
-    "Unsynchronized work is sealed on this station: 0 scans, 0 boxes, 0 corrections.",
+    "Unsynchronized work is sealed on this station: 0 production scans, 0 inventory scans, 0 boxes, 0 corrections.",
   );
   expect(screen.queryByTestId("scanner-status")).toBeNull();
   expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(1);
@@ -1219,7 +1314,7 @@ describe("App", () => {
 
     expect(lockdownMock.start).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Exit fullscreen" })).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Workstation setup" }));
     expect(await screen.findByRole("heading", { name: "Workstation setup" })).toBeDefined();
     expect(lockdownMock.exit).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Exit fullscreen" })).toBeDefined();
@@ -1402,6 +1497,642 @@ describe("App", () => {
       expect(queued).toHaveLength(1);
       expect(invokeMock.mock.calls.some(([cmd]) => cmd === "clear_credential")).toBe(false);
     } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("waits and retires the real inventory publication barrier before completing operator switch", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+    lockdownMock.subscribe.mockImplementation((listener) => {
+      lockdownMock.listeners.add(listener);
+      return () => lockdownMock.listeners.delete(listener);
+    });
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const inventoryId = "11111111-1111-4111-8111-111111111111";
+    const snapshotId = "22222222-2222-4222-8222-222222222222";
+    const snapshotFixedAt = "2026-08-25T05:00:00.000Z";
+    const contentDigest = inventorySnapshotContentDigest([]);
+    const manifest = {
+      inventoryId,
+      inventoryNumber: "INV-00047",
+      productId: "44444444-4444-4444-8444-444444444444",
+      productName: "Water",
+      productPrintName: null,
+      egaisCode: null,
+      shelfLifeDays: null,
+      gtin14: "04600000000015",
+      mode: "check",
+      lineId: "33333333-3333-4333-8333-333333333333",
+      lineName: "Line 1",
+      productionDateFrom: "2026-08-01",
+      productionDateTo: "2026-08-31",
+      boxCapacity: 12,
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: "a".repeat(64),
+      contentDigest,
+      codeCount: 0,
+      boxLabelTemplate: null,
+      limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
+      sscc: null,
+      ssccRevokedFrom: [],
+      ssccRevokedBlocks: [],
+    };
+    const page = {
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: manifest.combinedDigest,
+      contentDigest,
+      cursor: null,
+      items: [],
+      nextCursor: null,
+      pageDigest: inventorySnapshotPageDigest({
+        snapshotId,
+        snapshotFixedAt,
+        contentDigest,
+        cursor: null,
+        items: [],
+        nextCursor: null,
+      }),
+    };
+    const database = await mockInventoryEntryDatabase(pinHash);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/operators") throw new Error("keep cached operator");
+        if (path === "/shifts") return new Response(JSON.stringify({ items: [] }));
+        if (path === "/station/inventory-tasks") {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  inventoryId,
+                  inventoryNumber: manifest.inventoryNumber,
+                  productName: manifest.productName,
+                  mode: manifest.mode,
+                  lineId: manifest.lineId,
+                  lineName: manifest.lineName,
+                  productionDateFrom: manifest.productionDateFrom,
+                  productionDateTo: manifest.productionDateTo,
+                },
+              ],
+            }),
+          );
+        }
+        if (path === `/station/inventories/${inventoryId}/join`) {
+          return new Response(JSON.stringify(manifest));
+        }
+        if (path.endsWith("/bundle/manifest")) return new Response(JSON.stringify(manifest));
+        if (path.endsWith("/bundle/codes")) return new Response(JSON.stringify(page));
+        return new Response(JSON.stringify({ items: [] }));
+      }),
+    );
+
+    try {
+      render(<App />);
+      await signInAsOperator();
+      fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
+      await database.publicationStarted;
+      fireEvent.click(screen.getByRole("button", { name: "Change operator" }));
+
+      await act(async () => {});
+
+      expect(screen.queryByText("Operator sign-in")).toBeNull();
+      expect(screen.getByTestId("operator-switch-settling").textContent).toContain(
+        "Saving the current operation…",
+      );
+
+      database.releasePublication();
+      expect(await screen.findByText("Operator sign-in")).toBeDefined();
+      expect(
+        await database.exec.all(
+          "SELECT active_snapshot_id FROM inventory_task_mirror WHERE inventory_id = ?",
+          [inventoryId],
+        ),
+      ).toEqual([{ active_snapshot_id: snapshotId }]);
+      expect(
+        database.executed.some(({ query, values }) => {
+          return (
+            query.includes("INSERT INTO station_meta") &&
+            query.includes("ON CONFLICT(key) DO UPDATE") &&
+            values[0] === "active_inventory_floor_task_v1"
+          );
+        }),
+      ).toBe(true);
+      expect(
+        await database.exec.all("SELECT value FROM station_meta WHERE key = ?", [
+          "active_inventory_floor_task_v1",
+        ]),
+      ).toEqual([]);
+      expect(await readPersistedInventoryFloorTask(database.exec)).toBeNull();
+    } finally {
+      database.releasePublication();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("keeps inventory print recovery latched through setup and releases global actions after retry", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+    lockdownMock.subscribe.mockImplementation((listener) => {
+      lockdownMock.listeners.add(listener);
+      return () => lockdownMock.listeners.delete(listener);
+    });
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const inventoryId = "11111111-1111-4111-8111-111111111111";
+    const snapshotId = "22222222-2222-4222-8222-222222222222";
+    const inventoryOperatorId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const snapshotFixedAt = "2026-08-25T05:00:00.000Z";
+    const contentDigest = inventorySnapshotContentDigest([]);
+    const manifest = {
+      inventoryId,
+      inventoryNumber: "INV-REPACK-1",
+      productId: "44444444-4444-4444-8444-444444444444",
+      productName: "Water",
+      productPrintName: "Water 0.5 l",
+      egaisCode: null,
+      shelfLifeDays: 180,
+      gtin14: "04600000000015",
+      mode: "repack",
+      lineId: "33333333-3333-4333-8333-333333333333",
+      lineName: "Line 1",
+      productionDateFrom: "2026-08-01",
+      productionDateTo: "2026-08-31",
+      boxCapacity: 12,
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: "a".repeat(64),
+      contentDigest,
+      codeCount: 0,
+      boxLabelTemplate: {
+        id: "77777777-7777-4777-8777-777777777777",
+        name: "Box",
+        spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+      },
+      limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
+      sscc: {
+        allocationOrder: 1,
+        issuerPrefix: "460068200",
+        extensionDigit: 0,
+        fromSerial: 1,
+        toSerial: 10,
+        consumedThroughSerial: null,
+      },
+      ssccRevokedFrom: [],
+      ssccRevokedBlocks: [],
+    };
+    const page = {
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: manifest.combinedDigest,
+      contentDigest,
+      cursor: null,
+      items: [],
+      nextCursor: null,
+      pageDigest: inventorySnapshotPageDigest({
+        snapshotId,
+        snapshotFixedAt,
+        contentDigest,
+        cursor: null,
+        items: [],
+        nextCursor: null,
+      }),
+    };
+    const database = await mockInventoryEntryDatabase(pinHash, () => false);
+    await database.exec.run(
+      "UPDATE operators_mirror SET operator_id = ? WHERE operator_id = 'op1'",
+      [inventoryOperatorId],
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/operators") throw new Error("keep cached operator");
+        if (path === "/shifts") return new Response(JSON.stringify({ items: [] }));
+        if (path === "/station/inventory-tasks") {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  inventoryId,
+                  inventoryNumber: manifest.inventoryNumber,
+                  productName: manifest.productName,
+                  mode: manifest.mode,
+                  lineId: manifest.lineId,
+                  lineName: manifest.lineName,
+                  productionDateFrom: manifest.productionDateFrom,
+                  productionDateTo: manifest.productionDateTo,
+                },
+              ],
+            }),
+          );
+        }
+        if (path === `/station/inventories/${inventoryId}/join`) {
+          return new Response(JSON.stringify(manifest));
+        }
+        if (path.endsWith("/bundle/manifest")) return new Response(JSON.stringify(manifest));
+        if (path.endsWith("/bundle/codes")) return new Response(JSON.stringify(page));
+        return new Response(JSON.stringify({ items: [] }));
+      }),
+    );
+
+    try {
+      render(<App />);
+      await signInAsOperator();
+      fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
+      const continueTask = await screen.findByRole("button", { name: "Continue INV-REPACK-1" });
+      await database.exec.run(
+        `INSERT INTO inventory_terminal_state
+           (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+            open_repack_box_id, next_device_sequence, updated_at)
+         VALUES (?, ?, 'device-1', ?, '2026-08-19', NULL, 1,
+                 '2026-08-25T10:00:00.000Z')`,
+        [inventoryId, snapshotId, inventoryOperatorId],
+      );
+      await database.exec.run(
+        `INSERT INTO inventory_repack_boxes_mirror
+           (inventory_id, snapshot_id, box_id, opened_event_id, closed_event_id,
+            old_sscc_context, new_sscc, owner_device_id, capacity, production_date,
+            state, print_state, print_attempt_count, opened_at, closed_at, updated_at)
+         VALUES (?, ?, '55555555-5555-4555-8555-555555555555',
+                 '66666666-6666-4666-8666-666666666666',
+                 '77777777-7777-4777-8777-777777777777',
+                 '346006820000000014', '046006820000621515', 'device-1', 12,
+                 '2026-08-19', 'closed', 'pending', 0,
+                 '2026-08-25T09:00:00.000Z', '2026-08-25T10:00:00.000Z',
+                 '2026-08-25T10:00:00.000Z')`,
+        [inventoryId, snapshotId],
+      );
+      await database.exec.run(
+        `INSERT INTO inventory_repack_items_mirror
+           (inventory_id, snapshot_id, item_id, source_event_id, box_id, code_hash,
+            position, production_date, added_at)
+         VALUES (?, ?, '88888888-8888-4888-8888-888888888888',
+                 '99999999-9999-4999-8999-999999999999',
+                 '55555555-5555-4555-8555-555555555555', ?, 1,
+                 '2026-08-19', '2026-08-25T09:30:00.000Z')`,
+        [inventoryId, snapshotId, "d".repeat(64)],
+      );
+      await database.exec.run(
+        `INSERT INTO inventory_repack_print_attempts
+           (inventory_id, snapshot_id, attempt_id, box_id, kind, attempt_number,
+            state, attempted_at)
+         VALUES (?, ?, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                 '55555555-5555-4555-8555-555555555555', 'initial', 1, 'printing',
+                 '2026-08-25T10:00:00.000Z')`,
+        [inventoryId, snapshotId],
+      );
+      await database.exec.run(
+        `UPDATE inventory_repack_print_attempts
+            SET state = 'printed', completed_at = '2026-08-25T10:00:01.000Z',
+                event_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+          WHERE attempt_id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
+      );
+      await database.exec.run(
+        `UPDATE inventory_repack_boxes_mirror
+            SET print_state = 'printed', print_attempt_count = 1,
+                printed_at = '2026-08-25T10:00:01.000Z'
+          WHERE box_id = '55555555-5555-4555-8555-555555555555'`,
+      );
+      await database.exec.run(
+        `INSERT INTO inventory_repack_print_attempts
+           (inventory_id, snapshot_id, attempt_id, box_id, kind, attempt_number,
+            state, attempted_at)
+         VALUES (?, ?, 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+                 '55555555-5555-4555-8555-555555555555', 'reprint', 2, 'printing',
+                 '2026-08-25T10:02:00.000Z')`,
+        [inventoryId, snapshotId],
+      );
+      await database.exec.run(
+        `UPDATE inventory_repack_print_attempts
+            SET state = 'failed', error_code = 'printer_unconfigured',
+                completed_at = '2026-08-25T10:02:01.000Z',
+                event_id = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+          WHERE attempt_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'`,
+      );
+      await database.exec.run(
+        `UPDATE inventory_repack_boxes_mirror
+            SET print_attempt_count = 2, print_error_code = 'printer_unconfigured'
+          WHERE box_id = '55555555-5555-4555-8555-555555555555'`,
+      );
+
+      fireEvent.click(continueTask);
+      expect(await screen.findByTestId("inventory-repack-work")).toBeDefined();
+      expect(screen.queryByTestId("inventory-entry-ready")).toBeNull();
+      expect(await screen.findByText("Label was not printed")).toBeDefined();
+      expect(
+        (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "Saving the current operation…" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "Exit fullscreen" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: "Configure printer" }));
+      expect(await screen.findByRole("heading", { name: "Workstation setup" })).toBeDefined();
+      fireEvent.click(await screen.findByRole("tab", { name: "Printer" }));
+      const tcp = await screen.findByRole("radio", { name: "Network (TCP)" });
+      await waitFor(() => expect((tcp as HTMLInputElement).disabled).toBe(false));
+      fireEvent.click(tcp);
+      fireEvent.change(screen.getByLabelText("Printer address"), {
+        target: { value: "10.0.0.7" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+      expect(await screen.findByText("Label was not printed")).toBeDefined();
+      fireEvent.click(screen.getByRole("button", { name: "Retry printing" }));
+      await waitFor(() => expect(hardwareMock.print).toHaveBeenCalledOnce());
+      await waitFor(async () => {
+        expect(
+          await database.exec.all<{ state: string; kind: string }>(
+            `SELECT state, kind FROM inventory_repack_print_attempts
+              WHERE box_id = '55555555-5555-4555-8555-555555555555'
+              ORDER BY attempt_number DESC LIMIT 1`,
+          ),
+        ).toEqual([{ state: "printed", kind: "reprint" }]);
+      });
+      await waitFor(() =>
+        expect(
+          (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
+        ).toBe(false),
+      );
+      expect(
+        (screen.getByRole("button", { name: "Change operator" }) as HTMLButtonElement).disabled,
+      ).toBe(false);
+      expect(
+        (screen.getByRole("button", { name: "Exit fullscreen" }) as HTMLButtonElement).disabled,
+      ).toBe(false);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("drains and retires a suspended inventory pointer when Update Center unmounts selection", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+    lockdownMock.subscribe.mockImplementation((listener) => {
+      lockdownMock.listeners.add(listener);
+      return () => lockdownMock.listeners.delete(listener);
+    });
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const inventoryId = "11111111-1111-4111-8111-111111111111";
+    const snapshotId = "22222222-2222-4222-8222-222222222222";
+    const snapshotFixedAt = "2026-08-25T05:00:00.000Z";
+    const contentDigest = inventorySnapshotContentDigest([]);
+    const manifest = {
+      inventoryId,
+      inventoryNumber: "INV-00047",
+      productId: "44444444-4444-4444-8444-444444444444",
+      productName: "Water",
+      productPrintName: null,
+      egaisCode: null,
+      shelfLifeDays: null,
+      gtin14: "04600000000015",
+      mode: "check",
+      lineId: "33333333-3333-4333-8333-333333333333",
+      lineName: "Line 1",
+      productionDateFrom: "2026-08-01",
+      productionDateTo: "2026-08-31",
+      boxCapacity: 12,
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: "a".repeat(64),
+      contentDigest,
+      codeCount: 0,
+      boxLabelTemplate: null,
+      limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
+      sscc: null,
+      ssccRevokedFrom: [],
+      ssccRevokedBlocks: [],
+    };
+    const page = {
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: manifest.combinedDigest,
+      contentDigest,
+      cursor: null,
+      items: [],
+      nextCursor: null,
+      pageDigest: inventorySnapshotPageDigest({
+        snapshotId,
+        snapshotFixedAt,
+        contentDigest,
+        cursor: null,
+        items: [],
+        nextCursor: null,
+      }),
+    };
+    const database = await mockInventoryEntryDatabase(
+      pinHash,
+      (query, values) =>
+        query.includes("INSERT INTO station_meta") &&
+        values[0] === "active_inventory_floor_task_v1",
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/operators") throw new Error("keep cached operator");
+        if (path === "/shifts") return new Response(JSON.stringify({ items: [] }));
+        if (path === "/station/inventory-tasks") {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  inventoryId,
+                  inventoryNumber: manifest.inventoryNumber,
+                  productName: manifest.productName,
+                  mode: manifest.mode,
+                  lineId: manifest.lineId,
+                  lineName: manifest.lineName,
+                  productionDateFrom: manifest.productionDateFrom,
+                  productionDateTo: manifest.productionDateTo,
+                },
+              ],
+            }),
+          );
+        }
+        if (path === `/station/inventories/${inventoryId}/join`) {
+          return new Response(JSON.stringify(manifest));
+        }
+        if (path.endsWith("/bundle/manifest")) return new Response(JSON.stringify(manifest));
+        if (path.endsWith("/bundle/codes")) return new Response(JSON.stringify(page));
+        return new Response(JSON.stringify({ items: [] }));
+      }),
+    );
+
+    try {
+      render(<App />);
+      await signInAsOperator();
+      fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
+      await database.publicationStarted;
+
+      fireEvent.click(screen.getByRole("button", { name: "↻ Updates" }));
+      expect(await screen.findByRole("heading", { name: "Station updates" })).toBeDefined();
+      database.releasePublication();
+
+      await waitFor(async () =>
+        expect(
+          await database.exec.all("SELECT value FROM station_meta WHERE key = ?", [
+            "active_inventory_floor_task_v1",
+          ]),
+        ).toEqual([]),
+      );
+      await expect(readPersistedInventoryFloorTask(database.exec)).resolves.toBeNull();
+    } finally {
+      database.releasePublication();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("keeps an unmounted inventory page write registered until credential recovery can clean it", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+    lockdownMock.subscribe.mockImplementation((listener) => {
+      lockdownMock.listeners.add(listener);
+      return () => lockdownMock.listeners.delete(listener);
+    });
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const inventoryId = "11111111-1111-4111-8111-111111111111";
+    const snapshotId = "22222222-2222-4222-8222-222222222222";
+    const snapshotFixedAt = "2026-08-25T05:00:00.000Z";
+    const contentDigest = inventorySnapshotContentDigest([]);
+    const manifest = {
+      inventoryId,
+      inventoryNumber: "INV-00047",
+      productId: "44444444-4444-4444-8444-444444444444",
+      productName: "Water",
+      productPrintName: null,
+      egaisCode: null,
+      shelfLifeDays: null,
+      gtin14: "04600000000015",
+      mode: "check",
+      lineId: "33333333-3333-4333-8333-333333333333",
+      lineName: "Line 1",
+      productionDateFrom: "2026-08-01",
+      productionDateTo: "2026-08-31",
+      boxCapacity: 12,
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: "a".repeat(64),
+      contentDigest,
+      codeCount: 0,
+      boxLabelTemplate: null,
+      limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
+      sscc: null,
+      ssccRevokedFrom: [],
+      ssccRevokedBlocks: [],
+    };
+    const page = {
+      snapshotId,
+      snapshotRevision: 1,
+      snapshotFixedAt,
+      combinedDigest: manifest.combinedDigest,
+      contentDigest,
+      cursor: null,
+      items: [],
+      nextCursor: null,
+      pageDigest: inventorySnapshotPageDigest({
+        snapshotId,
+        snapshotFixedAt,
+        contentDigest,
+        cursor: null,
+        items: [],
+        nextCursor: null,
+      }),
+    };
+    const database = await mockInventoryEntryDatabase(pinHash, (query) =>
+      query.includes("SET staged_next_cursor = ?"),
+    );
+    let rejectInventoryList = false;
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = new URL(url).pathname;
+      if (path === "/station/operators") {
+        throw new Error("keep cached operator");
+      }
+      if (path === "/shifts") {
+        if (rejectInventoryList) {
+          return new Response(JSON.stringify({ message: "revoked" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ items: [] }));
+      }
+      if (path === "/station/inventory-tasks") {
+        if (rejectInventoryList) {
+          return new Response(JSON.stringify({ message: "revoked" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                inventoryId,
+                inventoryNumber: manifest.inventoryNumber,
+                productName: manifest.productName,
+                mode: manifest.mode,
+                lineId: manifest.lineId,
+                lineName: manifest.lineName,
+                productionDateFrom: manifest.productionDateFrom,
+                productionDateTo: manifest.productionDateTo,
+              },
+            ],
+          }),
+        );
+      }
+      if (path === `/station/inventories/${inventoryId}/join`) {
+        return new Response(JSON.stringify(manifest));
+      }
+      if (path.endsWith("/bundle/manifest")) return new Response(JSON.stringify(manifest));
+      if (path.endsWith("/bundle/codes")) return new Response(JSON.stringify(page));
+      return new Response(JSON.stringify({ items: [] }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      render(<App />);
+      await signInAsOperator();
+      fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
+      await database.publicationStarted;
+
+      rejectInventoryList = true;
+      fireEvent.click(screen.getByRole("button", { name: "Refresh tasks" }));
+      await waitFor(() =>
+        expect(
+          fetchMock.mock.calls.filter(
+            ([url]) => new URL(url).pathname === "/station/inventory-tasks",
+          ),
+        ).toHaveLength(2),
+      );
+      await waitFor(() => expect(screen.queryByTestId("scanner-status")).toBeNull());
+      expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(0);
+
+      database.releasePublication();
+      await waitFor(() =>
+        expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(1),
+      );
+      await screen.findByTestId("sealed-work-summary");
+      expect(await database.exec.all("SELECT * FROM inventory_task_mirror")).toEqual([]);
+    } finally {
+      database.releasePublication();
       consoleErrorSpy.mockRestore();
     }
   });
@@ -2133,8 +2864,13 @@ describe("App", () => {
     const initialShifts = new Promise<Response>((_resolve, reject) => {
       rejectInitialShifts = reject;
     });
+    let rejectInitialInventory!: (reason?: unknown) => void;
+    const initialInventory = new Promise<Response>((_resolve, reject) => {
+      rejectInitialInventory = reject;
+    });
     let operatorRequests = 0;
     let shiftRequests = 0;
+    let inventoryRequests = 0;
     const fetchMock = vi.fn((url: string) => {
       const path = new URL(url).pathname;
       if (path === "/station/operators") {
@@ -2147,6 +2883,12 @@ describe("App", () => {
         shiftRequests += 1;
         return shiftRequests === 2
           ? initialShifts
+          : Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      }
+      if (path === "/station/inventory-tasks") {
+        inventoryRequests += 1;
+        return inventoryRequests === 1
+          ? initialInventory
           : Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
       }
       return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
@@ -2165,7 +2907,10 @@ describe("App", () => {
     expect(screen.getByTestId("server-status").textContent).toBe("No connection");
 
     act(() => window.dispatchEvent(new Event("offline")));
-    act(() => rejectInitialShifts(new TypeError("network")));
+    act(() => {
+      rejectInitialShifts(new TypeError("network"));
+      rejectInitialInventory(new TypeError("network"));
+    });
     fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
     await waitFor(() => expect(screen.getByTestId("server-status").textContent).toBe("Available"));
   });
@@ -2917,7 +3662,9 @@ describe("App", () => {
     // port/baud did not change, and that reconciling run is what must
     // close before it opens.
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Done" }));
+    const done = await screen.findByRole("button", { name: "Done" });
+    await waitFor(() => expect((done as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(done);
 
     await waitFor(() => expect(calls).toContain("open"));
     expect(calls).toEqual(["close", "open"]);
@@ -2949,7 +3696,9 @@ describe("App", () => {
     // where the open effect's dependency array (keyed on port/baud) alone
     // would never re-run.
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-    fireEvent.change(await screen.findByRole("combobox", { name: "Port" }), {
+    const port = await screen.findByRole("combobox", { name: "Port" });
+    await waitFor(() => expect((port as HTMLSelectElement).disabled).toBe(false));
+    fireEvent.change(port, {
       target: { value: "COM3" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
@@ -3263,7 +4012,7 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
     expect(screen.getByTestId("sealed-work-summary").textContent).toBe(
-      "Unsynchronized work is sealed on this station: 1 scans, 0 boxes, 0 corrections.",
+      "Unsynchronized work is sealed on this station: 1 production scans, 0 inventory scans, 0 boxes, 0 corrections.",
     );
     expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "clear_credential")).toHaveLength(1);
     expect(outbox).toHaveLength(1);
@@ -3302,6 +4051,9 @@ describe("App", () => {
           checkedFloorExit = true;
         }
       },
+      undefined,
+      undefined,
+      1,
     );
     let rejectSync!: () => void;
     const rejectedResponse = new Promise<Response>((resolve) => {
@@ -3330,8 +4082,9 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.getByTestId("sealed-work-summary")).toBeDefined());
     expect(checkedFloorExit).toBe(true);
-    expect(screen.getByTestId("sealed-work-summary").textContent).toContain("1");
-    expect(screen.getByTestId("sealed-work-summary").textContent).toContain("0");
+    expect(screen.getByTestId("sealed-work-summary").textContent).toBe(
+      "Unsynchronized work is sealed on this station: 1 production scans, 1 inventory scans, 0 boxes, 0 corrections.",
+    );
     expect(invokeMock).toHaveBeenCalledWith("clear_credential");
     expect(outbox).toHaveLength(1);
     expect(persistedConfig).toEqual({
@@ -3480,7 +4233,9 @@ describe("App", () => {
     // leaves running must still be retired and the still-configured COM3
     // session reopened, without an app restart.
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-    fireEvent.change(await screen.findByRole("combobox", { name: "Port" }), {
+    const port = await screen.findByRole("combobox", { name: "Port" });
+    await waitFor(() => expect((port as HTMLSelectElement).disabled).toBe(false));
+    fireEvent.change(port, {
       target: { value: "COM9" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Connect scanner" }));
@@ -3549,7 +4304,9 @@ describe("App", () => {
       // the operator action from Finding 1 (no "Connect scanner" test-press
       // first).
       fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-      fireEvent.change(await screen.findByRole("combobox", { name: "Port" }), {
+      const port = await screen.findByRole("combobox", { name: "Port" });
+      await waitFor(() => expect((port as HTMLSelectElement).disabled).toBe(false));
+      fireEvent.change(port, {
         target: { value: "COM9" },
       });
       fireEvent.click(screen.getByRole("button", { name: "Done" }));

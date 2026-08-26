@@ -58,26 +58,17 @@ describe.skipIf(!databaseUrl)("SaaS bank-account migration", () => {
       force: true,
     });
     await rm(join(legacyMigrations, "0069_inventory_station_manifest.sql"), { force: true });
+    await rm(join(legacyMigrations, "0070_curious_big_bertha.sql"), { force: true });
     await rm(join(legacyMigrations, "meta", "0061_snapshot.json"), { force: true });
     await rm(join(legacyMigrations, "meta", "0064_snapshot.json"), { force: true });
     await rm(join(legacyMigrations, "meta", "0065_snapshot.json"), { force: true });
     await rm(join(legacyMigrations, "meta", "0069_snapshot.json"), { force: true });
+    await rm(join(legacyMigrations, "meta", "0070_snapshot.json"), { force: true });
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
     };
-    journal.entries = journal.entries.filter(
-      (entry) =>
-        entry.tag !== "0061_saas_bank_accounts" &&
-        entry.tag !== "0062_document_account_snapshots" &&
-        entry.tag !== "0063_payment_account_evidence" &&
-        entry.tag !== "0064_normalize_operator_billing_profile_kind" &&
-        entry.tag !== "0065_saas_party_actual_addresses" &&
-        entry.tag !== "0066_panoramic_hemingway" &&
-        entry.tag !== "0067_flashy_outlaw_kid" &&
-        entry.tag !== "0068_inventory_protected_date_precedence" &&
-        entry.tag !== "0069_inventory_station_manifest",
-    );
+    journal.entries = journal.entries.filter((entry) => Number(entry.tag.slice(0, 4)) < 61);
     await writeFile(journalPath, JSON.stringify(journal));
 
     await migrate(drizzle(pool), { migrationsFolder: legacyMigrations });

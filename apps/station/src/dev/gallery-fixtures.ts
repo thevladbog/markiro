@@ -12,11 +12,36 @@ const VISUAL_STRESS_GALLERY_STATE_IDS = [
   "long-copy-en",
 ] as const;
 
+export const INVENTORY_GALLERY_STATE_IDS = [
+  "inventory-task-selection",
+  "inventory-other-line-confirmation",
+  "inventory-simple-box-accepted",
+  "inventory-duplicate-other-terminal",
+  "inventory-known-ineligible",
+  "inventory-protected-moving-by-ud",
+  "inventory-not-in-snapshot",
+  "inventory-repack-awaiting-old-box",
+  "inventory-repack-scanning",
+  "inventory-repack-capacity-20",
+  "inventory-repack-box-ready",
+  "inventory-repack-corrections",
+  "inventory-production-date-change",
+  "inventory-leave-open-box",
+  "inventory-print-recovery",
+  "inventory-same-sscc-reprint-confirmation",
+] as const;
+
 export type GalleryStateId =
-  PersistentGalleryStateId | (typeof VISUAL_STRESS_GALLERY_STATE_IDS)[number];
+  | PersistentGalleryStateId
+  | (typeof VISUAL_STRESS_GALLERY_STATE_IDS)[number]
+  | (typeof INVENTORY_GALLERY_STATE_IDS)[number];
 
 export const EXPECTED_GALLERY_STATE_IDS: readonly GalleryStateId[] = Array.from(
-  new Set<GalleryStateId>([...PERSISTENT_GALLERY_STATE_IDS, ...VISUAL_STRESS_GALLERY_STATE_IDS]),
+  new Set<GalleryStateId>([
+    ...PERSISTENT_GALLERY_STATE_IDS,
+    ...VISUAL_STRESS_GALLERY_STATE_IDS,
+    ...INVENTORY_GALLERY_STATE_IDS,
+  ]),
 );
 export type GalleryLocale = "ru" | "en";
 
@@ -45,6 +70,7 @@ export type GalleryFixtureKind =
   | "sync"
   | "print"
   | "updates"
+  | "inventory"
   | "floor-header"
   | "long-copy";
 
@@ -228,6 +254,12 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
   { id: "print-not-sscc", kind: "print", variant: "not-sscc", source: "synthetic" },
   { id: "long-copy-ru", kind: "long-copy", variant: "ru", source: "synthetic" },
   { id: "long-copy-en", kind: "long-copy", variant: "en", source: "synthetic" },
+  ...INVENTORY_GALLERY_STATE_IDS.map((id) => ({
+    id,
+    kind: "inventory" as const,
+    variant: id.replace("inventory-", ""),
+    source: "synthetic" as const,
+  })),
 ];
 
 const FIXTURE_IDS = new Set<GalleryStateId>(EXPECTED_GALLERY_STATE_IDS);

@@ -1,0 +1,302 @@
+import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { eq } from "drizzle-orm";
+import pg from "pg";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { schema } from "../src/index.js";
+import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
+
+const databaseUrl = process.env.DATABASE_URL;
+const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
+
+describe.skipIf(!databaseUrl)("inventory claim evidence migration", () => {
+  const databaseName = `markiro_inventory_claims_${randomUUID().replaceAll("-", "_")}`;
+  const scratchUrl = new URL(databaseUrl ?? "postgres://invalid");
+  scratchUrl.pathname = `/${databaseName}`;
+  scratchUrl.search = "";
+  const maintenancePool = new pg.Pool({ connectionString: databaseUrl });
+  const pool = new pg.Pool({ connectionString: scratchUrl.toString() });
+  const db = drizzle(pool);
+  let temporaryRoot = "";
+  let created = false;
+
+  const tenantId = `claim-migration-${randomUUID()}`;
+  const userId = `claim-user-${randomUUID()}`;
+  const productId = randomUUID();
+  const lineId = randomUUID();
+  const operatorId = randomUUID();
+  const deviceAId = randomUUID();
+  const deviceBId = randomUUID();
+  const inventoryId = randomUUID();
+  const snapshotId = randomUUID();
+  const itemEventId = randomUUID();
+  const boxEventId = randomUUID();
+  const itemHash = "a".repeat(64);
+  const boxHashB = "b".repeat(64);
+  const boxHashC = "c".repeat(64);
+  const sscc = "346006820000000014";
+
+  beforeAll(async () => {
+    await maintenancePool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
+    created = true;
+    temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-inventory-claims-migration-"));
+    const legacyMigrations = join(temporaryRoot, "migrations");
+    await copyMigrationsThroughIndex({
+      sourceFolder: migrationsFolder,
+      targetFolder: legacyMigrations,
+      lastIncludedIndex: 73,
+    });
+    await migrate(db, { migrationsFolder: legacyMigrations });
+
+    await db.insert(schema.organization).values({
+      id: tenantId,
+      name: "Claim migration",
+      slug: `${tenantId}-${randomUUID()}`,
+      createdAt: new Date(),
+    });
+    await db.insert(schema.user).values({
+      id: userId,
+      name: "Claim migration",
+      email: `${randomUUID()}@example.invalid`,
+      emailVerified: false,
+    });
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId,
+      gtin14: "04600000000015",
+      name: "Product",
+    });
+    await db.insert(schema.lines).values({ id: lineId, tenantId, name: "Line" });
+    await db.insert(schema.employees).values({ id: operatorId, tenantId, fullName: "Operator" });
+    await db.insert(schema.stationDevices).values([
+      { id: deviceAId, tenantId, name: "Station A", lineId },
+      { id: deviceBId, tenantId, name: "Station B", lineId },
+    ]);
+    await db.insert(schema.inventories).values({
+      id: inventoryId,
+      tenantId,
+      number: `INV-${randomUUID()}`,
+      productId,
+      gtin14Snapshot: "04600000000015",
+      lineId,
+      mode: "check",
+      productionDateFrom: "2026-08-01",
+      productionDateTo: "2026-08-31",
+      createdByUserId: userId,
+    });
+    await db.insert(schema.inventorySnapshots).values({
+      id: snapshotId,
+      tenantId,
+      inventoryId,
+      combinedDigest: "0".repeat(64),
+      emittedCount: 0,
+      introducedCount: 3,
+      appliedCount: 0,
+      retiredCount: 0,
+      writtenOffCount: 0,
+      disaggregationCount: 0,
+      protectedCount: 0,
+      expectedCount: 3,
+      packageCount: 1,
+      looseCount: 0,
+      fixedByUserId: userId,
+    });
+    await db.insert(schema.inventorySnapshotCodes).values(
+      [itemHash, boxHashB, boxHashC].map((codeHash, index) => ({
+        tenantId,
+        snapshotId,
+        canonicalRaw: `legacy-code-${index}`,
+        codeHash,
+        gtin14: "04600000000015",
+        serial: `legacy-${index}`,
+        sourceStatus: "INTRODUCED" as const,
+        sourceProductionDate: "2026-08-20",
+        parentSscc: sscc,
+        expected: true,
+        protected: false,
+      })),
+    );
+    await db
+      .update(schema.inventories)
+      .set({
+        status: "running",
+        activeSnapshotId: snapshotId,
+        stationManifest: { snapshotRevision: 1 },
+        startedAt: new Date(),
+        startedByUserId: userId,
+      })
+      .where(eq(schema.inventories.id, inventoryId));
+    await db.insert(schema.inventoryScanBatches).values([
+      {
+        tenantId,
+        inventoryId,
+        deviceId: deviceAId,
+        batchId: "legacy-item",
+        payloadDigest: "1".repeat(64),
+        sequenceCeiling: 1n,
+        outcome: "applied",
+        result: legacyResult("legacy-item", "1".repeat(64), itemEventId, itemEventId),
+      },
+      {
+        tenantId,
+        inventoryId,
+        deviceId: deviceBId,
+        batchId: "legacy-box",
+        payloadDigest: "2".repeat(64),
+        sequenceCeiling: 1n,
+        outcome: "applied",
+        result: legacyResult("legacy-box", "2".repeat(64), boxEventId, boxEventId),
+      },
+    ]);
+    await db.insert(schema.inventoryScanEvents).values([
+      {
+        eventId: itemEventId,
+        tenantId,
+        inventoryId,
+        batchId: "legacy-item",
+        deviceId: deviceAId,
+        deviceSequence: 1n,
+        operatorId,
+        scannedAt: new Date("2026-08-25T08:00:00.000Z"),
+        kind: "item",
+        normalizedIdentity: `item:${itemHash}`,
+        codeHash: itemHash,
+        rawPayload: "legacy-item",
+        activeProductionDate: "2026-08-20",
+        snapshotRevision: 1,
+        localVerdict: "expected",
+        authoritativeVerdict: "applied",
+        firstWinningEventId: itemEventId,
+      },
+      {
+        eventId: boxEventId,
+        tenantId,
+        inventoryId,
+        batchId: "legacy-box",
+        deviceId: deviceBId,
+        deviceSequence: 1n,
+        operatorId,
+        scannedAt: new Date("2026-08-25T09:00:00.000Z"),
+        kind: "known_box",
+        normalizedIdentity: `known_box:${sscc}`,
+        rawPayload: sscc,
+        activeProductionDate: "2026-08-20",
+        snapshotRevision: 1,
+        localVerdict: "expected",
+        authoritativeVerdict: "applied",
+        firstWinningEventId: boxEventId,
+      },
+    ]);
+    await db
+      .insert(schema.inventoryCodeResults)
+      .values([
+        result(itemHash, itemEventId, deviceAId, "2026-08-25T08:00:00.000Z"),
+        result(boxHashB, boxEventId, deviceBId, "2026-08-25T09:00:00.000Z"),
+        result(boxHashC, boxEventId, deviceBId, "2026-08-25T09:00:00.000Z"),
+      ]);
+
+    await migrate(db, { migrationsFolder });
+  }, 120_000);
+
+  afterAll(async () => {
+    await pool.end();
+    if (created) await maintenancePool.query(`DROP DATABASE ${quoteIdentifier(databaseName)}`);
+    await maintenancePool.end();
+    if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
+  });
+
+  it("reconstructs item and partially-winning known-box evidence from real 0073 state idempotently", async () => {
+    await migrate(db, { migrationsFolder });
+    const rows = await pool.query<{
+      source_event_id: string;
+      code_hash: string;
+      status: string;
+      winning_event_id: string;
+    }>(
+      `SELECT source_event_id, code_hash, status, winning_event_id
+         FROM inventory_event_claim_outcomes
+        WHERE tenant_id = $1 AND inventory_id = $2
+        ORDER BY source_event_id, code_hash`,
+      [tenantId, inventoryId],
+    );
+    expect(rows.rows).toEqual(
+      [
+        {
+          source_event_id: itemEventId,
+          code_hash: itemHash,
+          status: "claimed",
+          winning_event_id: itemEventId,
+        },
+        {
+          source_event_id: boxEventId,
+          code_hash: itemHash,
+          status: "duplicate",
+          winning_event_id: itemEventId,
+        },
+        {
+          source_event_id: boxEventId,
+          code_hash: boxHashB,
+          status: "claimed",
+          winning_event_id: boxEventId,
+        },
+        {
+          source_event_id: boxEventId,
+          code_hash: boxHashC,
+          status: "claimed",
+          winning_event_id: boxEventId,
+        },
+      ].sort((left, right) =>
+        `${left.source_event_id}:${left.code_hash}`.localeCompare(
+          `${right.source_event_id}:${right.code_hash}`,
+        ),
+      ),
+    );
+  });
+
+  function result(codeHash: string, eventId: string, deviceId: string, scannedAt: string) {
+    return {
+      tenantId,
+      inventoryId,
+      codeHash,
+      snapshotId,
+      firstAcceptedEventId: eventId,
+      winningDeviceId: deviceId,
+      winningScannedAt: new Date(scannedAt),
+      observedProductionDate: "2026-08-20",
+      classification: "expected" as const,
+      originClassification: "expected" as const,
+    };
+  }
+
+  function legacyResult(batchId: string, digest: string, eventId: string, winnerId: string) {
+    return {
+      inventoryId,
+      snapshotId,
+      snapshotRevision: 1,
+      batchId,
+      payloadDigest: digest,
+      sequenceCeiling: 1,
+      resultRevision: 1,
+      outcomes: [
+        {
+          eventId,
+          status: "applied",
+          reasonCode: "CLAIM_APPLIED",
+          firstWinningEventId: winnerId,
+        },
+      ],
+    };
+  }
+});
+
+function quoteIdentifier(identifier: string): string {
+  if (!/^[a-z_][a-z0-9_]*$/.test(identifier)) throw new Error("Unsafe temporary database name");
+  return `"${identifier}"`;
+}

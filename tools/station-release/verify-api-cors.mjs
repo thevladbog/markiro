@@ -36,6 +36,46 @@ export const STATION_PREFLIGHTS = Object.freeze([
     headers: "content-type,x-api-key,x-station-capabilities",
   },
   {
+    path: "/station/inventory-tasks",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/inventory-tasks/resolve-barcode",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/inventories/cors-probe/join",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/inventories/cors-probe/bundle/manifest",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/inventories/cors-probe/bundle/codes",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/inventories/cors-probe/event-batches",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/inventories/cors-probe/progress",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/inventories/cors-probe/leave",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
     path: "/station/shift-closures",
     method: "POST",
     headers: "content-type,x-api-key,x-station-capabilities",

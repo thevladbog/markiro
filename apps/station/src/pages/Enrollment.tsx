@@ -277,6 +277,7 @@ export function Enrollment({
           <p data-testid="sealed-work-summary">
             {t("enroll.sealedWork", {
               scans: sealedWork.scans,
+              inventoryScans: sealedWork.inventoryScans,
               boxes: sealedWork.boxes,
               exceptions: sealedWork.exceptions,
             })}

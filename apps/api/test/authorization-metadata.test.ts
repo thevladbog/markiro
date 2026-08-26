@@ -20,6 +20,7 @@ import {
 } from "../src/modules/integrations/integrations.controller";
 import { KiosksController } from "../src/modules/kiosks/kiosks.controller";
 import { InventoriesController } from "../src/modules/inventories/inventories.controller";
+import { StationInventoriesController } from "../src/modules/inventories/station-inventories.controller";
 import { OperatorsController } from "../src/modules/operators/operators.controller";
 import { OrgProfileController } from "../src/modules/org-profile/org-profile.controller";
 import { StationOperatorsController } from "../src/modules/operators/station-operators.controller";
@@ -274,6 +275,10 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
 const STATION_ONLY_CONTROLLERS: readonly [ControllerClass, readonly string[]][] = [
   [StationOperatorsController, ["listRoster"]],
   [StationScansController, ["codeReleases", "conflictStatus", "ingest"]],
+  [
+    StationInventoriesController,
+    ["codes", "eventBatch", "join", "leave", "list", "manifest", "progress", "resolveBarcode"],
+  ],
 ];
 
 const reflector = new Reflector();

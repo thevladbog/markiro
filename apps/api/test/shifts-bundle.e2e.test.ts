@@ -747,6 +747,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
           ),
         );
       await db.insert(schema.ssccBlocks).values({
+        allocationOrder: 2,
         tenantId: orgId,
         issuerPrefix: block.issuerPrefix,
         extensionDigit: block.extensionDigit,
