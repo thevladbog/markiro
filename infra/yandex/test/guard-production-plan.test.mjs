@@ -102,6 +102,18 @@ function resource(plan, address) {
   return found;
 }
 
+function releaseCdnAfter(plan) {
+  return resource(plan, "module.station_releases.yandex_cdn_resource.releases").change.after;
+}
+
+function releaseCdnOptions(plan) {
+  return releaseCdnAfter(plan).options[0];
+}
+
+function releaseCdnCertificate(plan) {
+  return releaseCdnAfter(plan).ssl_certificate[0];
+}
+
 const publisherReference = [
   "yandex_iam_service_account.station_release_publisher.id",
   "yandex_iam_service_account.station_release_publisher",
@@ -724,6 +736,234 @@ test("guard CLI rejects computed release origin references without leaking them"
       assert.doesNotMatch(stderr, /do-not-print-this-plan-value/);
     });
   }
+});
+
+test("guard CLI distinguishes release CDN failure classes without leaking plan values", async () => {
+  const cases = [
+    {
+      scope: "resource",
+      mutate(plan) {
+        resource(plan, "module.station_releases.yandex_cdn_resource.releases").change.after =
+          "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "origin-group-reference",
+      mutate(plan) {
+        makeProviderComputedReleaseCreate(plan);
+        plan.configuration.root_module.module_calls.station_releases.module.resources.find(
+          (candidate) => candidate.address === "yandex_cdn_resource.releases",
+        ).expressions.origin_group_id.references = ["do-not-print-this-plan-value"];
+      },
+    },
+    {
+      scope: "cname",
+      mutate(plan) {
+        releaseCdnAfter(plan).cname = "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "active",
+      mutate(plan) {
+        releaseCdnAfter(plan).active = "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "origin-protocol",
+      mutate(plan) {
+        releaseCdnAfter(plan).origin_protocol = "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "origin-group-id",
+      mutate(plan) {
+        releaseCdnAfter(plan).origin_group_id = "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "options-count",
+      mutate(plan) {
+        releaseCdnAfter(plan).options = [];
+      },
+    },
+    {
+      scope: "options-shape",
+      mutate(plan) {
+        releaseCdnAfter(plan).options = ["do-not-print-this-plan-value"];
+      },
+    },
+    {
+      scope: "methods",
+      mutate(plan) {
+        releaseCdnOptions(plan).allowed_http_methods.push("do-not-print-this-plan-value");
+      },
+    },
+    {
+      scope: "redirect-http-to-https",
+      mutate(plan) {
+        releaseCdnOptions(plan).redirect_http_to_https = "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "redirect-https-to-http",
+      mutate(plan) {
+        releaseCdnOptions(plan).redirect_https_to_http = "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "edge-cache",
+      mutate(plan) {
+        releaseCdnOptions(plan).edge_cache_settings = "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "browser-cache",
+      mutate(plan) {
+        releaseCdnOptions(plan).browser_cache_settings = "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "headers-shape",
+      mutate(plan) {
+        releaseCdnOptions(plan).static_response_headers = "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "content-type-header",
+      mutate(plan) {
+        releaseCdnOptions(plan).static_response_headers["x-content-type-options"] =
+          "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "content-security-policy-header",
+      mutate(plan) {
+        releaseCdnOptions(plan).static_response_headers["content-security-policy"] =
+          "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "certificate-count",
+      mutate(plan) {
+        releaseCdnAfter(plan).ssl_certificate = [];
+      },
+    },
+    {
+      scope: "certificate-shape",
+      mutate(plan) {
+        releaseCdnAfter(plan).ssl_certificate = ["do-not-print-this-plan-value"];
+      },
+    },
+    {
+      scope: "certificate-type",
+      mutate(plan) {
+        releaseCdnCertificate(plan).type = "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "certificate-id",
+      mutate(plan) {
+        releaseCdnCertificate(plan).certificate_manager_id = {
+          do_not_print_this_plan_value: true,
+        };
+      },
+    },
+    {
+      scope: "provider-cname",
+      mutate(plan) {
+        releaseCdnAfter(plan).provider_cname = { do_not_print_this_plan_value: true };
+      },
+    },
+  ];
+
+  for (const { scope, mutate } of cases) {
+    const invalid = await readFixture("safe");
+    invalid.do_not_print_this_plan_value = "do-not-print-this-plan-value";
+    mutate(invalid);
+
+    await withPlan(invalid, (planPath) => {
+      let stdout = "";
+      let stderr = "";
+      try {
+        execFileSync(process.execPath, [script, planPath], {
+          cwd: root,
+          env: { ...process.env, GITHUB_ACTIONS: "true" },
+          stdio: "pipe",
+        });
+        assert.fail("guard CLI unexpectedly accepted invalid release CDN");
+      } catch (error) {
+        stdout = String(error.stdout);
+        stderr = String(error.stderr);
+      }
+      assert.equal(stdout, `::error title=Production plan rejected::release-cdn-${scope}\n`);
+      assert.equal(stderr, `production plan rejected (release-cdn-${scope})\n`);
+      assert.doesNotMatch(stdout, /do-not-print-this-plan-value/);
+      assert.doesNotMatch(stderr, /do-not-print-this-plan-value/);
+    });
+  }
+});
+
+test("guard CLI reports every independent release CDN failure without leaking plan values", async () => {
+  const invalid = await readFixture("safe");
+  invalid.do_not_print_this_plan_value = "do-not-print-this-plan-value";
+  releaseCdnAfter(invalid).cname = "do-not-print-this-plan-value";
+  releaseCdnAfter(invalid).active = false;
+  releaseCdnAfter(invalid).origin_protocol = "do-not-print-this-plan-value";
+  releaseCdnAfter(invalid).origin_group_id = "do-not-print-this-plan-value";
+  releaseCdnOptions(invalid).allowed_http_methods.push("do-not-print-this-plan-value");
+  releaseCdnOptions(invalid).redirect_http_to_https = false;
+  releaseCdnOptions(invalid).redirect_https_to_http = true;
+  releaseCdnOptions(invalid).edge_cache_settings = 1;
+  releaseCdnOptions(invalid).browser_cache_settings = "do-not-print-this-plan-value";
+  releaseCdnOptions(invalid).static_response_headers["x-content-type-options"] =
+    "do-not-print-this-plan-value";
+  releaseCdnOptions(invalid).static_response_headers["content-security-policy"] =
+    "do-not-print-this-plan-value";
+  releaseCdnCertificate(invalid).type = "do-not-print-this-plan-value";
+  releaseCdnCertificate(invalid).certificate_manager_id = {
+    do_not_print_this_plan_value: true,
+  };
+  releaseCdnAfter(invalid).provider_cname = { do_not_print_this_plan_value: true };
+
+  await withPlan(invalid, (planPath) => {
+    let stdout = "";
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [script, planPath], {
+        cwd: root,
+        env: { ...process.env, GITHUB_ACTIONS: "true" },
+        stdio: "pipe",
+      });
+      assert.fail("guard CLI unexpectedly accepted invalid release CDN");
+    } catch (error) {
+      stdout = String(error.stdout);
+      stderr = String(error.stderr);
+    }
+
+    const scopes = [
+      "release-cdn-cname",
+      "release-cdn-active",
+      "release-cdn-origin-protocol",
+      "release-cdn-origin-group-id",
+      "release-cdn-methods",
+      "release-cdn-redirect-http-to-https",
+      "release-cdn-redirect-https-to-http",
+      "release-cdn-edge-cache",
+      "release-cdn-browser-cache",
+      "release-cdn-content-type-header",
+      "release-cdn-content-security-policy-header",
+      "release-cdn-certificate-type",
+      "release-cdn-certificate-id",
+      "release-cdn-provider-cname",
+    ];
+    assert.equal(
+      stdout,
+      scopes.map((scope) => `::error title=Production plan rejected::${scope}\n`).join(""),
+    );
+    assert.equal(stderr, `production plan rejected (${scopes.join(",")})\n`);
+    assert.doesNotMatch(stdout, /do-not-print-this-plan-value/);
+    assert.doesNotMatch(stderr, /do-not-print-this-plan-value/);
+  });
 });
 
 test("production plan guard distinguishes release-policy failure classes", async () => {
