@@ -1122,8 +1122,7 @@ function validateCdn(plan, resource, expectedOriginGroupId) {
         if (options.edge_cache_settings !== 0) rejected();
       });
       check("browser-cache", () => {
-        if (options.browser_cache_settings !== null && options.browser_cache_settings !== undefined)
-          rejected();
+        if (options.browser_cache_settings !== 0) rejected();
       });
       const headersResult = capture("headers-shape", () => {
         if (!object(options.static_response_headers)) rejected();
