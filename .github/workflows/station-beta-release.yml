@@ -169,6 +169,9 @@ jobs:
           pnpm --filter @markiro/station typecheck
           pnpm --filter @markiro/station lint
           pnpm --filter @markiro/station build
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            cargo test --manifest-path apps/station/src-tauri/Cargo.toml --features legacy-github-updater
+          fi
           pnpm test:station-release:contract
           git diff --check
 
@@ -190,7 +193,14 @@ jobs:
           printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > "$signing_key_file"
           chmod 600 "$signing_key_file"
           export TAURI_SIGNING_PRIVATE_KEY="$signing_key_file"
-          pnpm --filter @markiro/station tauri build
+          set --
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            set -- --features legacy-github-updater --config src-tauri/tauri.beta-seed.conf.json
+          fi
+          pnpm --filter @markiro/station tauri build "$@"
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            node tools/station-release/verify-seed-updater-binary.mjs apps/station/src-tauri/target/release/markiro-station.exe
+          fi
           bundle_dir="apps/station/src-tauri/target/release/bundle/nsis"
           installer="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.exe' -print -quit)"
           bundle="$installer"

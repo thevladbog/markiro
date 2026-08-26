@@ -119,6 +119,19 @@ describe("tauri station updater adapter", () => {
     });
   });
 
+  it("accepts GitHub as the primary source for a legacy seed build", async () => {
+    invokeMock.mockResolvedValueOnce({
+      ...candidate,
+      selectedOrigin: "github",
+      fallbackReason: null,
+    });
+
+    await expect(tauriStationUpdater.check()).resolves.toMatchObject({
+      origin: "github",
+      fallbackReason: null,
+    });
+  });
+
   it("returns null when no update is available", async () => {
     invokeMock.mockResolvedValueOnce(null);
     await expect(tauriStationUpdater.check()).resolves.toBeNull();
@@ -133,7 +146,6 @@ describe("tauri station updater adapter", () => {
       { ...candidate, publishedAt: "2026-08-11T00:00:00Z" },
       { ...candidate, selectedOrigin: "mirror" },
       { ...candidate, selectedOrigin: "yandex", fallbackReason: "primary-unavailable" },
-      { ...candidate, selectedOrigin: "github", fallbackReason: null },
     ];
 
     for (const value of malformed) {
@@ -147,7 +159,7 @@ describe("tauri station updater adapter", () => {
 
     expect(
       invokeMock.mock.calls.filter(([command]) => command === "station_update_close"),
-    ).toHaveLength(7);
+    ).toHaveLength(6);
   });
 
   it("rejects unknown progress shapes and cancels the opaque candidate", async () => {

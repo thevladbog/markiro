@@ -94,6 +94,20 @@ describe("UpdateCenter", () => {
     ).toBeDefined();
   });
 
+  it("shows GitHub as the primary source for a legacy seed build", () => {
+    render(
+      <UpdateCenter
+        controller={{ ...controllerFixture(), origin: "github", fallbackReason: null }}
+        activeShift={false}
+        pendingOutbox={0}
+        onBack={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("Source: GitHub (legacy channel)")).toBeDefined();
+    expect(screen.queryByText("GitHub backup source used")).toBeNull();
+  });
+
   it("uses distinct calm copy for origin mismatch and integrity failure", () => {
     const { rerender } = render(
       <UpdateCenter

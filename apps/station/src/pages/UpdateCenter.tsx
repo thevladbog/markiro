@@ -29,6 +29,7 @@ export function UpdateCenter({
   const discoveryFallbackText = controller.fallbackReason
     ? t(`updates.source.discoveryFallback.${controller.fallbackReason}`)
     : null;
+  const primarySource = controller.fallbackReason === null;
 
   useEffect(
     () => () => {
@@ -102,11 +103,13 @@ export function UpdateCenter({
             </p>
             <StatusChip
               className="station-update-center__source-chip"
-              status={controller.origin === "yandex" ? "ok" : "info"}
+              status={primarySource ? "ok" : "info"}
               label={
                 controller.origin === "yandex"
                   ? t("updates.source.primary")
-                  : t("updates.source.backup")
+                  : primarySource
+                    ? t("updates.source.legacyPrimary")
+                    : t("updates.source.backup")
               }
             />
             {discoveryFallbackText ? (

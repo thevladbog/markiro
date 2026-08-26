@@ -129,7 +129,7 @@ function decodeUpdate(value: unknown): DecodedStationUpdate {
   if (compareStationVersions(version, currentVersion) <= 0) invalid("result");
   const origin = decodeOrigin(record.selectedOrigin, "result");
   const fallbackReason = decodeFallbackReason(record.fallbackReason);
-  if ((origin === "yandex") !== (fallbackReason === null)) invalid("result");
+  if (origin === "yandex" && fallbackReason !== null) invalid("result");
   return {
     candidateId: candidateId(record.candidateId),
     currentVersion,

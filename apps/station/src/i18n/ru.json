@@ -373,6 +373,7 @@
     "source": {
       "label": "Источник обновления",
       "primary": "Источник: Markiro (Yandex)",
+      "legacyPrimary": "Источник: GitHub (предыдущий канал)",
       "backup": "Использован резервный источник GitHub",
       "discoveryFallback": {
         "primary-unavailable": "Проверка выполнена через резервный источник GitHub: основной источник недоступен.",
