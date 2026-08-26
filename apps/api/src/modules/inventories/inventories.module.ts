@@ -13,10 +13,16 @@ import { InventoryReconciliationService } from "./inventory-reconciliation.servi
 import { InventoryResultSourceService } from "./inventory-result-source.service";
 import { InventoryCorrectionsService } from "./inventory-corrections.service";
 import { InventoryCloseService } from "./inventory-close.service";
+import { InventoryDocumentFormatsController } from "./inventory-document-formats.controller";
+import { InventoryDocumentFormatsService } from "./inventory-document-formats.service";
 
 @Module({
   imports: [SsccModule],
-  controllers: [InventoriesController, StationInventoriesController],
+  controllers: [
+    InventoriesController,
+    InventoryDocumentFormatsController,
+    StationInventoriesController,
+  ],
   providers: [
     InventoriesService,
     InventorySnapshotService,
@@ -28,6 +34,7 @@ import { InventoryCloseService } from "./inventory-close.service";
     InventoryResultSourceService,
     InventoryCorrectionsService,
     InventoryCloseService,
+    InventoryDocumentFormatsService,
   ],
   exports: [InventoriesService, InventoryResultSourceService],
 })

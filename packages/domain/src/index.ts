@@ -124,6 +124,23 @@ export {
   INVENTORY_CHZ_STATUSES,
 } from "./inventory/index.js";
 export {
+  createInventoryDocumentRegistry,
+  getInventoryDocumentFormat,
+  INVENTORY_DOCUMENT_FORMAT_AVAILABILITIES,
+  INVENTORY_DOCUMENT_FORMATS,
+  INVENTORY_DOCUMENT_SOURCE_CATEGORIES,
+  inventoryDocumentFormatDescriptorSchema,
+  inventoryDocumentRegistry,
+  InventoryDocumentRegistryError,
+} from "./inventory/index.js";
+export type {
+  InventoryDocumentFormatAvailability,
+  InventoryDocumentFormatDescriptor,
+  InventoryDocumentRegistry,
+  InventoryDocumentRegistryErrorCode,
+  InventoryDocumentSourceCategory,
+} from "./inventory/index.js";
+export {
   INVENTORY_EVENT_BATCH_SIZE,
   INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE,
   INVENTORY_EVENT_CLAIM_OUTCOME_SIZE,

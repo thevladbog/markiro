@@ -20,6 +20,7 @@ import {
 } from "../src/modules/integrations/integrations.controller";
 import { KiosksController } from "../src/modules/kiosks/kiosks.controller";
 import { InventoriesController } from "../src/modules/inventories/inventories.controller";
+import { InventoryDocumentFormatsController } from "../src/modules/inventories/inventory-document-formats.controller";
 import { StationInventoriesController } from "../src/modules/inventories/station-inventories.controller";
 import { OperatorsController } from "../src/modules/operators/operators.controller";
 import { OrgProfileController } from "../src/modules/org-profile/org-profile.controller";
@@ -145,6 +146,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
     },
   ],
   [ConflictsController, { listConflicts: readPolicy, reviewConflict: writePolicy }],
+  [InventoryDocumentFormatsController, { list: readPolicy }],
   [
     InventoriesController,
     {
