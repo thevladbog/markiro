@@ -586,6 +586,13 @@ describe("inventory execution schema", () => {
         ["tenant_id", "id"],
         "station_devices",
       ],
+      [
+        "inventoryLateEvents",
+        "inventory_late_events_replay_authorized_by_user_fk",
+        ["replay_authorized_by_user_id"],
+        ["id"],
+        "user",
+      ],
     ] as const;
 
     for (const [tableName, keyName, columns, foreignColumns, foreignTable] of expected) {
@@ -732,6 +739,16 @@ describe("inventory execution schema", () => {
     expect(resolution).toContain("\"resolution\" in ('replayed', 'discarded')");
     expect(resolution).toContain('"resolved_at" is not null');
     expect(resolution).toContain('"resolved_by_user_id" is not null');
+    const replayAuthorization = checkExpression(
+      "inventoryLateEvents",
+      "inventory_late_events_replay_authorization_check",
+    );
+    expect(replayAuthorization).toContain('"replay_authorized_at" is null');
+    expect(replayAuthorization).toContain('"replay_authorized_by_user_id" is null');
+    expect(replayAuthorization).toContain('"replay_authorized_revision" is null');
+    expect(replayAuthorization).toContain('"replay_authorized_at" is not null');
+    expect(replayAuthorization).toContain('"replay_authorized_by_user_id" is not null');
+    expect(replayAuthorization).toContain('"replay_authorized_revision" > "closed_revision"');
   });
 
   it("indexes batch replay, progress cursors, box membership, and close blockers", () => {

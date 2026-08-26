@@ -6,6 +6,7 @@ import { AdminPage, Alert, Card, Spinner, StatusChip } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
 import { useInventoryProgress } from "./api.js";
+import { InventoryClosePanel } from "./InventoryClosePanel.js";
 import type { InventoryDetail } from "./schemas.js";
 
 function formatCount(value: number, locale: string): string {
@@ -89,6 +90,11 @@ export function InventoryLivePage({ inventory }: { inventory: InventoryDetail })
         <Alert tone="info">
           {t("pages.inventory.live.pending", { count: data.pendingEventCount })}
         </Alert>
+      ) : null}
+
+      {canCorrect &&
+      (data.status === "running" || data.status === "closed" || data.status === "completed") ? (
+        <InventoryClosePanel inventoryId={inventory.id} status={data.status} progress={data} />
       ) : null}
 
       <div className="mk-inventory-live__columns">

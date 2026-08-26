@@ -1427,6 +1427,9 @@ export const inventoryLateEvents = pgTable(
     resolution: inventoryLateEventResolutionEnum("resolution").notNull().default("pending"),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     resolvedByUserId: text("resolved_by_user_id").references(() => user.id),
+    replayAuthorizedAt: timestamp("replay_authorized_at", { withTimezone: true }),
+    replayAuthorizedByUserId: text("replay_authorized_by_user_id"),
+    replayAuthorizedRevision: integer("replay_authorized_revision"),
   },
   (table) => [
     unique("inventory_late_events_tenant_id_inventory_uq").on(
@@ -1456,6 +1459,11 @@ export const inventoryLateEvents = pgTable(
       columns: [table.tenantId, table.deviceId],
       foreignColumns: [stationDevices.tenantId, stationDevices.id],
     }),
+    foreignKey({
+      name: "inventory_late_events_replay_authorized_by_user_fk",
+      columns: [table.replayAuthorizedByUserId],
+      foreignColumns: [user.id],
+    }),
     index("inventory_late_events_resolution_idx").on(
       table.tenantId,
       table.inventoryId,
@@ -1480,6 +1488,15 @@ export const inventoryLateEvents = pgTable(
         or (${table.resolution} in ('replayed', 'discarded')
           and ${table.resolvedAt} is not null
           and ${table.resolvedByUserId} is not null)`,
+    ),
+    check(
+      "inventory_late_events_replay_authorization_check",
+      sql`(${table.replayAuthorizedAt} is null
+          and ${table.replayAuthorizedByUserId} is null
+          and ${table.replayAuthorizedRevision} is null)
+        or (${table.replayAuthorizedAt} is not null
+          and ${table.replayAuthorizedByUserId} is not null
+          and ${table.replayAuthorizedRevision} > ${table.closedRevision})`,
     ),
   ],
 );

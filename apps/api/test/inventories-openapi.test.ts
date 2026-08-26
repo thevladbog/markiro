@@ -17,6 +17,10 @@ type JsonSchema = {
   maximum?: number;
   exclusiveMinimum?: boolean;
   minLength?: number;
+  maxLength?: number;
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
   pattern?: string;
   additionalProperties?: boolean;
   required?: string[];
@@ -153,6 +157,66 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
     expect(JSON.stringify(document.paths["/inventories/{id}/imports/{status}"])).not.toMatch(
       /objectKey|fileName|canonicalKm|credential|rawCause/i,
     );
+  });
+
+  it("documents the strict close lifecycle and bounded late-event decisions", () => {
+    for (const path of [
+      "/inventories/{id}/close",
+      "/inventories/{id}/emergency-close",
+      "/inventories/{id}/reopen",
+      "/inventories/{id}/complete",
+      "/inventories/{id}/late-events/discard",
+    ]) {
+      operation(document, path, "post");
+    }
+    operation(document, "/inventories/{id}/late-events", "get");
+
+    const discard = operation(document, "/inventories/{id}/late-events/discard", "post");
+    const requestBody = discard.requestBody;
+    if (!requestBody || "$ref" in requestBody) throw new Error("Missing discard request body");
+    const requestSchema = (requestBody.content as Record<string, { schema?: JsonSchema }>)[
+      "application/json"
+    ]?.schema;
+    if (!requestSchema) throw new Error("Missing discard JSON schema");
+    exactClosedObject(requestSchema, ["lateEventIds", "reason"], ["lateEventIds", "reason"]);
+    expect(requestSchema.properties?.lateEventIds).toMatchObject({
+      type: "array",
+      minItems: 1,
+      maxItems: 100,
+      uniqueItems: true,
+      items: { type: "string", format: "uuid" },
+    });
+    expect(requestSchema.properties?.reason).toMatchObject({
+      type: "string",
+      minLength: 1,
+      maxLength: 4096,
+    });
+    exactClosedObject(
+      responseSchema(document, "/inventories/{id}/late-events/discard", "post", "201"),
+      ["discardedCount"],
+      ["discardedCount"],
+    );
+
+    const complete = operation(document, "/inventories/{id}/complete", "post").requestBody;
+    if (!complete || "$ref" in complete) throw new Error("Missing complete request body");
+    const completeSchema = (complete.content as Record<string, { schema?: JsonSchema }>)[
+      "application/json"
+    ]?.schema;
+    if (!completeSchema) throw new Error("Missing complete JSON schema");
+    exactClosedObject(
+      completeSchema,
+      ["documentsDownloadedAndChecked"],
+      ["documentsDownloadedAndChecked"],
+    );
+    expect(completeSchema.properties?.documentsDownloadedAndChecked?.enum).toEqual([true]);
+
+    const lateList = responseSchema(document, "/inventories/{id}/late-events", "get", "200");
+    exactClosedObject(
+      lateList,
+      ["page", "pageSize", "total", "hasMore", "items"],
+      ["page", "pageSize", "total", "hasMore", "items"],
+    );
+    expect(JSON.stringify(lateList)).not.toMatch(/payloadDigest|canonicalRaw|payload/i);
   });
 
   it("documents strict six-slot fixation input and the immutable snapshot summary", () => {

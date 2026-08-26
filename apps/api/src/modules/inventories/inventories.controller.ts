@@ -17,6 +17,7 @@ import { FileInterceptor } from "@nestjs/platform-express";
 import {
   ApiBody,
   ApiConsumes,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiParam,
@@ -47,6 +48,8 @@ import {
   createInventorySchema,
   createInventoryCorrectionOpenApiSchema,
   createInventoryCorrectionSchema,
+  discardInventoryLateEventsOpenApiSchema,
+  discardInventoryLateEventsSchema,
   fixInventorySnapshotOpenApiSchema,
   fixInventorySnapshotSchema,
   INVENTORY_DISCREPANCY_CATEGORIES,
@@ -56,37 +59,64 @@ import {
   inventoryIdSchema,
   inventoryImportOpenApiSchema,
   inventoryImportStatusSchema,
+  inventoryLateEventsDiscardOpenApiSchema,
   inventoryOpenApiSchema,
   inventoryCorrectionOpenApiSchema,
+  closeInventoryOpenApiSchema,
+  closeInventorySchema,
+  completeInventoryOpenApiSchema,
+  completeInventorySchema,
+  emergencyCloseInventoryOpenApiSchema,
+  emergencyCloseInventorySchema,
+  inventoryCloseBlockedOpenApiSchema,
+  inventoryCloseOpenApiSchema,
+  inventoryCompleteOpenApiSchema,
   inventoryProgressOpenApiSchema,
+  inventoryReopenOpenApiSchema,
   inventorySnapshotOpenApiSchema,
   listInventoryDiscrepanciesOpenApiSchema,
   listInventoryDiscrepanciesQuerySchema,
   listInventoryEvidenceOpenApiSchema,
   listInventoryEvidenceQuerySchema,
+  listInventoryLateEventsOpenApiSchema,
+  listInventoryLateEventsQuerySchema,
   listInventoriesOpenApiSchema,
   updateInventoryOpenApiSchema,
   updateInventorySchema,
+  reopenInventoryOpenApiSchema,
+  reopenInventorySchema,
+  type CloseInventoryDto,
+  type CompleteInventoryDto,
   type CreateInventoryDto,
   type CreateInventoryCorrectionDto,
+  type DiscardInventoryLateEventsDto,
   type FixInventorySnapshotDto,
   type InventoryDto,
   type InventoryCorrectionDto,
+  type EmergencyCloseInventoryDto,
+  type InventoryCloseDto,
+  type InventoryCompleteDto,
   type InventoryDetailDto,
   type InventoryImportDto,
+  type InventoryLateEventsDiscardDto,
   type InventoryProgressDto,
+  type InventoryReopenDto,
   type ListInventoryDiscrepanciesQueryDto,
   type ListInventoryDiscrepanciesResponseDto,
   type ListInventoryEvidenceQueryDto,
   type ListInventoryEvidenceResponseDto,
+  type ListInventoryLateEventsQueryDto,
+  type ListInventoryLateEventsResponseDto,
   type ListInventoriesResponseDto,
   type InventorySnapshotDto,
   type UpdateInventoryDto,
+  type ReopenInventoryDto,
 } from "./dto";
 import { InventoriesService } from "./inventories.service";
 import { InventoryLifecycleService } from "./inventory-lifecycle.service";
 import { InventoryReconciliationService } from "./inventory-reconciliation.service";
 import { InventoryCorrectionsService } from "./inventory-corrections.service";
+import { InventoryCloseService } from "./inventory-close.service";
 import {
   stationInventoryManifestOpenApiSchema,
   type StationInventoryManifest,
@@ -102,6 +132,7 @@ export class InventoriesController {
     private readonly lifecycle: InventoryLifecycleService,
     private readonly reconciliation: InventoryReconciliationService,
     private readonly corrections: InventoryCorrectionsService,
+    private readonly closeService: InventoryCloseService,
   ) {}
 
   @Get()
@@ -166,6 +197,98 @@ export class InventoriesController {
     query: ListInventoryEvidenceQueryDto,
   ): Promise<ListInventoryEvidenceResponseDto> {
     return this.reconciliation.listEvidence(req.tenantId!, id, query);
+  }
+
+  @Get(":id/late-events")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiQuery({ name: "page", required: false, schema: { type: "integer", minimum: 1, default: 1 } })
+  @ApiQuery({
+    name: "pageSize",
+    required: false,
+    schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+  })
+  @ApiOkResponse({ schema: listInventoryLateEventsOpenApiSchema })
+  lateEvents(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Query(new ZodValidationPipe(listInventoryLateEventsQuerySchema))
+    query: ListInventoryLateEventsQueryDto,
+  ): Promise<ListInventoryLateEventsResponseDto> {
+    return this.closeService.listLateEvents(req.tenantId!, id, query);
+  }
+
+  @Post(":id/late-events/discard")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiBody({ schema: discardInventoryLateEventsOpenApiSchema })
+  @ApiCreatedResponse({ schema: inventoryLateEventsDiscardOpenApiSchema })
+  discardLateEvents(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Body(new ZodValidationPipe(discardInventoryLateEventsSchema))
+    body: DiscardInventoryLateEventsDto,
+  ): Promise<InventoryLateEventsDiscardDto> {
+    return this.closeService.discardLateEvents(req.tenantId!, req.userId!, id, body);
+  }
+
+  @Post(":id/close")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiBody({ schema: closeInventoryOpenApiSchema })
+  @ApiCreatedResponse({ schema: inventoryCloseOpenApiSchema })
+  @ApiConflictResponse({ schema: inventoryCloseBlockedOpenApiSchema })
+  close(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Body(new ZodValidationPipe(closeInventorySchema)) _body: CloseInventoryDto,
+  ): Promise<InventoryCloseDto> {
+    return this.closeService.close(req.tenantId!, req.userId!, id);
+  }
+
+  @Post(":id/emergency-close")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiBody({ schema: emergencyCloseInventoryOpenApiSchema })
+  @ApiCreatedResponse({ schema: inventoryCloseOpenApiSchema })
+  emergencyClose(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Body(new ZodValidationPipe(emergencyCloseInventorySchema))
+    body: EmergencyCloseInventoryDto,
+  ): Promise<InventoryCloseDto> {
+    return this.closeService.emergencyClose(req.tenantId!, req.userId!, id, body);
+  }
+
+  @Post(":id/reopen")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiBody({ schema: reopenInventoryOpenApiSchema })
+  @ApiCreatedResponse({ schema: inventoryReopenOpenApiSchema })
+  reopen(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Body(new ZodValidationPipe(reopenInventorySchema)) _body: ReopenInventoryDto,
+  ): Promise<InventoryReopenDto> {
+    return this.closeService.reopen(req.tenantId!, req.userId!, id);
+  }
+
+  @Post(":id/complete")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiBody({ schema: completeInventoryOpenApiSchema })
+  @ApiCreatedResponse({ schema: inventoryCompleteOpenApiSchema })
+  complete(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Body(new ZodValidationPipe(completeInventorySchema)) _body: CompleteInventoryDto,
+  ): Promise<InventoryCompleteDto> {
+    return this.closeService.complete(req.tenantId!, req.userId!, id);
   }
 
   @Post(":id/corrections")

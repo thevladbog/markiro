@@ -6,11 +6,16 @@ import {
   createInventoryInputSchema,
   createInventoryCorrectionInputSchema,
   inventoryCorrectionSchema,
+  inventoryCloseResponseSchema,
+  inventoryCompleteResponseSchema,
   inventoryDetailSchema,
   inventoryEvidenceResponseSchema,
   inventoryImportSchema,
   inventorySchema,
   inventoryProgressSchema,
+  inventoryLateEventsDiscardResponseSchema,
+  inventoryLateEventsResponseSchema,
+  inventoryReopenResponseSchema,
   inventorySnapshotInputsSchema,
   inventorySnapshotSchema,
   listInventoriesSchema,
@@ -19,11 +24,15 @@ import {
   type CreateInventoryCorrectionInput,
   type Inventory,
   type InventoryCorrection,
+  type InventoryCloseResponse,
+  type InventoryCompleteResponse,
   type InventoryChzStatus,
   type InventoryDetail,
   type InventoryEvidenceResponse,
   type InventoryImport,
   type InventoryProgress,
+  type InventoryLateEventsResponse,
+  type InventoryReopenResponse,
   type InventorySnapshot,
   type InventorySnapshotInputs,
 } from "./schemas.js";
@@ -32,6 +41,15 @@ export const INVENTORIES_QUERY_KEY = ["inventories"] as const;
 
 export function inventoryProgressQueryKey(id: string) {
   return [...INVENTORIES_QUERY_KEY, id, "progress"] as const;
+}
+
+export function inventoryLateEventsQueryKey(id: string, page?: number) {
+  return [
+    ...INVENTORIES_QUERY_KEY,
+    id,
+    "late-events",
+    ...(page === undefined ? [] : [page]),
+  ] as const;
 }
 
 export interface InventoryEvidenceQuery {
@@ -136,6 +154,66 @@ async function fixInventorySnapshot(input: {
 async function startInventory(inventoryId: string): Promise<void> {
   const value = await apiFetch<unknown>(`/inventories/${inventoryId}/start`, { method: "POST" });
   stationInventoryManifestSchema.parse(value);
+}
+
+async function closeInventory(input: {
+  inventoryId: string;
+  emergencyReason?: string;
+}): Promise<InventoryCloseResponse> {
+  const emergency = input.emergencyReason !== undefined;
+  const value = await apiFetch<unknown>(
+    `/inventories/${input.inventoryId}/${emergency ? "emergency-close" : "close"}`,
+    {
+      method: "POST",
+      body: JSON.stringify(
+        emergency ? { reason: input.emergencyReason, acknowledgeBlockers: true } : {},
+      ),
+    },
+  );
+  return inventoryCloseResponseSchema.parse(value);
+}
+
+async function reopenInventory(inventoryId: string): Promise<InventoryReopenResponse> {
+  const value = await apiFetch<unknown>(`/inventories/${inventoryId}/reopen`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return inventoryReopenResponseSchema.parse(value);
+}
+
+async function completeInventory(inventoryId: string): Promise<InventoryCompleteResponse> {
+  const value = await apiFetch<unknown>(`/inventories/${inventoryId}/complete`, {
+    method: "POST",
+    body: JSON.stringify({ documentsDownloadedAndChecked: true }),
+  });
+  return inventoryCompleteResponseSchema.parse(value);
+}
+
+async function getInventoryLateEvents(
+  inventoryId: string,
+  page: number,
+): Promise<InventoryLateEventsResponse> {
+  const value = await apiFetch<unknown>(
+    `/inventories/${inventoryId}/late-events?page=${page}&pageSize=50`,
+  );
+  return inventoryLateEventsResponseSchema.parse(value);
+}
+
+async function discardInventoryLateEvents(input: {
+  inventoryId: string;
+  lateEventIds: string[];
+  reason: string;
+}): Promise<number> {
+  const value = await apiFetch<unknown>(`/inventories/${input.inventoryId}/late-events/discard`, {
+    method: "POST",
+    body: JSON.stringify({ lateEventIds: input.lateEventIds, reason: input.reason }),
+  });
+  return inventoryLateEventsDiscardResponseSchema.parse(value).discardedCount;
+}
+
+function invalidateInventory(queryClient: ReturnType<typeof useQueryClient>, inventoryId: string) {
+  void queryClient.invalidateQueries({ queryKey: INVENTORIES_QUERY_KEY });
+  void queryClient.invalidateQueries({ queryKey: [...INVENTORIES_QUERY_KEY, inventoryId] });
 }
 
 export function useInventories(): UseQueryResult<Inventory[]> {
@@ -248,6 +326,66 @@ export function useStartInventory(): UseMutationResult<void, Error, string> {
       void queryClient.invalidateQueries({ queryKey: INVENTORIES_QUERY_KEY });
       void queryClient.invalidateQueries({
         queryKey: [...INVENTORIES_QUERY_KEY, inventoryId],
+      });
+    },
+  });
+}
+
+export function useCloseInventory(): UseMutationResult<
+  InventoryCloseResponse,
+  Error,
+  { inventoryId: string; emergencyReason?: string }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: closeInventory,
+    onSuccess: (_result, input) => invalidateInventory(queryClient, input.inventoryId),
+  });
+}
+
+export function useReopenInventory(): UseMutationResult<InventoryReopenResponse, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: reopenInventory,
+    onSuccess: (_result, inventoryId) => invalidateInventory(queryClient, inventoryId),
+  });
+}
+
+export function useCompleteInventory(): UseMutationResult<
+  InventoryCompleteResponse,
+  Error,
+  string
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: completeInventory,
+    onSuccess: (_result, inventoryId) => invalidateInventory(queryClient, inventoryId),
+  });
+}
+
+export function useInventoryLateEvents(
+  inventoryId: string,
+  enabled: boolean,
+  page = 1,
+): UseQueryResult<InventoryLateEventsResponse> {
+  return useQuery({
+    queryKey: inventoryLateEventsQueryKey(inventoryId, page),
+    queryFn: () => getInventoryLateEvents(inventoryId, page),
+    enabled: enabled && inventoryId.length > 0,
+  });
+}
+
+export function useDiscardInventoryLateEvents(): UseMutationResult<
+  number,
+  Error,
+  { inventoryId: string; lateEventIds: string[]; reason: string }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: discardInventoryLateEvents,
+    onSuccess: (_result, input) => {
+      void queryClient.invalidateQueries({
+        queryKey: inventoryLateEventsQueryKey(input.inventoryId),
       });
     },
   });

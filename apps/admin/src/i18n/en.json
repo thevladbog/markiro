@@ -440,6 +440,66 @@
           "voided": "Voided"
         }
       },
+      "close": {
+        "title": "Close inventory",
+        "runningHint": "The system checks stations, local queues, boxes, and required discrepancies before closing.",
+        "open": "Close inventory",
+        "modalTitle": "Pre-close check",
+        "ready": "No blockers found. The result will freeze at the current revision.",
+        "blocked": "Safe close is unavailable. Resolve the blockers or record an emergency decision.",
+        "safe": "Close safely",
+        "emergency": "Emergency close",
+        "emergencyReason": "Emergency close reason",
+        "reasonTooLong": "The reason must not exceed 4096 UTF-8 bytes",
+        "acknowledgeBlockers": "I understand that the blockers will remain in the frozen result",
+        "closedHint": "The result is frozen. Review late events and final documents.",
+        "reopen": "Reopen",
+        "documentsChecked": "Final documents have been downloaded and checked",
+        "complete": "Complete inventory",
+        "completedImmutable": "The inventory is completed and cannot be changed",
+        "actionError": "The action could not be completed. Refresh the data and try again.",
+        "success": {
+          "closed": "Inventory closed",
+          "reopened": "Inventory reopened",
+          "completed": "Inventory completed"
+        },
+        "blocker": {
+          "active": "Active stations: {{count}}",
+          "stale": "Offline stations: {{count}}",
+          "pending": "Unsynced events: {{count}}",
+          "participantBoxes": "Open boxes reported by stations: {{count}}",
+          "openBoxes": "Open boxes: {{count}}",
+          "invalidated": "Invalidated boxes: {{count}}",
+          "unresolvedPrint": "Unfinished box printing: {{count}}",
+          "discrepancies": "Required discrepancies without a decision: {{count}}"
+        }
+      },
+      "late": {
+        "title": "Late events",
+        "open": "Late events",
+        "loading": "Loading late events",
+        "loadError": "Could not load late events",
+        "empty": "No late events",
+        "readOnly": "After completion, the journal is read-only",
+        "select": "Select batch {{batchId}}",
+        "events_one": "{{count}} event",
+        "events_few": "{{count}} events",
+        "events_many": "{{count}} events",
+        "events_other": "{{count}} events",
+        "reason": "Decision reason",
+        "reasonTooLong": "The reason must not exceed 4096 UTF-8 bytes",
+        "discard": "Exclude selected",
+        "reopen": "Reopen for replay",
+        "previous": "Previous page",
+        "next": "Next page",
+        "page": "Page {{page}}",
+        "actionError": "Could not save the late-event decision.",
+        "resolution": {
+          "pending": "Decision required",
+          "replayed": "Replayed",
+          "discarded": "Excluded"
+        }
+      },
       "corrections": {
         "title": "Corrections · {{number}}",
         "runningOnly": "Corrections are available only while the inventory is running",

@@ -12,6 +12,7 @@ import { StationInventorySyncService } from "./station-inventory-sync.service";
 import { InventoryReconciliationService } from "./inventory-reconciliation.service";
 import { InventoryResultSourceService } from "./inventory-result-source.service";
 import { InventoryCorrectionsService } from "./inventory-corrections.service";
+import { InventoryCloseService } from "./inventory-close.service";
 
 @Module({
   imports: [SsccModule],
@@ -26,6 +27,7 @@ import { InventoryCorrectionsService } from "./inventory-corrections.service";
     InventoryReconciliationService,
     InventoryResultSourceService,
     InventoryCorrectionsService,
+    InventoryCloseService,
   ],
   exports: [InventoriesService, InventoryResultSourceService],
 })

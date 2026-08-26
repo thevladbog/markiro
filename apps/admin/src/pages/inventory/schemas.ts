@@ -302,6 +302,72 @@ export const inventoryProgressSchema = z.strictObject({
   recentEvents: z.array(inventoryRecentEventSchema),
 });
 
+const inventoryCloseBlockerSchema = z.strictObject({
+  code: z.enum([
+    "ACTIVE_PARTICIPANT",
+    "STALE_PARTICIPANT",
+    "PENDING_OUTBOX",
+    "PARTICIPANT_OPEN_BOX",
+    "OPEN_REPACK_BOX",
+    "INVALIDATED_REPACK_BOX",
+    "UNRESOLVED_BOX_PRINT",
+    "UNRESOLVED_DISCREPANCY",
+  ]),
+  count: z.number().int().positive(),
+  participantId: uuid.nullable(),
+  deviceId: uuid.nullable(),
+  boxId: uuid.nullable(),
+  discrepancyCategory: z.enum(["unknown", "ineligible", "date_mismatch", "voided"]).nullable(),
+});
+
+export const inventoryCloseResponseSchema = z.strictObject({
+  inventoryId: uuid,
+  status: z.literal("closed"),
+  resultRevision: nonnegativeInteger,
+  closedAt: dateTime,
+  emergency: z.boolean(),
+  blockers: z.array(inventoryCloseBlockerSchema),
+});
+
+export const inventoryReopenResponseSchema = z.strictObject({
+  inventoryId: uuid,
+  status: z.literal("running"),
+  resultRevision: z.number().int().positive(),
+  invalidatedArtifactCount: nonnegativeInteger,
+});
+
+export const inventoryCompleteResponseSchema = z.strictObject({
+  inventoryId: uuid,
+  status: z.literal("completed"),
+  resultRevision: nonnegativeInteger,
+  completedAt: dateTime,
+});
+
+const inventoryLateEventSchema = z.strictObject({
+  id: uuid,
+  batchId: z.string().min(1),
+  deviceId: uuid,
+  terminalName: z.string().min(1),
+  eventCount: nonnegativeInteger,
+  receivedAt: dateTime,
+  closedRevision: nonnegativeInteger,
+  reason: z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/),
+  resolution: z.enum(["pending", "replayed", "discarded"]),
+  resolvedAt: dateTime.nullable(),
+});
+
+export const inventoryLateEventsResponseSchema = z.strictObject({
+  page: z.number().int().positive(),
+  pageSize: z.number().int().min(1).max(100),
+  total: nonnegativeInteger,
+  hasMore: z.boolean(),
+  items: z.array(inventoryLateEventSchema),
+});
+
+export const inventoryLateEventsDiscardResponseSchema = z.strictObject({
+  discardedCount: z.number().int().positive().max(100),
+});
+
 export const INVENTORY_CORRECTION_ACTIONS = [
   "void_scan",
   "restore_scan",
@@ -423,6 +489,11 @@ export type InventorySnapshot = z.infer<typeof inventorySnapshotSchema>;
 export type InventorySnapshotInputs = z.infer<typeof inventorySnapshotInputsSchema>;
 export type CreateInventoryInput = z.infer<typeof createInventoryInputSchema>;
 export type InventoryProgress = z.infer<typeof inventoryProgressSchema>;
+export type InventoryCloseResponse = z.infer<typeof inventoryCloseResponseSchema>;
+export type InventoryReopenResponse = z.infer<typeof inventoryReopenResponseSchema>;
+export type InventoryCompleteResponse = z.infer<typeof inventoryCompleteResponseSchema>;
+export type InventoryLateEvent = z.infer<typeof inventoryLateEventSchema>;
+export type InventoryLateEventsResponse = z.infer<typeof inventoryLateEventsResponseSchema>;
 export type InventoryParticipant = z.infer<typeof inventoryParticipantSchema>;
 export type InventoryLiveBox = z.infer<typeof inventoryLiveBoxSchema>;
 export type InventoryRecentEvent = z.infer<typeof inventoryRecentEventSchema>;

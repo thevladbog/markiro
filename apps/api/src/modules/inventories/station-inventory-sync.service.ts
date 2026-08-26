@@ -192,6 +192,7 @@ export class StationInventorySyncService {
     input: StationInventoryEventBatchDto,
   ): Promise<StationInventoryEventBatchResponseDto> {
     return this.db.transaction(async (tx) => {
+      let replayAuthorization: { lateEventId: string; actorUserId: string } | null = null;
       const [inventory] = await tx
         .select({
           id: schema.inventories.id,
@@ -230,6 +231,7 @@ export class StationInventorySyncService {
       const [sameBatch] = await tx
         .select({
           payloadDigest: schema.inventoryScanBatches.payloadDigest,
+          outcome: schema.inventoryScanBatches.outcome,
           result: schema.inventoryScanBatches.result,
         })
         .from(schema.inventoryScanBatches)
@@ -245,15 +247,53 @@ export class StationInventorySyncService {
         if (sameBatch.payloadDigest !== input.payloadDigest) {
           throw new ConflictException({ code: "INVENTORY_BATCH_DIGEST_CONFLICT" });
         }
-        return this.normalizeStoredResponse(
-          tx,
-          tenantId,
-          deviceId,
-          inventoryId,
-          input,
-          sameBatch.result,
-          inventory.resultRevision,
-        );
+        if (sameBatch.outcome === "quarantined" && inventory.status === "running") {
+          const [lateEvent] = await tx
+            .select({
+              id: schema.inventoryLateEvents.id,
+              replayAuthorizedByUserId: schema.inventoryLateEvents.replayAuthorizedByUserId,
+            })
+            .from(schema.inventoryLateEvents)
+            .where(
+              and(
+                eq(schema.inventoryLateEvents.tenantId, tenantId),
+                eq(schema.inventoryLateEvents.inventoryId, inventoryId),
+                eq(schema.inventoryLateEvents.deviceId, deviceId),
+                eq(schema.inventoryLateEvents.batchId, input.batchId),
+                eq(schema.inventoryLateEvents.payloadDigest, input.payloadDigest),
+                eq(schema.inventoryLateEvents.resolution, "pending"),
+              ),
+            )
+            .for("update");
+          if (lateEvent?.replayAuthorizedByUserId) {
+            replayAuthorization = {
+              lateEventId: lateEvent.id,
+              actorUserId: lateEvent.replayAuthorizedByUserId,
+            };
+            await tx
+              .delete(schema.inventoryScanBatches)
+              .where(
+                and(
+                  eq(schema.inventoryScanBatches.tenantId, tenantId),
+                  eq(schema.inventoryScanBatches.inventoryId, inventoryId),
+                  eq(schema.inventoryScanBatches.deviceId, deviceId),
+                  eq(schema.inventoryScanBatches.batchId, input.batchId),
+                  eq(schema.inventoryScanBatches.outcome, "quarantined"),
+                ),
+              );
+          }
+        }
+        if (replayAuthorization === null) {
+          return this.normalizeStoredResponse(
+            tx,
+            tenantId,
+            deviceId,
+            inventoryId,
+            input,
+            sameBatch.result,
+            inventory.resultRevision,
+          );
+        }
       }
       const [sameDigest] = await tx
         .select({
@@ -795,8 +835,26 @@ export class StationInventorySyncService {
           resultRevision: nextRevision,
           pendingEventCount: input.pendingEventCount,
           openBoxCount: input.openBoxCount,
+          replayedLateEventId: replayAuthorization?.lateEventId ?? null,
         },
       });
+      if (replayAuthorization) {
+        await tx
+          .update(schema.inventoryLateEvents)
+          .set({
+            resolution: "replayed",
+            resolvedAt: new Date(),
+            resolvedByUserId: replayAuthorization.actorUserId,
+          })
+          .where(
+            and(
+              eq(schema.inventoryLateEvents.tenantId, tenantId),
+              eq(schema.inventoryLateEvents.inventoryId, inventoryId),
+              eq(schema.inventoryLateEvents.id, replayAuthorization.lateEventId),
+              eq(schema.inventoryLateEvents.resolution, "pending"),
+            ),
+          );
+      }
       return response;
     });
   }

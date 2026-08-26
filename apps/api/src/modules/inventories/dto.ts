@@ -110,6 +110,125 @@ export interface InventoryDetailDto extends InventoryDto {
   activeSnapshot: InventorySnapshotDto | null;
 }
 
+export const INVENTORY_CLOSE_BLOCKER_CODES = [
+  "ACTIVE_PARTICIPANT",
+  "STALE_PARTICIPANT",
+  "PENDING_OUTBOX",
+  "PARTICIPANT_OPEN_BOX",
+  "OPEN_REPACK_BOX",
+  "INVALIDATED_REPACK_BOX",
+  "UNRESOLVED_BOX_PRINT",
+  "UNRESOLVED_DISCREPANCY",
+] as const;
+export type InventoryCloseBlockerCode = (typeof INVENTORY_CLOSE_BLOCKER_CODES)[number];
+
+export const INVENTORY_REQUIRED_DISCREPANCY_CATEGORIES = [
+  "unknown",
+  "ineligible",
+  "date_mismatch",
+  "voided",
+] as const;
+export type InventoryRequiredDiscrepancyCategory =
+  (typeof INVENTORY_REQUIRED_DISCREPANCY_CATEGORIES)[number];
+
+export interface InventoryCloseBlockerDto {
+  code: InventoryCloseBlockerCode;
+  count: number;
+  participantId: string | null;
+  deviceId: string | null;
+  boxId: string | null;
+  discrepancyCategory: InventoryRequiredDiscrepancyCategory | null;
+}
+
+export interface InventoryCloseDto {
+  inventoryId: string;
+  status: "closed";
+  resultRevision: number;
+  closedAt: string;
+  emergency: boolean;
+  blockers: InventoryCloseBlockerDto[];
+}
+
+export interface InventoryReopenDto {
+  inventoryId: string;
+  status: "running";
+  resultRevision: number;
+  invalidatedArtifactCount: number;
+}
+
+export interface InventoryCompleteDto {
+  inventoryId: string;
+  status: "completed";
+  resultRevision: number;
+  completedAt: string;
+}
+
+export interface InventoryLateEventsDiscardDto {
+  discardedCount: number;
+}
+
+const boundedLifecycleReasonSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((value) => new TextEncoder().encode(value).byteLength <= 4096, {
+    message: "reason exceeds 4096 UTF-8 bytes",
+  });
+
+export const closeInventorySchema = z.strictObject({});
+export type CloseInventoryDto = z.infer<typeof closeInventorySchema>;
+export const emergencyCloseInventorySchema = z.strictObject({
+  reason: boundedLifecycleReasonSchema,
+  acknowledgeBlockers: z.literal(true),
+});
+export type EmergencyCloseInventoryDto = z.infer<typeof emergencyCloseInventorySchema>;
+export const reopenInventorySchema = z.strictObject({});
+export type ReopenInventoryDto = z.infer<typeof reopenInventorySchema>;
+export const completeInventorySchema = z.strictObject({
+  documentsDownloadedAndChecked: z.literal(true),
+});
+export type CompleteInventoryDto = z.infer<typeof completeInventorySchema>;
+export const discardInventoryLateEventsSchema = z.strictObject({
+  lateEventIds: z
+    .array(z.string().uuid())
+    .min(1)
+    .max(100)
+    .superRefine((ids, context) => {
+      if (new Set(ids).size !== ids.length) {
+        context.addIssue({ code: "custom", message: "lateEventIds must be unique" });
+      }
+    }),
+  reason: boundedLifecycleReasonSchema,
+});
+export type DiscardInventoryLateEventsDto = z.infer<typeof discardInventoryLateEventsSchema>;
+
+export const listInventoryLateEventsQuerySchema = z.strictObject({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+});
+export type ListInventoryLateEventsQueryDto = z.infer<typeof listInventoryLateEventsQuerySchema>;
+
+export interface InventoryLateEventDto {
+  id: string;
+  batchId: string;
+  deviceId: string;
+  terminalName: string;
+  eventCount: number;
+  receivedAt: string;
+  closedRevision: number;
+  reason: string;
+  resolution: "pending" | "replayed" | "discarded";
+  resolvedAt: string | null;
+}
+
+export interface ListInventoryLateEventsResponseDto {
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+  items: InventoryLateEventDto[];
+}
+
 export interface ListInventoriesResponseDto {
   items: InventoryDto[];
 }
@@ -494,6 +613,168 @@ export const inventoryCorrectionOpenApiSchema: SchemaObject = {
     resultRevision: { type: "integer", minimum: 1 },
     createdAt: dateTimeSchema,
   },
+};
+
+const emptyMutationOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [],
+  properties: {},
+};
+
+export const closeInventoryOpenApiSchema = emptyMutationOpenApiSchema;
+export const reopenInventoryOpenApiSchema = emptyMutationOpenApiSchema;
+export const emergencyCloseInventoryOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["reason", "acknowledgeBlockers"],
+  properties: {
+    reason: {
+      type: "string",
+      minLength: 1,
+      maxLength: 4096,
+      "x-maxUtf8Bytes": 4096,
+    } as SchemaObject & { "x-maxUtf8Bytes": number },
+    acknowledgeBlockers: { type: "boolean", enum: [true] },
+  },
+};
+export const completeInventoryOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["documentsDownloadedAndChecked"],
+  properties: { documentsDownloadedAndChecked: { type: "boolean", enum: [true] } },
+};
+
+const inventoryCloseBlockerOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["code", "count", "participantId", "deviceId", "boxId", "discrepancyCategory"],
+  properties: {
+    code: { type: "string", enum: [...INVENTORY_CLOSE_BLOCKER_CODES] },
+    count: { type: "integer", minimum: 1 },
+    participantId: { ...uuidSchema, nullable: true },
+    deviceId: { ...uuidSchema, nullable: true },
+    boxId: { ...uuidSchema, nullable: true },
+    discrepancyCategory: {
+      type: "string",
+      enum: [...INVENTORY_REQUIRED_DISCREPANCY_CATEGORIES],
+      nullable: true,
+    },
+  },
+};
+
+export const inventoryCloseOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["inventoryId", "status", "resultRevision", "closedAt", "emergency", "blockers"],
+  properties: {
+    inventoryId: uuidSchema,
+    status: { type: "string", enum: ["closed"] },
+    resultRevision: { type: "integer", minimum: 0 },
+    closedAt: dateTimeSchema,
+    emergency: { type: "boolean" },
+    blockers: { type: "array", items: inventoryCloseBlockerOpenApiSchema },
+  },
+};
+
+export const inventoryCloseBlockedOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["code", "resultRevision", "blockers"],
+  properties: {
+    code: { type: "string", enum: ["INVENTORY_CLOSE_BLOCKED"] },
+    resultRevision: { type: "integer", minimum: 0 },
+    blockers: { type: "array", items: inventoryCloseBlockerOpenApiSchema },
+  },
+};
+
+export const inventoryReopenOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["inventoryId", "status", "resultRevision", "invalidatedArtifactCount"],
+  properties: {
+    inventoryId: uuidSchema,
+    status: { type: "string", enum: ["running"] },
+    resultRevision: { type: "integer", minimum: 1 },
+    invalidatedArtifactCount: { type: "integer", minimum: 0 },
+  },
+};
+
+export const inventoryCompleteOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["inventoryId", "status", "resultRevision", "completedAt"],
+  properties: {
+    inventoryId: uuidSchema,
+    status: { type: "string", enum: ["completed"] },
+    resultRevision: { type: "integer", minimum: 0 },
+    completedAt: dateTimeSchema,
+  },
+};
+
+const inventoryLateEventOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "batchId",
+    "deviceId",
+    "terminalName",
+    "eventCount",
+    "receivedAt",
+    "closedRevision",
+    "reason",
+    "resolution",
+    "resolvedAt",
+  ],
+  properties: {
+    id: uuidSchema,
+    batchId: { type: "string" },
+    deviceId: uuidSchema,
+    terminalName: { type: "string" },
+    eventCount: { type: "integer", minimum: 0 },
+    receivedAt: dateTimeSchema,
+    closedRevision: { type: "integer", minimum: 0 },
+    reason: { type: "string", pattern: "^[A-Z][A-Z0-9_]{0,127}$" },
+    resolution: { type: "string", enum: ["pending", "replayed", "discarded"] },
+    resolvedAt: { ...dateTimeSchema, nullable: true },
+  },
+};
+
+export const listInventoryLateEventsOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["page", "pageSize", "total", "hasMore", "items"],
+  properties: {
+    page: { type: "integer", minimum: 1 },
+    pageSize: { type: "integer", minimum: 1, maximum: 100 },
+    total: { type: "integer", minimum: 0 },
+    hasMore: { type: "boolean" },
+    items: { type: "array", items: inventoryLateEventOpenApiSchema },
+  },
+};
+
+export const discardInventoryLateEventsOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["lateEventIds", "reason"],
+  properties: {
+    lateEventIds: {
+      type: "array",
+      minItems: 1,
+      maxItems: 100,
+      uniqueItems: true,
+      items: uuidSchema,
+    },
+    reason: { type: "string", minLength: 1, maxLength: 4096 },
+  },
+};
+
+export const inventoryLateEventsDiscardOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["discardedCount"],
+  properties: { discardedCount: { type: "integer", minimum: 1, maximum: 100 } },
 };
 
 export const createInventoryOpenApiSchema: SchemaObject = {

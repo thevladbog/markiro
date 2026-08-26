@@ -4,6 +4,66 @@
   gap: 16px;
 }
 
+.mk-inventory-close-panel,
+.mk-inventory-late-events,
+.mk-inventory-late-decision {
+  display: grid;
+  gap: 16px;
+}
+
+.mk-inventory-close-blockers {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--fg-2);
+  display: grid;
+  gap: 6px;
+}
+
+.mk-inventory-late-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.mk-inventory-late-list > li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+}
+
+.mk-inventory-late-list__main,
+.mk-inventory-late-list__state {
+  display: grid;
+  gap: 4px;
+}
+
+.mk-inventory-late-list__main small,
+.mk-inventory-late-list__state small {
+  color: var(--fg-3);
+}
+
+.mk-inventory-late-list__state {
+  justify-items: end;
+}
+
+@media (max-width: 640px) {
+  .mk-inventory-late-list > li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .mk-inventory-late-list__state {
+    grid-column: 2;
+    justify-items: start;
+  }
+}
+
 .mk-inventory-page__description,
 .mk-inventory-section-description,
 .mk-inventory-note,
