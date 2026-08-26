@@ -176,6 +176,8 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
         inventoryId,
         revision: 1,
         combinedDigest: DIGEST,
+        productName: "Bundle product",
+        lineName: "Bundle line",
         emittedCount: 1,
         introducedCount: 2,
         appliedCount: 0,

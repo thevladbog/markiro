@@ -100,6 +100,8 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
       tenantId,
       inventoryId,
       combinedDigest: "a".repeat(64),
+      productName: "Close product",
+      lineName: "Close line",
       emittedCount: 0,
       introducedCount: 0,
       appliedCount: 0,

@@ -239,28 +239,14 @@ export class InventoriesService {
         activeSnapshotId: schema.inventories.activeSnapshotId,
         stationManifest: schema.inventories.stationManifest,
         organizationName: schema.organization.name,
-        productName: schema.products.name,
-        productBoxCapacity: schema.products.boxCapacity,
-        lineName: schema.lines.name,
         snapshotId: schema.inventorySnapshots.id,
         expectedCount: schema.inventorySnapshots.expectedCount,
+        snapshotProductName: schema.inventorySnapshots.productName,
+        snapshotLineName: schema.inventorySnapshots.lineName,
+        snapshotBoxCapacity: schema.inventorySnapshots.boxCapacity,
       })
       .from(schema.inventories)
       .innerJoin(schema.organization, eq(schema.organization.id, schema.inventories.tenantId))
-      .innerJoin(
-        schema.products,
-        and(
-          eq(schema.products.tenantId, schema.inventories.tenantId),
-          eq(schema.products.id, schema.inventories.productId),
-        ),
-      )
-      .innerJoin(
-        schema.lines,
-        and(
-          eq(schema.lines.tenantId, schema.inventories.tenantId),
-          eq(schema.lines.id, schema.inventories.lineId),
-        ),
-      )
       .leftJoin(
         schema.inventorySnapshots,
         and(
@@ -276,6 +262,8 @@ export class InventoriesService {
       row.activeSnapshotId === null ||
       row.snapshotId === null ||
       row.expectedCount === null ||
+      row.snapshotProductName === null ||
+      row.snapshotLineName === null ||
       (row.status !== "ready" &&
         row.status !== "running" &&
         row.status !== "closed" &&
@@ -310,9 +298,9 @@ export class InventoriesService {
 
     if (
       row.mode === "repack" &&
-      (!Number.isInteger(row.productBoxCapacity) ||
-        row.productBoxCapacity === null ||
-        row.productBoxCapacity <= 0)
+      (!Number.isInteger(row.snapshotBoxCapacity) ||
+        row.snapshotBoxCapacity === null ||
+        row.snapshotBoxCapacity <= 0)
     ) {
       throw new ConflictException({ code: "INVENTORY_TASK_FORM_CONFIGURATION_INVALID" });
     }
@@ -321,14 +309,14 @@ export class InventoriesService {
       inventoryNumber: row.number,
       status: row.status,
       organizationName: row.organizationName,
-      productName: row.productName,
+      productName: row.snapshotProductName,
       gtin14: row.gtin14,
-      lineName: row.lineName,
+      lineName: row.snapshotLineName,
       mode: row.mode,
       productionDateFrom: row.productionDateFrom,
       productionDateTo: row.productionDateTo,
       expectedCount: row.expectedCount,
-      boxCapacity: row.mode === "repack" ? row.productBoxCapacity : null,
+      boxCapacity: row.mode === "repack" ? row.snapshotBoxCapacity : null,
       generatedAt,
     };
   }

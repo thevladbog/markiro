@@ -97,4 +97,19 @@ describe("renderInventoryTaskFormHtml", () => {
     expect(html).toContain("Beer &amp; &lt;b&gt;bold&lt;/b&gt;");
     expect(html).toContain("Line &#39;A&#39; &lt;img src=x onerror=alert(1)&gt;");
   });
+
+  it("uses a compact one-page layout for maximum-length catalog names", () => {
+    const organizationName = "О".repeat(200);
+    const productName = "П".repeat(200);
+    const lineName = "Л".repeat(200);
+    const html = renderInventoryTaskFormHtml(fixture({ organizationName, productName, lineName }));
+
+    expect(html).toContain('<main class="page compact" data-layout="compact">');
+    expect(html).toContain("overflow-wrap: anywhere");
+    expect(html).toContain(organizationName);
+    expect(html).toContain(productName);
+    expect(html).toContain(lineName);
+    expect(html.match(new RegExp(lineName, "g"))).toHaveLength(1);
+    expect(html).toMatch(/\.compact \.barcode\s*\{[^}]*width:\s*150mm[^}]*height:\s*17mm/s);
+  });
 });

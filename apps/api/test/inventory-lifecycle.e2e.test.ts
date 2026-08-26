@@ -245,6 +245,9 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
         inventoryId,
         revision: 1,
         combinedDigest: SNAPSHOT_DIGEST,
+        productName: "Inventory Water",
+        lineName: "Inventory line",
+        boxCapacity: 12,
         emittedCount: snapshotCounts.emitted,
         introducedCount: snapshotCounts.introduced,
         appliedCount: snapshotCounts.applied,
@@ -467,17 +470,42 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
     });
   });
 
-  it("requires a positive product box capacity before freezing either inventory mode", async () => {
+  it("starts from the catalog facts frozen with the snapshot after product and line edits", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedReadyInventory(agent, "repack");
+    await db
+      .update(schema.products)
+      .set({ name: "Changed product", boxCapacity: 24 })
+      .where(
+        and(
+          eq(schema.products.tenantId, fixture.tenantId),
+          eq(schema.products.id, fixture.productId),
+        ),
+      );
+    await db
+      .update(schema.lines)
+      .set({ name: "Changed line" })
+      .where(and(eq(schema.lines.tenantId, fixture.tenantId), eq(schema.lines.id, fixture.lineId)));
+
+    const response = await agent.post(`/inventories/${fixture.inventoryId}/start`).expect(201);
+    expect(response.body).toMatchObject({
+      productName: "Inventory Water",
+      lineName: "Inventory line",
+      boxCapacity: 12,
+    });
+  });
+
+  it("requires a positive snapshot box capacity before freezing either inventory mode", async () => {
     for (const mode of ["check", "repack"] as const) {
       const agent = request.agent(app!.getHttpServer());
       const fixture = await seedReadyInventory(agent, mode);
       await db
-        .update(schema.products)
+        .update(schema.inventorySnapshots)
         .set({ boxCapacity: 0 })
         .where(
           and(
-            eq(schema.products.tenantId, fixture.tenantId),
-            eq(schema.products.id, fixture.productId),
+            eq(schema.inventorySnapshots.tenantId, fixture.tenantId),
+            eq(schema.inventorySnapshots.id, fixture.snapshotId),
           ),
         );
 

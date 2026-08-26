@@ -136,6 +136,8 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       tenantId,
       inventoryId,
       combinedDigest: "d".repeat(64),
+      productName: "Reconciliation product",
+      lineName: "Reconciliation line",
       emittedCount: 1,
       introducedCount: 7,
       appliedCount: 0,

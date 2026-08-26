@@ -234,12 +234,38 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     expectedCount = 0,
   ): Promise<string> {
     const userId = await actorUserId(tenantId);
+    const [catalogFacts] = await db
+      .select({
+        productName: schema.products.name,
+        lineName: schema.lines.name,
+        boxCapacity: schema.products.boxCapacity,
+      })
+      .from(schema.inventories)
+      .innerJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.inventories.tenantId),
+          eq(schema.products.id, schema.inventories.productId),
+        ),
+      )
+      .innerJoin(
+        schema.lines,
+        and(
+          eq(schema.lines.tenantId, schema.inventories.tenantId),
+          eq(schema.lines.id, schema.inventories.lineId),
+        ),
+      )
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
+      );
+    if (!catalogFacts) throw new Error("Expected inventory catalog fixture");
     const [snapshot] = await db
       .insert(schema.inventorySnapshots)
       .values({
         tenantId,
         inventoryId,
         combinedDigest: "a".repeat(64),
+        ...catalogFacts,
         emittedCount: 0,
         introducedCount: 0,
         appliedCount: 0,
@@ -426,6 +452,12 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       .update(schema.lines)
       .set({ name: "Changed line after start" })
       .where(and(eq(schema.lines.tenantId, tenantId), eq(schema.lines.id, lineId)));
+    const stillReady = await owner.get(`/inventories/${inventory.id}/task-form`).expect(200);
+    expect(stillReady.text).toContain("Inventory Water");
+    expect(stillReady.text).toContain("Inventory line");
+    expect(stillReady.text).toContain("20 бутылок");
+    expect(stillReady.text).not.toContain("Changed after start");
+    expect(stillReady.text).not.toContain("Changed line after start");
     await db
       .update(schema.inventories)
       .set({
@@ -561,6 +593,8 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       tenantId,
       inventoryId: inventory.id,
       combinedDigest: "b".repeat(64),
+      productName: "Inventory Water",
+      lineName: "Inventory line",
       emittedCount: 10,
       introducedCount: 11,
       appliedCount: 0,

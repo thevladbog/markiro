@@ -107,6 +107,8 @@ describe.skipIf(!ready)("station inventory task access e2e", () => {
         inventoryId,
         revision: 1,
         combinedDigest: DIGEST,
+        productName: "Inventory Water",
+        lineName: "Inventory line",
         emittedCount: 0,
         introducedCount: 0,
         appliedCount: 0,

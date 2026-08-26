@@ -163,6 +163,8 @@ tenant-scoped unique key for their public identifier.
 
 - immutable revision and combined digest;
 - exact six selected import ids;
+- product name, line name, and box capacity captured from the same tenant at fixation; the ready
+  task form and the later Station manifest consume these same immutable catalog facts;
 - per-status counts, protected count, expected count, package and loose counts;
 - fixation actor and time.
 
@@ -284,8 +286,9 @@ between source and observed dates is visible in reconciliation.
   A partial download can never replace a usable local snapshot.
 - The bundle includes product facts, mode, date range, parent SSCC membership, the exact selected
   box-label descriptor and spec, and a device SSCC block when repacking. Starting the inventory
-  freezes that template for all new boxes and later reprints even if the organization default or
-  source template changes.
+  uses the product name, line name, and box capacity already frozen by snapshot fixation, then
+  freezes the remaining print facts and template for all new boxes and later reprints even if the
+  catalog, organization default, or source template changes.
 - The same required selector is reused by inventory repacking, standalone repacking, and future
   scenarios that create a new box. It is hidden when no new box is created.
 

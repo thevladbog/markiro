@@ -100,6 +100,9 @@ export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string
   const isRepack = data.mode === "repack";
   const mode = isRepack ? "С переупаковкой" : "Без переупаковки";
   const capacity = data.boxCapacity;
+  const compact =
+    data.organizationName.length + data.productName.length + data.lineName.length > 240 ||
+    [data.organizationName, data.productName, data.lineName].some((value) => value.length > 100);
   const finalStep = isRepack
     ? `Отсканируйте старый короб, затем все бутылки. Новый короб закроется и напечатается автоматически после ${capacity ?? "заданного"}-го кода.`
     : "Сканируйте коды единиц. Закрытую упаковку можно проверить одним сканированием кода упаковки.";
@@ -160,7 +163,7 @@ export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string
     dl { margin: 0; }
     .parameter { min-height: 8mm; display: grid; grid-template-columns: 1fr minmax(62mm, auto); align-items: center; gap: 6mm; border-bottom: .2mm solid #d8d5cf; }
     dt { color: #706d67; font-size: 8pt; }
-    dd { margin: 0; max-width: 110mm; text-align: right; font-size: 10pt; font-weight: 700; }
+    dd { margin: 0; max-width: 110mm; text-align: right; font-size: 10pt; font-weight: 700; overflow-wrap: anywhere; }
     .steps { margin-top: 4mm; padding-top: 1mm; border-top: .2mm solid #d8d5cf; }
     .steps ol { display: grid; gap: 2mm; margin: 0; padding: 0; list-style: none; }
     .steps li { display: grid; grid-template-columns: 7mm 1fr; gap: 3mm; align-items: start; color: #4f4c47; font-size: 8.5pt; line-height: 1.28; }
@@ -169,17 +172,35 @@ export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string
     .rules h2 { margin: 0 0 2mm; color: #1756a6; }
     .rules ul { margin: 0; padding-left: 5mm; display: grid; gap: 1.2mm; font-size: 8pt; line-height: 1.25; }
     .footer { margin-top: auto; padding-top: 3.5mm; border-top: .2mm solid #d8d5cf; display: flex; justify-content: space-between; color: #77736d; font-size: 7.5pt; }
+    .compact { padding: 12mm 14mm; }
+    .compact .top { padding-bottom: 4mm; }
+    .compact .hero { padding: 4mm 0; }
+    .compact h1 { font-size: 19pt; }
+    .compact .subtitle { margin-top: 1mm; max-width: 126mm; font-size: 8.5pt; line-height: 1.15; overflow-wrap: anywhere; }
+    .compact .status { padding: 3mm 4mm; }
+    .compact .scan-zone { height: 38mm; }
+    .compact .barcode { width: 150mm; height: 17mm; }
+    .compact h2 { margin: 2.5mm 0 1.2mm; font-size: 10.5pt; }
+    .compact .parameter { min-height: 6mm; padding: .5mm 0; }
+    .compact dt { font-size: 7pt; }
+    .compact dd { font-size: 8.5pt; line-height: 1.08; }
+    .compact .steps { margin-top: 2mm; padding-top: 0; }
+    .compact .steps ol { gap: 1mm; }
+    .compact .steps li { font-size: 7.5pt; line-height: 1.2; }
+    .compact .rules { margin-top: 3mm; padding: 3mm 4mm; }
+    .compact .rules ul { gap: .7mm; font-size: 7pt; line-height: 1.18; }
+    .compact .footer { padding-top: 2mm; font-size: 7pt; }
     @media screen { .page { box-shadow: 0 2mm 8mm rgba(23, 22, 26, .12); } }
     @media print { html, body { background: #fff; } .page { margin: 0; box-shadow: none; } }
   </style>
 </head>
 <body>
-  <main class="page">
+  <main class="page${compact ? " compact" : ""}" data-layout="${compact ? "compact" : "standard"}">
     <header class="top">${logo()}<div class="task-id"><span class="eyebrow">Форма-задание</span><strong>${number}</strong></div></header>
     <section class="hero"><div><h1>Задание на инвентаризацию</h1><p class="subtitle">${mode} · ${organization}</p></div><div class="status">${STATUS_LABEL[data.status]}</div></section>
     <section class="scan-zone" aria-label="Штрихкод задания"><div class="barcode" data-task-token="${escapeHtml(token)}">${barcode}</div><div class="barcode-caption">${number}</div><div class="scan-hint">Отсканируйте на терминале, чтобы открыть задание</div></section>
     <section><h2>Параметры задания</h2><dl>${parameters}</dl></section>
-    <section class="steps"><h2>Как начать работу</h2><ol>${step(1, `Откройте терминал на линии «${line}» и войдите оператором.`)}${step(2, "Отсканируйте штрихкод задания. На своей линии оно также будет видно в списке.")}${step(3, "Если терминал относится к другой линии, подтвердите предупреждение перед входом.")}${step(4, finalStep)}</ol></section>
+    <section class="steps"><h2>Как начать работу</h2><ol>${step(1, "Откройте терминал на выбранной линии и войдите оператором.")}${step(2, "Отсканируйте штрихкод задания. На своей линии оно также будет видно в списке.")}${step(3, "Если терминал относится к другой линии, подтвердите предупреждение перед входом.")}${step(4, finalStep)}</ol></section>
     <aside class="rules"><h2>Важные правила</h2><ul><li><strong>MOVING_BY_UD:</strong> код в отгрузке. Его нельзя учитывать, списывать или включать в документы.</li>${repackRule}<li>Дата производства действует на терминале до следующего изменения; в одном новом коробе одна дата.</li><li>Чтобы поставить работу на паузу, выйдите из задания. Закрыть инвентаризацию можно только в админке.</li><li>На время инвентаризации движения продукции по складу остановлены.</li></ul></aside>
     <footer class="footer"><span>Сформировано: ${formatGeneratedAt(data.generatedAt)} · Маркиро</span><span>${number} · 1 / 1</span></footer>
   </main>

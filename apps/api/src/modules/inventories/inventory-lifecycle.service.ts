@@ -189,6 +189,9 @@ export class InventoryLifecycleService {
         revision: schema.inventorySnapshots.revision,
         combinedDigest: schema.inventorySnapshots.combinedDigest,
         fixedAt: schema.inventorySnapshots.fixedAt,
+        productName: schema.inventorySnapshots.productName,
+        lineName: schema.inventorySnapshots.lineName,
+        boxCapacity: schema.inventorySnapshots.boxCapacity,
         emitted: schema.inventorySnapshots.emittedCount,
         introduced: schema.inventorySnapshots.introducedCount,
         applied: schema.inventorySnapshots.appliedCount,
@@ -209,7 +212,13 @@ export class InventoryLifecycleService {
         ),
       )
       .for("share");
-    if (!snapshot || snapshot.revision !== 1 || !/^[0-9a-f]{64}$/.test(snapshot.combinedDigest)) {
+    if (
+      !snapshot ||
+      snapshot.revision !== 1 ||
+      !/^[0-9a-f]{64}$/.test(snapshot.combinedDigest) ||
+      snapshot.productName.length === 0 ||
+      snapshot.lineName.length === 0
+    ) {
       throw new ConflictException({ code: "INVENTORY_SNAPSHOT_INCOMPLETE" });
     }
 
@@ -269,12 +278,10 @@ export class InventoryLifecycleService {
     const [product] = await tx
       .select({
         id: schema.products.id,
-        name: schema.products.name,
         printName: schema.products.printName,
         gtin14: schema.products.gtin14,
         egaisCode: schema.products.egaisCode,
         shelfLifeDays: schema.products.shelfLifeDays,
-        boxCapacity: schema.products.boxCapacity,
         status: schema.products.status,
       })
       .from(schema.products)
@@ -290,19 +297,12 @@ export class InventoryLifecycleService {
       throw new ConflictException({ code: "INVENTORY_PRODUCT_GTIN_CHANGED" });
     }
     if (
-      !Number.isInteger(product.boxCapacity) ||
-      product.boxCapacity === null ||
-      product.boxCapacity <= 0
+      !Number.isInteger(snapshot.boxCapacity) ||
+      snapshot.boxCapacity === null ||
+      snapshot.boxCapacity <= 0
     ) {
       throw new ConflictException({ code: "INVENTORY_BOX_CAPACITY_INVALID" });
     }
-
-    const [line] = await tx
-      .select({ id: schema.lines.id, name: schema.lines.name })
-      .from(schema.lines)
-      .where(and(eq(schema.lines.tenantId, tenantId), eq(schema.lines.id, inventory.lineId)))
-      .for("share");
-    if (!line) throw new BadRequestException({ code: "INVENTORY_LINE_INVALID" });
 
     const counts: InventorySnapshotCountsDto = {
       emitted: snapshot.emitted,
@@ -328,14 +328,14 @@ export class InventoryLifecycleService {
       },
       product: {
         id: product.id,
-        name: product.name,
+        name: snapshot.productName,
         printName: product.printName,
         gtin14: product.gtin14,
         egaisCode: product.egaisCode,
         shelfLifeDays: product.shelfLifeDays,
-        boxCapacity: product.boxCapacity,
+        boxCapacity: snapshot.boxCapacity,
       },
-      line,
+      line: { id: inventory.lineId, name: snapshot.lineName },
       boxLabelTemplate: await this.resolveBoxLabelTemplate(tx, tenantId, inventory),
     };
   }
@@ -354,6 +354,7 @@ export class InventoryLifecycleService {
         revision: schema.inventorySnapshots.revision,
         fixedAt: schema.inventorySnapshots.fixedAt,
         combinedDigest: schema.inventorySnapshots.combinedDigest,
+        productName: schema.inventorySnapshots.productName,
         emitted: schema.inventorySnapshots.emittedCount,
         introduced: schema.inventorySnapshots.introducedCount,
         applied: schema.inventorySnapshots.appliedCount,
@@ -373,7 +374,6 @@ export class InventoryLifecycleService {
     if (!snapshot) throw new Error("Running inventory snapshot is missing");
     const [product] = await tx
       .select({
-        name: schema.products.name,
         printName: schema.products.printName,
         egaisCode: schema.products.egaisCode,
         shelfLifeDays: schema.products.shelfLifeDays,
@@ -397,7 +397,7 @@ export class InventoryLifecycleService {
       boxLabelTemplateId: inventory.boxLabelTemplateId,
       activeSnapshotId: inventory.activeSnapshotId,
       stationManifest: inventory.stationManifest,
-      authoritativeProductName: product.name,
+      authoritativeProductName: snapshot.productName,
       authoritativeProductPrintName: product.printName,
       authoritativeEgaisCode: product.egaisCode,
       authoritativeShelfLifeDays: product.shelfLifeDays,

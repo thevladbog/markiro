@@ -568,6 +568,13 @@
       "when": 1787747754271,
       "tag": "0080_keen_major_mapleleaf",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1787769242505,
+      "tag": "0081_easy_frank_castle",
+      "breakpoints": true
     }
   ]
 }

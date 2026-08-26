@@ -102,6 +102,8 @@ describe.skipIf(!databaseUrl)("closed inventory result source", () => {
       tenantId,
       inventoryId,
       combinedDigest: "a".repeat(64),
+      productName: "Result product",
+      lineName: "Result line",
       emittedCount: 1,
       introducedCount: 6,
       appliedCount: 0,

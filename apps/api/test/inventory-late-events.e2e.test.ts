@@ -112,6 +112,8 @@ describe.skipIf(!ready)("inventory late events", () => {
       tenantId,
       inventoryId,
       combinedDigest: "b".repeat(64),
+      productName: "Late product",
+      lineName: "Late line",
       emittedCount: 0,
       introducedCount: 0,
       appliedCount: 0,

@@ -198,6 +198,9 @@ describe("inventory preparation schema", () => {
   });
 
   it("permits only one immutable snapshot and one selected import per status", () => {
+    expect(Object.keys(schema.inventorySnapshots)).toEqual(
+      expect.arrayContaining(["productName", "lineName", "boxCapacity"]),
+    );
     expect(
       constraintColumns("inventorySnapshots", "inventory_snapshots_tenant_inventory_uq"),
     ).toEqual(["tenant_id", "inventory_id"]);
@@ -860,13 +863,21 @@ async function inspectInventoryTestSchema(client: pg.PoolClient): Promise<"absen
     );
   }
 
-  const [outcomeColumn, constraints] = await Promise.all([
+  const [outcomeColumn, snapshotFactColumns, constraints] = await Promise.all([
     client.query<{ column_default: string | null; is_nullable: "YES" | "NO" }>(
       `select is_nullable, column_default
        from information_schema.columns
        where table_schema = current_schema()
          and table_name = 'inventory_snapshot_inputs'
          and column_name = 'import_parse_outcome'`,
+    ),
+    client.query<{ column_name: string; is_nullable: "YES" | "NO" }>(
+      `select column_name, is_nullable
+       from information_schema.columns
+       where table_schema = current_schema()
+         and table_name = 'inventory_snapshots'
+         and column_name = any($1::text[])`,
+      [["product_name", "line_name", "box_capacity"]],
     ),
     client.query<{ name: string }>(
       `select constraint_record.conname as name
@@ -878,11 +889,20 @@ async function inspectInventoryTestSchema(client: pg.PoolClient): Promise<"absen
     ),
   ]);
   const column = outcomeColumn.rows[0];
+  const snapshotFacts = new Map(
+    snapshotFactColumns.rows.map((item) => [item.column_name, item.is_nullable]),
+  );
   const foundConstraints = new Set(constraints.rows.map((row) => row.name));
   const missingInvariantCount =
     (column?.is_nullable === "NO" && column.column_default?.includes("'succeeded'") === true
       ? 0
-      : 1) + inventoryCurrentConstraints.filter((name) => !foundConstraints.has(name)).length;
+      : 1) +
+    (snapshotFacts.get("product_name") === "NO" &&
+    snapshotFacts.get("line_name") === "NO" &&
+    snapshotFacts.get("box_capacity") === "YES"
+      ? 0
+      : 1) +
+    inventoryCurrentConstraints.filter((name) => !foundConstraints.has(name)).length;
   if (missingInvariantCount !== 0) {
     throw new Error(
       `Inventory test schema is incompatible (${missingInvariantCount} current invariant(s) missing); refusing migration replay`,
@@ -901,6 +921,7 @@ async function ensureInventoryTestSchema(
     "0067_flashy_outlaw_kid.sql",
     "0068_inventory_protected_date_precedence.sql",
     "0069_inventory_station_manifest.sql",
+    "0081_easy_frank_castle.sql",
   ]) {
     const migration = readFileSync(
       new URL(`../migrations/${migrationName}`, import.meta.url),
@@ -992,10 +1013,12 @@ describe.skipIf(!databaseUrl)("inventory preparation PostgreSQL invariants", () 
     );
     await client.query(
       `insert into inventory_snapshots
-         (id, tenant_id, inventory_id, combined_digest, emitted_count, introduced_count,
+         (id, tenant_id, inventory_id, combined_digest, product_name, line_name,
+          emitted_count, introduced_count,
           applied_count, retired_count, written_off_count, disaggregation_count,
           protected_count, expected_count, package_count, loose_count, fixed_by_user_id)
-       values ($1, $2, $3, $4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $5)`,
+       values ($1, $2, $3, $4, 'Inventory review product', 'Inventory review line',
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, $5)`,
       [snapshotId, tenantId, inventoryId, "d".repeat(64), userId],
     );
   });

@@ -139,6 +139,8 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
       tenantId,
       inventoryId,
       combinedDigest: "a".repeat(64),
+      productName: "Correction product",
+      lineName: "Correction line",
       emittedCount: 0,
       introducedCount: 1,
       appliedCount: 0,
