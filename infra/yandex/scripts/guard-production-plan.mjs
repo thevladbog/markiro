@@ -747,86 +747,124 @@ function statement(policy, sid, keys) {
   return value;
 }
 
+function releasePolicyScoped(scope, callback) {
+  return scoped(`release-policy-${scope}`, callback);
+}
+
 function validateReleasePolicy(plan, resource, bucketName, expectedTerraformId, appRuntimeId) {
-  const value = after(resource);
-  if (value.bucket !== bucketName) rejected();
+  const value = releasePolicyScoped("resource", () => after(resource));
+  releasePolicyScoped("bucket", () => {
+    if (value.bucket !== bucketName) rejected();
+  });
   if (typeof value.policy !== "string") {
-    if (onlyCreate(resource) && computed(resource, "policy")) {
+    releasePolicyScoped("computed-value", () => {
+      if (!onlyCreate(resource) || !computed(resource, "policy")) rejected();
+    });
+    releasePolicyScoped("computed-references", () => {
       proveExactReferences(plan, resource, "policy", [
         ...releaseBucketReference,
         ...publisherReference,
         "var.terraform_service_account_id",
       ]);
-      return;
-    }
-    rejected();
+    });
+    return;
   }
 
-  let policy;
-  try {
-    policy = JSON.parse(value.policy);
-  } catch {
-    rejected();
-  }
-  exactKeys(policy, ["Version", "Statement"]);
-  if (policy.Version !== "2012-10-17" || !Array.isArray(policy.Statement)) rejected();
-  if (policy.Statement.length !== 4) rejected();
+  const policy = releasePolicyScoped("json", () => JSON.parse(value.policy));
+  releasePolicyScoped("shape", () => {
+    exactKeys(policy, ["Version", "Statement"]);
+    if (!Array.isArray(policy.Statement)) rejected();
+  });
+  releasePolicyScoped("version", () => {
+    if (policy.Version !== "2012-10-17") rejected();
+  });
+  releasePolicyScoped("statement-count", () => {
+    if (policy.Statement.length !== 4) rejected();
+  });
 
   const bucketArn = `arn:aws:s3:::${bucketName}`;
   const stationArn = `${bucketArn}/station/*`;
-  const publicRead = statement(policy, "AllowPublicStationReleaseObjects", [
-    "Sid",
-    "Effect",
-    "Principal",
-    "Action",
-    "Resource",
-  ]);
-  if (publicRead.Principal !== "*") rejected();
-  exactStrings(publicRead.Action, ["s3:GetObject"]);
-  exactStrings(publicRead.Resource, [stationArn]);
+  const publicRead = releasePolicyScoped("public-statement", () =>
+    statement(policy, "AllowPublicStationReleaseObjects", [
+      "Sid",
+      "Effect",
+      "Principal",
+      "Action",
+      "Resource",
+    ]),
+  );
+  releasePolicyScoped("public-principal", () => {
+    if (publicRead.Principal !== "*") rejected();
+  });
+  releasePolicyScoped("public-action", () => exactStrings(publicRead.Action, ["s3:GetObject"]));
+  releasePolicyScoped("public-resource", () => exactStrings(publicRead.Resource, [stationArn]));
 
-  const publisherObjects = statement(policy, "AllowPublisherStationObjects", [
-    "Sid",
-    "Effect",
-    "Principal",
-    "Action",
-    "Resource",
-  ]);
-  const publisherId = canonicalUser(publisherObjects);
-  exactStrings(publisherObjects.Action, ["s3:GetObject", "s3:PutObject"]);
-  exactStrings(publisherObjects.Resource, [stationArn]);
+  const publisherObjects = releasePolicyScoped("publisher-objects-statement", () =>
+    statement(policy, "AllowPublisherStationObjects", [
+      "Sid",
+      "Effect",
+      "Principal",
+      "Action",
+      "Resource",
+    ]),
+  );
+  const publisherId = releasePolicyScoped("publisher-objects-principal", () =>
+    canonicalUser(publisherObjects),
+  );
+  releasePolicyScoped("publisher-objects-action", () =>
+    exactStrings(publisherObjects.Action, ["s3:GetObject", "s3:PutObject"]),
+  );
+  releasePolicyScoped("publisher-objects-resource", () =>
+    exactStrings(publisherObjects.Resource, [stationArn]),
+  );
 
-  const publisherBucket = statement(policy, "AllowPublisherStationBucketPreflight", [
-    "Sid",
-    "Effect",
-    "Principal",
-    "Action",
-    "Resource",
-    "Condition",
-  ]);
-  if (canonicalUser(publisherBucket) !== publisherId) rejected();
-  exactStrings(publisherBucket.Action, ["s3:GetBucketLocation", "s3:ListBucket"]);
-  exactStrings(publisherBucket.Resource, [bucketArn]);
-  exactKeys(publisherBucket.Condition, ["StringLike"]);
-  exactKeys(publisherBucket.Condition.StringLike, ["s3:prefix"]);
-  exactStrings(publisherBucket.Condition.StringLike["s3:prefix"], ["station/*"]);
+  const publisherBucket = releasePolicyScoped("publisher-bucket-statement", () =>
+    statement(policy, "AllowPublisherStationBucketPreflight", [
+      "Sid",
+      "Effect",
+      "Principal",
+      "Action",
+      "Resource",
+      "Condition",
+    ]),
+  );
+  releasePolicyScoped("publisher-bucket-principal", () => {
+    if (canonicalUser(publisherBucket) !== publisherId) rejected();
+  });
+  releasePolicyScoped("publisher-bucket-action", () =>
+    exactStrings(publisherBucket.Action, ["s3:GetBucketLocation", "s3:ListBucket"]),
+  );
+  releasePolicyScoped("publisher-bucket-resource", () =>
+    exactStrings(publisherBucket.Resource, [bucketArn]),
+  );
+  releasePolicyScoped("publisher-bucket-condition", () => {
+    exactKeys(publisherBucket.Condition, ["StringLike"]);
+    exactKeys(publisherBucket.Condition.StringLike, ["s3:prefix"]);
+    exactStrings(publisherBucket.Condition.StringLike["s3:prefix"], ["station/*"]);
+  });
 
-  const terraform = statement(policy, "AllowTerraformReleaseManagement", [
-    "Sid",
-    "Effect",
-    "Principal",
-    "Action",
-    "Resource",
-  ]);
-  const terraformId = canonicalUser(terraform);
-  if (
-    terraformId === publisherId ||
-    terraformId !== expectedTerraformId ||
-    terraformId === appRuntimeId
-  )
-    rejected();
-  exactStrings(terraform.Action, ["s3:*"]);
-  exactStrings(terraform.Resource, [bucketArn, `${bucketArn}/*`]);
+  const terraform = releasePolicyScoped("terraform-statement", () =>
+    statement(policy, "AllowTerraformReleaseManagement", [
+      "Sid",
+      "Effect",
+      "Principal",
+      "Action",
+      "Resource",
+    ]),
+  );
+  const terraformId = releasePolicyScoped("terraform-principal", () => canonicalUser(terraform));
+  releasePolicyScoped("terraform-identity", () => {
+    if (
+      terraformId === publisherId ||
+      terraformId !== expectedTerraformId ||
+      terraformId === appRuntimeId
+    )
+      rejected();
+  });
+  releasePolicyScoped("terraform-action", () => exactStrings(terraform.Action, ["s3:*"]));
+  releasePolicyScoped("terraform-resource", () =>
+    exactStrings(terraform.Resource, [bucketArn, `${bucketArn}/*`]),
+  );
 }
 
 function validateReleaseBucket(resource) {
@@ -1146,14 +1184,12 @@ export function guardProductionPlan(plan) {
       publisherIdValue,
     ),
   );
-  scoped("release-policy", () =>
-    validateReleasePolicy(
-      plan,
-      resources.get("module.station_releases.yandex_storage_bucket_policy.releases"),
-      bucketName,
-      expectedTerraformId,
-      appRuntimeId,
-    ),
+  validateReleasePolicy(
+    plan,
+    resources.get("module.station_releases.yandex_storage_bucket_policy.releases"),
+    bucketName,
+    expectedTerraformId,
+    appRuntimeId,
   );
   const releaseOriginGroupId = scoped("release-origin-group", () =>
     validateOriginGroup(
