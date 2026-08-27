@@ -131,6 +131,13 @@ describe("1c_exchange orders (И-2)", () => {
       .expect(200);
     expect(queryRes.headers["content-type"]).toContain("application/xml");
     expect(queryRes.text).toContain(`<Ид>${orderId}</Ид>`);
+    // СБИС отклоняет документ без обязательного ключа «Контрагент» --
+    // покупателем едет сотрудник, оформивший заявку (order-export.ts).
+    expect(queryRes.text).toContain(
+      `<Контрагенты><Контрагент><Ид>${employeeId}</Ид><Наименование>Иван Иванов</Наименование>` +
+        "<Роль>Покупатель</Роль><ПолноеНаименование>Иван Иванов</ПолноеНаименование>" +
+        "</Контрагент></Контрагенты>",
+    );
 
     const [beforeSuccess] = await db
       .select({ exportedAt: schema.pickupOrders.exportedAt })

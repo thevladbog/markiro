@@ -5,6 +5,10 @@ export interface ExportCandidateOrder {
   createdAt: Date;
   reason: "buy" | "writeoff";
   writeoffReasonName: string | null;
+  /** `pickup_orders.employee_id` -- becomes the buyer `<Контрагент><Ид>`, stable across re-offers so the consumer can dedupe. */
+  employeeId: string;
+  /** `employees.full_name` (NOT NULL, inner-joined) -- the buyer counterparty's `<Наименование>`. */
+  employeeName: string;
   totalPrice: string | null;
   items: ExportCandidateItem[];
 }
@@ -180,6 +184,24 @@ function buildDocumentXml(
       tag("ХозОперация", escapeXmlText(documentType)),
       tag("Валюта", "руб"),
       tag("Сумма", order.totalPrice ?? "0.00"),
+      // Покупатель -- сотрудник, оформивший заявку на киоске. Блок
+      // <Контрагенты> обязателен по протоколу «Обмен с сайтом», и потребители
+      // строже типовой 1С (СБИС: «В структуре объекта отсутствует обязательный
+      // ключ 'Контрагент'») отклоняют документ без него. Ид -- employee_id,
+      // стабильный между повторами query, поэтому учётная система узнаёт
+      // контрагента как того же самого.
+      tag(
+        "Контрагенты",
+        tag(
+          "Контрагент",
+          [
+            tag("Ид", escapeXmlText(order.employeeId)),
+            tag("Наименование", escapeXmlText(order.employeeName)),
+            tag("Роль", "Покупатель"),
+            tag("ПолноеНаименование", escapeXmlText(order.employeeName)),
+          ].join(""),
+        ),
+      ),
       tag("Комментарий", escapeXmlText(reasonComment)),
       // Спека §5: причина дублируется отдельным реквизитом, который
       // конфигурация 1С может замапить -- тот же механизм `<ЗначенияРеквизитов>`
