@@ -551,15 +551,37 @@ function RepackInventoryFixture({ variant }: { variant: string }) {
               productionDate: GALLERY_INVENTORY_DATE,
             }
           : null,
-        reprintSscc: reprint ? GALLERY_INVENTORY_SSCC : "",
-        reprintCandidate: reprint
+        reprintSscc: reprint ? "0000" : "",
+        ...(reprint
           ? {
-              boxId: "gallery-repack-box",
-              sscc: GALLERY_INVENTORY_SSCC,
-              quantity: 20,
-              productionDate: GALLERY_INVENTORY_DATE,
+              reprintMatches: [
+                {
+                  boxId: "gallery-repack-box",
+                  sscc: GALLERY_INVENTORY_SSCC,
+                  quantity: 20,
+                  productionDate: GALLERY_INVENTORY_DATE,
+                },
+                {
+                  boxId: "gallery-repack-box-2",
+                  sscc: "046006820000000039",
+                  quantity: 20,
+                  productionDate: GALLERY_INVENTORY_DATE,
+                },
+                {
+                  boxId: "gallery-repack-box-3",
+                  sscc: "046006820000000046",
+                  quantity: 14,
+                  productionDate: "2026-08-18",
+                },
+                {
+                  boxId: "gallery-repack-box-4",
+                  sscc: "046006820000000053",
+                  quantity: 20,
+                  productionDate: "2026-08-18",
+                },
+              ],
             }
-          : null,
+          : {}),
       }}
     />
   );

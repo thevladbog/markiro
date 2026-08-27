@@ -16,14 +16,15 @@ import { formatCivilDate } from "../lib/civil-date-format.js";
 import { loadInventoryProductionDate, setInventoryProductionDate } from "../lib/inventory-date.js";
 import {
   attemptInventoryBoxPrint,
-  findInventoryPrintedBoxBySscc,
   listInventoryBoxPrintAttempts,
   processNextInventoryRemoteReprint,
   readInventoryBoxPrintFacts,
   readUnresolvedInventoryReprint,
   recoverInterruptedInventoryPrint,
+  searchInventoryPrintedBoxesBySscc,
   InventoryPrintRecoveryStaleError,
   type InventoryBoxPrintFacts,
+  type InventoryPrintedBoxMatch,
   type InventoryBoxPrintingTransport,
   type InventoryBoxPrintResult,
   type InventoryPrintErrorCode,
@@ -50,7 +51,10 @@ import { InventoryProgress as InventoryProgressView } from "../ui/inventory/Inve
 import { InventoryBoxPrintRecovery } from "../ui/inventory/InventoryBoxPrintRecovery.js";
 import { InventoryScanInstrument } from "../ui/inventory/InventoryScanInstrument.js";
 import { RepackBoxInstrument } from "../ui/inventory/RepackBoxInstrument.js";
-import { RepackCorrections } from "../ui/inventory/RepackCorrections.js";
+import {
+  RepackCorrections,
+  REPACK_REPRINT_MIN_QUERY,
+} from "../ui/inventory/RepackCorrections.js";
 import { StationScreen } from "../ui/StationScreen.js";
 
 export interface InventoryWorkScreenProps {
@@ -98,12 +102,12 @@ export type InventoryWorkGalleryState =
       correctionsDialog?: boolean;
       printDisplay?: InventoryPrintDisplay | null;
       reprintSscc?: string;
-      reprintCandidate?: {
+      reprintMatches?: {
         boxId: string;
         sscc: string;
         quantity: number;
         productionDate: string;
-      } | null;
+      }[];
     };
 
 const EMPTY_PROGRESS: InventoryProgress = {
@@ -610,13 +614,9 @@ function RepackInventoryWorkScreen({
   const [provisionalPrintFailure, setProvisionalPrintFailure] =
     useState<InventoryPrintDisplay | null>(gallery?.printDisplay ?? null);
   const [reprintSscc, setReprintSscc] = useState(gallery?.reprintSscc ?? "");
-  const [reprintCandidate, setReprintCandidate] = useState<{
-    boxId: string;
-    sscc: string;
-    quantity: number;
-    productionDate: string;
-  } | null>(gallery?.reprintCandidate ?? null);
-  const [reprintError, setReprintError] = useState(false);
+  const [reprintMatches, setReprintMatches] = useState<InventoryPrintedBoxMatch[] | null>(
+    gallery?.reprintMatches ?? null,
+  );
   const mounted = useRef(true);
   const automaticPrints = useRef(new Set<string>());
   const automaticRecoveries = useRef(new Set<string>());
@@ -812,11 +812,7 @@ function RepackInventoryWorkScreen({
     if (gallery || !correctionsDialog || printBusy) return undefined;
     return source.start((raw) => {
       const sscc = parseScannedSscc(raw);
-      if (sscc !== null) {
-        setReprintSscc(sscc);
-        setReprintCandidate(null);
-        setReprintError(false);
-      }
+      if (sscc !== null) setReprintSscc(sscc);
     });
   }, [correctionsDialog, gallery, printBusy, source]);
 
@@ -1146,28 +1142,43 @@ function RepackInventoryWorkScreen({
     }
   };
 
-  const findReprint = async () => {
-    const candidate = await findInventoryPrintedBoxBySscc(exec, {
-      inventoryId: inventory.inventoryId,
-      snapshotId: inventory.snapshotId,
-      deviceId,
-      sscc: reprintSscc,
-    });
-    if (mounted.current) {
-      setReprintCandidate(candidate);
-      setReprintError(candidate === null);
-    }
-  };
-
-  const reprint = async () => {
-    if (!reprintCandidate) return;
-    await runPrint(reprintCandidate.boxId, "reprint");
+  const reprint = async (match: InventoryPrintedBoxMatch) => {
+    await runPrint(match.boxId, "reprint");
     if (mounted.current) {
       setCorrectionsDialog(false);
-      setReprintCandidate(null);
+      setReprintMatches(null);
       setReprintSscc("");
     }
   };
+
+  // Live reprint lookup: matches appear as the operator types a fragment.
+  useEffect(() => {
+    if (gallery) return undefined;
+    if (!correctionsDialog || reprintSscc.length < REPACK_REPRINT_MIN_QUERY) {
+      setReprintMatches(null);
+      return undefined;
+    }
+    let cancelled = false;
+    void searchInventoryPrintedBoxesBySscc(exec, {
+      inventoryId: inventory.inventoryId,
+      snapshotId: inventory.snapshotId,
+      deviceId,
+      fragment: reprintSscc,
+    }).then((matches) => {
+      if (!cancelled && mounted.current) setReprintMatches(matches);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    correctionsDialog,
+    deviceId,
+    exec,
+    gallery,
+    inventory.inventoryId,
+    inventory.snapshotId,
+    reprintSscc,
+  ]);
 
   const retryPrint = async (recovery: InventoryPrintDisplay) => {
     if (recovery.attemptState === "printing" && recovery.attemptId) {
@@ -1352,10 +1363,7 @@ function RepackInventoryWorkScreen({
             size="floor"
             variant="secondary"
             disabled={busy || unresolvedPrint || printBusy}
-            onClick={() => {
-              setReprintError(false);
-              setCorrectionsDialog(true);
-            }}
+            onClick={() => setCorrectionsDialog(true)}
           >
             {t("inventory.repack.corrections")}
           </Button>
@@ -1473,36 +1481,29 @@ function RepackInventoryWorkScreen({
           onRemoveLast={() => void runCorrection("remove")}
           onClear={() => void runCorrection("clear")}
           onResolveConflict={() => void runCorrection("resolve-conflict")}
-          reprintSscc={reprintSscc}
-          onReprintSsccChange={(value) => {
-            setReprintSscc(value);
-            setReprintCandidate(null);
-            setReprintError(false);
-          }}
-          onFindReprint={() => void findReprint()}
-          reprintCandidate={
-            reprintCandidate
-              ? {
-                  ...reprintCandidate,
-                  productionDate: formatCivilDate(reprintCandidate.productionDate, locale),
-                }
+          reprintQuery={reprintSscc}
+          onReprintQueryChange={setReprintSscc}
+          reprintMatches={
+            reprintMatches
+              ? reprintMatches.map((match) => ({
+                  ...match,
+                  productionDate: formatCivilDate(match.productionDate, locale),
+                }))
               : null
           }
-          reprintError={reprintError}
-          onReprint={() => void reprint()}
+          onReprint={(match) => void reprint(match)}
           labels={{
             removeLast: t("inventory.repack.removeLast"),
             clear: t("inventory.repack.clear"),
             resolveConflict: t("inventory.repack.resolveConflict"),
             empty: t("inventory.repack.empty"),
+            openBoxTitle: t("inventory.repack.openBoxTitle"),
             reprintTitle: t("inventory.repack.reprint.title"),
             reprintSscc: t("inventory.repack.reprint.sscc"),
-            findReprint: t("inventory.repack.reprint.find"),
-            reprintCandidate: t("inventory.repack.reprint.candidate"),
-            reprintMissing: t("inventory.repack.reprint.missing"),
+            reprintHint: t("inventory.repack.reprint.hint"),
+            noMatches: t("inventory.repack.reprint.noMatches"),
             reprint: t("inventory.repack.reprint.action"),
             quantity: t("inventory.repack.print.quantity"),
-            productionDate: t("inventory.work.productionDate"),
             keypad: t("inventory.repack.reprint.keypad"),
             keypadBackspace: t("inventory.repack.reprint.keypadBackspace"),
             keypadClear: t("inventory.repack.reprint.keypadClear"),

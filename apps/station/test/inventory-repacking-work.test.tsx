@@ -379,9 +379,7 @@ describe("repack inventory work screen", () => {
     await waitFor(() => expect(scan.active()).toBe(true));
     scan.emit(`(00)${printedSscc}`);
     expect(await screen.findByDisplayValue(printedSscc)).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Проверить короб" }));
-    expect(await screen.findByText("Перепечатать этот SSCC")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Перепечатать" }));
     await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
     expect(scan.active()).toBe(false);
     await act(async () => finishPrint?.());

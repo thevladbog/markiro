@@ -1,5 +1,14 @@
 import { Button, PinPad } from "@markiro/ui";
 
+export interface RepackReprintMatch {
+  boxId: string;
+  sscc: string;
+  quantity: number;
+  productionDate: string;
+}
+
+export const REPACK_REPRINT_MIN_QUERY = 4;
+
 export interface RepackCorrectionsProps {
   itemCount: number;
   claimLostConflict: boolean;
@@ -8,29 +17,40 @@ export interface RepackCorrectionsProps {
   onRemoveLast: () => void;
   onClear: () => void;
   onResolveConflict: () => void;
-  reprintSscc: string;
-  onReprintSsccChange: (value: string) => void;
-  onFindReprint: () => void;
-  reprintCandidate: { sscc: string; quantity: number; productionDate: string } | null;
-  reprintError: boolean;
-  onReprint: () => void;
+  reprintQuery: string;
+  onReprintQueryChange: (value: string) => void;
+  /** Live matches for the current query; null while the lookup is running. */
+  reprintMatches: RepackReprintMatch[] | null;
+  onReprint: (match: RepackReprintMatch) => void;
   labels: {
     removeLast: string;
     clear: string;
     resolveConflict: string;
     empty: string;
+    openBoxTitle: string;
     reprintTitle: string;
     reprintSscc: string;
-    findReprint: string;
-    reprintCandidate: string;
-    reprintMissing: string;
+    reprintHint: string;
+    noMatches: string;
     reprint: string;
     quantity: string;
-    productionDate: string;
     keypad: string;
     keypadBackspace: string;
     keypadClear: string;
   };
+}
+
+/** Bolds every occurrence of the typed fragment inside a matched SSCC. */
+function highlightFragment(sscc: string, fragment: string) {
+  if (!fragment) return sscc;
+  const parts = sscc.split(fragment);
+  if (parts.length === 1) return sscc;
+  return parts.map((part, index) => (
+    <span key={index}>
+      {index > 0 ? <mark>{fragment}</mark> : null}
+      {part}
+    </span>
+  ));
 }
 
 export function RepackCorrections({
@@ -41,17 +61,17 @@ export function RepackCorrections({
   onRemoveLast,
   onClear,
   onResolveConflict,
-  reprintSscc,
-  onReprintSsccChange,
-  onFindReprint,
-  reprintCandidate,
-  reprintError,
+  reprintQuery,
+  onReprintQueryChange,
+  reprintMatches,
   onReprint,
   labels,
 }: RepackCorrectionsProps) {
+  const querySettled = reprintQuery.length >= REPACK_REPRINT_MIN_QUERY;
   return (
     <div className="repack-corrections">
-      <section>
+      <section className="repack-corrections__open">
+        <h3>{labels.openBoxTitle}</h3>
         {claimLostConflict ? (
           <Button size="floor" variant="secondary" disabled={busy} onClick={onResolveConflict}>
             {labels.resolveConflict}
@@ -77,48 +97,53 @@ export function RepackCorrections({
             id="inventory-reprint-sscc"
             inputMode="numeric"
             maxLength={18}
-            value={reprintSscc}
+            placeholder="••••"
+            value={reprintQuery}
             onChange={(event) =>
-              onReprintSsccChange(event.currentTarget.value.replace(/[^0-9]/g, "").slice(0, 18))
+              onReprintQueryChange(event.currentTarget.value.replace(/[^0-9]/g, "").slice(0, 18))
             }
           />
-          <Button
-            size="floor"
-            variant="secondary"
-            disabled={busy || reprintSscc.length !== 18}
-            onClick={onFindReprint}
-          >
-            {labels.findReprint}
-          </Button>
+          <p className="repack-reprint__hint">{labels.reprintHint}</p>
         </div>
-        <div className="repack-reprint__keypad">
-          <PinPad
-            value={reprintSscc}
-            onChange={(next) => onReprintSsccChange(next.replace(/[^0-9]/g, "").slice(0, 18))}
-            maxLength={18}
-            size="floor"
-            disabled={busy}
-            ariaLabel={labels.keypad}
-            backspaceLabel={labels.keypadBackspace}
-            clearLabel={labels.keypadClear}
-          />
-        </div>
-        {reprintError ? <p role="alert">{labels.reprintMissing}</p> : null}
-        {reprintCandidate ? (
-          <div className="repack-reprint__candidate">
-            <strong>{labels.reprintCandidate}</strong>
-            <span>{reprintCandidate.sscc}</span>
-            <span>
-              {labels.quantity}: {reprintCandidate.quantity}
-            </span>
-            <span>
-              {labels.productionDate}: {reprintCandidate.productionDate}
-            </span>
-            <Button size="floor" disabled={busy} onClick={onReprint}>
-              {labels.reprint}
-            </Button>
+        <div className="repack-reprint__workspace">
+          <div className="repack-reprint__keypad">
+            <PinPad
+              value={reprintQuery}
+              onChange={(next) => onReprintQueryChange(next.replace(/[^0-9]/g, "").slice(0, 18))}
+              maxLength={18}
+              size="floor"
+              disabled={busy}
+              ariaLabel={labels.keypad}
+              backspaceLabel={labels.keypadBackspace}
+              clearLabel={labels.keypadClear}
+            />
           </div>
-        ) : null}
+          <div className="repack-reprint__results" aria-live="polite">
+            {!querySettled ? (
+              <p className="repack-reprint__placeholder">{labels.reprintHint}</p>
+            ) : reprintMatches === null ? null : reprintMatches.length === 0 ? (
+              <p className="repack-reprint__placeholder" role="status">
+                {labels.noMatches}
+              </p>
+            ) : (
+              <ul className="repack-reprint__matches">
+                {reprintMatches.map((match) => (
+                  <li key={match.boxId} className="repack-reprint__match">
+                    <div>
+                      <strong>{highlightFragment(match.sscc, reprintQuery)}</strong>
+                      <span>
+                        {labels.quantity}: {match.quantity} · {match.productionDate}
+                      </span>
+                    </div>
+                    <Button size="floor" disabled={busy} onClick={() => onReprint(match)}>
+                      {labels.reprint}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
       </section>
     </div>
   );
