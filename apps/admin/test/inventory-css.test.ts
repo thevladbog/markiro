@@ -10,4 +10,10 @@ describe("inventory.css contracts", () => {
       /\.mk-inventory-steps li > span:last-child,[^{]+\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s,
     );
   });
+
+  it("keeps the terminal-line chip on one line", () => {
+    expect(css).toMatch(
+      /\.mk-inventory-terminal-line > \.mk-chip\s*\{[^}]*flex-shrink:\s*0;[^}]*white-space:\s*nowrap;/s,
+    );
+  });
 });

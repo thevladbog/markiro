@@ -251,6 +251,12 @@
 .mk-inventory-terminal-line {
   justify-content: space-between;
 }
+
+.mk-inventory-terminal-line > .mk-chip {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .mk-file-picker {
   display: inline-flex;
   margin: 12px 0;
