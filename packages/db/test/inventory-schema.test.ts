@@ -843,6 +843,12 @@ describe("inventory document schema", () => {
         "inventory_document_artifacts_tenant_run_format_part_uq",
       ),
     ).toEqual(["tenant_id", "run_id", "format_id", "part_number"]);
+    expect(
+      checkExpression(
+        "inventoryDocumentArtifacts",
+        "inventory_document_artifacts_byte_size_nonnegative_check",
+      ),
+    ).toContain('"byte_size" >= 0');
 
     const runColumns = Object.keys(schema.inventoryDocumentRuns);
     expect(runColumns).toEqual(
