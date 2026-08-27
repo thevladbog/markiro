@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  compareText,
   createUtf8ByteComparator,
   encodeLfText,
   encodeSemicolonCsv,
@@ -191,8 +192,4 @@ function generatedPart(
   boxCount: number,
 ): InventoryDocumentGeneratedPart {
   return { partNumber: 1, filename, mimeType, bytes, rowCount, codeCount, boxCount };
-}
-
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }

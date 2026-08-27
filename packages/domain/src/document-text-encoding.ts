@@ -1,6 +1,10 @@
 const UTF8_BOM = Uint8Array.of(0xef, 0xbb, 0xbf);
 const textEncoder = new TextEncoder();
 
+export function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 /** Creates a lexicographic UTF-8 comparator with a sort-local encoding cache. */
 export function createUtf8ByteComparator<T>(
   textOf: (value: T) => string,

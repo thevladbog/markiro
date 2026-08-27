@@ -241,7 +241,8 @@ describe("current inventory final-box selection", () => {
 
   it("sorts eligible boxes by their normalized stored SSCC", () => {
     const base = source();
-    const valid = base.newBoxes[0]!;
+    const valid = base.newBoxes.find((box) => box.sscc === "046800899000256001");
+    if (valid === undefined) throw new Error("expected eligible final-box fixture");
     const selected = selectEligibleInventoryFinalBoxes({
       ...base,
       newBoxes: [
@@ -255,7 +256,8 @@ describe("current inventory final-box selection", () => {
 
   it("sorts eligible box members by canonical UTF-8 bytes", () => {
     const unicode = source();
-    const valid = unicode.newBoxes[0]!;
+    const valid = unicode.newBoxes.find((box) => box.sscc === "046800899000256001");
+    if (valid === undefined) throw new Error("expected eligible final-box fixture");
     unicode.verified = [
       {
         codeHash: "supplementary",

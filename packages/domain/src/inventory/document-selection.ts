@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { createUtf8ByteComparator } from "../document-text-encoding.js";
+import { compareText, createUtf8ByteComparator } from "../document-text-encoding.js";
 import type { InventoryDocumentGenerationSource } from "./document-generators.js";
 
 export interface EligibleInventoryFinalBox {
@@ -62,8 +62,4 @@ export function selectEligibleInventoryFinalBoxes(
         },
       ];
     });
-}
-
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }

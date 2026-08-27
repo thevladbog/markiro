@@ -1,3 +1,4 @@
+import { compareText } from "../document-text-encoding.js";
 import { DomainError } from "../errors.js";
 import { GismtAggregationError, renderGismtAggregationXml } from "../gismt-aggregation.js";
 import { parseKmSegments } from "../gs1/km.js";
@@ -310,8 +311,4 @@ function xmlText(value: string): string {
 
 function xmlAttribute(value: string): string {
   return xmlText(value).replaceAll('"', "&quot;");
-}
-
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }
