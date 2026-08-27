@@ -336,6 +336,42 @@ describe("inventory GISMT aggregation XML", () => {
     });
     expect(inventoryPart?.bytes).toEqual(shiftPart?.bytes);
   });
+
+  it("renders an empty pack_content list for zero actionable boxes instead of failing", () => {
+    const emptyBoxes = {
+      writeOffCandidates: [],
+      verified: [],
+      protected: [],
+      oldBoxes: [],
+      newBoxes: [],
+    };
+
+    const [part] = generateInventoryAggregationXml(emptyBoxes, metadata);
+
+    expect(part).toMatchObject({
+      partNumber: 1,
+      filename: "inventory-INV-2026-0001-aggregation.xml",
+      mimeType: "application/xml; charset=utf-8",
+      rowCount: 10,
+      codeCount: 0,
+      boxCount: 0,
+    });
+    expect(decoder.decode(part?.bytes)).toBe(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<unit_pack document_id="11111111-1111-4111-8111-111111111111" VerForm="1.03" file_date_time="2026-08-27T09:10:11.000Z" action_id="30" version="1">',
+        '    <Document operation_date_time="2026-08-26T18:00:00.000Z" document_number="INV-2026-0001">',
+        "        <organisation>",
+        "            <id_info>",
+        '                <LP_info org_name="ООО «Пивоварня &amp; Ко»" LP_TIN="9705119097" />',
+        "            </id_info>",
+        "        </organisation>",
+        "    </Document>",
+        "</unit_pack>",
+        "",
+      ].join("\n"),
+    );
+  });
 });
 
 describe("inventory GISMT disaggregation XML", () => {
