@@ -50,12 +50,15 @@ result loader, and document runner for both approved XML formats.
 
 The first document run is verified artifact by artifact and again from the downloaded ZIP: every
 stored and archived byte stream is SHA-256 checked against artifact metadata, every complete
-`manifest.json` entry is compared with that metadata, eligible repack content is present in the
-appropriate aggregation/disaggregation XML, and the protected `MOVING_BY_UD` KM and old SSCC are
-absent from both. The journey then reopens the same inventory, proves both first-run artifacts are
-invalidated and no longer downloadable, closes at the next result revision, regenerates and fully
-re-verifies both XML files and the new ZIP, records the individual and ZIP downloads, and completes
-that revision.
+`manifest.json` entry is compared with that metadata, and both eligible codes/new SSCCs are present
+in aggregation XML. For disaggregation, one repacked old box deliberately contains an eligible code
+and a protected `MOVING_BY_UD` source code under the same frozen parent SSCC, while a second repacked
+old box is clean. The protected shared parent is absent and the clean old SSCC is present, making the
+parent-level exclusion observable through the real result loader and runner. The protected KM is
+absent from both formats. The journey then reopens the same inventory, proves both first-run
+artifacts are invalidated and no longer downloadable, closes at the next result revision,
+regenerates and fully re-verifies both XML files and the new ZIP, records the individual and ZIP
+downloads, and completes that revision.
 
 The following table identifies what the continuous scenario proves directly. The adjacent suites
 remain useful regression depth for branches and UI behavior, but are not used to assemble or
@@ -64,21 +67,23 @@ substitute for continuity of the acceptance journey.
 | Journey stage                                                                                             | Direct continuous evidence in `inventory-documents.e2e.test.ts`                                                                                                                    |
 | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Create one-product repack inventory with line, inclusive dates, capacity-two product, and label template  | Real `POST /inventories`; returned draft inventory is retained for every later step                                                                                                |
-| Upload and select all six statuses, including valid zero-row results                                      | Six real multipart import requests; one three-row INTRODUCED file plus five exact no-results files                                                                                 |
-| Freeze counts, parents, source dates, and immutable inputs                                                | Real snapshot request; six inputs and stored counts `introduced=3`, `protected=1`, `expected=2`, `packages=2`, `loose=1` asserted                                                  |
-| Keep `MOVING_BY_UD` protected and outside expected/destructive groups                                     | Frozen code asserted as `protected=true`, `expected=false`; protected KM and parent old SSCC excluded from every generated XML                                                     |
+| Upload and select all six statuses, including valid zero-row results                                      | Six real multipart import requests; one four-row INTRODUCED file plus five exact no-results files                                                                                  |
+| Freeze counts, parents, source dates, and immutable inputs                                                | Real snapshot request; six inputs and stored counts `introduced=4`, `protected=1`, `expected=3`, `packages=2`, `loose=1` asserted                                                  |
+| Keep `MOVING_BY_UD` protected and outside expected/destructive groups                                     | Tenant/snapshot-scoped frozen row proves `protected=true`, `expected=false`, and the exact shared parent; protected KM and shared old SSCC are excluded                            |
 | Start and expose the frozen task to an assigned line                                                      | Real start request followed by joins from two separately paired Station devices                                                                                                    |
-| Perform simple and repack work across two devices, including a conflict                                   | Protected simple scan on device B; old-box open, eligible add, new-box close/print on A; duplicate protected scan conflicts on A                                                   |
+| Perform simple and repack work across two devices, including a conflict                                   | Protected simple scan on device B; shared-parent and clean old/new boxes are repacked on A; duplicate protected scan conflicts on A                                                |
 | Correct the accepted result implicated in the duplicate, leave from both devices, and close               | `void_scan` changes `protected → voided`; `restore_scan` changes it back; both revisions, digests, correction/progress audit rows, two leaves, and blocker-free close are asserted |
-| Generate both production GISMT XML artifacts from eligible repack old/new data and exclude protected data | Production registry plus real result loader/runner; all stored/downloaded/archived bytes and full manifest metadata verified                                                       |
+| Generate both production GISMT XML artifacts from eligible repack old/new data and exclude protected data | Aggregation emits both eligible new boxes; disaggregation excludes the protected shared old SSCC and emits the clean old SSCC; every byte and manifest entry is verified           |
 | Reopen, invalidate, advance revision, close, regenerate, download, acknowledge, and complete              | Both first-run artifacts return 404 after reopen; the second run receives the same full verification before completion                                                             |
 
 The continuous snapshot selects six independently stored imports. Its introduced rows comprise an
-eligible code in an old box, a protected `MOVING_BY_UD` code in a different old box, and an eligible
-loose code, producing exactly two expected codes and one protected code. Empty APPLIED and the four
-other empty status slots are accepted only through the exact known no-results marker. The journey
-uses distinct authorized device identities and real PostgreSQL locks. Separate Station and admin
-suites continue to cover broader offline, UI, capacity-20, audit, quarantine, and error branches.
+eligible and a protected `MOVING_BY_UD` code sharing one old-box parent, an eligible code in a clean
+old box, and an eligible loose code, producing exactly three expected codes and one protected code.
+The protected-row lookup is scoped by tenant, snapshot, and code hash and asserts the shared parent
+SSCC. Empty APPLIED and the four other empty status slots are accepted only through the exact known
+no-results marker. The journey uses distinct authorized device identities and real PostgreSQL
+locks. Separate Station and admin suites continue to cover broader offline, UI, capacity-20, audit,
+quarantine, and error branches.
 
 ## Document contract gate
 

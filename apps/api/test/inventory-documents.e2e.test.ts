@@ -464,21 +464,27 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     const inventoryId = created.body.id as string;
     expect(created.body).toMatchObject({ id: inventoryId, status: "draft", mode: "repack" });
 
-    const eligibleOldSscc = buildSscc(0, "460000009", 9001);
-    const protectedOldSscc = buildSscc(0, "460000009", 9002);
-    const eligibleCanonical = canonicalizeKm(`01${GTIN}21ELIGIBLE-CONTINUOUS`);
+    const protectedSharedOldSscc = buildSscc(0, "460000009", 9001);
+    const cleanOldSscc = buildSscc(0, "460000009", 9002);
+    const sharedEligibleCanonical = canonicalizeKm(`01${GTIN}21ELIGIBLE-SHARED-PARENT`);
+    const cleanEligibleCanonical = canonicalizeKm(`01${GTIN}21ELIGIBLE-CLEAN-PARENT`);
     const protectedCanonical = canonicalizeKm(`01${GTIN}21PROTECTED-CONTINUOUS`);
     const imports = await uploadProductionImports(agent, inventoryId, {
       INTRODUCED: [
         {
-          serial: eligibleCanonical.serial,
+          serial: sharedEligibleCanonical.serial,
           productionDate: "2026-08-08",
-          parentSscc: eligibleOldSscc,
+          parentSscc: protectedSharedOldSscc,
         },
         {
           serial: protectedCanonical.serial,
           state: "MOVING_BY_UD",
-          parentSscc: protectedOldSscc,
+          parentSscc: protectedSharedOldSscc,
+        },
+        {
+          serial: cleanEligibleCanonical.serial,
+          productionDate: "2026-08-09",
+          parentSscc: cleanOldSscc,
         },
         { serial: "EXPECTED-LOOSE", productionDate: "2026-08-09" },
       ],
@@ -493,13 +499,13 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       inputs: imports,
       counts: {
         emitted: 0,
-        introduced: 3,
+        introduced: 4,
         applied: 0,
         retired: 0,
         writtenOff: 0,
         disaggregation: 0,
         protected: 1,
-        expected: 2,
+        expected: 3,
         packages: 2,
         loose: 1,
       },
@@ -516,9 +522,9 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       .from(schema.inventorySnapshots)
       .where(eq(schema.inventorySnapshots.id, snapshotId));
     expect(frozenSnapshot).toEqual({
-      introduced: 3,
+      introduced: 4,
       protected: 1,
-      expected: 2,
+      expected: 3,
       packages: 2,
       loose: 1,
     });
@@ -531,13 +537,21 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     const [protectedSnapshotCode] = await db
       .select({
         sourceState: schema.inventorySnapshotCodes.sourceState,
+        parentSscc: schema.inventorySnapshotCodes.parentSscc,
         expected: schema.inventorySnapshotCodes.expected,
         protected: schema.inventorySnapshotCodes.protected,
       })
       .from(schema.inventorySnapshotCodes)
-      .where(eq(schema.inventorySnapshotCodes.codeHash, kmHash(protectedCanonical)));
+      .where(
+        and(
+          eq(schema.inventorySnapshotCodes.tenantId, tenantId),
+          eq(schema.inventorySnapshotCodes.snapshotId, snapshotId),
+          eq(schema.inventorySnapshotCodes.codeHash, kmHash(protectedCanonical)),
+        ),
+      );
     expect(protectedSnapshotCode).toEqual({
       sourceState: "MOVING_BY_UD",
+      parentSscc: protectedSharedOldSscc,
       expected: false,
       protected: true,
     });
@@ -547,7 +561,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       inventoryId,
       snapshotId,
       snapshotRevision: 1,
-      codeCount: 3,
+      codeCount: 4,
       boxCapacity: 2,
       mode: "repack",
     });
@@ -589,12 +603,18 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       fromSerial: number;
     } | null;
     if (!ssccBlock) throw new Error("Expected a repack SSCC block for station A");
-    const eligibleNewSscc = buildSscc(
+    const protectedSharedNewSscc = buildSscc(
       ssccBlock.extensionDigit,
       ssccBlock.issuerPrefix,
       ssccBlock.fromSerial,
     );
-    const boxId = randomUUID();
+    const cleanNewSscc = buildSscc(
+      ssccBlock.extensionDigit,
+      ssccBlock.issuerPrefix,
+      ssccBlock.fromSerial + 1,
+    );
+    const protectedSharedBoxId = randomUUID();
+    const cleanBoxId = randomUUID();
 
     const sendBatch = async (
       device: { apiKey: string },
@@ -637,41 +657,47 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       expect.objectContaining({ eventId: protectedEvent.eventId, status: "applied" }),
     ]);
 
-    const openBox: InventoryEvent = {
+    const openProtectedSharedBox: InventoryEvent = {
       eventId: randomUUID(),
       deviceSequence: 1,
       operatorId,
       scannedAt: "2026-08-26T08:01:00.000Z",
       kind: "old_box",
-      normalizedIdentity: `old_box:${eligibleOldSscc}`,
+      normalizedIdentity: `old_box:${protectedSharedOldSscc}`,
       codeHash: null,
-      canonicalRaw: eligibleOldSscc,
+      canonicalRaw: protectedSharedOldSscc,
       activeProductionDate: "2026-08-08",
       localVerdict: "expected",
       repack: {
         action: "open-box",
-        boxId,
-        oldSscc: eligibleOldSscc,
-        newSscc: eligibleNewSscc,
+        boxId: protectedSharedBoxId,
+        oldSscc: protectedSharedOldSscc,
+        newSscc: protectedSharedNewSscc,
         capacity: 2,
         productionDate: "2026-08-08",
       },
     };
-    await sendBatch(deviceA, [openBox], 1);
-    const addItem: InventoryEvent = {
+    await sendBatch(deviceA, [openProtectedSharedBox], 1);
+    const addProtectedSharedEligibleItem: InventoryEvent = {
       eventId: randomUUID(),
       deviceSequence: 2,
       operatorId,
       scannedAt: "2026-08-26T08:02:00.000Z",
       kind: "item",
-      normalizedIdentity: `item:${kmHash(eligibleCanonical)}`,
-      codeHash: kmHash(eligibleCanonical),
-      canonicalRaw: eligibleCanonical.raw,
+      normalizedIdentity: `item:${kmHash(sharedEligibleCanonical)}`,
+      codeHash: kmHash(sharedEligibleCanonical),
+      canonicalRaw: sharedEligibleCanonical.raw,
       activeProductionDate: "2026-08-08",
       localVerdict: "expected",
-      repack: { action: "add-item", boxId, itemId: randomUUID(), position: 1, closeBox: false },
+      repack: {
+        action: "add-item",
+        boxId: protectedSharedBoxId,
+        itemId: randomUUID(),
+        position: 1,
+        closeBox: false,
+      },
     };
-    await sendBatch(deviceA, [addItem], 1);
+    await sendBatch(deviceA, [addProtectedSharedEligibleItem], 1);
 
     const duplicateProtected: InventoryEvent = {
       ...protectedEvent,
@@ -713,36 +739,36 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     if (!conflictedResult) throw new Error("Expected duplicate-conflict code result");
 
     const closedAt = "2026-08-26T08:04:00.000Z";
-    const closeBox: InventoryEvent = {
+    const closeProtectedSharedBox: InventoryEvent = {
       eventId: randomUUID(),
       deviceSequence: 4,
       operatorId,
       scannedAt: closedAt,
       kind: "repack_action",
-      normalizedIdentity: `repack_action:close-incomplete:${boxId}`,
+      normalizedIdentity: `repack_action:close-incomplete:${protectedSharedBoxId}`,
       codeHash: null,
       canonicalRaw: null,
       activeProductionDate: "2026-08-08",
       localVerdict: "repack-action",
-      repack: { action: "close-incomplete", boxId, changedAt: closedAt },
+      repack: { action: "close-incomplete", boxId: protectedSharedBoxId, changedAt: closedAt },
     };
-    await sendBatch(deviceA, [closeBox], 0);
+    await sendBatch(deviceA, [closeProtectedSharedBox], 0);
     const printedAt = "2026-08-26T08:05:00.000Z";
-    const printBox: InventoryEvent = {
+    const printProtectedSharedBox: InventoryEvent = {
       eventId: randomUUID(),
       deviceSequence: 5,
       operatorId,
       scannedAt: printedAt,
       kind: "repack_action",
-      normalizedIdentity: `repack_action:print-outcome:${boxId}:1`,
+      normalizedIdentity: `repack_action:print-outcome:${protectedSharedBoxId}:1`,
       codeHash: null,
       canonicalRaw: null,
       activeProductionDate: "2026-08-08",
       localVerdict: "repack-action",
       repack: {
         action: "print-outcome",
-        boxId,
-        sscc: eligibleNewSscc,
+        boxId: protectedSharedBoxId,
+        sscc: protectedSharedNewSscc,
         attemptId: randomUUID(),
         attemptNumber: 1,
         result: "printed",
@@ -751,7 +777,89 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         completedAt: printedAt,
       },
     };
-    const printed = await sendBatch(deviceA, [printBox], 0);
+    await sendBatch(deviceA, [printProtectedSharedBox], 0);
+
+    const openCleanBox: InventoryEvent = {
+      eventId: randomUUID(),
+      deviceSequence: 6,
+      operatorId,
+      scannedAt: "2026-08-26T08:06:00.000Z",
+      kind: "old_box",
+      normalizedIdentity: `old_box:${cleanOldSscc}`,
+      codeHash: null,
+      canonicalRaw: cleanOldSscc,
+      activeProductionDate: "2026-08-09",
+      localVerdict: "expected",
+      repack: {
+        action: "open-box",
+        boxId: cleanBoxId,
+        oldSscc: cleanOldSscc,
+        newSscc: cleanNewSscc,
+        capacity: 2,
+        productionDate: "2026-08-09",
+      },
+    };
+    await sendBatch(deviceA, [openCleanBox], 1);
+    const addCleanEligibleItem: InventoryEvent = {
+      eventId: randomUUID(),
+      deviceSequence: 7,
+      operatorId,
+      scannedAt: "2026-08-26T08:07:00.000Z",
+      kind: "item",
+      normalizedIdentity: `item:${kmHash(cleanEligibleCanonical)}`,
+      codeHash: kmHash(cleanEligibleCanonical),
+      canonicalRaw: cleanEligibleCanonical.raw,
+      activeProductionDate: "2026-08-09",
+      localVerdict: "expected",
+      repack: {
+        action: "add-item",
+        boxId: cleanBoxId,
+        itemId: randomUUID(),
+        position: 1,
+        closeBox: false,
+      },
+    };
+    await sendBatch(deviceA, [addCleanEligibleItem], 1);
+    const cleanClosedAt = "2026-08-26T08:08:00.000Z";
+    const closeCleanBox: InventoryEvent = {
+      eventId: randomUUID(),
+      deviceSequence: 8,
+      operatorId,
+      scannedAt: cleanClosedAt,
+      kind: "repack_action",
+      normalizedIdentity: `repack_action:close-incomplete:${cleanBoxId}`,
+      codeHash: null,
+      canonicalRaw: null,
+      activeProductionDate: "2026-08-09",
+      localVerdict: "repack-action",
+      repack: { action: "close-incomplete", boxId: cleanBoxId, changedAt: cleanClosedAt },
+    };
+    await sendBatch(deviceA, [closeCleanBox], 0);
+    const cleanPrintedAt = "2026-08-26T08:09:00.000Z";
+    const printCleanBox: InventoryEvent = {
+      eventId: randomUUID(),
+      deviceSequence: 9,
+      operatorId,
+      scannedAt: cleanPrintedAt,
+      kind: "repack_action",
+      normalizedIdentity: `repack_action:print-outcome:${cleanBoxId}:1`,
+      codeHash: null,
+      canonicalRaw: null,
+      activeProductionDate: "2026-08-09",
+      localVerdict: "repack-action",
+      repack: {
+        action: "print-outcome",
+        boxId: cleanBoxId,
+        sscc: cleanNewSscc,
+        attemptId: randomUUID(),
+        attemptNumber: 1,
+        result: "printed",
+        errorCode: null,
+        attemptedAt: "2026-08-26T08:08:30.000Z",
+        completedAt: cleanPrintedAt,
+      },
+    };
+    const cleanPrinted = await sendBatch(deviceA, [printCleanBox], 0);
 
     const projectionDigest = (classification: "protected" | "voided", updatedAt: string) =>
       createHash("sha256")
@@ -776,7 +884,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         action: "void_scan",
         target: { eventId: protectedEvent.eventId },
         reason: "Void accepted scan implicated in cross-device duplicate",
-        expectedResultRevision: printed.body.resultRevision,
+        expectedResultRevision: cleanPrinted.body.resultRevision,
         idempotencyKey: randomUUID(),
       })
       .expect(201);
@@ -793,7 +901,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       },
       beforeProjectionDigest: initialProjectionDigest,
       afterProjectionDigest: voidedProjectionDigest,
-      resultRevision: 3,
+      resultRevision: 4,
     });
     const [voidedResult] = await db
       .select({
@@ -830,7 +938,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       },
       beforeProjectionDigest: voidedProjectionDigest,
       afterProjectionDigest: restoredProjectionDigest,
-      resultRevision: 4,
+      resultRevision: 5,
     });
     const [restoredResult] = await db
       .select({
@@ -873,7 +981,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         targetRepackBoxId: null,
         beforeProjectionDigest: initialProjectionDigest,
         afterProjectionDigest: voidedProjectionDigest,
-        resultRevision: 3,
+        resultRevision: 4,
       },
       {
         actorUserId: member.userId,
@@ -883,7 +991,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         targetRepackBoxId: null,
         beforeProjectionDigest: voidedProjectionDigest,
         afterProjectionDigest: restoredProjectionDigest,
-        resultRevision: 4,
+        resultRevision: 5,
       },
     ]);
     const correctionProgress = await db
@@ -908,7 +1016,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       correctionProgress.sort((left, right) => left.resultRevision - right.resultRevision),
     ).toEqual([
       {
-        resultRevision: 3,
+        resultRevision: 4,
         kind: "correction",
         codeHash: kmHash(protectedCanonical),
         classification: "voided",
@@ -917,7 +1025,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         changedAt: new Date(voidCorrection.body.createdAt as string),
       },
       {
-        resultRevision: 4,
+        resultRevision: 5,
         kind: "correction",
         codeHash: kmHash(protectedCanonical),
         classification: "protected",
@@ -950,11 +1058,13 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       inventoryId,
       snapshotId,
       resultRevision: closed.body.resultRevision as number,
-      eligibleCanonical,
+      sharedEligibleCanonical,
+      cleanEligibleCanonical,
       protectedCanonical,
-      eligibleOldSscc,
-      eligibleNewSscc,
-      protectedOldSscc,
+      protectedSharedOldSscc,
+      cleanOldSscc,
+      protectedSharedNewSscc,
+      cleanNewSscc,
     };
   }
 
@@ -996,8 +1106,8 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         formatId: "inventory_xml_gismt_aggregation",
         formatVersion: 1,
         mimeType: "application/xml; charset=utf-8",
-        codeCount: 1,
-        boxCount: 1,
+        codeCount: 2,
+        boxCount: 2,
       },
       {
         formatId: "inventory_xml_gismt_disaggregation",
@@ -1022,13 +1132,16 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       expect(createHash("sha256").update(body).digest("hex")).toBe(sha256);
       const xml = body.toString("utf8");
       expect(xml).not.toContain(owner.protectedCanonical.serial);
-      expect(xml).not.toContain(owner.protectedOldSscc);
       if (formatId === "inventory_xml_gismt_aggregation") {
-        expect(xml).toContain(owner.eligibleCanonical.serial);
-        expect(xml).toContain(`00${owner.eligibleNewSscc}`);
+        expect(xml).toContain(owner.sharedEligibleCanonical.serial);
+        expect(xml).toContain(owner.cleanEligibleCanonical.serial);
+        expect(xml).toContain(`00${owner.protectedSharedNewSscc}`);
+        expect(xml).toContain(`00${owner.cleanNewSscc}`);
       } else {
-        expect(xml).toContain(owner.eligibleOldSscc);
-        expect(xml).not.toContain(owner.eligibleNewSscc);
+        expect(xml).not.toContain(owner.protectedSharedOldSscc);
+        expect(xml).toContain(owner.cleanOldSscc);
+        expect(xml).not.toContain(owner.protectedSharedNewSscc);
+        expect(xml).not.toContain(owner.cleanNewSscc);
       }
     };
 
@@ -1464,7 +1577,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     registry = productionInventoryDocumentGeneratorRegistry;
     try {
       const owner = await runProductionJourneyToFirstClose();
-      expect(owner.resultRevision).toBe(4);
+      expect(owner.resultRevision).toBe(5);
       const first = await owner.agent
         .post(`/inventories/${owner.inventoryId}/document-runs`)
         .send(productionBody())
@@ -1484,7 +1597,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         .send({})
         .expect(201);
       const regeneratedRevision = owner.resultRevision + 1;
-      expect(regeneratedRevision).toBe(5);
+      expect(regeneratedRevision).toBe(6);
       expect(reopened.body).toMatchObject({
         inventoryId: owner.inventoryId,
         status: "running",
