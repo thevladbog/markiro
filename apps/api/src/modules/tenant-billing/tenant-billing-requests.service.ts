@@ -202,58 +202,95 @@ export class TenantBillingRequestsService {
     const attachmentId = randomUUID();
     const objectKey = billingAttachmentObjectKey(tenantId, requestId, attachmentId);
     const sha256 = createHash("sha256").update(file.buffer).digest("hex");
-    const verified = await this.storage.putVerified(objectKey, file.buffer, file.mimetype, sha256);
+    await this.db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select({ id: schema.tenantBillingRequests.id })
+        .from(schema.tenantBillingRequests)
+        .where(
+          and(
+            eq(schema.tenantBillingRequests.tenantId, tenantId),
+            eq(schema.tenantBillingRequests.id, requestId),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      if (!locked) requestNotFound();
+      const [intent] = await tx
+        .insert(schema.tenantBillingRequestAttachments)
+        .values({
+          id: attachmentId,
+          tenantId,
+          requestId,
+          fileName: safeFileName(file.originalname),
+          contentType: file.mimetype,
+          byteSize: file.buffer.byteLength,
+          sha256,
+          objectKey,
+          state: "pending",
+          uploadedByUserId: userId,
+        })
+        .returning({ id: schema.tenantBillingRequestAttachments.id });
+      if (!intent) throw new Error("billing attachment intent insert failed");
+    });
+
     try {
-      return await this.db.transaction(async (tx) => {
-        const [locked] = await tx
-          .select({ id: schema.tenantBillingRequests.id })
-          .from(schema.tenantBillingRequests)
-          .where(
-            and(
-              eq(schema.tenantBillingRequests.tenantId, tenantId),
-              eq(schema.tenantBillingRequests.id, requestId),
-            ),
-          )
-          .for("update")
-          .limit(1);
-        if (!locked) requestNotFound();
-        const [attachment] = await tx
-          .insert(schema.tenantBillingRequestAttachments)
-          .values({
-            id: attachmentId,
-            tenantId,
-            requestId,
-            fileName: safeFileName(file.originalname),
-            contentType: file.mimetype,
-            byteSize: verified.byteSize,
-            sha256: verified.sha256,
-            objectKey,
-            uploadedByUserId: userId,
-          })
-          .returning();
-        if (!attachment) throw new Error("billing attachment metadata insert failed");
-        await tx.insert(schema.tenantAuditEvents).values({
-          organizationId: tenantId,
-          actorUserId: userId,
-          action: "billing.request.attachment_uploaded",
-          outcome: "success",
-          targetType: "tenant_billing_request_attachment",
-          targetId: attachment.id,
-          before: null,
-          after: {
-            requestId,
-            contentType: attachment.contentType,
-            byteSize: attachment.byteSize,
-            sha256: attachment.sha256,
-          },
-        });
-        return attachmentSource(attachment);
-      });
+      await this.storage.putVerified(objectKey, file.buffer, file.mimetype, sha256);
     } catch (error) {
+      let recovered = false;
       try {
-        await this.storage.delete(objectKey);
+        const verification = await this.storage.verifyObject(
+          objectKey,
+          file.buffer.byteLength,
+          sha256,
+        );
+        if (verification === "verified") {
+          recovered = true;
+        } else if (verification === "missing") {
+          await this.markAttachmentState(tenantId, requestId, attachmentId, "failed");
+        } else {
+          let state: "failed" | "cleanup_required" = "failed";
+          try {
+            await this.storage.deleteConfirmed(objectKey);
+          } catch {
+            state = "cleanup_required";
+          }
+          await this.markAttachmentState(tenantId, requestId, attachmentId, state);
+        }
       } catch {
-        // Preserve the database failure; object cleanup is compensating and best-effort.
+        // The pending intent is the durable reconciliation record. Never mask
+        // the storage error with a second HEAD or database failure.
+      }
+      if (!recovered) throw error;
+    }
+
+    try {
+      return await this.finalizeAttachment(tenantId, userId, requestId, attachmentId);
+    } catch (error) {
+      const committed = await this.readAttachment(tenantId, requestId, attachmentId).catch(
+        () => null,
+      );
+      if (committed?.state === "ready") return attachmentSource(committed);
+      if (committed?.state === "pending") {
+        try {
+          const verification = await this.storage.verifyObject(
+            objectKey,
+            file.buffer.byteLength,
+            sha256,
+          );
+          if (verification === "verified") {
+            try {
+              return await this.finalizeAttachment(tenantId, userId, requestId, attachmentId);
+            } catch {
+              const retried = await this.readAttachment(tenantId, requestId, attachmentId).catch(
+                () => null,
+              );
+              if (retried?.state === "ready") return attachmentSource(retried);
+            }
+          }
+        } catch {
+          // Preserve the original transaction failure. The pending row and
+          // canonical key are sufficient for a later reconciliation attempt.
+        }
       }
       throw error;
     }
@@ -268,6 +305,7 @@ export class TenantBillingRequestsService {
           eq(schema.tenantBillingRequestAttachments.tenantId, tenantId),
           eq(schema.tenantBillingRequestAttachments.requestId, requestId),
           eq(schema.tenantBillingRequestAttachments.id, attachmentId),
+          eq(schema.tenantBillingRequestAttachments.state, "ready"),
         ),
       )
       .limit(1);
@@ -278,6 +316,97 @@ export class TenantBillingRequestsService {
         downloadFilename: attachment.fileName,
       }),
     };
+  }
+
+  private async finalizeAttachment(
+    tenantId: string,
+    userId: string,
+    requestId: string,
+    attachmentId: string,
+  ) {
+    return this.db.transaction(async (tx) => {
+      const [attachment] = await tx
+        .select()
+        .from(schema.tenantBillingRequestAttachments)
+        .where(
+          and(
+            eq(schema.tenantBillingRequestAttachments.tenantId, tenantId),
+            eq(schema.tenantBillingRequestAttachments.requestId, requestId),
+            eq(schema.tenantBillingRequestAttachments.id, attachmentId),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      if (!attachment) attachmentNotFound();
+      if (attachment.state === "ready") return attachmentSource(attachment);
+      if (attachment.state !== "pending") {
+        throw new Error("billing attachment is not pending verification");
+      }
+      const now = new Date();
+      const [ready] = await tx
+        .update(schema.tenantBillingRequestAttachments)
+        .set({ state: "ready", readyAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(schema.tenantBillingRequestAttachments.tenantId, tenantId),
+            eq(schema.tenantBillingRequestAttachments.requestId, requestId),
+            eq(schema.tenantBillingRequestAttachments.id, attachmentId),
+            eq(schema.tenantBillingRequestAttachments.state, "pending"),
+          ),
+        )
+        .returning();
+      if (!ready) throw new Error("billing attachment ready transition failed");
+      await tx.insert(schema.tenantAuditEvents).values({
+        organizationId: tenantId,
+        actorUserId: userId,
+        action: "billing.request.attachment_uploaded",
+        outcome: "success",
+        targetType: "tenant_billing_request_attachment",
+        targetId: ready.id,
+        before: null,
+        after: {
+          requestId,
+          contentType: ready.contentType,
+          byteSize: ready.byteSize,
+          sha256: ready.sha256,
+        },
+      });
+      return attachmentSource(ready);
+    });
+  }
+
+  private async readAttachment(tenantId: string, requestId: string, attachmentId: string) {
+    const [attachment] = await this.db
+      .select()
+      .from(schema.tenantBillingRequestAttachments)
+      .where(
+        and(
+          eq(schema.tenantBillingRequestAttachments.tenantId, tenantId),
+          eq(schema.tenantBillingRequestAttachments.requestId, requestId),
+          eq(schema.tenantBillingRequestAttachments.id, attachmentId),
+        ),
+      )
+      .limit(1);
+    return attachment ?? null;
+  }
+
+  private async markAttachmentState(
+    tenantId: string,
+    requestId: string,
+    attachmentId: string,
+    state: "failed" | "cleanup_required",
+  ) {
+    await this.db
+      .update(schema.tenantBillingRequestAttachments)
+      .set({ state, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.tenantBillingRequestAttachments.tenantId, tenantId),
+          eq(schema.tenantBillingRequestAttachments.requestId, requestId),
+          eq(schema.tenantBillingRequestAttachments.id, attachmentId),
+          eq(schema.tenantBillingRequestAttachments.state, "pending"),
+        ),
+      );
   }
 
   private async detailWith(db: Pick<Db, "select">, tenantId: string, requestId: string) {
@@ -315,6 +444,7 @@ export class TenantBillingRequestsService {
         and(
           eq(schema.tenantBillingRequestAttachments.tenantId, tenantId),
           eq(schema.tenantBillingRequestAttachments.requestId, requestId),
+          eq(schema.tenantBillingRequestAttachments.state, "ready"),
         ),
       )
       .orderBy(

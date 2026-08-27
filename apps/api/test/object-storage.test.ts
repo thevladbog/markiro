@@ -85,6 +85,67 @@ describe("ObjectStorageService", () => {
     ).rejects.toThrow();
   });
 
+  it("surfaces a HEAD timeout after the PUT may already have succeeded", async () => {
+    const timeout = new Error("HEAD timeout");
+    const send = vi.fn().mockResolvedValueOnce({}).mockRejectedValueOnce(timeout);
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(
+      storage.putVerified(
+        "tenants/t/shifts/s/export.csv",
+        Buffer.from("verified export"),
+        "text/csv",
+        "4161a5679ca94a7d7999801d153f926f797929158d4110b1cf909030c2d5deba",
+      ),
+    ).rejects.toBe(timeout);
+    expect(send.mock.calls.map((call) => call[0]?.constructor.name)).toEqual([
+      "PutObjectCommand",
+      "HeadObjectCommand",
+    ]);
+  });
+
+  it("reports verified, missing, and mismatched stored objects through the reconciliation seam", async () => {
+    const sha256 = "a".repeat(64);
+    const missing = Object.assign(new Error("missing"), { name: "NotFound" });
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ ContentLength: 10, Metadata: { sha256 } })
+      .mockRejectedValueOnce(missing)
+      .mockResolvedValueOnce({ ContentLength: 9, Metadata: { sha256 } });
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(storage.verifyObject("tenants/t/shifts/s/export.csv", 10, sha256)).resolves.toBe(
+      "verified",
+    );
+    await expect(storage.verifyObject("tenants/t/shifts/s/export.csv", 10, sha256)).resolves.toBe(
+      "missing",
+    );
+    await expect(storage.verifyObject("tenants/t/shifts/s/export.csv", 10, sha256)).resolves.toBe(
+      "mismatch",
+    );
+  });
+
+  it("confirms deletion with a read-after-delete instead of trusting the delete acknowledgement", async () => {
+    const missing = Object.assign(new Error("missing"), { name: "NotFound" });
+    const send = vi.fn().mockResolvedValueOnce({}).mockRejectedValueOnce(missing);
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(storage.deleteConfirmed("tenants/t/shifts/s/export.csv")).resolves.toBeUndefined();
+    expect(send.mock.calls.map((call) => call[0]?.constructor.name)).toEqual([
+      "DeleteObjectCommand",
+      "HeadObjectCommand",
+    ]);
+  });
+
+  it("rejects deletion when the object is still visible after the delete acknowledgement", async () => {
+    const send = vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce({ ContentLength: 1 });
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(storage.deleteConfirmed("tenants/t/shifts/s/export.csv")).rejects.toThrow(
+      "could not be confirmed",
+    );
+  });
+
   it("rejects a malformed checksum before uploading", async () => {
     const send = vi.fn();
     const storage = new ObjectStorageService(env, { send } as never);

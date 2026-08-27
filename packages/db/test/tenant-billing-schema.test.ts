@@ -22,6 +22,9 @@ describe("tenant billing workflow schema", () => {
     );
     expect(getTableName(schema.tenantBillingRequestLinks)).toBe("tenant_billing_request_links");
     expect(getTableName(schema.commercialOfferDecisions)).toBe("commercial_offer_decisions");
+    expect(getTableName(schema.commercialOfferDecisionIdempotency)).toBe(
+      "commercial_offer_decision_idempotency",
+    );
     expect(getTableName(schema.billingActs)).toBe("billing_acts");
     expect(getTableName(schema.billingActDocuments)).toBe("billing_act_documents");
     expect(schema.invoiceStatus.enumValues).toContain("partially_paid");
@@ -62,6 +65,12 @@ describe("tenant billing workflow schema", () => {
     ]);
     expect(schema.BILLING_ACT_STATUSES).toEqual(["draft", "issued", "cancelled"]);
     expect(schema.BILLING_RESPONSIBLE_SIDES).toEqual(["tenant", "markiro", "none"]);
+    expect(schema.BILLING_ATTACHMENT_STATES).toEqual([
+      "pending",
+      "ready",
+      "failed",
+      "cleanup_required",
+    ]);
   });
 
   it("enforces tenant ownership and idempotency at every workflow boundary", () => {
@@ -80,6 +89,9 @@ describe("tenant billing workflow schema", () => {
     expect(constraintNames(schema.tenantBillingRequestAttachments).foreignKeys).toContain(
       "tenant_billing_request_attachments_tenant_request_fk",
     );
+    expect(constraintNames(schema.tenantBillingRequestAttachments).indexes).toContain(
+      "tenant_billing_request_attachments_tenant_request_state_idx",
+    );
     expect(constraintNames(schema.tenantBillingRequestLinks).foreignKeys).toEqual(
       expect.arrayContaining([
         "tenant_billing_request_links_tenant_request_fk",
@@ -96,6 +108,15 @@ describe("tenant billing workflow schema", () => {
     );
     expect(constraintNames(schema.commercialOfferDecisions).uniqueConstraints).toContain(
       "commercial_offer_decisions_tenant_idempotency_uq",
+    );
+    expect(constraintNames(schema.commercialOfferDecisionIdempotency).uniqueConstraints).toContain(
+      "commercial_offer_decision_idempotency_tenant_key_uq",
+    );
+    expect(constraintNames(schema.commercialOfferDecisionIdempotency).foreignKeys).toEqual(
+      expect.arrayContaining([
+        "commercial_offer_decision_idempotency_tenant_offer_fk",
+        "commercial_offer_decision_idempotency_tenant_decision_fk",
+      ]),
     );
     expect(constraintNames(schema.billingActDocuments).foreignKeys).toContain(
       "billing_act_documents_tenant_act_fk",

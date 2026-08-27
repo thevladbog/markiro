@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { createDb, schema, type Db } from "@markiro/db";
 import { and, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import {
@@ -28,7 +28,8 @@ describe.skipIf(!ready)("tenant billing requests isolated Postgres service", () 
         sha256,
       }),
     ),
-    delete: vi.fn(async () => undefined),
+    verifyObject: vi.fn(async (): Promise<"verified" | "missing" | "mismatch"> => "verified"),
+    deleteConfirmed: vi.fn(async () => undefined),
     presignRead: vi.fn(async () => "https://private.example.test/request-attachment"),
   };
 
@@ -39,6 +40,22 @@ describe.skipIf(!ready)("tenant billing requests isolated Postgres service", () 
   let userA: string;
   let userB: string;
   let service: TenantBillingRequestsService;
+
+  beforeEach(() => {
+    storage.putVerified
+      .mockReset()
+      .mockImplementation(
+        async (_key: string, body: Buffer, _contentType: string, sha256: string) => ({
+          byteSize: body.byteLength,
+          sha256,
+        }),
+      );
+    storage.verifyObject.mockReset().mockResolvedValue("verified");
+    storage.deleteConfirmed.mockReset().mockResolvedValue(undefined);
+    storage.presignRead
+      .mockReset()
+      .mockResolvedValue("https://private.example.test/request-attachment");
+  });
 
   beforeAll(async () => {
     await maintenance.pool.query(`CREATE DATABASE "${databaseName}"`);
@@ -236,6 +253,11 @@ describe.skipIf(!ready)("tenant billing requests isolated Postgres service", () 
     });
     const [putKey] = storage.putVerified.mock.calls.at(-1)!;
     expect(putKey).toBe(`tenant-billing/${tenantA}/requests/${request.id}/${attachment.id}`);
+    const [stored] = await db
+      .select()
+      .from(schema.tenantBillingRequestAttachments)
+      .where(eq(schema.tenantBillingRequestAttachments.id, attachment.id));
+    expect(stored).toMatchObject({ state: "ready" });
     await expect(
       service.downloadAttachment(tenantB, request.id, attachment.id),
     ).rejects.toMatchObject({ status: 404 });
@@ -244,41 +266,163 @@ describe.skipIf(!ready)("tenant billing requests isolated Postgres service", () 
     });
   });
 
-  it("deletes a verified object best-effort when attachment metadata insertion fails", async () => {
+  it("persists pending intent before PUT and retains it when upload verification is ambiguous", async () => {
     const request = await service.create(tenantA, userA, {
       type: "documents",
-      description: "Trigger compensation",
+      description: "Ambiguous upload",
       idempotencyKey: randomUUID(),
     });
-    await connection.pool.query(`
-      create function reject_task5_attachment() returns trigger language plpgsql as $$
-      begin raise exception 'metadata rejected'; end $$;
-      create trigger reject_task5_attachment before insert on tenant_billing_request_attachments
-      for each row execute function reject_task5_attachment();
-    `);
-    const original = new Error("sentinel");
-    storage.delete.mockRejectedValueOnce(original);
+    const timeout = new Error("HEAD timeout after successful PUT");
+    storage.putVerified.mockImplementationOnce(async (key) => {
+      const attachmentId = key.split("/").at(-1)!;
+      const pending = await connection.pool.query<{ state: string }>(
+        `select state from tenant_billing_request_attachments
+         where tenant_id = $1 and request_id = $2 and id = $3`,
+        [tenantA, request.id, attachmentId],
+      );
+      expect(pending.rows).toEqual([{ state: "pending" }]);
+      throw timeout;
+    });
+    storage.verifyObject.mockRejectedValueOnce(new Error("HEAD still unavailable"));
     const body = Buffer.from("plain text");
-    let metadataError: unknown;
-    try {
-      await service.attach(tenantA, userA, request.id, {
+    await expect(
+      service.attach(tenantA, userA, request.id, {
         originalname: "note.txt",
         mimetype: "text/plain",
         size: body.byteLength,
         buffer: body,
-      });
-    } catch (error) {
-      metadataError = error;
-    }
-    expect(metadataError).toMatchObject({
-      message: expect.stringContaining('insert into "tenant_billing_request_attachments"'),
-      cause: expect.objectContaining({ message: "metadata rejected" }),
-    });
-    expect(storage.delete).toHaveBeenCalledOnce();
-    await connection.pool.query(
-      `drop trigger reject_task5_attachment on tenant_billing_request_attachments`,
+      }),
+    ).rejects.toBe(timeout);
+    const [putKey] = storage.putVerified.mock.calls.at(-1)!;
+    const attachmentId = putKey.split("/").at(-1)!;
+    const pending = await connection.pool.query<{ state: string; object_key: string }>(
+      `select state, object_key from tenant_billing_request_attachments where id = $1`,
+      [attachmentId],
     );
-    await connection.pool.query(`drop function reject_task5_attachment()`);
+    expect(pending.rows).toEqual([{ state: "pending", object_key: putKey }]);
+    expect(storage.deleteConfirmed).not.toHaveBeenCalled();
+    const detail = await service.detail(tenantA, request.id);
+    expect(detail.attachments).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: attachmentId })]),
+    );
+    await expect(
+      service.downloadAttachment(tenantA, request.id, attachmentId),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("marks a mismatched object for cleanup when confirmed deletion fails", async () => {
+    const request = await service.create(tenantA, userA, {
+      type: "documents",
+      description: "Mismatched upload",
+      idempotencyKey: randomUUID(),
+    });
+    const mismatch = new Error("upload verification mismatch");
+    storage.putVerified.mockRejectedValueOnce(mismatch);
+    storage.verifyObject.mockResolvedValueOnce("mismatch");
+    storage.deleteConfirmed.mockRejectedValueOnce(new Error("delete timeout"));
+    const body = Buffer.from("plain text");
+    await expect(
+      service.attach(tenantA, userA, request.id, {
+        originalname: "note.txt",
+        mimetype: "text/plain",
+        size: body.byteLength,
+        buffer: body,
+      }),
+    ).rejects.toBe(mismatch);
+    const [putKey] = storage.putVerified.mock.calls.at(-1)!;
+    const attachmentId = putKey.split("/").at(-1)!;
+    const state = await connection.pool.query<{ state: string }>(
+      `select state from tenant_billing_request_attachments where id = $1`,
+      [attachmentId],
+    );
+    expect(state.rows).toEqual([{ state: "cleanup_required" }]);
+    expect(storage.deleteConfirmed).toHaveBeenCalledWith(putKey);
+  });
+
+  it("retains a tracked pending object when the ready transaction fails before commit", async () => {
+    const request = await service.create(tenantA, userA, {
+      type: "documents",
+      description: "Ready transition failure",
+      idempotencyKey: randomUUID(),
+    });
+    await connection.pool.query(`
+      create function reject_task5_attachment_ready() returns trigger language plpgsql as $$
+      begin raise exception 'ready transition rejected'; end $$;
+      create trigger reject_task5_attachment_ready before update on tenant_billing_request_attachments
+      for each row when (new.state = 'ready') execute function reject_task5_attachment_ready();
+    `);
+    const body = Buffer.from("plain text");
+    await expect(
+      service.attach(tenantA, userA, request.id, {
+        originalname: "note.txt",
+        mimetype: "text/plain",
+        size: body.byteLength,
+        buffer: body,
+      }),
+    ).rejects.toMatchObject({
+      cause: expect.objectContaining({ message: "ready transition rejected" }),
+    });
+    const [putKey] = storage.putVerified.mock.calls.at(-1)!;
+    const attachmentId = putKey.split("/").at(-1)!;
+    const state = await connection.pool.query<{ state: string }>(
+      `select state from tenant_billing_request_attachments where id = $1`,
+      [attachmentId],
+    );
+    expect(state.rows).toEqual([{ state: "pending" }]);
+    expect(storage.deleteConfirmed).not.toHaveBeenCalled();
+    await connection.pool.query(
+      `drop trigger reject_task5_attachment_ready on tenant_billing_request_attachments`,
+    );
+    await connection.pool.query(`drop function reject_task5_attachment_ready()`);
+  });
+
+  it("returns committed ready metadata after a lost commit acknowledgement without deleting storage", async () => {
+    const request = await service.create(tenantA, userA, {
+      type: "documents",
+      description: "Lost commit acknowledgement",
+      idempotencyKey: randomUUID(),
+    });
+    let transactionCount = 0;
+    const ambiguousDb = new Proxy(db, {
+      get(target, property, receiver) {
+        if (property !== "transaction") return Reflect.get(target, property, receiver);
+        return async (callback: Parameters<Db["transaction"]>[0]) => {
+          transactionCount += 1;
+          const result = await target.transaction(callback);
+          if (transactionCount === 2) throw new Error("lost COMMIT acknowledgement");
+          return result;
+        };
+      },
+    });
+    const ambiguousService = new TenantBillingRequestsService(
+      ambiguousDb,
+      storage as unknown as ObjectStorageService,
+    );
+    const body = Buffer.from("plain text");
+    const attachment = await ambiguousService.attach(tenantA, userA, request.id, {
+      originalname: "note.txt",
+      mimetype: "text/plain",
+      size: body.byteLength,
+      buffer: body,
+    });
+    expect(attachment).toMatchObject({ fileName: "note.txt" });
+    const [stored] = await db
+      .select()
+      .from(schema.tenantBillingRequestAttachments)
+      .where(eq(schema.tenantBillingRequestAttachments.id, attachment.id));
+    expect(stored).toMatchObject({ state: "ready" });
+    expect(storage.deleteConfirmed).not.toHaveBeenCalled();
+    const audits = await db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantA),
+          eq(schema.tenantAuditEvents.targetId, attachment.id),
+          eq(schema.tenantAuditEvents.action, "billing.request.attachment_uploaded"),
+        ),
+      );
+    expect(audits).toHaveLength(1);
   });
 });
 

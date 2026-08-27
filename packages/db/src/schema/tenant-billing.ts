@@ -66,6 +66,14 @@ export type BillingResponsibleSide = (typeof BILLING_RESPONSIBLE_SIDES)[number];
 export const OFFER_DECISION_KINDS = ["accepted", "changes_requested"] as const;
 export type OfferDecisionKind = (typeof OFFER_DECISION_KINDS)[number];
 
+export const BILLING_ATTACHMENT_STATES = [
+  "pending",
+  "ready",
+  "failed",
+  "cleanup_required",
+] as const;
+export type BillingAttachmentState = (typeof BILLING_ATTACHMENT_STATES)[number];
+
 export const BILLING_ACT_STATUSES = ["draft", "issued", "cancelled"] as const;
 export type BillingActStatus = (typeof BILLING_ACT_STATUSES)[number];
 
@@ -78,6 +86,7 @@ export const billingRequestEventKind = pgEnum(
 export const billingActorKind = pgEnum("billing_actor_kind", BILLING_ACTOR_KINDS);
 export const billingResponsibleSide = pgEnum("billing_responsible_side", BILLING_RESPONSIBLE_SIDES);
 export const offerDecisionKind = pgEnum("offer_decision_kind", OFFER_DECISION_KINDS);
+export const billingAttachmentState = pgEnum("billing_attachment_state", BILLING_ATTACHMENT_STATES);
 export const billingActStatus = pgEnum("billing_act_status", BILLING_ACT_STATUSES);
 
 export const tenantBillingRequestNumberSequence = pgSequence("tenant_billing_request_number_seq");
@@ -185,14 +194,24 @@ export const tenantBillingRequestAttachments = pgTable(
     byteSize: integer("byte_size").notNull(),
     sha256: text("sha256").notNull(),
     objectKey: text("object_key").notNull(),
+    state: billingAttachmentState("state").notNull().default("pending"),
     uploadedByUserId: text("uploaded_by_user_id")
       .notNull()
       .references(() => user.id),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     unique("tenant_billing_request_attachments_tenant_id_uq").on(table.tenantId, table.id),
     unique("tenant_billing_request_attachments_object_key_uq").on(table.objectKey),
+    index("tenant_billing_request_attachments_tenant_request_state_idx").on(
+      table.tenantId,
+      table.requestId,
+      table.state,
+      table.createdAt,
+      table.id,
+    ),
     foreignKey({
       name: "tenant_billing_request_attachments_tenant_request_fk",
       columns: [table.tenantId, table.requestId],
@@ -238,6 +257,44 @@ export const commercialOfferDecisions = pgTable(
     }),
     check(
       "commercial_offer_decisions_message_shape_check",
+      sql`${table.decision} <> 'changes_requested' or nullif(btrim(${table.message}), '') is not null`,
+    ),
+  ],
+);
+
+export const commercialOfferDecisionIdempotency = pgTable(
+  "commercial_offer_decision_idempotency",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: text("tenant_id").notNull(),
+    idempotencyKey: uuid("idempotency_key").notNull(),
+    offerId: uuid("offer_id").notNull(),
+    decision: offerDecisionKind("decision").notNull(),
+    message: text("message"),
+    decisionId: uuid("decision_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("commercial_offer_decision_idempotency_tenant_key_uq").on(
+      table.tenantId,
+      table.idempotencyKey,
+    ),
+    index("commercial_offer_decision_idempotency_tenant_decision_idx").on(
+      table.tenantId,
+      table.decisionId,
+    ),
+    foreignKey({
+      name: "commercial_offer_decision_idempotency_tenant_offer_fk",
+      columns: [table.tenantId, table.offerId],
+      foreignColumns: [commercialOffers.tenantId, commercialOffers.id],
+    }),
+    foreignKey({
+      name: "commercial_offer_decision_idempotency_tenant_decision_fk",
+      columns: [table.tenantId, table.decisionId],
+      foreignColumns: [commercialOfferDecisions.tenantId, commercialOfferDecisions.id],
+    }),
+    check(
+      "commercial_offer_decision_idempotency_message_shape_check",
       sql`${table.decision} <> 'changes_requested' or nullif(btrim(${table.message}), '') is not null`,
     ),
   ],

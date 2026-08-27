@@ -110,9 +110,27 @@ describe.skipIf(!ready)("tenant billing offer decisions isolated Postgres servic
 
   it("serializes two administrators accepting one offer into one accepted decision", async () => {
     const offerId = await offer();
+    const [request] = await db
+      .insert(schema.tenantBillingRequests)
+      .values({
+        tenantId: tenantA,
+        number: `BR-${randomUUID()}`,
+        type: "other",
+        description: "Concurrent linked offer",
+        idempotencyKey: randomUUID(),
+        createdByUserId: userA,
+      })
+      .returning();
+    await db.insert(schema.tenantBillingRequestLinks).values({
+      tenantId: tenantA,
+      requestId: request!.id,
+      offerId,
+    });
+    const firstKey = randomUUID();
+    const secondKey = randomUUID();
     const results = await Promise.all([
-      service.accept(tenantA, userA, offerId, randomUUID()),
-      service.accept(tenantA, userB, offerId, randomUUID()),
+      service.accept(tenantA, userA, offerId, firstKey),
+      service.accept(tenantA, userB, offerId, secondKey),
     ]);
     expect(results[0].id).toBe(results[1].id);
     const decisions = await db
@@ -126,6 +144,78 @@ describe.skipIf(!ready)("tenant billing offer decisions isolated Postgres servic
       );
     expect(decisions).toHaveLength(1);
     expect(decisions[0]?.decision).toBe("accepted");
+    const aliases = await db
+      .select()
+      .from(schema.commercialOfferDecisionIdempotency)
+      .where(eq(schema.commercialOfferDecisionIdempotency.tenantId, tenantA));
+    const offerAliases = aliases.filter((alias) => alias.offerId === offerId);
+    expect(offerAliases).toHaveLength(2);
+    expect(new Set(offerAliases.map((alias) => alias.decisionId))).toEqual(
+      new Set([results[0].id]),
+    );
+    await expect(service.accept(tenantA, userB, offerId, secondKey)).resolves.toEqual(results[1]);
+    await expect(
+      service.requestChanges(tenantA, userB, offerId, {
+        idempotencyKey: secondKey,
+        message: "Different payload",
+      }),
+    ).rejects.toMatchObject({
+      response: { code: "idempotency_key_reused" },
+      status: 409,
+    });
+    const events = await db
+      .select()
+      .from(schema.tenantBillingRequestEvents)
+      .where(
+        and(
+          eq(schema.tenantBillingRequestEvents.tenantId, tenantA),
+          eq(schema.tenantBillingRequestEvents.requestId, request!.id),
+          eq(schema.tenantBillingRequestEvents.kind, "offer_accepted"),
+        ),
+      );
+    const audits = await db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantA),
+          eq(schema.tenantAuditEvents.targetId, offerId),
+          eq(schema.tenantAuditEvents.action, "billing.offer.accepted"),
+        ),
+      );
+    expect(events).toHaveLength(1);
+    expect(audits).toHaveLength(1);
+  });
+
+  it("globally serializes one tenant idempotency key across different offer families", async () => {
+    const firstOfferId = await offer();
+    const secondOfferId = await offer();
+    const key = randomUUID();
+    const settled = await Promise.allSettled([
+      service.accept(tenantA, userA, firstOfferId, key),
+      service.accept(tenantA, userB, secondOfferId, key),
+    ]);
+    const fulfilled = settled.filter(
+      (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof service.accept>>> =>
+        result.status === "fulfilled",
+    );
+    const rejected = settled.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toMatchObject({
+      response: { code: "idempotency_key_reused" },
+      status: 409,
+    });
+
+    const winner = fulfilled[0]!.value;
+    await expect(service.accept(tenantA, userA, winner.offerId, key)).resolves.toEqual(winner);
+    const loserId = winner.offerId === firstOfferId ? secondOfferId : firstOfferId;
+    await expect(service.accept(tenantA, userA, loserId, key)).rejects.toMatchObject({
+      response: { code: "idempotency_key_reused" },
+      status: 409,
+    });
   });
 
   it("writes a linked request event and exact audit atomically without mutating the offer", async () => {
