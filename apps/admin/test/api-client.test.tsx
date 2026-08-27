@@ -13,6 +13,7 @@ function jsonResponse(status: number, body: unknown): Response {
     status,
     statusText: "",
     json: async () => body,
+    text: async () => (body === undefined ? "" : JSON.stringify(body)),
   } as Response;
 }
 
@@ -82,4 +83,71 @@ describe("apiFetch error message parsing", () => {
       );
     },
   );
+});
+
+/**
+ * Faithful model of a real fetch `Response` whose body is EMPTY: undici's
+ * `json()` rejects with a SyntaxError, `text()` resolves to `""`. This is
+ * exactly what every Nest void handler answers (200, content-length: 0 --
+ * verified against the running API: `DELETE /integrations/public_api/keys/:id`,
+ * `DELETE /products/:id/external-link`), and what the file-local
+ * `jsonResponse` stand-ins above can never produce -- their `json()` always
+ * resolves, which is why the page tests kept passing while the real success
+ * path threw.
+ */
+function emptyBodyResponse(status: number): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: "",
+    json: async () => {
+      throw new SyntaxError("Unexpected end of JSON input");
+    },
+    text: async () => "",
+  } as unknown as Response;
+}
+
+describe("apiFetch empty success bodies", () => {
+  // Регрессия: `apiFetch` раньше звал `response.json()` на всём, кроме 204,
+  // и успешная void-мутация (revoke ключа, разрыв external-link, link/hide
+  // кандидата) падала УЖЕ НА КЛИЕНТЕ -- после того как сервер её выполнил.
+  it("resolves undefined for a 200 with an empty body (Nest void handler)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => emptyBodyResponse(200)),
+    );
+
+    await expect(apiFetch<void>("/integrations/public_api/keys/k1")).resolves.toBeUndefined();
+  });
+
+  it("still resolves undefined for a 204", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => emptyBodyResponse(204)),
+    );
+
+    await expect(apiFetch<void>("/integrations/commerceml")).resolves.toBeUndefined();
+  });
+
+  it("still parses a non-empty JSON success body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          ({
+            ok: true,
+            status: 200,
+            statusText: "",
+            json: async () => {
+              throw new Error("apiFetch must not depend on json() for success bodies");
+            },
+            text: async () => JSON.stringify({ keys: [{ id: "k1" }] }),
+          }) as unknown as Response,
+      ),
+    );
+
+    await expect(apiFetch("/integrations/public_api/keys")).resolves.toEqual({
+      keys: [{ id: "k1" }],
+    });
+  });
 });

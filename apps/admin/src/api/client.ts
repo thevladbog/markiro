@@ -58,7 +58,20 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     return undefined as T;
   }
 
-  return (await response.json()) as T;
+  // Nest'овские void-обработчики (revoke ключа, разрыв external-link,
+  // link/hide кандидатов и т.п.) отвечают 200 с ПУСТЫМ телом -- Nest шлёт
+  // `res.send()` без аргументов, а не `null`/`{}`. `response.json()` на
+  // пустом теле отклоняется ("Unexpected end of JSON input"), то есть
+  // успешная мутация падала уже НА КЛИЕНТЕ, после того как сервер её
+  // выполнил (проверено против живого API: 200, content-length: 0).
+  // Тесты этого не ловили: их fetch-моки всегда дают `json()` с телом.
+  // Пустое тело -- это `undefined`, как и 204 выше; непустое обязано быть
+  // JSON, как и раньше.
+  const text = await response.text();
+  if (text.length === 0) {
+    return undefined as T;
+  }
+  return JSON.parse(text) as T;
 }
 
 export async function apiErrorFromResponse(response: Response): Promise<ApiRequestError> {
