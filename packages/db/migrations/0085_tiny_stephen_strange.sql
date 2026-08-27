@@ -1,0 +1,1 @@
+ALTER TABLE "integration_candidates" ADD COLUMN "gtin" text;
