@@ -582,6 +582,13 @@
       "when": 1787774121184,
       "tag": "0082_slow_skreet",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1787798683607,
+      "tag": "0083_inventory_document_rendering_metadata",
+      "breakpoints": true
     }
   ]
 }

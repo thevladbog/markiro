@@ -8,6 +8,7 @@ import {
   buildInventoryDocumentZip,
   InventoryDocumentGeneratorRegistry,
   InventoryDocumentRunnerService,
+  productionInventoryDocumentGeneratorRegistry,
   type InventoryDocumentGeneratedPart,
   type InventoryDocumentZipArtifact,
 } from "../src/modules/inventories/inventory-document-runner.service";
@@ -111,6 +112,10 @@ interface RunRow {
   resultRevision: number;
   selectedFormats: Array<{ id: string; version: number }>;
   requestDigest: string;
+  organizationNameSnapshot: string;
+  organizationInnSnapshot: string | null;
+  inventoryNumberSnapshot: string;
+  inventoryClosedAtSnapshot: Date;
   status: "queued" | "processing" | "ready" | "failed";
   errorCode: string | null;
   createdByUserId: string;
@@ -131,6 +136,10 @@ function runRow(overrides: Partial<RunRow> = {}): RunRow {
     resultRevision: 7,
     selectedFormats: [{ id: descriptor.id, version: descriptor.version }],
     requestDigest: "0".repeat(64),
+    organizationNameSnapshot: "ООО Тест",
+    organizationInnSnapshot: "9705119097",
+    inventoryNumberSnapshot: "INV-2026-0001",
+    inventoryClosedAtSnapshot: new Date("2026-08-26T18:00:00.000Z"),
     status: "queued",
     errorCode: null,
     createdByUserId: "user-1",
@@ -303,15 +312,35 @@ function syntheticRegistry(
   ]);
 }
 
+describe("production inventory document generators", () => {
+  it("registers exactly the two approved GISMT XML generators", () => {
+    expect(productionInventoryDocumentGeneratorRegistry.listAvailable()).toEqual([
+      expect.objectContaining({ id: "inventory_xml_gismt_aggregation", version: 1 }),
+      expect.objectContaining({ id: "inventory_xml_gismt_disaggregation", version: 1 }),
+    ]);
+  });
+});
+
 describe("inventory document runner", () => {
   it("publishes synthetic output with verified metadata from the frozen revision", async () => {
     const fake = runnerDb();
     const storage = runnerStorage();
+    const generated = vi.fn(async () => [
+      {
+        partNumber: 1,
+        filename: "stock.csv",
+        mimeType: descriptor.mimeType,
+        bytes: artifacts[0]!.bytes,
+        rowCount: 1,
+        codeCount: 1,
+        boxCount: 0,
+      },
+    ]);
     const runner = new InventoryDocumentRunnerService(
       fake.db,
       inventorySource(),
       storage,
-      syntheticRegistry(),
+      new InventoryDocumentGeneratorRegistry([{ descriptor, generate: generated }]),
     );
 
     await runner.run(fake.state.row.id, { retryCount: 0, retryLimit: 5 });
@@ -334,6 +363,14 @@ describe("inventory document runner", () => {
       descriptor.mimeType,
       artifacts[0]!.sha256,
     );
+    expect(generated).toHaveBeenCalledWith(expect.objectContaining({ resultRevision: 7 }), {
+      documentId: fake.state.row.id,
+      inventoryNumber: "INV-2026-0001",
+      fileDateTime: "2026-08-26T09:00:00.000Z",
+      operationDateTime: "2026-08-26T18:00:00.000Z",
+      organizationName: "ООО Тест",
+      organizationInn: "9705119097",
+    });
   });
 
   it("fails closed before upload when the frozen result revision changed", async () => {

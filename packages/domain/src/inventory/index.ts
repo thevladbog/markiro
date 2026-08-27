@@ -68,6 +68,17 @@ export {
   inventoryDocumentRegistry,
   InventoryDocumentRegistryError,
 } from "./documents.js";
+export {
+  generateInventoryAggregationXml,
+  generateInventoryDisaggregationXml,
+  InventoryDocumentGenerationError,
+} from "./document-generators.js";
+export type {
+  InventoryDocumentGeneratedPart,
+  InventoryDocumentGenerationErrorCode,
+  InventoryDocumentGenerationMetadata,
+  InventoryDocumentGenerationSource,
+} from "./document-generators.js";
 export type {
   InventoryDocumentFormatAvailability,
   InventoryDocumentFormatDescriptor,

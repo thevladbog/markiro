@@ -110,11 +110,28 @@ export function createInventoryDocumentRegistry(
   });
 }
 
-// This catalog is intentionally empty. A descriptor may be added only in the
-// same change as its approved, sanitized golden contract fixture.
-export const INVENTORY_DOCUMENT_FORMATS = Object.freeze(
-  [] as const satisfies readonly InventoryDocumentFormatDescriptor[],
-);
+export const INVENTORY_DOCUMENT_FORMATS = Object.freeze([
+  Object.freeze({
+    id: "inventory_xml_gismt_aggregation",
+    version: 1,
+    label: "[XML][ГИСМТ] Формирование упаковки",
+    extension: "xml",
+    mimeType: "application/xml; charset=utf-8",
+    requiredSourceCategories: Object.freeze(["verified", "protected", "newBoxes"] as const),
+    supportsParts: false,
+    availability: "available",
+  }),
+  Object.freeze({
+    id: "inventory_xml_gismt_disaggregation",
+    version: 1,
+    label: "[XML][ГИСМТ] Расформирование упаковки",
+    extension: "xml",
+    mimeType: "application/xml; charset=utf-8",
+    requiredSourceCategories: Object.freeze(["verified", "protected", "newBoxes"] as const),
+    supportsParts: false,
+    availability: "available",
+  }),
+] as const satisfies readonly InventoryDocumentFormatDescriptor[]);
 
 export const inventoryDocumentRegistry = createInventoryDocumentRegistry(
   INVENTORY_DOCUMENT_FORMATS,

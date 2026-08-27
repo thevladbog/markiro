@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<unit_pack>
+    <Document>
+        <organisation>
+            <id_info>
+                <LP_info LP_TIN="7777777777" />
+            </id_info>
+        </organisation>
+        <pack_content>
+            <pack_code>123456789123456789123456789</pack_code>
+            <cis>010463333333333321AAAAAAAAAAAAA</cis>
+            <cis>010463333333333321BBBBBBBBBBBBB</cis>
+        </pack_content>
+        <pack_content>
+            <pack_code>987654321987654321987654321</pack_code>
+            <cis>010463333333333321CCCCCCCCCCCCC</cis>
+        </pack_content>
+    </Document>
+</unit_pack>

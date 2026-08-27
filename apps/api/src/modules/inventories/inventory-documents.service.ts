@@ -76,6 +76,8 @@ export class InventoryDocumentsService {
           .select({
             status: schema.inventories.status,
             resultRevision: schema.inventories.resultRevision,
+            number: schema.inventories.number,
+            closedAt: schema.inventories.closedAt,
           })
           .from(schema.inventories)
           .where(
@@ -83,9 +85,19 @@ export class InventoryDocumentsService {
           )
           .for("update");
         if (!inventory) throw new NotFoundException();
-        if (inventory.status !== "closed") {
+        if (inventory.status !== "closed" || inventory.closedAt === null) {
           throw new ConflictException({ code: "INVENTORY_DOCUMENT_RUN_REQUIRES_CLOSED" });
         }
+        const [organization] = await tx
+          .select({
+            name: schema.organization.name,
+            inn: schema.orgProfiles.inn,
+          })
+          .from(schema.organization)
+          .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
+          .where(eq(schema.organization.id, tenantId))
+          .limit(1);
+        if (!organization) throw new NotFoundException();
         const [created] = await tx
           .insert(schema.inventoryDocumentRuns)
           .values({
@@ -94,6 +106,10 @@ export class InventoryDocumentsService {
             resultRevision: inventory.resultRevision,
             selectedFormats,
             requestDigest,
+            organizationNameSnapshot: organization.name,
+            organizationInnSnapshot: organization.inn,
+            inventoryNumberSnapshot: inventory.number,
+            inventoryClosedAtSnapshot: inventory.closedAt,
             createdByUserId: actorUserId,
             idempotencyKey: input.idempotencyKey,
           })

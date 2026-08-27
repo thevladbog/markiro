@@ -850,6 +850,10 @@ describe("inventory document schema", () => {
         "selectedFormats",
         "resultRevision",
         "requestDigest",
+        "organizationNameSnapshot",
+        "organizationInnSnapshot",
+        "inventoryNumberSnapshot",
+        "inventoryClosedAtSnapshot",
         "sourceSnapshotStartedAt",
         "attemptCount",
         "errorCode",
@@ -899,6 +903,26 @@ describe("inventory document schema", () => {
       when: expect.any(Number),
       breakpoints: true,
     });
+  });
+
+  it("packages immutable inventory document rendering metadata", () => {
+    const migration = readFileSync(
+      new URL("../migrations/0083_inventory_document_rendering_metadata.sql", import.meta.url),
+      "utf8",
+    );
+    const snapshot = readFileSync(
+      new URL("../migrations/meta/0083_snapshot.json", import.meta.url),
+      "utf8",
+    );
+
+    expect(migration).toContain('ADD COLUMN "organization_name_snapshot" text');
+    expect(migration).toContain('ADD COLUMN "inventory_number_snapshot" text');
+    expect(migration).toContain(
+      'ADD COLUMN "inventory_closed_at_snapshot" timestamp with time zone',
+    );
+    expect(snapshot).toContain('"organization_name_snapshot"');
+    expect(snapshot).toContain('"inventory_number_snapshot"');
+    expect(snapshot).toContain('"inventory_closed_at_snapshot"');
   });
 });
 
