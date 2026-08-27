@@ -147,6 +147,24 @@ describe("ObjectStorageService", () => {
     }
   });
 
+  it("accepts only canonical tenant billing request attachment paths", async () => {
+    const presign = vi.fn().mockResolvedValue("signed-read");
+    const storage = new ObjectStorageService(env, { send: vi.fn() } as never, presign);
+    const requestId = "11111111-1111-4111-8111-111111111111";
+    const attachmentId = "22222222-2222-4222-8222-222222222222";
+    const canonical = `tenant-billing/acme_2026/requests/${requestId}/${attachmentId}`;
+    await expect(storage.presignRead(canonical, 300)).resolves.toBe("signed-read");
+    for (const key of [
+      `${canonical}.pdf`,
+      `tenant-billing/acme/../requests/${requestId}/${attachmentId}`,
+      `tenant-billing/acme%2Fother/requests/${requestId}/${attachmentId}`,
+      `tenant-billing/acme/requests/not-a-uuid/${attachmentId}`,
+      `tenant-billing/acme/requests/${requestId}/not-a-uuid`,
+    ]) {
+      await expect(storage.presignRead(key, 300)).rejects.toThrow("Unsafe object key");
+    }
+  });
+
   it("returns a bounded private object body and its content type", async () => {
     const send = vi.fn().mockResolvedValue({
       Body: (async function* () {

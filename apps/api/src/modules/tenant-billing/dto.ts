@@ -55,6 +55,10 @@ export const listDocumentsQuerySchema = z.strictObject({
 });
 
 export const billingIdParamsSchema = z.strictObject({ id: billingUuidSchema });
+export const requestAttachmentParamsSchema = z.strictObject({
+  id: billingUuidSchema,
+  attachmentId: billingUuidSchema,
+});
 export const invoiceDocumentParamsSchema = z.strictObject({
   id: billingUuidSchema,
   documentId: billingUuidSchema,
@@ -70,7 +74,6 @@ const paymentSummarySchema = z.strictObject({
 
 const requestStatusSchema = z.enum(schema.BILLING_REQUEST_STATUSES);
 const serviceStatusSchema = z.enum(["ordered", "in_progress", "completed", "cancelled"]);
-const actStatusSchema = z.enum(schema.BILLING_ACT_STATUSES);
 const recentOperationStatusSchema = z.enum([
   "draft",
   "issued",
@@ -278,6 +281,43 @@ export const tenantBillingOverviewSchema = tenantSubscriptionBillingSchema.exten
 });
 
 export const privateDownloadSchema = z.strictObject({ url: z.string().url() });
+
+const idempotencyKeySchema = billingUuidSchema;
+const trimmedText = (maximum: number) =>
+  z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(z.string().min(1).max(maximum));
+
+export const createBillingRequestSchema = z.strictObject({
+  type: z.enum(schema.BILLING_REQUEST_TYPES),
+  description: trimmedText(4000),
+  desiredAt: billingDateSchema.optional(),
+  context: z
+    .strictObject({
+      type: z.string().trim().min(1).max(64),
+      id: z.string().trim().min(1).max(128),
+    })
+    .optional(),
+  idempotencyKey: idempotencyKeySchema,
+});
+
+export const requestReplySchema = z.strictObject({
+  message: trimmedText(2000),
+  idempotencyKey: idempotencyKeySchema,
+});
+
+export const offerAcceptSchema = z.strictObject({ idempotencyKey: idempotencyKeySchema });
+
+export const offerChangeRequestSchema = z.strictObject({
+  message: trimmedText(2000),
+  idempotencyKey: idempotencyKeySchema,
+});
+
+export type CreateBillingRequestDto = z.infer<typeof createBillingRequestSchema>;
+export type RequestReplyDto = z.infer<typeof requestReplySchema>;
+export type OfferAcceptDto = z.infer<typeof offerAcceptSchema>;
+export type OfferChangeRequestDto = z.infer<typeof offerChangeRequestSchema>;
 
 export type ListInvoicesQueryDto = z.infer<typeof listInvoicesQuerySchema>;
 export type ListDocumentsQueryDto = z.infer<typeof listDocumentsQuerySchema>;

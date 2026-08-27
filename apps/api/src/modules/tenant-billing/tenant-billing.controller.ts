@@ -1,4 +1,19 @@
-import { Controller, Get, Param, Query, Req, UseGuards } from "@nestjs/common";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Req,
+  UploadedFile,
+  UseFilters,
+  UseGuards,
+  UseInterceptors,
+} from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { memoryStorage } from "multer";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
@@ -9,21 +24,37 @@ import { ZodValidationPipe } from "../../zod.pipe";
 import {
   actDocumentParamsSchema,
   billingIdParamsSchema,
+  createBillingRequestSchema,
   invoiceDocumentParamsSchema,
   listDocumentsQuerySchema,
   listInvoicesQuerySchema,
+  offerAcceptSchema,
+  offerChangeRequestSchema,
   offerDocumentParamsSchema,
+  requestAttachmentParamsSchema,
+  requestReplySchema,
+  type CreateBillingRequestDto,
   type ListDocumentsQueryDto,
   type ListInvoicesQueryDto,
+  type OfferAcceptDto,
+  type OfferChangeRequestDto,
+  type RequestReplyDto,
 } from "./dto";
+import { BillingAttachmentUploadFilter } from "./billing-attachment-upload.filter";
+import { TenantBillingOffersService } from "./tenant-billing-offers.service";
 import { TenantBillingReadService } from "./tenant-billing-read.service";
+import { TenantBillingRequestsService } from "./tenant-billing-requests.service";
 
 @Controller("billing")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
 @RequirePermissions(CABINET_CAPABILITY.BILLING_READ)
 export class TenantBillingController {
-  constructor(private readonly billing: TenantBillingReadService) {}
+  constructor(
+    private readonly billing: TenantBillingReadService,
+    private readonly requests: TenantBillingRequestsService,
+    private readonly offers: TenantBillingOffersService,
+  ) {}
 
   @Get("overview")
   overview(@Req() req: RequestWithTenant) {
@@ -101,5 +132,89 @@ export class TenantBillingController {
     },
   ) {
     return this.billing.downloadActDocument(req.tenantId!, params.id, params.documentId);
+  }
+
+  @Post("requests")
+  @AllowSubscriptionReadOnly("read")
+  @RequirePermissions(CABINET_CAPABILITY.BILLING_REQUEST)
+  createRequest(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(createBillingRequestSchema)) body: CreateBillingRequestDto,
+  ) {
+    return this.requests.create(req.tenantId!, req.userId!, body);
+  }
+
+  @Get("requests")
+  listRequests(@Req() req: RequestWithTenant) {
+    return this.requests.list(req.tenantId!);
+  }
+
+  @Get("requests/:id")
+  requestDetail(
+    @Req() req: RequestWithTenant,
+    @Param(new ZodValidationPipe(billingIdParamsSchema)) params: { id: string },
+  ) {
+    return this.requests.detail(req.tenantId!, params.id);
+  }
+
+  @Post("requests/:id/replies")
+  @AllowSubscriptionReadOnly("read")
+  @RequirePermissions(CABINET_CAPABILITY.BILLING_REQUEST)
+  replyToRequest(
+    @Req() req: RequestWithTenant,
+    @Param(new ZodValidationPipe(billingIdParamsSchema)) params: { id: string },
+    @Body(new ZodValidationPipe(requestReplySchema)) body: RequestReplyDto,
+  ) {
+    return this.requests.reply(req.tenantId!, req.userId!, params.id, body);
+  }
+
+  @Post("requests/:id/attachments")
+  @UseInterceptors(
+    FileInterceptor("file", {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 0, parts: 2 },
+    }),
+  )
+  @UseFilters(BillingAttachmentUploadFilter)
+  @AllowSubscriptionReadOnly("read")
+  @RequirePermissions(CABINET_CAPABILITY.BILLING_REQUEST)
+  attachToRequest(
+    @Req() req: RequestWithTenant,
+    @Param(new ZodValidationPipe(billingIdParamsSchema)) params: { id: string },
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException({ code: "billing_attachment_required" });
+    return this.requests.attach(req.tenantId!, req.userId!, params.id, file);
+  }
+
+  @Get("requests/:id/attachments/:attachmentId/download")
+  downloadRequestAttachment(
+    @Req() req: RequestWithTenant,
+    @Param(new ZodValidationPipe(requestAttachmentParamsSchema))
+    params: { id: string; attachmentId: string },
+  ) {
+    return this.requests.downloadAttachment(req.tenantId!, params.id, params.attachmentId);
+  }
+
+  @Post("offers/:id/accept")
+  @AllowSubscriptionReadOnly("read")
+  @RequirePermissions(CABINET_CAPABILITY.BILLING_REQUEST)
+  acceptOffer(
+    @Req() req: RequestWithTenant,
+    @Param(new ZodValidationPipe(billingIdParamsSchema)) params: { id: string },
+    @Body(new ZodValidationPipe(offerAcceptSchema)) body: OfferAcceptDto,
+  ) {
+    return this.offers.accept(req.tenantId!, req.userId!, params.id, body.idempotencyKey);
+  }
+
+  @Post("offers/:id/change-request")
+  @AllowSubscriptionReadOnly("read")
+  @RequirePermissions(CABINET_CAPABILITY.BILLING_REQUEST)
+  requestOfferChanges(
+    @Req() req: RequestWithTenant,
+    @Param(new ZodValidationPipe(billingIdParamsSchema)) params: { id: string },
+    @Body(new ZodValidationPipe(offerChangeRequestSchema)) body: OfferChangeRequestDto,
+  ) {
+    return this.offers.requestChanges(req.tenantId!, req.userId!, params.id, body);
   }
 }

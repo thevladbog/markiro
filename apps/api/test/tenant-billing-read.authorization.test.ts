@@ -57,6 +57,9 @@ describe("tenant billing authorization guard seam", () => {
       "downloadInvoiceDocument",
       "downloadOfferDocument",
       "downloadActDocument",
+      "listRequests",
+      "requestDetail",
+      "downloadRequestAttachment",
     ] as const;
     expect(Reflect.getMetadata(GUARDS_METADATA, TenantBillingController)).toEqual([
       TenantGuard,
