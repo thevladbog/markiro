@@ -110,6 +110,15 @@ const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
 const GTIN = "04600000000015";
+const GS = "\u001d";
+const SHARED_ELIGIBLE_SERIAL = "ELIGIBLE-SHARED-PARENT";
+const CLEAN_ELIGIBLE_SERIAL = "ELIGIBLE-CLEAN-PARENT";
+const PROTECTED_SERIAL = "PROTECTED-CONTINUOUS";
+const EXPECTED_LOOSE_SERIAL = "EXPECTED-LOOSE";
+const SHARED_ELIGIBLE_RAW = `01${GTIN}21${SHARED_ELIGIBLE_SERIAL}${GS}93SHARED-CRYPTO`;
+const CLEAN_ELIGIBLE_RAW = `01${GTIN}21${CLEAN_ELIGIBLE_SERIAL}${GS}93CLEAN-CRYPTO`;
+const PROTECTED_RAW = `01${GTIN}21${PROTECTED_SERIAL}${GS}93PROTECTED-CRYPTO`;
+const EXPECTED_LOOSE_RAW = `01${GTIN}21${EXPECTED_LOOSE_SERIAL}${GS}93LOOSE-CRYPTO`;
 const CHZ_SOURCE = readFileSync(join(__dirname, "fixtures/inventory/chz-introduced.csv"), "utf8");
 const AGGREGATION_V1_GOLDEN = readFileSync(
   join(__dirname, "../../../docs/contracts/inventory-documents/v1/aggregation.golden.xml"),
@@ -168,8 +177,30 @@ const syntheticGenerators: readonly InventoryDocumentGenerator[] = [
   },
 ];
 
+class DelegatingInventoryDocumentGeneratorRegistry extends InventoryDocumentGeneratorRegistry {
+  constructor(private readonly current: () => InventoryDocumentGeneratorRegistry) {
+    super([]);
+  }
+
+  override listAvailable() {
+    return this.current().listAvailable();
+  }
+
+  override resolveForSelection(id: string, version: number) {
+    return this.current().resolveForSelection(id, version);
+  }
+
+  override resolveForExecution(id: string, version: number) {
+    return this.current().resolveForExecution(id, version);
+  }
+
+  override resolve(id: string, version: number) {
+    return this.current().resolve(id, version);
+  }
+}
+
 interface ChzSourceRow {
-  serial: string;
+  rawKm: string;
   state?: string;
   productionDate?: string;
   parentSscc?: string;
@@ -185,7 +216,7 @@ function chzFilterLine(status: InventoryChzStatus): string {
 
 function chzSourceRow(status: InventoryChzStatus, row: ChzSourceRow): string {
   const cells = Array.from({ length: 35 }, () => "");
-  cells[0] = `01${GTIN}21${row.serial}`;
+  cells[0] = row.rawKm;
   cells[1] = GTIN;
   cells[5] = row.parentSscc ?? "";
   cells[15] = status;
@@ -232,13 +263,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     const env = loadEnv({ ...process.env, ...PLATFORM_TEST_ENV });
     const setup: AuthSetup = setupAuth(env);
     db = setup.db;
-    const registryProvider = {
-      listAvailable: () => registry.listAvailable(),
-      resolveForSelection: (id: string, version: number) =>
-        registry.resolveForSelection(id, version),
-      resolveForExecution: (id: string, version: number) =>
-        registry.resolveForExecution(id, version),
-    } as InventoryDocumentGeneratorRegistry;
+    const registryProvider = new DelegatingInventoryDocumentGeneratorRegistry(() => registry);
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL, env })],
     })
@@ -486,28 +511,34 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
 
     const protectedSharedOldSscc = buildSscc(0, "460000009", 9001);
     const cleanOldSscc = buildSscc(0, "460000009", 9002);
-    const sharedEligibleCanonical = canonicalizeKm(`01${GTIN}21ELIGIBLE-SHARED-PARENT`);
-    const cleanEligibleCanonical = canonicalizeKm(`01${GTIN}21ELIGIBLE-CLEAN-PARENT`);
-    const protectedCanonical = canonicalizeKm(`01${GTIN}21PROTECTED-CONTINUOUS`);
-    const expectedLooseCanonical = canonicalizeKm(`01${GTIN}21EXPECTED-LOOSE`);
+    const sharedEligibleCanonical = canonicalizeKm(SHARED_ELIGIBLE_RAW);
+    const cleanEligibleCanonical = canonicalizeKm(CLEAN_ELIGIBLE_RAW);
+    const protectedCanonical = canonicalizeKm(PROTECTED_RAW);
+    const expectedLooseCanonical = canonicalizeKm(EXPECTED_LOOSE_RAW);
+    expect([
+      sharedEligibleCanonical.raw,
+      cleanEligibleCanonical.raw,
+      protectedCanonical.raw,
+      expectedLooseCanonical.raw,
+    ]).toEqual([SHARED_ELIGIBLE_RAW, CLEAN_ELIGIBLE_RAW, PROTECTED_RAW, EXPECTED_LOOSE_RAW]);
     const imports = await uploadProductionImports(agent, inventoryId, {
       INTRODUCED: [
         {
-          serial: sharedEligibleCanonical.serial,
+          rawKm: SHARED_ELIGIBLE_RAW,
           productionDate: "2026-08-08",
           parentSscc: protectedSharedOldSscc,
         },
         {
-          serial: protectedCanonical.serial,
+          rawKm: PROTECTED_RAW,
           state: "MOVING_BY_UD",
           parentSscc: protectedSharedOldSscc,
         },
         {
-          serial: cleanEligibleCanonical.serial,
+          rawKm: CLEAN_ELIGIBLE_RAW,
           productionDate: "2026-08-09",
           parentSscc: cleanOldSscc,
         },
-        { serial: expectedLooseCanonical.serial, productionDate: "2026-08-09" },
+        { rawKm: EXPECTED_LOOSE_RAW, productionDate: "2026-08-09" },
       ],
     });
     const snapshot = await agent
@@ -557,6 +588,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     ).toHaveLength(6);
     const [protectedSnapshotCode] = await db
       .select({
+        canonicalRaw: schema.inventorySnapshotCodes.canonicalRaw,
         sourceState: schema.inventorySnapshotCodes.sourceState,
         parentSscc: schema.inventorySnapshotCodes.parentSscc,
         expected: schema.inventorySnapshotCodes.expected,
@@ -571,6 +603,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         ),
       );
     expect(protectedSnapshotCode).toEqual({
+      canonicalRaw: PROTECTED_RAW,
       sourceState: "MOVING_BY_UD",
       parentSscc: protectedSharedOldSscc,
       expected: false,
@@ -1082,10 +1115,6 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       inventoryNumber,
       snapshotId,
       resultRevision: closed.body.resultRevision as number,
-      sharedEligibleCanonical,
-      cleanEligibleCanonical,
-      protectedCanonical,
-      expectedLooseCanonical,
       protectedSharedOldSscc,
       cleanOldSscc,
       protectedSharedNewSscc,
@@ -1130,14 +1159,14 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       {
         storedSscc: owner.protectedSharedNewSscc,
         outputSscc: `00${owner.protectedSharedNewSscc}`,
-        code: owner.sharedEligibleCanonical.raw,
-        serial: owner.sharedEligibleCanonical.serial,
+        code: SHARED_ELIGIBLE_RAW,
+        serial: SHARED_ELIGIBLE_SERIAL,
       },
       {
         storedSscc: owner.cleanNewSscc,
         outputSscc: `00${owner.cleanNewSscc}`,
-        code: owner.cleanEligibleCanonical.raw,
-        serial: owner.cleanEligibleCanonical.serial,
+        code: CLEAN_ELIGIBLE_RAW,
+        serial: CLEAN_ELIGIBLE_SERIAL,
       },
     ].sort((left, right) => left.storedSscc.localeCompare(right.storedSscc));
     const aggregationXml = Buffer.from(
@@ -1179,13 +1208,11 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     const expectedBytes = new Map<string, Buffer>([
       ["inventory_xml_gismt_aggregation", aggregationXml],
       ["inventory_xml_gismt_disaggregation", disaggregationXml],
-      ["inventory_txt_write_off", Buffer.from(`${owner.expectedLooseCanonical.raw}\n`)],
-      ["inventory_csv_write_off", csvBytes(`code\r\n${owner.expectedLooseCanonical.raw}\r\n`)],
+      ["inventory_txt_write_off", Buffer.from(`${EXPECTED_LOOSE_RAW}\n`)],
+      ["inventory_csv_write_off", csvBytes(`code\r\n${EXPECTED_LOOSE_RAW}\r\n`)],
       [
         "inventory_csv_current_stock",
-        csvBytes(
-          `code\r\n${owner.cleanEligibleCanonical.raw}\r\n${owner.sharedEligibleCanonical.raw}\r\n`,
-        ),
+        csvBytes(`code\r\n${CLEAN_ELIGIBLE_RAW}\r\n${SHARED_ELIGIBLE_RAW}\r\n`),
       ],
       [
         "inventory_csv_final_box_contents",
@@ -1278,7 +1305,8 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     const verifyBody = (formatId: string, body: Buffer, sha256: string) => {
       expect(createHash("sha256").update(body).digest("hex")).toBe(sha256);
       expect(body).toEqual(expectedBytes.get(formatId));
-      expect(body.toString("utf8")).not.toContain(owner.protectedCanonical.serial);
+      expect(body.toString("utf8")).not.toContain(PROTECTED_RAW);
+      expect(body.toString("utf8")).not.toContain(PROTECTED_SERIAL);
     };
 
     for (const artifact of storedArtifacts) {
@@ -1377,17 +1405,20 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       errorCode: null,
       selectedFormats: [{ id: "inventory_xml_gismt_aggregation", version: 1 }],
     });
-    const [artifact] = await db
+    const artifacts = await db
       .select()
       .from(schema.inventoryDocumentArtifacts)
       .where(eq(schema.inventoryDocumentArtifacts.runId, runId));
+    expect(artifacts).toHaveLength(1);
+    const [artifact] = artifacts;
     if (!artifact) throw new Error("Expected frozen aggregation v1 artifact");
+    expect(artifact.partNumber).toBe(1);
     const body = objects.get(artifact.objectKey);
     if (!body) throw new Error("Expected frozen aggregation v1 object");
 
     const boxes = [
-      { sscc: owner.protectedSharedNewSscc, serial: owner.sharedEligibleCanonical.serial },
-      { sscc: owner.cleanNewSscc, serial: owner.cleanEligibleCanonical.serial },
+      { sscc: owner.protectedSharedNewSscc, serial: SHARED_ELIGIBLE_SERIAL },
+      { sscc: owner.cleanNewSscc, serial: CLEAN_ELIGIBLE_SERIAL },
     ].sort((left, right) => left.sscc.localeCompare(right.sscc));
     const checkedInPack = [
       "        <pack_content>",
