@@ -37,41 +37,46 @@ Chestny ZNAK submission. Inventory v1 sends no document externally.
 
 ## Automated journey composition
 
-A DB-backed scenario named `runs both approved GISMT XML formats through the closed-revision API
-lifecycle and excludes MOVING_BY_UD` proves the production document lifecycle in one
-tenant-authorized sequence. It creates a repack source with eligible and protected old/new boxes,
-selects both production XML formats at closed revision 7, runs the actual result loader and runner,
-recomputes each artifact checksum, exercises both individual downloads and the ZIP download,
-verifies every `manifest.json` entry and archived byte stream, and proves that the protected KM and
-its old/new SSCCs occur in neither XML. It then reopens, verifies both artifacts are invalidated and
-revision 8 is established, closes, regenerates both formats with a new idempotency key, downloads
-the new ZIP, and completes revision 8.
+A DB-backed scenario named `runs one inventory continuously through preparation, two-station work,
+correction, both production XML revisions, and completion` proves the requested operation as one
+continuous tenant-authorized journey over one inventory. It creates that inventory through the
+cabinet API, uploads all six status files (including five valid zero-result exports), fixes one
+snapshot, starts the inventory, joins two distinct Station devices, records protected simple work
+and eligible old-box-to-new-box repack work, observes a cross-device duplicate conflict, applies an
+admin correction, leaves from both devices, and closes normally. The same inventory then traverses
+the real production registry, result loader, and document runner for both approved XML formats.
 
-The entire inventory operation is not collapsed into that one test. It spans three trust and
-persistence boundaries: cabinet session APIs, Station device/offline behavior, and asynchronous
-document publication. Duplicating all established fixtures in one test would bypass or weaken those
-boundaries. The following connected and UI suites form the rest of the reproducible journey, with
-the test registry substitution confined to document tests.
+The first document run is verified artifact by artifact and again from the downloaded ZIP: every
+stored and archived byte stream is SHA-256 checked against artifact metadata, every complete
+`manifest.json` entry is compared with that metadata, eligible repack content is present in the
+appropriate aggregation/disaggregation XML, and the protected `MOVING_BY_UD` KM and old SSCC are
+absent from both. The journey then reopens the same inventory, proves both first-run artifacts are
+invalidated and no longer downloadable, closes at the next result revision, regenerates and fully
+re-verifies both XML files and the new ZIP, records the individual and ZIP downloads, and completes
+that revision.
 
-| Journey stage                                                                                                                                                 | Evidence                                                                                                          |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Create one-product inventory and configure line, inclusive dates, check/repack mode, and label template                                                       | `inventories.e2e.test.ts`, `inventory-preparation.test.tsx`                                                       |
-| Upload and select all six statuses, including valid zero-row results                                                                                          | `inventory-chz-import.test.ts`, `inventory-snapshot.e2e.test.ts`                                                  |
-| Freeze counts, parents, source dates, and immutable product/line/capacity facts                                                                               | `inventory-snapshot.e2e.test.ts`, `inventory-lifecycle.e2e.test.ts`                                               |
-| Keep `MOVING_BY_UD` protected and outside expected/destructive groups                                                                                         | `inventory-snapshot.e2e.test.ts`, `inventory-reconciliation.e2e.test.ts`, `inventory-result-source.test.ts`       |
-| Start and expose the frozen task to an assigned line; join/rejoin and cross-line barcode confirmation                                                         | `inventory-lifecycle.e2e.test.ts`, `station-inventory-access.e2e.test.ts`, `station-inventory-bundle.e2e.test.ts` |
-| Synchronize two distinct devices, simple scans, known-box expansion, repack ownership/capacity/date, conflicts, and leave                                     | `station-inventory-sync.e2e.test.ts`, Station inventory work/outbox tests                                         |
-| Apply an append-only correction with revision and audit protection                                                                                            | `inventory-corrections.e2e.test.ts`, `inventory-corrections.test.tsx`                                             |
-| Evaluate blockers, leave, close, quarantine late work, and freeze a result revision                                                                           | `inventory-close.e2e.test.ts`, `inventory-late-events.e2e.test.ts`                                                |
-| Generate both production GISMT XML artifacts from repack old/new boxes, exclude protected contents, verify SHA-256, ZIP manifest, and tenant-scoped downloads | Exact DB-backed `runs both approved GISMT XML formats…` scenario in `inventory-documents.e2e.test.ts`             |
-| Reopen, invalidate both production artifacts, increment revision, close again, regenerate, download, acknowledge, and complete                                | The same production scenario plus the synthetic lifecycle regression in `inventory-documents.e2e.test.ts`         |
+The following table identifies what the continuous scenario proves directly. The adjacent suites
+remain useful regression depth for branches and UI behavior, but are not used to assemble or
+substitute for continuity of the acceptance journey.
 
-The connected snapshot fixture selects six independently stored imports. Its introduced rows include
-an inclusive-range pair, an out-of-range row, and a `MOVING_BY_UD` row; the asserted result is two
-expected codes and one protected code. Empty APPLIED and other empty slots are accepted only through
-the exact known no-results marker. Multi-device tests use distinct authorized device identities and
-real PostgreSQL locks. Repack UI tests separately prove 20 fixed positions, mandatory bottle scans,
-automatic full-box closure/printing, and no “next box” button.
+| Journey stage                                                                                             | Direct continuous evidence in `inventory-documents.e2e.test.ts`                                                                   |
+| --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Create one-product repack inventory with line, inclusive dates, capacity-two product, and label template  | Real `POST /inventories`; returned draft inventory is retained for every later step                                               |
+| Upload and select all six statuses, including valid zero-row results                                      | Six real multipart import requests; one three-row INTRODUCED file plus five exact no-results files                                |
+| Freeze counts, parents, source dates, and immutable inputs                                                | Real snapshot request; six inputs and stored counts `introduced=3`, `protected=1`, `expected=2`, `packages=2`, `loose=1` asserted |
+| Keep `MOVING_BY_UD` protected and outside expected/destructive groups                                     | Frozen code asserted as `protected=true`, `expected=false`; protected KM and parent old SSCC excluded from every generated XML    |
+| Start and expose the frozen task to an assigned line                                                      | Real start request followed by joins from two separately paired Station devices                                                   |
+| Perform simple and repack work across two devices, including a conflict                                   | Protected simple scan on device B; old-box open, eligible add, new-box close/print on A; duplicate protected scan conflicts on A  |
+| Apply a correction, leave from both devices, and close                                                    | Real reprint correction, two successful leave requests, blocker-free close                                                        |
+| Generate both production GISMT XML artifacts from eligible repack old/new data and exclude protected data | Production registry plus real result loader/runner; all stored/downloaded/archived bytes and full manifest metadata verified      |
+| Reopen, invalidate, advance revision, close, regenerate, download, acknowledge, and complete              | Both first-run artifacts return 404 after reopen; the second run receives the same full verification before completion            |
+
+The continuous snapshot selects six independently stored imports. Its introduced rows comprise an
+eligible code in an old box, a protected `MOVING_BY_UD` code in a different old box, and an eligible
+loose code, producing exactly two expected codes and one protected code. Empty APPLIED and the four
+other empty status slots are accepted only through the exact known no-results marker. The journey
+uses distinct authorized device identities and real PostgreSQL locks. Separate Station and admin
+suites continue to cover broader offline, UI, capacity-20, audit, quarantine, and error branches.
 
 ## Document contract gate
 

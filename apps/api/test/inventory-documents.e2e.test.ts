@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
@@ -9,7 +11,16 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { schema, type Db } from "@markiro/db";
-import { canonicalizeKm, kmHash } from "@markiro/domain";
+import {
+  buildSscc,
+  canonicalizeKm,
+  INVENTORY_CHZ_STATUSES,
+  inventoryEventBatchDigest,
+  kmHash,
+  type InventoryChzStatus,
+  type InventoryEvent,
+  type InventoryEventBatchPayload,
+} from "@markiro/domain";
 
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -31,7 +42,7 @@ import {
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
-import { signUpAndActivate } from "./support/auth";
+import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 
 describe("inventory document request contracts", () => {
   it("requires one unique id/version pair and rejects unknown properties", () => {
@@ -99,6 +110,11 @@ const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
 const GTIN = "04600000000015";
+const CHZ_SOURCE = readFileSync(join(__dirname, "fixtures/inventory/chz-introduced.csv"), "utf8");
+const [INTRODUCED_FILTER = "", CHZ_HEADER = ""] = CHZ_SOURCE.split(/\r?\n/);
+if (INTRODUCED_FILTER.length === 0 || CHZ_HEADER.length === 0) {
+  throw new Error("Expected inventory CSV fixture header");
+}
 const syntheticDescriptor = {
   id: "synthetic_stock",
   version: 1,
@@ -147,6 +163,40 @@ const syntheticGenerators: readonly InventoryDocumentGenerator[] = [
   },
 ];
 
+interface ChzSourceRow {
+  serial: string;
+  state?: string;
+  productionDate?: string;
+  parentSscc?: string;
+}
+
+function csvCell(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function chzFilterLine(status: InventoryChzStatus): string {
+  return INTRODUCED_FILTER.replace("INTRODUCED", status).replaceAll("04680089900383", GTIN);
+}
+
+function chzSourceRow(status: InventoryChzStatus, row: ChzSourceRow): string {
+  const cells = Array.from({ length: 35 }, () => "");
+  cells[0] = `01${GTIN}21${row.serial}`;
+  cells[1] = GTIN;
+  cells[5] = row.parentSscc ?? "";
+  cells[15] = status;
+  cells[16] = row.state ?? "";
+  cells[19] = "UNIT";
+  cells[27] = row.productionDate ?? "";
+  return cells.map(csvCell).join(",");
+}
+
+function chzExport(status: InventoryChzStatus, rows: readonly ChzSourceRow[] = []): Buffer {
+  const lines = [chzFilterLine(status), CHZ_HEADER];
+  if (rows.length === 0) lines.push("errors", "5: Коды маркировки не найдены");
+  else lines.push(...rows.map((row) => chzSourceRow(status, row)));
+  return Buffer.from(`${lines.join("\n")}\n`);
+}
+
 describe.skipIf(!ready)("inventory document endpoints", () => {
   let app: INestApplication | undefined;
   let db: Db;
@@ -156,12 +206,17 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
   const enqueue = vi.fn(async () => "job-1");
   const objects = new Map<string, Buffer>();
   const storage = {
+    ensureBucket: vi.fn().mockResolvedValue(undefined),
     putVerified: vi.fn(async (key: string, body: Buffer, _mime: string, sha256: string) => {
       expect(createHash("sha256").update(body).digest("hex")).toBe(sha256);
       objects.set(key, Buffer.from(body));
       return { byteSize: body.byteLength, sha256 };
     }),
-    get: vi.fn(async (key: string) => ({ body: objects.get(key)!, contentType: null })),
+    get: vi.fn(async (key: string) => {
+      const body = objects.get(key);
+      if (!body) throw Object.assign(new Error("missing test object"), { name: "NoSuchKey" });
+      return { body: Buffer.from(body), contentType: null };
+    }),
     delete: vi.fn(async (key: string) => {
       objects.delete(key);
     }),
@@ -319,244 +374,531 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     idempotencyKey,
   });
 
-  async function seedProductionRepackSource(owner: Awaited<ReturnType<typeof seedInventory>>) {
-    const operatorId = randomUUID();
-    const deviceId = randomUUID();
-    const batchId = `production-documents-${randomUUID()}`;
-    const eligibleEventId = randomUUID();
-    const protectedEventId = randomUUID();
-    const eligibleOldBoxEventId = randomUUID();
-    const protectedOldBoxEventId = randomUUID();
-    const eligibleCanonical = canonicalizeKm(`01${GTIN}21ELIGIBLE-PRODUCTION\u001d93crypto`);
-    const protectedCanonical = canonicalizeKm(`01${GTIN}21PROTECTED-PRODUCTION\u001d93crypto`);
-    const eligibleHash = kmHash(eligibleCanonical);
-    const protectedHash = kmHash(protectedCanonical);
-    const eligibleOldSscc = "046800899000256032";
-    const eligibleNewSscc = "046800899000256001";
-    const protectedOldSscc = "046800899000256049";
-    const protectedNewSscc = "046800899000256018";
-    const scannedAt = new Date("2026-08-26T08:30:00.000Z");
+  async function uploadProductionImports(
+    agent: ReturnType<typeof request.agent>,
+    inventoryId: string,
+    rows: Partial<Record<InventoryChzStatus, readonly ChzSourceRow[]>>,
+  ): Promise<Record<InventoryChzStatus, string>> {
+    const entries: Array<readonly [InventoryChzStatus, string]> = [];
+    for (const status of INVENTORY_CHZ_STATUSES) {
+      const response = await agent
+        .post(`/inventories/${inventoryId}/imports/${status}`)
+        .attach("file", chzExport(status, rows[status]), {
+          filename: `${status.toLowerCase()}.csv`,
+          contentType: "text/csv",
+        })
+        .expect(201);
+      expect(response.body).toMatchObject({
+        declaredStatus: status,
+        parsedStatus: status,
+      });
+      entries.push([status, response.body.id as string]);
+    }
+    return Object.fromEntries(entries) as Record<InventoryChzStatus, string>;
+  }
 
-    await db.insert(schema.employees).values({
-      id: operatorId,
-      tenantId: owner.tenantId,
-      fullName: "Production document operator",
+  async function runProductionJourneyToFirstClose() {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const [member] = await db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, tenantId));
+    if (!member) throw new Error("Expected production acceptance actor");
+    await db
+      .update(schema.organization)
+      .set({ name: "ООО Непрерывная приёмка" })
+      .where(eq(schema.organization.id, tenantId));
+    await db.insert(schema.orgProfiles).values({
+      tenantId,
+      inn: "9705119097",
+      gln: "4600000090007",
     });
-    await db.insert(schema.stationDevices).values({
-      id: deviceId,
-      tenantId: owner.tenantId,
-      name: "Production document station",
-      lineId: owner.lineId,
+
+    const productId = randomUUID();
+    const lineId = randomUUID();
+    const templateId = randomUUID();
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId,
+      gtin14: GTIN,
+      name: "Production acceptance water",
+      boxCapacity: 2,
+      status: "active",
     });
-    await db.insert(schema.inventorySnapshotCodes).values([
-      {
-        tenantId: owner.tenantId,
-        snapshotId: owner.snapshotId,
-        canonicalRaw: eligibleCanonical.raw,
-        codeHash: eligibleHash,
-        gtin14: GTIN,
-        serial: eligibleCanonical.serial,
-        sourceStatus: "INTRODUCED",
-        sourceState: null,
-        sourceProductionDate: "2026-08-08",
-        parentSscc: eligibleOldSscc,
-        expected: true,
-        protected: false,
+    await db.insert(schema.lines).values({ id: lineId, tenantId, name: "Acceptance line" });
+    await db.insert(schema.labelTemplates).values({
+      id: templateId,
+      tenantId,
+      name: "Acceptance box label",
+      spec: {
+        widthMm: 58,
+        heightMm: 40,
+        dpi: 203,
+        language: "zpl",
+        elements: [
+          {
+            id: "sscc",
+            kind: "barcode",
+            xMm: 4,
+            yMm: 12,
+            format: "code128",
+            data: "sscc",
+            sizeMm: 18,
+          },
+        ],
       },
-      {
-        tenantId: owner.tenantId,
-        snapshotId: owner.snapshotId,
-        canonicalRaw: protectedCanonical.raw,
-        codeHash: protectedHash,
-        gtin14: GTIN,
-        serial: protectedCanonical.serial,
-        sourceStatus: "INTRODUCED",
-        sourceState: "MOVING_BY_UD",
-        sourceProductionDate: null,
-        parentSscc: protectedOldSscc,
-        expected: false,
-        protected: true,
-      },
-    ]);
-    await db.insert(schema.inventoryScanBatches).values({
-      tenantId: owner.tenantId,
-      inventoryId: owner.inventoryId,
-      deviceId,
-      batchId,
-      payloadDigest: "b".repeat(64),
-      sequenceCeiling: 4n,
-      outcome: "applied",
-      result: {},
     });
-    await db.insert(schema.inventoryScanEvents).values([
-      {
-        eventId: eligibleEventId,
-        tenantId: owner.tenantId,
-        inventoryId: owner.inventoryId,
-        batchId,
-        deviceId,
-        deviceSequence: 1n,
-        operatorId,
-        scannedAt,
-        kind: "item",
-        normalizedIdentity: `item:${eligibleHash}`,
-        codeHash: eligibleHash,
-        rawPayload: eligibleCanonical.raw,
-        activeProductionDate: "2026-08-08",
-        snapshotRevision: 1,
-        localVerdict: "expected",
-        authoritativeVerdict: "applied",
-      },
-      {
-        eventId: protectedEventId,
-        tenantId: owner.tenantId,
-        inventoryId: owner.inventoryId,
-        batchId,
-        deviceId,
-        deviceSequence: 2n,
-        operatorId,
-        scannedAt,
-        kind: "item",
-        normalizedIdentity: `item:${protectedHash}`,
-        codeHash: protectedHash,
-        rawPayload: protectedCanonical.raw,
-        activeProductionDate: "2026-08-08",
-        snapshotRevision: 1,
-        localVerdict: "protected",
-        authoritativeVerdict: "applied",
-      },
-      {
-        eventId: eligibleOldBoxEventId,
-        tenantId: owner.tenantId,
-        inventoryId: owner.inventoryId,
-        batchId,
-        deviceId,
-        deviceSequence: 3n,
-        operatorId,
-        scannedAt,
-        kind: "old_box",
-        normalizedIdentity: `old_box:${eligibleOldSscc}`,
-        codeHash: null,
-        rawPayload: eligibleOldSscc,
-        activeProductionDate: "2026-08-08",
-        snapshotRevision: 1,
-        localVerdict: "expected",
-        authoritativeVerdict: "applied",
-      },
-      {
-        eventId: protectedOldBoxEventId,
-        tenantId: owner.tenantId,
-        inventoryId: owner.inventoryId,
-        batchId,
-        deviceId,
-        deviceSequence: 4n,
-        operatorId,
-        scannedAt,
-        kind: "old_box",
-        normalizedIdentity: `old_box:${protectedOldSscc}`,
-        codeHash: null,
-        rawPayload: protectedOldSscc,
-        activeProductionDate: "2026-08-08",
-        snapshotRevision: 1,
-        localVerdict: "protected",
-        authoritativeVerdict: "applied",
-      },
-    ]);
-    const [eligibleResult, protectedResult] = await db
-      .insert(schema.inventoryCodeResults)
-      .values([
+
+    const created = await agent
+      .post("/inventories")
+      .send({
+        productId,
+        lineId,
+        mode: "repack",
+        productionDateFrom: "2026-08-01",
+        productionDateTo: "2026-08-31",
+        boxLabelTemplateId: templateId,
+      })
+      .expect(201);
+    const inventoryId = created.body.id as string;
+    expect(created.body).toMatchObject({ id: inventoryId, status: "draft", mode: "repack" });
+
+    const eligibleOldSscc = buildSscc(0, "460000009", 9001);
+    const protectedOldSscc = buildSscc(0, "460000009", 9002);
+    const eligibleCanonical = canonicalizeKm(`01${GTIN}21ELIGIBLE-CONTINUOUS`);
+    const protectedCanonical = canonicalizeKm(`01${GTIN}21PROTECTED-CONTINUOUS`);
+    const imports = await uploadProductionImports(agent, inventoryId, {
+      INTRODUCED: [
         {
-          tenantId: owner.tenantId,
-          inventoryId: owner.inventoryId,
-          codeHash: eligibleHash,
-          snapshotId: owner.snapshotId,
-          firstAcceptedEventId: eligibleEventId,
-          winningDeviceId: deviceId,
-          winningScannedAt: scannedAt,
-          observedProductionDate: "2026-08-08",
-          classification: "expected",
-          originClassification: "expected",
+          serial: eligibleCanonical.serial,
+          productionDate: "2026-08-08",
+          parentSscc: eligibleOldSscc,
         },
         {
-          tenantId: owner.tenantId,
-          inventoryId: owner.inventoryId,
-          codeHash: protectedHash,
-          snapshotId: owner.snapshotId,
-          firstAcceptedEventId: protectedEventId,
-          winningDeviceId: deviceId,
-          winningScannedAt: scannedAt,
-          observedProductionDate: "2026-08-08",
-          classification: "protected",
-          originClassification: "protected",
+          serial: protectedCanonical.serial,
+          state: "MOVING_BY_UD",
+          parentSscc: protectedOldSscc,
         },
-      ])
-      .returning({ id: schema.inventoryCodeResults.id });
-    if (!eligibleResult || !protectedResult) throw new Error("Expected production code results");
-    const eligibleBoxId = randomUUID();
-    const protectedBoxId = randomUUID();
-    const closedAt = new Date("2026-08-26T08:50:00.000Z");
-    await db.insert(schema.inventoryRepackBoxes).values([
-      {
-        id: eligibleBoxId,
-        tenantId: owner.tenantId,
-        inventoryId: owner.inventoryId,
-        oldSsccContext: eligibleOldSscc,
+        { serial: "EXPECTED-LOOSE", productionDate: "2026-08-09" },
+      ],
+    });
+    const snapshot = await agent
+      .post(`/inventories/${inventoryId}/snapshots`)
+      .send({ imports })
+      .expect(201);
+    expect(snapshot.body).toMatchObject({
+      inventoryId,
+      revision: 1,
+      inputs: imports,
+      counts: {
+        emitted: 0,
+        introduced: 3,
+        applied: 0,
+        retired: 0,
+        writtenOff: 0,
+        disaggregation: 0,
+        protected: 1,
+        expected: 2,
+        packages: 2,
+        loose: 1,
+      },
+    });
+    const snapshotId = snapshot.body.id as string;
+    const [frozenSnapshot] = await db
+      .select({
+        introduced: schema.inventorySnapshots.introducedCount,
+        protected: schema.inventorySnapshots.protectedCount,
+        expected: schema.inventorySnapshots.expectedCount,
+        packages: schema.inventorySnapshots.packageCount,
+        loose: schema.inventorySnapshots.looseCount,
+      })
+      .from(schema.inventorySnapshots)
+      .where(eq(schema.inventorySnapshots.id, snapshotId));
+    expect(frozenSnapshot).toEqual({
+      introduced: 3,
+      protected: 1,
+      expected: 2,
+      packages: 2,
+      loose: 1,
+    });
+    expect(
+      await db
+        .select({ status: schema.inventorySnapshotInputs.status })
+        .from(schema.inventorySnapshotInputs)
+        .where(eq(schema.inventorySnapshotInputs.snapshotId, snapshotId)),
+    ).toHaveLength(6);
+    const [protectedSnapshotCode] = await db
+      .select({
+        sourceState: schema.inventorySnapshotCodes.sourceState,
+        expected: schema.inventorySnapshotCodes.expected,
+        protected: schema.inventorySnapshotCodes.protected,
+      })
+      .from(schema.inventorySnapshotCodes)
+      .where(eq(schema.inventorySnapshotCodes.codeHash, kmHash(protectedCanonical)));
+    expect(protectedSnapshotCode).toEqual({
+      sourceState: "MOVING_BY_UD",
+      expected: false,
+      protected: true,
+    });
+
+    const started = await agent.post(`/inventories/${inventoryId}/start`).expect(201);
+    expect(started.body).toMatchObject({
+      inventoryId,
+      snapshotId,
+      snapshotRevision: 1,
+      codeCount: 3,
+      boxCapacity: 2,
+      mode: "repack",
+    });
+
+    const operator = await agent
+      .post("/employees")
+      .send({ fullName: "Continuous acceptance operator" })
+      .expect(201);
+    const operatorId = operator.body.id as string;
+    await agent
+      .put(`/operators/${operatorId}`)
+      .send({ login: String(Date.now()).slice(-6), pin: "1234" })
+      .expect(200);
+    const deviceA = await createTestStationDevice(app!, agent, "Acceptance station A");
+    const deviceB = await createTestStationDevice(app!, agent, "Acceptance station B");
+    await db
+      .update(schema.stationDevices)
+      .set({ lineId })
+      .where(eq(schema.stationDevices.id, deviceA.deviceId));
+    await db
+      .update(schema.stationDevices)
+      .set({ lineId })
+      .where(eq(schema.stationDevices.id, deviceB.deviceId));
+
+    const joinDevice = (device: { apiKey: string }) =>
+      request(app!.getHttpServer())
+        .post(`/station/inventories/${inventoryId}/join`)
+        .set("x-api-key", device.apiKey)
+        .send({ operatorId })
+        .expect(200);
+    const joinedA = await joinDevice(deviceA);
+    const joinedB = await joinDevice(deviceB);
+    expect(deviceA.deviceId).not.toBe(deviceB.deviceId);
+    expect(joinedA.body).toMatchObject({ inventoryId, snapshotId, mode: "repack" });
+    expect(joinedB.body).toMatchObject({ inventoryId, snapshotId, mode: "repack" });
+    const ssccBlock = joinedA.body.sscc as {
+      issuerPrefix: string;
+      extensionDigit: number;
+      fromSerial: number;
+    } | null;
+    if (!ssccBlock) throw new Error("Expected a repack SSCC block for station A");
+    const eligibleNewSscc = buildSscc(
+      ssccBlock.extensionDigit,
+      ssccBlock.issuerPrefix,
+      ssccBlock.fromSerial,
+    );
+    const boxId = randomUUID();
+
+    const sendBatch = async (
+      device: { apiKey: string },
+      events: InventoryEvent[],
+      openBoxCount: number,
+    ) => {
+      const payload: InventoryEventBatchPayload = {
+        snapshotId,
+        snapshotRevision: 1,
+        sequenceCeiling: events.at(-1)!.deviceSequence,
+        pendingEventCount: 0,
+        openBoxCount,
+        events,
+      };
+      return request(app!.getHttpServer())
+        .post(`/station/inventories/${inventoryId}/event-batches`)
+        .set("x-api-key", device.apiKey)
+        .send({
+          batchId: `acceptance-${randomUUID()}`,
+          payloadDigest: inventoryEventBatchDigest(payload),
+          ...payload,
+        })
+        .expect(200);
+    };
+
+    const protectedEvent: InventoryEvent = {
+      eventId: randomUUID(),
+      deviceSequence: 1,
+      operatorId,
+      scannedAt: "2026-08-26T08:00:00.000Z",
+      kind: "item",
+      normalizedIdentity: `item:${kmHash(protectedCanonical)}`,
+      codeHash: kmHash(protectedCanonical),
+      canonicalRaw: protectedCanonical.raw,
+      activeProductionDate: "2026-08-08",
+      localVerdict: "protected",
+    };
+    const protectedScan = await sendBatch(deviceB, [protectedEvent], 0);
+    expect(protectedScan.body.outcomes).toEqual([
+      expect.objectContaining({ eventId: protectedEvent.eventId, status: "applied" }),
+    ]);
+
+    const openBox: InventoryEvent = {
+      eventId: randomUUID(),
+      deviceSequence: 1,
+      operatorId,
+      scannedAt: "2026-08-26T08:01:00.000Z",
+      kind: "old_box",
+      normalizedIdentity: `old_box:${eligibleOldSscc}`,
+      codeHash: null,
+      canonicalRaw: eligibleOldSscc,
+      activeProductionDate: "2026-08-08",
+      localVerdict: "expected",
+      repack: {
+        action: "open-box",
+        boxId,
+        oldSscc: eligibleOldSscc,
         newSscc: eligibleNewSscc,
-        ownerDeviceId: deviceId,
-        capacity: 20,
+        capacity: 2,
         productionDate: "2026-08-08",
-        state: "closed",
-        printState: "printed",
-        printAttemptCount: 1,
-        closedAt,
-        printedAt: closedAt,
       },
-      {
-        id: protectedBoxId,
-        tenantId: owner.tenantId,
-        inventoryId: owner.inventoryId,
-        oldSsccContext: protectedOldSscc,
-        newSscc: protectedNewSscc,
-        ownerDeviceId: deviceId,
-        capacity: 20,
-        productionDate: "2026-08-08",
-        state: "closed",
-        printState: "printed",
-        printAttemptCount: 1,
-        closedAt,
-        printedAt: closedAt,
-      },
+    };
+    await sendBatch(deviceA, [openBox], 1);
+    const addItem: InventoryEvent = {
+      eventId: randomUUID(),
+      deviceSequence: 2,
+      operatorId,
+      scannedAt: "2026-08-26T08:02:00.000Z",
+      kind: "item",
+      normalizedIdentity: `item:${kmHash(eligibleCanonical)}`,
+      codeHash: kmHash(eligibleCanonical),
+      canonicalRaw: eligibleCanonical.raw,
+      activeProductionDate: "2026-08-08",
+      localVerdict: "expected",
+      repack: { action: "add-item", boxId, itemId: randomUUID(), position: 1, closeBox: false },
+    };
+    await sendBatch(deviceA, [addItem], 1);
+
+    const duplicateProtected: InventoryEvent = {
+      ...protectedEvent,
+      eventId: randomUUID(),
+      deviceSequence: 3,
+      scannedAt: "2026-08-26T08:03:00.000Z",
+    };
+    const conflict = await sendBatch(deviceA, [duplicateProtected], 1);
+    expect(conflict.body.outcomes).toEqual([
+      expect.objectContaining({
+        eventId: duplicateProtected.eventId,
+        status: "duplicate",
+        conflictCount: 1,
+      }),
     ]);
-    await db.insert(schema.inventoryRepackItems).values([
-      {
-        tenantId: owner.tenantId,
-        inventoryId: owner.inventoryId,
-        boxId: eligibleBoxId,
-        resultId: eligibleResult.id,
-        sourceEventId: eligibleEventId,
-        position: 1,
-        productionDate: "2026-08-08",
-        activeObservedProductionDate: "2026-08-08",
+
+    const closedAt = "2026-08-26T08:04:00.000Z";
+    const closeBox: InventoryEvent = {
+      eventId: randomUUID(),
+      deviceSequence: 4,
+      operatorId,
+      scannedAt: closedAt,
+      kind: "repack_action",
+      normalizedIdentity: `repack_action:close-incomplete:${boxId}`,
+      codeHash: null,
+      canonicalRaw: null,
+      activeProductionDate: "2026-08-08",
+      localVerdict: "repack-action",
+      repack: { action: "close-incomplete", boxId, changedAt: closedAt },
+    };
+    await sendBatch(deviceA, [closeBox], 0);
+    const printedAt = "2026-08-26T08:05:00.000Z";
+    const printBox: InventoryEvent = {
+      eventId: randomUUID(),
+      deviceSequence: 5,
+      operatorId,
+      scannedAt: printedAt,
+      kind: "repack_action",
+      normalizedIdentity: `repack_action:print-outcome:${boxId}:1`,
+      codeHash: null,
+      canonicalRaw: null,
+      activeProductionDate: "2026-08-08",
+      localVerdict: "repack-action",
+      repack: {
+        action: "print-outcome",
+        boxId,
+        sscc: eligibleNewSscc,
+        attemptId: randomUUID(),
+        attemptNumber: 1,
+        result: "printed",
+        errorCode: null,
+        attemptedAt: "2026-08-26T08:04:30.000Z",
+        completedAt: printedAt,
       },
-      {
-        tenantId: owner.tenantId,
-        inventoryId: owner.inventoryId,
-        boxId: protectedBoxId,
-        resultId: protectedResult.id,
-        sourceEventId: protectedEventId,
-        position: 1,
-        productionDate: "2026-08-08",
-        activeObservedProductionDate: "2026-08-08",
-      },
-    ]);
+    };
+    const printed = await sendBatch(deviceA, [printBox], 0);
+
+    const correction = await agent
+      .post(`/inventories/${inventoryId}/corrections`)
+      .send({
+        action: "reprint",
+        target: { repackBoxId: boxId },
+        reason: "Continuous acceptance conflict review",
+        expectedResultRevision: printed.body.resultRevision,
+        idempotencyKey: randomUUID(),
+      })
+      .expect(201);
+    expect(correction.body).toMatchObject({ action: "reprint" });
+
+    const leaveDevice = (device: { apiKey: string }) =>
+      request(app!.getHttpServer())
+        .post(`/station/inventories/${inventoryId}/leave`)
+        .set("x-api-key", device.apiKey)
+        .send({ pendingEventCount: 0, openBoxCount: 0 })
+        .expect(200, { outcome: "left" });
+    await leaveDevice(deviceA);
+    await leaveDevice(deviceB);
+    const closed = await agent.post(`/inventories/${inventoryId}/close`).send({}).expect(201);
+    expect(closed.body).toMatchObject({
+      inventoryId,
+      status: "closed",
+      resultRevision: correction.body.resultRevision,
+      blockers: [],
+    });
+
     return {
+      agent,
+      tenantId,
+      userId: member.userId,
+      inventoryId,
+      snapshotId,
+      resultRevision: closed.body.resultRevision as number,
       eligibleCanonical,
       protectedCanonical,
       eligibleOldSscc,
       eligibleNewSscc,
       protectedOldSscc,
-      protectedNewSscc,
     };
+  }
+
+  async function verifyProductionRun(
+    owner: Awaited<ReturnType<typeof runProductionJourneyToFirstClose>>,
+    runId: string,
+    resultRevision: number,
+  ) {
+    await runner.run(runId, { retryCount: 0, retryLimit: 0 });
+    const history = await owner.agent
+      .get(`/inventories/${owner.inventoryId}/document-runs`)
+      .expect(200);
+    const run = history.body.items.find((item: { id: string }) => item.id === runId) as
+      | {
+          id: string;
+          resultRevision: number;
+          status: string;
+          artifacts: Array<{
+            id: string;
+            formatId: string;
+            formatVersion: number;
+            filename: string;
+            mimeType: string;
+            rowCount: number;
+            codeCount: number;
+            boxCount: number;
+            byteSize: number;
+            sha256: string;
+          }>;
+        }
+      | undefined;
+    if (!run) throw new Error(`Expected production revision ${resultRevision} run`);
+    const artifacts = [...run.artifacts].sort((left, right) =>
+      left.formatId.localeCompare(right.formatId),
+    );
+    expect(run).toMatchObject({ resultRevision, status: "ready" });
+    expect(artifacts).toMatchObject([
+      {
+        formatId: "inventory_xml_gismt_aggregation",
+        formatVersion: 1,
+        mimeType: "application/xml; charset=utf-8",
+        codeCount: 1,
+        boxCount: 1,
+      },
+      {
+        formatId: "inventory_xml_gismt_disaggregation",
+        formatVersion: 1,
+        mimeType: "application/xml; charset=utf-8",
+        codeCount: 0,
+        boxCount: 1,
+      },
+    ]);
+    const storedArtifacts = await db
+      .select({
+        id: schema.inventoryDocumentArtifacts.id,
+        formatId: schema.inventoryDocumentArtifacts.formatId,
+        objectKey: schema.inventoryDocumentArtifacts.objectKey,
+        sha256: schema.inventoryDocumentArtifacts.sha256,
+      })
+      .from(schema.inventoryDocumentArtifacts)
+      .where(eq(schema.inventoryDocumentArtifacts.runId, runId));
+    expect(storedArtifacts).toHaveLength(2);
+
+    const verifyXml = (formatId: string, body: Buffer, sha256: string) => {
+      expect(createHash("sha256").update(body).digest("hex")).toBe(sha256);
+      const xml = body.toString("utf8");
+      expect(xml).not.toContain(owner.protectedCanonical.serial);
+      expect(xml).not.toContain(owner.protectedOldSscc);
+      if (formatId === "inventory_xml_gismt_aggregation") {
+        expect(xml).toContain(owner.eligibleCanonical.serial);
+        expect(xml).toContain(`00${owner.eligibleNewSscc}`);
+      } else {
+        expect(xml).toContain(owner.eligibleOldSscc);
+        expect(xml).not.toContain(owner.eligibleNewSscc);
+      }
+    };
+
+    for (const artifact of storedArtifacts) {
+      const body = objects.get(artifact.objectKey);
+      if (!body) throw new Error(`Expected stored production artifact ${artifact.formatId}`);
+      verifyXml(artifact.formatId, body, artifact.sha256);
+      const individual = await owner.agent
+        .get(`/inventory-document-runs/${runId}/artifacts/${artifact.id}/download`)
+        .expect(200);
+      expect(individual.body).toMatchObject({
+        url: `https://storage.test/${encodeURIComponent(artifact.objectKey)}`,
+        expiresInSeconds: 300,
+      });
+    }
+
+    await owner.agent.get(`/inventory-document-runs/${runId}/download`).expect(200);
+    const zipKey = `tenants/${owner.tenantId}/inventory-documents/${runId}/revision-${resultRevision}/package.zip`;
+    const zip = objects.get(zipKey);
+    if (!zip) throw new Error(`Expected production revision ${resultRevision} ZIP`);
+    const archive = unzipSync(zip);
+    const manifest = JSON.parse(strFromU8(archive["manifest.json"]!)) as {
+      schemaVersion: number;
+      runId: string;
+      resultRevision: number;
+      artifacts: Array<{
+        name: string;
+        bytes: number;
+        sha256: string;
+        formatId: string;
+        formatVersion: number;
+      }>;
+    };
+    expect(manifest).toMatchObject({ schemaVersion: 1, runId, resultRevision });
+    expect(
+      [...manifest.artifacts].sort((left, right) => left.formatId.localeCompare(right.formatId)),
+    ).toEqual(
+      artifacts.map((artifact) => ({
+        name: artifact.filename,
+        mimeType: artifact.mimeType,
+        partNumber: 1,
+        rowCount: artifact.rowCount,
+        codeCount: artifact.codeCount,
+        boxCount: artifact.boxCount,
+        bytes: artifact.byteSize,
+        sha256: artifact.sha256,
+        formatId: artifact.formatId,
+        formatVersion: 1,
+      })),
+    );
+    for (const artifact of artifacts) {
+      const archived = archive[artifact.filename];
+      if (!archived) throw new Error(`Expected archived production artifact ${artifact.filename}`);
+      verifyXml(artifact.formatId, Buffer.from(archived), artifact.sha256);
+    }
+    return { run, storedArtifacts };
   }
 
   async function seedReadySingleArtifact(
@@ -932,199 +1274,75 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     });
   });
 
-  it("runs both approved GISMT XML formats through the closed-revision API lifecycle and excludes MOVING_BY_UD", async () => {
+  it("runs one inventory continuously through preparation, two-station work, correction, both production XML revisions, and completion", async () => {
     registry = productionInventoryDocumentGeneratorRegistry;
     try {
-      const owner = await seedInventory("closed", "repack");
-      const source = await seedProductionRepackSource(owner);
+      const owner = await runProductionJourneyToFirstClose();
       const first = await owner.agent
         .post(`/inventories/${owner.inventoryId}/document-runs`)
         .send(productionBody())
         .expect(201);
       expect(first.body).toMatchObject({
-        resultRevision: 7,
+        resultRevision: owner.resultRevision,
         status: "queued",
       });
-
-      await runner.run(first.body.id as string, { retryCount: 0, retryLimit: 0 });
-      const firstHistory = await owner.agent
-        .get(`/inventories/${owner.inventoryId}/document-runs`)
-        .expect(200);
-      const firstRun = firstHistory.body.items.find(
-        (run: { id: string }) => run.id === first.body.id,
-      ) as
-        | {
-            id: string;
-            resultRevision: number;
-            status: string;
-            artifacts: Array<{
-              id: string;
-              formatId: string;
-              formatVersion: number;
-              filename: string;
-              mimeType: string;
-              rowCount: number;
-              codeCount: number;
-              boxCount: number;
-              byteSize: number;
-              sha256: string;
-            }>;
-          }
-        | undefined;
-      if (!firstRun) throw new Error("Expected production revision 7 run");
-      const firstArtifacts = [...firstRun.artifacts].sort((left, right) =>
-        left.formatId.localeCompare(right.formatId),
+      const firstVerified = await verifyProductionRun(
+        owner,
+        first.body.id as string,
+        owner.resultRevision,
       );
-      expect(firstRun).toMatchObject({ resultRevision: 7, status: "ready" });
-      expect(firstArtifacts).toMatchObject([
-        {
-          formatId: "inventory_xml_gismt_aggregation",
-          formatVersion: 1,
-          mimeType: "application/xml; charset=utf-8",
-          codeCount: 1,
-          boxCount: 1,
-        },
-        {
-          formatId: "inventory_xml_gismt_disaggregation",
-          formatVersion: 1,
-          mimeType: "application/xml; charset=utf-8",
-          codeCount: 0,
-          boxCount: 1,
-        },
-      ]);
-      const storedFirstArtifacts = await db
-        .select({
-          id: schema.inventoryDocumentArtifacts.id,
-          formatId: schema.inventoryDocumentArtifacts.formatId,
-          objectKey: schema.inventoryDocumentArtifacts.objectKey,
-          sha256: schema.inventoryDocumentArtifacts.sha256,
-        })
-        .from(schema.inventoryDocumentArtifacts)
-        .where(eq(schema.inventoryDocumentArtifacts.runId, first.body.id));
-      expect(storedFirstArtifacts).toHaveLength(2);
-      for (const artifact of storedFirstArtifacts) {
-        const body = objects.get(artifact.objectKey);
-        if (!body) throw new Error(`Expected stored production artifact ${artifact.formatId}`);
-        expect(createHash("sha256").update(body).digest("hex")).toBe(artifact.sha256);
-        const xml = body.toString("utf8");
-        expect(xml).not.toContain(source.protectedCanonical.serial);
-        expect(xml).not.toContain(source.protectedOldSscc);
-        expect(xml).not.toContain(source.protectedNewSscc);
-        if (artifact.formatId === "inventory_xml_gismt_aggregation") {
-          expect(xml).toContain(source.eligibleCanonical.serial);
-          expect(xml).toContain(`00${source.eligibleNewSscc}`);
-        } else {
-          expect(xml).toContain(source.eligibleOldSscc);
-          expect(xml).not.toContain(source.eligibleNewSscc);
-        }
-        const individual = await owner.agent
-          .get(`/inventory-document-runs/${first.body.id}/artifacts/${artifact.id}/download`)
-          .expect(200);
-        expect(individual.body).toMatchObject({
-          url: `https://storage.test/${encodeURIComponent(artifact.objectKey)}`,
-          expiresInSeconds: 300,
-        });
-      }
-
-      await owner.agent.get(`/inventory-document-runs/${first.body.id}/download`).expect(200);
-      const firstZipKey = `tenants/${owner.tenantId}/inventory-documents/${first.body.id}/revision-7/package.zip`;
-      const firstZip = objects.get(firstZipKey);
-      if (!firstZip) throw new Error("Expected production revision 7 ZIP");
-      const firstArchive = unzipSync(firstZip);
-      const manifest = JSON.parse(strFromU8(firstArchive["manifest.json"]!)) as {
-        schemaVersion: number;
-        runId: string;
-        resultRevision: number;
-        artifacts: Array<{
-          name: string;
-          bytes: number;
-          sha256: string;
-          formatId: string;
-          formatVersion: number;
-        }>;
-      };
-      expect(manifest).toMatchObject({
-        schemaVersion: 1,
-        runId: first.body.id,
-        resultRevision: 7,
-        artifacts: firstArtifacts.map((artifact) => ({
-          name: artifact.filename,
-          bytes: artifact.byteSize,
-          sha256: artifact.sha256,
-          formatId: artifact.formatId,
-          formatVersion: 1,
-        })),
-      });
-      for (const artifact of firstArtifacts) {
-        expect(createHash("sha256").update(firstArchive[artifact.filename]!).digest("hex")).toBe(
-          artifact.sha256,
-        );
-      }
 
       const reopened = await owner.agent
         .post(`/inventories/${owner.inventoryId}/reopen`)
         .send({})
         .expect(201);
+      const regeneratedRevision = owner.resultRevision + 1;
       expect(reopened.body).toMatchObject({
+        inventoryId: owner.inventoryId,
         status: "running",
-        resultRevision: 8,
+        resultRevision: regeneratedRevision,
         invalidatedArtifactCount: 2,
       });
-      for (const artifact of storedFirstArtifacts) {
+      for (const artifact of firstVerified.storedArtifacts) {
         await owner.agent
           .get(`/inventory-document-runs/${first.body.id}/artifacts/${artifact.id}/download`)
           .expect(404);
       }
-      await owner.agent.post(`/inventories/${owner.inventoryId}/close`).send({}).expect(201);
 
+      const closedAgain = await owner.agent
+        .post(`/inventories/${owner.inventoryId}/close`)
+        .send({})
+        .expect(201);
+      expect(closedAgain.body).toMatchObject({
+        inventoryId: owner.inventoryId,
+        status: "closed",
+        resultRevision: regeneratedRevision,
+        blockers: [],
+      });
       const second = await owner.agent
         .post(`/inventories/${owner.inventoryId}/document-runs`)
         .send(productionBody())
         .expect(201);
-      expect(second.body).toMatchObject({ resultRevision: 8, status: "queued" });
-      await runner.run(second.body.id as string, { retryCount: 0, retryLimit: 0 });
-      const secondHistory = await owner.agent
-        .get(`/inventories/${owner.inventoryId}/document-runs`)
-        .expect(200);
-      const secondRun = secondHistory.body.items.find(
-        (run: { id: string }) => run.id === second.body.id,
-      ) as { status: string; artifacts: Array<{ id: string; sha256: string }> } | undefined;
-      if (!secondRun) throw new Error("Expected production revision 8 run");
-      expect(secondRun).toMatchObject({
-        status: "ready",
-        artifacts: [
-          { id: expect.any(String), sha256: expect.stringMatching(/^[0-9a-f]{64}$/) },
-          { id: expect.any(String), sha256: expect.stringMatching(/^[0-9a-f]{64}$/) },
-        ],
+      expect(second.body).toMatchObject({
+        resultRevision: regeneratedRevision,
+        status: "queued",
       });
-      await owner.agent.get(`/inventory-document-runs/${second.body.id}/download`).expect(200);
-      const secondZipKey = `tenants/${owner.tenantId}/inventory-documents/${second.body.id}/revision-8/package.zip`;
-      const secondZip = objects.get(secondZipKey);
-      if (!secondZip) throw new Error("Expected production revision 8 ZIP");
-      const secondManifest = JSON.parse(strFromU8(unzipSync(secondZip)["manifest.json"]!)) as {
-        runId: string;
-        resultRevision: number;
-        artifacts: Array<{ formatId: string; formatVersion: number }>;
-      };
-      expect(secondManifest).toMatchObject({
-        runId: second.body.id,
-        resultRevision: 8,
-        artifacts: [
-          { formatId: "inventory_xml_gismt_aggregation", formatVersion: 1 },
-          { formatId: "inventory_xml_gismt_disaggregation", formatVersion: 1 },
-        ],
-      });
+      expect(second.body.id).not.toBe(first.body.id);
+      await verifyProductionRun(owner, second.body.id as string, regeneratedRevision);
 
       const completed = await owner.agent
         .post(`/inventories/${owner.inventoryId}/complete`)
         .send({ documentsDownloadedAndChecked: true })
         .expect(201);
-      expect(completed.body).toMatchObject({ status: "completed", resultRevision: 8 });
+      expect(completed.body).toMatchObject({
+        inventoryId: owner.inventoryId,
+        status: "completed",
+        resultRevision: regeneratedRevision,
+      });
     } finally {
       registry = new InventoryDocumentGeneratorRegistry(syntheticGenerators);
     }
   });
-
   it("does not record ZIP download evidence when presigning fails", async () => {
     const owner = await seedInventory();
     const seeded = await seedReadySingleArtifact(owner, "presign.csv");
