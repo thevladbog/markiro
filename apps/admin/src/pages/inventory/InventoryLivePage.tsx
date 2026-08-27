@@ -45,7 +45,7 @@ export function InventoryLivePage({
     <AdminPage className="mk-inventory-page mk-inventory-live">
       <header className="mk-inventory-live__header">
         <div>
-          <h1>{t("pages.inventory.live.title", { number: inventory.number })}</h1>
+          <h1>{inventory.number}</h1>
           <p className="mk-inventory-page__description">
             {inventory.productName} · {inventory.lineName}
           </p>

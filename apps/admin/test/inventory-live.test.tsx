@@ -226,7 +226,7 @@ afterEach(async () => {
 
 it("renders approved live evidence with stale participants and local pending work distinguished", async () => {
   renderLive();
-  expect(await screen.findByRole("heading", { name: "Инвентаризация ИНВ-00042" })).toBeDefined();
+  expect(await screen.findByRole("heading", { level: 1, name: "ИНВ-00042" })).toBeDefined();
   expect(screen.getByText("312")).toBeDefined();
   expect(screen.getByText("3 804")).toBeDefined();
   expect(screen.getAllByText("Станция упаковки № 1").length).toBeGreaterThan(0);
@@ -242,7 +242,7 @@ it("polls at the bounded interval while running and stops after the server repor
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const closed = { ...progress, status: "closed" };
   const live = renderLive([progress, closed]);
-  expect(await screen.findByRole("heading", { name: "Инвентаризация ИНВ-00042" })).toBeDefined();
+  expect(await screen.findByRole("heading", { level: 1, name: "ИНВ-00042" })).toBeDefined();
   expect(live.getProgressRequestCount()).toBe(1);
   await vi.advanceTimersByTimeAsync(5_000);
   await waitFor(() => expect(live.getProgressRequestCount()).toBe(2));

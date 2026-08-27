@@ -396,7 +396,6 @@
         "start": "Start inventory"
       },
       "live": {
-        "title": "Inventory {{number}}",
         "loading": "Loading inventory progress",
         "loadError": "Could not load inventory progress",
         "corrections": "Corrections",
