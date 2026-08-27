@@ -145,7 +145,14 @@ export type {
 export {
   generateInventoryAggregationXml,
   generateInventoryAggregationXmlV2,
+  generateInventoryBalancesByProductionDateCsv,
+  generateInventoryCurrentStockCsv,
   generateInventoryDisaggregationXml,
+  generateInventoryFinalBoxContentsCsv,
+  generateInventoryFinalBoxesTxt,
+  generateInventoryWriteOffCsv,
+  generateInventoryWriteOffTxt,
+  inventoryDocumentFilenamePrefix,
   InventoryDocumentGenerationError,
 } from "./inventory/index.js";
 export type {

@@ -14,6 +14,7 @@ export interface InventoryDocumentGenerationMetadata {
 }
 
 export interface InventoryDocumentGenerationSource {
+  writeOffCandidates?: readonly { codeHash: string; canonicalRaw: string }[];
   verified: readonly {
     codeHash: string;
     canonicalRaw: string;
@@ -34,7 +35,8 @@ export interface InventoryDocumentGenerationSource {
 export interface InventoryDocumentGeneratedPart {
   partNumber: number;
   filename: string;
-  mimeType: "application/xml; charset=utf-8";
+  mimeType:
+    "application/xml; charset=utf-8" | "text/csv; charset=utf-8" | "text/plain; charset=utf-8";
   bytes: Uint8Array;
   rowCount: number;
   codeCount: number;
@@ -46,7 +48,8 @@ export type InventoryDocumentGenerationErrorCode =
   | "INVALID_CIS"
   | "INVALID_DOCUMENT_METADATA"
   | "INVALID_ORGANIZATION_INN"
-  | "INVALID_SSCC";
+  | "INVALID_SSCC"
+  | "VERIFIED_PRODUCTION_DATE_MISSING";
 
 export class InventoryDocumentGenerationError extends Error {
   constructor(readonly code: InventoryDocumentGenerationErrorCode) {
@@ -89,7 +92,7 @@ export function generateInventoryAggregationXml(
   ];
   return [
     part(
-      `${inventoryFilenamePrefix(metadata.inventoryNumber)}-aggregation.xml`,
+      `${inventoryDocumentFilenamePrefix(metadata.inventoryNumber)}-aggregation.xml`,
       lines,
       boxes.reduce((count, box) => count + box.codes.length, 0),
       boxes.length,
@@ -116,7 +119,7 @@ export function generateInventoryAggregationXmlV2(
     return [
       {
         partNumber: 1,
-        filename: `${inventoryFilenamePrefix(metadata.inventoryNumber)}-aggregation.xml`,
+        filename: `${inventoryDocumentFilenamePrefix(metadata.inventoryNumber)}-aggregation.xml`,
         mimeType: XML_MIME_TYPE,
         bytes: rendered.bytes,
         rowCount: rendered.physicalLineCount,
@@ -173,7 +176,7 @@ export function generateInventoryDisaggregationXml(
   ];
   return [
     part(
-      `${inventoryFilenamePrefix(metadata.inventoryNumber)}-disaggregation.xml`,
+      `${inventoryDocumentFilenamePrefix(metadata.inventoryNumber)}-disaggregation.xml`,
       lines,
       0,
       boxes.length,
@@ -292,7 +295,7 @@ function stripKmCryptoTail(code: string): string {
   }
 }
 
-function inventoryFilenamePrefix(inventoryNumber: string): string {
+export function inventoryDocumentFilenamePrefix(inventoryNumber: string): string {
   const sanitized = inventoryNumber
     .normalize("NFC")
     .replace(/[^\p{L}\p{N}-]+/gu, "-")

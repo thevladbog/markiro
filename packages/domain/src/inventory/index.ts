@@ -73,6 +73,7 @@ export {
   generateInventoryAggregationXml,
   generateInventoryAggregationXmlV2,
   generateInventoryDisaggregationXml,
+  inventoryDocumentFilenamePrefix,
   InventoryDocumentGenerationError,
 } from "./document-generators.js";
 export type {
@@ -83,6 +84,14 @@ export type {
 } from "./document-generators.js";
 export { selectEligibleInventoryFinalBoxes } from "./document-selection.js";
 export type { EligibleInventoryFinalBox } from "./document-selection.js";
+export {
+  generateInventoryBalancesByProductionDateCsv,
+  generateInventoryCurrentStockCsv,
+  generateInventoryFinalBoxContentsCsv,
+  generateInventoryFinalBoxesTxt,
+  generateInventoryWriteOffCsv,
+  generateInventoryWriteOffTxt,
+} from "./tabular-document-generators.js";
 export type {
   InventoryDocumentFormatAvailability,
   InventoryDocumentFormatDescriptor,
