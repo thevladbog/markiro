@@ -37,7 +37,12 @@ const SELL_CODES = {
 };
 
 function jsonResponse(status: number, body: unknown): Response {
-  return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+    text: async () => (body === undefined ? "" : JSON.stringify(body)),
+  } as Response;
 }
 
 function stubFetch(status = 200, body: unknown = SELL_CODES) {

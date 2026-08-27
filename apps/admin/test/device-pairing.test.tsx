@@ -11,7 +11,12 @@ import { DeviceActions } from "../src/pages/devices/DeviceActions.js";
 import { PairingCodePanel } from "../src/pages/devices/PairingCodePanel.js";
 
 function response(body: unknown): Response {
-  return { ok: true, status: 200, json: async () => body } as Response;
+  return {
+    ok: true,
+    status: 200,
+    json: async () => body,
+    text: async () => (body === undefined ? "" : JSON.stringify(body)),
+  } as Response;
 }
 
 function activeExpiry(offsetMs = 60_000): string {
