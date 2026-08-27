@@ -305,6 +305,123 @@ export class IntegrationsService {
     throw new Error("Could not mint a unique exchange login");
   }
 
+  /**
+   * Полное отключение интеграции (тенант переходит на другую систему):
+   * строка канала (настройки + логин/хэш секрета обмена), все сеансы с их
+   * cookie, куски файлов, журнал и очередь несопоставленных удаляются одной
+   * транзакцией. Удаление строки канала само по себе отзывает `checkauth`
+   * (exchange.controller.ts ищет её по `credentialLogin`), но живая cookie
+   * проверяется только по `integration_sessions` -- без удаления сеансов 1С
+   * посреди обмена продолжила бы слать файлы уже "удалённой" интеграции.
+   *
+   * Сеансы именно УДАЛЯЮТСЯ, а не завершаются через `finishSession`:
+   * предъявление cookie завершённого/просроченного сеанса журналируется
+   * (`ExchangeSessionService.resolve`), а `JournalService.append` --
+   * upsert по строке канала. Оставь мы строки сеансов, первый же повторный
+   * вызов 1С со старой cookie ВОСКРЕСИЛ бы только что удалённый канал
+   * (строка с lastOutcome: "error" -> карточка "Ошибка" у канала, которого
+   * нет). Для несуществующей строки сеанса `resolve` молчит -- ровно та же
+   * граница, что у `checkauth` с неизвестным логином.
+   *
+   * Итоговое событие пишется прямым insert'ом, НЕ `journal.append` -- по
+   * той же причине: upsert внутри `append` создал бы строку канала заново,
+   * и `stateOf` показал бы "working" вместо `not_configured`. Событие с
+   * `sessionId: null` кабинетный журнал видит через ветку orphan-событий
+   * (`readJournal`), так что после удаления журнал отвечает на "куда всё
+   * делось" одной записью вместо пустоты.
+   *
+   * `products.external_ref` сознательно не трогается: как и ручной разрыв
+   * связи (`unlinkProduct` -- "разрыв связи не трогает цену"), удаление
+   * интеграции не должно молча менять каталог. Для точечного разрыва есть
+   * `DELETE /products/:id/external-link`.
+   *
+   * 409, если строки канала нет: удалять нечего -- то же "отказ вместо
+   * тихого no-op", что у `unlinkProduct`. И 409 каналу без учётных данных
+   * обмена (`usesExchangeCredentials: false`): у `public_api` аутентификация
+   * -- собственный список ключей (`api-keys.service.ts`), удаление строки
+   * канала их бы НЕ отозвало, а выглядело бы как "интеграция удалена".
+   */
+  async deleteChannel(tenantId: string, type: IntegrationChannelType): Promise<void> {
+    const descriptor = safeDescribeChannel(type);
+    if (!descriptor.usesExchangeCredentials) {
+      throw new ConflictException("Channel cannot be deleted this way");
+    }
+
+    await this.db.transaction(async (tx) => {
+      const [deleted] = await tx
+        .delete(schema.integrationChannels)
+        .where(
+          and(
+            eq(schema.integrationChannels.tenantId, tenantId),
+            eq(schema.integrationChannels.type, type),
+          ),
+        )
+        .returning({ type: schema.integrationChannels.type });
+      if (!deleted) {
+        throw new ConflictException("Channel is not configured");
+      }
+
+      // Куски файлов не несут channelType -- собираем id сеансов ДО их
+      // удаления и чистим по ним (tenantId в where -- страховка границы
+      // тенанта, как везде в этом файле).
+      const sessions = await tx
+        .select({ id: schema.integrationSessions.id })
+        .from(schema.integrationSessions)
+        .where(
+          and(
+            eq(schema.integrationSessions.tenantId, tenantId),
+            eq(schema.integrationSessions.channelType, type),
+          ),
+        );
+      if (sessions.length > 0) {
+        await tx.delete(schema.exchangeUploads).where(
+          and(
+            eq(schema.exchangeUploads.tenantId, tenantId),
+            inArray(
+              schema.exchangeUploads.sessionId,
+              sessions.map((s) => s.id),
+            ),
+          ),
+        );
+      }
+
+      await tx
+        .delete(schema.integrationEvents)
+        .where(
+          and(
+            eq(schema.integrationEvents.tenantId, tenantId),
+            eq(schema.integrationEvents.channelType, type),
+          ),
+        );
+      await tx
+        .delete(schema.integrationSessions)
+        .where(
+          and(
+            eq(schema.integrationSessions.tenantId, tenantId),
+            eq(schema.integrationSessions.channelType, type),
+          ),
+        );
+      await tx
+        .delete(schema.integrationCandidates)
+        .where(
+          and(
+            eq(schema.integrationCandidates.tenantId, tenantId),
+            eq(schema.integrationCandidates.channelType, type),
+          ),
+        );
+
+      await tx.insert(schema.integrationEvents).values({
+        tenantId,
+        channelType: type,
+        sessionId: null,
+        direction: "local",
+        outcome: "ok",
+        grain: "session",
+        message: "Интеграция удалена: настройки, учётные данные и журнал очищены",
+      });
+    });
+  }
+
   async readJournal(tenantId: string, type: IntegrationChannelType): Promise<JournalPageDto> {
     safeDescribeChannel(type);
     const sessions = await this.db
