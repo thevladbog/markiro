@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { strFromU8, unzipSync } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import { schema, type Db } from "@markiro/db";
-import type { InventoryDocumentFormatDescriptor } from "@markiro/domain";
+import {
+  INVENTORY_DOCUMENT_FORMATS,
+  InventoryDocumentGenerationError,
+  type InventoryDocumentFormatDescriptor,
+} from "@markiro/domain";
 
 import {
   buildInventoryDocumentZip,
@@ -16,6 +20,19 @@ import type { InventoryResultSourceService } from "../src/modules/inventories/in
 import type { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 
 const artifacts: InventoryDocumentZipArtifact[] = [
+  {
+    filename: "empty.txt",
+    mimeType: "text/plain; charset=utf-8",
+    bytes: new Uint8Array(),
+    sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    byteSize: 0,
+    rowCount: 0,
+    codeCount: 0,
+    boxCount: 0,
+    formatId: "synthetic_empty",
+    formatVersion: 1,
+    partNumber: 1,
+  },
   {
     filename: "stock.csv",
     mimeType: "text/csv; charset=utf-8",
@@ -38,7 +55,7 @@ describe("inventory document ZIP", () => {
 
     expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
     const archive = unzipSync(first);
-    expect(Object.keys(archive)).toEqual(["manifest.json", "stock.csv"]);
+    expect(Object.keys(archive)).toEqual(["manifest.json", "empty.txt", "stock.csv"]);
     expect(strFromU8(archive["manifest.json"]!)).toBe(
       `${JSON.stringify(
         {
@@ -46,6 +63,18 @@ describe("inventory document ZIP", () => {
           runId: "run-1",
           resultRevision: 7,
           artifacts: [
+            {
+              name: "empty.txt",
+              mimeType: "text/plain; charset=utf-8",
+              bytes: 0,
+              sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              rowCount: 0,
+              codeCount: 0,
+              boxCount: 0,
+              formatId: "synthetic_empty",
+              formatVersion: 1,
+              partNumber: 1,
+            },
             {
               name: "stock.csv",
               mimeType: "text/csv; charset=utf-8",
@@ -65,7 +94,11 @@ describe("inventory document ZIP", () => {
       )}\n`,
     );
     expect(createHash("sha256").update(archive["stock.csv"]!).digest("hex")).toBe(
-      artifacts[0]!.sha256,
+      artifacts[1]!.sha256,
+    );
+    expect(archive["empty.txt"]).toHaveLength(0);
+    expect(createHash("sha256").update(archive["empty.txt"]!).digest("hex")).toBe(
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     );
   });
 
@@ -79,7 +112,7 @@ describe("inventory document ZIP", () => {
     "C:stock.csv",
     "CON.csv",
   ])("rejects unsafe artifact filename %s", (filename) => {
-    expect(() => buildInventoryDocumentZip("run-1", 7, [{ ...artifacts[0]!, filename }])).toThrow(
+    expect(() => buildInventoryDocumentZip("run-1", 7, [{ ...artifacts[1]!, filename }])).toThrow(
       "INVENTORY_DOCUMENT_ARCHIVE_FILENAME_INVALID",
     );
   });
@@ -87,8 +120,8 @@ describe("inventory document ZIP", () => {
   it("rejects duplicate and case-folding filename collisions", () => {
     expect(() =>
       buildInventoryDocumentZip("run-1", 7, [
-        artifacts[0]!,
-        { ...artifacts[0]!, filename: "STOCK.CSV", partNumber: 2 },
+        artifacts[1]!,
+        { ...artifacts[1]!, filename: "STOCK.CSV", partNumber: 2 },
       ]),
     ).toThrow("INVENTORY_DOCUMENT_ARCHIVE_FILENAME_COLLISION");
   });
@@ -103,6 +136,14 @@ const descriptor: InventoryDocumentFormatDescriptor = {
   requiredSourceCategories: ["verified"],
   supportsParts: false,
   availability: "available",
+};
+
+const txtDescriptor: InventoryDocumentFormatDescriptor = {
+  ...descriptor,
+  id: "synthetic_empty",
+  label: "Synthetic empty TXT",
+  extension: "txt",
+  mimeType: "text/plain; charset=utf-8",
 };
 
 interface RunRow {
@@ -300,7 +341,7 @@ function syntheticRegistry(
       partNumber: 1,
       filename: "stock.csv",
       mimeType: descriptor.mimeType,
-      bytes: artifacts[0]!.bytes,
+      bytes: artifacts[1]!.bytes,
       rowCount: 1,
       codeCount: 1,
       boxCount: 0,
@@ -313,11 +354,76 @@ function syntheticRegistry(
 }
 
 describe("production inventory document generators", () => {
-  it("registers exactly the two approved GISMT XML generators", () => {
-    expect(productionInventoryDocumentGeneratorRegistry.listAvailable()).toEqual([
-      expect.objectContaining({ id: "inventory_xml_gismt_aggregation", version: 1 }),
-      expect.objectContaining({ id: "inventory_xml_gismt_disaggregation", version: 1 }),
-    ]);
+  it("advertises the eight current domain formats in catalog order and executes legacy v1", () => {
+    expect(productionInventoryDocumentGeneratorRegistry.listAvailable()).toEqual(
+      INVENTORY_DOCUMENT_FORMATS,
+    );
+    expect(
+      productionInventoryDocumentGeneratorRegistry.resolveForSelection(
+        "inventory_xml_gismt_aggregation",
+        2,
+      ),
+    ).toBeDefined();
+    expect(() =>
+      productionInventoryDocumentGeneratorRegistry.resolveForSelection(
+        "inventory_xml_gismt_aggregation",
+        1,
+      ),
+    ).toThrowError(expect.objectContaining({ code: "FORMAT_SUPERSEDED" }));
+    expect(
+      productionInventoryDocumentGeneratorRegistry.resolveForExecution(
+        "inventory_xml_gismt_aggregation",
+        1,
+      ),
+    ).toBeDefined();
+    expect(
+      productionInventoryDocumentGeneratorRegistry.resolveForExecution(
+        "inventory_xml_gismt_aggregation",
+        2,
+      ),
+    ).toBeDefined();
+  });
+
+  it("allows zero-byte artifacts only on the two production TXT generators", () => {
+    const flagged = productionInventoryDocumentGeneratorRegistry
+      .listAvailable()
+      .filter(
+        ({ id, version }) =>
+          productionInventoryDocumentGeneratorRegistry.resolveForSelection(id, version)
+            .allowsZeroByteArtifact === true,
+      )
+      .map(({ id }) => id);
+
+    expect(flagged).toEqual(["inventory_txt_write_off", "inventory_txt_final_boxes"]);
+  });
+});
+
+describe("inventory document generator registry", () => {
+  it("keeps generator identity exact for two registered versions of one id", () => {
+    const legacy = {
+      descriptor: { ...descriptor, availability: "unavailable" as const },
+      generate: vi.fn(async () => []),
+    };
+    const current = {
+      descriptor: { ...descriptor, version: 2, availability: "available" as const },
+      generate: vi.fn(async () => []),
+    };
+    const registry = new InventoryDocumentGeneratorRegistry([legacy, current]);
+
+    expect(registry.resolveForExecution(descriptor.id, 1).generate).toBe(legacy.generate);
+    expect(registry.resolveForExecution(descriptor.id, 2).generate).toBe(current.generate);
+    expect(registry.resolveForSelection(descriptor.id, 2).descriptor).toEqual(current.descriptor);
+    expect(() => registry.resolveForSelection(descriptor.id, 1)).toThrowError(
+      expect.objectContaining({ code: "FORMAT_SUPERSEDED" }),
+    );
+  });
+
+  it("rejects duplicate generator registrations for the same exact id and version", () => {
+    const generator = { descriptor, generate: vi.fn(async () => []) };
+
+    expect(() => new InventoryDocumentGeneratorRegistry([generator, generator])).toThrowError(
+      expect.objectContaining({ code: "DUPLICATE_FORMAT_VERSION" }),
+    );
   });
 });
 
@@ -330,7 +436,7 @@ describe("inventory document runner", () => {
         partNumber: 1,
         filename: "stock.csv",
         mimeType: descriptor.mimeType,
-        bytes: artifacts[0]!.bytes,
+        bytes: artifacts[1]!.bytes,
         rowCount: 1,
         codeCount: 1,
         boxCount: 0,
@@ -354,14 +460,14 @@ describe("inventory document runner", () => {
         formatVersion: 1,
         filename: "stock.csv",
         byteSize: 25,
-        sha256: artifacts[0]!.sha256,
+        sha256: artifacts[1]!.sha256,
       }),
     ]);
     expect(storage.putVerified).toHaveBeenCalledWith(
       `tenants/tenant-1/inventory-documents/${fake.state.row.id}/attempt-1/synthetic_stock-v1-part-1`,
       expect.any(Buffer),
       descriptor.mimeType,
-      artifacts[0]!.sha256,
+      artifacts[1]!.sha256,
     );
     expect(generated).toHaveBeenCalledWith(expect.objectContaining({ resultRevision: 7 }), {
       documentId: fake.state.row.id,
@@ -371,6 +477,199 @@ describe("inventory document runner", () => {
       organizationName: "ООО Тест",
       organizationInn: "9705119097",
     });
+  });
+
+  it("hashes, stores, and publishes an explicitly valid zero-byte TXT artifact", async () => {
+    const fake = runnerDb(runRow({ selectedFormats: [{ id: txtDescriptor.id, version: 1 }] }));
+    const storage = runnerStorage();
+    const runner = new InventoryDocumentRunnerService(
+      fake.db,
+      inventorySource(),
+      storage,
+      new InventoryDocumentGeneratorRegistry([
+        {
+          descriptor: txtDescriptor,
+          allowsZeroByteArtifact: true,
+          generate: async () => [
+            {
+              partNumber: 1,
+              filename: "empty.txt",
+              mimeType: "text/plain; charset=utf-8",
+              bytes: new Uint8Array(),
+              rowCount: 0,
+              codeCount: 0,
+              boxCount: 0,
+            },
+          ],
+        },
+      ]),
+    );
+
+    await runner.run(fake.state.row.id, { retryCount: 0, retryLimit: 5 });
+
+    expect(fake.state.row.status).toBe("ready");
+    expect(fake.state.artifacts).toEqual([
+      expect.objectContaining({
+        byteSize: 0,
+        sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      }),
+    ]);
+    expect(storage.putVerified).toHaveBeenCalledWith(
+      expect.stringContaining("synthetic_empty-v1-part-1"),
+      expect.objectContaining({ byteLength: 0 }),
+      "text/plain; charset=utf-8",
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    );
+  });
+
+  it.each([
+    {
+      name: "the generator does not opt in",
+      generator: {
+        descriptor: txtDescriptor,
+        generate: async () => [
+          {
+            partNumber: 1,
+            filename: "empty.txt",
+            mimeType: "text/plain; charset=utf-8",
+            bytes: new Uint8Array(),
+            rowCount: 0,
+            codeCount: 0,
+            boxCount: 0,
+          },
+        ],
+      },
+    },
+    {
+      name: "the empty TXT reports non-zero metrics",
+      generator: {
+        descriptor: txtDescriptor,
+        allowsZeroByteArtifact: true as const,
+        generate: async () => [
+          {
+            partNumber: 1,
+            filename: "empty.txt",
+            mimeType: "text/plain; charset=utf-8",
+            bytes: new Uint8Array(),
+            rowCount: 1,
+            codeCount: 0,
+            boxCount: 0,
+          },
+        ],
+      },
+    },
+    {
+      name: "the opted-in artifact is not plain UTF-8 text",
+      generator: {
+        descriptor,
+        allowsZeroByteArtifact: true as const,
+        generate: async () => [
+          {
+            partNumber: 1,
+            filename: "empty.csv",
+            mimeType: "text/csv; charset=utf-8",
+            bytes: new Uint8Array(),
+            rowCount: 0,
+            codeCount: 0,
+            boxCount: 0,
+          },
+        ],
+      },
+    },
+  ])("fails before storage when $name", async ({ generator }) => {
+    const fake = runnerDb(
+      runRow({
+        selectedFormats: [{ id: generator.descriptor.id, version: generator.descriptor.version }],
+      }),
+    );
+    const storage = runnerStorage();
+    const runner = new InventoryDocumentRunnerService(
+      fake.db,
+      inventorySource(),
+      storage,
+      new InventoryDocumentGeneratorRegistry([generator]),
+    );
+
+    await runner.run(fake.state.row.id, { retryCount: 0, retryLimit: 5 });
+
+    expect(fake.state.row.status).toBe("failed");
+    expect(fake.state.row.errorCode).toBe("GENERATION_FAILED");
+    expect(fake.state.artifacts).toHaveLength(0);
+    expect(storage.putVerified).not.toHaveBeenCalled();
+  });
+
+  it("publishes only the missing verified production date as its precise safe error", async () => {
+    const failingDescriptor: InventoryDocumentFormatDescriptor = {
+      ...descriptor,
+      id: "synthetic_balances",
+    };
+    const fake = runnerDb(
+      runRow({
+        selectedFormats: [
+          { id: descriptor.id, version: 1 },
+          { id: failingDescriptor.id, version: 1 },
+        ],
+      }),
+    );
+    const storage = runnerStorage();
+    const runner = new InventoryDocumentRunnerService(
+      fake.db,
+      inventorySource(),
+      storage,
+      new InventoryDocumentGeneratorRegistry([
+        {
+          descriptor,
+          generate: async () => [
+            {
+              partNumber: 1,
+              filename: "stock.csv",
+              mimeType: descriptor.mimeType,
+              bytes: artifacts[1]!.bytes,
+              rowCount: 1,
+              codeCount: 1,
+              boxCount: 0,
+            },
+          ],
+        },
+        {
+          descriptor: failingDescriptor,
+          generate: async () => {
+            throw new InventoryDocumentGenerationError("VERIFIED_PRODUCTION_DATE_MISSING");
+          },
+        },
+      ]),
+    );
+
+    await runner.run(fake.state.row.id, { retryCount: 0, retryLimit: 5 });
+
+    expect(fake.state.row.status).toBe("failed");
+    expect(fake.state.row.errorCode).toBe("VERIFIED_PRODUCTION_DATE_MISSING");
+    expect(fake.state.artifacts).toHaveLength(0);
+    expect(storage.putVerified).not.toHaveBeenCalled();
+  });
+
+  it("keeps other generator validation faults behind GENERATION_FAILED", async () => {
+    const fake = runnerDb();
+    const storage = runnerStorage();
+    const runner = new InventoryDocumentRunnerService(
+      fake.db,
+      inventorySource(),
+      storage,
+      new InventoryDocumentGeneratorRegistry([
+        {
+          descriptor,
+          generate: async () => {
+            throw new InventoryDocumentGenerationError("EMPTY_SOURCE");
+          },
+        },
+      ]),
+    );
+
+    await runner.run(fake.state.row.id, { retryCount: 0, retryLimit: 5 });
+
+    expect(fake.state.row.status).toBe("failed");
+    expect(fake.state.row.errorCode).toBe("GENERATION_FAILED");
+    expect(storage.putVerified).not.toHaveBeenCalled();
   });
 
   it("fails closed before upload when the frozen result revision changed", async () => {

@@ -62,7 +62,7 @@ export class InventoryDocumentsService {
     }
     for (const selected of selectedFormats) {
       try {
-        this.generators.resolve(selected.id, selected.version);
+        this.generators.resolveForSelection(selected.id, selected.version);
       } catch (error) {
         throw formatSelectionError(error);
       }
