@@ -1,5 +1,5 @@
 import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from "@nestjs/common/constants";
-import { RequestMethod } from "@nestjs/common";
+import { BadRequestException, RequestMethod } from "@nestjs/common";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { describe, expect, it, vi } from "vitest";
 
@@ -14,21 +14,29 @@ import type { DashboardService } from "../src/modules/dashboard/dashboard.servic
 import { SubscriptionAccessGuard } from "../src/subscriptions/subscription-access.guard";
 import { ROUTE_SUBSCRIPTION_ACCESS_POLICY } from "../src/subscriptions/subscription-access-policy";
 import { TenantGuard, type RequestWithTenant } from "../src/tenancy/tenant.guard";
+import { ZodValidationPipe } from "../src/zod.pipe";
 
 describe("DashboardController", () => {
-  it("uses the authenticated tenant and the default period without accepting tenant input", async () => {
+  it("defaults an omitted period through the query pipe and uses the authenticated tenant", async () => {
     const overview = vi.fn(async () => ({}) as DashboardOverviewDto);
     const controller = new DashboardController({ overview } as unknown as DashboardService);
     const request = { tenantId: "authenticated-tenant" } as RequestWithTenant;
-    const query = {
-      ...dashboardOverviewQuerySchema.parse({}),
-      tenantId: "forged-tenant",
-    } as ReturnType<typeof dashboardOverviewQuerySchema.parse>;
+    const pipe = new ZodValidationPipe(dashboardOverviewQuerySchema);
+    const query = pipe.transform({}) as ReturnType<typeof dashboardOverviewQuerySchema.parse>;
 
     await controller.overview(request, query);
 
     expect(overview).toHaveBeenCalledOnce();
     expect(overview).toHaveBeenCalledWith("authenticated-tenant", "7d");
+  });
+
+  it("rejects unsupported periods and a client-supplied tenant at the query pipe", () => {
+    const pipe = new ZodValidationPipe(dashboardOverviewQuerySchema);
+
+    expect(() => pipe.transform({ period: "year" })).toThrow(BadRequestException);
+    expect(() => pipe.transform({ period: "today", tenantId: "forged-tenant" })).toThrow(
+      BadRequestException,
+    );
   });
 
   it("registers one guarded cabinet read route with subscription read-only access", () => {
