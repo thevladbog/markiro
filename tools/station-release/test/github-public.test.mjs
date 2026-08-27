@@ -74,6 +74,52 @@ test("reads immutable and channel assets through exact unauthenticated GitHub pu
   );
 });
 
+test("retries transient GitHub public failures with bounded backoff", async () => {
+  const { createGithubPublicReader } = await githubPublic();
+  const waits = [];
+  let call = 0;
+  const location =
+    "https://release-assets.githubusercontent.com/github-production-release-asset/123/retried?sig=bounded";
+  const reader = createGithubPublicReader({
+    fetchImpl: async () => {
+      call += 1;
+      if (call === 1) throw new Error("temporary provider failure with secret detail");
+      if (call === 2) return new Response("not ready", { status: 404 });
+      if (call === 3) return redirect(location);
+      return new Response("manifest", { status: 200, headers: { "content-length": "8" } });
+    },
+    waitImpl: async (milliseconds) => waits.push(milliseconds),
+  });
+
+  assert.deepEqual(
+    await reader.readChannelManifest({ channel: "stable" }),
+    Buffer.from("manifest"),
+  );
+  assert.equal(call, 4);
+  assert.deepEqual(waits, [1_000, 2_000]);
+});
+
+test("bounds persistent GitHub public retries and sanitizes the final failure", async () => {
+  const { createGithubPublicReader } = await githubPublic();
+  const waits = [];
+  let call = 0;
+  const reader = createGithubPublicReader({
+    fetchImpl: async () => {
+      call += 1;
+      throw new Error("github_pat_secret provider detail");
+    },
+    waitImpl: async (milliseconds) => waits.push(milliseconds),
+  });
+
+  await assert.rejects(reader.readChannelManifest({ channel: "stable" }), (error) => {
+    assert.equal(error.message, "station GitHub public read failed");
+    assert.equal(error.message.includes("secret"), false);
+    return true;
+  });
+  assert.equal(call, 4);
+  assert.deepEqual(waits, [1_000, 2_000, 4_000]);
+});
+
 test("rejects unsafe GitHub redirect schemes, hosts, paths, credentials and redirect chains", async () => {
   const { createGithubPublicReader } = await githubPublic();
   const invalidLocations = [
@@ -163,6 +209,7 @@ test("bounds GitHub public bodies and sanitizes provider failures", async () => 
     fetchImpl: async () => {
       throw new Error("github_pat_secret release asset provider details");
     },
+    waitImpl: async () => undefined,
   });
   await assert.rejects(secretFailure.readChannelManifest({ channel: "stable" }), (error) => {
     assert.equal(error.message, "station GitHub public read failed");

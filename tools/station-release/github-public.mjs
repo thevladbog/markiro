@@ -1,5 +1,6 @@
 import { lstat, mkdir, open, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { setTimeout as wait } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 import { stationAssetNames } from "./artifacts.mjs";
@@ -11,6 +12,7 @@ const MAX_ARTIFACT_BYTES = 512 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES = 64 * 1024;
 const MAX_TEXT_BYTES = 256 * 1024;
 const MAX_REDIRECT_URL_BYTES = 16 * 1024;
+const PUBLIC_READ_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
 
 function invalid() {
   throw new Error("invalid station GitHub public read");
@@ -18,6 +20,12 @@ function invalid() {
 
 function publicFailure() {
   return new Error("station GitHub public read failed");
+}
+
+function retryablePublicFailure() {
+  const error = publicFailure();
+  Object.defineProperty(error, "retryable", { value: true });
+  return error;
 }
 
 async function closeBody(body) {
@@ -147,43 +155,60 @@ function validatedRedirect(location) {
   return url.href;
 }
 
-export function createGithubPublicReader({ fetchImpl = fetch } = {}) {
-  if (typeof fetchImpl !== "function") invalid();
+export function createGithubPublicReader({ fetchImpl = fetch, waitImpl = wait } = {}) {
+  if (typeof fetchImpl !== "function" || typeof waitImpl !== "function") invalid();
+
+  async function fetchPublic(url, init) {
+    try {
+      return await fetchImpl(url, init);
+    } catch {
+      throw retryablePublicFailure();
+    }
+  }
 
   async function read(spec) {
-    let initialResponse;
-    let assetResponse;
-    try {
-      initialResponse = await fetchImpl(spec.url, { redirect: "manual", cache: "no-store" });
-      if (
-        !initialResponse ||
-        initialResponse.status !== 302 ||
-        initialResponse.redirected === true
-      ) {
-        throw publicFailure();
+    for (let attempt = 0; ; attempt += 1) {
+      let initialResponse;
+      let assetResponse;
+      try {
+        initialResponse = await fetchPublic(spec.url, {
+          redirect: "manual",
+          cache: "no-store",
+        });
+        if (!initialResponse || initialResponse.status !== 302) {
+          throw retryablePublicFailure();
+        }
+        if (initialResponse.redirected === true) throw publicFailure();
+        const location = validatedRedirect(initialResponse.headers?.get?.("location"));
+        await closeBody(initialResponse.body);
+        assetResponse = await fetchPublic(location, { redirect: "error", cache: "no-store" });
+        if (
+          assetResponse?.redirected === true ||
+          (Number.isInteger(assetResponse?.status) &&
+            assetResponse.status >= 300 &&
+            assetResponse.status < 400) ||
+          (typeof assetResponse?.url === "string" &&
+            assetResponse.url.length > 0 &&
+            assetResponse.url !== location)
+        ) {
+          throw publicFailure();
+        }
+        if (!assetResponse?.ok || assetResponse.status !== 200) {
+          throw retryablePublicFailure();
+        }
+        const lengthText = assetResponse.headers?.get?.("content-length");
+        const contentLength =
+          lengthText === null || lengthText === undefined ? undefined : Number(lengthText);
+        return await readBoundedBody(assetResponse.body, contentLength, spec.maxBytes);
+      } catch (error) {
+        await closeBody(initialResponse?.body);
+        await closeBody(assetResponse?.body);
+        if (error?.message === "invalid station GitHub public read") throw error;
+        if (error?.retryable !== true || attempt === PUBLIC_READ_RETRY_DELAYS_MS.length) {
+          throw publicFailure();
+        }
+        await waitImpl(PUBLIC_READ_RETRY_DELAYS_MS[attempt]);
       }
-      const location = validatedRedirect(initialResponse.headers?.get?.("location"));
-      await closeBody(initialResponse.body);
-      assetResponse = await fetchImpl(location, { redirect: "error", cache: "no-store" });
-      if (
-        !assetResponse?.ok ||
-        assetResponse.status !== 200 ||
-        assetResponse.redirected === true ||
-        (typeof assetResponse.url === "string" &&
-          assetResponse.url.length > 0 &&
-          assetResponse.url !== location)
-      ) {
-        throw publicFailure();
-      }
-      const lengthText = assetResponse.headers?.get?.("content-length");
-      const contentLength =
-        lengthText === null || lengthText === undefined ? undefined : Number(lengthText);
-      return await readBoundedBody(assetResponse.body, contentLength, spec.maxBytes);
-    } catch (error) {
-      await closeBody(initialResponse?.body);
-      await closeBody(assetResponse?.body);
-      if (error?.message === "invalid station GitHub public read") throw error;
-      throw publicFailure();
     }
   }
 

@@ -479,7 +479,7 @@ jobs:
             SHA256SUMS \
             release-evidence.json \
             release-notes.md; do
-            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 \
+            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
               --output "$yandex_public/$asset" \
               "$yandex_release_base/$asset"
           done
@@ -670,10 +670,10 @@ jobs:
               "$RUNNER_TEMP/station-yandex-public" beta "$yandex_backup"
             rm -rf "$RUNNER_TEMP/station-yandex-channel-verify"
             mkdir "$RUNNER_TEMP/station-yandex-channel-verify"
-            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 \
+            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
               --output "$RUNNER_TEMP/station-yandex-channel-verify/latest.json" \
               "https://releases.markiro.app/station/beta/latest.json"
-            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 \
+            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
               --output "$RUNNER_TEMP/station-yandex-channel-verify/download" \
               "https://releases.markiro.app/station/beta/download"
             cmp "$RUNNER_TEMP/station-yandex-channel-verify/latest.json" \

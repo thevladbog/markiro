@@ -175,7 +175,7 @@ jobs:
             SHA256SUMS \
             release-evidence.json \
             release-notes.md; do
-            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 \
+            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
               --output "$yandex_beta_dir/$asset" "$yandex_beta_base/$asset"
           done
           node tools/station-release/artifacts.mjs validate-origin github beta \
@@ -728,7 +728,7 @@ jobs:
             SHA256SUMS \
             release-evidence.json \
             release-notes.md; do
-            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 \
+            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
               --output "$yandex_public/$asset" "$yandex_release_base/$asset"
           done
           node tools/station-release/artifacts.mjs validate-origin github stable \
@@ -963,10 +963,10 @@ jobs:
             "$RUNNER_TEMP/station-stable-yandex-public" stable "$yandex_backup"
           rm -rf "$RUNNER_TEMP/station-stable-yandex-channel-verify"
           mkdir "$RUNNER_TEMP/station-stable-yandex-channel-verify"
-          curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 \
+          curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
             --output "$RUNNER_TEMP/station-stable-yandex-channel-verify/latest.json" \
             "https://releases.markiro.app/station/stable/latest.json"
-          curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 \
+          curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
             --output "$RUNNER_TEMP/station-stable-yandex-channel-verify/download" \
             "https://releases.markiro.app/station/download"
           cmp "$RUNNER_TEMP/station-stable-yandex-channel-verify/latest.json" \
