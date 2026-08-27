@@ -177,9 +177,8 @@
     "actions": "Warehouse actions",
     "refresh": "Refresh tasks",
     "categories": {
-      "label": "Floor task categories",
-      "production": "Production shifts {{count}}",
-      "warehouse": "Warehouse operations {{count}}"
+      "warehouse": "Warehouse operations {{count}}",
+      "backToShifts": "Back to shifts {{count}}"
     },
     "scanTitle": "Scan the task-form barcode",
     "scanHint": "Inventory opens automatically. A task assigned to another line requires confirmation.",

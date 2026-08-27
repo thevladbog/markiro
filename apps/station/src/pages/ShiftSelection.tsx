@@ -75,8 +75,8 @@ export interface ShiftSelectionProps {
   routeControlsDisabled?: boolean;
   /** Runs under the same initial/manual/poll request lock as the shift list. */
   onCoordinatedRefresh?: () => Promise<void>;
-  /** Fixed category navigation receives the current visible production count. */
-  categoryNavigation?: (openShiftCount: number) => ReactNode;
+  /** Header-row action (top right); receives the current visible production count. */
+  headerAction?: (openShiftCount: number) => ReactNode;
   alternateContent?: ReactNode;
   alternateActive?: boolean;
   productionActionsVisible?: boolean;
@@ -123,7 +123,7 @@ export function ShiftSelection({
   onRouteIntent,
   routeControlsDisabled = false,
   onCoordinatedRefresh,
-  categoryNavigation,
+  headerAction,
   alternateContent,
   alternateActive = false,
   productionActionsVisible = true,
@@ -386,7 +386,14 @@ export function ShiftSelection({
   return (
     <StationScreen
       title={title ?? t("shifts.title")}
-      header={<div className="shift-selection__message">{message}</div>}
+      header={
+        <>
+          <div className="shift-selection__message">{message}</div>
+          {headerAction ? (
+            <div className="shift-selection__header-action">{headerAction(openItems.length)}</div>
+          ) : null}
+        </>
+      }
       actions={
         <FloorFooter ariaLabel={actionsLabel ?? t("shifts.actions")}>
           {productionActionsVisible ? (
@@ -430,9 +437,8 @@ export function ShiftSelection({
       }
     >
       <div
-        className={`shift-selection__content${categoryNavigation ? " shift-selection__content--categorized" : ""}${alternateActive ? " shift-selection__content--alternate" : ""}`}
+        className={`shift-selection__content${alternateActive ? " shift-selection__content--alternate" : ""}`}
       >
-        {categoryNavigation?.(openItems.length)}
         <div className="shift-selection__slot">
           {alternateActive ? (
             alternateContent

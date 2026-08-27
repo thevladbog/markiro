@@ -629,34 +629,29 @@ export function TaskSelection({
         productionActionsVisible={category === "production"}
         alternateActive={category === "warehouse"}
         alternateContent={inventoryPanel}
-        categoryNavigation={(openShiftCount) => (
-          <div
-            className="floor-task-categories"
-            role="tablist"
-            aria-label={t("inventory.categories.label")}
-          >
+        headerAction={(openShiftCount) =>
+          category === "production" ? (
             <Button
               size="floor"
-              variant={category === "production" ? "primary" : "secondary"}
-              role="tab"
-              aria-selected={category === "production"}
+              variant="secondary"
               disabled={routePending}
-              onClick={() => setCategory("production")}
-            >
-              {t("inventory.categories.production", { count: openShiftCount })}
-            </Button>
-            <Button
-              size="floor"
-              variant={category === "warehouse" ? "primary" : "secondary"}
-              role="tab"
-              aria-selected={category === "warehouse"}
-              disabled={routePending}
+              data-floor-category="warehouse"
               onClick={() => setCategory("warehouse")}
             >
               {t("inventory.categories.warehouse", { count: tasks.length })}
             </Button>
-          </div>
-        )}
+          ) : (
+            <Button
+              size="floor"
+              variant="secondary"
+              disabled={routePending}
+              data-floor-category="production"
+              onClick={() => setCategory("production")}
+            >
+              {t("inventory.categories.backToShifts", { count: openShiftCount })}
+            </Button>
+          )
+        }
       />
       {confirmation ? (
         <InventoryTaskConfirmation

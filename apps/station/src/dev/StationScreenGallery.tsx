@@ -388,7 +388,7 @@ function InventoryFixture({ variant }: { variant: string }) {
 function InventoryTaskSelectionFixture() {
   const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    rootRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[1]?.click();
+    rootRef.current?.querySelector<HTMLButtonElement>('[data-floor-category="warehouse"]')?.click();
   }, []);
   return (
     <div ref={rootRef} style={{ width: "100%", height: "100%", minHeight: 0 }}>
@@ -1200,22 +1200,19 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
   return (
     <StationScreen
       title={ru ? "Смены" : "Shifts"}
-      header={<div className="shift-selection__message" aria-hidden="true" />}
+      header={
+        <>
+          <div className="shift-selection__message" aria-hidden="true" />
+          <div className="shift-selection__header-action">
+            <Button size="floor" variant="secondary">
+              {ru ? "Складские операции 1" : "Warehouse operations 1"}
+            </Button>
+          </div>
+        </>
+      }
       actions={<GalleryFooter locale={locale} primary={ru ? "Новая смена" : "New shift"} />}
     >
-      <div className="shift-selection__content shift-selection__content--categorized">
-        <div
-          className="floor-task-categories"
-          role="tablist"
-          aria-label={ru ? "Категории заданий" : "Task categories"}
-        >
-          <Button size="floor" variant="primary" role="tab" aria-selected>
-            {ru ? `Производственные смены ${shifts.length}` : `Production shifts ${shifts.length}`}
-          </Button>
-          <Button size="floor" variant="secondary" role="tab" aria-selected={false}>
-            {ru ? "Складские операции 1" : "Warehouse operations 1"}
-          </Button>
-        </div>
+      <div className="shift-selection__content">
         <div className="shift-selection__slot">
           <div className="shift-selection__grid">
             {shifts.map((shift, index) => (

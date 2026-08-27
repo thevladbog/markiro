@@ -964,25 +964,17 @@ body,
   grid-template-rows: minmax(0, 1fr) 64px;
 }
 
-.shift-selection__content--categorized {
-  gap: var(--sp-2);
-  grid-template-rows: 64px minmax(0, 1fr) 64px;
-}
-
 .shift-selection__content--alternate {
-  grid-template-rows: 64px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
-.floor-task-categories {
-  display: grid;
-  min-width: 0;
-  min-height: 64px;
-  gap: var(--sp-2);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+/* Top-right escape hatch in the screen header (e.g. «Складские операции»). */
+.shift-selection__header-action {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
-.floor-task-categories .mk-btn {
-  width: 100%;
+.shift-selection__header-action .mk-btn {
   min-height: 64px;
 }
 
