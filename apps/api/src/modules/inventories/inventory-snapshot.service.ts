@@ -108,6 +108,8 @@ export class InventorySnapshotService {
             id: schema.inventories.id,
             status: schema.inventories.status,
             gtin14: schema.inventories.gtin14Snapshot,
+            productId: schema.inventories.productId,
+            lineId: schema.inventories.lineId,
             productionDateFrom: schema.inventories.productionDateFrom,
             productionDateTo: schema.inventories.productionDateTo,
             activeSnapshotId: schema.inventories.activeSnapshotId,
@@ -130,6 +132,28 @@ export class InventorySnapshotService {
         }
         if (inventory.status !== "draft" && inventory.status !== "preparing") {
           throw new ConflictException({ code: "INVENTORY_SNAPSHOT_ALREADY_FIXED" });
+        }
+
+        const [product] = await tx
+          .select({
+            name: schema.products.name,
+            boxCapacity: schema.products.boxCapacity,
+          })
+          .from(schema.products)
+          .where(
+            and(
+              eq(schema.products.tenantId, tenantId),
+              eq(schema.products.id, inventory.productId),
+            ),
+          )
+          .for("share");
+        const [line] = await tx
+          .select({ name: schema.lines.name })
+          .from(schema.lines)
+          .where(and(eq(schema.lines.tenantId, tenantId), eq(schema.lines.id, inventory.lineId)))
+          .for("share");
+        if (!product || !line) {
+          throw new ConflictException({ code: "INVENTORY_SNAPSHOT_CATALOG_INVALID" });
         }
 
         const selectedImports = await this.selectedImports(
@@ -221,6 +245,9 @@ export class InventorySnapshotService {
           inventoryId,
           revision: 1,
           combinedDigest,
+          productName: product.name,
+          lineName: line.name,
+          boxCapacity: product.boxCapacity,
           emittedCount: counts.emitted,
           introducedCount: counts.introduced,
           appliedCount: counts.applied,

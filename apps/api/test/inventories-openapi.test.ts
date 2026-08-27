@@ -17,6 +17,10 @@ type JsonSchema = {
   maximum?: number;
   exclusiveMinimum?: boolean;
   minLength?: number;
+  maxLength?: number;
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
   pattern?: string;
   additionalProperties?: boolean;
   required?: string[];
@@ -34,7 +38,7 @@ function responseSchema(
   document: OpenAPIObject,
   path: string,
   method: "get" | "patch" | "post",
-  status: "200" | "201",
+  status: "200" | "201" | "409",
 ): JsonSchema {
   const response = operation(document, path, method).responses[status];
   if (!response || "$ref" in response) throw new Error(`Missing inline ${status} response`);
@@ -107,12 +111,21 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       ["/inventories", "get"],
       ["/inventories", "post"],
       ["/inventories/{id}", "get"],
+      ["/inventories/{id}/task-form", "get"],
       ["/inventories/{id}", "patch"],
       ["/inventories/{id}/imports/{status}", "post"],
       ["/inventories/{id}/snapshots", "post"],
       ["/inventories/{id}/start", "post"],
     ] as const;
     for (const [path, method] of paths) operation(document, path, method);
+
+    const taskForm = operation(document, "/inventories/{id}/task-form", "get");
+    const taskFormResponse = taskForm.responses["200"];
+    if (!taskFormResponse || "$ref" in taskFormResponse) {
+      throw new Error("Missing inline task-form response");
+    }
+    expect(Object.keys(taskFormResponse.content ?? {})).toEqual(["text/html"]);
+    expect(taskFormResponse.content?.["text/html"]?.schema).toEqual({ type: "string" });
 
     const upload = operation(document, "/inventories/{id}/imports/{status}", "post");
     const requestBody = upload.requestBody;
@@ -152,6 +165,85 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
     ]);
     expect(JSON.stringify(document.paths["/inventories/{id}/imports/{status}"])).not.toMatch(
       /objectKey|fileName|canonicalKm|credential|rawCause/i,
+    );
+  });
+
+  it("documents the strict close lifecycle and bounded late-event decisions", () => {
+    for (const path of [
+      "/inventories/{id}/close",
+      "/inventories/{id}/emergency-close",
+      "/inventories/{id}/reopen",
+      "/inventories/{id}/complete",
+      "/inventories/{id}/late-events/discard",
+      "/inventories/{id}/late-events/{lateEventId}/replay",
+    ]) {
+      operation(document, path, "post");
+    }
+    operation(document, "/inventories/{id}/late-events", "get");
+    operation(document, "/inventories/{id}/close-preview", "get");
+
+    const discard = operation(document, "/inventories/{id}/late-events/discard", "post");
+    const requestBody = discard.requestBody;
+    if (!requestBody || "$ref" in requestBody) throw new Error("Missing discard request body");
+    const requestSchema = (requestBody.content as Record<string, { schema?: JsonSchema }>)[
+      "application/json"
+    ]?.schema;
+    if (!requestSchema) throw new Error("Missing discard JSON schema");
+    exactClosedObject(requestSchema, ["lateEventIds", "reason"], ["lateEventIds", "reason"]);
+    expect(requestSchema.properties?.lateEventIds).toMatchObject({
+      type: "array",
+      minItems: 1,
+      maxItems: 100,
+      uniqueItems: true,
+      items: { type: "string", format: "uuid" },
+    });
+    expect(requestSchema.properties?.reason).toMatchObject({
+      type: "string",
+      minLength: 1,
+      maxLength: 4096,
+      "x-maxUtf8Bytes": 4096,
+    });
+    exactClosedObject(
+      responseSchema(document, "/inventories/{id}/late-events/discard", "post", "201"),
+      ["discardedCount"],
+      ["discardedCount"],
+    );
+
+    const complete = operation(document, "/inventories/{id}/complete", "post").requestBody;
+    if (!complete || "$ref" in complete) throw new Error("Missing complete request body");
+    const completeSchema = (complete.content as Record<string, { schema?: JsonSchema }>)[
+      "application/json"
+    ]?.schema;
+    if (!completeSchema) throw new Error("Missing complete JSON schema");
+    exactClosedObject(
+      completeSchema,
+      ["documentsDownloadedAndChecked"],
+      ["documentsDownloadedAndChecked"],
+    );
+    expect(completeSchema.properties?.documentsDownloadedAndChecked?.enum).toEqual([true]);
+    exactClosedObject(
+      responseSchema(document, "/inventories/{id}/complete", "post", "409"),
+      ["code", "requiredTask"],
+      ["code", "requiredTask"],
+    );
+
+    const lateList = responseSchema(document, "/inventories/{id}/late-events", "get", "200");
+    exactClosedObject(
+      lateList,
+      ["page", "pageSize", "total", "hasMore", "items"],
+      ["page", "pageSize", "total", "hasMore", "items"],
+    );
+    expect(JSON.stringify(lateList)).not.toMatch(/payloadDigest|canonicalRaw|payload/i);
+
+    exactClosedObject(
+      responseSchema(document, "/inventories/{id}/close-preview", "get", "200"),
+      ["inventoryId", "status", "resultRevision", "blockers"],
+      ["inventoryId", "status", "resultRevision", "blockers"],
+    );
+    exactClosedObject(
+      responseSchema(document, "/inventories/{id}/late-events/{lateEventId}/replay", "post", "201"),
+      ["lateEventId", "resolution", "result"],
+      ["lateEventId", "resolution", "result"],
     );
   });
 
@@ -290,7 +382,7 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
     exactObject(template, ["id", "name"]);
     expect(template.nullable).toBe(true);
     const inventoryDetail = responseSchema(document, "/inventories/{id}", "get", "200");
-    exactObject(inventoryDetail, [...fields, "blockers"]);
+    exactObject(inventoryDetail, [...fields, "blockers", "imports", "activeSnapshot"]);
     exactObject(inventoryDetail.properties!.blockers!, [
       "activeParticipantCount",
       "pendingEventCount",
@@ -298,6 +390,34 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       "openRepackBoxCount",
       "unresolvedPrintBoxCount",
     ]);
+    const history = inventoryDetail.properties!.imports?.items;
+    if (!history) throw new Error("Missing inventory import history projection");
+    exactObject(history, [
+      "id",
+      "declaredStatus",
+      "parsedStatus",
+      "fileName",
+      "result",
+      "rowCount",
+      "errorCount",
+      "duplicateCount",
+      "sha256",
+      "diagnostics",
+      "createdAt",
+    ]);
+    expect(inventoryDetail.properties!.activeSnapshot?.nullable).toBe(true);
+    exactObject(inventoryDetail.properties!.activeSnapshot!, [
+      "id",
+      "inventoryId",
+      "revision",
+      "combinedDigest",
+      "fixedAt",
+      "inputs",
+      "counts",
+    ]);
+    expect(JSON.stringify(inventoryDetail)).not.toMatch(
+      /objectKey|includedGtin14|createdByUserId/i,
+    );
     exactObject(responseSchema(document, "/inventories/{id}", "patch", "200"), fields);
     const list = responseSchema(document, "/inventories", "get", "200");
     exactObject(list, ["items"]);

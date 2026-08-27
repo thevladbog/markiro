@@ -130,10 +130,11 @@ describe.skipIf(!databaseUrl)("inventory sync PostgreSQL facts", () => {
     );
     await client.query(
       `insert into inventory_snapshots
-         (id, tenant_id, inventory_id, combined_digest, emitted_count, introduced_count,
+         (id, tenant_id, inventory_id, combined_digest, product_name, line_name,
+          emitted_count, introduced_count,
           applied_count, retired_count, written_off_count, disaggregation_count, protected_count,
           expected_count, package_count, loose_count, fixed_by_user_id)
-       values ($1, $2, $3, $4, 0, 4, 0, 0, 0, 0, 0, 4, 0, 4, $5)`,
+       values ($1, $2, $3, $4, 'Product', 'Line', 0, 4, 0, 0, 0, 0, 0, 4, 0, 4, $5)`,
       [snapshotId, tenantId, inventoryId, "0".repeat(64), userId],
     );
     await client.query(

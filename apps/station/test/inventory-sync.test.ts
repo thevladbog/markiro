@@ -180,13 +180,13 @@ describe("inventory sync engine", () => {
               WHERE type = 'trigger' AND name IN (
                 'inventory_sync_validate_ack_v2', 'inventory_sync_apply_ack_v2',
                 'inventory_sync_validate_ack_v3', 'inventory_sync_apply_ack_v3',
-                'inventory_progress_validate_page_v2', 'inventory_progress_apply_page_v2'
+                'inventory_progress_validate_page_v4', 'inventory_progress_apply_page_v2'
               ) ORDER BY name`,
           )
           .all(),
       ).toEqual([
         { name: "inventory_progress_apply_page_v2" },
-        { name: "inventory_progress_validate_page_v2" },
+        { name: "inventory_progress_validate_page_v4" },
         { name: "inventory_sync_apply_ack_v2" },
         { name: "inventory_sync_apply_ack_v3" },
         { name: "inventory_sync_validate_ack_v2" },
@@ -974,6 +974,131 @@ describe("inventory progress and leave", () => {
       classification: "voided",
       observed_production_date: null,
       updated_at: "2026-08-25T10:02:00.000Z",
+    });
+  });
+
+  it("atomically applies admin membership and box corrections and queues only an owned reprint", async () => {
+    const { db, exec } = await setup();
+    const openBoxId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const printedBoxId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const resultId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    db.prepare(
+      `INSERT INTO inventory_repack_boxes_mirror
+         (inventory_id, snapshot_id, box_id, opened_event_id, new_sscc, owner_device_id,
+          capacity, production_date, state, print_state, print_attempt_count, opened_at,
+          updated_at)
+       VALUES (?, ?, ?, 'open-event', '046006820000621502', ?, 20, '2026-08-20',
+               'open', 'not_ready', 0, '2026-08-25T09:00:00.000Z',
+               '2026-08-25T09:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, openBoxId, DEVICE_ID);
+    db.prepare(
+      `INSERT INTO inventory_repack_items_mirror
+         (inventory_id, snapshot_id, item_id, source_event_id, box_id, code_hash,
+          position, production_date, added_at)
+       VALUES (?, ?, 'item-1', 'source-event', ?, ?, 1, '2026-08-20',
+               '2026-08-25T09:01:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, openBoxId, "c".repeat(64));
+    db.prepare(
+      `INSERT INTO inventory_repack_boxes_mirror
+         (inventory_id, snapshot_id, box_id, opened_event_id, closed_event_id, new_sscc,
+          owner_device_id, capacity, production_date, state, print_state, print_attempt_count,
+          opened_at, closed_at, printed_at, updated_at)
+       VALUES (?, ?, ?, 'printed-open', 'printed-close', '046006820000621519', ?, 20,
+               '2026-08-20', 'closed', 'printed', 1, '2026-08-25T08:00:00.000Z',
+               '2026-08-25T08:30:00.000Z', '2026-08-25T08:31:00.000Z',
+               '2026-08-25T08:31:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, printedBoxId, DEVICE_ID);
+
+    const ids = [
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000002",
+      "10000000-0000-4000-8000-000000000003",
+      "10000000-0000-4000-8000-000000000004",
+    ];
+    await applyInventoryProgressPage(
+      exec,
+      { inventoryId: INVENTORY_ID, snapshotId: SNAPSHOT_ID, deviceId: DEVICE_ID },
+      {
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        snapshotRevision: 1,
+        cursor: null,
+        resultRevision: 4,
+        items: [
+          {
+            id: ids[0],
+            revision: 1,
+            kind: "remove_item",
+            boxId: openBoxId,
+            resultId,
+            codeHash: "c".repeat(64),
+            ownerDeviceId: DEVICE_ID,
+            removedAt: "2099-08-25T10:01:00.000Z",
+            correctedAt: "2026-08-25T10:01:00.000Z",
+          },
+          {
+            id: ids[1],
+            revision: 2,
+            kind: "invalidate_box",
+            boxId: openBoxId,
+            ownerDeviceId: DEVICE_ID,
+            correctedAt: "2026-08-25T10:02:00.000Z",
+          },
+          {
+            id: ids[2],
+            revision: 3,
+            kind: "reprint",
+            boxId: printedBoxId,
+            ownerDeviceId: DEVICE_ID,
+            correctedAt: "2026-08-25T10:03:00.000Z",
+          },
+          {
+            id: ids[3],
+            revision: 4,
+            kind: "reprint",
+            boxId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            ownerDeviceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+            correctedAt: "2026-08-25T10:04:00.000Z",
+          },
+        ],
+        nextCursor: `4:${ids[3]}`,
+      },
+    );
+
+    expect(
+      db
+        .prepare("SELECT removed_at FROM inventory_repack_items_mirror WHERE item_id = 'item-1'")
+        .get(),
+    ).toEqual({ removed_at: "2099-08-25T10:01:00.000Z" });
+    expect(
+      db
+        .prepare(
+          "SELECT state, invalidated_at, invalidation_source FROM inventory_repack_boxes_mirror WHERE box_id = ?",
+        )
+        .get(openBoxId),
+    ).toEqual({
+      state: "invalidated",
+      invalidated_at: "2026-08-25T10:02:00.000Z",
+      invalidation_source: "admin",
+    });
+    expect(
+      db
+        .prepare(
+          `SELECT correction_id, box_id, owner_device_id, requested_at, completed_at
+           FROM inventory_remote_reprint_requests`,
+        )
+        .all(),
+    ).toEqual([
+      {
+        correction_id: ids[2],
+        box_id: printedBoxId,
+        owner_device_id: DEVICE_ID,
+        requested_at: "2026-08-25T10:03:00.000Z",
+        completed_at: null,
+      },
+    ]);
+    expect(db.prepare("SELECT progress_cursor FROM inventory_terminal_state").get()).toEqual({
+      progress_cursor: `4:${ids[3]}`,
     });
   });
 

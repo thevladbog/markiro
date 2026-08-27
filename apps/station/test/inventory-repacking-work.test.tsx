@@ -204,10 +204,10 @@ describe("repack inventory work screen", () => {
       `INSERT INTO inventory_repack_boxes_mirror
          (inventory_id, snapshot_id, box_id, opened_event_id, old_sscc_context, new_sscc,
           owner_device_id, capacity, production_date, state, print_state, opened_at,
-          invalidated_at, updated_at)
+          invalidated_at, invalidation_source, updated_at)
        VALUES (?, ?, ?, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', ?, '046006820000621515',
                ?, 20, '2026-08-19', 'invalidated', 'not_ready',
-               '2026-08-25T09:00:00.000Z', '2026-08-25T10:00:00.000Z',
+               '2026-08-25T09:00:00.000Z', '2026-08-25T10:00:00.000Z', 'claim_lost',
                '2026-08-25T10:00:00.000Z')`,
     ).run(INVENTORY_ID, SNAPSHOT_ID, boxId, OLD_SSCC, DEVICE_ID);
     db.prepare(
@@ -253,6 +253,58 @@ describe("repack inventory work screen", () => {
         .prepare("SELECT state FROM inventory_conflicts_mirror WHERE conflict_id = 'conflict-1'")
         .get(),
     ).toEqual({ state: "resolved" });
+  });
+
+  it("hides local composition controls for a non-empty admin-invalidated box", async () => {
+    const db = new DatabaseSync(":memory:");
+    const exec = makeExec(db);
+    await applyMigrations(exec);
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'ИНВ-Р-42', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    const boxId = "12121212-1212-4212-8212-121212121212";
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          open_repack_box_id, next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', ?, 2, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID, boxId);
+    db.prepare(
+      `INSERT INTO inventory_repack_boxes_mirror
+         (inventory_id, snapshot_id, box_id, opened_event_id, old_sscc_context, new_sscc,
+          owner_device_id, capacity, production_date, state, print_state, opened_at,
+          invalidated_at, invalidation_source, updated_at)
+       VALUES (?, ?, ?, '13131313-1313-4313-8313-131313131313', ?, '046006820000621515',
+               ?, 20, '2026-08-19', 'invalidated', 'not_ready',
+               '2026-08-25T09:00:00.000Z', '2026-08-25T10:00:00.000Z', 'admin',
+               '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, boxId, OLD_SSCC, DEVICE_ID);
+    db.prepare(
+      `INSERT INTO inventory_repack_items_mirror
+         (inventory_id, snapshot_id, item_id, source_event_id, box_id, code_hash,
+          position, production_date, added_at)
+       VALUES (?, ?, '15151515-1515-4515-8515-151515151515',
+               '16161616-1616-4616-8616-161616161616', ?, ?, 1,
+               '2026-08-19', '2026-08-25T09:01:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, boxId, "d".repeat(64));
+
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scanner().source}
+        createEventId={() => "14141414-1414-4414-8414-141414141414"}
+        now={() => "2026-08-25T10:01:00.000Z"}
+      />,
+    );
+
+    expect(await screen.findByText("Короб аннулирован администратором")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Исправления" }));
+    expect(screen.queryByRole("button", { name: "Очистить конфликт и продолжить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Убрать последнюю бутылку" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Очистить открытый короб" })).toBeNull();
   });
 
   it("prints a full box automatically, pauses product scanning, and exposes no skip step", async () => {

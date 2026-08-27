@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { ConflictException, NotFoundException } from "@nestjs/common";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createDb, schema } from "@markiro/db";
@@ -162,6 +162,8 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
       tenantId,
       inventoryId,
       combinedDigest: "0".repeat(64),
+      productName: "Product",
+      lineName: "Line",
       emittedCount: 0,
       introducedCount: 2,
       appliedCount: 0,
@@ -902,6 +904,64 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
     expect(replay).toEqual(correction);
   });
 
+  it("reads the inventory revision and merged progress stream from one repeatable-read snapshot", async () => {
+    const [before] = await db
+      .select({ resultRevision: schema.inventories.resultRevision })
+      .from(schema.inventories)
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
+      );
+    if (!before) throw new Error("expected inventory revision");
+    const nextRevision = before.resultRevision + 1;
+    const changeId = randomUUID();
+    const writer = await pool.connect();
+    let committed = false;
+    try {
+      await writer.query("begin");
+      await writer.query("lock table inventory_progress_changes in access exclusive mode");
+      const pendingPage = service.progress(tenantId, deviceBId, inventoryId, { limit: 200 });
+
+      let streamReadBlocked = false;
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const activity = await writer.query<{ blocked: number }>(
+          `select count(*)::int as blocked
+             from pg_locks lock
+             join pg_class relation on relation.oid = lock.relation
+            where relation.relname = 'inventory_progress_changes'
+              and lock.granted = false`,
+        );
+        if ((activity.rows[0]?.blocked ?? 0) > 0) {
+          streamReadBlocked = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(streamReadBlocked).toBe(true);
+
+      await writer.query(
+        `insert into inventory_progress_changes
+           (id, tenant_id, inventory_id, snapshot_id, result_revision, kind,
+            code_hash, classification, changed_at)
+         values ($1, $2, $3, $4, $5, 'correction', $6, 'voided', clock_timestamp())`,
+        [changeId, tenantId, inventoryId, snapshotId, nextRevision, knownB.codeHash],
+      );
+      await writer.query(
+        `update inventories set result_revision = $1
+          where tenant_id = $2 and id = $3`,
+        [nextRevision, tenantId, inventoryId],
+      );
+      await writer.query("commit");
+      committed = true;
+
+      const page = await pendingPage;
+      expect(page.items.every((item) => item.revision <= page.resultRevision)).toBe(true);
+      expect(page.items.some((item) => item.id === changeId)).toBe(false);
+    } finally {
+      if (!committed) await writer.query("rollback");
+      writer.release();
+    }
+  });
+
   it("leaves only with zero client and stored blockers and never closes the inventory", async () => {
     await db
       .update(schema.inventoryDeviceParticipants)
@@ -978,6 +1038,8 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
       tenantId,
       inventoryId: repackInventoryId,
       combinedDigest: "1".repeat(64),
+      productName: "Product",
+      lineName: "Line",
       emittedCount: 0,
       introducedCount: 1,
       appliedCount: 0,
@@ -1539,6 +1601,54 @@ describe.skipIf(!databaseUrl)("station inventory sync against isolated PostgreSQ
         }),
       }),
     ]);
+
+    const adminInvalidatedAt = "2026-08-25T12:00:04.700Z";
+    await db
+      .update(schema.inventoryRepackBoxes)
+      .set({ state: "invalidated", invalidatedAt: new Date(adminInvalidatedAt) })
+      .where(eq(schema.inventoryRepackBoxes.id, boxBId));
+    await db.execute(sql`
+      insert into inventory_corrections
+        (id, tenant_id, inventory_id, action, reason, request_digest, actor_user_id,
+         target_repack_box_id, before_projection_digest, after_projection_digest,
+         result_revision, effect_at, created_at)
+      values
+        (${randomUUID()}, ${tenantId}, ${repackInventoryId}, 'invalidate_box',
+         'Administrative invalidation', ${"a".repeat(64)}, ${userId}, ${boxBId},
+         ${"b".repeat(64)}, ${"c".repeat(64)}, 1, ${adminInvalidatedAt}, ${adminInvalidatedAt})
+    `);
+    const forbiddenResolutionAt = "2026-08-25T12:00:04.800Z";
+    const forbiddenResolution = repackEvent("b", {
+      scannedAt: forbiddenResolutionAt,
+      kind: "repack_action",
+      normalizedIdentity: `repack_action:resolve-conflict:${boxBId}`,
+      codeHash: null,
+      canonicalRaw: null,
+      activeProductionDate: terminalDateB,
+      localVerdict: "repack-action",
+      repack: {
+        action: "resolve-conflict",
+        boxId: boxBId,
+        reason: "claim-lost",
+        changedAt: forbiddenResolutionAt,
+      },
+    });
+    await expect(
+      service.ingest(
+        tenantId,
+        deviceBId,
+        repackInventoryId,
+        repackBatch("repack-admin-invalidation-cannot-resolve", [forbiddenResolution], 1),
+      ),
+    ).rejects.toSatisfy(
+      (error: unknown) => errorCode(error) === "INVENTORY_REPACK_CONFLICT_RESOLUTION_INVALID",
+    );
+    expect(
+      await db
+        .select({ state: schema.inventoryRepackBoxes.state })
+        .from(schema.inventoryRepackBoxes)
+        .where(eq(schema.inventoryRepackBoxes.id, boxBId)),
+    ).toEqual([{ state: "invalidated" }]);
 
     const closedAt = "2026-08-25T12:00:05.000Z";
     const close = repackEvent("a", {

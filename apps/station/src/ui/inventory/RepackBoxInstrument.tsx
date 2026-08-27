@@ -16,6 +16,7 @@ export interface RepackBoxInstrumentProps {
     scanning: string;
     pendingPrint: string;
     invalidated: string;
+    adminInvalidated: string;
     oldSelected: string;
     accepted: string;
     discrepancy: string;
@@ -38,7 +39,9 @@ export function RepackBoxInstrument({
       : state.phase === "closed-pending-print"
         ? labels.pendingPrint
         : state.phase === "invalidated"
-          ? labels.invalidated
+          ? state.box?.invalidationSource === "admin"
+            ? labels.adminInvalidated
+            : labels.invalidated
           : labels.scanning;
   const verdict = writeFailed
     ? labels.writeFailed

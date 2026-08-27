@@ -14,12 +14,23 @@ export const API_BASE = "/api";
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly code: string | null;
+  readonly #details: unknown;
 
-  constructor(status: number, message: string, code: string | null = null) {
+  get details(): unknown {
+    return this.#details;
+  }
+
+  constructor(
+    status: number,
+    message: string,
+    code: string | null = null,
+    details: unknown = null,
+  ) {
     super(message);
     this.name = "ApiRequestError";
     this.status = status;
     this.code = code;
+    this.#details = details;
   }
 }
 
@@ -53,8 +64,10 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 export async function apiErrorFromResponse(response: Response): Promise<ApiRequestError> {
   let code: string | null = null;
   let message: string | null = null;
+  let details: unknown = null;
   try {
     const body: unknown = await response.json();
+    details = body;
     if (body && typeof body === "object") {
       if ("code" in body && typeof (body as { code?: unknown }).code === "string") {
         code = (body as { code: string }).code;
@@ -89,5 +102,6 @@ export async function apiErrorFromResponse(response: Response): Promise<ApiReque
     response.status,
     message ?? (response.statusText || `HTTP ${response.status}`),
     code,
+    details,
   );
 }

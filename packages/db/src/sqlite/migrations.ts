@@ -2639,6 +2639,601 @@ export const STATION_MIGRATIONS: string[] = [
          NEW.pin_key, NEW.pin_value, NEW.applied_at
        ) ON CONFLICT(receipt_id) DO NOTHING;
      END;`,
+  `CREATE TABLE IF NOT EXISTS inventory_remote_reprint_requests (
+     inventory_id TEXT NOT NULL,
+     snapshot_id TEXT NOT NULL,
+     correction_id TEXT NOT NULL,
+     box_id TEXT NOT NULL,
+     owner_device_id TEXT NOT NULL,
+     requested_at TEXT NOT NULL,
+     completed_at TEXT,
+     PRIMARY KEY (inventory_id, snapshot_id, correction_id)
+   );`,
+  `CREATE INDEX IF NOT EXISTS inventory_remote_reprint_pending_idx
+     ON inventory_remote_reprint_requests
+        (inventory_id, snapshot_id, owner_device_id, completed_at, requested_at);`,
+  `DROP TRIGGER IF EXISTS inventory_progress_validate_page_v2;`,
+  `DROP TRIGGER IF EXISTS inventory_progress_validate_civil_date_v3;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_progress_validate_page_v3
+     BEFORE INSERT ON inventory_progress_receipts_v2
+     WHEN NOT (
+       EXISTS (
+         SELECT 1 FROM inventory_progress_receipts_v2 receipt
+          WHERE receipt.receipt_id = NEW.receipt_id
+            AND receipt.inventory_id IS NEW.inventory_id
+            AND receipt.snapshot_id IS NEW.snapshot_id
+            AND receipt.device_id IS NEW.device_id
+            AND receipt.requested_cursor IS NEW.requested_cursor
+            AND receipt.prior_result_revision IS NEW.prior_result_revision
+            AND receipt.page_json IS NEW.page_json
+            AND receipt.pointer_key IS NEW.pointer_key
+            AND receipt.pointer_value IS NEW.pointer_value
+            AND receipt.credential_ownership IS NEW.credential_ownership
+            AND receipt.applied_at IS NEW.applied_at
+       )
+       OR (
+         NOT EXISTS (
+           SELECT 1 FROM inventory_progress_receipts_v2 receipt
+            WHERE receipt.receipt_id = NEW.receipt_id
+         )
+         AND NEW.receipt_id IS NOT NULL
+         AND json_valid(NEW.page_json)
+         AND json_type(NEW.page_json, '$') = 'object'
+         AND (SELECT COUNT(*) FROM json_each(NEW.page_json)) = 7
+         AND json_extract(NEW.page_json, '$.inventoryId') IS NEW.inventory_id
+         AND json_extract(NEW.page_json, '$.snapshotId') IS NEW.snapshot_id
+         AND json_extract(NEW.page_json, '$.snapshotRevision') IS 1
+         AND json_extract(NEW.page_json, '$.cursor') IS NEW.requested_cursor
+         AND json_type(NEW.page_json, '$.resultRevision') = 'integer'
+         AND json_extract(NEW.page_json, '$.resultRevision') >= NEW.prior_result_revision
+         AND json_type(NEW.page_json, '$.items') = 'array'
+         AND json_array_length(NEW.page_json, '$.items') <= 200
+         AND json_type(NEW.page_json, '$.nextCursor') IN ('text', 'null')
+         AND NEW.receipt_id = NEW.inventory_id || ':' || NEW.snapshot_id || ':' ||
+              NEW.device_id || ':' || COALESCE(NEW.requested_cursor, 'root') || ':' ||
+              CAST(NEW.prior_result_revision AS TEXT) || ':' ||
+              CAST(json_extract(NEW.page_json, '$.resultRevision') AS TEXT) || ':' ||
+              COALESCE(json_extract(NEW.page_json, '$.nextCursor'), 'end')
+         AND NEW.pointer_key = 'active_inventory_floor_task_v1'
+         AND json_valid(NEW.pointer_value)
+         AND json_type(NEW.pointer_value, '$') = 'object'
+         AND json_extract(NEW.pointer_value, '$.inventoryId') IS NEW.inventory_id
+         AND json_extract(NEW.pointer_value, '$.snapshotId') IS NEW.snapshot_id
+         AND json_extract(NEW.pointer_value, '$.credentialOwnership') IS NEW.credential_ownership
+         AND json_type(NEW.pointer_value, '$.activationId') = 'text'
+         AND length(json_extract(NEW.pointer_value, '$.activationId')) > 0
+         AND (SELECT COUNT(*) FROM json_each(NEW.pointer_value)) = 4
+         AND length(NEW.credential_ownership) = 64
+         AND NEW.credential_ownership = lower(NEW.credential_ownership)
+         AND NEW.credential_ownership NOT GLOB '*[^0-9a-f]*'
+         AND EXISTS (
+           SELECT 1 FROM station_meta pointer
+            WHERE pointer.key = NEW.pointer_key AND pointer.value = NEW.pointer_value
+         )
+         AND EXISTS (
+           SELECT 1 FROM inventory_terminal_state terminal
+            WHERE terminal.inventory_id = NEW.inventory_id
+              AND terminal.snapshot_id = NEW.snapshot_id
+              AND terminal.device_id = NEW.device_id
+              AND terminal.progress_cursor IS NEW.requested_cursor
+              AND terminal.progress_result_revision = NEW.prior_result_revision
+              AND NEW.applied_at = CASE
+                WHEN json_array_length(NEW.page_json, '$.items') > 0 THEN
+                  json_extract(NEW.page_json, '$.items[#-1].correctedAt')
+                ELSE terminal.updated_at
+              END
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM json_each(NEW.page_json, '$.items') item
+            WHERE json_type(item.value, '$') <> 'object'
+               OR json_type(item.value, '$.id') <> 'text'
+               OR json_type(item.value, '$.revision') <> 'integer'
+               OR json_extract(item.value, '$.revision') <= 0
+               OR json_extract(item.value, '$.revision') >
+                    json_extract(NEW.page_json, '$.resultRevision')
+               OR json_type(item.value, '$.correctedAt') <> 'text'
+               OR json_extract(item.value, '$.kind') NOT IN
+                    ('claim', 'correction', 'remove_item', 'invalidate_box', 'reprint')
+               OR (json_extract(item.value, '$.kind') IN ('claim', 'correction') AND (
+                 (SELECT COUNT(*) FROM json_each(item.value)) <> 8
+                 OR json_type(item.value, '$.codeHash') <> 'text'
+                 OR length(json_extract(item.value, '$.codeHash')) <> 64
+                 OR json_extract(item.value, '$.codeHash') GLOB '*[^0-9a-f]*'
+                 OR json_extract(item.value, '$.classification') NOT IN
+                      ('expected', 'protected', 'ineligible', 'unknown', 'voided')
+                 OR json_type(item.value, '$.observedProductionDate') NOT IN ('text', 'null')
+                 OR json_type(item.value, '$.winner') NOT IN ('object', 'null')
+                 OR (json_type(item.value, '$.winner') = 'object' AND (
+                   (SELECT COUNT(*) FROM json_each(item.value, '$.winner')) <> 4
+                   OR json_extract(item.value, '$.winner.codeHash') IS NOT
+                        json_extract(item.value, '$.codeHash')
+                   OR json_type(item.value, '$.winner.eventId') <> 'text'
+                   OR json_type(item.value, '$.winner.deviceId') <> 'text'
+                   OR json_type(item.value, '$.winner.scannedAt') <> 'text'
+                 ))
+               ))
+               OR (json_extract(item.value, '$.kind') = 'remove_item' AND (
+                 (SELECT COUNT(*) FROM json_each(item.value)) <> 8
+                 OR json_type(item.value, '$.boxId') <> 'text'
+                 OR json_type(item.value, '$.resultId') <> 'text'
+                 OR json_type(item.value, '$.codeHash') <> 'text'
+                 OR length(json_extract(item.value, '$.codeHash')) <> 64
+                 OR json_extract(item.value, '$.codeHash') GLOB '*[^0-9a-f]*'
+                 OR json_type(item.value, '$.ownerDeviceId') <> 'text'
+               ))
+               OR (json_extract(item.value, '$.kind') IN ('invalidate_box', 'reprint') AND (
+                 (SELECT COUNT(*) FROM json_each(item.value)) <> 6
+                 OR json_type(item.value, '$.boxId') <> 'text'
+                 OR json_type(item.value, '$.ownerDeviceId') <> 'text'
+               ))
+               OR EXISTS (
+                 SELECT 1 FROM json_each(NEW.page_json, '$.items') prior
+                  WHERE CAST(prior.key AS INTEGER) < CAST(item.key AS INTEGER)
+                    AND (json_extract(prior.value, '$.revision') >
+                           json_extract(item.value, '$.revision')
+                      OR (json_extract(prior.value, '$.revision') =
+                            json_extract(item.value, '$.revision')
+                        AND json_extract(prior.value, '$.id') >=
+                            json_extract(item.value, '$.id')))
+               )
+         )
+         AND (
+           (json_array_length(NEW.page_json, '$.items') = 0
+             AND json_extract(NEW.page_json, '$.nextCursor') IS NULL)
+           OR (json_array_length(NEW.page_json, '$.items') > 0
+             AND json_extract(NEW.page_json, '$.nextCursor') = (
+               SELECT CAST(json_extract(item.value, '$.revision') AS TEXT) || ':' ||
+                      json_extract(item.value, '$.id')
+                 FROM json_each(NEW.page_json, '$.items') item
+                ORDER BY CAST(item.key AS INTEGER) DESC LIMIT 1
+             ))
+         )
+       )
+     )
+     BEGIN
+       SELECT RAISE(ABORT, 'inventory progress receipt invalid');
+     END;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_progress_validate_civil_date_v4
+     BEFORE INSERT ON inventory_progress_receipts_v2
+     WHEN NOT EXISTS (
+       SELECT 1 FROM inventory_progress_receipts_v2 receipt
+        WHERE receipt.receipt_id = NEW.receipt_id
+          AND receipt.page_json IS NEW.page_json
+     ) AND EXISTS (
+       SELECT 1 FROM json_each(NEW.page_json, '$.items') item
+        WHERE json_extract(item.value, '$.kind') IN ('claim', 'correction')
+          AND json_type(item.value, '$.observedProductionDate') = 'text'
+          AND (length(json_extract(item.value, '$.observedProductionDate')) <> 10
+            OR json_extract(item.value, '$.observedProductionDate') NOT GLOB
+                 '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+            OR date(json_extract(item.value, '$.observedProductionDate')) IS NOT
+                 json_extract(item.value, '$.observedProductionDate'))
+     )
+     BEGIN
+       SELECT RAISE(ABORT, 'inventory progress civil date invalid');
+     END;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_progress_apply_admin_corrections_v1
+     AFTER INSERT ON inventory_progress_receipts_v2
+     BEGIN
+       UPDATE inventory_repack_items_mirror AS member
+          SET removed_at = (
+            SELECT json_extract(item.value, '$.correctedAt')
+              FROM json_each(NEW.page_json, '$.items') item
+             WHERE json_extract(item.value, '$.kind') = 'remove_item'
+               AND json_extract(item.value, '$.boxId') = member.box_id
+               AND json_extract(item.value, '$.codeHash') = member.code_hash
+             ORDER BY json_extract(item.value, '$.revision') DESC,
+                      json_extract(item.value, '$.id') DESC LIMIT 1
+          )
+        WHERE member.inventory_id = NEW.inventory_id
+          AND member.snapshot_id = NEW.snapshot_id
+          AND member.removed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM json_each(NEW.page_json, '$.items') item
+             WHERE json_extract(item.value, '$.kind') = 'remove_item'
+               AND json_extract(item.value, '$.boxId') = member.box_id
+               AND json_extract(item.value, '$.codeHash') = member.code_hash
+          );
+
+       UPDATE inventory_repack_boxes_mirror AS box
+          SET state = 'invalidated', invalidated_at = (
+                SELECT json_extract(item.value, '$.correctedAt')
+                  FROM json_each(NEW.page_json, '$.items') item
+                 WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
+                   AND json_extract(item.value, '$.boxId') = box.box_id
+                 ORDER BY json_extract(item.value, '$.revision') DESC,
+                          json_extract(item.value, '$.id') DESC LIMIT 1
+              ),
+              updated_at = (
+                SELECT json_extract(item.value, '$.correctedAt')
+                  FROM json_each(NEW.page_json, '$.items') item
+                 WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
+                   AND json_extract(item.value, '$.boxId') = box.box_id
+                 ORDER BY json_extract(item.value, '$.revision') DESC,
+                          json_extract(item.value, '$.id') DESC LIMIT 1
+              )
+        WHERE box.inventory_id = NEW.inventory_id
+          AND box.snapshot_id = NEW.snapshot_id
+          AND EXISTS (
+            SELECT 1 FROM json_each(NEW.page_json, '$.items') item
+             WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
+               AND json_extract(item.value, '$.boxId') = box.box_id
+          );
+
+       UPDATE inventory_remote_reprint_requests AS request
+          SET completed_at = (
+            SELECT json_extract(item.value, '$.correctedAt')
+              FROM json_each(NEW.page_json, '$.items') item
+             WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
+               AND json_extract(item.value, '$.boxId') = request.box_id
+             ORDER BY json_extract(item.value, '$.revision') DESC,
+                      json_extract(item.value, '$.id') DESC LIMIT 1
+          )
+        WHERE request.inventory_id = NEW.inventory_id
+          AND request.snapshot_id = NEW.snapshot_id
+          AND request.completed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM json_each(NEW.page_json, '$.items') item
+             WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
+               AND json_extract(item.value, '$.boxId') = request.box_id
+          );
+
+       INSERT INTO inventory_remote_reprint_requests
+         (inventory_id, snapshot_id, correction_id, box_id, owner_device_id, requested_at)
+       SELECT NEW.inventory_id, NEW.snapshot_id,
+              json_extract(item.value, '$.id'), json_extract(item.value, '$.boxId'),
+              json_extract(item.value, '$.ownerDeviceId'),
+              json_extract(item.value, '$.correctedAt')
+         FROM json_each(NEW.page_json, '$.items') item
+         JOIN inventory_repack_boxes_mirror box
+           ON box.inventory_id = NEW.inventory_id
+          AND box.snapshot_id = NEW.snapshot_id
+          AND box.box_id = json_extract(item.value, '$.boxId')
+          AND box.owner_device_id = NEW.device_id
+          AND box.owner_device_id = json_extract(item.value, '$.ownerDeviceId')
+          AND box.state = 'closed' AND box.print_state = 'printed'
+          AND box.invalidated_at IS NULL
+        WHERE json_extract(item.value, '$.kind') = 'reprint'
+       ON CONFLICT(inventory_id, snapshot_id, correction_id) DO NOTHING;
+     END;`,
+  // Admin invalidation must remain distinguishable from a claim-lost conflict.
+  // This is trailing, forward-only DDL so already-enrolled stations preserve history.
+  `ALTER TABLE inventory_repack_boxes_mirror ADD COLUMN invalidation_source TEXT
+     CHECK (invalidation_source IN ('claim_lost', 'admin'));`,
+  `UPDATE inventory_repack_boxes_mirror
+      SET invalidation_source = 'claim_lost'
+    WHERE state = 'invalidated' AND invalidation_source IS NULL;`,
+  `DROP TRIGGER IF EXISTS inventory_repack_invalidate_ack_v1;`,
+  `DROP TRIGGER IF EXISTS inventory_repack_invalidate_ack_v2;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_repack_invalidate_ack_v3
+     AFTER INSERT ON inventory_sync_ack_receipts
+     BEGIN
+       UPDATE inventory_repack_boxes_mirror AS box
+          SET state = 'invalidated', invalidation_source = 'claim_lost',
+              print_state = CASE WHEN box.print_state = 'pending' THEN 'failed'
+                                 ELSE box.print_state END,
+              invalidated_at = NEW.applied_at, updated_at = NEW.applied_at
+        WHERE box.inventory_id = NEW.inventory_id
+          AND box.snapshot_id = NEW.snapshot_id
+          AND (box.state = 'open' OR (box.state = 'closed' AND box.print_state = 'pending'))
+          AND EXISTS (
+            SELECT 1
+              FROM inventory_repack_items_mirror item,
+                   json_each(NEW.response_json, '$.outcomes') outcome
+             WHERE item.inventory_id = box.inventory_id
+               AND item.snapshot_id = box.snapshot_id
+               AND item.box_id = box.box_id
+               AND item.removed_at IS NULL
+               AND item.source_event_id = json_extract(outcome.value, '$.eventId')
+               AND json_extract(outcome.value, '$.status') = 'duplicate'
+          );
+     END;`,
+  `DROP TRIGGER IF EXISTS inventory_repack_invalidate_progress_v1;`,
+  `DROP TRIGGER IF EXISTS inventory_repack_invalidate_progress_v2;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_repack_invalidate_progress_v3
+     AFTER INSERT ON inventory_progress_receipts_v2
+     BEGIN
+       UPDATE inventory_repack_boxes_mirror AS box
+          SET state = 'invalidated', invalidation_source = 'claim_lost',
+              print_state = CASE WHEN box.print_state = 'pending' THEN 'failed'
+                                 ELSE box.print_state END,
+              invalidated_at = NEW.applied_at, updated_at = NEW.applied_at
+        WHERE box.inventory_id = NEW.inventory_id
+          AND box.snapshot_id = NEW.snapshot_id
+          AND (box.state = 'open' OR (box.state = 'closed' AND box.print_state = 'pending'))
+          AND EXISTS (
+            SELECT 1
+              FROM inventory_repack_items_mirror item,
+                   json_each(NEW.page_json, '$.items') progress
+             WHERE item.inventory_id = box.inventory_id
+               AND item.snapshot_id = box.snapshot_id
+               AND item.box_id = box.box_id
+               AND item.removed_at IS NULL
+               AND item.code_hash = json_extract(progress.value, '$.codeHash')
+               AND json_type(progress.value, '$.winner') = 'object'
+               AND json_extract(progress.value, '$.winner.eventId') <> item.source_event_id
+               AND NOT EXISTS (
+                 SELECT 1 FROM json_each(NEW.page_json, '$.items') later
+                  WHERE json_extract(later.value, '$.codeHash') = item.code_hash
+                    AND (json_extract(later.value, '$.revision') >
+                           json_extract(progress.value, '$.revision')
+                      OR (json_extract(later.value, '$.revision') =
+                            json_extract(progress.value, '$.revision')
+                        AND json_extract(later.value, '$.id') >
+                            json_extract(progress.value, '$.id')))
+               )
+          );
+     END;`,
+  `DROP TRIGGER IF EXISTS inventory_repack_resolve_conflict_v1;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_repack_resolve_conflict_v2
+     AFTER INSERT ON inventory_repack_journal
+     WHEN NEW.action = 'resolve-conflict'
+     BEGIN
+       UPDATE inventory_conflicts_mirror
+          SET state = 'resolved'
+        WHERE inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND state = 'open'
+          AND losing_event_id IN (
+            SELECT source_event_id FROM inventory_repack_items_mirror
+             WHERE inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+               AND box_id = NEW.box_id AND removed_at IS NULL
+          )
+          AND EXISTS (
+            SELECT 1 FROM inventory_repack_boxes_mirror box
+             WHERE box.inventory_id = NEW.inventory_id
+               AND box.snapshot_id = NEW.snapshot_id AND box.box_id = NEW.box_id
+               AND box.invalidation_source = 'claim_lost'
+          );
+
+       UPDATE inventory_repack_items_mirror
+          SET removed_at = NEW.occurred_at
+        WHERE inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND box_id = NEW.box_id AND removed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM inventory_repack_boxes_mirror box
+             WHERE box.inventory_id = NEW.inventory_id
+               AND box.snapshot_id = NEW.snapshot_id AND box.box_id = NEW.box_id
+               AND box.invalidation_source = 'claim_lost'
+          );
+
+       UPDATE inventory_repack_boxes_mirror
+          SET state = 'open', print_state = 'not_ready', print_attempt_count = 0,
+              print_error_code = NULL, closed_event_id = NULL, closed_at = NULL,
+              invalidated_at = NULL, invalidation_source = NULL,
+              printed_at = NULL, updated_at = NEW.occurred_at
+        WHERE inventory_id = NEW.inventory_id AND snapshot_id = NEW.snapshot_id
+          AND box_id = NEW.box_id AND owner_device_id = NEW.device_id
+          AND state = 'invalidated' AND invalidation_source = 'claim_lost'
+          AND print_attempt_count = 0 AND printed_at IS NULL;
+       SELECT CASE WHEN changes() <> 1
+         THEN RAISE(ABORT, 'inventory repack conflict resolution rejected') END;
+     END;`,
+  `DROP TRIGGER IF EXISTS inventory_progress_validate_page_v3;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_progress_validate_page_v4
+     BEFORE INSERT ON inventory_progress_receipts_v2
+     WHEN NOT (
+       EXISTS (
+         SELECT 1 FROM inventory_progress_receipts_v2 receipt
+          WHERE receipt.receipt_id = NEW.receipt_id
+            AND receipt.inventory_id IS NEW.inventory_id
+            AND receipt.snapshot_id IS NEW.snapshot_id
+            AND receipt.device_id IS NEW.device_id
+            AND receipt.requested_cursor IS NEW.requested_cursor
+            AND receipt.prior_result_revision IS NEW.prior_result_revision
+            AND receipt.page_json IS NEW.page_json
+            AND receipt.pointer_key IS NEW.pointer_key
+            AND receipt.pointer_value IS NEW.pointer_value
+            AND receipt.credential_ownership IS NEW.credential_ownership
+            AND receipt.applied_at IS NEW.applied_at
+       )
+       OR (
+         NOT EXISTS (
+           SELECT 1 FROM inventory_progress_receipts_v2 receipt
+            WHERE receipt.receipt_id = NEW.receipt_id
+         )
+         AND NEW.receipt_id IS NOT NULL
+         AND json_valid(NEW.page_json)
+         AND json_type(NEW.page_json, '$') = 'object'
+         AND (SELECT COUNT(*) FROM json_each(NEW.page_json)) = 7
+         AND json_extract(NEW.page_json, '$.inventoryId') IS NEW.inventory_id
+         AND json_extract(NEW.page_json, '$.snapshotId') IS NEW.snapshot_id
+         AND json_extract(NEW.page_json, '$.snapshotRevision') IS 1
+         AND json_extract(NEW.page_json, '$.cursor') IS NEW.requested_cursor
+         AND json_type(NEW.page_json, '$.resultRevision') = 'integer'
+         AND json_extract(NEW.page_json, '$.resultRevision') >= NEW.prior_result_revision
+         AND json_type(NEW.page_json, '$.items') = 'array'
+         AND json_array_length(NEW.page_json, '$.items') <= 200
+         AND json_type(NEW.page_json, '$.nextCursor') IN ('text', 'null')
+         AND NEW.receipt_id = NEW.inventory_id || ':' || NEW.snapshot_id || ':' ||
+              NEW.device_id || ':' || COALESCE(NEW.requested_cursor, 'root') || ':' ||
+              CAST(NEW.prior_result_revision AS TEXT) || ':' ||
+              CAST(json_extract(NEW.page_json, '$.resultRevision') AS TEXT) || ':' ||
+              COALESCE(json_extract(NEW.page_json, '$.nextCursor'), 'end')
+         AND NEW.pointer_key = 'active_inventory_floor_task_v1'
+         AND json_valid(NEW.pointer_value)
+         AND json_type(NEW.pointer_value, '$') = 'object'
+         AND json_extract(NEW.pointer_value, '$.inventoryId') IS NEW.inventory_id
+         AND json_extract(NEW.pointer_value, '$.snapshotId') IS NEW.snapshot_id
+         AND json_extract(NEW.pointer_value, '$.credentialOwnership') IS NEW.credential_ownership
+         AND json_type(NEW.pointer_value, '$.activationId') = 'text'
+         AND length(json_extract(NEW.pointer_value, '$.activationId')) > 0
+         AND (SELECT COUNT(*) FROM json_each(NEW.pointer_value)) = 4
+         AND length(NEW.credential_ownership) = 64
+         AND NEW.credential_ownership = lower(NEW.credential_ownership)
+         AND NEW.credential_ownership NOT GLOB '*[^0-9a-f]*'
+         AND EXISTS (
+           SELECT 1 FROM station_meta pointer
+            WHERE pointer.key = NEW.pointer_key AND pointer.value = NEW.pointer_value
+         )
+         AND EXISTS (
+           SELECT 1 FROM inventory_terminal_state terminal
+            WHERE terminal.inventory_id = NEW.inventory_id
+              AND terminal.snapshot_id = NEW.snapshot_id
+              AND terminal.device_id = NEW.device_id
+              AND terminal.progress_cursor IS NEW.requested_cursor
+              AND terminal.progress_result_revision = NEW.prior_result_revision
+              AND NEW.applied_at = CASE
+                WHEN json_array_length(NEW.page_json, '$.items') > 0 THEN
+                  json_extract(NEW.page_json, '$.items[#-1].correctedAt')
+                ELSE terminal.updated_at
+              END
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM json_each(NEW.page_json, '$.items') item
+            WHERE json_type(item.value, '$') <> 'object'
+               OR json_type(item.value, '$.id') <> 'text'
+               OR json_type(item.value, '$.revision') <> 'integer'
+               OR json_extract(item.value, '$.revision') <= 0
+               OR json_extract(item.value, '$.revision') >
+                    json_extract(NEW.page_json, '$.resultRevision')
+               OR json_type(item.value, '$.correctedAt') <> 'text'
+               OR json_extract(item.value, '$.kind') NOT IN
+                    ('claim', 'correction', 'remove_item', 'invalidate_box', 'reprint')
+               OR (json_extract(item.value, '$.kind') IN ('claim', 'correction') AND (
+                 (SELECT COUNT(*) FROM json_each(item.value)) <> 8
+                 OR json_type(item.value, '$.codeHash') <> 'text'
+                 OR length(json_extract(item.value, '$.codeHash')) <> 64
+                 OR json_extract(item.value, '$.codeHash') GLOB '*[^0-9a-f]*'
+                 OR json_extract(item.value, '$.classification') NOT IN
+                      ('expected', 'protected', 'ineligible', 'unknown', 'voided')
+                 OR json_type(item.value, '$.observedProductionDate') NOT IN ('text', 'null')
+                 OR json_type(item.value, '$.winner') NOT IN ('object', 'null')
+                 OR (json_type(item.value, '$.winner') = 'object' AND (
+                   (SELECT COUNT(*) FROM json_each(item.value, '$.winner')) <> 4
+                   OR json_extract(item.value, '$.winner.codeHash') IS NOT
+                        json_extract(item.value, '$.codeHash')
+                   OR json_type(item.value, '$.winner.eventId') <> 'text'
+                   OR json_type(item.value, '$.winner.deviceId') <> 'text'
+                   OR json_type(item.value, '$.winner.scannedAt') <> 'text'
+                 ))
+               ))
+               OR (json_extract(item.value, '$.kind') = 'remove_item' AND (
+                 (SELECT COUNT(*) FROM json_each(item.value)) <> 9
+                 OR json_type(item.value, '$.boxId') <> 'text'
+                 OR json_type(item.value, '$.resultId') <> 'text'
+                 OR json_type(item.value, '$.codeHash') <> 'text'
+                 OR length(json_extract(item.value, '$.codeHash')) <> 64
+                 OR json_extract(item.value, '$.codeHash') GLOB '*[^0-9a-f]*'
+                 OR json_type(item.value, '$.ownerDeviceId') <> 'text'
+                 OR json_type(item.value, '$.removedAt') <> 'text'
+               ))
+               OR (json_extract(item.value, '$.kind') IN ('invalidate_box', 'reprint') AND (
+                 (SELECT COUNT(*) FROM json_each(item.value)) <> 6
+                 OR json_type(item.value, '$.boxId') <> 'text'
+                 OR json_type(item.value, '$.ownerDeviceId') <> 'text'
+               ))
+               OR EXISTS (
+                 SELECT 1 FROM json_each(NEW.page_json, '$.items') prior
+                  WHERE CAST(prior.key AS INTEGER) < CAST(item.key AS INTEGER)
+                    AND (json_extract(prior.value, '$.revision') >
+                           json_extract(item.value, '$.revision')
+                      OR (json_extract(prior.value, '$.revision') =
+                            json_extract(item.value, '$.revision')
+                        AND json_extract(prior.value, '$.id') >=
+                            json_extract(item.value, '$.id')))
+               )
+         )
+         AND (
+           (json_array_length(NEW.page_json, '$.items') = 0
+             AND json_extract(NEW.page_json, '$.nextCursor') IS NULL)
+           OR (json_array_length(NEW.page_json, '$.items') > 0
+             AND json_extract(NEW.page_json, '$.nextCursor') = (
+               SELECT CAST(json_extract(item.value, '$.revision') AS TEXT) || ':' ||
+                      json_extract(item.value, '$.id')
+                 FROM json_each(NEW.page_json, '$.items') item
+                ORDER BY CAST(item.key AS INTEGER) DESC LIMIT 1
+             ))
+         )
+       )
+     )
+     BEGIN
+       SELECT RAISE(ABORT, 'inventory progress receipt invalid');
+     END;`,
+  `DROP TRIGGER IF EXISTS inventory_progress_apply_admin_corrections_v1;`,
+  `CREATE TRIGGER IF NOT EXISTS inventory_progress_apply_admin_corrections_v2
+     AFTER INSERT ON inventory_progress_receipts_v2
+     BEGIN
+       UPDATE inventory_repack_items_mirror AS member
+          SET removed_at = (
+            SELECT json_extract(item.value, '$.removedAt')
+              FROM json_each(NEW.page_json, '$.items') item
+             WHERE json_extract(item.value, '$.kind') = 'remove_item'
+               AND json_extract(item.value, '$.boxId') = member.box_id
+               AND json_extract(item.value, '$.codeHash') = member.code_hash
+             ORDER BY json_extract(item.value, '$.revision') DESC,
+                      json_extract(item.value, '$.id') DESC LIMIT 1
+          )
+        WHERE member.inventory_id = NEW.inventory_id
+          AND member.snapshot_id = NEW.snapshot_id
+          AND member.removed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM json_each(NEW.page_json, '$.items') item
+             WHERE json_extract(item.value, '$.kind') = 'remove_item'
+               AND json_extract(item.value, '$.boxId') = member.box_id
+               AND json_extract(item.value, '$.codeHash') = member.code_hash
+          );
+
+       UPDATE inventory_repack_boxes_mirror AS box
+          SET state = 'invalidated', invalidation_source = 'admin', invalidated_at = (
+                SELECT json_extract(item.value, '$.correctedAt')
+                  FROM json_each(NEW.page_json, '$.items') item
+                 WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
+                   AND json_extract(item.value, '$.boxId') = box.box_id
+                 ORDER BY json_extract(item.value, '$.revision') DESC,
+                          json_extract(item.value, '$.id') DESC LIMIT 1
+              ),
+              updated_at = (
+                SELECT json_extract(item.value, '$.correctedAt')
+                  FROM json_each(NEW.page_json, '$.items') item
+                 WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
+                   AND json_extract(item.value, '$.boxId') = box.box_id
+                 ORDER BY json_extract(item.value, '$.revision') DESC,
+                          json_extract(item.value, '$.id') DESC LIMIT 1
+              )
+        WHERE box.inventory_id = NEW.inventory_id
+          AND box.snapshot_id = NEW.snapshot_id
+          AND EXISTS (
+            SELECT 1 FROM json_each(NEW.page_json, '$.items') item
+             WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
+               AND json_extract(item.value, '$.boxId') = box.box_id
+          );
+
+       UPDATE inventory_remote_reprint_requests AS request
+          SET completed_at = (
+            SELECT json_extract(item.value, '$.correctedAt')
+              FROM json_each(NEW.page_json, '$.items') item
+             WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
+               AND json_extract(item.value, '$.boxId') = request.box_id
+             ORDER BY json_extract(item.value, '$.revision') DESC,
+                      json_extract(item.value, '$.id') DESC LIMIT 1
+          )
+        WHERE request.inventory_id = NEW.inventory_id
+          AND request.snapshot_id = NEW.snapshot_id
+          AND request.completed_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM json_each(NEW.page_json, '$.items') item
+             WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
+               AND json_extract(item.value, '$.boxId') = request.box_id
+          );
+
+       INSERT INTO inventory_remote_reprint_requests
+         (inventory_id, snapshot_id, correction_id, box_id, owner_device_id, requested_at)
+       SELECT NEW.inventory_id, NEW.snapshot_id,
+              json_extract(item.value, '$.id'), json_extract(item.value, '$.boxId'),
+              json_extract(item.value, '$.ownerDeviceId'),
+              json_extract(item.value, '$.correctedAt')
+         FROM json_each(NEW.page_json, '$.items') item
+         JOIN inventory_repack_boxes_mirror box
+           ON box.inventory_id = NEW.inventory_id
+          AND box.snapshot_id = NEW.snapshot_id
+          AND box.box_id = json_extract(item.value, '$.boxId')
+          AND box.owner_device_id = NEW.device_id
+          AND box.owner_device_id = json_extract(item.value, '$.ownerDeviceId')
+          AND box.state = 'closed' AND box.print_state = 'printed'
+          AND box.invalidated_at IS NULL
+        WHERE json_extract(item.value, '$.kind') = 'reprint'
+       ON CONFLICT(inventory_id, snapshot_id, correction_id) DO NOTHING;
+     END;`,
 ];
 
 export interface StationMigrationEntry {

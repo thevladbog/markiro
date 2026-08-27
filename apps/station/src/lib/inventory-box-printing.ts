@@ -67,6 +67,20 @@ export interface AttemptInventoryBoxPrintInput {
   recoveryOfAttemptId?: string;
 }
 
+export interface ProcessNextInventoryRemoteReprintInput {
+  exec: SqlExecutor;
+  manifest: StationInventoryBundleManifest & { mode: "repack" };
+  inventoryId: string;
+  snapshotId: string;
+  deviceId: string;
+  operatorId: string;
+  createEventId: () => string;
+  now: () => string;
+  printing: InventoryBoxPrintingTransport | null;
+  render?: AttemptInventoryBoxPrintInput["render"];
+  rasterizeText?: RasterizeTextFn;
+}
+
 export class InventoryPrintRecoveryStaleError extends Error {
   constructor() {
     super("inventory print recovery is stale");
@@ -460,6 +474,59 @@ export function attemptInventoryBoxPrint(
   return serialized(`${input.inventoryId}:${input.snapshotId}:${input.boxId}`, () =>
     attemptInternal(input),
   );
+}
+
+/**
+ * Bridges one durable admin correction into the existing print attempt/outbox
+ * pipeline. The correction id is the attempt id, so a crash after finalizing
+ * the outcome but before completing the queue row cannot print twice.
+ */
+export async function processNextInventoryRemoteReprint(
+  input: ProcessNextInventoryRemoteReprintInput,
+): Promise<InventoryBoxPrintResult | null> {
+  const [request] = await input.exec.all<{
+    correction_id: string;
+    box_id: string;
+    requested_at: string;
+  }>(
+    `SELECT correction_id, box_id, requested_at
+       FROM inventory_remote_reprint_requests
+      WHERE inventory_id = ? AND snapshot_id = ? AND owner_device_id = ?
+        AND completed_at IS NULL
+      ORDER BY requested_at, correction_id
+      LIMIT 1`,
+    [input.inventoryId, input.snapshotId, input.deviceId],
+  );
+  if (!request) return null;
+  let completedAt = input.now();
+  const result = await attemptInventoryBoxPrint({
+    exec: input.exec,
+    manifest: input.manifest,
+    inventoryId: input.inventoryId,
+    snapshotId: input.snapshotId,
+    deviceId: input.deviceId,
+    operatorId: input.operatorId,
+    boxId: request.box_id,
+    attemptId: request.correction_id,
+    eventId: input.createEventId(),
+    attemptedAt: completedAt,
+    completedAt: () => {
+      completedAt = input.now();
+      return completedAt;
+    },
+    printing: input.printing,
+    kind: "reprint",
+    ...(input.render ? { render: input.render } : {}),
+    ...(input.rasterizeText ? { rasterizeText: input.rasterizeText } : {}),
+  });
+  await input.exec.run(
+    `UPDATE inventory_remote_reprint_requests
+        SET completed_at = ?
+      WHERE inventory_id = ? AND snapshot_id = ? AND correction_id = ?
+        AND owner_device_id = ? AND completed_at IS NULL`,
+    [completedAt, input.inventoryId, input.snapshotId, request.correction_id, input.deviceId],
+  );
+  return result;
 }
 
 export async function listInventoryBoxPrintAttempts(

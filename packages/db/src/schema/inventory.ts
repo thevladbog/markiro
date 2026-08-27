@@ -104,6 +104,9 @@ export type InventoryLateEventResolution = (typeof INVENTORY_LATE_EVENT_RESOLUTI
 export const INVENTORY_PROGRESS_CHANGE_KINDS = ["claim", "correction"] as const;
 export type InventoryProgressChangeKind = (typeof INVENTORY_PROGRESS_CHANGE_KINDS)[number];
 
+export const INVENTORY_DOCUMENT_RUN_STATUSES = ["queued", "processing", "ready", "failed"] as const;
+export type InventoryDocumentRunStatus = (typeof INVENTORY_DOCUMENT_RUN_STATUSES)[number];
+
 export const inventoryChzStatusEnum = pgEnum("inventory_chz_status", INVENTORY_CHZ_STATUSES);
 export const inventoryLifecycleStatusEnum = pgEnum(
   "inventory_lifecycle_status",
@@ -153,6 +156,10 @@ export const inventoryLateEventResolutionEnum = pgEnum(
 export const inventoryProgressChangeKindEnum = pgEnum(
   "inventory_progress_change_kind",
   INVENTORY_PROGRESS_CHANGE_KINDS,
+);
+export const inventoryDocumentRunStatusEnum = pgEnum(
+  "inventory_document_run_status",
+  INVENTORY_DOCUMENT_RUN_STATUSES,
 );
 
 const tenantId = () =>
@@ -313,6 +320,138 @@ export const inventories = pgTable(
   },
 );
 
+export interface InventoryDocumentFormatSelection {
+  id: string;
+  version: number;
+}
+
+/** One immutable request to render selected formats from one closed result revision. */
+export const inventoryDocumentRuns = pgTable(
+  "inventory_document_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    inventoryId: uuid("inventory_id").notNull(),
+    resultRevision: integer("result_revision").notNull(),
+    selectedFormats: jsonb("selected_formats")
+      .$type<InventoryDocumentFormatSelection[]>()
+      .notNull(),
+    requestDigest: char("request_digest", { length: 64 }).notNull(),
+    status: inventoryDocumentRunStatusEnum("status").notNull().default("queued"),
+    errorCode: text("error_code"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => user.id),
+    idempotencyKey: uuid("idempotency_key").notNull(),
+    sourceSnapshotStartedAt: timestamp("source_snapshot_started_at", { withTimezone: true }),
+    sourceSnapshotCompletedAt: timestamp("source_snapshot_completed_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("inventory_document_runs_tenant_id_uq").on(table.tenantId, table.id),
+    unique("inventory_document_runs_tenant_actor_idempotency_uq").on(
+      table.tenantId,
+      table.createdByUserId,
+      table.idempotencyKey,
+    ),
+    foreignKey({
+      name: "inventory_document_runs_tenant_inventory_fk",
+      columns: [table.tenantId, table.inventoryId],
+      foreignColumns: [inventories.tenantId, inventories.id],
+    }),
+    index("inventory_document_runs_tenant_inventory_created_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.createdAt,
+    ),
+    index("inventory_document_runs_queued_created_idx")
+      .on(table.createdAt)
+      .where(sql`${table.status} = 'queued'`),
+    check(
+      "inventory_document_runs_result_revision_nonnegative_check",
+      sql`${table.resultRevision} >= 0`,
+    ),
+    check(
+      "inventory_document_runs_selected_formats_nonempty_check",
+      sql`jsonb_typeof(${table.selectedFormats}) = 'array' and jsonb_array_length(${table.selectedFormats}) > 0`,
+    ),
+    check(
+      "inventory_document_runs_request_digest_check",
+      sql`${table.requestDigest} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "inventory_document_runs_attempt_count_nonnegative_check",
+      sql`${table.attemptCount} >= 0`,
+    ),
+    check(
+      "inventory_document_runs_status_consistency_check",
+      sql`(${table.status} = 'ready' and ${table.completedAt} is not null and ${table.errorCode} is null)
+        or (${table.status} = 'failed' and ${table.completedAt} is not null and ${table.errorCode} is not null)
+        or (${table.status} in ('queued', 'processing') and ${table.completedAt} is null and ${table.errorCode} is null)`,
+    ),
+  ],
+);
+
+/** Verified private object produced for one selected format and part. */
+export const inventoryDocumentArtifacts = pgTable(
+  "inventory_document_artifacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    runId: uuid("run_id").notNull(),
+    formatId: text("format_id").notNull(),
+    formatVersion: integer("format_version").notNull(),
+    partNumber: integer("part_number").notNull(),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    rowCount: integer("row_count").notNull(),
+    codeCount: integer("code_count").notNull(),
+    boxCount: integer("box_count").notNull(),
+    byteSize: bigint("byte_size", { mode: "number" }).notNull(),
+    sha256: char("sha256", { length: 64 }).notNull(),
+    objectKey: text("object_key").notNull(),
+    downloadedAt: timestamp("downloaded_at", { withTimezone: true }),
+    downloadedByUserId: text("downloaded_by_user_id").references(() => user.id),
+    invalidatedAt: timestamp("invalidated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("inventory_document_artifacts_tenant_id_uq").on(table.tenantId, table.id),
+    unique("inventory_document_artifacts_tenant_run_format_part_uq").on(
+      table.tenantId,
+      table.runId,
+      table.formatId,
+      table.partNumber,
+    ),
+    foreignKey({
+      name: "inventory_document_artifacts_tenant_run_fk",
+      columns: [table.tenantId, table.runId],
+      foreignColumns: [inventoryDocumentRuns.tenantId, inventoryDocumentRuns.id],
+    }),
+    check(
+      "inventory_document_artifacts_format_version_positive_check",
+      sql`${table.formatVersion} > 0`,
+    ),
+    check("inventory_document_artifacts_part_number_positive_check", sql`${table.partNumber} > 0`),
+    check("inventory_document_artifacts_row_count_nonnegative_check", sql`${table.rowCount} >= 0`),
+    check(
+      "inventory_document_artifacts_code_count_nonnegative_check",
+      sql`${table.codeCount} >= 0`,
+    ),
+    check("inventory_document_artifacts_box_count_nonnegative_check", sql`${table.boxCount} >= 0`),
+    check("inventory_document_artifacts_byte_size_positive_check", sql`${table.byteSize} > 0`),
+    check("inventory_document_artifacts_sha256_check", sql`${table.sha256} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "inventory_document_artifacts_download_fields_check",
+      sql`(${table.downloadedAt} is null and ${table.downloadedByUserId} is null)
+        or (${table.downloadedAt} is not null and ${table.downloadedByUserId} is not null)`,
+    ),
+  ],
+);
+
 /** Append-only metadata for every upload attempt, including failed parses. */
 export const inventoryImports = pgTable(
   "inventory_imports",
@@ -403,6 +542,9 @@ export const inventorySnapshots = pgTable(
     inventoryId: uuid("inventory_id").notNull(),
     revision: integer("revision").notNull().default(1),
     combinedDigest: char("combined_digest", { length: 64 }).notNull(),
+    productName: text("product_name").notNull(),
+    lineName: text("line_name").notNull(),
+    boxCapacity: integer("box_capacity"),
     emittedCount: integer("emitted_count").notNull(),
     introducedCount: integer("introduced_count").notNull(),
     appliedCount: integer("applied_count").notNull(),
@@ -1321,6 +1463,7 @@ export const inventoryCorrections = pgTable(
     inventoryId: uuid("inventory_id").notNull(),
     action: inventoryCorrectionActionEnum("action").notNull(),
     reason: text("reason").notNull(),
+    requestDigest: char("request_digest", { length: 64 }).notNull(),
     actorUserId: text("actor_user_id").references(() => user.id),
     actorOperatorId: uuid("actor_operator_id"),
     targetEventId: uuid("target_event_id"),
@@ -1329,6 +1472,7 @@ export const inventoryCorrections = pgTable(
     beforeProjectionDigest: char("before_projection_digest", { length: 64 }).notNull(),
     afterProjectionDigest: char("after_projection_digest", { length: 64 }).notNull(),
     resultRevision: integer("result_revision").notNull(),
+    effectAt: timestamp("effect_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -1400,6 +1544,10 @@ export const inventoryCorrections = pgTable(
       sql`${table.beforeProjectionDigest} ~ '^[0-9a-f]{64}$'
         and ${table.afterProjectionDigest} ~ '^[0-9a-f]{64}$'`,
     ),
+    check(
+      "inventory_corrections_request_digest_check",
+      sql`${table.requestDigest} ~ '^[0-9a-f]{64}$'`,
+    ),
     check("inventory_corrections_revision_check", sql`${table.resultRevision} > 0`),
   ],
 );
@@ -1421,6 +1569,9 @@ export const inventoryLateEvents = pgTable(
     resolution: inventoryLateEventResolutionEnum("resolution").notNull().default("pending"),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     resolvedByUserId: text("resolved_by_user_id").references(() => user.id),
+    replayAuthorizedAt: timestamp("replay_authorized_at", { withTimezone: true }),
+    replayAuthorizedByUserId: text("replay_authorized_by_user_id"),
+    replayAuthorizedRevision: integer("replay_authorized_revision"),
   },
   (table) => [
     unique("inventory_late_events_tenant_id_inventory_uq").on(
@@ -1450,6 +1601,11 @@ export const inventoryLateEvents = pgTable(
       columns: [table.tenantId, table.deviceId],
       foreignColumns: [stationDevices.tenantId, stationDevices.id],
     }),
+    foreignKey({
+      name: "inventory_late_events_replay_authorized_by_user_fk",
+      columns: [table.replayAuthorizedByUserId],
+      foreignColumns: [user.id],
+    }),
     index("inventory_late_events_resolution_idx").on(
       table.tenantId,
       table.inventoryId,
@@ -1474,6 +1630,15 @@ export const inventoryLateEvents = pgTable(
         or (${table.resolution} in ('replayed', 'discarded')
           and ${table.resolvedAt} is not null
           and ${table.resolvedByUserId} is not null)`,
+    ),
+    check(
+      "inventory_late_events_replay_authorization_check",
+      sql`(${table.replayAuthorizedAt} is null
+          and ${table.replayAuthorizedByUserId} is null
+          and ${table.replayAuthorizedRevision} is null)
+        or (${table.replayAuthorizedAt} is not null
+          and ${table.replayAuthorizedByUserId} is not null
+          and ${table.replayAuthorizedRevision} > ${table.closedRevision})`,
     ),
   ],
 );
