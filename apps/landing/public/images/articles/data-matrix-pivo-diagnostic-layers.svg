@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Четыре уровня диагностики Data Matrix</title>
+  <desc id="desc">Последовательность проверки: символ, поток сканера, решение программы и внешний обмен.</desc>
+  <rect width="1200" height="620" fill="#131216"/>
+  <text x="64" y="72" fill="#3ddc7a" font-family="Arial, sans-serif" font-size="18" font-weight="700" letter-spacing="2">ГДЕ ИМЕННО ПРОПАЛ КОД?</text>
+  <text x="64" y="118" fill="#f4f2f5" font-family="Arial, sans-serif" font-size="32" font-weight="700">Один симптом — четыре разных уровня отказа</text>
+  <g font-family="Arial, sans-serif">
+    <g transform="translate(64 174)">
+      <rect width="246" height="292" fill="#1d1c21" stroke="#3b3941"/>
+      <text x="24" y="42" fill="#3ddc7a" font-size="17" font-weight="700">01 / СИМВОЛ</text>
+      <text x="24" y="88" fill="#f4f2f5" font-size="24" font-weight="700">Камера не</text>
+      <text x="24" y="119" fill="#f4f2f5" font-size="24" font-weight="700">распознала код</text>
+      <text x="24" y="164" fill="#aaa7b0" font-size="17">Печать · блик · изгиб</text>
+      <text x="24" y="194" fill="#aaa7b0" font-size="17">размер · тихая зона</text>
+      <path d="M24 242h198" stroke="#3ddc7a" stroke-width="4"/>
+      <text x="24" y="270" fill="#f4f2f5" font-size="15">Тест: есть ли декодирование?</text>
+    </g>
+    <path d="M321 320h29m-12-12 12 12-12 12" fill="none" stroke="#3ddc7a" stroke-width="3"/>
+    <g transform="translate(362 174)">
+      <rect width="246" height="292" fill="#1d1c21" stroke="#3b3941"/>
+      <text x="24" y="42" fill="#3ddc7a" font-size="17" font-weight="700">02 / СКАНЕР</text>
+      <text x="24" y="88" fill="#f4f2f5" font-size="24" font-weight="700">Поток данных</text>
+      <text x="24" y="119" fill="#f4f2f5" font-size="24" font-weight="700">искажён</text>
+      <text x="24" y="164" fill="#aaa7b0" font-size="17">FNC1 · GS · раскладка</text>
+      <text x="24" y="194" fill="#aaa7b0" font-size="17">префикс · суффикс</text>
+      <path d="M24 242h198" stroke="#3ddc7a" stroke-width="4"/>
+      <text x="24" y="270" fill="#f4f2f5" font-size="15">Тест: совпадают ли байты?</text>
+    </g>
+    <path d="M619 320h29m-12-12 12 12-12 12" fill="none" stroke="#3ddc7a" stroke-width="3"/>
+    <g transform="translate(660 174)">
+      <rect width="246" height="292" fill="#1d1c21" stroke="#3b3941"/>
+      <text x="24" y="42" fill="#3ddc7a" font-size="17" font-weight="700">03 / ПРОГРАММА</text>
+      <text x="24" y="88" fill="#f4f2f5" font-size="24" font-weight="700">Код отклонён</text>
+      <text x="24" y="119" fill="#f4f2f5" font-size="24" font-weight="700">по правилу</text>
+      <text x="24" y="164" fill="#aaa7b0" font-size="17">Формат · GTIN · дубль</text>
+      <text x="24" y="194" fill="#aaa7b0" font-size="17">не то задание</text>
+      <path d="M24 242h198" stroke="#3ddc7a" stroke-width="4"/>
+      <text x="24" y="270" fill="#f4f2f5" font-size="15">Тест: какой вердикт?</text>
+    </g>
+    <path d="M917 320h29m-12-12 12 12-12 12" fill="none" stroke="#3ddc7a" stroke-width="3"/>
+    <g transform="translate(958 174)">
+      <rect width="178" height="292" fill="#1d1c21" stroke="#3b3941"/>
+      <text x="20" y="42" fill="#3ddc7a" font-size="17" font-weight="700">04 / ОБМЕН</text>
+      <text x="20" y="88" fill="#f4f2f5" font-size="22" font-weight="700">Статус не</text>
+      <text x="20" y="117" fill="#f4f2f5" font-size="22" font-weight="700">принят</text>
+      <text x="20" y="164" fill="#aaa7b0" font-size="16">ГИС МТ · ЭДО</text>
+      <text x="20" y="192" fill="#aaa7b0" font-size="16">интеграция</text>
+      <path d="M20 242h138" stroke="#3ddc7a" stroke-width="4"/>
+      <text x="20" y="270" fill="#f4f2f5" font-size="15">Тест: ответ системы</text>
+    </g>
+  </g>
+  <rect x="64" y="500" width="1072" height="68" fill="#202d25" stroke="#3ddc7a"/>
+  <text x="88" y="542" fill="#f4f2f5" font-family="Arial, sans-serif" font-size="20" font-weight="700">Не меняйте печать, пока не доказано, что отказ возник на первом уровне.</text>
+</svg>

@@ -1,0 +1,137 @@
+---
+import { Picture } from "astro:assets";
+
+import articleHero from "../../../assets/beer-application-report-hero.png";
+import LandingFooter from "../../../components/LandingFooter.astro";
+import LandingHeader from "../../../components/LandingHeader.astro";
+import { BEER_APPLICATION_REPORT_ARTICLE } from "../../../content/articles";
+import { buildArticlePageGraph } from "../../../lib/seo";
+import { readPublicSiteConfig } from "../../../lib/site-config";
+import BaseLayout from "../../../layouts/BaseLayout.astro";
+
+const article = BEER_APPLICATION_REPORT_ARTICLE;
+const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<BaseLayout metadata={article} graph={buildArticlePageGraph(article)}>
+  <LandingHeader page={article} phone={config.phone} />
+  <main id="main" class="article-page">
+    <header class="article-hero">
+      <div class="container article-hero__inner">
+        <nav class="breadcrumbs" aria-label="Хлебные крошки"><ol><li><a href="/">Markiro</a></li><li aria-current="page">{article.navigationLabel}</li></ol></nav>
+        <div class="article-hero__layout">
+          <div class="article-hero__copy">
+            <p class="section-index">{article.eyebrow}</p>
+            <h1>{article.heading}</h1>
+            <p class="article-hero__lead">{article.introduction}</p>
+            <div class="article-byline" aria-label="Сведения о публикации"><span>{article.authorName}</span><time datetime={article.publishedAt}>27 августа 2026</time><span>{article.readingTimeMinutes} минут чтения</span></div>
+          </div>
+          <figure class="article-hero__media" data-article-visual>
+            <Picture src={articleHero} alt="Оператор и руководитель сверяют результаты смены перед отчётом о нанесении кодов пива" widths={[480, 720, 1080]} formats={["avif", "webp"]} sizes="(max-width: 767px) 100vw, 45vw" loading="eager" fetchpriority="high" data-article-hero-image />
+            <figcaption>Документ начинается не в личном кабинете, а со сверенного производственного факта: какие единицы действительно выпущены и приняты.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </header>
+
+    <article class="container article-body">
+      <aside class="article-summary" aria-labelledby="article-summary-title">
+        <p class="section-index">Коротко</p><h2 id="article-summary-title">Что важно в отчёте о нанесении</h2>
+        <ul>
+          <li data-key-takeaway>Отчёт подтверждает факт нанесения и использования кодов маркировки на произведённой продукции.</li>
+          <li data-key-takeaway>Для произведённого в РФ пива на его основе автоматически формируется документ ввода в оборот.</li>
+          <li data-key-takeaway>В исходный список входят только допустимые коды закрытой смены — без дублей, брака и отменённых операций.</li>
+          <li data-key-takeaway>Черновик не равен отправленному отчёту: документ нужно проверить, отправить и подписать.</li>
+          <li data-key-takeaway>При частичной обработке повторяют только исправленные ошибочные КМ; при обработке с ошибкой — весь исправленный состав.</li>
+          <li data-key-takeaway>Markiro готовит проверяемые данные смены, но прямую отправку отчёта в СУЗ нужно настраивать и принимать отдельно.</li>
+        </ul>
+      </aside>
+
+      <nav class="article-toc" aria-label="Содержание статьи"><p class="section-index">Содержание</p><ol><li><a href="#purpose">Назначение отчёта</a></li><li><a href="#deadline">Срок подачи</a></li><li><a href="#source">Какие коды включать</a></li><li><a href="#fields">Поля и формат КМ</a></li><li><a href="#submit">Отправка и подпись</a></li><li><a href="#statuses">Статусы обработки</a></li><li><a href="#reconcile">Итоговая сверка</a></li><li><a href="#markiro">Граница Markiro</a></li></ol></nav>
+
+      <section id="purpose" aria-labelledby="purpose-title">
+        <p class="section-index">01 / Назначение</p><h2 id="purpose-title">Что подтверждает отчёт о нанесении кодов маркировки пива</h2>
+        <p><strong>Отчёт сообщает системе маркировки, какие заказанные коды фактически нанесены и использованы на продукции.</strong> Для товарной группы «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки» при отчёте по продукции российского производства документ «Ввод в оборот. Производство РФ» формируется автоматически.</p>
+        <p>Это означает, что отчёт нельзя собирать как выгрузку «всего, что печатали». Печать этикетки ещё не доказывает выпуск товара: носитель мог быть смят, единица забракована, скан отменён, а короб разобран. Источником должен быть итоговый производственный учёт после исключений.</p>
+        <p>Актуальный порядок, варианты через API СУЗ и ручной режим опубликованы в официальной инструкции <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/kak-otpravit-otchet-o-nanesenii-pivo">«Как отправить отчёт о нанесении по пивной продукции»</a>.</p>
+      </section>
+
+      <section id="deadline" aria-labelledby="deadline-title">
+        <p class="section-index">02 / Срок</p><h2 id="deadline-title">Когда производителю нужно подать отчёт</h2>
+        <p><strong>Производитель подаёт отчёт после нанесения средства идентификации — не позднее одного календарного дня со дня производства пива и слабоалкогольных напитков.</strong> Планировать этот шаг лучше как обязательное закрытие смены, а не как еженедельную ручную задачу.</p>
+        <p>Официальная памятка также описывает отдельные сроки для импортёров и срок жизни полученных кодов в зависимости от способа оплаты. Перед запуском конкретного процесса сверяйте действующую редакцию требований: <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/kogda-neobkhodimo-podavat-otchet-o-nanesenii-pivo">сроки подачи отчёта по пивной продукции</a>.</p>
+        <div class="article-callout"><strong>Контрольный момент — закрытая и сверенная смена.</strong><p>Если отчёт формируется до завершения исключений, в него легко попадут дубли, забракованные этикетки или код, который оператор успел отменить.</p></div>
+      </section>
+
+      <section id="source" aria-labelledby="source-title">
+        <p class="section-index">03 / Источник</p><h2 id="source-title">Какие коды должны попасть в отчёт</h2>
+        <p><strong>Берите реестр фактически принятых единиц закрытой смены, а не количество печатных заданий.</strong> Для каждого КМ должны быть известны товар и GTIN, производственная дата, смена, результат проверки и текущее состояние операции. Повторный скан не создаёт вторую единицу, а отмена должна освобождать код из итогового состава.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/otchet-nanesenie-pivo-source.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Пять этапов подготовки кодов закрытой смены для отчёта о нанесении пива" data-article-diagram />
+          <figcaption>Сначала фиксируется выпуск, затем исключаются недопустимые события и сверяются контрольные количества.</figcaption>
+        </figure>
+        <p>Перед черновиком проверьте четыре равенства: число допустимых КМ равно числу принятых физических единиц; каждый КМ встречается один раз; единицы в закрытых коробах входят в их состав; SSCC и состав коробов не изменились после выгрузки. Разбор конфликтов вынесен в статью <a href="/stati/dubl-koda-markirovki-pivo/">о дубликатах кодов маркировки пива</a>.</p>
+        <p>Зафиксируйте момент, на который сделана выгрузка. Если после него менеджер разобрал короб, отменил скан или разрешил конфликт между терминалами, старый файл уже не отражает итоговое состояние. Его нельзя «подправить» удалением одной строки без повторной сверки: создайте новый снимок данных и сохраните связь между версией выгрузки и документом. Такой порядок особенно полезен, когда отчёт подписывает не тот сотрудник, который закрывал смену.</p>
+      </section>
+
+      <section id="fields" aria-labelledby="fields-title">
+        <p class="section-index">04 / Данные</p><h2 id="fields-title">Какие поля и последовательности проверить</h2>
+        <p><strong>До отправки убедитесь, что карточка товара готова к вводу в оборот, а общие данные соответствуют фактическому выпуску.</strong> Для действующего процесса по пиву важны данные организации и места деятельности, фактическое содержание этилового спирта, номер и дата первичного учётного документа, а для кегов — фактический объём.</p>
+        <p>При ручной загрузке официальный материал требует полную последовательность КМ: AI 01, GTIN, AI 21, серийный номер, служебный разделитель GS, AI 93 и код проверки. GS — управляющий символ ASCII 29, а не две напечатанные буквы. Потеря разделителя при копировании через таблицу меняет данные и приводит к ошибке обработки. Подробности приведены в инструкции <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/chto-delat-esli-ne-sozdalsya-chernovik-otcheta-o-nanesenii-pivo">о ручном создании отчёта, если черновик не появился</a>.</p>
+        <div class="article-callout article-callout--boundary"><strong>Не восстанавливайте КМ из картинки или обрезанного CSV.</strong><p>Если источник не сохраняет код проверки и GS, он не подходит для формирования полного отчёта. Используйте исходный защищённый набор или проверенное сканирование.</p></div>
+      </section>
+
+      <section id="submit" aria-labelledby="submit-title">
+        <p class="section-index">05 / Отправка</p><h2 id="submit-title">Черновик, отправка и подпись — три разных состояния</h2>
+        <p><strong>Автоматически сформированный черновик нужно открыть, проверить, сохранить, отправить и подписать сертификатом.</strong> До подписания документ остаётся в ожидании. Повторное получение ранее заказанных кодов не требует нового отчёта о нанесении.</p>
+        <ol class="article-steps">
+          <li><h3>Проверить черновик</h3><p>Сопоставить товар, производственную дату, учётный документ и количество КМ с закрытой сменой.</p></li>
+          <li><h3>Проверить коды</h3><p>Убедиться, что исключены дубли, брак и отмены, а полные последовательности не повреждены.</p></li>
+          <li><h3>Отправить и подписать</h3><p>Зафиксировать номер документа, время, сертификат и ответ системы.</p></li>
+          <li><h3>Дождаться обработки</h3><p>Не считать отсутствие ответа отказом и не создавать копию документа вслепую.</p></li>
+        </ol>
+      </section>
+
+      <section id="statuses" aria-labelledby="statuses-title">
+        <p class="section-index">06 / Результат</p><h2 id="statuses-title">Что означают статусы обработки отчёта</h2>
+        <p><strong>Следующее действие зависит от результата документа, а не от общего слова «ошибка».</strong> Успешный отчёт переводит КМ российской продукции в статус «В обороте». При частичной обработке статус меняется только у кодов без ошибок; при обработке с ошибкой статусы не меняются для всего документа.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/otchet-nanesenie-pivo-statuses.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Действия при ожидании, успешной, частичной и ошибочной обработке отчёта о нанесении" data-article-diagram />
+          <figcaption>Частичная обработка требует повторить только ошибочные КМ, а полная ошибка — весь исправленный состав документа.</figcaption>
+        </figure>
+        <p>Откройте карточку отчёта и результат по каждому КМ. Для «Обработан частично» отделите уже принятые коды и создайте новый отчёт только по исправленным ошибочным. Для «Обработан с ошибкой» сначала устраните общую причину, затем сформируйте новый отчёт со всеми исправленными КМ.</p>
+      </section>
+
+      <section id="reconcile" aria-labelledby="reconcile-title">
+        <p class="section-index">07 / Сверка</p><h2 id="reconcile-title">Как закрыть контроль после обработки</h2>
+        <p><strong>Сохраните связь «смена → выгрузка → документ → результат по каждому коду».</strong> Одного зелёного статуса недостаточно: итоговое количество принятых КМ должно совпасть с физическим выпуском после брака и исключений.</p>
+        <div class="article-checklist">
+          <div><h3>Производство</h3><ul><li>закрытая смена;</li><li>дата выпуска;</li><li>фактические единицы;</li><li>исключённый брак.</li></ul></div>
+          <div><h3>Документ</h3><ul><li>номер и время;</li><li>подпись;</li><li>количество КМ;</li><li>файл ошибок.</li></ul></div>
+          <div><h3>Результат</h3><ul><li>принятые КМ;</li><li>ошибочные КМ;</li><li>повторный документ;</li><li>остаток расхождений.</li></ul></div>
+        </div>
+        <p>Если сведения уже приняты, но отдельные атрибуты нужно изменить, используйте предусмотренный документ корректировки, а не новый отчёт о нанесении. Ограничения описаны в официальной <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/instruktsiya-po-korrektirovke-svedeniy-o-kodakh-v-sisteme-markirovki-pivo">инструкции по корректировке сведений о кодах</a>.</p>
+      </section>
+
+      <section id="markiro" aria-labelledby="markiro-title">
+        <p class="section-index">08 / Markiro</p><h2 id="markiro-title">Что Markiro готовит для внешней отчётности</h2>
+        <p><strong>Markiro формирует проверяемый источник из закрытой смены: только авторитетные принятые КМ, производственную дату, товар и, при агрегации, состав закрытых коробов с SSCC.</strong> Выгрузки TXT и CSV доступны без коробов или с коробами; отдельный XML предназначен для отчёта об агрегации.</p>
+        <p>Текущая выгрузка об агрегации не является отчётом о нанесении. Прямая подача отчёта о нанесении через API СУЗ, подпись и обратное получение статусов требуют отдельной интеграции, настройки сертификатов и приёмочного сценария. До этого Markiro используется как надёжный производственный источник, а документ передаётся согласованным внешним способом.</p>
+        <p>Для небольшого производителя это позволяет начать без дорогой сквозной автоматизации: оператор получает чистый список смены и контрольные количества, а API-подачу можно добавить после стабилизации процесса. Поэтапный подход разобран в статье <a href="/stati/stoimost-markirovki-piva/">о стоимости маркировки пива</a>.</p>
+      </section>
+
+      <section class="article-conclusion" aria-labelledby="conclusion-title">
+        <p class="section-index">Вывод</p><h2 id="conclusion-title">Надёжный отчёт начинается с закрытой и сверенной смены</h2>
+        <p>Сначала определите фактически выпущенные единицы, исключите дубли и отмены, сопоставьте короба, затем проверьте и подпишите документ. После обработки сверяйте результат по каждому КМ — только так отчёт становится доказуемым продолжением производства.</p>
+        <a class="button" href="/#demo" data-analytics="landing_demo_click" data-placement="article-conclusion">Разобрать закрытие вашей смены <span aria-hidden="true">→</span></a>
+      </section>
+
+      <section class="article-related" aria-labelledby="article-related-title">
+        <p class="section-index">По теме</p><h2 id="article-related-title">Продолжить настройку производственного контура</h2>
+        <div class="seo-related__grid"><a href="/stati/dubl-koda-markirovki-pivo/"><span>Дубликаты кодов</span><span aria-hidden="true">→</span></a><a href="/stati/markirovka-piva-bez-interneta/"><span>Работа без интернета</span><span aria-hidden="true">→</span></a><a href="/stati/agregatsiya-piva-v-koroba/"><span>Агрегация в короба</span><span aria-hidden="true">→</span></a></div>
+      </section>
+    </article>
+  </main>
+  <LandingFooter page={article} />
+  <script>import { browserLandingRuntime, initLanding } from "../../../scripts/site"; initLanding(document, browserLandingRuntime(window));</script>
+</BaseLayout>

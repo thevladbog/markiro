@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Четыре разных значения сообщения о дубликате кода</title>
+  <desc id="desc">Схема различает повторный скан, один код на двух единицах, дубль отчета и контролируемую повторную печать.</desc>
+  <rect width="1200" height="620" fill="#111014"/>
+  <text x="70" y="74" fill="#31e981" font-family="IBM Plex Mono, monospace" font-size="18" font-weight="700" letter-spacing="2">СНАЧАЛА ОПРЕДЕЛИТЕ ТИП ДУБЛЯ</text>
+  <text x="70" y="116" fill="#f4f3f5" font-family="IBM Plex Sans, sans-serif" font-size="30" font-weight="700">Одинаковое сообщение — разные причины и действия</text>
+
+  <g transform="translate(70 162)">
+    <rect width="505" height="170" fill="#1a191e" stroke="#38363f"/>
+    <text x="26" y="38" fill="#31e981" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="700">01 / ПОВТОРНЫЙ СКАН</text>
+    <text x="26" y="75" fill="#f4f3f5" font-family="IBM Plex Sans, sans-serif" font-size="23" font-weight="700">Одна единица считана дважды</text>
+    <text x="26" y="110" fill="#b8b5bd" font-family="IBM Plex Sans, sans-serif" font-size="17">Не увеличивать счётчик.</text>
+    <text x="26" y="138" fill="#b8b5bd" font-family="IBM Plex Sans, sans-serif" font-size="17">Сохранить попытку в журнале.</text>
+  </g>
+  <g transform="translate(625 162)">
+    <rect width="505" height="170" fill="#1a191e" stroke="#ff7a66"/>
+    <text x="26" y="38" fill="#ff7a66" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="700">02 / ДВА ТОВАРА</text>
+    <text x="26" y="75" fill="#f4f3f5" font-family="IBM Plex Sans, sans-serif" font-size="23" font-weight="700">Один код нанесён на две единицы</text>
+    <text x="26" y="110" fill="#b8b5bd" font-family="IBM Plex Sans, sans-serif" font-size="17">Изолировать вторую единицу.</text>
+    <text x="26" y="138" fill="#b8b5bd" font-family="IBM Plex Sans, sans-serif" font-size="17">Не выпускать её под этим кодом.</text>
+  </g>
+  <g transform="translate(70 366)">
+    <rect width="505" height="170" fill="#1a191e" stroke="#e9b949"/>
+    <text x="26" y="38" fill="#e9b949" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="700">03 / ДОКУМЕНТ</text>
+    <text x="26" y="75" fill="#f4f3f5" font-family="IBM Plex Sans, sans-serif" font-size="23" font-weight="700">Код или отчёт отправлен повторно</text>
+    <text x="26" y="110" fill="#b8b5bd" font-family="IBM Plex Sans, sans-serif" font-size="17">Проверить статус и исходный документ.</text>
+    <text x="26" y="138" fill="#b8b5bd" font-family="IBM Plex Sans, sans-serif" font-size="17">Не создавать новую операцию вслепую.</text>
+  </g>
+  <g transform="translate(625 366)">
+    <rect width="505" height="170" fill="#1a191e" stroke="#31e981"/>
+    <text x="26" y="38" fill="#31e981" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="700">04 / ПОВТОРНАЯ ПЕЧАТЬ</text>
+    <text x="26" y="75" fill="#f4f3f5" font-family="IBM Plex Sans, sans-serif" font-size="23" font-weight="700">Та же идентичность печатается снова</text>
+    <text x="26" y="110" fill="#b8b5bd" font-family="IBM Plex Sans, sans-serif" font-size="17">Только для той же единицы или упаковки.</text>
+    <text x="26" y="138" fill="#b8b5bd" font-family="IBM Plex Sans, sans-serif" font-size="17">Не превращать копию в новый товар.</text>
+  </g>
+</svg>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Последовательность восстановления после сетевого сбоя</title>
+  <desc id="desc">Пять шагов: сохранить, продолжить допустимое, восстановить сеть, повторяемо синхронизировать, разобрать конфликты.</desc>
+  <rect width="1200" height="620" fill="#131216"/>
+  <text x="64" y="70" fill="#3ddc7a" font-family="IBM Plex Sans,Arial,sans-serif" font-size="18" font-weight="700" letter-spacing="2">ВОЗВРАТ СВЯЗИ — ЭТО ПРОТОКОЛ, А НЕ КНОПКА</text>
+  <path d="M148 266H1036" stroke="#3ddc7a" stroke-width="4"/>
+  <g font-family="IBM Plex Sans,Arial,sans-serif">
+    <g><circle cx="148" cy="266" r="38" fill="#1b1a1f" stroke="#3ddc7a" stroke-width="3"/><text x="148" y="274" text-anchor="middle" fill="#f4f2f6" font-size="22" font-weight="700">01</text><text x="148" y="345" text-anchor="middle" fill="#f4f2f6" font-size="21" font-weight="700">Сохранить</text><text x="148" y="378" text-anchor="middle" fill="#9d9aa4" font-size="16">операцию локально</text></g>
+    <g><circle cx="370" cy="266" r="38" fill="#1b1a1f" stroke="#3ddc7a" stroke-width="3"/><text x="370" y="274" text-anchor="middle" fill="#f4f2f6" font-size="22" font-weight="700">02</text><text x="370" y="345" text-anchor="middle" fill="#f4f2f6" font-size="21" font-weight="700">Продолжить</text><text x="370" y="378" text-anchor="middle" fill="#9d9aa4" font-size="16">разрешённый сценарий</text></g>
+    <g><circle cx="592" cy="266" r="38" fill="#1b1a1f" stroke="#f2a341" stroke-width="3"/><text x="592" y="274" text-anchor="middle" fill="#f4f2f6" font-size="22" font-weight="700">03</text><text x="592" y="345" text-anchor="middle" fill="#f4f2f6" font-size="21" font-weight="700">Вернуть сеть</text><text x="592" y="378" text-anchor="middle" fill="#9d9aa4" font-size="16">не очищая очередь</text></g>
+    <g><circle cx="814" cy="266" r="38" fill="#1b1a1f" stroke="#3ddc7a" stroke-width="3"/><text x="814" y="274" text-anchor="middle" fill="#f4f2f6" font-size="22" font-weight="700">04</text><text x="814" y="345" text-anchor="middle" fill="#f4f2f6" font-size="21" font-weight="700">Синхронизировать</text><text x="814" y="378" text-anchor="middle" fill="#9d9aa4" font-size="16">с теми же ключами</text></g>
+    <g><circle cx="1036" cy="266" r="38" fill="#1b1a1f" stroke="#3ddc7a" stroke-width="3"/><text x="1036" y="274" text-anchor="middle" fill="#f4f2f6" font-size="22" font-weight="700">05</text><text x="1036" y="345" text-anchor="middle" fill="#f4f2f6" font-size="21" font-weight="700">Разобрать</text><text x="1036" y="378" text-anchor="middle" fill="#9d9aa4" font-size="16">отказы и конфликты</text></g>
+  </g>
+  <rect x="64" y="456" width="1072" height="92" rx="4" fill="#1b1a1f" stroke="#35333b"/>
+  <text x="96" y="496" fill="#f4f2f6" font-family="IBM Plex Sans,Arial,sans-serif" font-size="21" font-weight="700">Не удаляйте журнал и не создавайте задание заново только потому, что ответ не пришёл.</text>
+  <text x="96" y="529" fill="#9d9aa4" font-family="IBM Plex Sans,Arial,sans-serif" font-size="17">Повтор должен продолжать исходную операцию, иначе восстановление само создаст дубли.</text>
+</svg>

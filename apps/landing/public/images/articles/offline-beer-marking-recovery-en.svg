@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Recovery sequence after a network outage</title>
+  <desc id="desc">Five steps: persist, continue permitted work, restore connectivity, synchronize safely, and review conflicts.</desc>
+  <rect width="1200" height="620" fill="#131216"/>
+  <text x="64" y="70" fill="#3ddc7a" font-family="IBM Plex Sans,Arial,sans-serif" font-size="18" font-weight="700" letter-spacing="2">RECOVERY IS A PROTOCOL, NOT A BUTTON</text>
+  <path d="M148 266H1036" stroke="#3ddc7a" stroke-width="4"/>
+  <g font-family="IBM Plex Sans,Arial,sans-serif">
+    <g><circle cx="148" cy="266" r="38" fill="#1b1a1f" stroke="#3ddc7a" stroke-width="3"/><text x="148" y="274" text-anchor="middle" fill="#f4f2f6" font-size="22" font-weight="700">01</text><text x="148" y="345" text-anchor="middle" fill="#f4f2f6" font-size="21" font-weight="700">Persist</text><text x="148" y="378" text-anchor="middle" fill="#9d9aa4" font-size="16">the local operation</text></g>
+    <g><circle cx="370" cy="266" r="38" fill="#1b1a1f" stroke="#3ddc7a" stroke-width="3"/><text x="370" y="274" text-anchor="middle" fill="#f4f2f6" font-size="22" font-weight="700">02</text><text x="370" y="345" text-anchor="middle" fill="#f4f2f6" font-size="21" font-weight="700">Continue</text><text x="370" y="378" text-anchor="middle" fill="#9d9aa4" font-size="16">permitted local work</text></g>
+    <g><circle cx="592" cy="266" r="38" fill="#1b1a1f" stroke="#f2a341" stroke-width="3"/><text x="592" y="274" text-anchor="middle" fill="#f4f2f6" font-size="22" font-weight="700">03</text><text x="592" y="345" text-anchor="middle" fill="#f4f2f6" font-size="21" font-weight="700">Restore</text><text x="592" y="378" text-anchor="middle" fill="#9d9aa4" font-size="16">without clearing the queue</text></g>
+    <g><circle cx="814" cy="266" r="38" fill="#1b1a1f" stroke="#3ddc7a" stroke-width="3"/><text x="814" y="274" text-anchor="middle" fill="#f4f2f6" font-size="22" font-weight="700">04</text><text x="814" y="345" text-anchor="middle" fill="#f4f2f6" font-size="21" font-weight="700">Synchronize</text><text x="814" y="378" text-anchor="middle" fill="#9d9aa4" font-size="16">with the same identities</text></g>
+    <g><circle cx="1036" cy="266" r="38" fill="#1b1a1f" stroke="#3ddc7a" stroke-width="3"/><text x="1036" y="274" text-anchor="middle" fill="#f4f2f6" font-size="22" font-weight="700">05</text><text x="1036" y="345" text-anchor="middle" fill="#f4f2f6" font-size="21" font-weight="700">Review</text><text x="1036" y="378" text-anchor="middle" fill="#9d9aa4" font-size="16">rejections and conflicts</text></g>
+  </g>
+  <rect x="64" y="456" width="1072" height="92" rx="4" fill="#1b1a1f" stroke="#35333b"/>
+  <text x="96" y="496" fill="#f4f2f6" font-family="IBM Plex Sans,Arial,sans-serif" font-size="21" font-weight="700">Do not erase the journal or recreate a job merely because no response arrived.</text>
+  <text x="96" y="529" fill="#9d9aa4" font-family="IBM Plex Sans,Arial,sans-serif" font-size="17">A retry must continue the original operation, or recovery itself can create duplicates.</text>
+</svg>
