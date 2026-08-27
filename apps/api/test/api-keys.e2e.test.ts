@@ -104,7 +104,7 @@ describe.skipIf(!ready)("public api keys", () => {
       .post("/integrations/public_api/keys")
       .send({ name: "X" })
       .expect(201);
-    await agent.delete(`/integrations/public_api/keys/${created.body.id}`).expect(200);
+    await agent.delete(`/integrations/public_api/keys/${created.body.id}`).expect(204);
 
     const list = await agent.get("/integrations/public_api/keys").expect(200);
     expect(list.body.keys.map((k: { id: string }) => k.id)).not.toContain(created.body.id);
