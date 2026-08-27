@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, gt, gte, inArray, lt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, lt, lte, notInArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
@@ -28,73 +28,63 @@ export class TenantBillingReadService {
   ) {}
 
   async overview(tenantId: string): Promise<TenantBillingOverviewDto> {
-    const now = new Date();
-    const [billing, offers, decisions, requests, invoices, payments, acts] = await Promise.all([
-      this.subscriptionBilling(tenantId, now),
-      this.db
-        .select()
-        .from(schema.commercialOffers)
-        .where(eq(schema.commercialOffers.tenantId, tenantId)),
-      this.db
-        .select()
-        .from(schema.commercialOfferDecisions)
-        .where(eq(schema.commercialOfferDecisions.tenantId, tenantId))
-        .orderBy(
-          desc(schema.commercialOfferDecisions.createdAt),
-          desc(schema.commercialOfferDecisions.id),
-        ),
-      this.db
-        .select()
-        .from(schema.tenantBillingRequests)
-        .where(eq(schema.tenantBillingRequests.tenantId, tenantId))
-        .orderBy(desc(schema.tenantBillingRequests.updatedAt))
-        .limit(100),
-      this.db
-        .select()
-        .from(schema.invoices)
-        .where(
-          and(
-            eq(schema.invoices.tenantId, tenantId),
-            inArray(schema.invoices.status, ["issued", "partially_paid", "paid"]),
+    const now = this.now();
+    const [billing, offers, decisions, activeRequests, invoices, payments, acts, attentionCount] =
+      await Promise.all([
+        this.subscriptionBilling(tenantId, now),
+        this.db
+          .select()
+          .from(schema.commercialOffers)
+          .where(eq(schema.commercialOffers.tenantId, tenantId)),
+        this.db
+          .select()
+          .from(schema.commercialOfferDecisions)
+          .where(eq(schema.commercialOfferDecisions.tenantId, tenantId))
+          .orderBy(
+            desc(schema.commercialOfferDecisions.createdAt),
+            desc(schema.commercialOfferDecisions.id),
           ),
-        )
-        .orderBy(desc(schema.invoices.updatedAt))
-        .limit(20),
-      this.db
-        .select()
-        .from(schema.billingPayments)
-        .where(eq(schema.billingPayments.tenantId, tenantId))
-        .orderBy(desc(schema.billingPayments.paidAt))
-        .limit(20),
-      this.db
-        .select()
-        .from(schema.billingActs)
-        .where(eq(schema.billingActs.tenantId, tenantId))
-        .orderBy(desc(schema.billingActs.updatedAt))
-        .limit(20),
-    ]);
+        this.db
+          .select()
+          .from(schema.tenantBillingRequests)
+          .where(
+            and(
+              eq(schema.tenantBillingRequests.tenantId, tenantId),
+              notInArray(schema.tenantBillingRequests.status, ["completed", "cancelled"]),
+            ),
+          )
+          .orderBy(
+            desc(schema.tenantBillingRequests.updatedAt),
+            desc(schema.tenantBillingRequests.id),
+          )
+          .limit(1),
+        this.db
+          .select()
+          .from(schema.invoices)
+          .where(
+            and(
+              eq(schema.invoices.tenantId, tenantId),
+              inArray(schema.invoices.status, ["issued", "partially_paid", "paid"]),
+            ),
+          )
+          .orderBy(desc(schema.invoices.updatedAt))
+          .limit(20),
+        this.db
+          .select()
+          .from(schema.billingPayments)
+          .where(eq(schema.billingPayments.tenantId, tenantId))
+          .orderBy(desc(schema.billingPayments.paidAt))
+          .limit(20),
+        this.db
+          .select()
+          .from(schema.billingActs)
+          .where(eq(schema.billingActs.tenantId, tenantId))
+          .orderBy(desc(schema.billingActs.updatedAt))
+          .limit(20),
+        this.attentionCount(tenantId, now),
+      ]);
     const actionableOffer = this.actionableOffer(offers, decisions, now);
-    const activeRequest = requests.find(
-      (request) => !["completed", "cancelled"].includes(request.status),
-    );
-    const approachingDeadline = new Date(now);
-    approachingDeadline.setUTCDate(approachingDeadline.getUTCDate() + 7);
-    const attentionTargets = new Set<string>();
-    for (const request of requests) {
-      if (request.status === "clarification_required")
-        attentionTargets.add(`request:${request.id}`);
-    }
-    if (actionableOffer) attentionTargets.add(`offer:${actionableOffer.id}`);
-    for (const invoice of invoices) {
-      if (
-        invoice.dueDate &&
-        invoice.dueDate >= now &&
-        invoice.dueDate <= approachingDeadline &&
-        ["issued", "partially_paid"].includes(invoice.status)
-      ) {
-        attentionTargets.add(`invoice:${invoice.id}`);
-      }
-    }
+    const activeRequest = activeRequests[0] ?? null;
     const recentOperations = [
       ...invoices.map((invoice) => ({
         id: invoice.id,
@@ -129,19 +119,19 @@ export class TenantBillingReadService {
       activeRequest: activeRequest
         ? { id: activeRequest.id, number: activeRequest.number, status: activeRequest.status }
         : null,
-      attentionCount: attentionTargets.size,
+      attentionCount,
     };
   }
 
   subscription(tenantId: string): Promise<TenantSubscriptionBillingDto> {
-    return this.subscriptionBilling(tenantId);
+    return this.subscriptionBilling(tenantId, this.now());
   }
 
   async listInvoices(
     tenantId: string,
     query: ListInvoicesQueryDto,
   ): Promise<{ items: TenantInvoiceDto[] }> {
-    const now = new Date();
+    const now = this.now();
     const conditions = [eq(schema.invoices.tenantId, tenantId)];
     if (query.status === "overdue") {
       conditions.push(inArray(schema.invoices.status, ["issued", "partially_paid"]));
@@ -235,7 +225,7 @@ export class TenantBillingReadService {
     ]);
     const request = await this.requestForLink(tenantId, links[0]?.requestId);
     return {
-      ...this.toInvoice(invoice, payments, new Date()),
+      ...this.toInvoice(invoice, payments, this.now()),
       subtotal: invoice.subtotal,
       vatTotal: invoice.vatTotal,
       payments: payments.map((payment) => ({
@@ -342,7 +332,7 @@ export class TenantBillingReadService {
     return {
       id: offer.id,
       number: offer.number,
-      status: await this.offerPresentationStatus(tenantId, offer),
+      status: await this.offerPresentationStatus(tenantId, offer, this.now()),
       total: offer.total,
       expiresAt: iso(offer.expiresAt),
       publishedAt: iso(offer.publishedAt),
@@ -636,8 +626,9 @@ export class TenantBillingReadService {
   private async offerPresentationStatus(
     tenantId: string,
     offer: typeof schema.commercialOffers.$inferSelect,
+    at: Date,
   ) {
-    if (offer.status === "published" && offer.expiresAt && offer.expiresAt <= new Date()) {
+    if (offer.status === "published" && offer.expiresAt && offer.expiresAt <= at) {
       return "expired" as const;
     }
     const [newer] = await this.db
@@ -653,6 +644,48 @@ export class TenantBillingReadService {
       )
       .limit(1);
     return newer ? ("superseded" as const) : offer.status;
+  }
+
+  private async attentionCount(tenantId: string, at: Date): Promise<number> {
+    const approachingDeadline = new Date(at);
+    approachingDeadline.setUTCDate(approachingDeadline.getUTCDate() + 7);
+    const result = await this.db.execute<{ attentionCount: number | string }>(sql`
+      with latest_published_offers as (
+        select distinct on (family_id) id, expires_at
+        from commercial_offers
+        where tenant_id = ${tenantId} and status = 'published'
+        order by family_id, revision desc, published_at desc nulls last, id desc
+      ), attention_targets as (
+        select 'request:' || request.id::text as target
+        from tenant_billing_requests as request
+        where request.tenant_id = ${tenantId}
+          and request.status = 'clarification_required'
+        union all
+        select 'offer:' || offer.id::text as target
+        from latest_published_offers as offer
+        where (offer.expires_at is null or offer.expires_at > ${at})
+          and not exists (
+            select 1
+            from commercial_offer_decisions as decision
+            where decision.tenant_id = ${tenantId}
+              and decision.offer_id = offer.id
+          )
+        union all
+        select 'invoice:' || invoice.id::text as target
+        from invoices as invoice
+        where invoice.tenant_id = ${tenantId}
+          and invoice.status in ('issued', 'partially_paid')
+          and invoice.due_date >= ${at}
+          and invoice.due_date <= ${approachingDeadline}
+      )
+      select count(distinct target)::int as "attentionCount"
+      from attention_targets
+    `);
+    return Number(result.rows[0]?.attentionCount ?? 0);
+  }
+
+  protected now(): Date {
+    return new Date();
   }
 
   private toInvoice(
@@ -688,7 +721,7 @@ export class TenantBillingReadService {
       id: document.id,
       revision: document.revision,
       format: document.format as "pdf" | "html",
-      status: document.status as "pending" | "ready" | "failed",
+      status: document.status,
       contentType: document.contentType,
       byteSize: document.byteSize,
       createdAt: iso(document.createdAt)!,

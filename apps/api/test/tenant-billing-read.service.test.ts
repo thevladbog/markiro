@@ -78,6 +78,16 @@ function scalarValues(value: unknown, seen = new WeakSet<object>()): string[] {
   });
 }
 
+class FixedClockTenantBillingReadService extends TenantBillingReadService {
+  constructor(db: Db, entitlements: ConstructorParameters<typeof TenantBillingReadService>[2]) {
+    super(db, {} as never, entitlements);
+  }
+
+  protected now(): Date {
+    return new Date("2020-01-01T00:00:00.000Z");
+  }
+}
+
 describe("TenantBillingReadService", () => {
   it("projects a partial invoice with ordered payments and exact payment summary", async () => {
     const { db } = queryDb((table) => {
@@ -276,6 +286,98 @@ describe("TenantBillingReadService", () => {
 
     expect(calls).toContainEqual(expect.objectContaining({ table: schema.invoices, offset: 150 }));
     expect(calls).toContainEqual(expect.objectContaining({ table: schema.invoices, limit: 25 }));
+  });
+
+  it("returns the nearest future scheduled subscription at the service clock", async () => {
+    const currentId = "31111111-1111-4111-8111-111111111121";
+    const nearId = "31111111-1111-4111-8111-111111111122";
+    const farId = "31111111-1111-4111-8111-111111111123";
+    const currentPlanId = "41111111-1111-4111-8111-111111111121";
+    const nearPlanId = "41111111-1111-4111-8111-111111111122";
+    const farPlanId = "41111111-1111-4111-8111-111111111123";
+    const { db } = queryDb((table) => {
+      if (table === schema.tenantSubscriptions) {
+        return [
+          {
+            id: currentId,
+            tenantId,
+            planVersionId: currentPlanId,
+            status: "active",
+            startsAt: new Date("2019-01-01T00:00:00.000Z"),
+            endsAt: new Date("2030-01-01T00:00:00.000Z"),
+          },
+          {
+            id: farId,
+            tenantId,
+            planVersionId: farPlanId,
+            status: "scheduled",
+            startsAt: new Date("2020-01-03T00:00:00.000Z"),
+            endsAt: new Date("2020-02-03T00:00:00.000Z"),
+          },
+          {
+            id: nearId,
+            tenantId,
+            planVersionId: nearPlanId,
+            status: "scheduled",
+            startsAt: new Date("2020-01-02T00:00:00.000Z"),
+            endsAt: new Date("2020-02-02T00:00:00.000Z"),
+          },
+        ];
+      }
+      if (table === schema.catalogItemVersions) {
+        return [
+          {
+            id: currentPlanId,
+            nameRu: "Current",
+            billingPeriod: "month",
+            unitPrice: "1000.00",
+          },
+          {
+            id: nearPlanId,
+            nameRu: "Near",
+            billingPeriod: "month",
+            unitPrice: "2000.00",
+          },
+          {
+            id: farPlanId,
+            nameRu: "Far",
+            billingPeriod: "year",
+            unitPrice: "3000.00",
+          },
+        ];
+      }
+      return [];
+    });
+    const entitlements = {
+      resolve: vi.fn(async () => ({
+        tenantId,
+        access: "managed" as const,
+        subscription: {
+          id: currentId,
+          planVersionId: currentPlanId,
+          status: "active" as const,
+          startsAt: new Date("2019-01-01T00:00:00.000Z"),
+          endsAt: new Date("2030-01-01T00:00:00.000Z"),
+        },
+        quotas: { lines: 1, stations: 1, kiosks: 1, cabinetUsers: 1 },
+        features: { labelEditor: false, publicApi: false, pallets: false },
+      })),
+      usage: vi.fn(async () => ({ lines: 0, stations: 0, kiosks: 0, cabinetUsers: 0 })),
+    };
+    const service = new FixedClockTenantBillingReadService(db, entitlements as never);
+
+    await expect(service.subscription(tenantId)).resolves.toMatchObject({
+      subscription: { id: currentId, status: "active" },
+      scheduledSubscription: {
+        id: nearId,
+        planVersionId: nearPlanId,
+        status: "scheduled",
+        startsAt: "2020-01-02T00:00:00.000Z",
+        planName: "Near",
+        billingPeriod: "month",
+        price: "2000.00",
+      },
+    });
   });
 
   it("rejects unknown persisted workflow states at the DTO boundary", () => {
