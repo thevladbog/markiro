@@ -364,6 +364,12 @@ test("immutable publication and public dual-origin validation precede every mode
   assert.match(publicValidation.run, /e\.releaseSha!==process\.env\.RELEASE_SHA/);
   assert.match(publicValidation.run, /"\$yandex_public\/release-evidence\.json"/);
   assert.doesNotMatch(publicValidation.run, /grep -o[\s\S]*wc -l/);
+  assert.match(publicValidation.run, /sha256_file\(\)/);
+  assert.match(
+    publicValidation.run,
+    /createHash\("sha256"\)[\s\S]*readFileSync\(process\.argv\[1\]\)[\s\S]*digest\("hex"\)/,
+  );
+  assert.doesNotMatch(publicValidation.run, /sha256sum/);
   assert.doesNotMatch(publicValidation.run, /publish-immutable|tauri build/);
   assert.doesNotMatch(promote.run, /gh release create "\$tag"|publish-immutable|tauri build/);
   assert.equal(
