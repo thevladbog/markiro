@@ -8,14 +8,21 @@ describe("tenant operational timezone migration", () => {
     expect(existsSync(migrationUrl)).toBe(true);
 
     const sql = readFileSync(migrationUrl, "utf8").replace(/\s+/g, " ").trim();
-    const additions = sql.match(
-      /ALTER TABLE "org_profiles" ADD COLUMN "time_zone" text DEFAULT 'Europe\/Moscow' NOT NULL;/g,
+    const statements = sql
+      .split(";")
+      .map((statement) => statement.trim())
+      .filter(Boolean);
+    const expectedAddition =
+      'ALTER TABLE "org_profiles" ADD COLUMN "time_zone" text DEFAULT \'Europe/Moscow\' NOT NULL';
+    const alterAddColumnOperations = statements.filter((statement) =>
+      /^ALTER TABLE (?:"org_profiles"|org_profiles) ADD COLUMN\b/i.test(statement),
     );
 
-    expect(additions).toEqual([
-      'ALTER TABLE "org_profiles" ADD COLUMN "time_zone" text DEFAULT \'Europe/Moscow\' NOT NULL;',
-    ]);
-    expect(sql).not.toMatch(/\bUPDATE\s+"org_profiles"\b/i);
-    expect(sql).not.toMatch(/\bDELETE\s+FROM\s+"org_profiles"\b/i);
+    expect(alterAddColumnOperations).toEqual([expectedAddition]);
+    expect(statements).toEqual([expectedAddition]);
+    expect(sql).not.toMatch(/\bUPDATE\s+(?:"org_profiles"|org_profiles)(?![A-Za-z0-9_])/i);
+    expect(sql).not.toMatch(
+      /\bDELETE\s+FROM\s+(?:"org_profiles"|org_profiles)(?![A-Za-z0-9_])/i,
+    );
   });
 });
