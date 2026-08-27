@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { DomainError, parseLabelTemplate, type LabelTemplateSpec } from "@markiro/domain";
+import type { SchemaObject } from "@nestjs/swagger";
+import {
+  DomainError,
+  labelTemplateSpecSchema,
+  parseLabelTemplate,
+  type LabelTemplateSpec,
+} from "@markiro/domain";
+import { zodApiSchema } from "../../lib/openapi";
 
 /**
  * Validates `spec` against the domain model (`parseLabelTemplate`). On
@@ -85,3 +92,55 @@ export interface LabelTemplateSummaryDto {
 export interface ListLabelTemplatesResponseDto {
   items: LabelTemplateSummaryDto[];
 }
+
+const uuidSchema = { type: "string", format: "uuid" } as const;
+const dateTimeSchema = { type: "string", format: "date-time" } as const;
+
+/**
+ * Generated from the domain's own `labelTemplateSpecSchema`, so the full
+ * element model (text | field | barcode | line | box discriminated union)
+ * stays in lockstep with what `parseLabelTemplate` actually accepts. The
+ * schema's one cross-element `superRefine` invariant (unique element ids)
+ * is not representable in JSON Schema, hence the description.
+ */
+const labelTemplateSpecOpenApiSchema: SchemaObject = {
+  ...zodApiSchema(labelTemplateSpecSchema),
+  description:
+    "Printer-agnostic label layout. Every element's `id` must be unique within the template " +
+    "(enforced server-side; not expressible in JSON Schema).",
+};
+
+export const labelTemplateOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "name", "spec", "createdAt", "updatedAt"],
+  properties: {
+    id: uuidSchema,
+    name: { type: "string", minLength: 1, maxLength: 200 },
+    spec: labelTemplateSpecOpenApiSchema,
+    createdAt: dateTimeSchema,
+    updatedAt: dateTimeSchema,
+  },
+};
+
+export const labelTemplateSummaryOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "name", "widthMm", "heightMm", "dpi", "language", "updatedAt"],
+  properties: {
+    id: uuidSchema,
+    name: { type: "string", minLength: 1, maxLength: 200 },
+    widthMm: { type: "number", minimum: 10, maximum: 300 },
+    heightMm: { type: "number", minimum: 10, maximum: 300 },
+    dpi: { type: "integer", enum: [203, 300] },
+    language: { type: "string", enum: ["zpl", "tspl"] },
+    updatedAt: dateTimeSchema,
+  },
+};
+
+export const listLabelTemplatesOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: { items: { type: "array", items: labelTemplateSummaryOpenApiSchema } },
+};

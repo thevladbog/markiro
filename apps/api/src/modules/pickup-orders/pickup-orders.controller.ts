@@ -10,11 +10,18 @@ import {
   Res,
   UseGuards,
 } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { ApiOperation, ApiParam, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import type { Response } from "express";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import {
+  ApiCabinetAuth,
+  ApiHttpErrors,
+  ApiZodBody,
+  ApiZodQuery,
+  ApiZodValidationError,
+} from "../../lib/openapi";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { renderPickupSlipHtml } from "../../pickup/slip";
 import { ZodValidationPipe } from "../../zod.pipe";
@@ -25,7 +32,10 @@ import {
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import {
   exportPickupCodesSchema,
+  listPickupOrdersOpenApiSchema,
   listPickupOrdersQuerySchema,
+  pickupOrderDetailOpenApiSchema,
+  pickupOrderRowOpenApiSchema,
   resolvePickupOrderSchema,
   type ExportPickupCodesDto,
   type ListPickupOrdersQueryDto,
@@ -41,6 +51,7 @@ import { PickupOrdersService } from "./pickup-orders.service";
 // never needs this module, so no device key — station or kiosk — should reach
 // it (see docs/device-key-surface.md).
 @ApiTags("pickup-orders")
+@ApiCabinetAuth()
 @Controller("pickup-orders")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
@@ -48,6 +59,15 @@ export class PickupOrdersController {
   constructor(private readonly pickupOrdersService: PickupOrdersService) {}
 
   @Get()
+  @ApiOperation({ summary: "List pickup orders" })
+  @ApiZodQuery(listPickupOrdersQuerySchema)
+  @ApiResponse({
+    status: 200,
+    schema: listPickupOrdersOpenApiSchema,
+    description: "Orders joined with employee/kiosk/reason names, newest first.",
+  })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async list(
     @Req() req: RequestWithTenant,
@@ -57,6 +77,10 @@ export class PickupOrdersController {
   }
 
   @Get(":id")
+  @ApiOperation({ summary: "Get pickup order details" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiResponse({ status: 200, schema: pickupOrderDetailOpenApiSchema })
+  @ApiHttpErrors(401, 403, 404)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async detail(
     @Req() req: RequestWithTenant,
@@ -67,6 +91,18 @@ export class PickupOrdersController {
 
   /** Print-ready A4 "Ведомость отбора по заявке": DataMatrix per item, badge QR, footer Code128 of the order number. */
   @Get(":id/slip")
+  @ApiOperation({
+    summary: "Render a print-ready pickup slip",
+    description:
+      'A4 "Ведомость отбора по заявке": a DataMatrix per item, the employee badge QR, and a footer Code128 of the order number.',
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiResponse({
+    status: 200,
+    description: "Print-ready HTML document.",
+    content: { "text/html; charset=utf-8": { schema: { type: "string" } } },
+  })
+  @ApiHttpErrors(401, 403, 404)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async slip(
     @Req() req: RequestWithTenant,
@@ -80,6 +116,15 @@ export class PickupOrdersController {
 
   @Post(":id/resolve")
   @HttpCode(200)
+  @ApiOperation({
+    summary: "Resolve a pickup order",
+    description: "Marks a pending order punched (receipt) or written off (act).",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(resolvePickupOrderSchema)
+  @ApiResponse({ status: 200, schema: pickupOrderRowOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
   async resolve(
@@ -92,6 +137,13 @@ export class PickupOrdersController {
 
   @Post(":id/cancel")
   @HttpCode(200)
+  @ApiOperation({
+    summary: "Cancel a pending pickup order",
+    description: "Cancelling voids the order's items, so their codes can be re-scanned later.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiResponse({ status: 200, schema: pickupOrderRowOpenApiSchema })
+  @ApiHttpErrors(401, 403, 404, 409)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
   async cancel(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<PickupOrderRowDto> {
@@ -100,6 +152,18 @@ export class PickupOrdersController {
 
   @Post("export")
   @HttpCode(200)
+  @ApiOperation({
+    summary: "Export raw codes from pickup orders",
+    description: "Order ids that don't belong to this tenant are silently excluded.",
+  })
+  @ApiZodBody(exportPickupCodesSchema)
+  @ApiResponse({
+    status: 200,
+    description: "Text attachment with one raw KM per line, preserving GS bytes.",
+    content: { "text/plain; charset=utf-8": { schema: { type: "string" } } },
+  })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @AllowSubscriptionReadOnly("export")
   async export(

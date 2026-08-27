@@ -12,10 +12,17 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { ApiOperation, ApiParam, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import {
+  ApiCabinetAuth,
+  ApiHttpErrors,
+  ApiZodBody,
+  ApiZodQuery,
+  ApiZodValidationError,
+} from "../../lib/openapi";
 import {
   AllowSubscriptionReadOnly,
   RequireSubscriptionWrite,
@@ -25,11 +32,15 @@ import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard"
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   bulkEmployeePickupLimitsSchema,
+  bulkEmployeePickupPolicyResponseOpenApiSchema,
   bulkEmployeePickupWriteoffSchema,
   createEmployeeSchema,
+  employeeOpenApiSchema,
   employeePickupPolicySchema,
   issueBadgeSchema,
+  listEmployeesOpenApiSchema,
   listEmployeesQuerySchema,
+  listLinkableMembersOpenApiSchema,
   updateEmployeeSchema,
   type BulkEmployeePickupLimitsDto,
   type BulkEmployeePickupPolicyResponseDto,
@@ -54,11 +65,17 @@ import { EmployeesService } from "./employees.service";
 // resolution.
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
+@ApiCabinetAuth()
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
 
   @Get()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "List employees" })
+  @ApiZodQuery(listEmployeesQuerySchema)
+  @ApiResponse({ status: 200, schema: listEmployeesOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   async listEmployees(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(listEmployeesQuerySchema)) query: ListEmployeesQueryDto,
@@ -71,6 +88,12 @@ export class EmployeesController {
   // is the right bar for seeing which members can still be linked.
   @Get("linkable-members")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({
+    summary: "List members linkable to a new employee",
+    description: "Cabinet members without a linked employee, for the create-employee picker.",
+  })
+  @ApiResponse({ status: 200, schema: listLinkableMembersOpenApiSchema })
+  @ApiHttpErrors(401, 403)
   async listLinkableMembers(
     @Req() req: RequestWithTenant,
   ): Promise<ListLinkableMembersResponseDto> {
@@ -80,6 +103,11 @@ export class EmployeesController {
   @Post()
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Create an employee" })
+  @ApiZodBody(createEmployeeSchema)
+  @ApiResponse({ status: 201, schema: employeeOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
   async createEmployee(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createEmployeeSchema)) body: CreateEmployeeDto,
@@ -90,6 +118,11 @@ export class EmployeesController {
   @Patch("pickup-policy/limits")
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Bulk update employee pickup limits" })
+  @ApiZodBody(bulkEmployeePickupLimitsSchema)
+  @ApiResponse({ status: 200, schema: bulkEmployeePickupPolicyResponseOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404)
   async bulkUpdatePickupLimits(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(bulkEmployeePickupLimitsSchema))
@@ -101,6 +134,11 @@ export class EmployeesController {
   @Patch("pickup-policy/writeoff-permission")
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Bulk update employee write-off permission" })
+  @ApiZodBody(bulkEmployeePickupWriteoffSchema)
+  @ApiResponse({ status: 200, schema: bulkEmployeePickupPolicyResponseOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404)
   async bulkUpdatePickupWriteoff(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(bulkEmployeePickupWriteoffSchema))
@@ -112,6 +150,12 @@ export class EmployeesController {
   @Patch(":id")
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Update an employee" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(updateEmployeeSchema)
+  @ApiResponse({ status: 200, schema: employeeOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404)
   async updateEmployee(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -123,6 +167,12 @@ export class EmployeesController {
   @Patch(":id/pickup-policy")
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Update an employee's pickup policy" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(employeePickupPolicySchema)
+  @ApiResponse({ status: 200, schema: employeeOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404)
   async updatePickupPolicy(
     @Req() req: RequestWithTenant,
     @Param("id", new ParseUUIDPipe()) id: string,
@@ -135,6 +185,10 @@ export class EmployeesController {
   @HttpCode(204)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Archive an employee" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiResponse({ status: 204, description: "The employee is archived." })
+  @ApiHttpErrors(401, 403, 404)
   async archiveEmployee(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.employeesService.archiveEmployee(req.tenantId!, id);
   }
@@ -142,6 +196,12 @@ export class EmployeesController {
   @Post(":id/badges")
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Issue a badge to an employee" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(issueBadgeSchema)
+  @ApiResponse({ status: 201, schema: employeeOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
   async issueBadge(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -154,6 +214,11 @@ export class EmployeesController {
   @HttpCode(204)
   @AllowSubscriptionReadOnly("security")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Revoke an employee badge" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiParam({ name: "badgeId", schema: { type: "string", format: "uuid" } })
+  @ApiResponse({ status: 204, description: "The badge is revoked." })
+  @ApiHttpErrors(401, 403, 404)
   async revokeBadge(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,

@@ -1,4 +1,5 @@
 import { Controller, Get, Query, Req } from "@nestjs/common";
+import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { and, desc, eq, gte, like, lte, or } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { platformAuditContracts, type PlatformAuditQuery } from "@markiro/platform-contracts";
@@ -11,12 +12,18 @@ import type { RequestWithPlatformPrincipal } from "./platform-auth.guard";
 import { sanitizeAuditMetadata, sanitizeSupportAuditMetadata } from "./platform-audit.service";
 import { parsePlatformResponse } from "../platform-http/platform-response";
 
+@ApiTags("platform-auth")
 @Controller("platform/audit")
 @RequirePlatformCapabilities("audit.read")
 export class PlatformAuditController {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   @Get()
+  @ApiOperation({
+    summary: "List platform audit events",
+    description:
+      "Support and accountant roles see a role-scoped subset of actions with sanitized metadata.",
+  })
   @PlatformApiProtectedOk({ response: platformAuditContracts.list.response })
   async list(
     @Req() request: RequestWithPlatformPrincipal,

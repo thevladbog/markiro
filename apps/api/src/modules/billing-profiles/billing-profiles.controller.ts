@@ -1,7 +1,10 @@
 import { Body, Controller, Get, Param, Put, Req, Res } from "@nestjs/common";
+import { ApiOperation, ApiTags } from "@nestjs/swagger";
+import { platformCommercialContracts } from "@markiro/platform-contracts";
 import type { Response } from "express";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
+import { PlatformApiProtectedOk } from "../../platform-http/platform-openapi";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   billingProfileSchema,
@@ -13,11 +16,16 @@ import {
 } from "./dto";
 import { BillingProfilesService } from "./billing-profiles.service";
 
+@ApiTags("billing-profiles")
 @Controller("platform/billing")
 export class BillingProfilesController {
   constructor(private readonly profiles: BillingProfilesService) {}
 
   @Get("operator-profile")
+  @ApiOperation({ summary: "Get operator billing profile" })
+  @PlatformApiProtectedOk({
+    response: platformCommercialContracts.billingProfiles.operator.get.response,
+  })
   @RequirePlatformCapabilities("billing.read")
   async getOperator(@Res() response: Response) {
     const profile = operatorBillingProfileResponseSchema
@@ -27,6 +35,11 @@ export class BillingProfilesController {
   }
 
   @Put("operator-profile")
+  @ApiOperation({ summary: "Set operator billing profile" })
+  @PlatformApiProtectedOk({
+    body: platformCommercialContracts.billingProfiles.operator.set.body,
+    response: platformCommercialContracts.billingProfiles.operator.set.response,
+  })
   @RequirePlatformCapabilities("billing.write")
   setOperator(
     @Req() request: RequestWithPlatformPrincipal,
@@ -39,6 +52,10 @@ export class BillingProfilesController {
   }
 
   @Get("tenants/:tenantId/profile")
+  @ApiOperation({ summary: "Get tenant billing profile" })
+  @PlatformApiProtectedOk({
+    response: platformCommercialContracts.billingProfiles.tenant.get.response,
+  })
   @RequirePlatformCapabilities("billing.read")
   async getTenant(@Param("tenantId") tenantId: string, @Res() response: Response) {
     const profile = tenantBillingProfileResponseSchema
@@ -48,6 +65,11 @@ export class BillingProfilesController {
   }
 
   @Put("tenants/:tenantId/profile")
+  @ApiOperation({ summary: "Set tenant billing profile" })
+  @PlatformApiProtectedOk({
+    body: platformCommercialContracts.billingProfiles.tenant.set.body,
+    response: platformCommercialContracts.billingProfiles.tenant.set.response,
+  })
   @RequirePlatformCapabilities("billing.write")
   setTenant(
     @Req() request: RequestWithPlatformPrincipal,

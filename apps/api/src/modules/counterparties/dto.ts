@@ -1,4 +1,7 @@
 import { z } from "zod";
+
+import type { SchemaObject } from "@nestjs/swagger";
+
 import { hasValidCheckDigit } from "@markiro/domain";
 import { ssccCounterSchema, type SsccCounterDto } from "../org-profile/dto";
 
@@ -49,3 +52,72 @@ export interface CounterpartyDto {
 export interface ListCounterpartiesResponseDto {
   items: CounterpartyDto[];
 }
+
+const uuidSchema = { type: "string", format: "uuid" } as const;
+const dateTimeSchema = { type: "string", format: "date-time" } as const;
+
+export const counterpartyOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["id", "name", "gln", "inn", "gs1Prefixes", "notes", "createdAt"],
+  properties: {
+    id: uuidSchema,
+    name: { type: "string" },
+    gln: { type: "string", pattern: "^\\d{13}$" },
+    inn: { type: "string", nullable: true },
+    gs1Prefixes: { type: "array", items: { type: "string", pattern: "^\\d{4,12}$" } },
+    notes: { type: "string", nullable: true },
+    createdAt: dateTimeSchema,
+  },
+};
+
+export const listCounterpartiesOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["items"],
+  properties: { items: { type: "array", items: counterpartyOpenApiSchema } },
+};
+
+/**
+ * Hand-written mirror of `SsccCounterStateDto` (sscc/dto.ts), which is an
+ * interface-only DTO. `blockedBy` is the `SsccSeedBlocker` union or null.
+ */
+export const ssccCounterStateOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["extensionDigit", "nextSerial", "minSerial", "blockedBy"],
+  properties: {
+    extensionDigit: { type: "integer", minimum: 0, maximum: 9 },
+    nextSerial: {
+      type: "integer",
+      minimum: 0,
+      description: "The value the next serial block will be cut from.",
+    },
+    minSerial: {
+      type: "integer",
+      minimum: 0,
+      description: "The lowest value PUT will accept right now.",
+    },
+    blockedBy: {
+      nullable: true,
+      description: "Why an admin currently cannot reseed this counter; null when nothing blocks.",
+      oneOf: [
+        {
+          type: "object",
+          required: ["kind", "shiftId", "shiftNumber"],
+          properties: {
+            kind: { type: "string", enum: ["active_shift"] },
+            shiftId: uuidSchema,
+            shiftNumber: { type: "string" },
+          },
+        },
+        {
+          type: "object",
+          required: ["kind", "deviceId", "deviceName"],
+          properties: {
+            kind: { type: "string", enum: ["device_out_of_sync"] },
+            deviceId: uuidSchema,
+            deviceName: { type: "string" },
+          },
+        },
+      ],
+    },
+  },
+};

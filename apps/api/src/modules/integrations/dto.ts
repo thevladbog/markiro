@@ -1,5 +1,8 @@
 import { z } from "zod";
-import type { IntegrationChannelType } from "./channel-registry";
+
+import type { SchemaObject } from "@nestjs/swagger";
+
+import { CHANNELS, type IntegrationChannelType } from "./channel-registry";
 
 export type ChannelState = "not_configured" | "working" | "error" | "silent" | "unavailable";
 
@@ -118,3 +121,140 @@ export const linkCandidateSchema = z.object({
   productId: z.string().uuid(),
 });
 export type LinkCandidateDto = z.infer<typeof linkCandidateSchema>;
+
+export const INTEGRATION_CHANNEL_TYPES = CHANNELS.map((channel) => channel.type);
+
+const uuidSchema = { type: "string", format: "uuid" } as const;
+const dateTimeSchema = { type: "string", format: "date-time" } as const;
+
+const channelStates: ChannelState[] = [
+  "not_configured",
+  "working",
+  "error",
+  "silent",
+  "unavailable",
+];
+
+export const channelSummaryOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["type", "labelKey", "state", "lastEventAt"],
+  properties: {
+    type: { type: "string", enum: INTEGRATION_CHANNEL_TYPES },
+    labelKey: { type: "string" },
+    state: { type: "string", enum: channelStates },
+    lastEventAt: { ...dateTimeSchema, nullable: true },
+  },
+};
+
+export const listChannelsOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["channels"],
+  properties: { channels: { type: "array", items: channelSummaryOpenApiSchema } },
+};
+
+export const channelDetailOpenApiSchema: SchemaObject = {
+  ...channelSummaryOpenApiSchema,
+  required: [
+    ...(channelSummaryOpenApiSchema.required ?? []),
+    "settings",
+    "silentAfterHours",
+    "credentialLogin",
+  ],
+  properties: {
+    ...channelSummaryOpenApiSchema.properties,
+    settings: { type: "object", additionalProperties: true },
+    silentAfterHours: {
+      type: "integer",
+      minimum: SILENT_AFTER_HOURS_MIN,
+      maximum: SILENT_AFTER_HOURS_MAX,
+    },
+    credentialLogin: { type: "string", nullable: true },
+  },
+};
+
+const journalEventOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["at", "direction", "outcome", "message", "details"],
+  properties: {
+    at: dateTimeSchema,
+    direction: { type: "string", enum: ["in", "out", "local"] },
+    outcome: { type: "string", enum: ["ok", "warn", "error"] },
+    message: { type: "string" },
+    details: { type: "object", nullable: true, additionalProperties: true },
+  },
+};
+
+const journalSessionOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "startedAt", "finishedAt", "outcome", "summary", "events"],
+  properties: {
+    id: uuidSchema,
+    startedAt: dateTimeSchema,
+    finishedAt: { ...dateTimeSchema, nullable: true },
+    outcome: { type: "string", nullable: true },
+    summary: { type: "object", nullable: true, additionalProperties: true },
+    events: { type: "array", items: journalEventOpenApiSchema },
+  },
+};
+
+export const journalPageOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["sessions"],
+  properties: { sessions: { type: "array", items: journalSessionOpenApiSchema } },
+};
+
+export const credentialsIssuedOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["login", "secret"],
+  properties: {
+    login: { type: "string" },
+    secret: { type: "string", description: "Shown exactly once; only its hash is stored." },
+  },
+};
+
+const candidateOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "externalRef",
+    "name",
+    "article",
+    "unit",
+    "price",
+    "priceType",
+    "firstSeenAt",
+    "lastSeenAt",
+    "hidden",
+    "suggestedProductId",
+  ],
+  properties: {
+    id: uuidSchema,
+    externalRef: { type: "string" },
+    name: { type: "string" },
+    article: { type: "string", nullable: true },
+    unit: { type: "string", nullable: true },
+    price: { type: "string", nullable: true },
+    priceType: { type: "string", nullable: true },
+    firstSeenAt: dateTimeSchema,
+    lastSeenAt: dateTimeSchema,
+    hidden: { type: "boolean" },
+    suggestedProductId: { ...uuidSchema, nullable: true },
+  },
+};
+
+export const candidatesPageOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["candidates", "truncated"],
+  properties: {
+    candidates: { type: "array", items: candidateOpenApiSchema },
+    truncated: { type: "boolean" },
+  },
+};
