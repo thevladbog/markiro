@@ -1,6 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { lstat, open, readFile } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
@@ -8,6 +7,7 @@ import {
   validateLegacyGithubStationReleaseDirectory,
   validateStationReleaseDirectory,
 } from "./artifacts.mjs";
+import { isCanonicalAbsolutePath } from "./canonical-path.mjs";
 import { parseStationBetaTag, parseStationStableTag } from "./version.mjs";
 
 const execFile = promisify(execFileCallback);
@@ -164,13 +164,7 @@ export function resolveStableReleaseState({ mode, sourceBetaTag, releases, repos
 }
 
 async function ensureRepository(repository) {
-  if (
-    typeof repository !== "string" ||
-    !isAbsolute(repository) ||
-    resolve(repository) !== repository
-  ) {
-    invalid();
-  }
+  if (!isCanonicalAbsolutePath(repository)) invalid();
   try {
     const info = await lstat(repository);
     if (!info.isDirectory() || info.isSymbolicLink()) invalid();
@@ -323,7 +317,7 @@ export async function resolveStableChangelogBoundary({
 }
 
 async function readBounded(path) {
-  if (typeof path !== "string" || !isAbsolute(path) || resolve(path) !== path) invalid();
+  if (!isCanonicalAbsolutePath(path)) invalid();
   try {
     const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink() || info.size <= 0 || info.size > MAX_INPUT_BYTES) {
@@ -337,7 +331,7 @@ async function readBounded(path) {
 }
 
 async function writeExclusive(path, content) {
-  if (typeof path !== "string" || !isAbsolute(path) || resolve(path) !== path) invalid();
+  if (!isCanonicalAbsolutePath(path)) invalid();
   let handle;
   try {
     handle = await open(path, "wx", 0o600);
