@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<disaggregation action_id="31" version="2">
+    <trade_participant_inn>9705119097</trade_participant_inn>
+    <packings_list>
+        <packing>
+            <kitu><![CDATA[046800899000256032]]></kitu>
+        </packing>
+    </packings_list>
+</disaggregation>

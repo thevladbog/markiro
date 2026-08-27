@@ -204,6 +204,14 @@ describe.skipIf(!ready)("inventory document endpoints with synthetic test regist
   async function seedInventory(status: "draft" | "closed" = "closed") {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
+    await db
+      .update(schema.organization)
+      .set({ name: "ООО Документы" })
+      .where(eq(schema.organization.id, tenantId));
+    await db
+      .insert(schema.orgProfiles)
+      .values({ tenantId, inn: "9705119097" })
+      .onConflictDoUpdate({ target: schema.orgProfiles.tenantId, set: { inn: "9705119097" } });
     const [member] = await db
       .select({ userId: schema.member.userId })
       .from(schema.member)
@@ -214,6 +222,7 @@ describe.skipIf(!ready)("inventory document endpoints with synthetic test regist
     const lineId = randomUUID();
     const inventoryId = randomUUID();
     const snapshotId = randomUUID();
+    const inventoryNumber = `INV-${randomUUID()}`;
     await db.insert(schema.products).values({
       id: productId,
       tenantId,
@@ -224,7 +233,7 @@ describe.skipIf(!ready)("inventory document endpoints with synthetic test regist
     await db.insert(schema.inventories).values({
       id: inventoryId,
       tenantId,
-      number: `INV-${randomUUID()}`,
+      number: inventoryNumber,
       productId,
       gtin14Snapshot: GTIN,
       lineId,
@@ -269,7 +278,7 @@ describe.skipIf(!ready)("inventory document endpoints with synthetic test regist
           and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
         );
     }
-    return { agent, tenantId, userId: member.userId, inventoryId };
+    return { agent, tenantId, userId: member.userId, inventoryId, inventoryNumber };
   }
 
   const createBody = (idempotencyKey = randomUUID()) => ({
@@ -352,6 +361,21 @@ describe.skipIf(!ready)("inventory document endpoints with synthetic test regist
     expect(replay.body.id).toBe(first.body.id);
     expect(replay.body.resultRevision).toBe(7);
     expect(enqueue).toHaveBeenCalledWith(first.body.id);
+    const [stored] = await db
+      .select({
+        organizationNameSnapshot: schema.inventoryDocumentRuns.organizationNameSnapshot,
+        organizationInnSnapshot: schema.inventoryDocumentRuns.organizationInnSnapshot,
+        inventoryNumberSnapshot: schema.inventoryDocumentRuns.inventoryNumberSnapshot,
+        inventoryClosedAtSnapshot: schema.inventoryDocumentRuns.inventoryClosedAtSnapshot,
+      })
+      .from(schema.inventoryDocumentRuns)
+      .where(eq(schema.inventoryDocumentRuns.id, first.body.id));
+    expect(stored).toEqual({
+      organizationNameSnapshot: "ООО Документы",
+      organizationInnSnapshot: "9705119097",
+      inventoryNumberSnapshot: closed.inventoryNumber,
+      inventoryClosedAtSnapshot: new Date("2026-08-26T09:00:00.000Z"),
+    });
 
     await closed.agent
       .post(`/inventories/${closed.inventoryId}/document-runs`)

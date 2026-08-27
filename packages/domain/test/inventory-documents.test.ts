@@ -21,8 +21,29 @@ const availableDescriptor: InventoryDocumentFormatDescriptor = {
 };
 
 describe("inventory document format registry", () => {
-  it("keeps the production catalog empty until an approved fixture is checked in", () => {
-    expect(INVENTORY_DOCUMENT_FORMATS).toEqual([]);
+  it("advertises only the two fixture-backed GISMT inventory documents", () => {
+    expect(INVENTORY_DOCUMENT_FORMATS).toEqual([
+      {
+        id: "inventory_xml_gismt_aggregation",
+        version: 1,
+        label: "[XML][ГИСМТ] Формирование упаковки",
+        extension: "xml",
+        mimeType: "application/xml; charset=utf-8",
+        requiredSourceCategories: ["verified", "protected", "newBoxes"],
+        supportsParts: false,
+        availability: "available",
+      },
+      {
+        id: "inventory_xml_gismt_disaggregation",
+        version: 1,
+        label: "[XML][ГИСМТ] Расформирование упаковки",
+        extension: "xml",
+        mimeType: "application/xml; charset=utf-8",
+        requiredSourceCategories: ["verified", "protected", "newBoxes"],
+        supportsParts: false,
+        availability: "available",
+      },
+    ]);
     expect(Object.isFrozen(INVENTORY_DOCUMENT_FORMATS)).toBe(true);
   });
 
