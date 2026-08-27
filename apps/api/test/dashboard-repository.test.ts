@@ -28,6 +28,9 @@ const B_AGGREGATION_PRODUCT = randomUUID();
 const B_VALIDATION_SHIFT_WITHOUT_DURATION = randomUUID();
 const B_AGGREGATION_SHIFT = randomUUID();
 
+const BERLIN_VALIDATION_PRODUCT = randomUUID();
+const BERLIN_VALIDATION_SHIFT = randomUUID();
+
 const HASH_1 = "1".repeat(64);
 const HASH_2 = "2".repeat(64);
 const HASH_3 = "3".repeat(64);
@@ -55,12 +58,19 @@ describe.skipIf(!databaseUrl)("tenant dashboard repository", () => {
     await seedOrganizations(connection.db);
     await seedTenantA(connection.db);
     await seedTenantB(connection.db);
+    await seedBerlin(connection.db);
   }, 120_000);
 
   afterAll(async () => {
-    await connection.pool.end();
-    await maintenance.pool.query(`DROP DATABASE ${quoteIdentifier(databaseName)}`);
-    await maintenance.pool.end();
+    try {
+      await connection.pool.end();
+    } finally {
+      try {
+        await maintenance.pool.query(`DROP DATABASE ${quoteIdentifier(databaseName)}`);
+      } finally {
+        await maintenance.pool.end();
+      }
+    }
   }, 120_000);
 
   it("loads one tenant's authoritative today facts and mode-isolated equal-shape windows", async () => {
@@ -208,6 +218,11 @@ describe.skipIf(!databaseUrl)("tenant dashboard repository", () => {
       start: "2026-03-28T23:00:00.000Z",
       end: "2026-03-29T22:00:00.000Z",
       label: "2026-03-29",
+      validation: {
+        acceptedUnits: 23,
+        shiftHours: 23,
+        unitsPerShiftHour: 1,
+      },
     });
     expect(
       (new Date(dstBucket!.end).getTime() - new Date(dstBucket!.start).getTime()) / 3_600_000,
@@ -286,6 +301,7 @@ async function seedTenantA(db: Db): Promise<void> {
   const openBox = randomUUID();
   const disassembledBox = randomUUID();
   const comparisonBox = randomUUID();
+  const validationShiftBox = randomUUID();
   await db.insert(schema.boxes).values([
     box(TENANT_A, closedBox, A_TODAY_AGGREGATION_SHIFT, "shared-closed", {
       sscc: "046000000000000015",
@@ -301,6 +317,10 @@ async function seedTenantA(db: Db): Promise<void> {
       sscc: "246000000000000019",
       closedAt: new Date("2026-08-20T10:00:00.000Z"),
     }),
+    box(TENANT_A, validationShiftBox, A_ACTIVE_VALIDATION_SHIFT, "validation-shift-box", {
+      sscc: "346000000000000016",
+      closedAt: new Date("2026-08-27T07:30:00.000Z"),
+    }),
   ]);
   await db.insert(schema.boxItems).values([
     item(TENANT_A, closedBox, HASH_3, "2026-08-27T06:10:00.000Z"),
@@ -314,6 +334,7 @@ async function seedTenantA(db: Db): Promise<void> {
     item(TENANT_A, openBox, HASH_7, "2026-08-27T07:00:00.000Z"),
     item(TENANT_A, disassembledBox, HASH_8, "2026-08-27T07:10:00.000Z"),
     item(TENANT_A, comparisonBox, HASH_9, "2026-08-20T09:00:00.000Z"),
+    item(TENANT_A, validationShiftBox, HASH_1, "2026-08-27T07:00:00.000Z"),
   ]);
   await db.insert(schema.codeConflicts).values([
     conflict(TENANT_A, A_ACTIVE_VALIDATION_SHIFT, A_OLD_AGGREGATION_SHIFT, HASH_1),
@@ -372,6 +393,39 @@ async function seedTenantB(db: Db): Promise<void> {
   await db
     .insert(schema.codeConflicts)
     .values(conflict(TENANT_B, B_VALIDATION_SHIFT_WITHOUT_DURATION, B_AGGREGATION_SHIFT, HASH_B));
+}
+
+async function seedBerlin(db: Db): Promise<void> {
+  await db
+    .insert(schema.products)
+    .values(
+      product(
+        BERLIN_TENANT,
+        BERLIN_VALIDATION_PRODUCT,
+        "04600000000053",
+        "Berlin validation product",
+      ),
+    );
+  await db.insert(schema.shifts).values({
+    ...shift(BERLIN_TENANT, BERLIN_VALIDATION_SHIFT, BERLIN_VALIDATION_PRODUCT, 1, "validation"),
+    numberMonthKey: "MAR26",
+    plannedDate: "2026-03-29",
+    status: "closed",
+    openedAt: new Date("2026-03-28T23:00:00.000Z"),
+    closedAt: new Date("2026-03-29T22:00:00.000Z"),
+  });
+  await db
+    .insert(schema.codeRegistry)
+    .values(
+      Array.from({ length: 23 }, (_, index) =>
+        registry(
+          BERLIN_TENANT,
+          BERLIN_VALIDATION_SHIFT,
+          index.toString(16).padStart(64, "0"),
+          "2026-03-29T10:00:00.000Z",
+        ),
+      ),
+    );
 }
 
 function organization(id: string, name: string) {
