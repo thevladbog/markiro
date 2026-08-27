@@ -1926,6 +1926,8 @@
     "devices": {
       "title": "Devices",
       "add": "Add device",
+      "downloadStation": "Download Station for Windows",
+      "downloadStationHint": "Install Station on the production PC, then pair it with the organization using the code shown after the device is created.",
       "cancel": "Cancel",
       "create": "Create",
       "done": "Done",
@@ -2275,6 +2277,17 @@
             "neverUsed": "Never used",
             "actions": "Actions"
           }
+        },
+        "danger": {
+          "title": "Delete integration",
+          "body": "Disconnect the exchange if you are switching to another system. Settings, exchange credentials, the journal and the unmatched queue will be deleted.",
+          "deleteAction": "Delete integration",
+          "confirmTitle": "Delete the integration?",
+          "confirmBody": "Exchange credentials will be revoked and 1C will lose access immediately. Settings, the journal and the unmatched queue will be deleted permanently. Product links to external items will be kept.",
+          "confirmAction": "Delete",
+          "cancelAction": "Cancel",
+          "success": "Integration deleted",
+          "error": "Failed to delete the integration"
         }
       }
     },

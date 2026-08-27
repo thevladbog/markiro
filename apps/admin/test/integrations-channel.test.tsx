@@ -40,6 +40,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   patchSpy.mockClear();
+  deleteSpy.mockClear();
   credentialHookMountSpy.mockClear();
   journalSessions = [];
 });
@@ -50,6 +51,7 @@ function jsonResponse(status: number, body: unknown): Response {
     ok: status >= 200 && status < 300,
     status,
     json: async () => body,
+    text: async () => (body === undefined ? "" : JSON.stringify(body)),
   } as Response;
 }
 
@@ -63,6 +65,9 @@ const ISSUED_SECRET = "R4nd0mExchangeSecretValue==";
 
 /** Captures every `PATCH /integrations/:type` call as `(path, parsedBody)`. */
 const patchSpy = vi.fn();
+
+/** Captures every `DELETE /integrations/:type` call as `(path)`. */
+const deleteSpy = vi.fn();
 
 /** Sessions the next `GET /integrations/:type/journal` call answers with. */
 let journalSessions: JournalSessionDto[] = [];
@@ -110,6 +115,8 @@ interface FetchMockOptions {
   settingsMode?: "ok" | "error";
   /** `POST /integrations/:type/credentials`. "network-error" throws instead of resolving a non-ok `Response`, to exercise the non-`ApiRequestError` fallback branch in `handleIssueCredentials`. */
   issueMode?: "ok" | "error" | "network-error";
+  /** `DELETE /integrations/:type`. */
+  deleteMode?: "ok" | "error";
   detailSettings?: Record<string, unknown>;
 }
 
@@ -119,11 +126,22 @@ function createFetchMock(options: FetchMockOptions = {}) {
     detailMode = "ok",
     settingsMode = "ok",
     issueMode = "ok",
+    deleteMode = "ok",
     detailSettings = {},
   } = options;
   return vi.fn(async (url: string, init?: RequestInit) => {
     const path = url.replace(/^\/api/, "");
     const method = init?.method ?? "GET";
+
+    // `DELETE /integrations/:type` -- сервер отвечает 204 без тела
+    // (integrations.controller.ts), и `apiFetch` для 204 не зовёт `json()`.
+    if (method === "DELETE") {
+      deleteSpy(path);
+      if (deleteMode === "error") {
+        return jsonResponse(409, { message: "Интеграция не настроена" });
+      }
+      return jsonResponse(204, null);
+    }
 
     if (method === "GET" && /\/journal$/.test(path)) {
       if (journalMode === "pending") return new Promise<Response>(() => {});
@@ -202,6 +220,10 @@ function renderChannel(
         <MemoryRouter initialEntries={[`/integrations/${type}`]}>
           <Routes>
             <Route path="/integrations/:type" element={<ChannelPage />} />
+            {/* Заглушка списка: после удаления интеграции страница уходит на
+                `/integrations`, и тесту удаления нужен маркер, что уход
+                состоялся, а не рендер самого списка. */}
+            <Route path="/integrations" element={<div data-testid="integrations-index" />} />
           </Routes>
         </MemoryRouter>
       </AccessProvider>
@@ -375,8 +397,9 @@ describe("ChannelPage", () => {
     // outlives `cleanup()` (see `pickup.test.tsx`'s note on the same thing),
     // so an earlier test's toast can still carry its own `role="status"` --
     // scope the search to the journal card instead of a bare
-    // `findByRole("status")`.
-    const journalCard = (await screen.findByText(/журнал/i)).closest(".mk-card");
+    // `findByRole("status")`. Точное "Журнал", а не /журнал/i: слово
+    // встречается и в тексте секции "Удаление интеграции".
+    const journalCard = (await screen.findByText("Журнал")).closest(".mk-card");
     if (!journalCard) throw new Error("expected to find the journal card");
     expect(within(journalCard as HTMLElement).getByRole("status")).toBeDefined();
     expect(screen.queryByText(/обменов ещё не было/i)).toBeNull();
@@ -560,7 +583,7 @@ describe("ChannelPage", () => {
     });
     await screen.findByDisplayValue("ЗаказВыполнен");
 
-    await userEvent.click(screen.getByRole("button", { name: /удалить/i }));
+    await userEvent.click(screen.getByRole("button", { name: "Удалить" }));
     await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
 
     expect(patchSpy).toHaveBeenCalledWith(
@@ -583,7 +606,7 @@ describe("ChannelPage", () => {
 
     await userEvent.clear(writeoffInput);
     await userEvent.clear(statusFieldInput);
-    await userEvent.click(screen.getByRole("button", { name: /удалить/i }));
+    await userEvent.click(screen.getByRole("button", { name: "Удалить" }));
     await userEvent.click(screen.getByRole("button", { name: /сохранить/i }));
 
     expect(patchSpy).toHaveBeenCalledWith(
@@ -603,7 +626,7 @@ describe("ChannelPage", () => {
       ((await screen.findByLabelText(/тип документа для списания/i)) as HTMLInputElement).value,
     ).toBe("");
     expect((screen.getByLabelText(/реквизит статуса заказа/i) as HTMLInputElement).value).toBe("");
-    expect(screen.queryByRole("button", { name: /удалить/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();
   });
 
   it("даёт каждой паре сопоставления уникальные переведённые имена с номером строки", async () => {
@@ -640,5 +663,68 @@ describe("ChannelPage", () => {
     // Exactly one "Выпустить" button should remain -- `ApiKeysPanel`'s own.
     // Before this fix there were two: this one, plus `CredentialsSection`'s.
     expect(screen.getAllByRole("button", { name: /выпустить/i }).length).toBe(1);
+  });
+
+  it("удаляет интеграцию после подтверждения и уходит на список", async () => {
+    renderChannel("commerceml");
+
+    await userEvent.click(await screen.findByRole("button", { name: "Удалить интеграцию" }));
+    const dialog = await screen.findByRole("alertdialog");
+    // Текст подтверждения перечисляет конкретные последствия, включая то,
+    // что связи товаров сознательно остаются.
+    expect(within(dialog).getByText(/связи товаров/i)).toBeDefined();
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
+
+    expect(await screen.findByTestId("integrations-index")).toBeDefined();
+    expect(deleteSpy).toHaveBeenCalledWith("/integrations/commerceml");
+  });
+
+  it("отказ сервера показывается в диалоге удаления, а не молча закрывает его", async () => {
+    renderChannel("commerceml", { deleteMode: "error" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Удалить интеграцию" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
+
+    // Сообщение сервера (409) -- внутри открытого диалога; ухода на список
+    // не произошло.
+    expect(await within(dialog).findByText("Интеграция не настроена")).toBeDefined();
+    expect(screen.queryByTestId("integrations-index")).toBeNull();
+  });
+
+  it("отмена в диалоге удаления ничего не отправляет", async () => {
+    renderChannel("commerceml");
+
+    await userEvent.click(await screen.findByRole("button", { name: "Удалить интеграцию" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Отмена" }));
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(deleteSpy).not.toHaveBeenCalled();
+  });
+
+  // Удаление стирает учётные данные обмена, то есть распоряжается ими -- та
+  // же пара capability, что у "Выпустить" (integrations.write +
+  // credentials.manage). Одного integrations.write мало.
+  it("скрывает удаление интеграции без credentials.manage", async () => {
+    renderChannel(
+      "commerceml",
+      {},
+      {
+        roles: ["member"],
+        capabilities: [CABINET_CAPABILITY.INTEGRATIONS_READ, CABINET_CAPABILITY.INTEGRATIONS_WRITE],
+      },
+    );
+
+    expect(await screen.findByRole("button", { name: /сохранить/i })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Удалить интеграцию" })).toBeNull();
+  });
+
+  it("не показывает удаление интеграции каналу без учётных данных обмена (public_api)", async () => {
+    renderChannel("public_api");
+    await screen.findByText(/ключи публичного api/i);
+
+    expect(screen.queryByRole("button", { name: "Удалить интеграцию" })).toBeNull();
   });
 });

@@ -1954,6 +1954,26 @@ input:focus-visible {
   padding-left: 1.25rem;
 }
 
+.seo-download {
+  border-top: 1px solid var(--accent);
+}
+
+.seo-download__content {
+  min-width: 0;
+}
+
+.seo-download__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  margin-top: var(--sp-6);
+}
+
+.seo-download__actions > span {
+  color: var(--fg-3);
+  font: 500 0.75rem / 1.4 var(--font-mono);
+}
+
 .faq-list > section {
   grid-template-columns: minmax(16rem, 0.7fr) minmax(0, 1fr);
 }
@@ -2032,6 +2052,11 @@ input:focus-visible {
 
   .seo-related__grid {
     grid-template-columns: 1fr;
+  }
+
+  .seo-download__actions {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .seo-related__grid a {

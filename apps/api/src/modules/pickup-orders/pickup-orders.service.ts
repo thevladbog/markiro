@@ -194,6 +194,8 @@ export interface ExportCandidatesResult {
     createdAt: Date;
     reason: "buy" | "writeoff";
     writeoffReasonName: string | null;
+    employeeId: string;
+    employeeName: string;
     totalPrice: string | null;
     items: { productId: string; productExternalRef: string | null; unitPrice: string | null }[];
   }[];
@@ -840,12 +842,23 @@ export class PickupOrdersService {
         createdAt: schema.pickupOrders.createdAt,
         reason: schema.pickupOrders.reason,
         writeoffReasonName: schema.pickupOrderReasons.name,
+        employeeId: schema.pickupOrders.employeeId,
+        employeeName: schema.employees.fullName,
         totalPrice: schema.pickupOrders.totalPrice,
       })
       .from(schema.pickupOrders)
       .leftJoin(
         schema.pickupOrderReasons,
         eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId),
+      )
+      // Inner join can't drop rows: employee_id is NOT NULL with a composite
+      // (tenant_id, employee_id) FK, matched here on both columns.
+      .innerJoin(
+        schema.employees,
+        and(
+          eq(schema.employees.tenantId, schema.pickupOrders.tenantId),
+          eq(schema.employees.id, schema.pickupOrders.employeeId),
+        ),
       )
       .where(
         and(

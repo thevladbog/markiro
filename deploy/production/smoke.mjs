@@ -14,6 +14,7 @@ const LANDING_CSP =
 const VBTECH_CSP =
   "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; frame-src https://smartcaptcha.cloud.yandex.ru; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline' https://smartcaptcha.cloud.yandex.ru; style-src 'self' 'unsafe-inline'; upgrade-insecure-requests";
 const LANDING_SITE_URL = "https://markiro.app";
+const STATION_STABLE_DOWNLOAD_URL = "https://releases.markiro.app/station/download";
 const COMMAND_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 1_000;
 function timeoutError(command, timeoutMs) {
@@ -374,9 +375,16 @@ function kioskShellSignature(html, baseUrl) {
   };
 }
 
-function assertNoExternalOrigins(html, baseUrl, allowedCanonicalUrl, allowedExternalOrigins = []) {
+function assertNoExternalOrigins(
+  html,
+  baseUrl,
+  allowedCanonicalUrl,
+  allowedExternalOrigins = [],
+  allowedExternalLinks = [],
+) {
   const baseOrigin = new URL(baseUrl).origin;
   const allowedOriginSet = new Set(allowedExternalOrigins.map((value) => new URL(value).origin));
+  const allowedExternalLinkSet = new Set(allowedExternalLinks);
   let runtimeHtml = html;
   if (allowedCanonicalUrl) {
     const allowedMetadataOrigin = new URL(allowedCanonicalUrl).origin;
@@ -400,6 +408,11 @@ function assertNoExternalOrigins(html, baseUrl, allowedCanonicalUrl, allowedExte
       return tag;
     });
   }
+  runtimeHtml = runtimeHtml.replace(/<a\b[^>]*>/gi, (tag) =>
+    tag.replace(/\bhref\s*=\s*(["'])([^"']+)\1/i, (attribute, _quote, href) =>
+      allowedExternalLinkSet.has(href) ? "" : attribute,
+    ),
+  );
   const assertUrl = (value) => {
     if (!value.startsWith("//") && !/^https?:\/\//i.test(value)) return;
     const origin = new URL(value, baseUrl).origin;
@@ -460,7 +473,9 @@ function assertLandingRoute(check, response, body, baseUrl, landingDemoSubmissio
       throw new Error(`landing ${path} is not revalidation-only`);
     const allowedExternalOrigins =
       landingDemoSubmissionState === "enabled" ? ["https://smartcaptcha.cloud.yandex.ru"] : [];
-    assertNoExternalOrigins(body, baseUrl, expectedUrl, allowedExternalOrigins);
+    assertNoExternalOrigins(body, baseUrl, expectedUrl, allowedExternalOrigins, [
+      STATION_STABLE_DOWNLOAD_URL,
+    ]);
     return;
   }
 
