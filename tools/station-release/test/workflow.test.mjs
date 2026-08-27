@@ -358,10 +358,19 @@ test("immutable publication and public dual-origin validation precede every mode
   assert.match(publicValidation.run, /artifacts\.mjs compare-origins/);
   assert.match(
     publicValidation.run,
+    /curl --fail[^\n]*--retry 3 --retry-all-errors --retry-max-time 30/,
+  );
+  assert.match(
+    publicValidation.run,
     /releaseSha.*\[\[:space:\]\]\*:\[\[:space:\]\]\*.*\$release_sha/,
   );
   assert.doesNotMatch(publicValidation.run, /publish-immutable|tauri build/);
   assert.doesNotMatch(promote.run, /gh release create "\$tag"|publish-immutable|tauri build/);
+  assert.equal(
+    [...promote.run.matchAll(/curl --fail[^\n]*--retry 3 --retry-all-errors --retry-max-time 30/g)]
+      .length,
+    2,
+  );
 });
 
 test("one mutable transaction backs up completely, promotes in order and rolls back in reverse", async () => {
