@@ -15,6 +15,8 @@ import { renderShiftExport } from "../src/shift-exports.js";
 const decoder = new TextDecoder();
 const GTIN = "04680089900017";
 const km = (serial: string) => `01${GTIN}21${serial}\u001d93crypto`;
+const BMP_SERIAL = "\uE000";
+const SUPPLEMENTARY_SERIAL = "\u{10000}";
 const aggregationGolden = readFileSync(
   new URL("../../../docs/contracts/inventory-documents/v1/aggregation.golden.xml", import.meta.url),
   "utf8",
@@ -249,6 +251,28 @@ describe("current inventory final-box selection", () => {
     });
 
     expect(selected.map((box) => box.sscc)).toEqual(["046800899000256001", "046800899000256018"]);
+  });
+
+  it("sorts eligible box members by canonical UTF-8 bytes", () => {
+    const unicode = source();
+    const valid = unicode.newBoxes[0]!;
+    unicode.verified = [
+      {
+        codeHash: "supplementary",
+        canonicalRaw: km(SUPPLEMENTARY_SERIAL),
+        observedProductionDate: "2026-08-08",
+      },
+      {
+        codeHash: "bmp",
+        canonicalRaw: km(BMP_SERIAL),
+        observedProductionDate: "2026-08-08",
+      },
+    ];
+    unicode.newBoxes = [{ ...valid, codeHashes: ["supplementary", "bmp"] }];
+
+    expect(
+      selectEligibleInventoryFinalBoxes(unicode)[0]?.codes.map((code) => code.canonicalRaw),
+    ).toEqual([km(BMP_SERIAL), km(SUPPLEMENTARY_SERIAL)]);
   });
 });
 

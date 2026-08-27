@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { createUtf8ByteComparator } from "../document-text-encoding.js";
 import type { InventoryDocumentGenerationSource } from "./document-generators.js";
 
 export interface EligibleInventoryFinalBox {
@@ -51,7 +52,7 @@ export function selectEligibleInventoryFinalBoxes(
         });
       }
 
-      codes.sort((left, right) => compareText(left.canonicalRaw, right.canonicalRaw));
+      codes.sort(createUtf8ByteComparator((code) => code.canonicalRaw));
       return [
         {
           sscc: box.sscc,

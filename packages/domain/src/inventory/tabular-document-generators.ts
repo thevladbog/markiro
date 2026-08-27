@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { encodeLfText, encodeSemicolonCsv } from "../document-text-encoding.js";
+import {
+  createUtf8ByteComparator,
+  encodeLfText,
+  encodeSemicolonCsv,
+} from "../document-text-encoding.js";
 import { DomainError } from "../errors.js";
 import { formatSsccWithAi } from "../gs1/sscc.js";
 import {
@@ -153,7 +157,7 @@ function writeOffCodes(source: InventoryDocumentGenerationSource): string[] {
   return source.writeOffCandidates
     .filter((code) => !protectedHashes.has(code.codeHash))
     .map((code) => code.canonicalRaw)
-    .sort(compareText);
+    .sort(createUtf8ByteComparator((code) => code));
 }
 
 function verifiedEntries(source: InventoryDocumentGenerationSource) {
@@ -164,7 +168,7 @@ function verifiedEntries(source: InventoryDocumentGenerationSource) {
 function verifiedCodes(source: InventoryDocumentGenerationSource): string[] {
   return verifiedEntries(source)
     .map((code) => code.canonicalRaw)
-    .sort(compareText);
+    .sort(createUtf8ByteComparator((code) => code));
 }
 
 function formatOutputSscc(sscc: string): string {

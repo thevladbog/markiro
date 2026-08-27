@@ -17,6 +17,8 @@ import {
 const decoder = new TextDecoder();
 const GTIN = "04680089900017";
 const km = (serial: string) => `01${GTIN}21${serial}\u001d93crypto`;
+const BMP_SERIAL = "\uE000";
+const SUPPLEMENTARY_SERIAL = "\u{10000}";
 
 const metadata: InventoryDocumentGenerationMetadata = {
   documentId: "11111111-1111-4111-8111-111111111111",
@@ -169,6 +171,38 @@ describe("inventory tabular document generators", () => {
       boxCount: 0,
     });
     expect(decodeCsv(part)).not.toMatch(/PROTECTED|INELIGIBLE|UNKNOWN|VOIDED/);
+  });
+
+  it("sorts write-off and current-stock codes by full canonical UTF-8 bytes", () => {
+    const unicode = emptySource();
+    unicode.writeOffCandidates = [
+      { codeHash: "supplementary", canonicalRaw: km(SUPPLEMENTARY_SERIAL) },
+      { codeHash: "bmp", canonicalRaw: km(BMP_SERIAL) },
+    ];
+    unicode.verified = [
+      {
+        codeHash: "supplementary",
+        canonicalRaw: km(SUPPLEMENTARY_SERIAL),
+        observedProductionDate: "2026-08-08",
+      },
+      {
+        codeHash: "bmp",
+        canonicalRaw: km(BMP_SERIAL),
+        observedProductionDate: "2026-08-08",
+      },
+    ];
+
+    const [writeOffTxt] = generateInventoryWriteOffTxt(unicode, metadata);
+    const [writeOffCsv] = generateInventoryWriteOffCsv(unicode, metadata);
+    const [currentStockCsv] = generateInventoryCurrentStockCsv(unicode, metadata);
+
+    expect(decode(writeOffTxt)).toBe(`${km(BMP_SERIAL)}\n${km(SUPPLEMENTARY_SERIAL)}\n`);
+    expect(decodeCsv(writeOffCsv)).toBe(
+      `code\r\n${km(BMP_SERIAL)}\r\n${km(SUPPLEMENTARY_SERIAL)}\r\n`,
+    );
+    expect(decodeCsv(currentStockCsv)).toBe(
+      `code\r\n${km(BMP_SERIAL)}\r\n${km(SUPPLEMENTARY_SERIAL)}\r\n`,
+    );
   });
 
   it("renders only eligible final boxes with 00-prefixed SSCCs and full canonical codes", () => {
