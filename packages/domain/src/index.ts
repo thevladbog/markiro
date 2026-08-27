@@ -126,6 +126,7 @@ export {
 export {
   createInventoryDocumentRegistry,
   getInventoryDocumentFormat,
+  getRegisteredInventoryDocumentFormat,
   INVENTORY_DOCUMENT_FORMAT_AVAILABILITIES,
   INVENTORY_DOCUMENT_FORMATS,
   INVENTORY_DOCUMENT_MIME_TYPE_PATTERN,
@@ -143,7 +144,15 @@ export type {
 } from "./inventory/index.js";
 export {
   generateInventoryAggregationXml,
+  generateInventoryAggregationXmlV2,
+  generateInventoryBalancesByProductionDateCsv,
+  generateInventoryCurrentStockCsv,
   generateInventoryDisaggregationXml,
+  generateInventoryFinalBoxContentsCsv,
+  generateInventoryFinalBoxesTxt,
+  generateInventoryWriteOffCsv,
+  generateInventoryWriteOffTxt,
+  inventoryDocumentFilenamePrefix,
   InventoryDocumentGenerationError,
 } from "./inventory/index.js";
 export type {
@@ -152,6 +161,8 @@ export type {
   InventoryDocumentGenerationMetadata,
   InventoryDocumentGenerationSource,
 } from "./inventory/index.js";
+export { selectEligibleInventoryFinalBoxes } from "./inventory/index.js";
+export type { EligibleInventoryFinalBox } from "./inventory/index.js";
 export {
   INVENTORY_EVENT_BATCH_SIZE,
   INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE,

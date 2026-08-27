@@ -1063,7 +1063,7 @@ function validateCertificateRecord(resource) {
   if (data !== null && (!Array.isArray(data) || data.length !== 1)) rejected();
 }
 
-function validateCdn(plan, resource, expectedOriginGroupId) {
+function validateCdn(plan, resource, expectedOriginGroupId, bucketName) {
   const failures = [];
   const capture = (scope, callback) => {
     try {
@@ -1120,6 +1120,12 @@ function validateCdn(plan, resource, expectedOriginGroupId) {
       });
       check("edge-cache", () => {
         if (options.edge_cache_settings !== 0) rejected();
+      });
+      check("custom-host-header", () => {
+        if (options.custom_host_header !== `${bucketName}.storage.yandexcloud.net`) rejected();
+      });
+      check("forward-host-header", () => {
+        if (options.forward_host_header !== false) rejected();
       });
       check("browser-cache", () => {
         if (options.browser_cache_settings !== 0) rejected();
@@ -1380,7 +1386,7 @@ export function guardProductionPlan(plan) {
   if (scoped("release-cdn-actions", () => includesDelete(cdn)) && publicDnsLive)
     rejected("release-cdn-delete");
   const providerCname =
-    cdn?.change?.after !== null ? validateCdn(plan, cdn, releaseOriginGroupId) : null;
+    cdn?.change?.after !== null ? validateCdn(plan, cdn, releaseOriginGroupId, bucketName) : null;
   if (publicDns && publicDns.change?.after !== null) {
     scoped("release-public-dns", () => validatePublicDns(plan, publicDns, providerCname));
   }

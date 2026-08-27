@@ -824,6 +824,18 @@ test("guard CLI distinguishes release CDN failure classes without leaking plan v
       },
     },
     {
+      scope: "custom-host-header",
+      mutate(plan) {
+        releaseCdnOptions(plan).custom_host_header = "do-not-print-this-plan-value";
+      },
+    },
+    {
+      scope: "forward-host-header",
+      mutate(plan) {
+        releaseCdnOptions(plan).forward_host_header = true;
+      },
+    },
+    {
       scope: "browser-cache",
       mutate(plan) {
         releaseCdnOptions(plan).browser_cache_settings = "do-not-print-this-plan-value";
@@ -921,6 +933,8 @@ test("guard CLI reports every independent release CDN failure without leaking pl
   releaseCdnOptions(invalid).redirect_http_to_https = false;
   releaseCdnOptions(invalid).redirect_https_to_http = true;
   releaseCdnOptions(invalid).edge_cache_settings = 1;
+  releaseCdnOptions(invalid).custom_host_header = "do-not-print-this-plan-value";
+  releaseCdnOptions(invalid).forward_host_header = true;
   releaseCdnOptions(invalid).browser_cache_settings = "do-not-print-this-plan-value";
   releaseCdnOptions(invalid).static_response_headers["x-content-type-options"] =
     "do-not-print-this-plan-value";
@@ -956,6 +970,8 @@ test("guard CLI reports every independent release CDN failure without leaking pl
       "release-cdn-redirect-http-to-https",
       "release-cdn-redirect-https-to-http",
       "release-cdn-edge-cache",
+      "release-cdn-custom-host-header",
+      "release-cdn-forward-host-header",
       "release-cdn-browser-cache",
       "release-cdn-content-type-header",
       "release-cdn-content-security-policy-header",

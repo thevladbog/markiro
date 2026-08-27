@@ -1,6 +1,9 @@
+import { compareText } from "../document-text-encoding.js";
 import { DomainError } from "../errors.js";
+import { GismtAggregationError, renderGismtAggregationXml } from "../gismt-aggregation.js";
 import { parseKmSegments } from "../gs1/km.js";
 import { formatSsccWithAi } from "../gs1/sscc.js";
+import { selectEligibleInventoryFinalBoxes } from "./document-selection.js";
 
 export interface InventoryDocumentGenerationMetadata {
   documentId: string;
@@ -12,7 +15,12 @@ export interface InventoryDocumentGenerationMetadata {
 }
 
 export interface InventoryDocumentGenerationSource {
-  verified: readonly { codeHash: string; canonicalRaw: string }[];
+  writeOffCandidates: readonly { codeHash: string; canonicalRaw: string }[];
+  verified: readonly {
+    codeHash: string;
+    canonicalRaw: string;
+    observedProductionDate: string | null;
+  }[];
   protected: readonly { codeHash: string; canonicalRaw: string; parentSscc: string | null }[];
   oldBoxes: readonly { sscc: string }[];
   newBoxes: readonly {
@@ -20,6 +28,7 @@ export interface InventoryDocumentGenerationSource {
     oldSsccContext: string | null;
     state: "open" | "closed" | "invalidated";
     printState: "not_ready" | "pending" | "printing" | "printed" | "failed";
+    productionDate: string;
     codeHashes: readonly string[];
   }[];
 }
@@ -27,7 +36,8 @@ export interface InventoryDocumentGenerationSource {
 export interface InventoryDocumentGeneratedPart {
   partNumber: number;
   filename: string;
-  mimeType: "application/xml; charset=utf-8";
+  mimeType:
+    "application/xml; charset=utf-8" | "text/csv; charset=utf-8" | "text/plain; charset=utf-8";
   bytes: Uint8Array;
   rowCount: number;
   codeCount: number;
@@ -39,7 +49,8 @@ export type InventoryDocumentGenerationErrorCode =
   | "INVALID_CIS"
   | "INVALID_DOCUMENT_METADATA"
   | "INVALID_ORGANIZATION_INN"
-  | "INVALID_SSCC";
+  | "INVALID_SSCC"
+  | "VERIFIED_PRODUCTION_DATE_MISSING";
 
 export class InventoryDocumentGenerationError extends Error {
   constructor(readonly code: InventoryDocumentGenerationErrorCode) {
@@ -59,7 +70,7 @@ export function generateInventoryAggregationXml(
   metadata: InventoryDocumentGenerationMetadata,
 ): InventoryDocumentGeneratedPart[] {
   validateAggregationMetadata(metadata);
-  const boxes = eligibleRepackedBoxes(source);
+  const boxes = frozenAggregationV1Boxes(source);
   if (boxes.length === 0) throw new InventoryDocumentGenerationError("EMPTY_SOURCE");
 
   const lines = [
@@ -82,12 +93,53 @@ export function generateInventoryAggregationXml(
   ];
   return [
     part(
-      `${inventoryFilenamePrefix(metadata.inventoryNumber)}-aggregation.xml`,
+      `${inventoryDocumentFilenamePrefix(metadata.inventoryNumber)}-aggregation.xml`,
       lines,
       boxes.reduce((count, box) => count + box.codes.length, 0),
       boxes.length,
     ),
   ];
+}
+
+export function generateInventoryAggregationXmlV2(
+  source: InventoryDocumentGenerationSource,
+  metadata: InventoryDocumentGenerationMetadata,
+): InventoryDocumentGeneratedPart[] {
+  validateAggregationMetadata(metadata);
+  const boxes = selectEligibleInventoryFinalBoxes(source);
+  if (boxes.length === 0) throw new InventoryDocumentGenerationError("EMPTY_SOURCE");
+
+  try {
+    const rendered = renderGismtAggregationXml({
+      organizationInn: metadata.organizationInn,
+      boxes: boxes.map((box) => ({
+        sscc: box.sscc,
+        codes: box.codes.map((code) => code.canonicalRaw),
+      })),
+    });
+    return [
+      {
+        partNumber: 1,
+        filename: `${inventoryDocumentFilenamePrefix(metadata.inventoryNumber)}-aggregation.xml`,
+        mimeType: XML_MIME_TYPE,
+        bytes: rendered.bytes,
+        rowCount: rendered.physicalLineCount,
+        codeCount: rendered.codeCount,
+        boxCount: rendered.boxCount,
+      },
+    ];
+  } catch (error) {
+    if (error instanceof GismtAggregationError) {
+      throw new InventoryDocumentGenerationError(
+        error.code === "INVALID_CIS"
+          ? "INVALID_CIS"
+          : error.code === "INVALID_SSCC"
+            ? "INVALID_SSCC"
+            : "INVALID_ORGANIZATION_INN",
+      );
+    }
+    throw error;
+  }
 }
 
 export function generateInventoryDisaggregationXml(
@@ -101,7 +153,9 @@ export function generateInventoryDisaggregationXml(
   const protectedParents = new Set(
     source.protected.flatMap((code) => (code.parentSscc === null ? [] : [code.parentSscc])),
   );
-  const boxes = [...new Set(eligibleRepackedBoxes(source).map((box) => box.oldSsccContext))]
+  const boxes = [
+    ...new Set(selectEligibleInventoryFinalBoxes(source).map((box) => box.oldSsccContext)),
+  ]
     .filter((sscc): sscc is string => sscc !== null)
     .filter((sscc) => !protectedParents.has(sscc))
     .sort(compareText)
@@ -123,7 +177,7 @@ export function generateInventoryDisaggregationXml(
   ];
   return [
     part(
-      `${inventoryFilenamePrefix(metadata.inventoryNumber)}-disaggregation.xml`,
+      `${inventoryDocumentFilenamePrefix(metadata.inventoryNumber)}-disaggregation.xml`,
       lines,
       0,
       boxes.length,
@@ -131,7 +185,7 @@ export function generateInventoryDisaggregationXml(
   ];
 }
 
-function eligibleRepackedBoxes(source: InventoryDocumentGenerationSource): {
+function frozenAggregationV1Boxes(source: InventoryDocumentGenerationSource): {
   sscc: string;
   oldSsccContext: string | null;
   codes: string[];
@@ -242,7 +296,7 @@ function stripKmCryptoTail(code: string): string {
   }
 }
 
-function inventoryFilenamePrefix(inventoryNumber: string): string {
+export function inventoryDocumentFilenamePrefix(inventoryNumber: string): string {
   const sanitized = inventoryNumber
     .normalize("NFC")
     .replace(/[^\p{L}\p{N}-]+/gu, "-")
@@ -257,8 +311,4 @@ function xmlText(value: string): string {
 
 function xmlAttribute(value: string): string {
   return xmlText(value).replaceAll('"', "&quot;");
-}
-
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }

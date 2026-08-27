@@ -441,7 +441,10 @@ test("stable mutables promote GitHub, Yandex manifest, then the default stable a
       rollback.indexOf("station-stable-github-channel-backup/latest.json"),
   );
   assert.match(rollback, /station-stable-github-rollback-verify/);
-  assert.match(rollback, /github-public\.mjs download-channel stable/);
+  assert.match(
+    rollback,
+    /github-public\.mjs[\s\\]*download-channel-exact stable[\s\\]*"\$RUNNER_TEMP\/station-stable-github-channel-backup\/latest\.json"[\s\\]*"\$RUNNER_TEMP\/station-stable-github-rollback-verify\/latest\.json"/,
+  );
   assert.doesNotMatch(rollback, /gh release download station-stable-channel/);
   assert.match(rollback, /station release mutable restoration failed/);
   assert.match(
@@ -450,7 +453,11 @@ test("stable mutables promote GitHub, Yandex manifest, then the default stable a
   );
   assert.match(run, /https:\/\/releases\.markiro\.app\/station\/stable\/latest\.json/);
   assert.match(run, /https:\/\/releases\.markiro\.app\/station\/download/);
-  assert.match(run, /github-public\.mjs download-channel stable/);
+  assert.match(run, /github-public\.mjs[\s\\]*download-channel stable/);
+  assert.match(
+    run,
+    /github-public\.mjs[\s\\]*download-channel-exact stable[\s\\]*"\$github_tree\/latest\.json"[\s\\]*"\$RUNNER_TEMP\/station-stable-github-channel-verify\/latest\.json"/,
+  );
   assert.doesNotMatch(run, /station\/beta\/download/);
   assert.match(
     run,

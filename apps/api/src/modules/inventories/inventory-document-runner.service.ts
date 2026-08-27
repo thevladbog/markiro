@@ -7,8 +7,15 @@ import { schema, type Db } from "@markiro/db";
 import {
   createInventoryDocumentRegistry,
   generateInventoryAggregationXml,
+  generateInventoryAggregationXmlV2,
+  generateInventoryBalancesByProductionDateCsv,
+  generateInventoryCurrentStockCsv,
   generateInventoryDisaggregationXml,
-  getInventoryDocumentFormat,
+  generateInventoryFinalBoxContentsCsv,
+  generateInventoryFinalBoxesTxt,
+  generateInventoryWriteOffCsv,
+  generateInventoryWriteOffTxt,
+  getRegisteredInventoryDocumentFormat,
   InventoryDocumentGenerationError,
   InventoryDocumentRegistryError,
   type InventoryDocumentGenerationMetadata,
@@ -58,6 +65,7 @@ export interface InventoryDocumentGeneratedPart {
 
 export interface InventoryDocumentGenerator {
   descriptor: InventoryDocumentFormatDescriptor;
+  allowsZeroByteArtifact?: true;
   generate(
     source: InventoryResultSource,
     metadata: InventoryDocumentGenerationMetadata,
@@ -73,7 +81,16 @@ export class InventoryDocumentGeneratorRegistry {
       generators.map((generator) => generator.descriptor),
     );
     this.#generators = new Map(
-      generators.map((generator) => [generator.descriptor.id, generator] as const),
+      generators.map((generator) => {
+        const descriptor = this.#descriptors.resolveRegistered(
+          generator.descriptor.id,
+          generator.descriptor.version,
+        );
+        return [
+          generatorKey(descriptor.id, descriptor.version),
+          { ...generator, descriptor },
+        ] as const;
+      }),
     );
   }
 
@@ -81,22 +98,70 @@ export class InventoryDocumentGeneratorRegistry {
     return this.#descriptors.listAvailable();
   }
 
+  resolveForSelection(id: string, version: number): InventoryDocumentGenerator {
+    const descriptor = this.#descriptors.resolve(id, version);
+    return this.#resolve(descriptor);
+  }
+
+  resolveForExecution(id: string, version: number): InventoryDocumentGenerator {
+    const descriptor = this.#descriptors.resolveRegistered(id, version);
+    return this.#resolve(descriptor);
+  }
+
   resolve(id: string, version: number): InventoryDocumentGenerator {
-    this.#descriptors.resolve(id, version);
-    const generator = this.#generators.get(id);
+    return this.resolveForSelection(id, version);
+  }
+
+  #resolve(descriptor: InventoryDocumentFormatDescriptor): InventoryDocumentGenerator {
+    const generator = this.#generators.get(generatorKey(descriptor.id, descriptor.version));
     if (!generator) throw new InventoryDocumentRegistryError("FORMAT_UNAVAILABLE");
     return generator;
   }
 }
 
+const generatorKey = (id: string, version: number): string => `${id}@${version}`;
+
 export const productionInventoryDocumentGeneratorRegistry = new InventoryDocumentGeneratorRegistry([
   {
-    descriptor: getInventoryDocumentFormat("inventory_xml_gismt_aggregation", 1),
+    descriptor: getRegisteredInventoryDocumentFormat("inventory_xml_gismt_aggregation", 1),
     generate: generateInventoryAggregationXml,
   },
   {
-    descriptor: getInventoryDocumentFormat("inventory_xml_gismt_disaggregation", 1),
+    descriptor: getRegisteredInventoryDocumentFormat("inventory_xml_gismt_aggregation", 2),
+    generate: generateInventoryAggregationXmlV2,
+  },
+  {
+    descriptor: getRegisteredInventoryDocumentFormat("inventory_xml_gismt_disaggregation", 1),
     generate: generateInventoryDisaggregationXml,
+  },
+  {
+    descriptor: getRegisteredInventoryDocumentFormat("inventory_txt_write_off", 1),
+    allowsZeroByteArtifact: true,
+    generate: generateInventoryWriteOffTxt,
+  },
+  {
+    descriptor: getRegisteredInventoryDocumentFormat("inventory_csv_write_off", 1),
+    generate: generateInventoryWriteOffCsv,
+  },
+  {
+    descriptor: getRegisteredInventoryDocumentFormat("inventory_csv_current_stock", 1),
+    generate: generateInventoryCurrentStockCsv,
+  },
+  {
+    descriptor: getRegisteredInventoryDocumentFormat("inventory_csv_final_box_contents", 1),
+    generate: generateInventoryFinalBoxContentsCsv,
+  },
+  {
+    descriptor: getRegisteredInventoryDocumentFormat("inventory_txt_final_boxes", 1),
+    allowsZeroByteArtifact: true,
+    generate: generateInventoryFinalBoxesTxt,
+  },
+  {
+    descriptor: getRegisteredInventoryDocumentFormat(
+      "inventory_csv_balances_by_production_date",
+      1,
+    ),
+    generate: generateInventoryBalancesByProductionDateCsv,
   },
 ]);
 
@@ -123,6 +188,7 @@ export const INVENTORY_DOCUMENT_SAFE_ERROR_CODES = [
   "FORMAT_UNAVAILABLE",
   "INVENTORY_RESULT_NOT_CLOSED",
   "STALE_RESULT_REVISION",
+  "VERIFIED_PRODUCTION_DATE_MISSING",
   "GENERATION_FAILED",
   "STORAGE_FAILED",
   "QUEUE_FAILED",
@@ -150,7 +216,7 @@ export class InventoryDocumentRunnerService {
     try {
       const selected = claimed.selectedFormats.map((selection) => ({
         selection,
-        generator: this.generators.resolve(selection.id, selection.version),
+        generator: this.generators.resolveForExecution(selection.id, selection.version),
       }));
       const source = await this.source.load(claimed.tenantId, claimed.inventoryId);
       if (source.resultRevision !== claimed.resultRevision) {
@@ -175,7 +241,7 @@ export class InventoryDocumentRunnerService {
       }> = [];
       for (const { selection, generator } of selected) {
         const parts = await generator.generate(source, generationMetadata(claimed));
-        validateGeneratedParts(generator.descriptor, parts);
+        validateGeneratedParts(generator, parts);
         rendered.push(
           ...parts.map((part) => ({
             formatId: selection.id,
@@ -439,10 +505,15 @@ function safeDocumentErrorCode(error: unknown): InventoryDocumentSafeErrorCode |
         return error.code;
       case "INVALID_DESCRIPTOR":
       case "DUPLICATE_FORMAT_ID":
+      case "DUPLICATE_FORMAT_VERSION":
         return "GENERATION_FAILED";
     }
   }
-  if (error instanceof InventoryDocumentGenerationError) return "GENERATION_FAILED";
+  if (error instanceof InventoryDocumentGenerationError) {
+    return error.code === "VERIFIED_PRODUCTION_DATE_MISSING"
+      ? "VERIFIED_PRODUCTION_DATE_MISSING"
+      : "GENERATION_FAILED";
+  }
   return null;
 }
 
@@ -458,9 +529,10 @@ function generationMetadata(run: InventoryDocumentRunRow): InventoryDocumentGene
 }
 
 function validateGeneratedParts(
-  descriptor: InventoryDocumentFormatDescriptor,
+  generator: InventoryDocumentGenerator,
   parts: readonly InventoryDocumentGeneratedPart[],
 ): void {
+  const { descriptor } = generator;
   if (parts.length === 0 || (!descriptor.supportsParts && parts.length !== 1)) {
     throw new InventoryDocumentRunError("GENERATION_FAILED");
   }
@@ -475,7 +547,14 @@ function validateGeneratedParts(
       filenames.has(part.filename.normalize("NFC").toLowerCase()) ||
       part.mimeType !== descriptor.mimeType ||
       !part.filename.endsWith(`.${descriptor.extension}`) ||
-      part.bytes.byteLength < 1 ||
+      (part.bytes.byteLength === 0 &&
+        !(
+          generator.allowsZeroByteArtifact === true &&
+          part.mimeType === "text/plain; charset=utf-8" &&
+          part.rowCount === 0 &&
+          part.codeCount === 0 &&
+          part.boxCount === 0
+        )) ||
       ![part.rowCount, part.codeCount, part.boxCount].every(
         (count) => Number.isSafeInteger(count) && count >= 0,
       )

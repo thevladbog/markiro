@@ -60,6 +60,7 @@ export {
 export {
   createInventoryDocumentRegistry,
   getInventoryDocumentFormat,
+  getRegisteredInventoryDocumentFormat,
   INVENTORY_DOCUMENT_FORMAT_AVAILABILITIES,
   INVENTORY_DOCUMENT_FORMATS,
   INVENTORY_DOCUMENT_MIME_TYPE_PATTERN,
@@ -70,7 +71,9 @@ export {
 } from "./documents.js";
 export {
   generateInventoryAggregationXml,
+  generateInventoryAggregationXmlV2,
   generateInventoryDisaggregationXml,
+  inventoryDocumentFilenamePrefix,
   InventoryDocumentGenerationError,
 } from "./document-generators.js";
 export type {
@@ -79,6 +82,16 @@ export type {
   InventoryDocumentGenerationMetadata,
   InventoryDocumentGenerationSource,
 } from "./document-generators.js";
+export { selectEligibleInventoryFinalBoxes } from "./document-selection.js";
+export type { EligibleInventoryFinalBox } from "./document-selection.js";
+export {
+  generateInventoryBalancesByProductionDateCsv,
+  generateInventoryCurrentStockCsv,
+  generateInventoryFinalBoxContentsCsv,
+  generateInventoryFinalBoxesTxt,
+  generateInventoryWriteOffCsv,
+  generateInventoryWriteOffTxt,
+} from "./tabular-document-generators.js";
 export type {
   InventoryDocumentFormatAvailability,
   InventoryDocumentFormatDescriptor,
