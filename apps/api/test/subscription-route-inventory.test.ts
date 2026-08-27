@@ -179,6 +179,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "DELETE /disaggregation-reasons/:id (DisaggregationReasonsController.archiveReason)",
       "DELETE /disaggregation/:id/lines/:lineId (DisaggregationController.removeLine)",
       "DELETE /employees/:id (EmployeesController.archiveEmployee)",
+      "DELETE /integrations/:type (IntegrationsController.deleteChannel)",
       "DELETE /lines/:id (LinesController.deleteLine)",
       "DELETE /org/profile/logo (OrgProfileController.deleteLogo)",
       "DELETE /pickup-reasons/:id (PickupReasonsController.archiveReason)",
