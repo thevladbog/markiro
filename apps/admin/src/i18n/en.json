@@ -720,7 +720,7 @@
         "product": "Product",
         "line": "Line",
         "mode": "Mode",
-        "plan": "Plan",
+        "output": "Output",
         "started": "Opened",
         "empty": "No shifts are active now.",
         "openShifts": "Open shifts"

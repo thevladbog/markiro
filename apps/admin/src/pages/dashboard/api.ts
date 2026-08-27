@@ -48,7 +48,7 @@ const dashboardReasonSchema = z
   .strict();
 const dashboardActiveShiftSchema = z
   .object({
-    id: z.string(),
+    id: z.string().uuid(),
     number: z.string(),
     productName: z.string().nullable(),
     lineName: z.string().nullable(),

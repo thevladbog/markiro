@@ -111,7 +111,7 @@ function OperationalDashboard({ overview }: { overview: DashboardOverviewDto }) 
                 <th scope="col">{t("pages.dashboard.active.line")}</th>
                 <th scope="col">{t("pages.dashboard.active.mode")}</th>
                 <th scope="col" className="mk-dashboard-table__number">
-                  {t("pages.dashboard.active.plan")}
+                  {t("pages.dashboard.active.output")}
                 </th>
                 <th scope="col">{t("pages.dashboard.active.started")}</th>
               </tr>

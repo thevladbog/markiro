@@ -117,7 +117,7 @@ function dashboardFixture(
     },
     activeShifts: [
       {
-        id: "shift-active",
+        id: "11111111-1111-4111-8111-111111111111",
         number: "S-2026-08-27-001",
         productName: "Вода газированная 1,0 л",
         lineName: "Линия 2",
@@ -172,6 +172,17 @@ describe("DashboardPage", () => {
     expect(
       (await screen.findByRole("link", { name: "Запланировать смену" })).getAttribute("href"),
     ).toBe("/shifts");
+  });
+
+  it("labels the server-provided active shift value as output", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, dashboardFixture({ hasRunShift: true }))),
+    );
+
+    renderDashboard();
+
+    expect(await screen.findByRole("columnheader", { name: "Выпуск" })).toBeDefined();
   });
 
   it("renders a layout-shaped loading state while the dashboard overview is unresolved", () => {
