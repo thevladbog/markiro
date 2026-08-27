@@ -337,7 +337,7 @@ describe("inventory GISMT aggregation XML", () => {
     expect(inventoryPart?.bytes).toEqual(shiftPart?.bytes);
   });
 
-  it("renders an empty pack_content list for zero actionable boxes instead of failing", () => {
+  it("returns a zero-byte artifact for zero actionable boxes instead of an invalid empty XML root", () => {
     const emptyBoxes = {
       writeOffCandidates: [],
       verified: [],
@@ -352,25 +352,33 @@ describe("inventory GISMT aggregation XML", () => {
       partNumber: 1,
       filename: "inventory-INV-2026-0001-aggregation.xml",
       mimeType: "application/xml; charset=utf-8",
-      rowCount: 10,
+      rowCount: 0,
       codeCount: 0,
       boxCount: 0,
     });
-    expect(decoder.decode(part?.bytes)).toBe(
-      [
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<unit_pack document_id="11111111-1111-4111-8111-111111111111" VerForm="1.03" file_date_time="2026-08-27T09:10:11.000Z" action_id="30" version="1">',
-        '    <Document operation_date_time="2026-08-26T18:00:00.000Z" document_number="INV-2026-0001">',
-        "        <organisation>",
-        "            <id_info>",
-        '                <LP_info org_name="ООО «Пивоварня &amp; Ко»" LP_TIN="9705119097" />',
-        "            </id_info>",
-        "        </organisation>",
-        "    </Document>",
-        "</unit_pack>",
-        "",
-      ].join("\n"),
-    );
+    expect(part?.bytes.byteLength).toBe(0);
+  });
+
+  it("v2 returns a zero-byte artifact for zero actionable boxes instead of an invalid empty XML root", () => {
+    const emptyBoxes = {
+      writeOffCandidates: [],
+      verified: [],
+      protected: [],
+      oldBoxes: [],
+      newBoxes: [],
+    };
+
+    const [part] = generateInventoryAggregationXmlV2(emptyBoxes, metadata);
+
+    expect(part).toMatchObject({
+      partNumber: 1,
+      filename: "inventory-INV-2026-0001-aggregation.xml",
+      mimeType: "application/xml; charset=utf-8",
+      rowCount: 0,
+      codeCount: 0,
+      boxCount: 0,
+    });
+    expect(part?.bytes.byteLength).toBe(0);
   });
 });
 
@@ -417,7 +425,7 @@ describe("inventory GISMT disaggregation XML", () => {
     expect(decoder.decode(part?.bytes)).not.toContain("046800899000256049");
   });
 
-  it("renders an empty packings list for zero actionable output instead of failing", () => {
+  it("returns a zero-byte artifact for zero actionable output instead of an invalid empty XML root", () => {
     const onlyProtected = source();
     onlyProtected.newBoxes = onlyProtected.newBoxes.filter(
       (box) => box.oldSsccContext === "046800899000256049",
@@ -429,21 +437,11 @@ describe("inventory GISMT disaggregation XML", () => {
       partNumber: 1,
       filename: "inventory-INV-2026-0001-disaggregation.xml",
       mimeType: "application/xml; charset=utf-8",
-      rowCount: 6,
+      rowCount: 0,
       codeCount: 0,
       boxCount: 0,
     });
-    expect(decoder.decode(part?.bytes)).toBe(
-      [
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<disaggregation action_id="31" version="2">',
-        `    <trade_participant_inn>${metadata.organizationInn}</trade_participant_inn>`,
-        "    <packings_list>",
-        "    </packings_list>",
-        "</disaggregation>",
-        "",
-      ].join("\n"),
-    );
+    expect(part?.bytes.byteLength).toBe(0);
   });
 
   it("rejects malformed organization metadata regardless of actionable output", () => {

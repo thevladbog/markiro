@@ -455,7 +455,7 @@ describe("production inventory document generators", () => {
     ).toBeDefined();
   });
 
-  it("allows zero-byte artifacts only on the two production TXT generators", () => {
+  it("allows zero-byte artifacts on the production TXT and XML generators", () => {
     const flagged = productionInventoryDocumentGeneratorRegistry
       .listAvailable()
       .filter(
@@ -465,7 +465,18 @@ describe("production inventory document generators", () => {
       )
       .map(({ id }) => id);
 
-    expect(flagged).toEqual(["inventory_txt_write_off", "inventory_txt_final_boxes"]);
+    expect(flagged).toEqual([
+      "inventory_xml_gismt_aggregation",
+      "inventory_xml_gismt_disaggregation",
+      "inventory_txt_write_off",
+      "inventory_txt_final_boxes",
+    ]);
+    expect(
+      productionInventoryDocumentGeneratorRegistry.resolveForExecution(
+        "inventory_xml_gismt_aggregation",
+        1,
+      ).allowsZeroByteArtifact,
+    ).toBe(true);
   });
 });
 
@@ -570,6 +581,13 @@ describe("inventory document runner", () => {
     expect(fake.state.row.errorCode).toBeNull();
     expect(fake.state.artifacts).toHaveLength(INVENTORY_DOCUMENT_FORMATS.length);
     expect(fake.state.artifacts.every((artifact) => artifact.byteSize !== null)).toBe(true);
+    const xmlArtifacts = fake.state.artifacts.filter((artifact) =>
+      ["inventory_xml_gismt_aggregation", "inventory_xml_gismt_disaggregation"].includes(
+        artifact.formatId as string,
+      ),
+    );
+    expect(xmlArtifacts).toHaveLength(2);
+    expect(xmlArtifacts.every((artifact) => artifact.byteSize === 0)).toBe(true);
   });
 
   it("hashes, stores, and publishes an explicitly valid zero-byte TXT artifact", async () => {

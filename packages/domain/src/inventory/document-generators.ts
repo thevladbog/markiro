@@ -71,6 +71,10 @@ export function generateInventoryAggregationXml(
 ): InventoryDocumentGeneratedPart[] {
   validateAggregationMetadata(metadata);
   const boxes = frozenAggregationV1Boxes(source);
+  const filename = `${inventoryDocumentFilenamePrefix(metadata.inventoryNumber)}-aggregation.xml`;
+  if (boxes.length === 0) {
+    return [emptyPart(filename)];
+  }
 
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -92,7 +96,7 @@ export function generateInventoryAggregationXml(
   ];
   return [
     part(
-      `${inventoryDocumentFilenamePrefix(metadata.inventoryNumber)}-aggregation.xml`,
+      filename,
       lines,
       boxes.reduce((count, box) => count + box.codes.length, 0),
       boxes.length,
@@ -106,6 +110,10 @@ export function generateInventoryAggregationXmlV2(
 ): InventoryDocumentGeneratedPart[] {
   validateAggregationMetadata(metadata);
   const boxes = selectEligibleInventoryFinalBoxes(source);
+  const filename = `${inventoryDocumentFilenamePrefix(metadata.inventoryNumber)}-aggregation.xml`;
+  if (boxes.length === 0) {
+    return [emptyPart(filename)];
+  }
 
   try {
     const rendered = renderGismtAggregationXml({
@@ -118,7 +126,7 @@ export function generateInventoryAggregationXmlV2(
     return [
       {
         partNumber: 1,
-        filename: `${inventoryDocumentFilenamePrefix(metadata.inventoryNumber)}-aggregation.xml`,
+        filename,
         mimeType: XML_MIME_TYPE,
         bytes: rendered.bytes,
         rowCount: rendered.physicalLineCount,
@@ -158,6 +166,10 @@ export function generateInventoryDisaggregationXml(
     .filter((sscc) => !protectedParents.has(sscc))
     .sort(compareText)
     .map(validateSscc);
+  const filename = `${inventoryDocumentFilenamePrefix(metadata.inventoryNumber)}-disaggregation.xml`;
+  if (boxes.length === 0) {
+    return [emptyPart(filename)];
+  }
 
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -172,14 +184,7 @@ export function generateInventoryDisaggregationXml(
     "    </packings_list>",
     "</disaggregation>",
   ];
-  return [
-    part(
-      `${inventoryDocumentFilenamePrefix(metadata.inventoryNumber)}-disaggregation.xml`,
-      lines,
-      0,
-      boxes.length,
-    ),
-  ];
+  return [part(filename, lines, 0, boxes.length)];
 }
 
 function frozenAggregationV1Boxes(source: InventoryDocumentGenerationSource): {
@@ -226,6 +231,25 @@ function part(
     rowCount: lines.length,
     codeCount,
     boxCount,
+  };
+}
+
+/**
+ * A valid "empty" XML document does not exist for these ЧЗ schemas (both
+ * `pack_content` and `packing` are `minOccurs="1"`), so zero actionable
+ * boxes render a genuine zero-byte artifact instead of a schema-invalid
+ * skeleton root element — matching the precedent set by the zero-byte TXT
+ * formats.
+ */
+function emptyPart(filename: string): InventoryDocumentGeneratedPart {
+  return {
+    partNumber: 1,
+    filename,
+    mimeType: XML_MIME_TYPE,
+    bytes: new Uint8Array(0),
+    rowCount: 0,
+    codeCount: 0,
+    boxCount: 0,
   };
 }
 
