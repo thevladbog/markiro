@@ -265,7 +265,7 @@ function ExportsStep({
                   ariaLabel={t("pages.inventory.exports.fileLabel", { status })}
                   accept=".csv,.zip,.xlsx"
                   disabled={upload.isPending}
-                  busy={upload.isPending}
+                  busy={upload.isPending && upload.variables?.status === status}
                   onFile={(file) => upload.mutate({ inventoryId: inventory.id, status, file })}
                 />
               ) : null}

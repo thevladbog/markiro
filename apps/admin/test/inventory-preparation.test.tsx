@@ -385,7 +385,7 @@ it("keeps six independent slots, zero-row success, replacement history, and exac
   const file = new File(["replacement"], "introduced-replacement.zip", {
     type: "application/zip",
   });
-  expect(screen.getByRole("button", { name: "Файл INTRODUCED" })).toBeDefined();
+  expect(screen.getByRole("button", { name: "Выбрать файл INTRODUCED" })).toBeDefined();
   await user.upload(fileInput("INTRODUCED"), file);
   await waitFor(() =>
     expect(posts.some(({ url }) => url.endsWith("/imports/INTRODUCED"))).toBe(true),
@@ -436,7 +436,7 @@ it("refreshes persisted failed upload attempts and diagnostics after a 422 respo
   });
 
   expect(await screen.findByRole("heading", { name: "Выписки по статусам кодов" })).toBeDefined();
-  expect(screen.getByRole("button", { name: "Файл WRITTEN_OFF" })).toBeDefined();
+  expect(screen.getByRole("button", { name: "Выбрать файл WRITTEN_OFF" })).toBeDefined();
   await user.upload(
     fileInput("WRITTEN_OFF"),
     new File(["invalid"], "written-off-persisted-failure.zip", { type: "application/zip" }),
@@ -629,7 +629,7 @@ it("recovers the active snapshot after reload and blocks start until warehouse c
   ).toBe("false");
   expect(
     screen.queryAllByLabelText(
-      /^Файл (?:EMITTED|INTRODUCED|APPLIED|RETIRED|WRITTEN_OFF|DISAGGREGATION)$/,
+      /^Выбрать файл (?:EMITTED|INTRODUCED|APPLIED|RETIRED|WRITTEN_OFF|DISAGGREGATION)$/,
     ),
   ).toHaveLength(0);
   expect(screen.getAllByRole("radio").every((control) => control.hasAttribute("disabled"))).toBe(

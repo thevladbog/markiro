@@ -254,6 +254,7 @@
 }
 
 .mk-inventory-terminal-line > .mk-chip {
+  flex-direction: row;
   flex-shrink: 0;
   white-space: nowrap;
 }

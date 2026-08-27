@@ -31,6 +31,7 @@ export function FilePickerButton({
         type="file"
         accept={accept}
         tabIndex={-1}
+        aria-hidden="true"
         onChange={(event) => {
           const file = event.currentTarget.files?.[0];
           if (file) onFile(file);

@@ -13,7 +13,7 @@ describe("inventory.css contracts", () => {
 
   it("keeps the terminal-line chip on one line", () => {
     expect(css).toMatch(
-      /\.mk-inventory-terminal-line > \.mk-chip\s*\{[^}]*flex-shrink:\s*0;[^}]*white-space:\s*nowrap;/s,
+      /\.mk-inventory-terminal-line > \.mk-chip\s*\{[^}]*flex-direction:\s*row;[^}]*flex-shrink:\s*0;[^}]*white-space:\s*nowrap;/s,
     );
   });
 

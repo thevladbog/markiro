@@ -360,7 +360,7 @@
         "missing": "Нет файла",
         "chooseFile": "Выбрать файл",
         "uploading": "Загрузка…",
-        "fileLabel": "Файл {{status}}",
+        "fileLabel": "Выбрать файл {{status}}",
         "selectFile": "Выбор загрузки {{status}}",
         "noAttempts": "Загрузок ещё нет",
         "useFile": "Использовать {{file}}",
