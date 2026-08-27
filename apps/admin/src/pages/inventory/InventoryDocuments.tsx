@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -43,6 +44,13 @@ function statusTone(status: InventoryDocumentRun["status"]): "neutral" | "info" 
     case "failed":
       return "error";
   }
+}
+
+function runFailureMessage(code: string | null, t: TFunction): string {
+  if (code === "VERIFIED_PRODUCTION_DATE_MISSING") {
+    return t("pages.inventory.documents.errors.verifiedProductionDateMissing");
+  }
+  return t("pages.inventory.documents.failed", { code: code ?? "UNKNOWN" });
 }
 
 export function InventoryDocuments({
@@ -320,9 +328,7 @@ function DocumentRun({
       ) : null}
       {item.status === "failed" ? (
         <div className="mk-inventory-document-run__failure">
-          <Alert tone="error">
-            {t("pages.inventory.documents.failed", { code: item.errorCode ?? "UNKNOWN" })}
-          </Alert>
+          <Alert tone="error">{runFailureMessage(item.errorCode, t)}</Alert>
           {canRetry ? (
             <Button
               type="button"
