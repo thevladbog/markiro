@@ -565,7 +565,7 @@ export function TaskSelection({
             <article className="inventory-task-card" key={task.inventoryId}>
               <div>
                 <strong>{task.inventoryNumber}</strong>
-                <span>{task.productName}</span>
+                <span>{task.productPrintName ?? task.productName}</span>
                 <small>
                   {t(task.mode === "repack" ? "inventory.modeRepack" : "inventory.modeCheck")}
                 </small>

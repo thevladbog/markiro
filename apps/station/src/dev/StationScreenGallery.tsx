@@ -286,6 +286,7 @@ const GALLERY_INVENTORY_TASK = {
   inventoryId: "11111111-1111-4111-8111-111111111111",
   inventoryNumber: "INV-00047",
   productName: "Вода питьевая 0,5 л / Drinking water 0.5 L",
+  productPrintName: "Вода 0,5 л",
   mode: "check" as const,
   lineId: "22222222-2222-4222-8222-222222222222",
   lineName: "Линия розлива 2 / Filling line 2",
@@ -302,7 +303,6 @@ const GALLERY_CHECK_MANIFEST: StationInventoryBundleManifest & { mode: "check" }
   contentDigest: "b".repeat(64),
   codeCount: 124,
   productId: "55555555-5555-4555-8555-555555555555",
-  productPrintName: null,
   egaisCode: null,
   shelfLifeDays: null,
   gtin14: "04600000000015",
@@ -318,7 +318,6 @@ const GALLERY_REPACK_MANIFEST: StationInventoryBundleManifest & { mode: "repack"
   ...GALLERY_CHECK_MANIFEST,
   inventoryNumber: "INV-R-00012",
   mode: "repack",
-  productPrintName: GALLERY_INVENTORY_TASK.productName,
   boxLabelTemplate: {
     id: "66666666-6666-4666-8666-666666666666",
     name: "Gallery box label",
@@ -1182,7 +1181,19 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
       header={<div className="shift-selection__message" aria-hidden="true" />}
       actions={<GalleryFooter locale={locale} primary={ru ? "Новая смена" : "New shift"} />}
     >
-      <div className="shift-selection__content">
+      <div className="shift-selection__content shift-selection__content--categorized">
+        <div
+          className="floor-task-categories"
+          role="tablist"
+          aria-label={ru ? "Категории заданий" : "Task categories"}
+        >
+          <Button size="floor" variant="primary" role="tab" aria-selected>
+            {ru ? `Производственные смены ${shifts.length}` : `Production shifts ${shifts.length}`}
+          </Button>
+          <Button size="floor" variant="secondary" role="tab" aria-selected={false}>
+            {ru ? "Складские операции 1" : "Warehouse operations 1"}
+          </Button>
+        </div>
         <div className="shift-selection__slot">
           <div className="shift-selection__grid">
             {shifts.map((shift, index) => (

@@ -240,7 +240,10 @@
         "find": "Check box",
         "candidate": "Reprint this SSCC",
         "missing": "No printed box with this SSCC was found on this terminal.",
-        "action": "Reprint label"
+        "action": "Reprint label",
+        "keypad": "SSCC entry keypad",
+        "keypadBackspace": "Backspace",
+        "keypadClear": "Clear"
       },
       "position": "Position {{position}}: {{status}}",
       "occupied": "occupied",

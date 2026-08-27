@@ -346,11 +346,22 @@ body,
   }
 }
 
-#root .mk-alert > span,
-#root .mk-alert > div > span,
+#root .mk-alert > span:not(.mk-badge),
+#root .mk-alert > div > span:not(.mk-badge),
 #root .mk-alert > div > div {
   font-size: 18px !important;
   line-height: 26px !important;
+}
+
+/* Floor-size the alert badge separately: the generic 18px bump above made the
+   mono space inside two-word badges read as a double space. */
+#root .mk-alert .mk-badge {
+  height: auto !important;
+  padding: 2px 8px !important;
+  font-size: 14px !important;
+  line-height: 20px !important;
+  /* IBM Plex Mono's space is a full cell; pull word gaps back to sans-like width. */
+  word-spacing: -0.35ch;
 }
 
 .station-screen-slot {
@@ -1081,17 +1092,18 @@ body,
 }
 
 .inventory-task-selection__body {
-  display: grid;
+  display: flex;
   min-width: 0;
   min-height: 64px;
   overflow: hidden;
   gap: var(--sp-2);
-  grid-template-rows: minmax(0, 1fr) auto;
+  flex-direction: column;
   align-items: stretch;
 }
 
 .inventory-task-selection__body > p {
   display: grid;
+  flex: 1;
   color: var(--fg-3);
   font: var(--floor-body);
   place-items: center start;
@@ -1152,6 +1164,7 @@ body,
   display: grid;
   min-width: 0;
   min-height: 64px;
+  margin-top: auto;
   gap: var(--sp-2);
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
@@ -1552,32 +1565,38 @@ body,
 }
 
 .repack-prompt {
-  display: grid;
+  display: flex;
   min-width: 0;
-  min-height: 0;
-  gap: var(--sp-1);
+  min-height: 64px;
+  padding: var(--sp-2) var(--sp-3);
+  gap: var(--sp-2);
   border: 1px solid var(--info-border);
   border-radius: var(--r-2);
   background: var(--info-bg);
-  align-content: center;
-  justify-items: center;
-  text-align: center;
+  align-items: center;
+  text-align: left;
 }
 
 .repack-prompt > span {
-  font: var(--floor-title);
+  font: var(--floor-body-strong);
 }
 
 .repack-prompt h2,
 .repack-prompt p {
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .repack-prompt h2 {
-  font: var(--floor-title);
+  min-width: 0;
+  font: var(--floor-body-strong);
 }
 
 .repack-prompt p {
+  min-width: 0;
+  margin-left: auto;
   color: var(--fg-2);
   font: var(--floor-body-strong);
 }
@@ -1592,36 +1611,48 @@ body,
   background: var(--err-bg);
 }
 
+/* The box-fill visualization is the hero of the repack screen: the operator's
+   main question is "how full is the box", so the counter and cells take the
+   flexible middle row while the scan prompt collapses to a status strip. */
 .repack-capacity {
   display: grid;
-  gap: var(--sp-1);
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-2);
+  gap: var(--sp-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-raised);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .repack-capacity > strong {
-  min-width: 72px;
   color: var(--ok-fg);
   font: var(--floor-counter-sm);
+  font-size: clamp(40px, 8vh, 72px);
+  line-height: 1.1;
+  text-align: center;
 }
 
 .repack-capacity ol {
   display: grid;
   min-width: 0;
+  min-height: 0;
   margin: 0;
   padding: 0;
-  gap: 6px;
+  gap: var(--sp-1);
   list-style: none;
   grid-template-columns: repeat(10, minmax(28px, 1fr));
+  grid-auto-rows: minmax(48px, 1fr);
 }
 
 .repack-capacity li {
   display: grid;
-  min-height: 36px;
+  min-height: 48px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-1);
   color: var(--fg-2);
-  font: 700 13px/18px var(--font-ui);
+  font: 700 18px/24px var(--font-ui);
   place-items: center;
 }
 
@@ -1669,6 +1700,11 @@ body,
   background: var(--surface-card);
   color: var(--fg-1);
   font: 700 18px/24px var(--font-mono);
+}
+
+.repack-reprint__keypad {
+  display: grid;
+  justify-content: start;
 }
 
 .repack-reprint__candidate {
@@ -2058,11 +2094,24 @@ body,
 .shift-card__product {
   display: -webkit-box;
   align-self: start;
+  /* The row is minmax(0, 1fr): without this cap a long clamped title still
+     overflows the track and overlaps the dates/mode rows below. */
+  max-height: 100%;
   overflow: hidden;
   font: var(--floor-lg);
   letter-spacing: -0.015em;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 6;
+}
+
+/* Short kiosk viewports (1366×768 and 1280×800): the compact overrides below
+   only trigger on narrow widths, so tighten the title here by height instead —
+   otherwise the clamped 6-line title overflows its row or clips mid-line. */
+@media (max-height: 820px) {
+  .shift-card__product {
+    font: 600 20px/24px var(--font-ui);
+    -webkit-line-clamp: 4;
+  }
 }
 
 .shift-card__number {

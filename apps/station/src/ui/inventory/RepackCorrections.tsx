@@ -1,4 +1,4 @@
-import { Button } from "@markiro/ui";
+import { Button, PinPad } from "@markiro/ui";
 
 export interface RepackCorrectionsProps {
   itemCount: number;
@@ -27,6 +27,9 @@ export interface RepackCorrectionsProps {
     reprint: string;
     quantity: string;
     productionDate: string;
+    keypad: string;
+    keypadBackspace: string;
+    keypadClear: string;
   };
 }
 
@@ -87,6 +90,18 @@ export function RepackCorrections({
           >
             {labels.findReprint}
           </Button>
+        </div>
+        <div className="repack-reprint__keypad">
+          <PinPad
+            value={reprintSscc}
+            onChange={(next) => onReprintSsccChange(next.replace(/[^0-9]/g, "").slice(0, 18))}
+            maxLength={18}
+            size="floor"
+            disabled={busy}
+            ariaLabel={labels.keypad}
+            backspaceLabel={labels.keypadBackspace}
+            clearLabel={labels.keypadClear}
+          />
         </div>
         {reprintError ? <p role="alert">{labels.reprintMissing}</p> : null}
         {reprintCandidate ? (

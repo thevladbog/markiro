@@ -206,6 +206,7 @@ export class StationInventoryAccessService {
       inventoryId: manifest.inventoryId,
       inventoryNumber: manifest.inventoryNumber,
       productName: manifest.productName,
+      productPrintName: manifest.productPrintName,
       mode: manifest.mode,
       lineId: manifest.lineId,
       lineName: manifest.lineName,

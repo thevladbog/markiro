@@ -53,6 +53,7 @@ const task = {
   inventoryId,
   inventoryNumber: "INV-00042",
   productName: "Вода питьевая 0,5 л",
+  productPrintName: null,
   mode: "check" as const,
   lineId,
   lineName: "Розлив №2",

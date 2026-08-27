@@ -12,6 +12,7 @@ import {
   type RecentInventoryOperation,
   type RecordInventoryScanResult,
 } from "../lib/inventory-journal.js";
+import { formatCivilDate } from "../lib/civil-date-format.js";
 import { loadInventoryProductionDate, setInventoryProductionDate } from "../lib/inventory-date.js";
 import {
   attemptInventoryBoxPrint,
@@ -360,9 +361,7 @@ function CheckInventoryWorkScreen({
 
   const locale = i18n.language === "ru" ? "ru-RU" : "en-US";
   const formattedDate = productionDate
-    ? new Intl.DateTimeFormat(locale, { timeZone: "UTC" }).format(
-        new Date(`${productionDate}T00:00:00.000Z`),
-      )
+    ? formatCivilDate(productionDate, locale)
     : t("inventory.work.loadingDate");
 
   const leave = async () => {
@@ -407,7 +406,7 @@ function CheckInventoryWorkScreen({
       header={
         <div className="inventory-work-heading">
           <span>{inventory.inventoryNumber}</span>
-          <strong>{inventory.productName}</strong>
+          <strong>{inventory.productPrintName ?? inventory.productName}</strong>
           <span>{t("inventory.modeCheck")}</span>
         </div>
       }
@@ -1289,9 +1288,7 @@ function RepackInventoryWorkScreen({
 
   const locale = i18n.language === "ru" ? "ru-RU" : "en-US";
   const formattedDate = productionDate
-    ? new Intl.DateTimeFormat(locale, { timeZone: "UTC" }).format(
-        new Date(`${productionDate}T00:00:00Z`),
-      )
+    ? formatCivilDate(productionDate, locale)
     : t("inventory.work.loadingDate");
   const durableReprintDisplay: InventoryPrintDisplay | null = unresolvedReprint
     ? {
@@ -1325,7 +1322,7 @@ function RepackInventoryWorkScreen({
       header={
         <div className="inventory-work-heading">
           <span>{inventory.inventoryNumber}</span>
-          <strong>{inventory.productName}</strong>
+          <strong>{inventory.productPrintName ?? inventory.productName}</strong>
           <span>{t("inventory.modeRepack")}</span>
         </div>
       }
@@ -1375,7 +1372,10 @@ function RepackInventoryWorkScreen({
           {printDisplay ? (
             <InventoryBoxPrintRecovery
               state={printDisplay.state}
-              facts={printDisplay}
+              facts={{
+                ...printDisplay,
+                productionDate: formatCivilDate(printDisplay.productionDate, locale),
+              }}
               errorCode={printDisplay.errorCode}
               busy={printBusy}
               onRetry={() => void retryPrint(printDisplay)}
@@ -1422,6 +1422,7 @@ function RepackInventoryWorkScreen({
                     position,
                     status: filled ? t("inventory.repack.occupied") : t("inventory.repack.free"),
                   }),
+                formatDate: (value) => formatCivilDate(value, locale),
               }}
             />
           )}
@@ -1479,7 +1480,14 @@ function RepackInventoryWorkScreen({
             setReprintError(false);
           }}
           onFindReprint={() => void findReprint()}
-          reprintCandidate={reprintCandidate}
+          reprintCandidate={
+            reprintCandidate
+              ? {
+                  ...reprintCandidate,
+                  productionDate: formatCivilDate(reprintCandidate.productionDate, locale),
+                }
+              : null
+          }
           reprintError={reprintError}
           onReprint={() => void reprint()}
           labels={{
@@ -1495,6 +1503,9 @@ function RepackInventoryWorkScreen({
             reprint: t("inventory.repack.reprint.action"),
             quantity: t("inventory.repack.print.quantity"),
             productionDate: t("inventory.work.productionDate"),
+            keypad: t("inventory.repack.reprint.keypad"),
+            keypadBackspace: t("inventory.repack.reprint.keypadBackspace"),
+            keypadClear: t("inventory.repack.reprint.keypadClear"),
           }}
         />
       </FullScreenDialog>
