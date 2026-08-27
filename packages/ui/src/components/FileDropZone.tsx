@@ -20,6 +20,13 @@ export interface FileDropZoneProps {
   busy?: boolean;
   busyLabel?: string;
   onFile: (file: File) => void;
+  /**
+   * Вызывается для файла, не прошедшего `accept` (из диалога «все файлы» или
+   * дропом). Без него отказ молчалив, как у нативного `accept`; страницы с
+   * собственной валидацией передают сюда свой обработчик, чтобы показать
+   * своё сообщение об ошибке.
+   */
+  onRejected?: (file: File) => void;
   /** Уникальный доступный ярлык — нужен там, где видимый текст зоны неоднозначен (несколько зон на странице). */
   ariaLabel?: string;
   /** Низкая версия для плотных мест: паддинг меньше, текст в одну строку, без hint. */
@@ -68,6 +75,7 @@ export function FileDropZone({
   busy = false,
   busyLabel,
   onFile,
+  onRejected,
   ariaLabel,
   compact = false,
   className,
@@ -108,12 +116,14 @@ export function FileDropZone({
     setDragOver(false);
     if (isDisabled) return;
     const file = event.dataTransfer.files?.[0];
-    if (file && fileMatchesAccept(file, accept)) onFile(file);
+    if (file) (fileMatchesAccept(file, accept) ? onFile : onRejected)?.(file);
   };
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0];
-    if (file) onFile(file);
+    // The native dialog filters by `accept`, but "All files" bypasses it —
+    // apply the same guard as the drop path.
+    if (file) (fileMatchesAccept(file, accept) ? onFile : onRejected)?.(file);
     // Reset so picking the same file again still fires a change event.
     event.currentTarget.value = "";
   };
@@ -144,9 +154,9 @@ export function FileDropZone({
         justifyContent: "center",
         gap: compact ? 8 : 6,
         padding: compact ? "10px 14px" : "20px",
-        border: "1px dashed var(--line-strong)",
+        // border/background live in components.css (.mk-file-drop): inline
+        // declarations would override the [data-dragover] highlight.
         borderRadius: "var(--r-2)",
-        background: "var(--surface-panel)",
         textAlign: "center",
         cursor: isDisabled ? "not-allowed" : "pointer",
         opacity: isDisabled ? 0.6 : 1,

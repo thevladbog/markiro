@@ -266,6 +266,8 @@ git commit -m "fix(admin): unify inventory detail and live page titles"
 
 ### Task 4: Стилизованный выбор файла вместо нативного «Choose File»
 
+> **Итог реализации (пост-фактум):** по фидбеку пользователя `FilePickerButton` из этой задачи был заменён на общий drag-and-drop компонент `FileDropZone` из `packages/ui/src/components/FileDropZone.tsx` (testid `file-drop-input`), применённый во всех местах загрузки админки. Детали ниже описывают промежуточную реализацию и сохранены как история.
+
 Скриншот `03-detail-draft`: шесть нативных `<input type="file">` с английским «Choose File / No file chosen». Заменить на кнопку в стиле дизайн-системы, скрыв нативный контрол.
 
 **Files:**

@@ -38,6 +38,34 @@ describe("FileDropZone", () => {
     expect(input.value).toBe("");
   });
 
+  it("ignores a picked file that does not match accept", () => {
+    const onFile = vi.fn();
+    render(<FileDropZone label="Перетащите файл или нажмите" accept=".csv" onFile={onFile} />);
+    const input = screen.getByTestId("file-drop-input") as HTMLInputElement;
+    const file = new File(["a"], "malware.exe", { type: "application/octet-stream" });
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(onFile).not.toHaveBeenCalled();
+    expect(input.value).toBe("");
+  });
+
+  it("hands a non-matching file to onRejected instead of onFile", () => {
+    const onFile = vi.fn();
+    const onRejected = vi.fn();
+    render(
+      <FileDropZone
+        label="Перетащите файл или нажмите"
+        accept=".csv"
+        onFile={onFile}
+        onRejected={onRejected}
+      />,
+    );
+    const file = new File(["a"], "photo.png", { type: "image/png" });
+    fireEvent.change(screen.getByTestId("file-drop-input"), { target: { files: [file] } });
+    fireEvent.drop(screen.getByRole("button"), { dataTransfer: { files: [file] } });
+    expect(onFile).not.toHaveBeenCalled();
+    expect(onRejected).toHaveBeenCalledTimes(2);
+  });
+
   it("forwards a dropped file", () => {
     const onFile = vi.fn();
     render(<FileDropZone label="Перетащите файл или нажмите" accept=".csv" onFile={onFile} />);

@@ -349,6 +349,8 @@
 }
 
 .mk-file-drop {
+  border: 1px dashed var(--line-strong);
+  background: var(--surface-panel);
   transition:
     border-color 120ms ease,
     background-color 120ms ease;

@@ -422,6 +422,9 @@ function OrganizationLogoCard({ logoUrl }: { logoUrl: string | null }) {
           ariaLabel={t("pages.settings.logo.uploadLabel")}
           disabled={upload.isPending || remove.isPending}
           onFile={(file) => void uploadFile(file)}
+          // Страница валидирует тип сама (ALLOWED_LOGO_TYPES) и показывает
+          // собственное сообщение — отказ зоны не должен быть молчаливым.
+          onRejected={(file) => void uploadFile(file)}
         />
         {previewUrl ? (
           <Button
