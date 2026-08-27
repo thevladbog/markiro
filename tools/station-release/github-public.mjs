@@ -1,4 +1,4 @@
-import { lstat, mkdir, open, rm } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
@@ -13,6 +13,7 @@ const MAX_SIGNATURE_BYTES = 64 * 1024;
 const MAX_TEXT_BYTES = 256 * 1024;
 const MAX_REDIRECT_URL_BYTES = 16 * 1024;
 const PUBLIC_READ_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
+const CHANNEL_MATCH_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 16_000, 30_000, 60_000, 60_000];
 
 function invalid() {
   throw new Error("invalid station GitHub public read");
@@ -212,6 +213,19 @@ export function createGithubPublicReader({ fetchImpl = fetch, waitImpl = wait } 
     }
   }
 
+  async function readChannelMatching(channel, expected) {
+    ensureChannel(channel);
+    if (!(expected instanceof Uint8Array) || expected.byteLength === 0) invalid();
+    if (expected.byteLength > MAX_TEXT_BYTES) invalid();
+    const expectedBytes = Buffer.from(expected);
+    for (let attempt = 0; ; attempt += 1) {
+      const actual = await read(channelManifest(channel));
+      if (actual.equals(expectedBytes)) return actual;
+      if (attempt === CHANNEL_MATCH_RETRY_DELAYS_MS.length) throw publicFailure();
+      await waitImpl(CHANNEL_MATCH_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+
   return Object.freeze({
     async readReleaseAsset({ channel, version, assetName } = {}) {
       return read(releaseAsset(channel, version, assetName));
@@ -219,6 +233,10 @@ export function createGithubPublicReader({ fetchImpl = fetch, waitImpl = wait } 
 
     async readChannelManifest({ channel } = {}) {
       return read(channelManifest(channel));
+    },
+
+    async readChannelManifestMatching({ channel, expected } = {}) {
+      return readChannelMatching(channel, expected);
     },
   });
 }
@@ -279,6 +297,44 @@ export async function downloadGithubChannelManifest({ channel, outputPath, reade
   await writeExclusive(outputPath, await reader.readChannelManifest({ channel }));
 }
 
+export async function downloadGithubChannelManifestMatching({
+  channel,
+  expectedPath,
+  outputPath,
+  reader,
+} = {}) {
+  if (
+    !reader ||
+    typeof reader.readChannelManifestMatching !== "function" ||
+    !isCanonicalAbsolutePath(expectedPath) ||
+    !isCanonicalAbsolutePath(outputPath)
+  ) {
+    invalid();
+  }
+  let expected;
+  try {
+    const [expectedInfo, parent] = await Promise.all([
+      lstat(expectedPath),
+      lstat(dirname(outputPath)),
+    ]);
+    if (
+      !expectedInfo.isFile() ||
+      expectedInfo.isSymbolicLink() ||
+      expectedInfo.size <= 0 ||
+      expectedInfo.size > MAX_TEXT_BYTES ||
+      !parent.isDirectory() ||
+      parent.isSymbolicLink()
+    ) {
+      invalid();
+    }
+    expected = await readFile(expectedPath);
+  } catch (error) {
+    if (error?.message === "invalid station GitHub public read") throw error;
+    invalid();
+  }
+  await writeExclusive(outputPath, await reader.readChannelManifestMatching({ channel, expected }));
+}
+
 async function main() {
   const [, , command, ...args] = process.argv;
   const reader = createGithubPublicReader();
@@ -292,6 +348,17 @@ async function main() {
     const [channel, outputPath, ...extra] = args;
     if (!channel || !outputPath || extra.length > 0) invalid();
     await downloadGithubChannelManifest({ channel, outputPath, reader });
+    return;
+  }
+  if (command === "download-channel-exact") {
+    const [channel, expectedPath, outputPath, ...extra] = args;
+    if (!channel || !expectedPath || !outputPath || extra.length > 0) invalid();
+    await downloadGithubChannelManifestMatching({
+      channel,
+      expectedPath,
+      outputPath,
+      reader,
+    });
     return;
   }
   invalid();

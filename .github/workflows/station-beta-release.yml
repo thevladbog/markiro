@@ -568,10 +568,9 @@ jobs:
                     ! mkdir "$RUNNER_TEMP/station-github-rollback-verify"; then
                     restoration_failed=true
                   elif ! env -u GH_TOKEN -u GITHUB_TOKEN node \
-                    tools/station-release/github-public.mjs download-channel beta \
-                    "$RUNNER_TEMP/station-github-rollback-verify/latest.json" || \
-                    ! cmp "$RUNNER_TEMP/station-github-rollback-verify/latest.json" \
-                      "$RUNNER_TEMP/station-github-channel-backup/latest.json"; then
+                    tools/station-release/github-public.mjs download-channel-exact beta \
+                    "$RUNNER_TEMP/station-github-channel-backup/latest.json" \
+                    "$RUNNER_TEMP/station-github-rollback-verify/latest.json"; then
                     restoration_failed=true
                   fi
                 fi
@@ -648,8 +647,8 @@ jobs:
           rm -rf "$RUNNER_TEMP/station-github-channel-verify"
           mkdir "$RUNNER_TEMP/station-github-channel-verify"
           env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
-            download-channel beta "$RUNNER_TEMP/station-github-channel-verify/latest.json"
-          cmp "$RUNNER_TEMP/station-github-channel-verify/latest.json" "$github_tree/latest.json"
+            download-channel-exact beta "$github_tree/latest.json" \
+            "$RUNNER_TEMP/station-github-channel-verify/latest.json"
           node tools/station-release/release-summary.mjs beta-transition \
             "$RUNNER_TEMP/station-beta-release-summary.json" github-manifest-promoted
 
