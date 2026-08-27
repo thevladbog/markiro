@@ -183,6 +183,9 @@ export function renderShiftExport(input: RenderShiftExportInput): ShiftExportPar
   }
 
   const blocks = createBlocks(descriptor, input.source);
+  if (descriptor.extension === "xml") {
+    renderXmlPart(organizationInn, blocks.map((block) => requireXmlBox(block)));
+  }
   if (blocks.reduce((total, block) => total + block.codeCount, 0) === 0) {
     throw new ShiftExportDomainError("EMPTY_SOURCE");
   }
@@ -279,7 +282,11 @@ function createBlocks(
 
     return {
       csvRows,
-      physicalLineCount: box.codes.reduce((total, code) => total + countCsvPhysicalLines(code), 0),
+      physicalLineCount: box.codes.reduce(
+        (total, code) =>
+          total + countCsvPhysicalLines(ssccOut) + countCsvPhysicalLines(code) - 1,
+        0,
+      ),
       codeCount: box.codes.length,
       boxCount: 1,
     };

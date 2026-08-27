@@ -216,6 +216,38 @@ describe("shift export splitting", () => {
     ]);
   });
 
+  it("counts escaped v1 CSV box SSCC line breaks before splitting", () => {
+    const multilineSsccBoxes: ShiftExportSource = {
+      mode: "boxes",
+      boxes: [
+        { sscc: "box\r\none", codes: ["KM-1"] },
+        { sscc: "second-box", codes: ["KM-2"] },
+      ],
+    };
+
+    expect(
+      renderParts("shift_csv_boxes", multilineSsccBoxes, 3).map((part) => ({
+        physicalLineCount: part.physicalLineCount,
+        codeCount: part.codeCount,
+        boxCount: part.boxCount,
+        body: stripBom(part.bytes),
+      })),
+    ).toEqual([
+      {
+        physicalLineCount: 3,
+        codeCount: 1,
+        boxCount: 1,
+        body: 'box_sscc;code\r\n"box\r\none";KM-1\r\n',
+      },
+      {
+        physicalLineCount: 2,
+        codeCount: 1,
+        boxCount: 1,
+        body: "box_sscc;code\r\nsecond-box;KM-2\r\n",
+      },
+    ]);
+  });
+
   it("keeps TXT boxes indivisible and starts the next box in a new part", () => {
     expect(
       renderParts("shift_txt_boxes", boxes, 5).map((part) => ({
@@ -579,6 +611,24 @@ describe("GISMT aggregation XML format", () => {
     expect(() => renderXml({ mode: "flat", codes: [km("A")] })).toThrow(
       new ShiftExportDomainError("FORMAT_SOURCE_MISMATCH"),
     );
+  });
+
+  it("validates XML boxes before empty-source and line-limit decisions", () => {
+    expect(() =>
+      renderXml({ mode: "boxes", boxes: [{ sscc: "not-an-sscc", codes: [] }] }),
+    ).toThrow(new ShiftExportDomainError("INVALID_BOX_SSCC"));
+    expect(() =>
+      renderXml(
+        { mode: "boxes", boxes: [{ sscc: "not-an-sscc", codes: [km("A")] }] },
+        10,
+      ),
+    ).toThrow(new ShiftExportDomainError("INVALID_BOX_SSCC"));
+    expect(() =>
+      renderXml(
+        { mode: "boxes", boxes: [{ sscc: "046800899000256001", codes: ["KM-1"] }] },
+        10,
+      ),
+    ).toThrow(new ShiftExportDomainError("INVALID_CIS"));
   });
 
   it.each([
