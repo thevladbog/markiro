@@ -32,6 +32,7 @@ export function InventoryPage() {
       {
         key: "number",
         title: t("pages.inventory.list.number"),
+        width: 240,
         mono: true,
         render: (row) => (
           <div className="mk-inventory-list__identity">
