@@ -147,8 +147,10 @@ The preparation, execution, reconciliation, correction, close/reopen, document-j
 tenant-admin UI infrastructure has automated coverage recorded in
 `docs/acceptance/inventory-admin.md`. One continuous DB-backed acceptance journey retains the same
 inventory through six imports, snapshot fixation, start, two Station devices, simple/repack work,
-conflict, correction, leave/close, document generation, reopen/regeneration, and completion. The
-production registry exposes exactly `inventory_xml_gismt_aggregation` v1 and
+and a cross-device duplicate. It voids and restores the accepted protected result implicated in
+that duplicate with projection-digest and append-only audit evidence, then continues through
+leave/close, document generation, reopen/regeneration, and completion. The production registry
+exposes exactly `inventory_xml_gismt_aggregation` v1 and
 `inventory_xml_gismt_disaggregation` v1. Their approved fixtures, XSD evidence, and real API-runner
 path cover frozen result loading, deterministic XML, verified artifact publication, individual and
 ZIP download/checksums, reopen invalidation, regeneration, and completion; protected

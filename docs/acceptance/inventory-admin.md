@@ -42,9 +42,11 @@ correction, both production XML revisions, and completion` proves the requested 
 continuous tenant-authorized journey over one inventory. It creates that inventory through the
 cabinet API, uploads all six status files (including five valid zero-result exports), fixes one
 snapshot, starts the inventory, joins two distinct Station devices, records protected simple work
-and eligible old-box-to-new-box repack work, observes a cross-device duplicate conflict, applies an
-admin correction, leaves from both devices, and closes normally. The same inventory then traverses
-the real production registry, result loader, and document runner for both approved XML formats.
+and eligible old-box-to-new-box repack work, and observes a cross-device duplicate conflict. The
+admin then voids the accepted protected scan implicated in that duplicate and restores it after
+review, proving both projection transitions and their audit evidence before both devices leave and
+the inventory closes normally. The same inventory then traverses the real production registry,
+result loader, and document runner for both approved XML formats.
 
 The first document run is verified artifact by artifact and again from the downloaded ZIP: every
 stored and archived byte stream is SHA-256 checked against artifact metadata, every complete
@@ -59,17 +61,17 @@ The following table identifies what the continuous scenario proves directly. The
 remain useful regression depth for branches and UI behavior, but are not used to assemble or
 substitute for continuity of the acceptance journey.
 
-| Journey stage                                                                                             | Direct continuous evidence in `inventory-documents.e2e.test.ts`                                                                   |
-| --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Create one-product repack inventory with line, inclusive dates, capacity-two product, and label template  | Real `POST /inventories`; returned draft inventory is retained for every later step                                               |
-| Upload and select all six statuses, including valid zero-row results                                      | Six real multipart import requests; one three-row INTRODUCED file plus five exact no-results files                                |
-| Freeze counts, parents, source dates, and immutable inputs                                                | Real snapshot request; six inputs and stored counts `introduced=3`, `protected=1`, `expected=2`, `packages=2`, `loose=1` asserted |
-| Keep `MOVING_BY_UD` protected and outside expected/destructive groups                                     | Frozen code asserted as `protected=true`, `expected=false`; protected KM and parent old SSCC excluded from every generated XML    |
-| Start and expose the frozen task to an assigned line                                                      | Real start request followed by joins from two separately paired Station devices                                                   |
-| Perform simple and repack work across two devices, including a conflict                                   | Protected simple scan on device B; old-box open, eligible add, new-box close/print on A; duplicate protected scan conflicts on A  |
-| Apply a correction, leave from both devices, and close                                                    | Real reprint correction, two successful leave requests, blocker-free close                                                        |
-| Generate both production GISMT XML artifacts from eligible repack old/new data and exclude protected data | Production registry plus real result loader/runner; all stored/downloaded/archived bytes and full manifest metadata verified      |
-| Reopen, invalidate, advance revision, close, regenerate, download, acknowledge, and complete              | Both first-run artifacts return 404 after reopen; the second run receives the same full verification before completion            |
+| Journey stage                                                                                             | Direct continuous evidence in `inventory-documents.e2e.test.ts`                                                                                                                    |
+| --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create one-product repack inventory with line, inclusive dates, capacity-two product, and label template  | Real `POST /inventories`; returned draft inventory is retained for every later step                                                                                                |
+| Upload and select all six statuses, including valid zero-row results                                      | Six real multipart import requests; one three-row INTRODUCED file plus five exact no-results files                                                                                 |
+| Freeze counts, parents, source dates, and immutable inputs                                                | Real snapshot request; six inputs and stored counts `introduced=3`, `protected=1`, `expected=2`, `packages=2`, `loose=1` asserted                                                  |
+| Keep `MOVING_BY_UD` protected and outside expected/destructive groups                                     | Frozen code asserted as `protected=true`, `expected=false`; protected KM and parent old SSCC excluded from every generated XML                                                     |
+| Start and expose the frozen task to an assigned line                                                      | Real start request followed by joins from two separately paired Station devices                                                                                                    |
+| Perform simple and repack work across two devices, including a conflict                                   | Protected simple scan on device B; old-box open, eligible add, new-box close/print on A; duplicate protected scan conflicts on A                                                   |
+| Correct the accepted result implicated in the duplicate, leave from both devices, and close               | `void_scan` changes `protected → voided`; `restore_scan` changes it back; both revisions, digests, correction/progress audit rows, two leaves, and blocker-free close are asserted |
+| Generate both production GISMT XML artifacts from eligible repack old/new data and exclude protected data | Production registry plus real result loader/runner; all stored/downloaded/archived bytes and full manifest metadata verified                                                       |
+| Reopen, invalidate, advance revision, close, regenerate, download, acknowledge, and complete              | Both first-run artifacts return 404 after reopen; the second run receives the same full verification before completion                                                             |
 
 The continuous snapshot selects six independently stored imports. Its introduced rows comprise an
 eligible code in an old box, a protected `MOVING_BY_UD` code in a different old box, and an eligible

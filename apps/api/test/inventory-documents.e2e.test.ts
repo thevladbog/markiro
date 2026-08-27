@@ -687,6 +687,30 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         conflictCount: 1,
       }),
     ]);
+    const [conflictedResult] = await db
+      .select({
+        id: schema.inventoryCodeResults.id,
+        classification: schema.inventoryCodeResults.classification,
+        observedProductionDate: schema.inventoryCodeResults.observedProductionDate,
+        firstAcceptedEventId: schema.inventoryCodeResults.firstAcceptedEventId,
+        winningDeviceId: schema.inventoryCodeResults.winningDeviceId,
+        updatedAt: schema.inventoryCodeResults.updatedAt,
+      })
+      .from(schema.inventoryCodeResults)
+      .where(
+        and(
+          eq(schema.inventoryCodeResults.tenantId, tenantId),
+          eq(schema.inventoryCodeResults.inventoryId, inventoryId),
+          eq(schema.inventoryCodeResults.codeHash, kmHash(protectedCanonical)),
+        ),
+      );
+    expect(conflictedResult).toMatchObject({
+      classification: "protected",
+      observedProductionDate: "2026-08-08",
+      firstAcceptedEventId: protectedEvent.eventId,
+      winningDeviceId: deviceB.deviceId,
+    });
+    if (!conflictedResult) throw new Error("Expected duplicate-conflict code result");
 
     const closedAt = "2026-08-26T08:04:00.000Z";
     const closeBox: InventoryEvent = {
@@ -729,17 +753,179 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     };
     const printed = await sendBatch(deviceA, [printBox], 0);
 
-    const correction = await agent
+    const projectionDigest = (classification: "protected" | "voided", updatedAt: string) =>
+      createHash("sha256")
+        .update(
+          JSON.stringify({
+            kind: "code_result",
+            id: conflictedResult.id,
+            classification,
+            observedProductionDate: "2026-08-08",
+            updatedAt,
+          }),
+          "utf8",
+        )
+        .digest("hex");
+    const initialProjectionDigest = projectionDigest(
+      "protected",
+      conflictedResult.updatedAt.toISOString(),
+    );
+    const voidCorrection = await agent
       .post(`/inventories/${inventoryId}/corrections`)
       .send({
-        action: "reprint",
-        target: { repackBoxId: boxId },
-        reason: "Continuous acceptance conflict review",
+        action: "void_scan",
+        target: { eventId: protectedEvent.eventId },
+        reason: "Void accepted scan implicated in cross-device duplicate",
         expectedResultRevision: printed.body.resultRevision,
         idempotencyKey: randomUUID(),
       })
       .expect(201);
-    expect(correction.body).toMatchObject({ action: "reprint" });
+    const voidedProjectionDigest = projectionDigest(
+      "voided",
+      voidCorrection.body.createdAt as string,
+    );
+    expect(voidCorrection.body).toMatchObject({
+      action: "void_scan",
+      target: {
+        eventId: protectedEvent.eventId,
+        codeResultId: conflictedResult.id,
+        repackBoxId: null,
+      },
+      beforeProjectionDigest: initialProjectionDigest,
+      afterProjectionDigest: voidedProjectionDigest,
+      resultRevision: 3,
+    });
+    const [voidedResult] = await db
+      .select({
+        classification: schema.inventoryCodeResults.classification,
+        updatedAt: schema.inventoryCodeResults.updatedAt,
+      })
+      .from(schema.inventoryCodeResults)
+      .where(eq(schema.inventoryCodeResults.id, conflictedResult.id));
+    expect(voidedResult).toEqual({
+      classification: "voided",
+      updatedAt: new Date(voidCorrection.body.createdAt as string),
+    });
+
+    const restoreCorrection = await agent
+      .post(`/inventories/${inventoryId}/corrections`)
+      .send({
+        action: "restore_scan",
+        target: { eventId: protectedEvent.eventId },
+        reason: "Restore protected source after duplicate review",
+        expectedResultRevision: voidCorrection.body.resultRevision,
+        idempotencyKey: randomUUID(),
+      })
+      .expect(201);
+    const restoredProjectionDigest = projectionDigest(
+      "protected",
+      restoreCorrection.body.createdAt as string,
+    );
+    expect(restoreCorrection.body).toMatchObject({
+      action: "restore_scan",
+      target: {
+        eventId: protectedEvent.eventId,
+        codeResultId: conflictedResult.id,
+        repackBoxId: null,
+      },
+      beforeProjectionDigest: voidedProjectionDigest,
+      afterProjectionDigest: restoredProjectionDigest,
+      resultRevision: 4,
+    });
+    const [restoredResult] = await db
+      .select({
+        classification: schema.inventoryCodeResults.classification,
+        updatedAt: schema.inventoryCodeResults.updatedAt,
+      })
+      .from(schema.inventoryCodeResults)
+      .where(eq(schema.inventoryCodeResults.id, conflictedResult.id));
+    expect(restoredResult).toEqual({
+      classification: "protected",
+      updatedAt: new Date(restoreCorrection.body.createdAt as string),
+    });
+
+    const correctionAudits = await db
+      .select({
+        actorUserId: schema.inventoryCorrections.actorUserId,
+        action: schema.inventoryCorrections.action,
+        targetEventId: schema.inventoryCorrections.targetEventId,
+        targetCodeResultId: schema.inventoryCorrections.targetCodeResultId,
+        targetRepackBoxId: schema.inventoryCorrections.targetRepackBoxId,
+        beforeProjectionDigest: schema.inventoryCorrections.beforeProjectionDigest,
+        afterProjectionDigest: schema.inventoryCorrections.afterProjectionDigest,
+        resultRevision: schema.inventoryCorrections.resultRevision,
+      })
+      .from(schema.inventoryCorrections)
+      .where(
+        and(
+          eq(schema.inventoryCorrections.tenantId, tenantId),
+          eq(schema.inventoryCorrections.inventoryId, inventoryId),
+        ),
+      );
+    expect(
+      correctionAudits.sort((left, right) => left.resultRevision - right.resultRevision),
+    ).toEqual([
+      {
+        actorUserId: member.userId,
+        action: "void_scan",
+        targetEventId: protectedEvent.eventId,
+        targetCodeResultId: conflictedResult.id,
+        targetRepackBoxId: null,
+        beforeProjectionDigest: initialProjectionDigest,
+        afterProjectionDigest: voidedProjectionDigest,
+        resultRevision: 3,
+      },
+      {
+        actorUserId: member.userId,
+        action: "restore_scan",
+        targetEventId: protectedEvent.eventId,
+        targetCodeResultId: conflictedResult.id,
+        targetRepackBoxId: null,
+        beforeProjectionDigest: voidedProjectionDigest,
+        afterProjectionDigest: restoredProjectionDigest,
+        resultRevision: 4,
+      },
+    ]);
+    const correctionProgress = await db
+      .select({
+        resultRevision: schema.inventoryProgressChanges.resultRevision,
+        kind: schema.inventoryProgressChanges.kind,
+        codeHash: schema.inventoryProgressChanges.codeHash,
+        classification: schema.inventoryProgressChanges.classification,
+        winningEventId: schema.inventoryProgressChanges.winningEventId,
+        winningDeviceId: schema.inventoryProgressChanges.winningDeviceId,
+        changedAt: schema.inventoryProgressChanges.changedAt,
+      })
+      .from(schema.inventoryProgressChanges)
+      .where(
+        and(
+          eq(schema.inventoryProgressChanges.tenantId, tenantId),
+          eq(schema.inventoryProgressChanges.inventoryId, inventoryId),
+          eq(schema.inventoryProgressChanges.kind, "correction"),
+        ),
+      );
+    expect(
+      correctionProgress.sort((left, right) => left.resultRevision - right.resultRevision),
+    ).toEqual([
+      {
+        resultRevision: 3,
+        kind: "correction",
+        codeHash: kmHash(protectedCanonical),
+        classification: "voided",
+        winningEventId: protectedEvent.eventId,
+        winningDeviceId: deviceB.deviceId,
+        changedAt: new Date(voidCorrection.body.createdAt as string),
+      },
+      {
+        resultRevision: 4,
+        kind: "correction",
+        codeHash: kmHash(protectedCanonical),
+        classification: "protected",
+        winningEventId: protectedEvent.eventId,
+        winningDeviceId: deviceB.deviceId,
+        changedAt: new Date(restoreCorrection.body.createdAt as string),
+      },
+    ]);
 
     const leaveDevice = (device: { apiKey: string }) =>
       request(app!.getHttpServer())
@@ -753,7 +939,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     expect(closed.body).toMatchObject({
       inventoryId,
       status: "closed",
-      resultRevision: correction.body.resultRevision,
+      resultRevision: restoreCorrection.body.resultRevision,
       blockers: [],
     });
 
@@ -1278,6 +1464,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     registry = productionInventoryDocumentGeneratorRegistry;
     try {
       const owner = await runProductionJourneyToFirstClose();
+      expect(owner.resultRevision).toBe(4);
       const first = await owner.agent
         .post(`/inventories/${owner.inventoryId}/document-runs`)
         .send(productionBody())
@@ -1297,6 +1484,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         .send({})
         .expect(201);
       const regeneratedRevision = owner.resultRevision + 1;
+      expect(regeneratedRevision).toBe(5);
       expect(reopened.body).toMatchObject({
         inventoryId: owner.inventoryId,
         status: "running",
