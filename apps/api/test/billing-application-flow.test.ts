@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { createDb, schema, type Db } from "@markiro/db";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -146,6 +146,71 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     throw new Error(`Timed out waiting for ${description}`);
+  }
+
+  async function createManualServiceInvoice() {
+    const tenantId = await createOrganization(db);
+    const itemId = randomUUID();
+    const serviceVersionId = randomUUID();
+    await db.insert(schema.catalogItems).values({
+      id: itemId,
+      code: `rollout-service-${itemId}`,
+      nameRu: "Настройка",
+      nameEn: "Configuration",
+      kind: "service",
+    });
+    await db.insert(schema.catalogItemVersions).values({
+      id: serviceVersionId,
+      catalogItemId: itemId,
+      kind: "service",
+      version: 1,
+      status: "published",
+      publishedAt: new Date(),
+      nameRu: "Настройка",
+      nameEn: "Configuration",
+      unit: "service",
+      billingMode: "one_time",
+      unitPrice: "100.00",
+      vatIncluded: true,
+    });
+    const invoiceId = randomUUID();
+    const lineId = randomUUID();
+    const issuedAt = new Date();
+    await db.insert(schema.invoices).values({
+      id: invoiceId,
+      tenantId,
+      number: `INV-${randomUUID()}`,
+      status: "issued",
+      issueDate: issuedAt,
+      sellerSnapshot: { name: "Markiro" },
+      buyerSnapshot: { name: tenantId },
+      subtotal: "100.00",
+      vatTotal: "0.00",
+      total: "100.00",
+      applicationMode: "manual",
+      createdByPlatformUserId: actor.userId,
+      issuedByPlatformUserId: actor.userId,
+      issuedAt,
+    });
+    await db.insert(schema.invoiceLines).values({
+      id: lineId,
+      tenantId,
+      invoiceId,
+      position: 1,
+      kind: "service",
+      catalogVersionId: serviceVersionId,
+      catalogKind: "service",
+      nameRu: "Настройка",
+      nameEn: "Configuration",
+      quantity: 1,
+      unit: "service",
+      agreedUnitPrice: "100.00",
+      vatIncluded: true,
+      lineSubtotal: "100.00",
+      lineVat: "0.00",
+      lineTotal: "100.00",
+    });
+    return { tenantId, invoiceId, lineId };
   }
 
   it("rejects payment before an invoice is issued", async () => {
@@ -759,6 +824,130 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
         .from(schema.orderedServices)
         .where(eq(schema.orderedServices.invoiceLineId, serviceLineId)),
     ).toEqual([{ billingPaymentId: final.id, orderedAt: final.paidAt }]);
+  });
+
+  it("applies old-binary manual and imported payments through trigger provenance", async () => {
+    const manual = await createManualServiceInvoice();
+    const imported = await createManualServiceInvoice();
+    const manualPaymentId = randomUUID();
+    const importedPaymentId = randomUUID();
+    const manualPaidAt = new Date("2026-08-24T12:00:00.000Z");
+    const importedPaidAt = new Date("2026-08-23T12:00:00.000Z");
+    const importId = randomUUID();
+    const importRowId = randomUUID();
+    await db.insert(schema.paymentImports).values({
+      id: importId,
+      sourceChecksum: randomUUID().replaceAll("-", "").padEnd(64, "0"),
+      parserVersion: "old-binary-rollout-test",
+      status: "ready",
+      createdByPlatformUserId: actor.userId,
+    });
+    await db.insert(schema.paymentImportRows).values({
+      id: importRowId,
+      importId,
+      sourceRowId: "1",
+      operationDate: importedPaidAt,
+      amount: "100.00",
+      currency: "RUB",
+      bankReference: `old-import-${importRowId}`,
+    });
+
+    const oldManualTransaction = await connection.pool.connect();
+    try {
+      await oldManualTransaction.query("BEGIN");
+      await oldManualTransaction.query("SELECT id FROM invoices WHERE id = $1 FOR UPDATE", [
+        manual.invoiceId,
+      ]);
+      await oldManualTransaction.query(
+        `INSERT INTO billing_payments
+           (id, tenant_id, invoice_id, source, paid_at, amount, bank_reference,
+            platform_user_id, idempotency_key)
+         VALUES ($1, $2, $3, 'manual', $4, 100, $5, $6, $7)`,
+        [
+          manualPaymentId,
+          manual.tenantId,
+          manual.invoiceId,
+          manualPaidAt,
+          `old-manual-${manualPaymentId}`,
+          actor.userId,
+          `old-manual-${manualPaymentId}`,
+        ],
+      );
+      await oldManualTransaction.query(
+        "UPDATE invoices SET status = 'paid', paid_at = $2 WHERE id = $1",
+        [manual.invoiceId, manualPaidAt],
+      );
+      await oldManualTransaction.query("COMMIT");
+    } catch (error) {
+      await oldManualTransaction.query("ROLLBACK");
+      throw error;
+    } finally {
+      oldManualTransaction.release();
+    }
+
+    const oldImportTransaction = await connection.pool.connect();
+    try {
+      await oldImportTransaction.query("BEGIN");
+      await oldImportTransaction.query("SELECT id FROM invoices WHERE id = $1 FOR UPDATE", [
+        imported.invoiceId,
+      ]);
+      await oldImportTransaction.query(
+        `INSERT INTO billing_payments
+           (id, tenant_id, invoice_id, source, paid_at, amount, bank_reference, import_row_id,
+            platform_user_id, idempotency_key)
+         VALUES ($1, $2, $3, 'bank_import', $4, 100, $5, $6, $7, $8)`,
+        [
+          importedPaymentId,
+          imported.tenantId,
+          imported.invoiceId,
+          importedPaidAt,
+          `old-import-${importRowId}`,
+          importRowId,
+          actor.userId,
+          `bank-import:${importRowId}`,
+        ],
+      );
+      await oldImportTransaction.query(
+        "UPDATE invoices SET status = 'paid', paid_at = $2 WHERE id = $1",
+        [imported.invoiceId, importedPaidAt],
+      );
+      await oldImportTransaction.query("COMMIT");
+    } catch (error) {
+      await oldImportTransaction.query("ROLLBACK");
+      throw error;
+    } finally {
+      oldImportTransaction.release();
+    }
+
+    await application.apply(actor, manual.invoiceId, {
+      reason: "Apply old manual rollout payment",
+      lines: [{ lineId: manual.lineId }],
+    });
+    await application.apply(actor, imported.invoiceId, {
+      reason: "Apply old imported rollout payment",
+      lines: [{ lineId: imported.lineId }],
+    });
+
+    expect(
+      await db
+        .select({
+          invoiceId: schema.orderedServices.invoiceId,
+          billingPaymentId: schema.orderedServices.billingPaymentId,
+          orderedAt: schema.orderedServices.orderedAt,
+        })
+        .from(schema.orderedServices)
+        .where(inArray(schema.orderedServices.invoiceId, [manual.invoiceId, imported.invoiceId]))
+        .orderBy(schema.orderedServices.invoiceId),
+    ).toEqual(
+      [
+        { invoiceId: manual.invoiceId, billingPaymentId: manualPaymentId, orderedAt: manualPaidAt },
+        {
+          invoiceId: imported.invoiceId,
+          billingPaymentId: importedPaymentId,
+          orderedAt: importedPaidAt,
+        },
+      ].sort((left, right) => left.invoiceId.localeCompare(right.invoiceId)),
+    );
   });
 
   it("does not let cancellation overwrite a payment holding the invoice lock", async () => {

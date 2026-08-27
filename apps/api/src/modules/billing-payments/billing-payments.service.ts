@@ -175,11 +175,7 @@ export class BillingPaymentsService {
       const confirmedAfter = confirmedBefore + paymentAmount;
       const invoiceStatus = confirmedAfter === total ? "paid" : "partially_paid";
       if (invoiceStatus === "paid") {
-        await tx.insert(schema.invoicePaymentCompletions).values({
-          tenantId: invoice.tenantId,
-          invoiceId,
-          billingPaymentId: payment.id,
-        });
+        await ensurePaymentCompletion(tx, invoice.tenantId, invoiceId, payment.id);
       }
       await tx
         .update(schema.invoices)
@@ -489,11 +485,7 @@ export class BillingPaymentsService {
         const confirmedAfter = confirmedBefore + paymentAmount;
         const invoiceStatus = confirmedAfter === total ? "paid" : "partially_paid";
         if (invoiceStatus === "paid") {
-          await tx.insert(schema.invoicePaymentCompletions).values({
-            tenantId: input.tenantId,
-            invoiceId: input.invoiceId,
-            billingPaymentId: payment.id,
-          });
+          await ensurePaymentCompletion(tx, input.tenantId, input.invoiceId, payment.id);
         }
         await tx
           .update(schema.invoices)
@@ -629,6 +621,31 @@ type TenantAccount = typeof schema.tenantBankAccounts.$inferSelect;
 type PaymentMatchRow = typeof schema.paymentMatches.$inferSelect;
 type PaymentImportRow = typeof schema.paymentImportRows.$inferSelect;
 type DbTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+async function ensurePaymentCompletion(
+  tx: DbTransaction,
+  tenantId: string,
+  invoiceId: string,
+  paymentId: string,
+): Promise<void> {
+  await tx
+    .insert(schema.invoicePaymentCompletions)
+    .values({ tenantId, invoiceId, billingPaymentId: paymentId })
+    .onConflictDoNothing();
+  const [completion] = await tx
+    .select({ billingPaymentId: schema.invoicePaymentCompletions.billingPaymentId })
+    .from(schema.invoicePaymentCompletions)
+    .where(
+      and(
+        eq(schema.invoicePaymentCompletions.tenantId, tenantId),
+        eq(schema.invoicePaymentCompletions.invoiceId, invoiceId),
+      ),
+    )
+    .limit(1);
+  if (completion?.billingPaymentId !== paymentId) {
+    throw new ConflictException({ code: "invoice_payment_completion_conflict" });
+  }
+}
 
 function cents(value: string): bigint {
   const [whole = "0", fraction = "00"] = value.split(".");

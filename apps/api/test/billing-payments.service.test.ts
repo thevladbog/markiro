@@ -47,6 +47,7 @@ function makeHarness({
   const insertedPayments: Array<Record<string, unknown>> = [];
   const completionInserts: Array<Record<string, unknown>> = [];
   const invoiceUpdates: Array<Record<string, unknown>> = [];
+  let completionPaymentId: string | undefined;
   let paymentSelect = 0;
 
   const tx = {
@@ -68,6 +69,9 @@ function makeHarness({
                 ? [idempotentPayment]
                 : []
               : existingPayments;
+          }
+          if (table === schema.invoicePaymentCompletions) {
+            return completionPaymentId ? [{ billingPaymentId: completionPaymentId }] : [];
           }
           if (table === schema.invoices) return [invoice];
           if (table === schema.invoiceLines) return [line];
@@ -94,6 +98,7 @@ function makeHarness({
         }
         if (table === schema.invoicePaymentCompletions && !Array.isArray(values)) {
           completionInserts.push(values);
+          completionPaymentId = String(values.billingPaymentId);
         }
         const created =
           table === schema.billingPayments && !Array.isArray(values)
@@ -108,6 +113,7 @@ function makeHarness({
         const promise = Promise.resolve(created ? [created] : []);
         return {
           returning: vi.fn(async () => (created ? [created] : [])),
+          onConflictDoNothing: vi.fn(async () => []),
           then: promise.then.bind(promise),
         };
       }),
@@ -227,6 +233,7 @@ describe("BillingPaymentsService confirmed payment reconciliation", () => {
     const partial = paymentRow();
     const invoiceUpdates: Array<Record<string, unknown>> = [];
     const completionInserts: Array<Record<string, unknown>> = [];
+    let completionPaymentId: string | undefined;
     let paymentSelect = 0;
     const tx = {
       select: vi.fn(() => {
@@ -245,6 +252,9 @@ describe("BillingPaymentsService confirmed payment reconciliation", () => {
             if (table === schema.billingPayments) {
               paymentSelect += 1;
               return paymentSelect === 1 ? [] : [partial];
+            }
+            if (table === schema.invoicePaymentCompletions) {
+              return completionPaymentId ? [{ billingPaymentId: completionPaymentId }] : [];
             }
             return [];
           }),
@@ -271,6 +281,7 @@ describe("BillingPaymentsService confirmed payment reconciliation", () => {
         values: vi.fn((values: Record<string, unknown> | Array<Record<string, unknown>>) => {
           if (table === schema.invoicePaymentCompletions && !Array.isArray(values)) {
             completionInserts.push(values);
+            completionPaymentId = String(values.billingPaymentId);
           }
           const created =
             table === schema.billingPayments && !Array.isArray(values)
@@ -284,6 +295,7 @@ describe("BillingPaymentsService confirmed payment reconciliation", () => {
           const promise = Promise.resolve(created ? [created] : []);
           return {
             returning: vi.fn(async () => (created ? [created] : [])),
+            onConflictDoNothing: vi.fn(async () => []),
             then: promise.then.bind(promise),
           };
         }),

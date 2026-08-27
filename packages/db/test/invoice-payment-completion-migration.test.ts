@@ -1,0 +1,331 @@
+import { randomUUID } from "node:crypto";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import pg from "pg";
+import { afterAll, describe, expect, it } from "vitest";
+
+const databaseUrl = process.env.DATABASE_URL;
+const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
+
+describe.skipIf(!databaseUrl)("invoice payment completion migration", () => {
+  const maintenancePool = new pg.Pool({ connectionString: databaseUrl });
+
+  afterAll(async () => {
+    await maintenancePool.end();
+  });
+
+  it("installs the completion trigger on a fresh database", async () => {
+    await withScratchDatabase(maintenancePool, async ({ pool }) => {
+      await migrate(drizzle(pool), { migrationsFolder });
+
+      const result = await pool.query<{ trigger_name: string }>(
+        `SELECT trigger_name
+         FROM information_schema.triggers
+         WHERE event_object_schema = 'public'
+           AND event_object_table = 'billing_payments'
+           AND trigger_name = 'billing_payments_record_completion'`,
+      );
+
+      expect(result.rows).toEqual([{ trigger_name: "billing_payments_record_completion" }]);
+    });
+  }, 120_000);
+
+  it("backfills one unambiguous exact-total legacy payment", async () => {
+    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0066 }) => {
+      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0066 });
+      await seedBillingActors(pool);
+      await seedPaidInvoice(pool, {
+        invoiceId: "00000000-0000-4000-8000-000000000901",
+        number: "INV-COMPLETION-SINGLE",
+      });
+      await seedManualPayment(pool, {
+        paymentId: "00000000-0000-4000-8000-000000000902",
+        invoiceId: "00000000-0000-4000-8000-000000000901",
+        amount: 100,
+      });
+
+      await migrate(drizzle(pool), { migrationsFolder });
+
+      expect(await completionRows(pool)).toEqual([
+        {
+          invoice_id: "00000000-0000-4000-8000-000000000901",
+          billing_payment_id: "00000000-0000-4000-8000-000000000902",
+        },
+      ]);
+    });
+  }, 120_000);
+
+  it("rejects a paid invoice with no exact-total legacy payment candidate", async () => {
+    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0066 }) => {
+      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0066 });
+      await seedBillingActors(pool);
+      await seedPaidInvoice(pool, {
+        invoiceId: "00000000-0000-4000-8000-000000000911",
+        number: "INV-COMPLETION-MISSING",
+      });
+
+      await expectMigrationFailure(
+        migrate(drizzle(pool), { migrationsFolder }),
+        "paid invoice has no exact-total payment candidate",
+      );
+    });
+  }, 120_000);
+
+  it("rejects a paid invoice with multiple exact-total legacy payment candidates", async () => {
+    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0066 }) => {
+      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0066 });
+      await seedBillingActors(pool);
+      const invoiceId = "00000000-0000-4000-8000-000000000921";
+      await seedPaidInvoice(pool, { invoiceId, number: "INV-COMPLETION-AMBIGUOUS" });
+      await seedManualPayment(pool, {
+        paymentId: "00000000-0000-4000-8000-000000000922",
+        invoiceId,
+        amount: 100,
+      });
+      await seedManualPayment(pool, {
+        paymentId: "00000000-0000-4000-8000-000000000923",
+        invoiceId,
+        amount: 100,
+      });
+
+      await expectMigrationFailure(
+        migrate(drizzle(pool), { migrationsFolder }),
+        "paid invoice has multiple exact-total payment candidates",
+      );
+    });
+  }, 120_000);
+
+  it("captures old manual and imported completions after DDL even when a transaction started first", async () => {
+    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0066 }) => {
+      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0066 });
+      await seedBillingActors(pool);
+      const manualInvoiceId = "00000000-0000-4000-8000-000000000931";
+      const importedInvoiceId = "00000000-0000-4000-8000-000000000932";
+      await seedIssuedInvoice(pool, {
+        invoiceId: manualInvoiceId,
+        number: "INV-COMPLETION-ROLLOUT-MANUAL",
+      });
+      await seedIssuedInvoice(pool, {
+        invoiceId: importedInvoiceId,
+        number: "INV-COMPLETION-ROLLOUT-IMPORT",
+      });
+      await pool.query(
+        `INSERT INTO payment_imports
+           (id, source_checksum, parser_version, status, created_by_platform_user_id)
+         VALUES
+           ('00000000-0000-4000-8000-000000000933', repeat('c', 64), 'rollout-test', 'ready',
+            'billing-completion-admin')`,
+      );
+      await pool.query(
+        `INSERT INTO payment_import_rows
+           (id, import_id, source_row_id, operation_date, amount, currency, bank_reference)
+         VALUES
+           ('00000000-0000-4000-8000-000000000934',
+            '00000000-0000-4000-8000-000000000933', 'rollout-import-row',
+            '2026-08-20T12:00:00.000Z', 100, 'RUB', 'rollout-import')`,
+      );
+
+      const oldManualTransaction = await pool.connect();
+      try {
+        await oldManualTransaction.query("BEGIN");
+        await oldManualTransaction.query("SELECT now()");
+        await oldManualTransaction.query(
+          "SELECT id FROM billing_payments WHERE idempotency_key = 'rollout-manual'",
+        );
+        await oldManualTransaction.query("SELECT id FROM invoices WHERE id = $1 FOR UPDATE", [
+          manualInvoiceId,
+        ]);
+
+        await migrate(drizzle(pool), { migrationsFolder });
+
+        await oldManualTransaction.query(
+          `INSERT INTO billing_payments
+             (id, tenant_id, invoice_id, source, paid_at, amount, bank_reference,
+              platform_user_id, idempotency_key)
+           VALUES
+             ('00000000-0000-4000-8000-000000000935', 'billing-completion-tenant', $1,
+              'manual', '2026-08-21T12:00:00.000Z', 100, 'rollout-manual',
+              'billing-completion-admin', 'rollout-manual')`,
+          [manualInvoiceId],
+        );
+        await oldManualTransaction.query(
+          "UPDATE invoices SET status = 'paid', paid_at = '2026-08-21T12:00:00.000Z' WHERE id = $1",
+          [manualInvoiceId],
+        );
+        await oldManualTransaction.query("COMMIT");
+      } catch (error) {
+        await oldManualTransaction.query("ROLLBACK");
+        throw error;
+      } finally {
+        oldManualTransaction.release();
+      }
+
+      const oldImportTransaction = await pool.connect();
+      try {
+        await oldImportTransaction.query("BEGIN");
+        await oldImportTransaction.query("SELECT id FROM invoices WHERE id = $1 FOR UPDATE", [
+          importedInvoiceId,
+        ]);
+        await oldImportTransaction.query(
+          `INSERT INTO billing_payments
+             (id, tenant_id, invoice_id, source, paid_at, amount, bank_reference, import_row_id,
+              platform_user_id, idempotency_key)
+           VALUES
+             ('00000000-0000-4000-8000-000000000936', 'billing-completion-tenant', $1,
+              'bank_import', '2026-08-20T12:00:00.000Z', 100, 'rollout-import',
+              '00000000-0000-4000-8000-000000000934', 'billing-completion-admin',
+              'bank-import:00000000-0000-4000-8000-000000000934')`,
+          [importedInvoiceId],
+        );
+        await oldImportTransaction.query(
+          "UPDATE invoices SET status = 'paid', paid_at = '2026-08-20T12:00:00.000Z' WHERE id = $1",
+          [importedInvoiceId],
+        );
+        await oldImportTransaction.query("COMMIT");
+      } catch (error) {
+        await oldImportTransaction.query("ROLLBACK");
+        throw error;
+      } finally {
+        oldImportTransaction.release();
+      }
+
+      expect(await completionRows(pool)).toEqual([
+        {
+          invoice_id: manualInvoiceId,
+          billing_payment_id: "00000000-0000-4000-8000-000000000935",
+        },
+        {
+          invoice_id: importedInvoiceId,
+          billing_payment_id: "00000000-0000-4000-8000-000000000936",
+        },
+      ]);
+    });
+  }, 120_000);
+});
+
+async function withScratchDatabase(
+  maintenancePool: pg.Pool,
+  run: (context: { pool: pg.Pool; migrationsThrough0066: string }) => Promise<void>,
+): Promise<void> {
+  const databaseName = `markiro_payment_completion_${randomUUID().replaceAll("-", "_")}`;
+  const scratchUrl = new URL(databaseUrl ?? "postgres://invalid");
+  scratchUrl.pathname = `/${databaseName}`;
+  scratchUrl.search = "";
+  const pool = new pg.Pool({ connectionString: scratchUrl.toString() });
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-payment-completion-migration-"));
+  const migrationsThrough0066 = join(temporaryRoot, "migrations");
+  let created = false;
+  try {
+    await maintenancePool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
+    created = true;
+    await cp(migrationsFolder, migrationsThrough0066, { recursive: true });
+    await rm(join(migrationsThrough0066, "0067_invoice_payment_completion.sql"));
+    await rm(join(migrationsThrough0066, "meta", "0067_snapshot.json"));
+    const journalPath = join(migrationsThrough0066, "meta", "_journal.json");
+    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
+      entries: Array<{ tag: string }>;
+    };
+    journal.entries = journal.entries.filter(
+      (entry) => entry.tag !== "0067_invoice_payment_completion",
+    );
+    await writeFile(journalPath, JSON.stringify(journal));
+    await run({ pool, migrationsThrough0066 });
+  } finally {
+    await pool.end();
+    if (created) await maintenancePool.query(`DROP DATABASE ${quoteIdentifier(databaseName)}`);
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+async function seedBillingActors(pool: pg.Pool): Promise<void> {
+  await pool.query(
+    `INSERT INTO organization (id, name, slug, created_at)
+     VALUES ('billing-completion-tenant', 'Billing completion tenant', 'billing-completion', now())`,
+  );
+  await pool.query(
+    `INSERT INTO platform_users (id, name, email, role, status)
+     VALUES ('billing-completion-admin', 'Billing completion admin',
+             'billing-completion-admin@example.invalid', 'platform_admin', 'active')`,
+  );
+}
+
+async function seedPaidInvoice(
+  pool: pg.Pool,
+  input: { invoiceId: string; number: string },
+): Promise<void> {
+  await seedInvoice(pool, { ...input, status: "paid" });
+}
+
+async function seedIssuedInvoice(
+  pool: pg.Pool,
+  input: { invoiceId: string; number: string },
+): Promise<void> {
+  await seedInvoice(pool, { ...input, status: "issued" });
+}
+
+async function seedInvoice(
+  pool: pg.Pool,
+  input: { invoiceId: string; number: string; status: "issued" | "paid" },
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO invoices
+       (id, tenant_id, number, status, issue_date, seller_snapshot, buyer_snapshot, total,
+        created_by_platform_user_id, issued_by_platform_user_id, issued_at, paid_at)
+     VALUES
+       ($1, 'billing-completion-tenant', $2, $3::invoice_status, now(), '{}', '{}', 100,
+        'billing-completion-admin', 'billing-completion-admin', now(),
+        CASE WHEN $3::text = 'paid' THEN now() ELSE NULL END)`,
+    [input.invoiceId, input.number, input.status],
+  );
+}
+
+async function seedManualPayment(
+  pool: pg.Pool,
+  input: { paymentId: string; invoiceId: string; amount: number },
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO billing_payments
+       (id, tenant_id, invoice_id, source, paid_at, amount, bank_reference,
+        platform_user_id, idempotency_key)
+     VALUES
+       ($1::text::uuid, 'billing-completion-tenant', $2::text::uuid, 'manual', now(), $3,
+        $1::text, 'billing-completion-admin', $1::text)`,
+    [input.paymentId, input.invoiceId, input.amount],
+  );
+}
+
+async function completionRows(
+  pool: pg.Pool,
+): Promise<Array<{ invoice_id: string; billing_payment_id: string }>> {
+  const result = await pool.query<{ invoice_id: string; billing_payment_id: string }>(
+    `SELECT invoice_id, billing_payment_id
+     FROM invoice_payment_completions
+     ORDER BY invoice_id`,
+  );
+  return result.rows;
+}
+
+async function expectMigrationFailure(promise: Promise<void>, message: string): Promise<void> {
+  try {
+    await promise;
+  } catch (error) {
+    const messages: string[] = [];
+    let current: unknown = error;
+    while (current instanceof Error) {
+      messages.push(current.message);
+      current = current.cause;
+    }
+    expect(messages.join("\n")).toContain(message);
+    return;
+  }
+  throw new Error(`Expected migration to fail with: ${message}`);
+}
+
+function quoteIdentifier(identifier: string): string {
+  if (!/^[a-z_][a-z0-9_]*$/.test(identifier)) throw new Error("Unsafe database identifier");
+  return `"${identifier}"`;
+}
