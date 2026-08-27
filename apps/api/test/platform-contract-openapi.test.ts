@@ -11,6 +11,10 @@ import { BillingController } from "../src/modules/billing/billing.controller";
 import { BillingService } from "../src/modules/billing/billing.service";
 import { BillingPaymentsController } from "../src/modules/billing-payments/billing-payments.controller";
 import { BillingPaymentsService } from "../src/modules/billing-payments/billing-payments.service";
+import { BillingActsController } from "../src/modules/billing-acts/billing-acts.controller";
+import { BillingActsService } from "../src/modules/billing-acts/billing-acts.service";
+import { PlatformBillingRequestsController } from "../src/modules/platform-billing-requests/platform-billing-requests.controller";
+import { PlatformBillingRequestsService } from "../src/modules/platform-billing-requests/platform-billing-requests.service";
 import { PlatformDadataController } from "../src/modules/platform-dadata/platform-dadata.controller";
 import { PlatformDadataRateLimit } from "../src/modules/platform-dadata/platform-dadata-rate-limit";
 import { PlatformDadataService } from "../src/modules/platform-dadata/platform-dadata.service";
@@ -113,6 +117,8 @@ async function createPlatformDocument(): Promise<{
     BillingDocumentsService,
     BillingApplicationService,
     BillingPaymentsService,
+    BillingActsService,
+    PlatformBillingRequestsService,
     BillingAccountsService,
     PlatformDadataService,
     PlatformDadataRateLimit,
@@ -131,6 +137,8 @@ async function createPlatformDocument(): Promise<{
       PlatformOffersController,
       BillingController,
       BillingPaymentsController,
+      BillingActsController,
+      PlatformBillingRequestsController,
       BillingAccountsController,
       PlatformDadataController,
       PlatformOperationsController,
@@ -157,8 +165,8 @@ async function createPlatformDocument(): Promise<{
 }
 
 describe("current SaaS platform OpenAPI contracts", () => {
-  it("converts all 85 current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(85);
+  it("converts all 103 current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(103);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }
@@ -192,9 +200,27 @@ describe("current SaaS platform OpenAPI contracts", () => {
         expectOpenApi30Compatible(successSchema);
 
         if (contract.body) {
-          const bodySchema = inlineJsonSchema(documented.requestBody);
-          expect(bodySchema).toEqual(jsonSchema(contract.body));
-          expectOpenApi30Compatible(bodySchema);
+          if (contract.multipart) {
+            expect(inlineJsonSchema(documented.requestBody)).toBeUndefined();
+            const multipartSchema = inlineContentSchema(
+              documented.requestBody,
+              "multipart/form-data",
+            );
+            expect(multipartSchema).toEqual({
+              type: "object",
+              additionalProperties: false,
+              required: ["idempotencyKey", "file"],
+              properties: {
+                idempotencyKey: { type: "string", format: "uuid" },
+                file: { type: "string", format: "binary" },
+              },
+            });
+            expectOpenApi30Compatible(multipartSchema);
+          } else {
+            const bodySchema = inlineJsonSchema(documented.requestBody);
+            expect(bodySchema).toEqual(jsonSchema(contract.body));
+            expectOpenApi30Compatible(bodySchema);
+          }
         } else {
           expect(documented.requestBody).toBeUndefined();
         }
@@ -218,3 +244,8 @@ describe("current SaaS platform OpenAPI contracts", () => {
     }
   });
 });
+
+function inlineContentSchema(response: unknown, contentType: string): unknown {
+  if (!response || typeof response !== "object" || !("content" in response)) return undefined;
+  return (response.content as Record<string, { schema?: unknown }>)?.[contentType]?.schema;
+}

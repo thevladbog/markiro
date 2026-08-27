@@ -300,6 +300,55 @@ export const commercialOfferDecisionIdempotency = pgTable(
   ],
 );
 
+export const platformBillingMutationIdempotency = pgTable(
+  "platform_billing_mutation_idempotency",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: text("tenant_id").notNull(),
+    idempotencyKey: uuid("idempotency_key").notNull(),
+    operation: text("operation").notNull(),
+    targetId: text("target_id").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    state: text("state").notNull().default("pending"),
+    resultId: uuid("result_id"),
+    result: jsonb("result"),
+    actorPlatformUserId: text("actor_platform_user_id")
+      .notNull()
+      .references(() => platformUsers.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("platform_billing_mutation_idempotency_tenant_key_uq").on(
+      table.tenantId,
+      table.idempotencyKey,
+    ),
+    index("platform_billing_mutation_idempotency_tenant_target_idx").on(
+      table.tenantId,
+      table.operation,
+      table.targetId,
+    ),
+    foreignKey({
+      name: "platform_billing_mutation_idempotency_tenant_fk",
+      columns: [table.tenantId],
+      foreignColumns: [organization.id],
+    }),
+    check(
+      "platform_billing_mutation_idempotency_operation_nonempty",
+      sql`nullif(btrim(${table.operation}), '') is not null and nullif(btrim(${table.targetId}), '') is not null`,
+    ),
+    check(
+      "platform_billing_mutation_idempotency_payload_hash_check",
+      sql`${table.payloadHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "platform_billing_mutation_idempotency_state_check",
+      sql`(${table.state} = 'pending' and ${table.result} is null)
+        or (${table.state} = 'committed' and ${table.result} is not null and ${table.resultId} is not null)`,
+    ),
+  ],
+);
+
 export const billingActs = pgTable(
   "billing_acts",
   {
@@ -373,10 +422,13 @@ export const billingActDocuments = pgTable(
     contentType: text("content_type").notNull(),
     sha256: text("sha256").notNull(),
     byteSize: integer("byte_size").notNull(),
+    state: billingAttachmentState("state").notNull().default("pending"),
     uploadedByPlatformUserId: text("uploaded_by_platform_user_id")
       .notNull()
       .references(() => platformUsers.id),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     unique("billing_act_documents_tenant_id_uq").on(table.tenantId, table.id),
@@ -384,6 +436,13 @@ export const billingActDocuments = pgTable(
     unique("billing_act_documents_object_key_uq").on(table.objectKey),
     index("billing_act_documents_tenant_created_id_idx").on(
       table.tenantId,
+      table.createdAt,
+      table.id,
+    ),
+    index("billing_act_documents_tenant_act_state_idx").on(
+      table.tenantId,
+      table.actId,
+      table.state,
       table.createdAt,
       table.id,
     ),
@@ -398,6 +457,11 @@ export const billingActDocuments = pgTable(
     check("billing_act_documents_revision_positive", sql`${table.revision} > 0`),
     check("billing_act_documents_byte_size_positive", sql`${table.byteSize} > 0`),
     check("billing_act_documents_content_type_pdf", sql`${table.contentType} = 'application/pdf'`),
+    check(
+      "billing_act_documents_ready_shape_check",
+      sql`(${table.state} = 'ready' and ${table.readyAt} is not null)
+        or (${table.state} <> 'ready' and ${table.readyAt} is null)`,
+    ),
   ],
 );
 

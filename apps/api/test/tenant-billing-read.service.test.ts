@@ -174,6 +174,7 @@ describe("TenantBillingReadService", () => {
             id: actDocumentId,
             tenantId,
             actId,
+            state: "ready",
             objectKey: `tenant-billing/${tenantId}/acts/${actId}/${actDocumentId}.pdf`,
           },
         ];
@@ -251,6 +252,7 @@ describe("TenantBillingReadService", () => {
             id: actDocumentId,
             tenantId,
             actId,
+            state: "ready",
             objectKey: `tenant-billing/${tenantId}/acts/${actId}/other-document.pdf`,
           },
         ];

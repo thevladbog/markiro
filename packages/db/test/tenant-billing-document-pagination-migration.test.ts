@@ -37,7 +37,7 @@ describe("tenant billing document pagination migration metadata", () => {
 
     expect(current.id).not.toBe(previous.id);
     expect(current.prevId).toBe(previous.id);
-    expect(journal.entries.at(-1)).toMatchObject({
+    expect(journal.entries.find((entry) => entry.idx === 68)).toMatchObject({
       idx: 68,
       tag: "0068_tenant_billing_document_pagination_indexes",
       when: originalMigrationTimestamp,
@@ -128,8 +128,8 @@ describe.skipIf(!databaseUrl)("tenant billing document pagination migration", ()
     }>(
       `SELECT id, hash, created_at
        FROM drizzle.__drizzle_migrations
-       ORDER BY created_at DESC, id DESC
-       LIMIT 1`,
+       WHERE created_at = $1`,
+      [originalMigrationTimestamp],
     );
 
     expect(result.rows).toEqual([
@@ -209,12 +209,7 @@ describe.skipIf(!databaseUrl)("tenant billing document pagination migration", ()
     }>(
       `UPDATE drizzle.__drizzle_migrations
        SET hash = $1, created_at = $2
-       WHERE id = (
-         SELECT id
-         FROM drizzle.__drizzle_migrations
-         ORDER BY created_at DESC, id DESC
-         LIMIT 1
-       )
+       WHERE created_at = $2
        RETURNING id, hash, created_at`,
       [originalMigrationHash, originalMigrationTimestamp],
     );

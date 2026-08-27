@@ -277,7 +277,7 @@ export class TenantBillingReadService {
       select id, 'act'::text as type, act_id as "entityId", revision, 'pdf'::text as format,
              'ready'::text as status, content_type as "contentType", byte_size as "byteSize", created_at as "createdAt"
       from billing_act_documents
-      where tenant_id = ${tenantId} and ${actType}
+      where tenant_id = ${tenantId} and state = 'ready' and ${actType}
         and (${from}::timestamptz is null or created_at >= ${from})
         and (${to}::timestamptz is null or created_at <= ${to})
       order by "createdAt" desc, id desc, type asc
@@ -421,7 +421,10 @@ export class TenantBillingReadService {
     documentId: string,
   ): Promise<PrivateDownloadDto> {
     const [document] = await this.db
-      .select({ objectKey: schema.billingActDocuments.objectKey })
+      .select({
+        objectKey: schema.billingActDocuments.objectKey,
+        state: schema.billingActDocuments.state,
+      })
       .from(schema.billingActDocuments)
       .where(
         and(
@@ -433,7 +436,7 @@ export class TenantBillingReadService {
       .limit(1);
     return this.presigned(
       document?.objectKey,
-      Boolean(document?.objectKey),
+      document?.state === "ready",
       "act_document_not_found",
       `tenant-billing/${tenantId}/acts/${actId}/${documentId}.pdf`,
     );

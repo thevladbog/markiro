@@ -21,6 +21,19 @@ const serviceTimestampSchema = z.date();
 const nullableServiceTimestampSchema = serviceTimestampSchema.nullable();
 const requestDateSchema = z.union([z.iso.date(), z.iso.datetime({ offset: true })]);
 const nullableRequestDateSchema = requestDateSchema.nullable();
+const billingCivilDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
+  .refine((value) => {
+    const [year, month, day] = value.split("-").map(Number);
+    if (year === undefined || month === undefined || day === undefined) return false;
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return (
+      parsed.getUTCFullYear() === year &&
+      parsed.getUTCMonth() === month - 1 &&
+      parsed.getUTCDate() === day
+    );
+  }, "Expected a real calendar date");
 const vatRateSchema = z
   .string()
   .regex(/^\d{1,3}\.\d{2}$/)
@@ -682,6 +695,278 @@ export const offerPaymentResultSchema = z
   })
   .strict();
 
+const billingRequestTypeSchema = z.enum([
+  "renewal",
+  "capacity_change",
+  "additional_service",
+  "documents",
+  "other",
+]);
+export const platformBillingRequestStatusSchema = z.enum([
+  "new",
+  "under_review",
+  "clarification_required",
+  "offer_prepared",
+  "awaiting_payment",
+  "in_progress",
+  "completed",
+  "cancelled",
+]);
+const platformBillingRequestTargetStatusSchema = z.enum([
+  "under_review",
+  "clarification_required",
+  "offer_prepared",
+  "awaiting_payment",
+  "in_progress",
+  "completed",
+  "cancelled",
+]);
+const billingRequestResponsibleSideSchema = z.enum(["tenant", "markiro", "none"]);
+const billingRequestEventKindSchema = z.enum([
+  "created",
+  "status_changed",
+  "tenant_reply",
+  "platform_comment",
+  "offer_linked",
+  "offer_accepted",
+  "offer_changes_requested",
+  "invoice_linked",
+  "payment_confirmed",
+  "service_linked",
+  "act_linked",
+]);
+const billingActorKindSchema = z.enum(["tenant_user", "platform_user", "system"]);
+const trimmedTextSchema = (maximum: number) =>
+  z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(z.string().min(1).max(maximum));
+
+export const platformBillingRequestCommentSchema = z
+  .object({
+    message: trimmedTextSchema(2_000),
+    idempotencyKey: platformUuidSchema,
+  })
+  .strict();
+export const platformBillingRequestStatusMutationSchema = z
+  .object({
+    status: platformBillingRequestTargetStatusSchema,
+    message: trimmedTextSchema(2_000).optional(),
+    idempotencyKey: platformUuidSchema,
+  })
+  .strict();
+const platformBillingRequestLinkCommon = {
+  targetId: platformUuidSchema,
+  idempotencyKey: platformUuidSchema,
+};
+export const platformBillingRequestLinkSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("offer"), ...platformBillingRequestLinkCommon }).strict(),
+  z.object({ type: z.literal("invoice"), ...platformBillingRequestLinkCommon }).strict(),
+  z.object({ type: z.literal("payment"), ...platformBillingRequestLinkCommon }).strict(),
+  z.object({ type: z.literal("act"), ...platformBillingRequestLinkCommon }).strict(),
+  z.object({ type: z.literal("ordered_service"), ...platformBillingRequestLinkCommon }).strict(),
+]);
+
+export const platformBillingRequestEventSchema = z
+  .object({
+    id: platformUuidSchema,
+    tenantId: platformTenantIdSchema,
+    requestId: platformUuidSchema,
+    kind: billingRequestEventKindSchema,
+    fromStatus: platformBillingRequestStatusSchema.nullable(),
+    toStatus: platformBillingRequestStatusSchema.nullable(),
+    actorKind: billingActorKindSchema,
+    actorUserId: z.string().min(1).nullable(),
+    actorPlatformUserId: platformUserIdSchema.nullable(),
+    message: z.string().nullable(),
+    metadata: z.unknown().nullable(),
+    createdAt: responseTimestampSchema,
+  })
+  .strict()
+  .superRefine((event, context) => {
+    const actorShapeIsValid =
+      (event.actorKind === "tenant_user" &&
+        event.actorUserId !== null &&
+        event.actorPlatformUserId === null) ||
+      (event.actorKind === "platform_user" &&
+        event.actorUserId === null &&
+        event.actorPlatformUserId !== null) ||
+      (event.actorKind === "system" &&
+        event.actorUserId === null &&
+        event.actorPlatformUserId === null);
+    if (!actorShapeIsValid) {
+      context.addIssue({ code: "custom", path: ["actorKind"], message: "Invalid event actor" });
+    }
+    if (
+      event.kind === "status_changed" &&
+      (event.fromStatus === null || event.toStatus === null || event.fromStatus === event.toStatus)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["toStatus"],
+        message: "Status events require a real transition",
+      });
+    }
+  });
+
+export const platformBillingRequestLinkResponseSchema = z
+  .object({
+    id: platformUuidSchema,
+    tenantId: platformTenantIdSchema,
+    requestId: platformUuidSchema,
+    type: z.enum(["offer", "invoice", "payment", "act", "ordered_service"]),
+    targetId: platformUuidSchema,
+    createdAt: responseTimestampSchema,
+  })
+  .strict();
+
+export const platformBillingRequestSchema = z
+  .object({
+    id: platformUuidSchema,
+    tenantId: platformTenantIdSchema,
+    number: z.string().min(1),
+    type: billingRequestTypeSchema,
+    status: platformBillingRequestStatusSchema,
+    description: z.string().min(1).max(4_000),
+    desiredAt: nullableResponseTimestampSchema,
+    context: z
+      .object({ type: z.string().min(1).max(64), id: z.string().min(1).max(128) })
+      .strict()
+      .nullable(),
+    responsibleSide: billingRequestResponsibleSideSchema,
+    createdAt: responseTimestampSchema,
+    updatedAt: responseTimestampSchema,
+  })
+  .strict();
+export const platformBillingRequestListItemSchema = platformBillingRequestSchema
+  .extend({ latestEvent: platformBillingRequestEventSchema.nullable() })
+  .strict();
+export const platformBillingRequestDetailSchema = platformBillingRequestSchema
+  .extend({
+    events: z.array(platformBillingRequestEventSchema),
+    links: z.array(platformBillingRequestLinkResponseSchema),
+  })
+  .strict();
+export const platformBillingRequestListQuerySchema = z
+  .object({
+    tenantId: platformTenantIdSchema.optional(),
+    status: platformBillingRequestStatusSchema.optional(),
+  })
+  .strict();
+
+export const offerReviseSchema = z.object({ idempotencyKey: platformUuidSchema }).strict();
+
+const billingActIdempotencySchema = z.object({ idempotencyKey: platformUuidSchema }).strict();
+export const billingActCreateSchema = z
+  .object({
+    tenantId: platformTenantIdSchema,
+    requestId: platformUuidSchema.optional(),
+    invoiceId: platformUuidSchema.optional(),
+    orderedServiceId: platformUuidSchema.optional(),
+    number: trimmedTextSchema(200),
+    periodStart: billingCivilDateSchema,
+    periodEnd: billingCivilDateSchema,
+    idempotencyKey: platformUuidSchema,
+  })
+  .strict()
+  .refine((act) => act.periodEnd >= act.periodStart, {
+    path: ["periodEnd"],
+    message: "Act period end must be on or after period start",
+  });
+export const billingActIssueSchema = billingActIdempotencySchema;
+export const billingActCancelSchema = billingActIdempotencySchema;
+export const billingActUploadMetadataSchema = z
+  .object({
+    contentType: z.literal("application/pdf"),
+    byteSize: z
+      .number()
+      .int()
+      .positive()
+      .max(5 * 1024 * 1024),
+  })
+  .strict();
+export const billingActDocumentSchema = z.discriminatedUnion("state", [
+  z
+    .object({
+      id: platformUuidSchema,
+      revision: positiveIntegerSchema,
+      state: z.literal("pending"),
+      contentType: z.literal("application/pdf"),
+      byteSize: positiveIntegerSchema.max(5 * 1024 * 1024),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/),
+      uploadedByPlatformUserId: platformUserIdSchema,
+      readyAt: z.null(),
+      createdAt: responseTimestampSchema,
+      updatedAt: responseTimestampSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: platformUuidSchema,
+      revision: positiveIntegerSchema,
+      state: z.literal("ready"),
+      contentType: z.literal("application/pdf"),
+      byteSize: positiveIntegerSchema.max(5 * 1024 * 1024),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/),
+      uploadedByPlatformUserId: platformUserIdSchema,
+      readyAt: responseTimestampSchema,
+      createdAt: responseTimestampSchema,
+      updatedAt: responseTimestampSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: platformUuidSchema,
+      revision: positiveIntegerSchema,
+      state: z.enum(["failed", "cleanup_required"]),
+      contentType: z.literal("application/pdf"),
+      byteSize: positiveIntegerSchema.max(5 * 1024 * 1024),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/),
+      uploadedByPlatformUserId: platformUserIdSchema,
+      readyAt: z.null(),
+      createdAt: responseTimestampSchema,
+      updatedAt: responseTimestampSchema,
+    })
+    .strict(),
+]);
+export const billingActSchema = z
+  .object({
+    id: platformUuidSchema,
+    tenantId: platformTenantIdSchema,
+    requestId: platformUuidSchema.nullable(),
+    invoiceId: platformUuidSchema.nullable(),
+    orderedServiceId: platformUuidSchema.nullable(),
+    number: z.string().min(1).max(200),
+    status: z.enum(["draft", "issued", "cancelled"]),
+    periodStart: billingCivilDateSchema,
+    periodEnd: billingCivilDateSchema,
+    createdByPlatformUserId: platformUserIdSchema,
+    issuedByPlatformUserId: platformUserIdSchema.nullable(),
+    issuedAt: nullableResponseTimestampSchema,
+    cancelledByPlatformUserId: platformUserIdSchema.nullable(),
+    cancelledAt: nullableResponseTimestampSchema,
+    createdAt: responseTimestampSchema,
+    updatedAt: responseTimestampSchema,
+    document: billingActDocumentSchema.nullable(),
+  })
+  .strict()
+  .superRefine((act, context) => {
+    const issuedShape = act.issuedAt !== null && act.issuedByPlatformUserId !== null;
+    const issuedFieldsMatch =
+      (act.issuedAt === null && act.issuedByPlatformUserId === null) || issuedShape;
+    const cancelledShape = act.cancelledAt !== null && act.cancelledByPlatformUserId !== null;
+    const valid =
+      (act.status === "draft" && !issuedShape && !cancelledShape) ||
+      (act.status === "issued" &&
+        issuedShape &&
+        !cancelledShape &&
+        act.document?.state === "ready") ||
+      (act.status === "cancelled" && cancelledShape && issuedFieldsMatch);
+    if (!valid) {
+      context.addIssue({ code: "custom", path: ["status"], message: "Invalid act lifecycle" });
+    }
+  });
+
 const invoiceCreateLineSchema = z
   .object({
     kind: z.enum(["plan", "addon", "service", "custom"]),
@@ -703,6 +988,8 @@ const invoiceCreateLineSchema = z
 export const invoiceCreateSchema = z
   .object({
     tenantId: platformTenantIdSchema,
+    sourceOfferId: platformUuidSchema.optional(),
+    sourceRequestId: platformUuidSchema.optional(),
     sellerBankAccountId: platformUuidSchema.nullable().optional(),
     dueDate: nullableRequestDateSchema.optional(),
     applicationMode: z.enum(["manual", "automatic"]),
@@ -752,6 +1039,8 @@ const invoiceRecordCommonSchema = z
     tenantId: platformTenantIdSchema,
     number: z.string().min(1),
     sellerBankAccountId: platformUuidSchema.nullable().optional(),
+    sourceOfferId: platformUuidSchema.nullable().optional(),
+    sourceRequestId: platformUuidSchema.nullable().optional(),
     dueDate: nullableResponseTimestampSchema,
     currency: z.literal("RUB"),
     subtotal: platformMoneySchema,
@@ -1360,6 +1649,7 @@ export const platformCommercialContracts = {
     list: { response: z.array(offerSchema) },
     detail: { params: offerIdSchema, response: offerDetailSchema },
     create: { body: offerCreateSchema, response: draftOfferDetailSchema },
+    revise: { params: offerIdSchema, body: offerReviseSchema, response: offerDetailSchema },
     publish: { params: offerIdSchema, response: publishedOfferWithDocumentsSchema },
     cancel: { params: offerIdSchema, response: cancelledOfferDetailSchema },
     payment: {
@@ -1398,6 +1688,49 @@ export const platformCommercialContracts = {
       },
     },
   },
+  billingRequests: {
+    list: {
+      query: platformBillingRequestListQuerySchema,
+      response: z.object({ items: z.array(platformBillingRequestListItemSchema) }).strict(),
+    },
+    detail: { params: platformUuidSchema, response: platformBillingRequestDetailSchema },
+    comment: {
+      params: platformUuidSchema,
+      body: platformBillingRequestCommentSchema,
+      response: platformBillingRequestEventSchema,
+    },
+    status: {
+      params: platformUuidSchema,
+      body: platformBillingRequestStatusMutationSchema,
+      response: platformBillingRequestEventSchema,
+    },
+    link: {
+      params: platformUuidSchema,
+      body: platformBillingRequestLinkSchema,
+      response: platformBillingRequestLinkResponseSchema,
+    },
+  },
+  billingActs: {
+    list: {
+      query: z
+        .object({
+          tenantId: platformTenantIdSchema.optional(),
+          status: z.enum(["draft", "issued", "cancelled"]).optional(),
+        })
+        .strict(),
+      response: z.object({ items: z.array(billingActSchema) }).strict(),
+    },
+    detail: { params: platformUuidSchema, response: billingActSchema },
+    create: { body: billingActCreateSchema, response: billingActSchema },
+    issue: { params: platformUuidSchema, body: billingActIssueSchema, response: billingActSchema },
+    cancel: {
+      params: platformUuidSchema,
+      body: billingActCancelSchema,
+      response: billingActSchema,
+    },
+    document: billingActDocumentSchema,
+    uploadMetadata: billingActUploadMetadataSchema,
+  },
   payments: {
     list: { response: z.object({ items: z.array(billingPaymentSchema) }).strict() },
     matches: {
@@ -1429,6 +1762,7 @@ export type OfferDetailSource = z.input<typeof offerDetailSchema>;
 export type OfferServiceDetailSource = z.input<typeof offerServiceDetailSchema>;
 export type OfferPaymentResult = z.output<typeof offerPaymentResultSchema>;
 export type OfferPaymentResultSource = z.input<typeof offerPaymentResultSchema>;
+export type OfferReviseDto = z.output<typeof offerReviseSchema>;
 export type CommercialDocument = z.output<typeof commercialDocumentSchema>;
 export type CommercialDocumentSource = z.input<typeof commercialDocumentSchema>;
 export type CommercialDocumentServiceSource = z.input<typeof commercialDocumentServiceSchema>;
@@ -1477,6 +1811,22 @@ export type PaymentMatch = z.output<typeof paymentMatchSchema>;
 export type PaymentMatchServiceSource = z.input<typeof paymentMatchServiceSchema>;
 export type PaymentMatchResolveInput = z.input<typeof paymentMatchResolveSchema>;
 export type PaymentMatchResolveDto = z.output<typeof paymentMatchResolveSchema>;
+export type PlatformBillingRequestListQueryDto = z.output<
+  typeof platformBillingRequestListQuerySchema
+>;
+export type PlatformBillingRequestCommentDto = z.output<typeof platformBillingRequestCommentSchema>;
+export type PlatformBillingRequestStatusMutationDto = z.output<
+  typeof platformBillingRequestStatusMutationSchema
+>;
+export type PlatformBillingRequestLinkDto = z.output<typeof platformBillingRequestLinkSchema>;
+export type PlatformBillingRequest = z.output<typeof platformBillingRequestSchema>;
+export type PlatformBillingRequestEvent = z.output<typeof platformBillingRequestEventSchema>;
+export type PlatformBillingRequestLink = z.output<typeof platformBillingRequestLinkResponseSchema>;
+export type BillingActCreateDto = z.output<typeof billingActCreateSchema>;
+export type BillingActIssueDto = z.output<typeof billingActIssueSchema>;
+export type BillingActCancelDto = z.output<typeof billingActCancelSchema>;
+export type BillingAct = z.output<typeof billingActSchema>;
+export type BillingActDocument = z.output<typeof billingActDocumentSchema>;
 export type BillingProfileInput = z.output<typeof currentBillingProfileInputSchema>;
 export type OperatorBillingProfileInput = z.output<typeof currentOperatorBillingProfileInputSchema>;
 export type CompatibleBillingProfileInput = z.output<typeof billingProfileInputSchema>;

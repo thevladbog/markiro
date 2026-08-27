@@ -27,6 +27,9 @@ describe("tenant billing workflow schema", () => {
     );
     expect(getTableName(schema.billingActs)).toBe("billing_acts");
     expect(getTableName(schema.billingActDocuments)).toBe("billing_act_documents");
+    expect(getTableName(schema.platformBillingMutationIdempotency)).toBe(
+      "platform_billing_mutation_idempotency",
+    );
     expect(schema.invoiceStatus.enumValues).toContain("partially_paid");
     expect(schema.invoices.sourceOfferId).toBeDefined();
     expect("sourceRequestId" in schema.invoices).toBe(false);
@@ -120,6 +123,18 @@ describe("tenant billing workflow schema", () => {
     );
     expect(constraintNames(schema.billingActDocuments).foreignKeys).toContain(
       "billing_act_documents_tenant_act_fk",
+    );
+    expect(constraintNames(schema.billingActDocuments).indexes).toContain(
+      "billing_act_documents_tenant_act_state_idx",
+    );
+    expect(schema.billingActDocuments.state).toBeDefined();
+    expect(schema.billingActDocuments.readyAt).toBeDefined();
+    expect(schema.billingActDocuments.updatedAt).toBeDefined();
+    expect(constraintNames(schema.platformBillingMutationIdempotency).uniqueConstraints).toContain(
+      "platform_billing_mutation_idempotency_tenant_key_uq",
+    );
+    expect(constraintNames(schema.platformBillingMutationIdempotency).foreignKeys).toContain(
+      "platform_billing_mutation_idempotency_tenant_fk",
     );
   });
 

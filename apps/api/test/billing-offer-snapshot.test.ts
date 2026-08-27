@@ -51,7 +51,13 @@ describe("BillingService offer snapshots", () => {
     const tx = {
       select: vi.fn(() => {
         transactionSelect += 1;
-        return resolvedQuery(transactionSelect === 1 ? [{ number: "INV-000001" }] : []);
+        return resolvedQuery(
+          transactionSelect === 1
+            ? [{ id: invoice.tenantId }]
+            : transactionSelect === 2
+              ? [{ number: "INV-000001" }]
+              : [],
+        );
       }),
       insert: vi.fn(() => ({
         values: (values: unknown) => {
@@ -146,10 +152,12 @@ describe("BillingService offer snapshots", () => {
         transactionSelect += 1;
         return resolvedQuery<unknown>(
           transactionSelect === 1
-            ? [{ number: "INV-000001" }]
+            ? [{ id: invoice.tenantId }]
             : transactionSelect === 2
-              ? [catalogVersion]
-              : [],
+              ? [{ number: "INV-000001" }]
+              : transactionSelect === 3
+                ? [catalogVersion]
+                : [],
         );
       }),
       insert: vi.fn(() => ({

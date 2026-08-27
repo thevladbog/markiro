@@ -1160,4 +1160,180 @@ describe("platform commercial contracts", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("strictly validates platform request mutations and invoice provenance identifiers", () => {
+    const idempotencyKey = "81111111-1111-4111-8111-111111111119";
+    const requestId = "82111111-1111-4111-8111-111111111119";
+
+    expect(
+      platformCommercialContracts.billingRequests.comment.body.parse({
+        message: "  Нужна спецификация  ",
+        idempotencyKey,
+      }),
+    ).toEqual({ message: "Нужна спецификация", idempotencyKey });
+    expect(
+      platformCommercialContracts.billingRequests.status.body.parse({
+        status: "clarification_required",
+        message: "Уточните период",
+        idempotencyKey,
+      }),
+    ).toMatchObject({ status: "clarification_required" });
+    expect(
+      platformCommercialContracts.billingRequests.link.body.parse({
+        type: "offer",
+        targetId: OFFER_ID,
+        idempotencyKey,
+      }),
+    ).toEqual({ type: "offer", targetId: OFFER_ID, idempotencyKey });
+
+    for (const candidate of [
+      { message: "ok", idempotencyKey, unexpected: true },
+      { message: "ok", idempotencyKey: "not-a-uuid" },
+    ]) {
+      expect(
+        platformCommercialContracts.billingRequests.comment.body.safeParse(candidate).success,
+      ).toBe(false);
+    }
+    expect(
+      platformCommercialContracts.billingRequests.status.body.safeParse({
+        status: "new",
+        idempotencyKey,
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.billingRequests.link.body.safeParse({
+        type: "invoice",
+        targetId: INVOICE_ID,
+        tenantId: TENANT_ID,
+        idempotencyKey,
+      }).success,
+      "link bodies cannot carry a client-owned tenant",
+    ).toBe(false);
+    expect(platformCommercialContracts.billingRequests.detail.params.parse(requestId)).toBe(
+      requestId,
+    );
+
+    const direct = platformCommercialContracts.invoices.create.body.parse({
+      tenantId: TENANT_ID,
+      applicationMode: "manual",
+      lines: [
+        {
+          kind: "custom",
+          nameRu: "Работы",
+          nameEn: "Services",
+          quantity: 1,
+          unit: "шт.",
+          agreedUnitPrice: "100.00",
+          vatIncluded: true,
+        },
+      ],
+      sourceOfferId: OFFER_ID,
+      sourceRequestId: requestId,
+    });
+    expect(direct).toMatchObject({ sourceOfferId: OFFER_ID, sourceRequestId: requestId });
+    expect(
+      platformCommercialContracts.invoices.create.body.safeParse({
+        ...direct,
+        sourceOfferId: "not-a-uuid",
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.invoices.create.body.safeParse({
+        ...direct,
+        sourceRequestId: "not-a-uuid",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("strictly validates act dates, upload metadata, and idempotency bodies", () => {
+    const idempotencyKey = "83111111-1111-4111-8111-111111111119";
+    const requestId = "84111111-1111-4111-8111-111111111119";
+    const act = platformCommercialContracts.billingActs.create.body.parse({
+      tenantId: TENANT_ID,
+      requestId,
+      number: " ACT-2026-001 ",
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-31",
+      idempotencyKey,
+    });
+    expect(act.number).toBe("ACT-2026-001");
+    expect(
+      platformCommercialContracts.billingActs.create.body.safeParse({
+        ...act,
+        periodStart: "2026-09-01",
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.billingActs.create.body.safeParse({
+        ...act,
+        periodEnd: "2026-02-30",
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.billingActs.uploadMetadata.safeParse({
+        contentType: "application/pdf",
+        byteSize: 5 * 1024 * 1024,
+      }).success,
+    ).toBe(true);
+    expect(
+      platformCommercialContracts.billingActs.uploadMetadata.safeParse({
+        contentType: "text/plain",
+        byteSize: 10,
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.billingActs.issue.body.safeParse({
+        idempotencyKey,
+        contentType: "application/pdf",
+      }).success,
+    ).toBe(false);
+    expect(platformCommercialContracts.billingActs.cancel.body.parse({ idempotencyKey })).toEqual({
+      idempotencyKey,
+    });
+  });
+
+  it("parses exact platform request events and durable act document metadata", () => {
+    const requestId = "85111111-1111-4111-8111-111111111119";
+    const event = platformCommercialContracts.billingRequests.comment.response.parse({
+      id: "86111111-1111-4111-8111-111111111119",
+      tenantId: TENANT_ID,
+      requestId,
+      kind: "platform_comment",
+      fromStatus: null,
+      toStatus: null,
+      actorKind: "platform_user",
+      actorUserId: null,
+      actorPlatformUserId: PLATFORM_USER_ID,
+      message: "Нужна спецификация",
+      metadata: null,
+      createdAt: CREATED_AT,
+    });
+    expect(event.createdAt).toBe(ISO_CREATED_AT);
+    expect(
+      platformCommercialContracts.billingRequests.comment.response.safeParse({
+        ...event,
+        actorPlatformUserId: null,
+      }).success,
+    ).toBe(false);
+
+    const document = platformCommercialContracts.billingActs.document.parse({
+      id: DOCUMENT_ID,
+      revision: 1,
+      state: "ready",
+      contentType: "application/pdf",
+      byteSize: 1024,
+      sha256: "a".repeat(64),
+      uploadedByPlatformUserId: PLATFORM_USER_ID,
+      readyAt: CREATED_AT,
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+    });
+    expect(document.state).toBe("ready");
+    expect(
+      platformCommercialContracts.billingActs.document.safeParse({
+        ...document,
+        objectKey: `tenant-billing/${TENANT_ID}/acts/redacted/redacted.pdf`,
+      }).success,
+    ).toBe(false);
+  });
 });

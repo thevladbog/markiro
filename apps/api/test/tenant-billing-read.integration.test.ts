@@ -341,8 +341,11 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
           contentType: "application/pdf",
           sha256: "b".repeat(64),
           byteSize: 1,
+          state: "ready" as const,
           uploadedByPlatformUserId: actorId,
+          readyAt: tiedTimestamp,
           createdAt: tiedTimestamp,
+          updatedAt: tiedTimestamp,
         };
       }),
     );
@@ -455,8 +458,11 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
         contentType: "application/pdf",
         sha256: "1".repeat(64),
         byteSize: 1,
+        state: "ready",
         uploadedByPlatformUserId: actorId,
+        readyAt: olderDocumentTimestamp,
         createdAt: olderDocumentTimestamp,
+        updatedAt: olderDocumentTimestamp,
       },
       {
         id: poisonedActDocumentId,
@@ -467,7 +473,10 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
         contentType: "application/pdf",
         sha256: "2".repeat(64),
         byteSize: 1,
+        state: "ready",
         uploadedByPlatformUserId: actorId,
+        readyAt: olderDocumentTimestamp,
+        updatedAt: olderDocumentTimestamp,
         createdAt: olderDocumentTimestamp,
       },
     ]);

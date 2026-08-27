@@ -324,6 +324,15 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "BillingAccountsController.setTenantDefault": platform(
     "tenant default-account mutation is guarded by platform billing capabilities",
   ),
+  "BillingActsController.create": platform(
+    "platform billing act creation is guarded by platform billing capabilities",
+  ),
+  "BillingActsController.cancel": platform(
+    "platform billing act cancellation is guarded by platform billing capabilities",
+  ),
+  "BillingActsController.issue": platform(
+    "platform billing act issuance is guarded by platform billing capabilities",
+  ),
   "BillingController.create": platform(
     "platform invoice creation is guarded by platform billing capabilities",
   ),
@@ -359,6 +368,18 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   ),
   "PlatformOffersController.create": platform(
     "platform billing offer creation is guarded by platform capabilities",
+  ),
+  "PlatformBillingRequestsController.comment": platform(
+    "platform billing request comments are guarded by platform billing capabilities",
+  ),
+  "PlatformBillingRequestsController.link": platform(
+    "platform billing request links are guarded by platform billing capabilities",
+  ),
+  "PlatformBillingRequestsController.status": platform(
+    "platform billing request status changes are guarded by platform billing capabilities",
+  ),
+  "PlatformOffersController.revise": platform(
+    "platform billing offer revision is guarded by platform capabilities",
   ),
   "PlatformOffersController.publish": platform(
     "platform billing offer publication is guarded by platform capabilities",

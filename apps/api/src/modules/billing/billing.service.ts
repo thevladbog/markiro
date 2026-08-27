@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
   ConflictException,
@@ -5,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import type {
   InvoiceCreateServiceResultSource,
@@ -41,13 +42,19 @@ export class BillingService {
     principal: PlatformPrincipal,
     input: CreateInvoiceDto,
   ): Promise<InvoiceCreateServiceResultSource> {
-    const [tenant] = await this.db
-      .select()
-      .from(schema.organization)
-      .where(eq(schema.organization.id, input.tenantId))
-      .limit(1);
-    if (!tenant) throw new NotFoundException({ code: "tenant_not_found" });
     return this.db.transaction(async (tx) => {
+      const [tenant] = await tx
+        .select({ id: schema.organization.id })
+        .from(schema.organization)
+        .where(eq(schema.organization.id, input.tenantId))
+        .limit(1);
+      if (!tenant) throw new NotFoundException({ code: "tenant_not_found" });
+      const sourceRequestId = input.sourceRequestId
+        ? await lockInvoiceSourceRequest(tx, input.tenantId, input.sourceRequestId)
+        : null;
+      const sourceOfferId = input.sourceOfferId
+        ? await lockAcceptedInvoiceSourceOffer(tx, input.tenantId, input.sourceOfferId)
+        : null;
       const [last] = await tx
         .select({ number: schema.invoices.number })
         .from(schema.invoices)
@@ -62,6 +69,7 @@ export class BillingService {
           sellerBankAccountId: input.sellerBankAccountId ?? null,
           dueDate: input.dueDate ? new Date(input.dueDate) : null,
           applicationMode: input.applicationMode,
+          sourceOfferId,
           createdByPlatformUserId: principal.userId,
           subtotal: "0.00",
           vatTotal: "0.00",
@@ -69,6 +77,13 @@ export class BillingService {
         })
         .returning();
       if (!invoice) throw new BadRequestException({ code: "invoice_create_failed" });
+      if (sourceRequestId) {
+        await tx.insert(schema.tenantBillingRequestLinks).values({
+          tenantId: input.tenantId,
+          requestId: sourceRequestId,
+          invoiceId: invoice.id,
+        });
+      }
 
       let subtotal = 0n;
       let vatTotal = 0n;
@@ -152,7 +167,7 @@ export class BillingService {
         .where(eq(schema.invoices.id, invoice.id))
         .returning();
       if (!updated) throw new BadRequestException({ code: "invoice_create_failed" });
-      return { ...updated, lines: input.lines.length };
+      return { ...updated, sourceRequestId, lines: input.lines.length };
     });
   }
 
@@ -288,6 +303,105 @@ export class BillingService {
         .where(and(eq(schema.invoices.id, id), eq(schema.invoices.status, "draft")))
         .returning();
       if (!updated) throw new ConflictException({ code: "invoice_not_draft" });
+      const [sourceLink] = await tx
+        .select()
+        .from(schema.tenantBillingRequestLinks)
+        .where(
+          and(
+            eq(schema.tenantBillingRequestLinks.tenantId, invoice.tenantId),
+            eq(schema.tenantBillingRequestLinks.invoiceId, invoice.id),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      let sourceRequestId: string | null = null;
+      if (sourceLink) {
+        const [request] = await tx
+          .select()
+          .from(schema.tenantBillingRequests)
+          .where(
+            and(
+              eq(schema.tenantBillingRequests.tenantId, invoice.tenantId),
+              eq(schema.tenantBillingRequests.id, sourceLink.requestId),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!request) throw new ConflictException({ code: "billing_source_link_invalid" });
+        sourceRequestId = request.id;
+        const linkEventIdempotencyKey = randomUUID();
+        const [linkEvent] = await tx
+          .insert(schema.tenantBillingRequestEvents)
+          .values({
+            tenantId: invoice.tenantId,
+            requestId: request.id,
+            kind: "invoice_linked",
+            actorKind: "platform_user",
+            actorPlatformUserId: principal.userId,
+            metadata: { invoiceId: invoice.id, linkId: sourceLink.id },
+            idempotencyKey: linkEventIdempotencyKey,
+          })
+          .returning({ id: schema.tenantBillingRequestEvents.id });
+        if (!linkEvent) throw new Error("invoice request link event insert failed");
+        await this.audit.record(tx, {
+          actorPlatformUserId: principal.userId,
+          actorRole: principal.role,
+          action: "billing.request.invoice_linked",
+          outcome: "success",
+          tenantId: invoice.tenantId,
+          targetType: "tenant_billing_request",
+          targetId: request.id,
+          reason: null,
+          before: { status: request.status },
+          after: { status: request.status, invoiceId: invoice.id, eventId: linkEvent.id },
+          requestId: null,
+        });
+        if (request.status === "offer_prepared") {
+          await tx
+            .update(schema.tenantBillingRequests)
+            .set({ status: "awaiting_payment", responsibleSide: "tenant", updatedAt: now })
+            .where(
+              and(
+                eq(schema.tenantBillingRequests.tenantId, request.tenantId),
+                eq(schema.tenantBillingRequests.id, request.id),
+                eq(schema.tenantBillingRequests.status, "offer_prepared"),
+              ),
+            );
+          const [statusEvent] = await tx
+            .insert(schema.tenantBillingRequestEvents)
+            .values({
+              tenantId: invoice.tenantId,
+              requestId: request.id,
+              kind: "status_changed",
+              fromStatus: "offer_prepared",
+              toStatus: "awaiting_payment",
+              actorKind: "platform_user",
+              actorPlatformUserId: principal.userId,
+              metadata: { invoiceId: invoice.id },
+              idempotencyKey: randomUUID(),
+            })
+            .returning({ id: schema.tenantBillingRequestEvents.id });
+          if (!statusEvent) throw new Error("invoice request status event insert failed");
+          await this.audit.record(tx, {
+            actorPlatformUserId: principal.userId,
+            actorRole: principal.role,
+            action: "billing.request.status_changed",
+            outcome: "success",
+            tenantId: invoice.tenantId,
+            targetType: "tenant_billing_request",
+            targetId: request.id,
+            reason: null,
+            before: { status: "offer_prepared", responsibleSide: request.responsibleSide },
+            after: {
+              status: "awaiting_payment",
+              responsibleSide: "tenant",
+              eventId: statusEvent.id,
+              invoiceId: invoice.id,
+            },
+            requestId: null,
+          });
+        }
+      }
       await this.audit.record(tx, {
         actorPlatformUserId: principal.userId,
         actorRole: principal.role,
@@ -308,7 +422,7 @@ export class BillingService {
         },
         requestId: null,
       });
-      return updated;
+      return { ...updated, sourceRequestId };
     });
   }
 
@@ -333,6 +447,90 @@ export class BillingService {
       return updated;
     });
   }
+}
+
+type InvoiceSourceExecutor = Pick<Db, "select" | "execute">;
+
+async function lockInvoiceSourceRequest(
+  tx: InvoiceSourceExecutor,
+  tenantId: string,
+  requestId: string,
+): Promise<string> {
+  const [request] = await tx
+    .select({
+      id: schema.tenantBillingRequests.id,
+      tenantId: schema.tenantBillingRequests.tenantId,
+    })
+    .from(schema.tenantBillingRequests)
+    .where(eq(schema.tenantBillingRequests.id, requestId))
+    .for("update")
+    .limit(1);
+  if (!request) throw new NotFoundException({ code: "billing_request_not_found" });
+  if (request.tenantId !== tenantId) {
+    throw new ConflictException({ code: "billing_source_tenant_mismatch" });
+  }
+  return request.id;
+}
+
+async function lockAcceptedInvoiceSourceOffer(
+  tx: InvoiceSourceExecutor,
+  tenantId: string,
+  offerId: string,
+): Promise<string> {
+  const [located] = await tx
+    .select({
+      tenantId: schema.commercialOffers.tenantId,
+      familyId: schema.commercialOffers.familyId,
+    })
+    .from(schema.commercialOffers)
+    .where(eq(schema.commercialOffers.id, offerId))
+    .limit(1);
+  if (!located) throw new NotFoundException({ code: "offer_not_found" });
+  if (located.tenantId !== tenantId) {
+    throw new ConflictException({ code: "billing_source_tenant_mismatch" });
+  }
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`commercial-offer-family:${tenantId}:${located.familyId}`}, 0))`,
+  );
+  const family = await tx
+    .select()
+    .from(schema.commercialOffers)
+    .where(
+      and(
+        eq(schema.commercialOffers.tenantId, tenantId),
+        eq(schema.commercialOffers.familyId, located.familyId),
+      ),
+    )
+    .orderBy(desc(schema.commercialOffers.revision), desc(schema.commercialOffers.id))
+    .for("update");
+  const source = family.find((offer) => offer.id === offerId);
+  if (!source) throw new NotFoundException({ code: "offer_not_found" });
+  const currentPublished = family.find((offer) => offer.status === "published");
+  if (source.status !== "published") {
+    throw new ConflictException({ code: "offer_not_accepted" });
+  }
+  if (!currentPublished || currentPublished.id !== source.id) {
+    throw new ConflictException({ code: "offer_version_stale" });
+  }
+  const [decision] = await tx
+    .select()
+    .from(schema.commercialOfferDecisions)
+    .where(
+      and(
+        eq(schema.commercialOfferDecisions.tenantId, tenantId),
+        eq(schema.commercialOfferDecisions.offerId, source.id),
+      ),
+    )
+    .orderBy(
+      desc(schema.commercialOfferDecisions.createdAt),
+      desc(schema.commercialOfferDecisions.id),
+    )
+    .for("update")
+    .limit(1);
+  if (decision?.decision !== "accepted") {
+    throw new ConflictException({ code: "offer_not_accepted" });
+  }
+  return source.id;
 }
 
 function invoicePaymentSummary(

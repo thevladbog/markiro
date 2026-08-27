@@ -7,10 +7,13 @@ import {
 } from "@nestjs/common";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import type {
-  OfferPaymentResultSource,
-  OfferServiceDetailSource,
-  OfferServiceRecordSource,
+import {
+  platformCommercialContracts,
+  offerServiceDetailSchema,
+  type OfferPaymentResultSource,
+  type OfferReviseDto,
+  type OfferServiceDetailSource,
+  type OfferServiceRecordSource,
 } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import {
@@ -25,6 +28,10 @@ import type { EntitlementsExecutor } from "../../subscriptions/entitlements.type
 import { calculateOfferTotals } from "./offer-totals";
 import { normalizeOfferTerms } from "./offer-terms";
 import type { CreateOfferDto, PaymentDto } from "./dto";
+import {
+  beginPlatformBillingMutation,
+  commitPlatformBillingMutation,
+} from "../platform-billing-idempotency";
 
 @Injectable()
 export class PlatformOffersService {
@@ -234,6 +241,161 @@ export class PlatformOffersService {
         requestId: null,
       });
       return this.detailWith(tx, updated.tenantId, updated.id);
+    });
+  }
+
+  async revise(
+    actor: PlatformPrincipal,
+    id: string,
+    input: OfferReviseDto,
+  ): Promise<OfferServiceDetailSource> {
+    const [located] = await this.db
+      .select({
+        tenantId: schema.commercialOffers.tenantId,
+        familyId: schema.commercialOffers.familyId,
+      })
+      .from(schema.commercialOffers)
+      .where(eq(schema.commercialOffers.id, id))
+      .limit(1);
+    if (!located) throw new NotFoundException({ code: "offer_not_found" });
+    return this.db.transaction(async (tx) => {
+      const mutation = await beginPlatformBillingMutation(tx, {
+        tenantId: located.tenantId,
+        idempotencyKey: input.idempotencyKey,
+        operation: "billing.offer.revise",
+        targetId: id,
+        payload: { sourceOfferId: id },
+        actorPlatformUserId: actor.userId,
+      });
+      if (mutation.kind === "committed") {
+        const replay = platformCommercialContracts.offers.revise.response.parse(mutation.result);
+        return offerServiceDetailSchema.parse({
+          ...replay,
+          expiresAt: replay.expiresAt ? new Date(replay.expiresAt) : null,
+          publishedAt: replay.publishedAt ? new Date(replay.publishedAt) : null,
+          paidAt: replay.paidAt ? new Date(replay.paidAt) : null,
+          createdAt: new Date(replay.createdAt),
+          updatedAt: new Date(replay.updatedAt),
+          lines: replay.lines.map((line) => ({ ...line, createdAt: new Date(line.createdAt) })),
+        });
+      }
+      if (mutation.kind === "pending") {
+        throw new ConflictException({ code: "billing_mutation_in_progress" });
+      }
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`commercial-offer-family:${located.tenantId}:${located.familyId}`}, 0))`,
+      );
+      const family = await tx
+        .select()
+        .from(schema.commercialOffers)
+        .where(
+          and(
+            eq(schema.commercialOffers.tenantId, located.tenantId),
+            eq(schema.commercialOffers.familyId, located.familyId),
+          ),
+        )
+        .orderBy(desc(schema.commercialOffers.revision), desc(schema.commercialOffers.id))
+        .for("update");
+      const source = family.find((offer) => offer.id === id);
+      if (!source) throw new NotFoundException({ code: "offer_not_found" });
+      const currentPublished = family.find((offer) => offer.status === "published");
+      if (!currentPublished || source.status !== "published") {
+        throw new ConflictException({ code: "offer_not_published" });
+      }
+      if (currentPublished.id !== source.id) {
+        throw new ConflictException({ code: "offer_version_stale" });
+      }
+      if (family.some((offer) => offer.status === "draft")) {
+        throw new ConflictException({ code: "offer_revision_draft_exists" });
+      }
+      const [decision] = await tx
+        .select()
+        .from(schema.commercialOfferDecisions)
+        .where(
+          and(
+            eq(schema.commercialOfferDecisions.tenantId, source.tenantId),
+            eq(schema.commercialOfferDecisions.offerId, source.id),
+          ),
+        )
+        .orderBy(
+          desc(schema.commercialOfferDecisions.createdAt),
+          desc(schema.commercialOfferDecisions.id),
+        )
+        .for("update")
+        .limit(1);
+      if (decision?.decision !== "changes_requested") {
+        throw new ConflictException({ code: "offer_revision_not_requested" });
+      }
+      const [draft] = await tx
+        .insert(schema.commercialOffers)
+        .values({
+          tenantId: source.tenantId,
+          familyId: source.familyId,
+          revision: source.revision + 1,
+          previousRevisionId: source.id,
+          status: "draft",
+          sellerBankAccountId: source.sellerBankAccountId,
+          total: source.total,
+          expiresAt: source.expiresAt,
+          termsMarkdown: source.termsMarkdown,
+          createdByPlatformUserId: actor.userId,
+        })
+        .returning();
+      if (!draft) throw new Error("offer revision insert failed");
+      const lines = await tx
+        .select()
+        .from(schema.commercialOfferLines)
+        .where(
+          and(
+            eq(schema.commercialOfferLines.tenantId, source.tenantId),
+            eq(schema.commercialOfferLines.offerId, source.id),
+          ),
+        )
+        .orderBy(asc(schema.commercialOfferLines.position));
+      if (lines.length > 0) {
+        await tx.insert(schema.commercialOfferLines).values(
+          lines.map((line) => ({
+            tenantId: source.tenantId,
+            offerId: draft.id,
+            position: line.position,
+            kind: line.kind,
+            catalogVersionId: line.catalogVersionId,
+            nameRu: line.nameRu,
+            nameEn: line.nameEn,
+            descriptionRu: line.descriptionRu,
+            descriptionEn: line.descriptionEn,
+            quantity: line.quantity,
+            unit: line.unit,
+            catalogUnitPrice: line.catalogUnitPrice,
+            agreedUnitPrice: line.agreedUnitPrice,
+            vatRate: line.vatRate,
+            vatIncluded: line.vatIncluded,
+            priceOverrideReason: line.priceOverrideReason,
+            activationPolicy: line.activationPolicy,
+            lineTotal: line.lineTotal,
+          })),
+        );
+      }
+      const result = await this.detailWith(tx, source.tenantId, draft.id);
+      await this.audit.record(tx, {
+        actorPlatformUserId: actor.userId,
+        actorRole: actor.role,
+        action: "billing.offer.revised",
+        outcome: "success",
+        tenantId: source.tenantId,
+        targetType: "commercial_offer",
+        targetId: draft.id,
+        reason: null,
+        before: { sourceOfferId: source.id, revision: source.revision, status: source.status },
+        after: {
+          revision: draft.revision,
+          status: draft.status,
+          previousRevisionId: source.id,
+        },
+        requestId: null,
+      });
+      await commitPlatformBillingMutation(tx, mutation.row.id, draft.id, result);
+      return result;
     });
   }
 

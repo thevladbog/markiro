@@ -1,6 +1,10 @@
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { BadRequestException } from "@nestjs/common";
-import type { Db } from "@markiro/db";
-import { describe, expect, it, vi } from "vitest";
+import { createDb, schema, type Db } from "@markiro/db";
+import { eq } from "drizzle-orm";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createOfferSchema, type CreateOfferDto } from "../src/modules/platform-offers/dto";
 import type { OfferDocumentsService } from "../src/modules/platform-offers/offer-documents.service";
@@ -8,6 +12,8 @@ import { PlatformOffersController } from "../src/modules/platform-offers/platfor
 import { PlatformOffersService } from "../src/modules/platform-offers/platform-offers.service";
 import type { PlatformPrincipal } from "../src/platform-auth/platform-access-policy";
 import type { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
+import { PlatformAuditService as RealPlatformAuditService } from "../src/platform-auth/platform-audit.service";
+import { createOrganization } from "./support/subscription-fixtures";
 
 const actor: PlatformPrincipal = {
   userId: "11111111-1111-4111-8111-111111111111",
@@ -234,3 +240,185 @@ describe("platform offer response boundary", () => {
     expect(documents.url).not.toHaveBeenCalled();
   });
 });
+
+const databaseUrl = process.env.DATABASE_URL;
+
+describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", () => {
+  const databaseName = `markiro_offer_revisions_${randomUUID().replaceAll("-", "_")}`;
+  const scratchUrl = new URL(databaseUrl ?? "postgres://invalid");
+  scratchUrl.pathname = `/${databaseName}`;
+  scratchUrl.search = "";
+  const maintenance = createDb(databaseUrl ?? "postgres://invalid");
+  const connection = createDb(scratchUrl.toString());
+  const actorId = `offer-revision-${randomUUID()}`;
+  const tenantUserId = `offer-revision-tenant-${randomUUID()}`;
+  const revisionActor: PlatformPrincipal = {
+    userId: actorId,
+    role: "accountant",
+    capabilities: ["billing.read", "billing.write"],
+    twoFactorReady: true,
+  };
+  let tenantId = "";
+  let publishedOfferId = "";
+  let familyId = "";
+  let service: PlatformOffersService;
+
+  beforeAll(async () => {
+    await maintenance.pool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
+    await migrate(connection.db, {
+      migrationsFolder: join(__dirname, "../../../packages/db/migrations"),
+    });
+    tenantId = await createOrganization(connection.db);
+    await connection.db.insert(schema.platformUsers).values({
+      id: actorId,
+      name: "Offer revision actor",
+      email: `${actorId}@example.invalid`,
+      role: revisionActor.role,
+      status: "active",
+    });
+    await connection.db.insert(schema.user).values({
+      id: tenantUserId,
+      name: "Offer revision tenant user",
+      email: `${tenantUserId}@example.invalid`,
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    familyId = randomUUID();
+    const [published] = await connection.db
+      .insert(schema.commercialOffers)
+      .values({
+        tenantId,
+        familyId,
+        revision: 4,
+        status: "draft",
+        total: "240.00",
+        expiresAt: new Date("2026-09-30T21:00:00.000Z"),
+        termsMarkdown: "## Immutable terms",
+        createdByPlatformUserId: actorId,
+      })
+      .returning();
+    publishedOfferId = published!.id;
+    await connection.db.insert(schema.commercialOfferLines).values({
+      tenantId,
+      offerId: publishedOfferId,
+      position: 1,
+      kind: "service",
+      nameRu: "Настройка",
+      nameEn: "Setup",
+      descriptionRu: "Снимок строки",
+      descriptionEn: "Line snapshot",
+      quantity: 2,
+      unit: "час",
+      catalogUnitPrice: "120.00",
+      agreedUnitPrice: "120.00",
+      vatRate: "20.00",
+      vatIncluded: true,
+      lineTotal: "240.00",
+    });
+    await connection.db
+      .update(schema.commercialOffers)
+      .set({
+        status: "published",
+        number: `KP-REVISION-${randomUUID()}`,
+        publishedAt: new Date("2026-08-27T12:00:00.000Z"),
+        publishedByPlatformUserId: actorId,
+      })
+      .where(eq(schema.commercialOffers.id, publishedOfferId));
+    await connection.db.insert(schema.commercialOfferDecisions).values({
+      tenantId,
+      offerId: publishedOfferId,
+      decision: "changes_requested",
+      message: "Change the delivery date",
+      actorUserId: tenantUserId,
+      idempotencyKey: randomUUID(),
+    });
+    service = new PlatformOffersService(connection.db, new RealPlatformAuditService());
+  }, 120_000);
+
+  afterAll(async () => {
+    await connection.pool.end();
+    await maintenance.pool.query(`DROP DATABASE IF EXISTS ${quoteIdentifier(databaseName)}`);
+    await maintenance.pool.end();
+  });
+
+  it("serializes revision retries, copies immutable inputs, and leaves the published offer current", async () => {
+    const idempotencyKey = randomUUID();
+    const [left, right] = await Promise.all([
+      service.revise(revisionActor, publishedOfferId, { idempotencyKey }),
+      service.revise(revisionActor, publishedOfferId, { idempotencyKey }),
+    ]);
+    expect(right).toEqual(left);
+    expect(left).toMatchObject({
+      tenantId,
+      familyId,
+      previousRevisionId: publishedOfferId,
+      revision: 5,
+      status: "draft",
+      number: null,
+      total: "240.00",
+      termsMarkdown: "## Immutable terms",
+      lines: [
+        expect.objectContaining({
+          position: 1,
+          kind: "service",
+          nameRu: "Настройка",
+          quantity: 2,
+          agreedUnitPrice: "120.00",
+          vatIncluded: true,
+          lineTotal: "240.00",
+        }),
+      ],
+    });
+    const family = await connection.db
+      .select()
+      .from(schema.commercialOffers)
+      .where(eq(schema.commercialOffers.familyId, familyId));
+    expect(family).toHaveLength(2);
+    expect(family.find((offer) => offer.id === publishedOfferId)).toMatchObject({
+      status: "published",
+      revision: 4,
+    });
+    const audits = await connection.db
+      .select()
+      .from(schema.platformAuditEvents)
+      .where(eq(schema.platformAuditEvents.targetId, left.id));
+    expect(audits).toEqual([
+      expect.objectContaining({
+        actorPlatformUserId: actorId,
+        actorRole: "accountant",
+        action: "billing.offer.revised",
+        outcome: "success",
+        tenantId,
+        targetType: "commercial_offer",
+        before: { sourceOfferId: publishedOfferId, revision: 4, status: "published" },
+        after: { revision: 5, status: "draft", previousRevisionId: publishedOfferId },
+      }),
+    ]);
+    await expect(
+      service.revise(revisionActor, publishedOfferId, { idempotencyKey: randomUUID() }),
+    ).rejects.toMatchObject({ response: { code: "offer_revision_draft_exists" }, status: 409 });
+  });
+
+  it("rejects revision when the latest published offer has no current changes request", async () => {
+    const [other] = await connection.db
+      .insert(schema.commercialOffers)
+      .values({
+        tenantId,
+        revision: 1,
+        status: "published",
+        number: `KP-NO-REVISION-${randomUUID()}`,
+        publishedAt: new Date(),
+        createdByPlatformUserId: actorId,
+      })
+      .returning();
+    await expect(
+      service.revise(revisionActor, other!.id, { idempotencyKey: randomUUID() }),
+    ).rejects.toMatchObject({ response: { code: "offer_revision_not_requested" }, status: 409 });
+  });
+});
+
+function quoteIdentifier(identifier: string): string {
+  if (!/^[a-z_][a-z0-9_]*$/.test(identifier)) throw new Error("Unsafe database identifier");
+  return `"${identifier}"`;
+}
