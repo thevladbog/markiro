@@ -38,6 +38,7 @@ import {
   type InventorySnapshot,
   type InventorySnapshotInputs,
 } from "./schemas.js";
+import { inventoryStatusChipProps } from "./status.js";
 import "./inventory.css";
 
 function latestSuccessfulImports(
@@ -130,7 +131,10 @@ export function InventoryDetailPage() {
       <PageHeader
         title={inventory.number}
         actions={
-          <StatusChip status="neutral" label={t(`pages.inventory.status.${inventory.status}`)} />
+          <StatusChip
+            {...inventoryStatusChipProps(inventory.status)}
+            label={t(`pages.inventory.status.${inventory.status}`)}
+          />
         }
       />
       <p className="mk-inventory-page__description">

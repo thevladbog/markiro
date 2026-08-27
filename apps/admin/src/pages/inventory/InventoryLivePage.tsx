@@ -7,6 +7,7 @@ import { useInventoryProgress } from "./api.js";
 import { InventoryClosePanel } from "./InventoryClosePanel.js";
 import { InventoryDocuments } from "./InventoryDocuments.js";
 import type { InventoryDetail } from "./schemas.js";
+import { inventoryStatusChipProps } from "./status.js";
 
 function formatCount(value: number, locale: string): string {
   return new Intl.NumberFormat(locale).format(value);
@@ -51,7 +52,7 @@ export function InventoryLivePage({
         </div>
         <div className="mk-inventory-live__actions">
           <StatusChip
-            status={data.status === "running" ? "ok" : "neutral"}
+            {...inventoryStatusChipProps(data.status)}
             label={t(`pages.inventory.status.${data.status}`)}
           />
           {canWrite && data.status === "running" ? (
