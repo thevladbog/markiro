@@ -1,0 +1,146 @@
+---
+import { Picture } from "astro:assets";
+
+import articleHero from "../../../../assets/beer-marking-equipment-hero.png";
+import LandingFooter from "../../../../components/LandingFooter.astro";
+import LandingHeader from "../../../../components/LandingHeader.astro";
+import { BEER_MARKING_EQUIPMENT_ARTICLE_EN } from "../../../../content/articles";
+import { buildArticlePageGraph } from "../../../../lib/seo";
+import { readPublicSiteConfig } from "../../../../lib/site-config";
+import BaseLayout from "../../../../layouts/BaseLayout.astro";
+
+const article = BEER_MARKING_EQUIPMENT_ARTICLE_EN;
+const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<BaseLayout metadata={article} graph={buildArticlePageGraph(article)}>
+  <LandingHeader page={article} phone={config.phone} />
+  <main id="main" class="article-page">
+    <header class="article-hero">
+      <div class="container article-hero__inner">
+        <nav class="breadcrumbs" aria-label="Breadcrumb"><ol><li><a href="/en/">Markiro</a></li><li aria-current="page">{article.navigationLabel}</li></ol></nav>
+        <div class="article-hero__layout">
+          <div class="article-hero__copy">
+            <p class="section-index">{article.eyebrow}</p>
+            <h1>{article.heading}</h1>
+            <p class="article-hero__lead">{article.introduction}</p>
+            <div class="article-byline" aria-label="Publication details"><span>{article.authorName}</span><time datetime={article.publishedAt}>26 August 2026</time><span>{article.readingTimeMinutes} min read</span></div>
+          </div>
+          <figure class="article-hero__media" data-article-visual>
+            <Picture src={articleHero} alt="Beer packaging line with printer, fixed reader, and operator workstation" widths={[480, 720, 1080]} formats={["avif", "webp"]} sizes="(max-width: 767px) 100vw, 45vw" loading="eager" fetchpriority="high" data-article-hero-image />
+            <figcaption>Select equipment as one production control loop, not as unrelated devices.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </header>
+
+    <article class="container article-body">
+      <aside class="article-summary" aria-labelledby="article-summary-title">
+        <p class="section-index">Key takeaways</p><h2 id="article-summary-title">What to define before requesting quotations</h2>
+        <ul>
+          <li data-key-takeaway>Freeze package formats, code location, application method, real line speed, and aggregation level first.</li>
+          <li data-key-takeaway>A handheld 2D imager, fixed reader, machine-vision system, and verifier answer different questions.</li>
+          <li data-key-takeaway>Validate the complete cycle on actual packaging instead of relying on a device’s headline throughput.</li>
+          <li data-key-takeaway>Specify rejection, reprint, restart recovery, and disconnected operation before factory acceptance.</li>
+          <li data-key-takeaway>Interfaces, job identity, acknowledgements, and the local journal matter as much as the printer and camera.</li>
+          <li data-key-takeaway>Compatibility must be proven at the facility; a technology or protocol name is not sufficient evidence.</li>
+        </ul>
+      </aside>
+
+      <nav class="article-toc" aria-label="Article contents"><p class="section-index">Contents</p><ol><li><a href="#process">Process before equipment</a></li><li><a href="#contour">Line functions</a></li><li><a href="#reading">Reader, vision, verifier</a></li><li><a href="#application">Application method</a></li><li><a href="#interfaces">Interfaces and software</a></li><li><a href="#acceptance">Acceptance testing</a></li><li><a href="#supplier">Supplier questions</a></li><li><a href="#markiro">Markiro boundary</a></li></ol></nav>
+
+      <section id="process" aria-labelledby="process-title">
+        <p class="section-index">01 / Inputs</p><h2 id="process-title">Choose the production process before choosing equipment</h2>
+        <p><strong>A reliable specification starts with the production flow, not with a printer model.</strong> The same nominal packs per hour can require different equipment for glass bottles, cans, PET containers, and kegs. Surface geometry, the available application window, package orientation, moisture, speed variation, accumulation, and rejection space all affect the design.</p>
+        <p>The Chestny ZNAK <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/markirovka-tovarov-proizvedennykh-na-territorii-rf-posledovatelnost-deystviy-pivo">official production sequence</a> for Russian beer manufacturers covers product description and GTIN assignment, ordering codes, applying identification means, and submitting the application report. Aggregation can be added where required. These are process functions, not a mandated equipment brand or architecture.</p>
+        <p>International equipment vendors should request an SKU matrix before proposing hardware: package type, label or closure dimensions, code position, minimum and maximum line speed, batch size, changeover frequency, case format, and required SSCC flow. The Russian manufacturer should also state which operations may remain manual and which must be automatic.</p>
+        <div class="article-callout"><strong>A modern solution does not have to begin with a capital rebuild of the line.</strong><p>For a smaller producer, a sensible first loop is one workstation plus a compatible 2D scanner and printer already available on site or selected after testing. Automatic application, machine vision, and rejection are added when actual throughput and failure economics justify them. The budget then buys a reliable process instead of premature machinery.</p></div>
+      </section>
+
+      <section id="contour" aria-labelledby="contour-title">
+        <p class="section-index">02 / Functional loop</p><h2 id="contour-title">Which functions a Russian beer marking line must cover</h2>
+        <p><strong>The line must carry a code from an identified production job to a confirmed physical package.</strong> Individual devices can change, but the control functions cannot disappear between suppliers.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/beer-marking-equipment-contour-en.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Beer marking line functions from job and application through reading, rejection, aggregation, and journal" data-article-diagram />
+          <figcaption>The job source and local journal connect physical equipment into one recoverable process.</figcaption>
+        </figure>
+        <ol class="article-steps">
+          <li><h3>Job and code pool</h3><p>The system binds GTIN, batch, application parameters, and available codes. The active job revision must remain visible on the line.</p></li>
+          <li><h3>Code application</h3><p>The code may arrive on a pre-printed label, on a separate serialized label, or through direct inline printing. This decision defines printing and application hardware.</p></li>
+          <li><h3>Read and decision</h3><p>The reader passes a result to line software. Software distinguishes a valid item from a wrong GTIN, duplicate, malformed stream, or unread symbol.</p></li>
+          <li><h3>Reject or controlled stop</h3><p>An automatic line needs positive reject confirmation. A manual station needs an unambiguous physical quarantine procedure.</p></li>
+          <li><h3>Case and SSCC</h3><p>Accepted items form the case composition. Closing the case triggers the transport label and its confirmation.</p></li>
+          <li><h3>Journal and exchange</h3><p>Operations remain locally recoverable until acknowledged, preventing an outage or workstation restart from producing invisible loss or duplication.</p></li>
+        </ol>
+      </section>
+
+      <section id="reading" aria-labelledby="reading-title">
+        <p class="section-index">03 / Reading and quality</p><h2 id="reading-title">Handheld scanner, fixed reader, machine vision, or verifier?</h2>
+        <p><strong>“Reads Data Matrix” is not a sufficient selection criterion.</strong> A handheld 2D imager lets an operator confirm an item or case. A fixed industrial reader must decode moving packs without aiming and therefore depends on optics, lighting, distance, triggering, and orientation. A machine-vision system may also inspect position and drive the rejection mechanism.</p>
+        <p>A verifier has a different role: it grades the printed symbol under a defined method. Official Russian beer guidance specifies ECC-200 and a minimum application quality of <strong>class 1.5 (C)</strong>, with different cited standards for labels and direct part marking. The same official page documents placement and recommended dimensions: see the Chestny ZNAK guidance on <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/kakim-dolzhen-byt-datamatrix-trebovaniya-k-preobrazovaniyu-i-kachestvu-naneseniya-pivo">Data Matrix conversion and application quality</a>.</p>
+        <div class="article-callout"><strong>A production reader does not replace formal verification.</strong><p>It proves readability for one line configuration. A verifier grades the symbol under a standard method. Both outputs can be useful during acceptance.</p></div>
+      </section>
+
+      <section id="application" aria-labelledby="application-title">
+        <p class="section-index">04 / Application</p><h2 id="application-title">How application method changes the equipment architecture</h2>
+        <p><strong>Beer production has three broad options: pre-printed serialization, a separate serialized label, or direct inline marking.</strong> Pre-printed stock requires roll and job reconciliation. A separate label adds a label printer and a manual or automatic applicator. Direct marking places the print module inside the transport path and synchronizes it with product movement.</p>
+        <p>Official guidance permits identification means on consumer packaging or closures, kegs and keg closures, group packaging, labels, and stickers, subject to the stated rules. For glass and PET bottles, documented options include closures, neck labels, back labels, and primary labels. Regulatory placement alone does not prove production stability: curvature, gloss, condensation, abrasion, and shelf-life readability still need testing.</p>
+        <p>Do not freeze ink, ribbon, label stock, or printing technology before a material trial. Ask for samples at the lowest and highest speed, after a controlled stop and restart, after routine cleaning, and across the expected temperature and humidity range.</p>
+      </section>
+
+      <section id="interfaces" aria-labelledby="interfaces-title">
+        <p class="section-index">05 / Interfaces</p><h2 id="interfaces-title">Which hardware and software contracts must be explicit</h2>
+        <p><strong>Compatibility is more than a connector.</strong> Document transport, protocol, encoding, control-character handling, message terminator, acknowledgement, timeout, retry behavior, and production-job identifier. A scanner contract must preserve the GS separator. A printer contract must define both command language and error reporting.</p>
+        <p>The current Markiro workstation accepts a USB HID keyboard-wedge scanner without a dedicated port configuration, or a serial scanner. It can send print jobs through an installed Windows printer queue, TCP, or a serial port, using <strong>ZPL and TSPL</strong>. Its setup flow performs a control scan and test print; optional label verification ties together the selected printer, print language, and scanner for that run.</p>
+        <p>Direct API integration between a participant’s internal ERP and the Russian marking system is optional. The official Chestny ZNAK page on <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/integratsiya-sistemy-markirovki-s-tovarouchetnoy-sistemoy-uchastnika-pivo">internal accounting-system integration</a> leaves that decision to the participant and points to True API, National Catalogue API, and SUZ documentation. A project still needs named ownership for exchange, retry, and reconciliation between local operations and external status.</p>
+      </section>
+
+      <section id="acceptance" aria-labelledby="acceptance-title">
+        <p class="section-index">06 / Acceptance</p><h2 id="acceptance-title">How to test equipment before rolling it across the plant</h2>
+        <p><strong>Acceptance should cover the operating envelope and failure recovery, not one ideal demonstration.</strong> Start with one SKU and workstation, preserve the evidence, and then expand the matrix.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/beer-marking-equipment-acceptance-en.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Equipment acceptance matrix covering packaging, speed, quality, failures, and recovery" data-article-diagram />
+          <figcaption>Each scenario needs an expected outcome, actual result, deviation owner, and repeatable evidence.</figcaption>
+        </figure>
+        <ul>
+          <li><strong>Packaging:</strong> every material, colour, diameter, code position, and edge-case label variant.</li>
+          <li><strong>Speed:</strong> startup, normal rate, short peak, accumulation, controlled stop, and restart.</li>
+          <li><strong>Quality:</strong> good and borderline samples, glare, displacement, wrinkles, contamination, and wear.</li>
+          <li><strong>Failures:</strong> unread code, wrong GTIN, duplicate, depleted code pool, label jam, and printer unavailable.</li>
+          <li><strong>Recovery:</strong> network loss, workstation restart, job replay, reprint, and physical-case reconciliation.</li>
+        </ul>
+        <p>The protocol should identify equipment and software versions, sample packaging, speed, lighting, consumable lot, and job revision. Without this context, a successful factory test cannot be reproduced after changeover.</p>
+      </section>
+
+      <section id="supplier" aria-labelledby="supplier-title">
+        <p class="section-index">07 / Procurement</p><h2 id="supplier-title">Questions for an equipment supplier or system integrator</h2>
+        <div class="article-checklist">
+          <div><h3>Actual line conditions</h3><ul><li>which of our packages prove the quoted speed;</li><li>what minimum module size is stable;</li><li>how lighting, orientation, and triggering work;</li><li>where a rejected product physically goes.</li></ul></div>
+          <div><h3>Operation and service</h3><ul><li>consumables and changeover time;</li><li>cleaning and calibration routine;</li><li>site spares and replacement lead time;</li><li>remote and on-site support ownership.</li></ul></div>
+          <div><h3>Data and failure modes</h3><ul><li>available interfaces and protocols;</li><li>print and reject acknowledgements;</li><li>what survives network loss;</li><li>how restart duplication is prevented.</li></ul></div>
+        </div>
+        <p>Attach these answers to the acceptance matrix and contract. A statement such as “Chestny ZNAK compatible” is too broad without the agreed packaging, speed, interfaces, and failure scenarios.</p>
+      </section>
+
+      <section id="markiro" aria-labelledby="markiro-title">
+        <p class="section-index">08 / Markiro</p><h2 id="markiro-title">Where Markiro fits into the equipment loop</h2>
+        <p>Markiro connects the production job, scanner, printer, operator action, case composition, and local journal. A workstation continues recording operations through unstable connectivity and sends prepared data in a controlled way. The current aggregation chain is <strong>item → case → SSCC</strong>; pallet aggregation is the next development stage.</p>
+        <div class="article-callout article-callout--boundary"><strong>Markiro is not a universal mechanical line package.</strong><p>The automatic applicator, industrial machine vision, verifier, conveyor, and reject mechanism are selected for the site. Equipment compatibility is confirmed for the specific facility through a joint pilot.</p></div>
+        <p>The current primary category is beer, beer-based beverages, and selected low-alcohol beverages. Additional product types are being added gradually. Connections to a specific Russian marking-system, ERP, EDI, and equipment configuration are confirmed separately.</p>
+      </section>
+
+      <section class="article-conclusion" aria-labelledby="conclusion-title">
+        <p class="section-index">Conclusion</p><h2 id="conclusion-title">Buy a proven process, not a list of devices</h2>
+        <p>A robust line begins with a function map and ends with reproducible acceptance on actual packaging. The printer, reader, and software then operate as one recoverable control loop, with ownership boundaries understood before launch.</p>
+        <a class="button" href="/en/#demo" data-analytics="landing_demo_click" data-placement="article-conclusion">Review one line architecture <span aria-hidden="true">→</span></a>
+      </section>
+
+      <section class="article-related" aria-labelledby="article-related-title">
+        <p class="section-index">Related</p><h2 id="article-related-title">Continue preparing the line</h2>
+        <div class="seo-related__grid"><a href="/en/articles/beer-data-matrix-application-methods/"><span>Choose an application method</span><span aria-hidden="true">→</span></a><a href="/en/articles/beer-marking-cost-russia/"><span>Beer marking cost in Russia</span><span aria-hidden="true">→</span></a><a href="/en/articles/beer-data-matrix-not-scanning/"><span>Beer Data Matrix diagnostics</span><span aria-hidden="true">→</span></a></div>
+      </section>
+    </article>
+  </main>
+  <LandingFooter page={article} />
+  <script>import { browserLandingRuntime, initLanding } from "../../../../scripts/site"; initLanding(document, browserLandingRuntime(window));</script>
+</BaseLayout>

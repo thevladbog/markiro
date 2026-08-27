@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Diagnostic sequence for a duplicate marking code</title>
+  <desc id="desc">Six steps from preserving the raw code to reconciling the result and taking a controlled action.</desc>
+  <rect width="1200" height="620" fill="#111014"/>
+  <text x="70" y="72" fill="#31e981" font-family="IBM Plex Mono, monospace" font-size="18" font-weight="700" letter-spacing="2">DIAGNOSE FROM EVIDENCE</text>
+  <text x="70" y="114" fill="#f4f3f5" font-family="IBM Plex Sans, sans-serif" font-size="30" font-weight="700">Reconstruct the fact before choosing the action</text>
+  <path d="M125 258H1075" stroke="#31e981" stroke-width="3"/>
+  <g font-family="IBM Plex Sans, sans-serif">
+    <g transform="translate(70 180)"><circle cx="55" cy="78" r="42" fill="#1a191e" stroke="#31e981" stroke-width="2"/><text x="55" y="86" fill="#31e981" font-size="23" font-weight="700" text-anchor="middle">01</text><text x="55" y="156" fill="#f4f3f5" font-size="18" font-weight="700" text-anchor="middle">Code</text><text x="55" y="184" fill="#b8b5bd" font-size="15" text-anchor="middle">preserve raw</text></g>
+    <g transform="translate(260 180)"><circle cx="55" cy="78" r="42" fill="#1a191e" stroke="#31e981" stroke-width="2"/><text x="55" y="86" fill="#31e981" font-size="23" font-weight="700" text-anchor="middle">02</text><text x="55" y="156" fill="#f4f3f5" font-size="18" font-weight="700" text-anchor="middle">Journal</text><text x="55" y="184" fill="#b8b5bd" font-size="15" text-anchor="middle">first seen</text></g>
+    <g transform="translate(450 180)"><circle cx="55" cy="78" r="42" fill="#1a191e" stroke="#31e981" stroke-width="2"/><text x="55" y="86" fill="#31e981" font-size="23" font-weight="700" text-anchor="middle">03</text><text x="55" y="156" fill="#f4f3f5" font-size="18" font-weight="700" text-anchor="middle">Product</text><text x="55" y="184" fill="#b8b5bd" font-size="15" text-anchor="middle">find both units</text></g>
+    <g transform="translate(640 180)"><circle cx="55" cy="78" r="42" fill="#1a191e" stroke="#31e981" stroke-width="2"/><text x="55" y="86" fill="#31e981" font-size="23" font-weight="700" text-anchor="middle">04</text><text x="55" y="156" fill="#f4f3f5" font-size="18" font-weight="700" text-anchor="middle">Document</text><text x="55" y="184" fill="#b8b5bd" font-size="15" text-anchor="middle">number and status</text></g>
+    <g transform="translate(830 180)"><circle cx="55" cy="78" r="42" fill="#1a191e" stroke="#31e981" stroke-width="2"/><text x="55" y="86" fill="#31e981" font-size="23" font-weight="700" text-anchor="middle">05</text><text x="55" y="156" fill="#f4f3f5" font-size="18" font-weight="700" text-anchor="middle">Classify</text><text x="55" y="184" fill="#b8b5bd" font-size="15" text-anchor="middle">conflict type</text></g>
+    <g transform="translate(1020 180)"><circle cx="55" cy="78" r="42" fill="#31e981"/><text x="55" y="86" fill="#111014" font-size="23" font-weight="700" text-anchor="middle">06</text><text x="55" y="156" fill="#f4f3f5" font-size="18" font-weight="700" text-anchor="middle">Act</text><text x="55" y="184" fill="#b8b5bd" font-size="15" text-anchor="middle">correct and reconcile</text></g>
+  </g>
+  <rect x="70" y="432" width="1060" height="112" fill="#1a191e" stroke="#38363f"/>
+  <text x="100" y="475" fill="#ffcf66" font-family="IBM Plex Mono, monospace" font-size="16" font-weight="700">CRITICAL RULE</text>
+  <text x="100" y="515" fill="#f4f3f5" font-family="IBM Plex Sans, sans-serif" font-size="22" font-weight="700">Do not print a new code or resend a new report until the first action is understood.</text>
+</svg>

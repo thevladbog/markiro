@@ -1,0 +1,142 @@
+---
+import { Picture } from "astro:assets";
+
+import articleHero from "../../../../assets/offline-beer-marking-hero.png";
+import LandingFooter from "../../../../components/LandingFooter.astro";
+import LandingHeader from "../../../../components/LandingHeader.astro";
+import { OFFLINE_BEER_MARKING_ARTICLE_EN } from "../../../../content/articles";
+import { buildArticlePageGraph } from "../../../../lib/seo";
+import { readPublicSiteConfig } from "../../../../lib/site-config";
+import BaseLayout from "../../../../layouts/BaseLayout.astro";
+
+const article = OFFLINE_BEER_MARKING_ARTICLE_EN;
+const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<BaseLayout metadata={article} graph={buildArticlePageGraph(article)}>
+  <LandingHeader page={article} phone={config.phone} />
+  <main id="main" class="article-page">
+    <header class="article-hero">
+      <div class="container article-hero__inner">
+        <nav class="breadcrumbs" aria-label="Breadcrumbs"><ol><li><a href="/en/">Markiro</a></li><li aria-current="page">{article.navigationLabel}</li></ol></nav>
+        <div class="article-hero__layout">
+          <div class="article-hero__copy">
+            <p class="section-index">{article.eyebrow}</p>
+            <h1>{article.heading}</h1>
+            <p class="article-hero__lead">{article.introduction}</p>
+            <div class="article-byline" aria-label="Publication details"><span>{article.authorName}</span><time datetime={article.publishedAt}>26 August 2026</time><span>{article.readingTimeMinutes} min read</span></div>
+          </div>
+          <figure class="article-hero__media" data-article-visual>
+            <Picture src={articleHero} alt="An operator continues local code checks on a compact beer packaging line during a network outage" widths={[480, 720, 1080]} formats={["avif", "webp"]} sizes="(max-width: 767px) 100vw, 45vw" loading="eager" fetchpriority="high" data-article-hero-image />
+            <figcaption>A resilient station makes connectivity loss explicit and separates permitted local work from server-dependent actions.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </header>
+
+    <article class="container article-body">
+      <aside class="article-summary" aria-labelledby="article-summary-title">
+        <p class="section-index">Key takeaways</p><h2 id="article-summary-title">What offline production operation requires</h2>
+        <ul>
+          <li data-key-takeaway>Production-line offline operation is not the Chestny ZNAK retail local module; it is a prepared local workstation boundary.</li>
+          <li data-key-takeaway>Only a job whose data, permissions, codes, and packing rules are already loaded may continue.</li>
+          <li data-key-takeaway>Every scan, case, and exception must enter a durable local journal before joining the outgoing queue.</li>
+          <li data-key-takeaway>A retry must retain the original operation identity because a missing response does not prove rejection.</li>
+          <li data-key-takeaway>Local duplicates can be stopped immediately; cross-station conflicts may surface only after synchronization.</li>
+          <li data-key-takeaway>Markiro currently controls item → case → SSCC; a direct SUZ or GIS MT connection is a separately accepted integration.</li>
+        </ul>
+      </aside>
+
+      <nav class="article-toc" aria-label="Article contents"><p class="section-index">Contents</p><ol><li><a href="#answer">Short answer</a></li><li><a href="#boundary">Offline boundary</a></li><li><a href="#prepare">Shift preparation</a></li><li><a href="#outage">Outage procedure</a></li><li><a href="#journal">Journal and duplicates</a></li><li><a href="#recovery">Connectivity recovery</a></li><li><a href="#test">Acceptance test</a></li><li><a href="#markiro">Markiro boundary</a></li></ol></nav>
+
+      <section id="answer" aria-labelledby="answer-title">
+        <p class="section-index">01 / Answer</p><h2 id="answer-title">Can a Russian beer marking line operate without internet access</h2>
+        <p><strong>A prepared line station may continue a limited local workflow when the production job, product data, marking codes, and SSCC ranges have been received in advance.</strong> Scanning, local validation, case packing, and SSCC printing should not require a cloud round trip for every item. Connectivity is still required for new server data and the prescribed exchange with Russia’s national marking system.</p>
+        <p>Official beer guidance separates physical application from information reporting and states that production and movement without an applied identification means are prohibited. International teams should use the current Russian source as the authority: <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/sroki-i-etapy-zapuska-obyazatelnoy-markirovki-piva-pivnykh-i-slaboalkogolnykh-napitkov">Chestny ZNAK’s beer and low-alcohol beverage implementation timeline</a>.</p>
+        <div class="article-callout"><strong>The accurate promise is “prepared work may continue locally.”</strong><p>It is not “the internet is unnecessary.” A new job, refreshed permissions, additional marking codes, external report acceptance, and final system outcomes require connectivity.</p></div>
+      </section>
+
+      <section id="boundary" aria-labelledby="boundary-title">
+        <p class="section-index">02 / Boundary</p><h2 id="boundary-title">Which operations may continue and which must wait</h2>
+        <p><strong>The boundary separates prepared local facts from new server facts.</strong> When the current job is present on the station, an operator may scan an applied code, receive a local verdict, add an accepted item to a case, and print an SSCC from a preallocated terminal range. Each action is recorded on the device.</p>
+        <p>The station must not invent a new production order, replenish its code inventory, change server-managed authority, or treat an external report as accepted without a response. Official guidance on code access explains that automated production systems receive and store code values inside a protected technical boundary: <a href="https://markirovka.ru/knowledge/tovarnyegruppy/obschie-voprosy-gis/pochemu-otklyuchena-vozmozhnost-polucheniya-kodov-markirovki-v-csv-formate-v-stantsii-upravleniya-za">Chestny ZNAK guidance on automated-system code receipt and storage</a>.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/offline-beer-marking-boundary-en.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Boundary between local beer marking workstation operations and actions that wait for restored connectivity" data-article-diagram />
+          <figcaption>Only a prepared, permitted workflow continues locally. New data and external confirmation remain pending.</figcaption>
+        </figure>
+        <div class="article-callout article-callout--boundary"><strong>Do not confuse production continuity with retail offline verification.</strong><p>The retail process uses a seller’s local database to make a point-of-sale decision when the central system is unavailable. Its separate rules are described in the <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/rezhim-proverok-na-kassakh-pivo">official beer checkout verification guidance</a>. That module does not replace a production journal, outbox, or recovery protocol.</p></div>
+      </section>
+
+      <section id="prepare" aria-labelledby="prepare-title">
+        <p class="section-index">03 / Before the run</p><h2 id="prepare-title">What must be available before connectivity is lost</h2>
+        <p><strong>Offline resilience is created before filling starts.</strong> The station needs the production job, GTIN and product parameters, approved label template, packing rules, operator authority, and a local identity reserve sized for the agreed production scenario. A missing critical element is a reason to stop before the run, not to improvise during it.</p>
+        <div class="article-checklist">
+          <div><h3>Job data</h3><ul><li>product and GTIN;</li><li>planned quantity;</li><li>pack and case type;</li><li>template version.</li></ul></div>
+          <div><h3>Local reserves</h3><ul><li>codes for the current run;</li><li>SSCC range;</li><li>operator roster;</li><li>printer configuration.</li></ul></div>
+          <div><h3>Start check</h3><ul><li>test scan;</li><li>test print;</li><li>free disk space;</li><li>visible network state.</li></ul></div>
+        </div>
+        <p>A smaller brewery does not need to begin with an oversized plant-server project. A compact workstation can retain the working slice locally. The important question is not rack count but the operating contract: what was prepared, who issued it, and what happens when the reserve is exhausted. The staged approach is covered in our guide to <a href="/en/articles/beer-marking-cost-russia/">beer marking cost in Russia</a>.</p>
+      </section>
+
+      <section id="outage" aria-labelledby="outage-title">
+        <p class="section-index">04 / Outage</p><h2 id="outage-title">What the operator should do when the connection fails</h2>
+        <p><strong>The operator needs a short operational procedure, not a network-engineering task.</strong> The interface identifies local mode, shows the remaining prepared scope, and displays the number of queued operations. Scanning continues only when the local context is complete. A request for a new job or another server-dependent action is blocked with a clear reason.</p>
+        <ol class="article-steps">
+          <li><h3>Confirm the state</h3><p>Record the outage time and verify that the station explicitly reports local operation rather than an unknown failure.</p></li>
+          <li><h3>Check the reserve</h3><p>Confirm that the active job, marking codes, SSCC range, and packing rules are available on the device.</p></li>
+          <li><h3>Avoid parallel records</h3><p>Do not copy codes into a spreadsheet or begin an independent paper log that creates a second source of truth.</p></li>
+          <li><h3>Stop at the boundary</h3><p>If a local reserve is exhausted or a new server action is required, finish the safe step and wait for connectivity.</p></li>
+        </ol>
+        <p>Keep network loss separate from a scanner, printer, or local-disk failure. Those are different recovery paths. A code-reading fault can be isolated with our <a href="/en/articles/beer-data-matrix-not-scanning/">beer Data Matrix diagnostic guide</a>.</p>
+      </section>
+
+      <section id="journal" aria-labelledby="journal-title">
+        <p class="section-index">05 / Durable facts</p><h2 id="journal-title">Why the local journal matters more than an online icon</h2>
+        <p><strong>An operation becomes durable when it is written to the device, not when the interface animates.</strong> A scan record should retain time, station, shift, operator, local outcome, and case association. The outgoing queue must survive application and workstation restart. Otherwise the physical item moves downstream while its production evidence disappears.</p>
+        <p>A station can stop a repeated code against its local accepted-code registry. Two isolated stations cannot perform an immediate global check, so the same code could be accepted on both. After connectivity returns, the server applies the defined ownership rule and exposes the losing event as a conflict for review. The system must not silently rewrite production history.</p>
+        <p>Our separate guide to a <a href="/en/articles/duplicate-beer-marking-code-russia/">duplicate beer marking code</a> distinguishes a repeated scan, two products with one identity, a repeated report, and a controlled reprint.</p>
+        <p>This is particularly important for aggregation. An accepted item belongs to one case, the closed case receives one SSCC, and reprinting a damaged label must not create another logical case. The full relationship is explained in our guide to <a href="/en/articles/beer-case-aggregation/">beer case aggregation</a>.</p>
+      </section>
+
+      <section id="recovery" aria-labelledby="recovery-title">
+        <p class="section-index">06 / Recovery</p><h2 id="recovery-title">How to synchronize the queue without duplicates</h2>
+        <p><strong>When connectivity returns, the station must retry the original operations with their original identities.</strong> A timeout does not prove that a server rejected a batch; it may have accepted the request while the response was lost. Recreating the batch as new work makes recovery itself a duplication mechanism.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/offline-beer-marking-recovery-en.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Five-step recovery sequence for an offline beer marking queue after connectivity returns" data-article-diagram />
+          <figcaption>The production fact is persisted first and its delivery is retried second. A queue row is removed only after an unambiguous outcome.</figcaption>
+        </figure>
+        <p>Useful outcomes include accepted, already accepted, rejected by a business rule, and temporarily unprocessed. A conflict with another station is its own result, not a generic network failure. After synchronization, reconcile locally accepted items, closed cases, conflicts, and records still pending.</p>
+      </section>
+
+      <section id="test" aria-labelledby="test-title">
+        <p class="section-index">07 / Acceptance</p><h2 id="test-title">How to test offline operation before a real incident</h2>
+        <p><strong>Disconnect the network during a representative acceptance run and verify the complete recovery.</strong> A demonstration in which only a Wi-Fi icon disappears proves nothing. Exercise scanning, case closure, SSCC printing, station restart, a repeated delivery attempt, and a cross-station conflict.</p>
+        <div class="article-cases">
+          <article><h3>Lost response</h3><p>The connection fails after a batch is sent. Retrying must neither duplicate the operation nor acknowledge it prematurely.</p></article>
+          <article><h3>Restart</h3><p>The workstation closes with pending facts. Its journal, current case, and queue must return after launch.</p></article>
+          <article><h3>Two stations</h3><p>The same code is accepted locally in two places. Synchronization must expose a recoverable conflict.</p></article>
+        </div>
+        <p>Write the acceptance boundary down: permitted local actions, agreed reserve size, behaviour at exhaustion, conflict ownership, and evidence of successful delivery. Do not advertise unlimited offline production when the test covered a short network pause.</p>
+      </section>
+
+      <section id="markiro" aria-labelledby="markiro-title">
+        <p class="section-index">08 / Markiro</p><h2 id="markiro-title">The current Markiro operating boundary</h2>
+        <p><strong>The Markiro station retains its working context locally, appends scans to a durable journal, creates an outgoing queue, and delivers it in retry-safe batches.</strong> SSCC ranges are preallocated per terminal so independent stations do not issue the same case number. The local registry blocks a repeat on one device, while cross-station conflicts become visible after synchronization.</p>
+        <p>The current product boundary is <strong>item → case → SSCC</strong>. External-system reporting uses the agreed export or integration layer for the specific deployment. A direct Markiro connection to SUZ or GIS MT must not be treated as live until it has been separately configured and accepted. This boundary lets a smaller producer start with a modern compact workstation and add automation as line volume grows.</p>
+      </section>
+
+      <section class="article-conclusion" aria-labelledby="conclusion-title">
+        <p class="section-index">Conclusion</p><h2 id="conclusion-title">Resilient offline operation means durable facts and an explicit boundary</h2>
+        <p>A line survives a network outage when it knows the prepared scope, persists every production fact before delivery, and resumes the original queue without inventing new operations. Anything that requires new data or external confirmation waits visibly for connectivity.</p>
+        <a class="button" href="/en/#demo" data-analytics="landing_demo_click" data-placement="article-conclusion">Review an outage scenario <span aria-hidden="true">→</span></a>
+      </section>
+
+      <section class="article-related" aria-labelledby="article-related-title">
+        <p class="section-index">Related</p><h2 id="article-related-title">Continue planning a resilient line</h2>
+        <div class="seo-related__grid"><a href="/en/offline-production/"><span>Markiro offline production</span><span aria-hidden="true">→</span></a><a href="/en/articles/beer-case-aggregation/"><span>Beer case aggregation</span><span aria-hidden="true">→</span></a><a href="/en/articles/beer-marking-cost-russia/"><span>Staged launch budget</span><span aria-hidden="true">→</span></a></div>
+      </section>
+    </article>
+  </main>
+  <LandingFooter page={article} />
+  <script>import { browserLandingRuntime, initLanding } from "../../../../scripts/site"; initLanding(document, browserLandingRuntime(window));</script>
+</BaseLayout>

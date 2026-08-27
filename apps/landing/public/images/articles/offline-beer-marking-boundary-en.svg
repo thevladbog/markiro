@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Local operating boundary during a network outage</title>
+  <desc id="desc">The left side shows operations that may continue on a prepared station; the right side shows actions that require restored connectivity.</desc>
+  <rect width="1200" height="620" fill="#131216"/>
+  <text x="64" y="68" fill="#3ddc7a" font-family="IBM Plex Sans,Arial,sans-serif" font-size="18" font-weight="700" letter-spacing="2">NO NETWORK ≠ NO OPERATION RECORD</text>
+  <rect x="64" y="110" width="504" height="420" rx="4" fill="#1b1a1f" stroke="#35333b"/>
+  <rect x="632" y="110" width="504" height="420" rx="4" fill="#1b1a1f" stroke="#35333b"/>
+  <circle cx="112" cy="160" r="12" fill="#3ddc7a"/>
+  <text x="142" y="168" fill="#f4f2f6" font-family="IBM Plex Sans,Arial,sans-serif" font-size="26" font-weight="700">May continue locally</text>
+  <text x="96" y="224" fill="#9d9aa4" font-family="IBM Plex Sans,Arial,sans-serif" font-size="16">ONLY A PREPARED AND PERMITTED WORKFLOW</text>
+  <g fill="#f4f2f6" font-family="IBM Plex Sans,Arial,sans-serif" font-size="22">
+    <text x="112" y="282">01  Scan codes from the loaded job</text>
+    <text x="112" y="335">02  Block local duplicates</text>
+    <text x="112" y="388">03  Pack accepted items into a case</text>
+    <text x="112" y="441">04  Print SSCC from a local range</text>
+  </g>
+  <text x="96" y="494" fill="#3ddc7a" font-family="IBM Plex Sans,Arial,sans-serif" font-size="17" font-weight="700">JOURNAL AND QUEUE PERSIST</text>
+  <circle cx="680" cy="160" r="12" fill="#f2a341"/>
+  <text x="710" y="168" fill="#f4f2f6" font-family="IBM Plex Sans,Arial,sans-serif" font-size="26" font-weight="700">Must wait for connectivity</text>
+  <text x="664" y="224" fill="#9d9aa4" font-family="IBM Plex Sans,Arial,sans-serif" font-size="16">NEW DATA AND EXTERNAL CONFIRMATION</text>
+  <g fill="#f4f2f6" font-family="IBM Plex Sans,Arial,sans-serif" font-size="22">
+    <text x="680" y="282">01  Receive a new production job</text>
+    <text x="680" y="335">02  Replenish codes and SSCC ranges</text>
+    <text x="680" y="388">03  Deliver the durable queue</text>
+    <text x="680" y="441">04  Receive final server outcomes</text>
+  </g>
+  <text x="664" y="494" fill="#f2a341" font-family="IBM Plex Sans,Arial,sans-serif" font-size="17" font-weight="700">NEVER DISPLAY FALSE SUCCESS</text>
+  <line x1="64" y1="574" x2="1136" y2="574" stroke="#35333b"/>
+  <text x="64" y="602" fill="#9d9aa4" font-family="IBM Plex Sans,Arial,sans-serif" font-size="16">The boundary depends on the loaded job, cached permissions, and local reserves.</text>
+</svg>

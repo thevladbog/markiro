@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Actions for each beer application report processing status</title>
+  <desc id="desc">Four outcomes: pending, processed, partially processed, and processed with an error.</desc>
+  <rect width="1200" height="620" fill="#111014"/>
+  <text x="70" y="70" fill="#31e981" font-family="IBM Plex Mono, monospace" font-size="18" font-weight="700" letter-spacing="2">STATUS DEFINES THE NEXT ACTION</text>
+  <text x="70" y="112" fill="#f4f3f5" font-family="IBM Plex Sans, sans-serif" font-size="30" font-weight="700">Do not resend every code after every warning</text>
+  <g font-family="IBM Plex Sans, sans-serif">
+    <g transform="translate(70 160)"><rect width="1060" height="86" fill="#1a191e" stroke="#e9b949"/><text x="24" y="34" fill="#e9b949" font-family="IBM Plex Mono, monospace" font-size="16" font-weight="700">PENDING / NO RESPONSE</text><text x="370" y="35" fill="#f4f3f5" font-size="20" font-weight="700">Check signature and document card</text><text x="370" y="64" fill="#b8b5bd" font-size="16">Do not clone the request while its first outcome is unknown.</text></g>
+    <g transform="translate(70 264)"><rect width="1060" height="86" fill="#1a191e" stroke="#31e981"/><text x="24" y="34" fill="#31e981" font-family="IBM Plex Mono, monospace" font-size="16" font-weight="700">PROCESSED</text><text x="370" y="35" fill="#f4f3f5" font-size="20" font-weight="700">Record the ID and reconcile code statuses</text><text x="370" y="64" fill="#b8b5bd" font-size="16">Archive the evidence and close the shift control.</text></g>
+    <g transform="translate(70 368)"><rect width="1060" height="86" fill="#1a191e" stroke="#79b8ff"/><text x="24" y="34" fill="#79b8ff" font-family="IBM Plex Mono, monospace" font-size="16" font-weight="700">PARTIALLY PROCESSED</text><text x="370" y="35" fill="#f4f3f5" font-size="20" font-weight="700">Separate successful and failed codes</text><text x="370" y="64" fill="#b8b5bd" font-size="16">The next report contains only corrected failed codes.</text></g>
+    <g transform="translate(70 472)"><rect width="1060" height="86" fill="#1a191e" stroke="#ff7a66"/><text x="24" y="34" fill="#ff7a66" font-family="IBM Plex Mono, monospace" font-size="16" font-weight="700">PROCESSED WITH ERROR</text><text x="370" y="35" fill="#f4f3f5" font-size="20" font-weight="700">Correct the cause for the whole document</text><text x="370" y="64" fill="#b8b5bd" font-size="16">Statuses do not change; resubmit every corrected code.</text></g>
+  </g>
+</svg>
