@@ -2,7 +2,7 @@ import type { INestApplication } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { Test } from "@nestjs/testing";
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import express from "express";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -41,7 +41,7 @@ const expectedFormats = {
   items: [
     {
       id: "inventory_xml_gismt_aggregation",
-      version: 1,
+      version: 2,
       label: "[XML][ГИСМТ] Формирование упаковки",
       extension: "xml",
       mimeType: "application/xml; charset=utf-8",
@@ -55,6 +55,66 @@ const expectedFormats = {
       label: "[XML][ГИСМТ] Расформирование упаковки",
       extension: "xml",
       mimeType: "application/xml; charset=utf-8",
+      requiredSourceCategories: ["verified", "protected", "newBoxes"],
+      supportsParts: false,
+      availability: "available",
+    },
+    {
+      id: "inventory_txt_write_off",
+      version: 1,
+      label: "[TXT] Коды к списанию",
+      extension: "txt",
+      mimeType: "text/plain; charset=utf-8",
+      requiredSourceCategories: ["writeOffCandidates", "protected"],
+      supportsParts: false,
+      availability: "available",
+    },
+    {
+      id: "inventory_csv_write_off",
+      version: 1,
+      label: "[CSV] Коды к списанию",
+      extension: "csv",
+      mimeType: "text/csv; charset=utf-8",
+      requiredSourceCategories: ["writeOffCandidates", "protected"],
+      supportsParts: false,
+      availability: "available",
+    },
+    {
+      id: "inventory_csv_current_stock",
+      version: 1,
+      label: "[CSV] Коды на учёт",
+      extension: "csv",
+      mimeType: "text/csv; charset=utf-8",
+      requiredSourceCategories: ["verified", "protected"],
+      supportsParts: false,
+      availability: "available",
+    },
+    {
+      id: "inventory_csv_final_box_contents",
+      version: 1,
+      label: "[CSV] Состав итоговых коробов",
+      extension: "csv",
+      mimeType: "text/csv; charset=utf-8",
+      requiredSourceCategories: ["verified", "protected", "newBoxes"],
+      supportsParts: false,
+      availability: "available",
+    },
+    {
+      id: "inventory_txt_final_boxes",
+      version: 1,
+      label: "[TXT] Номера итоговых коробов",
+      extension: "txt",
+      mimeType: "text/plain; charset=utf-8",
+      requiredSourceCategories: ["verified", "protected", "newBoxes"],
+      supportsParts: false,
+      availability: "available",
+    },
+    {
+      id: "inventory_csv_balances_by_production_date",
+      version: 1,
+      label: "[CSV] Остатки по датам производства",
+      extension: "csv",
+      mimeType: "text/csv; charset=utf-8",
       requiredSourceCategories: ["verified", "protected", "newBoxes"],
       supportsParts: false,
       availability: "available",
@@ -101,8 +161,77 @@ describe.skipIf(!ready)("inventory document formats e2e", () => {
     return { agent, tenantId };
   }
 
-  it("advertises the two approved GISMT XML formats and rejects an unknown format", async () => {
-    const { agent } = await owner();
+  async function seedClosedInventory(tenantId: string): Promise<string> {
+    const [member] = await db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, tenantId))
+      .limit(1);
+    if (!member) throw new Error("Expected catalog acceptance actor");
+    const productId = randomUUID();
+    const lineId = randomUUID();
+    const inventoryId = randomUUID();
+    const snapshotId = randomUUID();
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId,
+      gtin14: "04600000000015",
+      name: "Catalog acceptance product",
+    });
+    await db.insert(schema.lines).values({ id: lineId, tenantId, name: "Catalog acceptance line" });
+    await db.insert(schema.inventories).values({
+      id: inventoryId,
+      tenantId,
+      number: `INV-${randomUUID()}`,
+      productId,
+      gtin14Snapshot: "04600000000015",
+      lineId,
+      mode: "check",
+      productionDateFrom: "2026-08-01",
+      productionDateTo: "2026-08-31",
+      createdByUserId: member.userId,
+    });
+    await db.insert(schema.inventorySnapshots).values({
+      id: snapshotId,
+      tenantId,
+      inventoryId,
+      combinedDigest: "a".repeat(64),
+      productName: "Catalog acceptance product",
+      lineName: "Catalog acceptance line",
+      boxCapacity: null,
+      emittedCount: 0,
+      introducedCount: 0,
+      appliedCount: 0,
+      retiredCount: 0,
+      writtenOffCount: 0,
+      disaggregationCount: 0,
+      protectedCount: 0,
+      expectedCount: 0,
+      packageCount: 0,
+      looseCount: 0,
+      fixedByUserId: member.userId,
+    });
+    await db
+      .update(schema.inventories)
+      .set({
+        status: "closed",
+        activeSnapshotId: snapshotId,
+        stationManifest: { snapshotRevision: 1 },
+        resultRevision: 1,
+        startedByUserId: member.userId,
+        startedAt: new Date("2026-08-27T08:00:00.000Z"),
+        closedByUserId: member.userId,
+        closedAt: new Date("2026-08-27T09:00:00.000Z"),
+      })
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
+      );
+    return inventoryId;
+  }
+
+  it("advertises the exact eight current formats and rejects unknown and hidden versions", async () => {
+    const { agent, tenantId } = await owner();
+    const closedInventoryId = await seedClosedInventory(tenantId);
     await agent.get("/inventory-document-formats").expect(200, expectedFormats);
     await agent
       .post(`/inventories/${randomUUID()}/document-runs`)
@@ -111,6 +240,13 @@ describe.skipIf(!ready)("inventory document formats e2e", () => {
         idempotencyKey: randomUUID(),
       })
       .expect(400, { code: "INVENTORY_DOCUMENT_FORMAT_UNKNOWN" });
+    await agent
+      .post(`/inventories/${closedInventoryId}/document-runs`)
+      .send({
+        selectedFormats: [{ id: "inventory_xml_gismt_aggregation", version: 1 }],
+        idempotencyKey: randomUUID(),
+      })
+      .expect(400, { code: "INVENTORY_DOCUMENT_FORMAT_SUPERSEDED" });
   });
 
   it("requires operations.read and rejects station credentials", async () => {

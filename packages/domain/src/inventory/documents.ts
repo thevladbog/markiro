@@ -51,6 +51,7 @@ export type InventoryDocumentFormatDescriptor = z.infer<
 export type InventoryDocumentRegistryErrorCode =
   | "INVALID_DESCRIPTOR"
   | "DUPLICATE_FORMAT_ID"
+  | "DUPLICATE_FORMAT_VERSION"
   | "FORMAT_UNKNOWN"
   | "FORMAT_SUPERSEDED"
   | "FORMAT_UNAVAILABLE";
@@ -65,6 +66,11 @@ export class InventoryDocumentRegistryError extends Error {
 export interface InventoryDocumentRegistry {
   listAvailable(): readonly InventoryDocumentFormatDescriptor[];
   resolve(id: string, version: number): InventoryDocumentFormatDescriptor;
+  resolveRegistered(id: string, version: number): InventoryDocumentFormatDescriptor;
+}
+
+function formatKey(id: string, version: number): string {
+  return `${id}@${version}`;
 }
 
 function immutableDescriptor(value: unknown): InventoryDocumentFormatDescriptor {
@@ -81,39 +87,67 @@ function immutableDescriptor(value: unknown): InventoryDocumentFormatDescriptor 
 export function createInventoryDocumentRegistry(
   input: readonly unknown[],
 ): InventoryDocumentRegistry {
-  const byId = new Map<string, InventoryDocumentFormatDescriptor>();
+  const byRegisteredVersion = new Map<string, InventoryDocumentFormatDescriptor>();
+  const registeredIds = new Set<string>();
+  const currentById = new Map<string, InventoryDocumentFormatDescriptor>();
   for (const value of input) {
     const descriptor = immutableDescriptor(value);
-    if (byId.has(descriptor.id)) {
+    const key = formatKey(descriptor.id, descriptor.version);
+    if (byRegisteredVersion.has(key)) {
+      throw new InventoryDocumentRegistryError("DUPLICATE_FORMAT_VERSION");
+    }
+    if (descriptor.availability === "available" && currentById.has(descriptor.id)) {
       throw new InventoryDocumentRegistryError("DUPLICATE_FORMAT_ID");
     }
-    byId.set(descriptor.id, descriptor);
+    byRegisteredVersion.set(key, descriptor);
+    registeredIds.add(descriptor.id);
+    if (descriptor.availability === "available") {
+      currentById.set(descriptor.id, descriptor);
+    }
   }
 
-  const available = Object.freeze(
-    [...byId.values()].filter((descriptor) => descriptor.availability === "available"),
-  );
+  const available = Object.freeze([...currentById.values()]);
 
   return Object.freeze({
     listAvailable: () => available,
     resolve: (id: string, version: number) => {
-      const descriptor = byId.get(id);
-      if (!descriptor) throw new InventoryDocumentRegistryError("FORMAT_UNKNOWN");
-      if (descriptor.version !== version) {
-        throw new InventoryDocumentRegistryError("FORMAT_SUPERSEDED");
+      const current = currentById.get(id);
+      if (current) {
+        if (current.version !== version) {
+          throw new InventoryDocumentRegistryError("FORMAT_SUPERSEDED");
+        }
+        return current;
       }
-      if (descriptor.availability !== "available") {
+      if (registeredIds.has(id)) {
         throw new InventoryDocumentRegistryError("FORMAT_UNAVAILABLE");
+      }
+      throw new InventoryDocumentRegistryError("FORMAT_UNKNOWN");
+    },
+    resolveRegistered: (id: string, version: number) => {
+      const descriptor = byRegisteredVersion.get(formatKey(id, version));
+      if (!descriptor) {
+        throw new InventoryDocumentRegistryError("FORMAT_UNKNOWN");
       }
       return descriptor;
     },
   });
 }
 
+const legacyAggregationV1 = Object.freeze({
+  id: "inventory_xml_gismt_aggregation",
+  version: 1,
+  label: "[XML][ГИСМТ] Формирование упаковки",
+  extension: "xml",
+  mimeType: "application/xml; charset=utf-8",
+  requiredSourceCategories: Object.freeze(["verified", "protected", "newBoxes"] as const),
+  supportsParts: false,
+  availability: "unavailable",
+} as const satisfies InventoryDocumentFormatDescriptor);
+
 export const INVENTORY_DOCUMENT_FORMATS = Object.freeze([
   Object.freeze({
     id: "inventory_xml_gismt_aggregation",
-    version: 1,
+    version: 2,
     label: "[XML][ГИСМТ] Формирование упаковки",
     extension: "xml",
     mimeType: "application/xml; charset=utf-8",
@@ -131,15 +165,83 @@ export const INVENTORY_DOCUMENT_FORMATS = Object.freeze([
     supportsParts: false,
     availability: "available",
   }),
+  Object.freeze({
+    id: "inventory_txt_write_off",
+    version: 1,
+    label: "[TXT] Коды к списанию",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    requiredSourceCategories: Object.freeze(["writeOffCandidates", "protected"] as const),
+    supportsParts: false,
+    availability: "available",
+  }),
+  Object.freeze({
+    id: "inventory_csv_write_off",
+    version: 1,
+    label: "[CSV] Коды к списанию",
+    extension: "csv",
+    mimeType: "text/csv; charset=utf-8",
+    requiredSourceCategories: Object.freeze(["writeOffCandidates", "protected"] as const),
+    supportsParts: false,
+    availability: "available",
+  }),
+  Object.freeze({
+    id: "inventory_csv_current_stock",
+    version: 1,
+    label: "[CSV] Коды на учёт",
+    extension: "csv",
+    mimeType: "text/csv; charset=utf-8",
+    requiredSourceCategories: Object.freeze(["verified", "protected"] as const),
+    supportsParts: false,
+    availability: "available",
+  }),
+  Object.freeze({
+    id: "inventory_csv_final_box_contents",
+    version: 1,
+    label: "[CSV] Состав итоговых коробов",
+    extension: "csv",
+    mimeType: "text/csv; charset=utf-8",
+    requiredSourceCategories: Object.freeze(["verified", "protected", "newBoxes"] as const),
+    supportsParts: false,
+    availability: "available",
+  }),
+  Object.freeze({
+    id: "inventory_txt_final_boxes",
+    version: 1,
+    label: "[TXT] Номера итоговых коробов",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    requiredSourceCategories: Object.freeze(["verified", "protected", "newBoxes"] as const),
+    supportsParts: false,
+    availability: "available",
+  }),
+  Object.freeze({
+    id: "inventory_csv_balances_by_production_date",
+    version: 1,
+    label: "[CSV] Остатки по датам производства",
+    extension: "csv",
+    mimeType: "text/csv; charset=utf-8",
+    requiredSourceCategories: Object.freeze(["verified", "protected", "newBoxes"] as const),
+    supportsParts: false,
+    availability: "available",
+  }),
 ] as const satisfies readonly InventoryDocumentFormatDescriptor[]);
 
-export const inventoryDocumentRegistry = createInventoryDocumentRegistry(
-  INVENTORY_DOCUMENT_FORMATS,
-);
+export const inventoryDocumentRegistry = createInventoryDocumentRegistry([
+  legacyAggregationV1,
+  ...INVENTORY_DOCUMENT_FORMATS,
+]);
+
+export function getRegisteredInventoryDocumentFormat(
+  id: string,
+  version: number,
+): InventoryDocumentFormatDescriptor {
+  return inventoryDocumentRegistry.resolveRegistered(id, version);
+}
 
 export function getInventoryDocumentFormat(
   id: string,
   version: number,
 ): InventoryDocumentFormatDescriptor {
-  return inventoryDocumentRegistry.resolve(id, version);
+  return getRegisteredInventoryDocumentFormat(id, version);
 }

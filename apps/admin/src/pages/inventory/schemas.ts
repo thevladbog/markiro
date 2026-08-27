@@ -409,7 +409,7 @@ export const inventoryDocumentArtifactSchema = z.strictObject({
   rowCount: nonnegativeInteger,
   codeCount: nonnegativeInteger,
   boxCount: nonnegativeInteger,
-  byteSize: z.number().int().positive(),
+  byteSize: z.number().int().min(0),
   sha256: digest,
   downloadedAt: dateTime.nullable(),
   invalidatedAt: dateTime.nullable(),

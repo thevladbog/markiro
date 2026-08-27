@@ -589,6 +589,13 @@
       "when": 1787798683607,
       "tag": "0083_inventory_document_rendering_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1787838007131,
+      "tag": "0084_inventory_document_artifact_empty_files",
+      "breakpoints": true
     }
   ]
 }
