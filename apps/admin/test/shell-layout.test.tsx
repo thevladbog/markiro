@@ -145,6 +145,7 @@ describe("app shell layout", () => {
       ["Каталог", "/catalog"],
       ["Смены", "/shifts"],
       ["Линии", "/lines"],
+      ["Инвентаризации", "/inventory"],
       ["Контрагенты", "/counterparties"],
       ["Операторы и сотрудники", "/employees"],
       ["Этикетки", "/labels"],

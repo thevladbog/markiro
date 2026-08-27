@@ -10,6 +10,7 @@ import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { schema, type Db } from "@markiro/db";
+import { INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@markiro/domain";
 
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -227,14 +228,44 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     return uploadNamed(agent, inventoryId, status, bytes, filename);
   }
 
-  async function markReady(tenantId: string, inventoryId: string): Promise<void> {
+  async function markReady(
+    tenantId: string,
+    inventoryId: string,
+    expectedCount = 0,
+  ): Promise<string> {
     const userId = await actorUserId(tenantId);
+    const [catalogFacts] = await db
+      .select({
+        productName: schema.products.name,
+        lineName: schema.lines.name,
+        boxCapacity: schema.products.boxCapacity,
+      })
+      .from(schema.inventories)
+      .innerJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.inventories.tenantId),
+          eq(schema.products.id, schema.inventories.productId),
+        ),
+      )
+      .innerJoin(
+        schema.lines,
+        and(
+          eq(schema.lines.tenantId, schema.inventories.tenantId),
+          eq(schema.lines.id, schema.inventories.lineId),
+        ),
+      )
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
+      );
+    if (!catalogFacts) throw new Error("Expected inventory catalog fixture");
     const [snapshot] = await db
       .insert(schema.inventorySnapshots)
       .values({
         tenantId,
         inventoryId,
         combinedDigest: "a".repeat(64),
+        ...catalogFacts,
         emittedCount: 0,
         introducedCount: 0,
         appliedCount: 0,
@@ -242,7 +273,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
         writtenOffCount: 0,
         disaggregationCount: 0,
         protectedCount: 0,
-        expectedCount: 0,
+        expectedCount,
         packageCount: 0,
         looseCount: 0,
         fixedByUserId: userId,
@@ -255,6 +286,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       .where(
         and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
       );
+    return snapshot.id;
   }
 
   it("requires cabinet operations permissions and gives read routes no mutation capability", async () => {
@@ -379,6 +411,257 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     });
   });
 
+  it("serves a tenant-scoped print-ready task form only after a fixed snapshot exists", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId, templateId } = await seedPreparation(owner, {
+      mode: "repack",
+    });
+    await db
+      .update(schema.organization)
+      .set({ name: "ООО «Пивоварня»" })
+      .where(eq(schema.organization.id, tenantId));
+    await db
+      .update(schema.products)
+      .set({ boxCapacity: 20 })
+      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
+    const inventory = await createInventory(owner, productId, lineId, "repack", templateId);
+
+    await owner
+      .get(`/inventories/${inventory.id}/task-form`)
+      .expect(409, { code: "INVENTORY_TASK_FORM_SNAPSHOT_REQUIRED" });
+
+    const snapshotId = await markReady(tenantId, inventory.id, 4_116);
+    const form = await owner
+      .get(`/inventories/${inventory.id}/task-form`)
+      .expect("Content-Type", /text\/html/)
+      .expect(200);
+    expect(form.text).toContain("ООО «Пивоварня»");
+    expect(form.text).toContain("04680089900383");
+    expect(form.text).toContain("Задание на инвентаризацию");
+    expect(form.text).toContain("4&nbsp;116 кодов");
+    expect(form.text).toContain("20 бутылок");
+    expect(form.text).toContain(`markiro:inventory:v1:${inventory.id}`);
+
+    const userId = await actorUserId(tenantId);
+    const startedAt = new Date("2026-08-26T09:30:00.000Z");
+    await db
+      .update(schema.products)
+      .set({ name: "Changed after start", boxCapacity: 24 })
+      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
+    await db
+      .update(schema.lines)
+      .set({ name: "Changed line after start" })
+      .where(and(eq(schema.lines.tenantId, tenantId), eq(schema.lines.id, lineId)));
+    const stillReady = await owner.get(`/inventories/${inventory.id}/task-form`).expect(200);
+    expect(stillReady.text).toContain("Inventory Water");
+    expect(stillReady.text).toContain("Inventory line");
+    expect(stillReady.text).toContain("20 бутылок");
+    expect(stillReady.text).not.toContain("Changed after start");
+    expect(stillReady.text).not.toContain("Changed line after start");
+    await db
+      .update(schema.inventories)
+      .set({
+        status: "running",
+        stationManifest: {
+          inventoryId: inventory.id,
+          inventoryNumber: inventory.number,
+          snapshotId,
+          snapshotRevision: 1,
+          snapshotFixedAt: "2026-08-26T09:12:00.000Z",
+          combinedDigest: "a".repeat(64),
+          contentDigest: "b".repeat(64),
+          codeCount: 0,
+          productId,
+          productName: "Inventory Water",
+          productPrintName: null,
+          egaisCode: null,
+          shelfLifeDays: null,
+          gtin14: FIXTURE_GTIN,
+          boxCapacity: 20,
+          mode: "repack",
+          lineId,
+          lineName: "Inventory line",
+          productionDateFrom: "2026-08-01",
+          productionDateTo: "2026-08-31",
+          boxLabelTemplate: {
+            id: templateId,
+            name: "Inventory box label",
+            spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+          },
+          limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
+        },
+        startedByUserId: userId,
+        startedAt,
+      })
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventory.id)),
+      );
+    const running = await owner.get(`/inventories/${inventory.id}/task-form`).expect(200);
+    expect(running.text).toContain("Inventory Water");
+    expect(running.text).toContain("Inventory line");
+    expect(running.text).toContain("20 бутылок");
+    expect(running.text).not.toContain("Changed after start");
+    expect(running.text).not.toContain("Changed line after start");
+
+    const closedAt = new Date("2026-08-26T10:00:00.000Z");
+    await db
+      .update(schema.inventories)
+      .set({ status: "closed", closedByUserId: userId, closedAt })
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventory.id)),
+      );
+    await owner.get(`/inventories/${inventory.id}/task-form`).expect(200);
+
+    const completedAt = new Date("2026-08-26T10:30:00.000Z");
+    await db
+      .update(schema.inventories)
+      .set({
+        status: "completed",
+        completionAcknowledgedByUserId: userId,
+        completionAcknowledgedAt: completedAt,
+        completedByUserId: userId,
+        completedAt,
+      })
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventory.id)),
+      );
+    await owner.get(`/inventories/${inventory.id}/task-form`).expect(200);
+
+    const other = request.agent(app!.getHttpServer());
+    await seedPreparation(other);
+    await other.get(`/inventories/${inventory.id}/task-form`).expect(404);
+  });
+
+  it("projects append-only import history and the exact active snapshot for reloadable preparation", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, productId, lineId } = await seedPreparation(agent);
+    const inventory = await createInventory(agent, productId, lineId);
+    const userId = await actorUserId(tenantId);
+    const createdAt = new Date("2026-08-26T09:00:00.000Z");
+    const selectedIds = Object.fromEntries(
+      INVENTORY_CHZ_STATUSES.map((status) => [status, randomUUID()]),
+    ) as Record<InventoryChzStatus, string>;
+    const replacedIntroducedId = randomUUID();
+    const succeededRows = [
+      ...INVENTORY_CHZ_STATUSES.map((status, index) => ({
+        id: selectedIds[status],
+        tenantId,
+        inventoryId: inventory.id,
+        declaredStatus: status,
+        fileName: `${status.toLowerCase()}.zip`,
+        containerKind: "zip" as const,
+        byteSize: 100 + index,
+        sha256: (index + 1).toString(16).repeat(64),
+        objectKey: `private/${selectedIds[status]}`,
+        parsedStatus: status,
+        includedGtin14: FIXTURE_GTIN,
+        parseOutcome: "succeeded" as const,
+        rowCount: status === "APPLIED" || status === "DISAGGREGATION" ? 0 : index + 10,
+        errorCount: 0,
+        duplicateCount: index,
+        errorCode: null,
+        createdByUserId: userId,
+        createdAt: new Date(createdAt.getTime() + index * 1_000),
+        parsedAt: new Date(createdAt.getTime() + index * 1_000),
+      })),
+      {
+        id: replacedIntroducedId,
+        tenantId,
+        inventoryId: inventory.id,
+        declaredStatus: "INTRODUCED" as const,
+        fileName: "introduced-replacement.zip",
+        containerKind: "zip" as const,
+        byteSize: 200,
+        sha256: "a".repeat(64),
+        objectKey: `private/${replacedIntroducedId}`,
+        parsedStatus: "INTRODUCED" as const,
+        includedGtin14: FIXTURE_GTIN,
+        parseOutcome: "succeeded" as const,
+        rowCount: 25,
+        errorCount: 0,
+        duplicateCount: 2,
+        errorCode: null,
+        createdByUserId: userId,
+        createdAt: new Date("2026-08-26T09:10:00.000Z"),
+        parsedAt: new Date("2026-08-26T09:10:00.000Z"),
+      },
+    ];
+    await db.insert(schema.inventoryImports).values(succeededRows);
+    const snapshotId = randomUUID();
+    await db.insert(schema.inventorySnapshots).values({
+      id: snapshotId,
+      tenantId,
+      inventoryId: inventory.id,
+      combinedDigest: "b".repeat(64),
+      productName: "Inventory Water",
+      lineName: "Inventory line",
+      emittedCount: 10,
+      introducedCount: 11,
+      appliedCount: 0,
+      retiredCount: 13,
+      writtenOffCount: 14,
+      disaggregationCount: 0,
+      protectedCount: 2,
+      expectedCount: 9,
+      packageCount: 1,
+      looseCount: 8,
+      fixedByUserId: userId,
+      fixedAt: new Date("2026-08-26T09:12:00.000Z"),
+    });
+    await db.insert(schema.inventorySnapshotInputs).values(
+      INVENTORY_CHZ_STATUSES.map((status) => ({
+        tenantId,
+        snapshotId,
+        inventoryId: inventory.id,
+        status,
+        importId: selectedIds[status],
+      })),
+    );
+    await db
+      .update(schema.inventories)
+      .set({ status: "ready", activeSnapshotId: snapshotId })
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventory.id)),
+      );
+
+    const detail = await agent.get(`/inventories/${inventory.id}`).expect(200);
+    expect(detail.body.imports).toHaveLength(7);
+    expect(detail.body.imports[0]).toEqual({
+      id: replacedIntroducedId,
+      declaredStatus: "INTRODUCED",
+      parsedStatus: "INTRODUCED",
+      fileName: "introduced-replacement.zip",
+      result: "succeeded",
+      rowCount: 25,
+      errorCount: 0,
+      duplicateCount: 2,
+      sha256: "a".repeat(64),
+      diagnostics: [],
+      createdAt: "2026-08-26T09:10:00.000Z",
+    });
+    expect(detail.body.activeSnapshot).toEqual({
+      id: snapshotId,
+      inventoryId: inventory.id,
+      revision: 1,
+      combinedDigest: "b".repeat(64),
+      fixedAt: "2026-08-26T09:12:00.000Z",
+      inputs: selectedIds,
+      counts: {
+        emitted: 10,
+        introduced: 11,
+        applied: 0,
+        retired: 13,
+        writtenOff: 14,
+        disaggregation: 0,
+        protected: 2,
+        expected: 9,
+        packages: 1,
+        loose: 8,
+      },
+    });
+    expect(JSON.stringify(detail.body)).not.toMatch(/objectKey|includedGtin14|createdByUserId/i);
+  });
+
   it("returns not found for cross-tenant inventory ids before read, update, or upload side effects", async () => {
     const owner = request.agent(app!.getHttpServer());
     const ownerSeed = await seedPreparation(owner);
@@ -426,6 +709,8 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
 
     await agent.get("/inventories").expect(200);
     await agent.get(`/inventories/${inventory.id}`).expect(200);
+    await markReady(tenantId, inventory.id);
+    await agent.get(`/inventories/${inventory.id}/task-form`).expect(200);
     await agent
       .post("/inventories")
       .send(createBody(productId, lineId))

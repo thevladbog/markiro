@@ -22,6 +22,7 @@ type JsonSchema = {
   properties?: Record<string, JsonSchema>;
   items?: JsonSchema;
   oneOf?: JsonSchema[];
+  discriminator?: { propertyName: string };
 };
 
 function operation(document: OpenAPIObject, path: string, method: "get" | "post") {
@@ -184,8 +185,10 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
 
     const progress = responseSchema(document, "/station/inventories/{id}/progress", "get");
     const change = progress.properties?.items?.items ?? {};
-    expect(change.additionalProperties).toBe(false);
-    expect(change.required).toEqual([
+    expect(change.discriminator).toEqual({ propertyName: "kind" });
+    expect(change.oneOf).toHaveLength(4);
+    const [codeChange, removeItem, invalidateBox, reprint] = change.oneOf ?? [];
+    exactClosedObject(codeChange ?? {}, [
       "id",
       "revision",
       "kind",
@@ -195,7 +198,34 @@ describe.skipIf(!ready)("station inventory OpenAPI contract", () => {
       "winner",
       "correctedAt",
     ]);
-    expect(change.properties?.kind?.enum).toEqual(["claim", "correction"]);
+    expect(codeChange?.properties?.kind?.enum).toEqual(["claim", "correction"]);
+    exactClosedObject(removeItem ?? {}, [
+      "id",
+      "revision",
+      "kind",
+      "boxId",
+      "resultId",
+      "codeHash",
+      "ownerDeviceId",
+      "removedAt",
+      "correctedAt",
+    ]);
+    expect(removeItem?.properties?.kind?.enum).toEqual(["remove_item"]);
+    expect(removeItem?.properties?.removedAt?.format).toBe("date-time");
+    for (const [variant, kind] of [
+      [invalidateBox, "invalidate_box"],
+      [reprint, "reprint"],
+    ] as const) {
+      exactClosedObject(variant ?? {}, [
+        "id",
+        "revision",
+        "kind",
+        "boxId",
+        "ownerDeviceId",
+        "correctedAt",
+      ]);
+      expect(variant?.properties?.kind?.enum).toEqual([kind]);
+    }
     expect(progress.properties?.items?.maxItems).toBe(200);
     const cursorPattern =
       "^[1-9][0-9]*:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";

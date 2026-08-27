@@ -41,6 +41,7 @@ export interface InventoryRepackBoxView {
   state: "open" | "closed" | "invalidated";
   printState: "not_ready" | "pending" | "printing" | "printed" | "failed";
   printErrorCode: string | null;
+  invalidationSource: "claim_lost" | "admin" | null;
   ownerDeviceId: string;
 }
 
@@ -83,6 +84,7 @@ interface BoxRow {
   state: "open" | "closed" | "invalidated";
   print_state: InventoryRepackBoxView["printState"];
   print_error_code: string | null;
+  invalidation_source: InventoryRepackBoxView["invalidationSource"];
   item_count: number;
   last_item_id: string | null;
 }
@@ -143,6 +145,7 @@ async function ownedBox(
   const rows = await exec.all<BoxRow>(
     `SELECT box.box_id, box.old_sscc_context, box.new_sscc, box.owner_device_id,
             box.capacity, box.production_date, box.state, box.print_state, box.print_error_code,
+            box.invalidation_source,
             (SELECT COUNT(*) FROM inventory_repack_items_mirror item
               WHERE item.inventory_id = box.inventory_id AND item.snapshot_id = box.snapshot_id
                 AND item.box_id = box.box_id AND item.removed_at IS NULL) AS item_count,
@@ -171,6 +174,7 @@ function view(row: BoxRow): InventoryRepackBoxView {
     state: row.state,
     printState: row.print_state,
     printErrorCode: row.print_error_code,
+    invalidationSource: row.invalidation_source,
     ownerDeviceId: row.owner_device_id,
   };
 }
@@ -729,6 +733,9 @@ async function resolveInvalidatedInternal(
   }
   if (state.box.ownerDeviceId !== input.deviceId) {
     throw new Error("inventory repack box belongs to another terminal");
+  }
+  if (state.box.invalidationSource !== "claim_lost") {
+    throw new Error("inventory repack box is not a claim-lost conflict");
   }
   const sequence = await allocateSequence(
     exec,

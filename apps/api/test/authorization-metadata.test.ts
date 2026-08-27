@@ -19,7 +19,11 @@ import {
   ProductExternalLinkController,
 } from "../src/modules/integrations/integrations.controller";
 import { KiosksController } from "../src/modules/kiosks/kiosks.controller";
-import { InventoriesController } from "../src/modules/inventories/inventories.controller";
+import {
+  InventoriesController,
+  InventoryDocumentRunsController,
+} from "../src/modules/inventories/inventories.controller";
+import { InventoryDocumentFormatsController } from "../src/modules/inventories/inventory-document-formats.controller";
 import { StationInventoriesController } from "../src/modules/inventories/station-inventories.controller";
 import { OperatorsController } from "../src/modules/operators/operators.controller";
 import { OrgProfileController } from "../src/modules/org-profile/org-profile.controller";
@@ -145,11 +149,31 @@ const OPERATIONAL_CONTROLLERS: readonly [
     },
   ],
   [ConflictsController, { listConflicts: readPolicy, reviewConflict: writePolicy }],
+  [InventoryDocumentFormatsController, { list: readPolicy }],
+  [
+    InventoryDocumentRunsController,
+    { retry: writePolicy, downloadArtifact: readPolicy, downloadZip: readPolicy },
+  ],
   [
     InventoriesController,
     {
       list: readPolicy,
+      progress: readPolicy,
+      closePreview: readPolicy,
+      discrepancies: readPolicy,
+      evidence: readPolicy,
+      lateEvents: readPolicy,
+      documentRuns: readPolicy,
+      createDocumentRun: writePolicy,
+      discardLateEvents: writePolicy,
+      replayLateEvent: writePolicy,
+      close: writePolicy,
+      emergencyClose: writePolicy,
+      reopen: writePolicy,
+      complete: writePolicy,
+      correct: writePolicy,
       create: writePolicy,
+      taskForm: readPolicy,
       get: readPolicy,
       update: writePolicy,
       importEvidence: writePolicy,

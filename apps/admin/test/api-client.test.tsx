@@ -17,6 +17,18 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 describe("apiFetch error message parsing", () => {
+  it("retains the parsed response body for structured conflict handling", async () => {
+    const body = { code: "INVENTORY_CLOSE_BLOCKED", blockers: [{ code: "VOIDED" }] };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(409, body)),
+    );
+
+    const error = await apiFetch("/inventories/1/close").catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(ApiRequestError);
+    expect((error as ApiRequestError).details).toEqual(body);
+  });
+
   it("uses a string `message` body field as-is", async () => {
     vi.stubGlobal(
       "fetch",

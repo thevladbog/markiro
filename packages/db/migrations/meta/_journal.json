@@ -554,6 +554,34 @@
       "when": 1787686557733,
       "tag": "0078_inventory_repack_reprint_recovery",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1787733681667,
+      "tag": "0079_youthful_miek",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1787747754271,
+      "tag": "0080_keen_major_mapleleaf",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1787769242505,
+      "tag": "0081_easy_frank_castle",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1787774121184,
+      "tag": "0082_slow_skreet",
+      "breakpoints": true
     }
   ]
 }
