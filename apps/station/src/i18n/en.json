@@ -374,6 +374,7 @@
     "source": {
       "label": "Update source",
       "primary": "Source: Markiro (Yandex)",
+      "legacyPrimary": "Source: GitHub (legacy channel)",
       "backup": "GitHub backup source used",
       "discoveryFallback": {
         "primary-unavailable": "Checked through the GitHub backup because the primary source was unavailable.",

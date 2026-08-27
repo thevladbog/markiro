@@ -36,62 +36,246 @@ const UPDATER_USER_AGENT: &str = "tauri-plugin-updater/2.10.1";
 const MAX_CANDIDATE_ID_BYTES: usize = 128;
 pub(crate) const CANDIDATE_TTL: Duration = Duration::from_secs(15 * 60);
 
+#[cfg(not(feature = "legacy-github-updater"))]
 const BETA_YANDEX_ENDPOINT: &str = "https://releases.markiro.app/station/beta/latest.json";
 const BETA_GITHUB_ENDPOINT: &str =
     "https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json";
+#[cfg(not(feature = "legacy-github-updater"))]
 const STABLE_YANDEX_ENDPOINT: &str = "https://releases.markiro.app/station/stable/latest.json";
+#[cfg(not(feature = "legacy-github-updater"))]
 const STABLE_GITHUB_ENDPOINT: &str =
     "https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum StationReleaseOrigin {
+    #[cfg(not(feature = "legacy-github-updater"))]
     Yandex,
     Github,
 }
 
-impl StationReleaseOrigin {
-    fn peer(self) -> Self {
-        match self {
-            Self::Yandex => Self::Github,
-            Self::Github => Self::Yandex,
+#[cfg(all(test, feature = "legacy-github-updater"))]
+mod legacy_feature_tests {
+    use std::{future::Future, pin::Pin, sync::Mutex};
+
+    use super::{
+        discover_update, execute_candidate_install, CandidateMetadata, DiscoveredCandidate,
+        DiscoveryCandidate, DiscoveryFailure, DiscoveryTransport, InstallCoordinator,
+        PackageAccumulator, PackageBytes, PackageDownloadFailure, PackageProgress,
+        PackageTransport, ProgressSink, StationReleaseChannel, StationReleaseOrigin,
+        StationUpdateProgress, TransferControl, BETA_GITHUB_ENDPOINT, WINDOWS_TARGET,
+    };
+
+    const CURRENT_VERSION: &str = "0.2.0-beta.6";
+    const UPDATE_VERSION: &str = "0.2.0-beta.7";
+    const NOW_UNIX: i64 = 1_787_565_660;
+
+    #[derive(Clone)]
+    struct Candidate(CandidateMetadata);
+
+    impl DiscoveryCandidate for Candidate {
+        fn metadata(&self) -> &CandidateMetadata {
+            &self.0
         }
+    }
+
+    fn candidate() -> Candidate {
+        Candidate(CandidateMetadata {
+            current_version: CURRENT_VERSION.into(),
+            version: UPDATE_VERSION.into(),
+            target: WINDOWS_TARGET.into(),
+            published_at: "2026-08-24T10:00:00Z".into(),
+            published_unix: NOW_UNIX - 60,
+            signature: "trusted-feature-fixture-signature".into(),
+            download_url: format!(
+                "https://github.com/thevladbog/markiro-station-releases/releases/download/station-v{UPDATE_VERSION}/markiro-station-{UPDATE_VERSION}-windows-x86_64.nsis.zip"
+            ),
+        })
+    }
+
+    #[derive(Default)]
+    struct Transport {
+        calls: Mutex<Vec<(StationReleaseOrigin, &'static str)>>,
+    }
+
+    impl DiscoveryTransport for Transport {
+        type Candidate = Candidate;
+
+        fn check(
+            &self,
+            origin: StationReleaseOrigin,
+            endpoint: &'static str,
+        ) -> Pin<
+            Box<dyn Future<Output = Result<Option<Self::Candidate>, DiscoveryFailure>> + Send + '_>,
+        > {
+            self.calls
+                .lock()
+                .expect("feature calls lock")
+                .push((origin, endpoint));
+            Box::pin(async { Ok(Some(candidate())) })
+        }
+    }
+
+    #[derive(Default)]
+    struct Packages {
+        downloads: Mutex<usize>,
+        installs: Mutex<usize>,
+    }
+
+    impl PackageTransport<Candidate> for Packages {
+        fn download<'a>(
+            &'a self,
+            _candidate: &'a Candidate,
+            progress: &'a mut dyn PackageProgress,
+            _cancellation: &'a TransferControl,
+        ) -> Pin<Box<dyn Future<Output = Result<PackageBytes, PackageDownloadFailure>> + Send + 'a>>
+        {
+            Box::pin(async move {
+                *self.downloads.lock().expect("feature downloads lock") += 1;
+                progress.started(Some(7))?;
+                progress.advanced(7)?;
+                let mut package = PackageAccumulator::with_limit(7);
+                package.extend(b"package")?;
+                package.finish()
+            })
+        }
+
+        fn install(
+            &self,
+            _candidate: &Candidate,
+            _bytes: &[u8],
+        ) -> Result<(), tauri_plugin_updater::Error> {
+            *self.installs.lock().expect("feature installs lock") += 1;
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct Progress(Vec<StationUpdateProgress>);
+
+    impl ProgressSink for Progress {
+        fn send(&mut self, event: StationUpdateProgress) -> Result<(), PackageDownloadFailure> {
+            self.0.push(event);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn compiled_feature_accepts_only_the_github_beta_channel() {
+        assert_eq!(
+            StationReleaseChannel::Beta.endpoints(),
+            &[(BETA_GITHUB_ENDPOINT, StationReleaseOrigin::Github)]
+        );
+        assert_eq!(
+            StationReleaseChannel::from_compiled_endpoints(&[BETA_GITHUB_ENDPOINT])
+                .expect("feature beta config"),
+            StationReleaseChannel::Beta
+        );
+        assert!(StationReleaseChannel::from_compiled_endpoints(&[
+            "https://releases.markiro.app/station/beta/latest.json",
+            BETA_GITHUB_ENDPOINT,
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn compiled_feature_discovers_and_installs_only_through_github() {
+        let discovery = Transport::default();
+        let discovered = tauri::async_runtime::block_on(discover_update(
+            &discovery,
+            StationReleaseChannel::Beta,
+            CURRENT_VERSION,
+            NOW_UNIX,
+        ))
+        .expect("feature discovery")
+        .expect("feature update");
+        assert_eq!(discovered.origin, StationReleaseOrigin::Github);
+        assert_eq!(discovered.fallback_reason, None);
+
+        let packages = Packages::default();
+        let installs = InstallCoordinator::default();
+        let permit = installs.acquire().expect("feature install permit");
+        let transfer = TransferControl::default();
+        let mut progress = Progress::default();
+        tauri::async_runtime::block_on(execute_candidate_install(
+            DiscoveredCandidate {
+                candidate: candidate(),
+                metadata: candidate().0,
+                origin: StationReleaseOrigin::Github,
+                fallback_reason: None,
+            },
+            &discovery,
+            &packages,
+            StationReleaseChannel::Beta,
+            NOW_UNIX,
+            &mut progress,
+            &transfer,
+            permit,
+        ))
+        .expect("feature install");
+
+        assert_eq!(
+            discovery
+                .calls
+                .lock()
+                .expect("feature calls lock")
+                .as_slice(),
+            &[
+                (StationReleaseOrigin::Github, BETA_GITHUB_ENDPOINT),
+                (StationReleaseOrigin::Github, BETA_GITHUB_ENDPOINT),
+            ]
+        );
+        assert_eq!(*packages.downloads.lock().expect("downloads lock"), 1);
+        assert_eq!(*packages.installs.lock().expect("installs lock"), 1);
+        assert!(!progress
+            .0
+            .iter()
+            .any(|event| matches!(event, StationUpdateProgress::Fallback { .. })));
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StationReleaseChannel {
     Beta,
+    #[cfg(not(feature = "legacy-github-updater"))]
     Stable,
 }
 
 impl StationReleaseChannel {
-    fn endpoints(self) -> [(&'static str, StationReleaseOrigin); 2] {
+    #[cfg(not(feature = "legacy-github-updater"))]
+    fn endpoints(self) -> &'static [(&'static str, StationReleaseOrigin)] {
         match self {
-            Self::Beta => [
+            Self::Beta => &[
                 (BETA_YANDEX_ENDPOINT, StationReleaseOrigin::Yandex),
                 (BETA_GITHUB_ENDPOINT, StationReleaseOrigin::Github),
             ],
-            Self::Stable => [
+            Self::Stable => &[
                 (STABLE_YANDEX_ENDPOINT, StationReleaseOrigin::Yandex),
                 (STABLE_GITHUB_ENDPOINT, StationReleaseOrigin::Github),
             ],
         }
     }
 
-    fn endpoint(self, origin: StationReleaseOrigin) -> &'static str {
-        self.endpoints()
-            .into_iter()
-            .find_map(|(endpoint, candidate_origin)| {
-                (candidate_origin == origin).then_some(endpoint)
-            })
-            .expect("closed release channel contains both origins")
+    #[cfg(feature = "legacy-github-updater")]
+    fn endpoints(self) -> &'static [(&'static str, StationReleaseOrigin)] {
+        match self {
+            Self::Beta => &[(BETA_GITHUB_ENDPOINT, StationReleaseOrigin::Github)],
+        }
     }
 
+    #[cfg(not(feature = "legacy-github-updater"))]
     fn from_compiled_endpoints(endpoints: &[&str]) -> Result<Self, StationUpdateError> {
         match endpoints {
             [BETA_YANDEX_ENDPOINT, BETA_GITHUB_ENDPOINT] => Ok(Self::Beta),
             [STABLE_YANDEX_ENDPOINT, STABLE_GITHUB_ENDPOINT] => Ok(Self::Stable),
+            _ => Err(StationUpdateError::policy_denied()),
+        }
+    }
+
+    #[cfg(feature = "legacy-github-updater")]
+    fn from_compiled_endpoints(endpoints: &[&str]) -> Result<Self, StationUpdateError> {
+        match endpoints {
+            [BETA_GITHUB_ENDPOINT] => Ok(Self::Beta),
             _ => Err(StationUpdateError::policy_denied()),
         }
     }
@@ -114,6 +298,7 @@ impl StationReleaseChannel {
                     .parse::<u64>()
                     .is_ok_and(|number| number > 0 && number <= MAX_SAFE_VERSION_COMPONENT)
             }
+            #[cfg(not(feature = "legacy-github-updater"))]
             Self::Stable => version.pre.is_empty(),
         }
     }
@@ -121,6 +306,7 @@ impl StationReleaseChannel {
     fn expected_download_url(self, origin: StationReleaseOrigin, version: &str) -> String {
         let filename = format!("markiro-station-{version}-windows-x86_64.nsis.zip");
         match origin {
+            #[cfg(not(feature = "legacy-github-updater"))]
             StationReleaseOrigin::Yandex => {
                 let channel = match self {
                     Self::Beta => "beta",
@@ -133,6 +319,50 @@ impl StationReleaseChannel {
             StationReleaseOrigin::Github => format!(
                 "https://github.com/thevladbog/markiro-station-releases/releases/download/station-v{version}/{filename}"
             ),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct StationReleasePlan {
+    channel: StationReleaseChannel,
+    endpoints: &'static [(&'static str, StationReleaseOrigin)],
+}
+
+impl StationReleasePlan {
+    #[cfg(all(test, not(feature = "legacy-github-updater")))]
+    fn legacy_beta() -> Self {
+        Self {
+            channel: StationReleaseChannel::Beta,
+            endpoints: &[(BETA_GITHUB_ENDPOINT, StationReleaseOrigin::Github)],
+        }
+    }
+
+    fn endpoint(self, origin: StationReleaseOrigin) -> Option<&'static str> {
+        self.endpoints
+            .iter()
+            .find_map(|(endpoint, candidate_origin)| {
+                (*candidate_origin == origin).then_some(*endpoint)
+            })
+    }
+
+    fn fallback_after(
+        self,
+        origin: StationReleaseOrigin,
+    ) -> Option<(&'static str, StationReleaseOrigin)> {
+        self.endpoints
+            .iter()
+            .copied()
+            .skip(1)
+            .find(|(_endpoint, candidate_origin)| *candidate_origin != origin)
+    }
+}
+
+impl From<StationReleaseChannel> for StationReleasePlan {
+    fn from(channel: StationReleaseChannel) -> Self {
+        Self {
+            channel,
+            endpoints: channel.endpoints(),
         }
     }
 }
@@ -386,14 +616,23 @@ fn validate_candidate<C: DiscoveryCandidate>(
     })
 }
 
-pub(crate) async fn discover_update<T: DiscoveryTransport>(
+pub(crate) async fn discover_update<T, R>(
     transport: &T,
-    channel: StationReleaseChannel,
+    release: R,
     current_version: &str,
     now_unix: i64,
-) -> Result<Option<DiscoveredCandidate<T::Candidate>>, StationUpdateError> {
-    let [(primary_endpoint, primary_origin), (fallback_endpoint, fallback_origin)] =
-        channel.endpoints();
+) -> Result<Option<DiscoveredCandidate<T::Candidate>>, StationUpdateError>
+where
+    T: DiscoveryTransport,
+    R: Into<StationReleasePlan>,
+{
+    let release = release.into();
+    let channel = release.channel;
+    let (primary_endpoint, primary_origin) = release
+        .endpoints
+        .first()
+        .copied()
+        .ok_or_else(StationUpdateError::policy_denied)?;
 
     let reason = match transport.check(primary_origin, primary_endpoint).await {
         Ok(Some(candidate)) => {
@@ -408,8 +647,17 @@ pub(crate) async fn discover_update<T: DiscoveryTransport>(
             .map(Some)
         }
         Ok(None) => return Ok(None),
-        Err(error) => fallback_reason(error)?,
+        Err(error) => {
+            if release.fallback_after(primary_origin).is_none() {
+                return Err(terminal_failure(error));
+            }
+            fallback_reason(error)?
+        }
     };
+
+    let (fallback_endpoint, fallback_origin) = release
+        .fallback_after(primary_origin)
+        .ok_or_else(StationUpdateError::policy_denied)?;
 
     match transport.check(fallback_origin, fallback_endpoint).await {
         Ok(Some(candidate)) => validate_candidate(
@@ -723,7 +971,7 @@ impl PackageDownloadPolicy {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "legacy-github-updater")))]
     fn fixture(
         connect_timeout: Duration,
         read_timeout: Duration,
@@ -759,12 +1007,12 @@ impl BufferCleanupProbe {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "legacy-github-updater")))]
     fn cleaned_allocations(&self) -> usize {
         self.cleaned_allocations.load(Ordering::Acquire)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "legacy-github-updater")))]
     fn all_clean(&self) -> bool {
         !self.dirty_cleanup.load(Ordering::Acquire)
     }
@@ -826,7 +1074,7 @@ impl AsRef<[u8]> for PackageBytes {
 }
 
 impl PackageBytes {
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "legacy-github-updater")))]
     fn capacity(&self) -> usize {
         self.0.bytes.capacity()
     }
@@ -881,7 +1129,7 @@ impl PackageAccumulator {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "legacy-github-updater")))]
     fn with_probe(
         content_length: Option<usize>,
         limit: usize,
@@ -942,7 +1190,7 @@ impl PackageAccumulator {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "legacy-github-updater")))]
     fn buffer_capacity(&self) -> usize {
         match &self.storage {
             PackageStorage::Known { buffer, .. } => buffer.bytes.capacity(),
@@ -950,7 +1198,7 @@ impl PackageAccumulator {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "legacy-github-updater")))]
     fn chunk_count(&self) -> usize {
         match &self.storage {
             PackageStorage::Known { .. } => 1,
@@ -1391,20 +1639,20 @@ impl CandidateRecheckFailure {
 
 async fn recheck_exact_candidate<T: DiscoveryTransport>(
     transport: &T,
-    channel: StationReleaseChannel,
+    release: StationReleasePlan,
     origin: StationReleaseOrigin,
     accepted: &AcceptedTarget,
     now_unix: i64,
     cancellation: &TransferControl,
 ) -> Result<T::Candidate, CandidateRecheckFailure> {
-    let candidate = wait_for_transfer(
-        transport.check(origin, channel.endpoint(origin)),
-        cancellation,
-    )
-    .await
-    .map_err(|failure| CandidateRecheckFailure::Terminal(terminal_package_error(failure)))?
-    .map_err(CandidateRecheckFailure::Discovery)?
-    .ok_or_else(|| CandidateRecheckFailure::Terminal(StationUpdateError::origin_mismatch()))?;
+    let endpoint = release
+        .endpoint(origin)
+        .ok_or_else(|| CandidateRecheckFailure::Terminal(StationUpdateError::policy_denied()))?;
+    let candidate = wait_for_transfer(transport.check(origin, endpoint), cancellation)
+        .await
+        .map_err(|failure| CandidateRecheckFailure::Terminal(terminal_package_error(failure)))?
+        .map_err(CandidateRecheckFailure::Discovery)?
+        .ok_or_else(|| CandidateRecheckFailure::Terminal(StationUpdateError::origin_mismatch()))?;
     if !accepted.matches(candidate.metadata()) {
         return Err(CandidateRecheckFailure::Terminal(
             StationUpdateError::origin_mismatch(),
@@ -1412,7 +1660,7 @@ async fn recheck_exact_candidate<T: DiscoveryTransport>(
     }
     let candidate = validate_candidate(
         candidate,
-        channel,
+        release.channel,
         origin,
         &accepted.current_version,
         now_unix,
@@ -1477,12 +1725,12 @@ impl TransferControl {
             .map_err(|_phase| StationUpdateError::installation_failed())
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "legacy-github-updater")))]
     fn is_cancelled(&self) -> bool {
         self.phase.load(Ordering::Acquire) == TRANSFER_CANCELLED
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "legacy-github-updater")))]
     fn is_install_started(&self) -> bool {
         self.phase.load(Ordering::Acquire) == TRANSFER_INSTALL_STARTED
     }
@@ -1613,11 +1861,11 @@ impl Drop for InstallPermit<'_> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn execute_candidate_install<T, P, S>(
+pub(crate) async fn execute_candidate_install<T, P, S, R>(
     accepted: DiscoveredCandidate<T::Candidate>,
     discovery: &T,
     packages: &P,
-    channel: StationReleaseChannel,
+    release: R,
     now_unix: i64,
     progress: &mut S,
     transfer: &TransferControl,
@@ -1627,7 +1875,9 @@ where
     T: DiscoveryTransport,
     P: PackageTransport<T::Candidate>,
     S: ProgressSink,
+    R: Into<StationReleasePlan>,
 {
+    let release = release.into();
     let DiscoveredCandidate {
         candidate: stale_handle,
         metadata,
@@ -1637,11 +1887,15 @@ where
     drop(stale_handle);
     let accepted_target = metadata.into_accepted_target();
 
-    let primary_origin = StationReleaseOrigin::Yandex;
+    let (_primary_endpoint, primary_origin) = release
+        .endpoints
+        .first()
+        .copied()
+        .ok_or_else(StationUpdateError::policy_denied)?;
     let mut monotonic_progress = MonotonicProgress::new(progress);
     let (selected_origin, selected) = match recheck_exact_candidate(
         discovery,
-        channel,
+        release,
         primary_origin,
         &accepted_target,
         now_unix,
@@ -1654,10 +1908,12 @@ where
             reason,
             _detail,
         ))) => {
-            let peer_origin = primary_origin.peer();
+            let (_peer_endpoint, peer_origin) = release
+                .fallback_after(primary_origin)
+                .ok_or_else(StationUpdateError::origins_unavailable)?;
             let peer = recheck_exact_candidate(
                 discovery,
-                channel,
+                release,
                 peer_origin,
                 &accepted_target,
                 now_unix,
@@ -1671,10 +1927,12 @@ where
             (peer_origin, peer)
         }
         Err(CandidateRecheckFailure::Discovery(DiscoveryFailure::MetadataInvalid(_detail))) => {
-            let peer_origin = primary_origin.peer();
+            let (_peer_endpoint, peer_origin) = release
+                .fallback_after(primary_origin)
+                .ok_or_else(StationUpdateError::origins_unavailable)?;
             let peer = recheck_exact_candidate(
                 discovery,
-                channel,
+                release,
                 peer_origin,
                 &accepted_target,
                 now_unix,
@@ -1702,10 +1960,12 @@ where
         Err(failure) => match package_fallback_reason(&failure) {
             Some(reason) if selected_origin == primary_origin => {
                 drop(selected);
-                let peer_origin = selected_origin.peer();
+                let (_peer_endpoint, peer_origin) = release
+                    .fallback_after(selected_origin)
+                    .ok_or_else(|| terminal_package_error(failure))?;
                 let peer = recheck_exact_candidate(
                     discovery,
-                    channel,
+                    release,
                     peer_origin,
                     &accepted_target,
                     now_unix,
@@ -1993,7 +2253,7 @@ pub(crate) fn station_update_close(
     close_candidate(&state.candidates, &state.transfers, &request.candidate_id)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "legacy-github-updater")))]
 mod tests {
     use std::{
         future::Future,
@@ -2023,8 +2283,8 @@ mod tests {
         PackageDownloadFailure, PackageDownloadPolicy, PackageProgress, PackageTimeoutKind,
         PackageTransport, ProgressSink, StartedUpdateCheck, StationFallbackReason,
         StationPackageFallbackReason, StationReleaseChannel, StationReleaseOrigin,
-        StationUpdateCloseRequest, StationUpdateErrorCode, StationUpdateProgress, TransferControl,
-        CANDIDATE_TTL, WINDOWS_TARGET,
+        StationReleasePlan, StationUpdateCloseRequest, StationUpdateErrorCode,
+        StationUpdateProgress, TransferControl, CANDIDATE_TTL, WINDOWS_TARGET,
     };
 
     const CURRENT_VERSION: &str = "0.2.0-beta.6";
@@ -2838,6 +3098,17 @@ mod tests {
         ))
     }
 
+    fn run_legacy(
+        transport: &FakeTransport,
+    ) -> Result<Option<super::DiscoveredCandidate<FakeCandidate>>, super::StationUpdateError> {
+        tauri::async_runtime::block_on(discover_update(
+            transport,
+            StationReleasePlan::legacy_beta(),
+            CURRENT_VERSION,
+            NOW_UNIX,
+        ))
+    }
+
     fn assert_plugin_error_falls_back(
         error: tauri_plugin_updater::Error,
         expected_reason: StationFallbackReason,
@@ -3234,6 +3505,25 @@ mod tests {
     }
 
     #[test]
+    fn legacy_beta_discovery_uses_github_as_the_only_primary_origin() {
+        let transport = FakeTransport::new(vec![(
+            StationReleaseOrigin::Github,
+            FakeOutcome::Update(candidate(StationReleaseOrigin::Github)),
+        )]);
+
+        let discovered = run_legacy(&transport)
+            .expect("legacy discovery succeeds")
+            .expect("legacy update");
+
+        assert_eq!(discovered.origin, StationReleaseOrigin::Github);
+        assert_eq!(discovered.fallback_reason, None);
+        assert_eq!(
+            transport.calls(),
+            vec![(StationReleaseOrigin::Github, BETA_GITHUB_ENDPOINT)]
+        );
+    }
+
+    #[test]
     fn candidate_slot_is_one_item_expiring_and_consumed_after_use() {
         let slot = CandidateSlot::default();
         let now = Instant::now();
@@ -3416,6 +3706,50 @@ mod tests {
                 StationUpdateProgress::Finished,
             ]
         );
+    }
+
+    #[test]
+    fn legacy_download_rechecks_and_installs_only_from_github() {
+        let discovery = FakeTransport::new(vec![(
+            StationReleaseOrigin::Github,
+            FakeOutcome::Update(candidate(StationReleaseOrigin::Github)),
+        )]);
+        let packages =
+            FakePackageTransport::new(vec![FakeDownload::success(9, vec![9], b"package-1")]);
+        let installs = Arc::new(InstallCoordinator::default());
+        packages.observe_install_phase(Arc::clone(&installs));
+        let permit = installs.acquire().expect("acquire legacy install");
+        let transfer = TransferControl::default();
+        let mut progress = RecordingProgress::default();
+
+        tauri::async_runtime::block_on(execute_candidate_install(
+            accepted_candidate(StationReleaseOrigin::Github),
+            &discovery,
+            &packages,
+            StationReleasePlan::legacy_beta(),
+            NOW_UNIX,
+            &mut progress,
+            &transfer,
+            permit,
+        ))
+        .expect("verified legacy GitHub install");
+
+        assert_eq!(
+            discovery.calls(),
+            vec![(StationReleaseOrigin::Github, BETA_GITHUB_ENDPOINT)]
+        );
+        assert_eq!(
+            packages.download_calls(),
+            vec![candidate(StationReleaseOrigin::Github).0.download_url]
+        );
+        assert_eq!(
+            packages.install_calls(),
+            vec![candidate(StationReleaseOrigin::Github).0.download_url]
+        );
+        assert!(!progress
+            .events
+            .iter()
+            .any(|event| matches!(event, StationUpdateProgress::Fallback { .. })));
     }
 
     #[test]
