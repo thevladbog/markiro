@@ -563,6 +563,7 @@ export const subscriptionEvents = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    unique("subscription_events_tenant_id_uq").on(table.tenantId, table.id),
     index("subscription_events_tenant_effective_idx").on(table.tenantId, table.effectiveAt),
     foreignKey({
       name: "subscription_events_tenant_subscription_fk",

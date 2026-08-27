@@ -206,6 +206,9 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
     await rm(join(legacyMigrationsFolder, "0065_saas_party_actual_addresses.sql"), {
       force: true,
     });
+    await rm(join(legacyMigrationsFolder, "0066_tenant_billing_experience.sql"), {
+      force: true,
+    });
     await rm(join(legacyMigrationsFolder, "meta", "0042_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0043_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0044_snapshot.json"), { force: true });
@@ -228,6 +231,7 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
     await rm(join(legacyMigrationsFolder, "meta", "0061_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0064_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0065_snapshot.json"), { force: true });
+    await rm(join(legacyMigrationsFolder, "meta", "0066_snapshot.json"), { force: true });
     const journalPath = join(legacyMigrationsFolder, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -257,7 +261,8 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
         entry.tag !== "0062_document_account_snapshots" &&
         entry.tag !== "0063_payment_account_evidence" &&
         entry.tag !== "0064_normalize_operator_billing_profile_kind" &&
-        entry.tag !== "0065_saas_party_actual_addresses",
+        entry.tag !== "0065_saas_party_actual_addresses" &&
+        entry.tag !== "0066_tenant_billing_experience",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0041_product_images");
     await writeFile(journalPath, JSON.stringify(journal));

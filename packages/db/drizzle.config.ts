@@ -17,6 +17,7 @@ export default defineConfig({
     "./src/schema/platform-auth.ts",
     "./src/schema/saas.ts",
     "./src/schema/billing.ts",
+    "./src/schema/tenant-billing.ts",
     "./src/schema/shift-exports.ts",
     "./src/schema/disaggregation.ts",
   ],
