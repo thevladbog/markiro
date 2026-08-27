@@ -44,6 +44,7 @@ import { BillingProfilesModule } from "./modules/billing-profiles/billing-profil
 import { BillingAccountsModule } from "./modules/billing-accounts/billing-accounts.module";
 import { BillingModule } from "./modules/billing/billing.module";
 import { BillingPaymentsModule } from "./modules/billing-payments/billing-payments.module";
+import { TenantBillingModule } from "./modules/tenant-billing/tenant-billing.module";
 import { PlatformOperationsModule } from "./modules/platform-operations/platform-operations.module";
 import type { PlatformAuth } from "@markiro/db";
 import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
@@ -94,6 +95,7 @@ export class AppModule {
           : []),
         AuthorizationModule,
         SubscriptionsModule.forRoot(env.SUBSCRIPTION_ENFORCEMENT_MODE),
+        TenantBillingModule,
         JobsModule.forRoot(setup.databaseUrl, env),
         DemoRequestsModule.forRoot(env),
         OrgProfileModule,
