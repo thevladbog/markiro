@@ -492,6 +492,15 @@ describe("GISMT aggregation XML format", () => {
     );
   });
 
+  it("renders identical XML bytes for identical input", () => {
+    const source: ShiftExportSource = {
+      mode: "boxes",
+      boxes: [{ sscc: "046800899000256001", codes: [km("A")] }],
+    };
+
+    expect(renderXml(source)[0]!.bytes).toEqual(renderXml(source)[0]!.bytes);
+  });
+
   it("escapes XML-reserved characters in cis serials and the LP_TIN attribute", () => {
     const [part] = renderXml(
       {

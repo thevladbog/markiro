@@ -1,6 +1,13 @@
-import { DomainError } from "./errors.js";
-import { parseKmSegments } from "./gs1/km.js";
-import { formatSsccWithAi } from "./gs1/sscc.js";
+import { encodeLfText, encodeSemicolonCsv } from "./document-text-encoding.js";
+import {
+  GISMT_AGGREGATION_OVERHEAD_LINE_COUNT,
+  GismtAggregationError,
+  formatGismtAggregationSscc,
+  gismtAggregationBoxLineCount,
+  renderGismtAggregationXml,
+  type GismtAggregationBox,
+  type GismtAggregationRenderResult,
+} from "./gismt-aggregation.js";
 
 export type ShiftExportFormatId =
   | "shift_txt_flat"
@@ -131,29 +138,10 @@ const LEGACY_SHIFT_EXPORT_FORMATS = Object.freeze([
   } as const),
 ] as const satisfies readonly ShiftExportFormatDescriptor[]);
 
-const UTF8_BOM = Uint8Array.of(0xef, 0xbb, 0xbf);
-const textEncoder = new TextEncoder();
-
-const XML_FOOTER_LINES = ["    </Document>", "</unit_pack>"] as const;
-
-function xmlHeaderLines(organizationInn: string): string[] {
-  return [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    "<unit_pack>",
-    "    <Document>",
-    "        <organisation>",
-    "            <id_info>",
-    `                <LP_info LP_TIN="${xmlAttribute(organizationInn)}" />`,
-    "            </id_info>",
-    "        </organisation>",
-  ];
-}
-
-/** Header + footer lines every GISMT XML part carries besides its pack_content blocks. */
-const XML_OVERHEAD_LINE_COUNT = xmlHeaderLines("").length + XML_FOOTER_LINES.length;
-
 interface ShiftExportBlock {
-  lines: readonly string[];
+  lines?: readonly string[];
+  csvRows?: readonly (readonly string[])[];
+  xmlBox?: GismtAggregationBox;
   physicalLineCount: number;
   codeCount: number;
   boxCount: number;
@@ -205,13 +193,19 @@ export function renderShiftExport(input: RenderShiftExportInput): ShiftExportPar
 
   return partBlocks.map((part, index) => {
     const partNumber = index + 1;
-    const codeCount = part.blocks.reduce((total, block) => total + block.codeCount, 0);
-    const boxCount = part.blocks.reduce((total, block) => total + block.boxCount, 0);
-    const body = encodePart(descriptor, part.blocks, organizationInn);
+    const xmlRendered =
+      descriptor.extension === "xml"
+        ? renderXmlPart(organizationInn, part.blocks.map((block) => requireXmlBox(block)))
+        : null;
+    const codeCount =
+      xmlRendered?.codeCount ?? part.blocks.reduce((total, block) => total + block.codeCount, 0);
+    const boxCount =
+      xmlRendered?.boxCount ?? part.blocks.reduce((total, block) => total + block.boxCount, 0);
+    const body = xmlRendered?.bytes ?? encodePart(descriptor, part.blocks);
 
     return {
       partNumber,
-      physicalLineCount: part.physicalLineCount,
+      physicalLineCount: xmlRendered?.physicalLineCount ?? part.physicalLineCount,
       codeCount,
       boxCount,
       filename: createFilename({
@@ -251,11 +245,9 @@ function createBlocks(
 ): ShiftExportBlock[] {
   if (source.mode === "flat") {
     return source.codes.map((code) => {
-      const line = descriptor.extension === "csv" ? csvField(code) : code;
-
       return {
-        lines: [line],
-        physicalLineCount: descriptor.extension === "csv" ? countCsvPhysicalLines(line) : 1,
+        ...(descriptor.extension === "csv" ? { csvRows: [[code]] } : { lines: [code] }),
+        physicalLineCount: descriptor.extension === "csv" ? countCsvPhysicalLines(code) : 1,
         codeCount: 1,
         boxCount: 0,
       };
@@ -264,13 +256,17 @@ function createBlocks(
 
   return source.boxes.map((box) => {
     if (descriptor.extension === "xml") {
-      const lines = [
-        "        <pack_content>",
-        `            <pack_code>${xmlText(formatBoxSscc(box.sscc))}</pack_code>`,
-        ...box.codes.map((code) => `            <cis>${xmlText(stripKmCryptoTail(code))}</cis>`),
-        "        </pack_content>",
-      ];
+      return {
+        xmlBox: box,
+        physicalLineCount: gismtAggregationBoxLineCount(box),
+        codeCount: box.codes.length,
+        boxCount: 1,
+      };
+    }
 
+    const ssccOut = descriptor.version >= 2 ? formatBoxSscc(box.sscc) : box.sscc;
+    if (descriptor.extension === "txt") {
+      const lines = [ssccOut, ...box.codes, ""];
       return {
         lines,
         physicalLineCount: lines.length,
@@ -279,18 +275,11 @@ function createBlocks(
       };
     }
 
-    const ssccOut = descriptor.version >= 2 ? formatBoxSscc(box.sscc) : box.sscc;
-    const lines =
-      descriptor.extension === "txt"
-        ? [ssccOut, ...box.codes, ""]
-        : box.codes.map((code) => `${csvField(ssccOut)};${csvField(code)}`);
+    const csvRows = box.codes.map((code) => [ssccOut, code]);
 
     return {
-      lines,
-      physicalLineCount:
-        descriptor.extension === "csv"
-          ? lines.reduce((total, line) => total + countCsvPhysicalLines(line), 0)
-          : lines.length,
+      csvRows,
+      physicalLineCount: box.codes.reduce((total, code) => total + countCsvPhysicalLines(code), 0),
       codeCount: box.codes.length,
       boxCount: 1,
     };
@@ -306,7 +295,7 @@ function splitBlocks(
     descriptor.extension === "csv"
       ? 1
       : descriptor.extension === "xml"
-        ? XML_OVERHEAD_LINE_COUNT
+        ? GISMT_AGGREGATION_OVERHEAD_LINE_COUNT
         : 0;
 
   if (maxLines === null) {
@@ -345,25 +334,14 @@ function splitBlocks(
 function encodePart(
   descriptor: ShiftExportFormatDescriptor,
   blocks: readonly ShiftExportBlock[],
-  organizationInn: string,
 ): Uint8Array {
-  const lines = blocks.flatMap((block) => block.lines);
-  const content =
-    descriptor.extension === "xml"
-      ? [...xmlHeaderLines(organizationInn), ...lines, ...XML_FOOTER_LINES].join("\n") + "\n"
-      : descriptor.extension === "csv"
-        ? [descriptor.boxMode === "flat" ? "code" : "box_sscc;code", ...lines].join("\r\n") + "\r\n"
-        : lines.join("\n") + "\n";
-  const encoded = textEncoder.encode(content);
-
-  if (descriptor.extension !== "csv") {
-    return encoded;
+  if (descriptor.extension === "csv") {
+    return encodeSemicolonCsv(
+      descriptor.boxMode === "flat" ? ["code"] : ["box_sscc", "code"],
+      blocks.flatMap((block) => block.csvRows ?? []),
+    );
   }
-
-  const bytes = new Uint8Array(UTF8_BOM.length + encoded.length);
-  bytes.set(UTF8_BOM);
-  bytes.set(encoded, UTF8_BOM.length);
-  return bytes;
+  return encodeLfText(blocks.flatMap((block) => block.lines ?? []));
 }
 
 function createFilename(input: {
@@ -381,66 +359,36 @@ function createFilename(input: {
   return `${input.productName}_${input.codeCount}pcs${boxCountSegment}_${input.shiftDate}${partSegment}.${input.descriptor.extension}`;
 }
 
-/**
- * Wraps `formatSsccWithAi` so a malformed v2 box SSCC surfaces through this
- * module's own error taxonomy (`ShiftExportDomainError`) instead of the
- * `gs1/sscc.js` module's plain `DomainError` — every failure mode of
- * `renderShiftExport`/`createBlocks` is a `ShiftExportDomainError`, and
- * callers (e.g. the export runner) pattern-match on `ShiftExportDomainErrorCode`.
- */
 function formatBoxSscc(sscc: string): string {
   try {
-    return formatSsccWithAi(sscc);
+    return formatGismtAggregationSscc(sscc);
   } catch (error) {
-    if (error instanceof DomainError) {
+    if (error instanceof GismtAggregationError) {
       throw new ShiftExportDomainError("INVALID_BOX_SSCC");
     }
     throw error;
   }
 }
 
-/**
- * Reduces a stored KM to the identification code (КИ) the GISMT aggregation
- * XML expects in `<cis>`: `01<gtin14>21<serial>` with the crypto tail (AI 93
- * and everything behind it) dropped. XML 1.0 cannot carry the GS separator
- * that delimits trailing AIs, so only the fixed-position КИ survives.
- */
-/**
- * Characters a `<cis>` value must never carry: XML 1.0-illegal code points
- * (C0 controls, lone surrogates, U+FFFE/U+FFFF) plus tab/LF/CR — those three
- * are XML-legal but would corrupt this renderer's line-oriented output.
- */
-const XML_PROHIBITED_CIS_CHARACTERS =
-  // eslint-disable-next-line no-control-regex
-  /[\u0000-\u001f\u007f\ufffe\uffff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
-
-function stripKmCryptoTail(code: string): string {
-  let cis: string;
+function renderXmlPart(
+  organizationInn: string,
+  boxes: readonly GismtAggregationBox[],
+): GismtAggregationRenderResult {
   try {
-    const segments = parseKmSegments(code);
-    cis = `01${segments.gtin14}21${segments.serial}`;
+    return renderGismtAggregationXml({ organizationInn, boxes });
   } catch (error) {
-    if (error instanceof DomainError) {
-      throw new ShiftExportDomainError("INVALID_CIS");
+    if (error instanceof GismtAggregationError) {
+      throw new ShiftExportDomainError(
+        error.code === "INVALID_SSCC" ? "INVALID_BOX_SSCC" : error.code,
+      );
     }
     throw error;
   }
-  if (XML_PROHIBITED_CIS_CHARACTERS.test(cis)) {
-    throw new ShiftExportDomainError("INVALID_CIS");
-  }
-  return cis;
 }
 
-function xmlText(value: string): string {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
-function xmlAttribute(value: string): string {
-  return xmlText(value).replaceAll('"', "&quot;");
-}
-
-function csvField(value: string): string {
-  return /[;"\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+function requireXmlBox(block: ShiftExportBlock): GismtAggregationBox {
+  if (block.xmlBox === undefined) throw new Error("Missing XML aggregation box");
+  return block.xmlBox;
 }
 
 function countCsvPhysicalLines(value: string): number {
