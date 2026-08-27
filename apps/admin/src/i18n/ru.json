@@ -359,6 +359,7 @@
         "ready": "Готово",
         "missing": "Нет файла",
         "chooseFile": "Выбрать файл",
+        "uploading": "Загрузка…",
         "fileLabel": "Файл {{status}}",
         "selectFile": "Выбор загрузки {{status}}",
         "noAttempts": "Загрузок ещё нет",

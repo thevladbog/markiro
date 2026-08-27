@@ -359,6 +359,7 @@
         "ready": "Ready",
         "missing": "Missing",
         "chooseFile": "Choose file",
+        "uploading": "Uploading…",
         "fileLabel": "{{status}} file",
         "selectFile": "Select {{status}} upload",
         "noAttempts": "No uploads yet",

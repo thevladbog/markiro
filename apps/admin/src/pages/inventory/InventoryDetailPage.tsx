@@ -11,7 +11,6 @@ import {
   Card,
   Checkbox,
   EmptyState,
-  Input,
   PageHeader,
   RadioGroup,
   Spinner,
@@ -27,6 +26,7 @@ import {
   useUpdateInventory,
   useUploadInventoryImport,
 } from "./api.js";
+import { FilePickerButton } from "./FilePickerButton.js";
 import { InventoryParametersForm } from "./InventoryParametersForm.js";
 import { InventoryLivePage } from "./InventoryLivePage.js";
 import { PreparationSteps } from "./PreparationSteps.js";
@@ -259,18 +259,14 @@ function ExportsStep({
                 )}
               </div>
               {canMutate ? (
-                <Input
-                  className="mk-inventory-file-control"
+                <FilePickerButton
                   label={t("pages.inventory.exports.chooseFile")}
-                  type="file"
+                  busyLabel={t("pages.inventory.exports.uploading")}
+                  ariaLabel={t("pages.inventory.exports.fileLabel", { status })}
                   accept=".csv,.zip,.xlsx"
-                  aria-label={t("pages.inventory.exports.fileLabel", { status })}
                   disabled={upload.isPending}
-                  onChange={(event) => {
-                    const file = event.currentTarget.files?.[0];
-                    if (file) upload.mutate({ inventoryId: inventory.id, status, file });
-                    event.currentTarget.value = "";
-                  }}
+                  busy={upload.isPending}
+                  onFile={(file) => upload.mutate({ inventoryId: inventory.id, status, file })}
                 />
               ) : null}
               {attempts.length === 0 ? (
