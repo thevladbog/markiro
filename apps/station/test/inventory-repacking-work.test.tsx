@@ -379,6 +379,12 @@ describe("repack inventory work screen", () => {
     await waitFor(() => expect(scan.active()).toBe(true));
     scan.emit(`(00)${printedSscc}`);
     expect(await screen.findByDisplayValue(printedSscc)).toBeDefined();
+    await screen.findByRole("button", { name: "Перепечатать" });
+    // Changing the query must synchronously drop the previous matches so a
+    // stale row cannot be tapped while the new lookup is in flight.
+    fireEvent.change(screen.getByLabelText("SSCC короба"), { target: { value: "999999" } });
+    expect(screen.queryByRole("button", { name: "Перепечатать" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("SSCC короба"), { target: { value: printedSscc } });
     fireEvent.click(await screen.findByRole("button", { name: "Перепечатать" }));
     await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
     expect(scan.active()).toBe(false);

@@ -70,6 +70,9 @@ function taskMatchesManifest(
     task.inventoryId === manifest.inventoryId &&
     task.inventoryNumber === manifest.inventoryNumber &&
     task.productName === manifest.productName &&
+    // null means the task came from an older list response without the field,
+    // so only a present-but-different print name counts as a mismatch.
+    (task.productPrintName === null || task.productPrintName === manifest.productPrintName) &&
     task.mode === manifest.mode &&
     task.lineId === manifest.lineId &&
     task.lineName === manifest.lineName &&

@@ -80,6 +80,16 @@ describe("floor task contracts", () => {
     expect(productionFloorTask(shift)).toEqual({ kind: "production", shift });
   });
 
+  it("defaults an omitted productPrintName to null and preserves a provided one", () => {
+    const withoutPrintName: Partial<typeof task> = { ...task };
+    delete withoutPrintName.productPrintName;
+    expect(parseInventoryTaskList({ items: [withoutPrintName] })).toEqual([
+      { ...task, productPrintName: null },
+    ]);
+    const named = { ...task, productPrintName: "Вода 0,5 л" };
+    expect(parseInventoryTaskList({ items: [named] })).toEqual([named]);
+  });
+
   it("strictly validates inventory task discovery and barcode resolution", () => {
     expect(parseInventoryTaskList({ items: [task] })).toEqual([task]);
     expect(

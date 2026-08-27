@@ -51,10 +51,7 @@ import { InventoryProgress as InventoryProgressView } from "../ui/inventory/Inve
 import { InventoryBoxPrintRecovery } from "../ui/inventory/InventoryBoxPrintRecovery.js";
 import { InventoryScanInstrument } from "../ui/inventory/InventoryScanInstrument.js";
 import { RepackBoxInstrument } from "../ui/inventory/RepackBoxInstrument.js";
-import {
-  RepackCorrections,
-  REPACK_REPRINT_MIN_QUERY,
-} from "../ui/inventory/RepackCorrections.js";
+import { RepackCorrections, REPACK_REPRINT_MIN_QUERY } from "../ui/inventory/RepackCorrections.js";
 import { StationScreen } from "../ui/StationScreen.js";
 
 export interface InventoryWorkScreenProps {
@@ -1158,6 +1155,9 @@ function RepackInventoryWorkScreen({
       setReprintMatches(null);
       return undefined;
     }
+    // Drop the previous query's matches immediately so a stale row cannot be
+    // tapped while the lookup for the new fragment is still in flight.
+    setReprintMatches(null);
     let cancelled = false;
     void searchInventoryPrintedBoxesBySscc(exec, {
       inventoryId: inventory.inventoryId,
