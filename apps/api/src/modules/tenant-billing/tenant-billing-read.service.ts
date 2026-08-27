@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, lt, lte } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
@@ -28,63 +28,64 @@ export class TenantBillingReadService {
   ) {}
 
   async overview(tenantId: string): Promise<TenantBillingOverviewDto> {
-    const [subscription, scheduledSubscription, limits, offer, requests, invoices, services, acts] =
-      await Promise.all([
-        this.currentSubscription(tenantId),
-        this.scheduledSubscription(tenantId),
-        this.subscriptionBilling(tenantId),
-        this.db
-          .select({
-            id: schema.commercialOffers.id,
-            number: schema.commercialOffers.number,
-            total: schema.commercialOffers.total,
-          })
-          .from(schema.commercialOffers)
-          .where(
-            and(
-              eq(schema.commercialOffers.tenantId, tenantId),
-              eq(schema.commercialOffers.status, "published"),
-            ),
-          )
-          .orderBy(desc(schema.commercialOffers.publishedAt))
-          .limit(1),
-        this.db
-          .select()
-          .from(schema.tenantBillingRequests)
-          .where(eq(schema.tenantBillingRequests.tenantId, tenantId))
-          .orderBy(desc(schema.tenantBillingRequests.updatedAt))
-          .limit(100),
-        this.db
-          .select()
-          .from(schema.invoices)
-          .where(
-            and(
-              eq(schema.invoices.tenantId, tenantId),
-              inArray(schema.invoices.status, ["issued", "partially_paid"]),
-            ),
-          )
-          .orderBy(desc(schema.invoices.updatedAt))
-          .limit(20),
-        this.db
-          .select()
-          .from(schema.orderedServices)
-          .where(eq(schema.orderedServices.tenantId, tenantId))
-          .orderBy(desc(schema.orderedServices.orderedAt))
-          .limit(20),
-        this.db
-          .select()
-          .from(schema.billingActs)
-          .where(eq(schema.billingActs.tenantId, tenantId))
-          .orderBy(desc(schema.billingActs.updatedAt))
-          .limit(20),
-      ]);
     const now = new Date();
+    const [billing, offers, requests, invoices, payments, acts] = await Promise.all([
+      this.subscriptionBilling(tenantId, now),
+      this.db
+        .select()
+        .from(schema.commercialOffers)
+        .where(eq(schema.commercialOffers.tenantId, tenantId)),
+      this.db
+        .select()
+        .from(schema.tenantBillingRequests)
+        .where(eq(schema.tenantBillingRequests.tenantId, tenantId))
+        .orderBy(desc(schema.tenantBillingRequests.updatedAt))
+        .limit(100),
+      this.db
+        .select()
+        .from(schema.invoices)
+        .where(
+          and(
+            eq(schema.invoices.tenantId, tenantId),
+            inArray(schema.invoices.status, ["issued", "partially_paid", "paid"]),
+          ),
+        )
+        .orderBy(desc(schema.invoices.updatedAt))
+        .limit(20),
+      this.db
+        .select()
+        .from(schema.billingPayments)
+        .where(eq(schema.billingPayments.tenantId, tenantId))
+        .orderBy(desc(schema.billingPayments.paidAt))
+        .limit(20),
+      this.db
+        .select()
+        .from(schema.billingActs)
+        .where(eq(schema.billingActs.tenantId, tenantId))
+        .orderBy(desc(schema.billingActs.updatedAt))
+        .limit(20),
+    ]);
+    const actionableOffer = this.actionableOffer(offers, now);
     const activeRequest = requests.find(
       (request) => !["completed", "cancelled"].includes(request.status),
     );
-    const attentionCount =
-      requests.filter((request) => request.status === "clarification_required").length +
-      invoices.filter((invoice) => this.invoiceStatus(invoice, now) === "overdue").length;
+    const approachingDeadline = new Date(now);
+    approachingDeadline.setUTCDate(approachingDeadline.getUTCDate() + 7);
+    const attentionTargets = new Set<string>();
+    for (const request of requests) {
+      if (request.status === "clarification_required")
+        attentionTargets.add(`request:${request.id}`);
+    }
+    if (actionableOffer) attentionTargets.add(`offer:${actionableOffer.id}`);
+    for (const invoice of invoices) {
+      if (
+        invoice.dueDate &&
+        invoice.dueDate <= approachingDeadline &&
+        ["issued", "partially_paid"].includes(invoice.status)
+      ) {
+        attentionTargets.add(`invoice:${invoice.id}`);
+      }
+    }
     const recentOperations = [
       ...invoices.map((invoice) => ({
         id: invoice.id,
@@ -93,12 +94,12 @@ export class TenantBillingReadService {
         occurredAt: iso(invoice.updatedAt)!,
         label: invoice.number,
       })),
-      ...services.map((service) => ({
-        id: service.id,
-        kind: "service" as const,
-        status: service.status,
-        occurredAt: iso(service.orderedAt)!,
-        label: service.nameRu,
+      ...payments.map((payment) => ({
+        id: payment.id,
+        kind: "payment" as const,
+        status: "confirmed" as const,
+        occurredAt: iso(payment.paidAt)!,
+        label: "Payment confirmed",
       })),
       ...acts.map((act) => ({
         id: act.id,
@@ -111,15 +112,15 @@ export class TenantBillingReadService {
       .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
       .slice(0, 20);
     return {
-      ...limits,
-      subscription,
-      scheduledSubscription,
-      actionableOffer: offer[0] ?? null,
+      ...billing,
+      actionableOffer: actionableOffer
+        ? { id: actionableOffer.id, number: actionableOffer.number, total: actionableOffer.total }
+        : null,
       recentOperations,
       activeRequest: activeRequest
         ? { id: activeRequest.id, number: activeRequest.number, status: activeRequest.status }
         : null,
-      attentionCount,
+      attentionCount: attentionTargets.size,
     };
   }
 
@@ -131,8 +132,12 @@ export class TenantBillingReadService {
     tenantId: string,
     query: ListInvoicesQueryDto,
   ): Promise<{ items: TenantInvoiceDto[] }> {
+    const now = new Date();
     const conditions = [eq(schema.invoices.tenantId, tenantId)];
-    if (query.status && query.status !== "overdue") {
+    if (query.status === "overdue") {
+      conditions.push(inArray(schema.invoices.status, ["issued", "partially_paid"]));
+      conditions.push(lt(schema.invoices.dueDate, now));
+    } else if (query.status) {
       conditions.push(eq(schema.invoices.status, query.status));
     }
     if (query.from)
@@ -144,12 +149,9 @@ export class TenantBillingReadService {
       .from(schema.invoices)
       .where(and(...conditions))
       .orderBy(desc(schema.invoices.issuedAt), desc(schema.invoices.createdAt))
-      .limit(100);
-    const invoicesWithStatus = invoices
-      .map((invoice) => this.toInvoice(invoice, [], new Date()))
-      .filter((invoice) => query.status === undefined || invoice.status === query.status)
-      .slice(query.offset, query.offset + query.limit);
-    const ids = invoicesWithStatus.map((invoice) => invoice.id);
+      .offset(query.offset)
+      .limit(query.limit);
+    const ids = invoices.map((invoice) => invoice.id);
     if (ids.length === 0) return { items: [] };
     const payments = await this.db
       .select()
@@ -162,11 +164,11 @@ export class TenantBillingReadService {
       )
       .orderBy(schema.billingPayments.paidAt, schema.billingPayments.id);
     return {
-      items: invoicesWithStatus.map((invoice) =>
+      items: invoices.map((invoice) =>
         this.toInvoice(
           invoices.find((row) => row.id === invoice.id)!,
           payments.filter((payment) => payment.invoiceId === invoice.id),
-          new Date(),
+          now,
         ),
       ),
     };
@@ -266,16 +268,24 @@ export class TenantBillingReadService {
             .select()
             .from(schema.commercialOfferDocuments)
             .where(and(...offerConditions))
-            .orderBy(desc(schema.commercialOfferDocuments.createdAt))
-            .limit(100),
+            .orderBy(
+              desc(schema.commercialOfferDocuments.createdAt),
+              desc(schema.commercialOfferDocuments.id),
+            )
+            .offset(0)
+            .limit(query.offset + query.limit),
       query.type === "offer"
         ? []
         : this.db
             .select()
             .from(schema.billingActDocuments)
             .where(and(...actConditions))
-            .orderBy(desc(schema.billingActDocuments.createdAt))
-            .limit(100),
+            .orderBy(
+              desc(schema.billingActDocuments.createdAt),
+              desc(schema.billingActDocuments.id),
+            )
+            .offset(0)
+            .limit(query.offset + query.limit),
     ]);
     return {
       items: [
@@ -302,7 +312,10 @@ export class TenantBillingReadService {
           createdAt: iso(document.createdAt)!,
         })),
       ]
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .sort((left, right) => {
+          const byDate = right.createdAt.localeCompare(left.createdAt);
+          return byDate !== 0 ? byDate : right.id.localeCompare(left.id);
+        })
         .slice(query.offset, query.offset + query.limit),
     };
   }
@@ -351,7 +364,7 @@ export class TenantBillingReadService {
     return {
       id: offer.id,
       number: offer.number,
-      status: offer.status,
+      status: await this.offerPresentationStatus(tenantId, offer),
       total: offer.total,
       expiresAt: iso(offer.expiresAt),
       publishedAt: iso(offer.publishedAt),
@@ -403,6 +416,7 @@ export class TenantBillingReadService {
       document?.objectKey,
       document?.status === "ready",
       "invoice_document_not_ready",
+      `tenants/${tenantId}/invoices/${invoiceId}/`,
     );
   }
 
@@ -429,6 +443,7 @@ export class TenantBillingReadService {
       document?.objectKey,
       document?.status === "ready",
       "offer_document_not_ready",
+      `tenants/${tenantId}/offers/${offerId}/`,
     );
   }
 
@@ -452,66 +467,139 @@ export class TenantBillingReadService {
       document?.objectKey,
       Boolean(document?.objectKey),
       "act_document_not_found",
+      `tenants/${tenantId}/acts/${actId}/`,
     );
   }
 
-  private async subscriptionBilling(tenantId: string): Promise<TenantSubscriptionBillingDto> {
-    const [subscription, scheduledSubscription, resolved] = await Promise.all([
-      this.currentSubscription(tenantId),
-      this.scheduledSubscription(tenantId),
-      this.entitlements.resolve(tenantId),
+  private async subscriptionBilling(
+    tenantId: string,
+    at = new Date(),
+  ): Promise<TenantSubscriptionBillingDto> {
+    const [subscriptions, resolved, usage, addons, services] = await Promise.all([
+      this.db
+        .select()
+        .from(schema.tenantSubscriptions)
+        .where(eq(schema.tenantSubscriptions.tenantId, tenantId))
+        .orderBy(
+          desc(schema.tenantSubscriptions.startsAt),
+          desc(schema.tenantSubscriptions.updatedAt),
+        ),
+      this.entitlements.resolve(tenantId, this.db, at),
+      this.entitlements.usage(tenantId, this.db, at),
+      this.db
+        .select()
+        .from(schema.subscriptionAddons)
+        .where(eq(schema.subscriptionAddons.tenantId, tenantId))
+        .orderBy(
+          desc(schema.subscriptionAddons.startsAt),
+          desc(schema.subscriptionAddons.updatedAt),
+        ),
+      this.db
+        .select()
+        .from(schema.orderedServices)
+        .where(eq(schema.orderedServices.tenantId, tenantId))
+        .orderBy(desc(schema.orderedServices.orderedAt), desc(schema.orderedServices.id)),
     ]);
+    const currentRow = resolved.subscription
+      ? (subscriptions.find((row) => row.id === resolved.subscription!.id) ?? null)
+      : this.latestEndedSubscription(subscriptions, at);
+    const scheduledRow = subscriptions.find(
+      (row) => row.status === "scheduled" && row.startsAt !== null && row.startsAt > at,
+    );
+    const versionIds = [
+      ...subscriptions.map((row) => row.planVersionId),
+      ...addons.map((row) => row.addonVersionId),
+    ];
+    const versions =
+      versionIds.length === 0
+        ? []
+        : await this.db
+            .select({
+              id: schema.catalogItemVersions.id,
+              nameRu: schema.catalogItemVersions.nameRu,
+              billingPeriod: schema.catalogItemVersions.billingPeriod,
+              unitPrice: schema.catalogItemVersions.unitPrice,
+            })
+            .from(schema.catalogItemVersions)
+            .where(inArray(schema.catalogItemVersions.id, versionIds));
+    const versionsById = new Map(versions.map((version) => [version.id, version]));
+    const limits = { ...resolved.quotas, ...resolved.features };
     return {
-      subscription,
-      scheduledSubscription,
+      subscription: currentRow
+        ? this.subscriptionDto(
+            currentRow,
+            versionsById.get(currentRow.planVersionId),
+            resolved.subscription ? resolved.subscription.status : "expired",
+          )
+        : null,
+      scheduledSubscription: scheduledRow
+        ? this.subscriptionDto(
+            scheduledRow,
+            versionsById.get(scheduledRow.planVersionId),
+            "scheduled",
+          )
+        : null,
       access: resolved.access,
-      limits: { ...resolved.quotas, ...resolved.features },
+      limits,
+      usage,
+      limitPresentation: {
+        lines: limitPresentation(usage.lines, resolved.quotas.lines),
+        stations: limitPresentation(usage.stations, resolved.quotas.stations),
+        kiosks: limitPresentation(usage.kiosks, resolved.quotas.kiosks),
+        cabinetUsers: limitPresentation(usage.cabinetUsers, resolved.quotas.cabinetUsers),
+      },
+      addons: addons.map((addon) => ({
+        id: addon.id,
+        catalogVersionId: addon.addonVersionId,
+        name: versionsById.get(addon.addonVersionId)?.nameRu ?? "",
+        quantity: addon.quantity,
+        status: addon.status,
+        startsAt: iso(addon.startsAt),
+        endsAt: iso(addon.endsAt),
+      })),
+      services: services.map((service) => ({
+        id: service.id,
+        name: service.nameRu,
+        quantity: service.quantity,
+        unit: service.unit,
+        status: service.status,
+        orderedAt: iso(service.orderedAt)!,
+      })),
     };
   }
 
-  private async currentSubscription(tenantId: string) {
-    const [subscription] = await this.db
-      .select()
-      .from(schema.tenantSubscriptions)
-      .where(
-        and(
-          eq(schema.tenantSubscriptions.tenantId, tenantId),
-          inArray(schema.tenantSubscriptions.status, ["pending_activation", "trial", "active"]),
-        ),
-      )
-      .orderBy(desc(schema.tenantSubscriptions.updatedAt))
-      .limit(1);
-    return subscription ? this.subscriptionDto(subscription) : null;
+  private latestEndedSubscription(
+    subscriptions: Array<typeof schema.tenantSubscriptions.$inferSelect>,
+    at: Date,
+  ) {
+    return (
+      subscriptions
+        .filter(
+          (row) =>
+            row.status !== "cancelled" &&
+            row.status !== "superseded" &&
+            row.endsAt !== null &&
+            row.endsAt <= at,
+        )
+        .sort((left, right) => right.endsAt!.getTime() - left.endsAt!.getTime())[0] ?? null
+    );
   }
 
-  private async scheduledSubscription(tenantId: string) {
-    const [subscription] = await this.db
-      .select()
-      .from(schema.tenantSubscriptions)
-      .where(
-        and(
-          eq(schema.tenantSubscriptions.tenantId, tenantId),
-          eq(schema.tenantSubscriptions.status, "scheduled"),
-        ),
-      )
-      .orderBy(desc(schema.tenantSubscriptions.updatedAt))
-      .limit(1);
-    return subscription ? this.subscriptionDto(subscription) : null;
-  }
-
-  private async subscriptionDto(subscription: typeof schema.tenantSubscriptions.$inferSelect) {
-    const [version] = await this.db
-      .select({ nameRu: schema.catalogItemVersions.nameRu })
-      .from(schema.catalogItemVersions)
-      .where(eq(schema.catalogItemVersions.id, subscription.planVersionId))
-      .limit(1);
+  private subscriptionDto(
+    subscription: typeof schema.tenantSubscriptions.$inferSelect,
+    version:
+      { nameRu: string; billingPeriod: "month" | "year" | null; unitPrice: string } | undefined,
+    status: "pending_activation" | "trial" | "active" | "scheduled" | "expired",
+  ) {
     return {
       id: subscription.id,
       planVersionId: subscription.planVersionId,
-      status: subscription.status,
+      status,
       startsAt: iso(subscription.startsAt),
       endsAt: iso(subscription.endsAt),
       planName: version?.nameRu ?? null,
+      billingPeriod: version?.billingPeriod ?? null,
+      price: version?.unitPrice ?? null,
     };
   }
 
@@ -534,6 +622,45 @@ export class TenantBillingReadService {
     return request ?? null;
   }
 
+  private actionableOffer(offers: Array<typeof schema.commercialOffers.$inferSelect>, at: Date) {
+    const latestByFamily = new Map<string, typeof schema.commercialOffers.$inferSelect>();
+    for (const offer of offers) {
+      const current = latestByFamily.get(offer.familyId);
+      if (!current || offer.revision > current.revision) latestByFamily.set(offer.familyId, offer);
+    }
+    return [...latestByFamily.values()]
+      .filter(
+        (offer) =>
+          offer.status === "published" && (offer.expiresAt === null || offer.expiresAt > at),
+      )
+      .sort(
+        (left, right) =>
+          (right.publishedAt?.getTime() ?? 0) - (left.publishedAt?.getTime() ?? 0) ||
+          right.revision - left.revision,
+      )[0];
+  }
+
+  private async offerPresentationStatus(
+    tenantId: string,
+    offer: typeof schema.commercialOffers.$inferSelect,
+  ) {
+    if (offer.status === "published" && offer.expiresAt && offer.expiresAt <= new Date()) {
+      return "expired" as const;
+    }
+    const [newer] = await this.db
+      .select({ id: schema.commercialOffers.id })
+      .from(schema.commercialOffers)
+      .where(
+        and(
+          eq(schema.commercialOffers.tenantId, tenantId),
+          eq(schema.commercialOffers.familyId, offer.familyId),
+          gt(schema.commercialOffers.revision, offer.revision),
+        ),
+      )
+      .limit(1);
+    return newer ? ("superseded" as const) : offer.status;
+  }
+
   private toInvoice(
     invoice: InvoiceRow,
     payments: Array<typeof schema.billingPayments.$inferSelect>,
@@ -554,7 +681,7 @@ export class TenantBillingReadService {
     };
   }
 
-  private invoiceStatus(invoice: InvoiceRow, now: Date) {
+  private invoiceStatus(invoice: InvoiceRow, now: Date): TenantInvoiceDto["status"] {
     return (invoice.status === "issued" || invoice.status === "partially_paid") &&
       invoice.dueDate &&
       invoice.dueDate < now
@@ -578,8 +705,11 @@ export class TenantBillingReadService {
     objectKey: string | null | undefined,
     ready: boolean,
     code: string,
+    expectedPrefix: string,
   ): Promise<PrivateDownloadDto> {
-    if (!ready || !objectKey) throw new NotFoundException({ code });
+    if (!ready || !objectKey || !objectKey.startsWith(expectedPrefix)) {
+      throw new NotFoundException({ code });
+    }
     return { url: await this.storage.presignRead(objectKey, 300) };
   }
 }
@@ -610,5 +740,23 @@ function paymentSummary(
         : confirmed === 0n
           ? ("issued" as const)
           : ("partially_paid" as const),
+  };
+}
+
+function limitPresentation(used: number, assigned: number | null) {
+  if (assigned === null) return { used, assigned, remaining: null, state: "normal" as const };
+  const remaining = assigned - used;
+  return {
+    used,
+    assigned,
+    remaining,
+    state:
+      used > assigned
+        ? ("exceeded" as const)
+        : used === assigned
+          ? ("reached" as const)
+          : used / assigned >= 0.8
+            ? ("approaching" as const)
+            : ("normal" as const),
   };
 }

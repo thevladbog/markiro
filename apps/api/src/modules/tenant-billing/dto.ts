@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { schema } from "@markiro/db";
 
 const billingUuidSchema = z.string().uuid();
 const billingMoneySchema = z.string().regex(/^\d{1,12}\.\d{2}$/, "Expected a decimal amount");
@@ -33,13 +34,7 @@ export const tenantInvoiceStatusSchema = z.enum([
   "cancelled",
 ]);
 export const invoicePaymentStatusSchema = z.enum(["issued", "partially_paid", "paid"]);
-export const tenantOfferStatusSchema = z.enum([
-  "draft",
-  "published",
-  "paid",
-  "expired",
-  "cancelled",
-]);
+export const tenantOfferStatusSchema = z.enum([...schema.OFFER_STATUSES, "superseded"] as const);
 export const tenantDocumentTypeSchema = z.enum(["offer", "act"]);
 export const tenantDocumentStatusSchema = z.enum(["pending", "ready", "failed"]);
 
@@ -72,6 +67,30 @@ const paymentSummarySchema = z.strictObject({
   remainingAmount: billingMoneySchema,
   status: invoicePaymentStatusSchema,
 });
+
+const requestStatusSchema = z.enum(schema.BILLING_REQUEST_STATUSES);
+const serviceStatusSchema = z.enum(["ordered", "in_progress", "completed", "cancelled"]);
+const actStatusSchema = z.enum(schema.BILLING_ACT_STATUSES);
+const recentOperationStatusSchema = z.enum([
+  "draft",
+  "issued",
+  "overdue",
+  "partially_paid",
+  "paid",
+  "cancelled",
+  "published",
+  "expired",
+  "superseded",
+  "new",
+  "under_review",
+  "clarification_required",
+  "offer_prepared",
+  "awaiting_payment",
+  "in_progress",
+  "completed",
+  "ordered",
+  "confirmed",
+] as const);
 
 const paymentSchema = z.strictObject({
   id: billingUuidSchema,
@@ -118,7 +137,7 @@ export const tenantInvoiceDetailSchema = tenantInvoiceSchema.extend({
   ),
   documents: z.array(documentSchema),
   request: z
-    .strictObject({ id: billingUuidSchema, number: z.string(), status: z.string() })
+    .strictObject({ id: billingUuidSchema, number: z.string(), status: requestStatusSchema })
     .nullable(),
 });
 
@@ -145,7 +164,7 @@ export const tenantOfferDetailSchema = z.strictObject({
   ),
   documents: z.array(documentSchema),
   request: z
-    .strictObject({ id: billingUuidSchema, number: z.string(), status: z.string() })
+    .strictObject({ id: billingUuidSchema, number: z.string(), status: requestStatusSchema })
     .nullable(),
 });
 
@@ -176,6 +195,34 @@ const subscriptionSchema = z.strictObject({
   startsAt: billingDateSchema.nullable(),
   endsAt: billingDateSchema.nullable(),
   planName: z.string().nullable(),
+  billingPeriod: z.enum(["month", "year"]).nullable(),
+  price: billingMoneySchema.nullable(),
+});
+
+const addonSchema = z.strictObject({
+  id: billingUuidSchema,
+  catalogVersionId: billingUuidSchema,
+  name: z.string(),
+  quantity: z.number().int().positive(),
+  status: z.enum(["scheduled", "active", "expired", "revoked"]),
+  startsAt: billingDateSchema.nullable(),
+  endsAt: billingDateSchema.nullable(),
+});
+
+const serviceSchema = z.strictObject({
+  id: billingUuidSchema,
+  name: z.string(),
+  quantity: z.number().int().positive(),
+  unit: z.string(),
+  status: serviceStatusSchema,
+  orderedAt: billingDateSchema,
+});
+
+const limitSchema = z.strictObject({
+  used: z.number().int().nonnegative(),
+  assigned: z.number().int().positive().nullable(),
+  remaining: z.number().int().nullable(),
+  state: z.enum(["normal", "approaching", "reached", "exceeded"]),
 });
 
 export const tenantSubscriptionBillingSchema = z.strictObject({
@@ -191,6 +238,20 @@ export const tenantSubscriptionBillingSchema = z.strictObject({
     publicApi: z.boolean(),
     pallets: z.boolean(),
   }),
+  usage: z.strictObject({
+    lines: z.number().int().nonnegative(),
+    stations: z.number().int().nonnegative(),
+    kiosks: z.number().int().nonnegative(),
+    cabinetUsers: z.number().int().nonnegative(),
+  }),
+  limitPresentation: z.strictObject({
+    lines: limitSchema,
+    stations: limitSchema,
+    kiosks: limitSchema,
+    cabinetUsers: limitSchema,
+  }),
+  addons: z.array(addonSchema),
+  services: z.array(serviceSchema),
 });
 
 export const tenantBillingOverviewSchema = tenantSubscriptionBillingSchema.extend({
@@ -204,14 +265,14 @@ export const tenantBillingOverviewSchema = tenantSubscriptionBillingSchema.exten
   recentOperations: z.array(
     z.strictObject({
       id: billingUuidSchema,
-      kind: z.enum(["invoice", "offer", "request", "service", "act"]),
-      status: z.string(),
+      kind: z.enum(["invoice", "offer", "request", "service", "act", "payment"]),
+      status: recentOperationStatusSchema,
       occurredAt: billingDateSchema,
       label: z.string(),
     }),
   ),
   activeRequest: z
-    .strictObject({ id: billingUuidSchema, number: z.string(), status: z.string() })
+    .strictObject({ id: billingUuidSchema, number: z.string(), status: requestStatusSchema })
     .nullable(),
   attentionCount: z.number().int().nonnegative(),
 });
