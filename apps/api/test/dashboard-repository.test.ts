@@ -219,9 +219,9 @@ describe.skipIf(!databaseUrl)("tenant dashboard repository", () => {
       end: "2026-03-29T22:00:00.000Z",
       label: "2026-03-29",
       validation: {
-        acceptedUnits: 23,
+        acceptedUnits: 13,
         shiftHours: 23,
-        unitsPerShiftHour: 1,
+        unitsPerShiftHour: 0.6,
       },
     });
     expect(
@@ -417,7 +417,7 @@ async function seedBerlin(db: Db): Promise<void> {
   await db
     .insert(schema.codeRegistry)
     .values(
-      Array.from({ length: 23 }, (_, index) =>
+      Array.from({ length: 13 }, (_, index) =>
         registry(
           BERLIN_TENANT,
           BERLIN_VALIDATION_SHIFT,
