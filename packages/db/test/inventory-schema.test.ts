@@ -848,7 +848,10 @@ describe("inventory document schema", () => {
         "inventoryDocumentArtifacts",
         "inventory_document_artifacts_byte_size_nonnegative_check",
       ),
-    ).toContain('"byte_size" >= 0');
+    ).toBe('"byte_size" >= 0');
+    expect(
+      getTableConfig(table("inventoryDocumentArtifacts")).checks.map((item) => item.name),
+    ).not.toContain("inventory_document_artifacts_byte_size_positive_check");
 
     const runColumns = Object.keys(schema.inventoryDocumentRuns);
     expect(runColumns).toEqual(
