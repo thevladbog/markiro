@@ -489,8 +489,14 @@ jobs:
             "$yandex_public" "$version"
           node tools/station-release/artifacts.mjs compare-origins \
             "$github_public" "$yandex_public" beta "$version"
-          test "$(grep -o \"\\\"releaseSha\\\"[[:space:]]*:[[:space:]]*\\\"$release_sha\\\"\" \
-            "$github_public/release-evidence.json" | wc -l)" = 1
+          for evidence_path in \
+            "$github_public/release-evidence.json" \
+            "$yandex_public/release-evidence.json"; do
+            RELEASE_SHA="$release_sha" node -e '
+              const e=require(process.argv[1]);
+              if(e.releaseSha!==process.env.RELEASE_SHA)process.exit(1)
+            ' "$evidence_path"
+          done
           github_manifest_sha256="$(sha256sum "$github_public/latest.json" | cut -d ' ' -f 1)"
           yandex_manifest_sha256="$(sha256sum "$yandex_public/latest.json" | cut -d ' ' -f 1)"
           github_evidence_sha256="$(sha256sum "$github_public/release-evidence.json" | cut -d ' ' -f 1)"

@@ -360,10 +360,10 @@ test("immutable publication and public dual-origin validation precede every mode
     publicValidation.run,
     /curl --fail[^\n]*--retry 3 --retry-all-errors --retry-max-time 30/,
   );
-  assert.match(
-    publicValidation.run,
-    /releaseSha.*\[\[:space:\]\]\*:\[\[:space:\]\]\*.*\$release_sha/,
-  );
+  assert.match(publicValidation.run, /RELEASE_SHA="\$release_sha" node -e/);
+  assert.match(publicValidation.run, /e\.releaseSha!==process\.env\.RELEASE_SHA/);
+  assert.match(publicValidation.run, /"\$yandex_public\/release-evidence\.json"/);
+  assert.doesNotMatch(publicValidation.run, /grep -o[\s\S]*wc -l/);
   assert.doesNotMatch(publicValidation.run, /publish-immutable|tauri build/);
   assert.doesNotMatch(promote.run, /gh release create "\$tag"|publish-immutable|tauri build/);
   assert.equal(
