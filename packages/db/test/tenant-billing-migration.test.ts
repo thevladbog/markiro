@@ -76,6 +76,39 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
     );
 
     await migrate(drizzle(pool), { migrationsFolder });
+    await pool.query(
+      `INSERT INTO tenant_billing_requests
+         (id, tenant_id, number, type, description, idempotency_key, created_by_user_id)
+       VALUES
+         ('00000000-0000-4000-8000-000000000806', 'billing-migration-a', 'BR-000001',
+          'other', 'Tenant A isolation fixture',
+          '00000000-0000-4000-8000-000000000807', 'billing-migration-user'),
+         ('00000000-0000-4000-8000-000000000811', 'billing-migration-b', 'BR-000002',
+          'other', 'Tenant B isolation fixture',
+          '00000000-0000-4000-8000-000000000812', 'billing-migration-user')`,
+    );
+    await pool.query(
+      `INSERT INTO invoices
+         (id, tenant_id, number, status, created_by_platform_user_id)
+       VALUES
+         ('00000000-0000-4000-8000-000000000808', 'billing-migration-b',
+          'INV-BILLING-FOREIGN-1', 'draft', 'billing-migration-admin')`,
+    );
+    await pool.query(
+      `INSERT INTO commercial_offers
+         (id, tenant_id, revision, number, created_by_platform_user_id)
+       VALUES
+         ('00000000-0000-4000-8000-000000000809', 'billing-migration-b', 1,
+          'KP-BILLING-FOREIGN-1', 'billing-migration-admin')`,
+    );
+    await pool.query(
+      `INSERT INTO billing_acts
+         (id, tenant_id, number, status, period_start, period_end, created_by_platform_user_id)
+       VALUES
+         ('00000000-0000-4000-8000-000000000810', 'billing-migration-b',
+          'ACT-BILLING-FOREIGN-1', 'draft', '2026-08-01', '2026-08-31',
+          'billing-migration-admin')`,
+    );
   }, 120_000);
 
   afterAll(async () => {
@@ -136,23 +169,7 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
   });
 
   it("rejects a request link whose typed target belongs to another tenant", async () => {
-    await pool.query(
-      `INSERT INTO tenant_billing_requests
-         (id, tenant_id, number, type, description, idempotency_key, created_by_user_id)
-       VALUES
-         ('00000000-0000-4000-8000-000000000806', 'billing-migration-a', 'BR-000001',
-          'other', 'Cross-tenant isolation fixture',
-          '00000000-0000-4000-8000-000000000807', 'billing-migration-user')`,
-    );
-    await pool.query(
-      `INSERT INTO invoices
-         (id, tenant_id, number, status, created_by_platform_user_id)
-       VALUES
-         ('00000000-0000-4000-8000-000000000808', 'billing-migration-b',
-          'INV-BILLING-FOREIGN-1', 'draft', 'billing-migration-admin')`,
-    );
-
-    await expect(
+    await expectForeignKeyViolation(
       pool.query(
         `INSERT INTO tenant_billing_request_links
            (tenant_id, request_id, invoice_id)
@@ -160,12 +177,162 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
            ('billing-migration-a', '00000000-0000-4000-8000-000000000806',
             '00000000-0000-4000-8000-000000000808')`,
       ),
+      "tenant_billing_request_links_tenant_invoice_fk",
+    );
+  });
+
+  it("rejects cross-tenant request events and attachments", async () => {
+    await expectForeignKeyViolation(
+      pool.query(
+        `INSERT INTO tenant_billing_request_events
+           (tenant_id, request_id, kind, actor_kind, idempotency_key)
+         VALUES
+           ('billing-migration-b', '00000000-0000-4000-8000-000000000806',
+            'created', 'system', '00000000-0000-4000-8000-000000000813')`,
+      ),
+      "tenant_billing_request_events_tenant_request_fk",
+    );
+
+    await expectForeignKeyViolation(
+      pool.query(
+        `INSERT INTO tenant_billing_request_attachments
+           (tenant_id, request_id, file_name, content_type, byte_size, sha256, object_key,
+            uploaded_by_user_id)
+         VALUES
+           ('billing-migration-b', '00000000-0000-4000-8000-000000000806',
+            'foreign.pdf', 'application/pdf', 1, 'fixture-sha256',
+            'tenant-billing/foreign-attachment', 'billing-migration-user')`,
+      ),
+      "tenant_billing_request_attachments_tenant_request_fk",
+    );
+  });
+
+  it("rejects cross-tenant offer decisions and invoice offer provenance", async () => {
+    await expectForeignKeyViolation(
+      pool.query(
+        `INSERT INTO commercial_offer_decisions
+           (tenant_id, offer_id, decision, actor_user_id, idempotency_key)
+         VALUES
+           ('billing-migration-a', '00000000-0000-4000-8000-000000000809',
+            'accepted', 'billing-migration-user',
+            '00000000-0000-4000-8000-000000000814')`,
+      ),
+      "commercial_offer_decisions_tenant_offer_fk",
+    );
+
+    await expectForeignKeyViolation(
+      pool.query(
+        `INSERT INTO invoices
+           (tenant_id, number, status, source_offer_id, created_by_platform_user_id)
+         VALUES
+           ('billing-migration-a', 'INV-BILLING-CROSS-OFFER-1', 'draft',
+            '00000000-0000-4000-8000-000000000809', 'billing-migration-admin')`,
+      ),
+      "invoices_tenant_source_offer_fk",
+    );
+  });
+
+  it("rejects cross-tenant acts and act documents", async () => {
+    await expectForeignKeyViolation(
+      pool.query(
+        `INSERT INTO billing_acts
+           (tenant_id, request_id, number, status, period_start, period_end,
+            created_by_platform_user_id)
+         VALUES
+           ('billing-migration-a', '00000000-0000-4000-8000-000000000811',
+            'ACT-BILLING-CROSS-REQUEST-1', 'draft', '2026-08-01', '2026-08-31',
+            'billing-migration-admin')`,
+      ),
+      "billing_acts_tenant_request_fk",
+    );
+
+    await expectForeignKeyViolation(
+      pool.query(
+        `INSERT INTO billing_act_documents
+           (tenant_id, act_id, revision, object_key, content_type, sha256, byte_size,
+            uploaded_by_platform_user_id)
+         VALUES
+           ('billing-migration-a', '00000000-0000-4000-8000-000000000810', 1,
+            'tenant-billing/foreign-act-document', 'application/pdf', 'fixture-sha256', 1,
+            'billing-migration-admin')`,
+      ),
+      "billing_act_documents_tenant_act_fk",
+    );
+  });
+
+  it("supports cancellation before or after issue with consistent issue audit pairs", async () => {
+    await pool.query(
+      `INSERT INTO billing_acts
+         (id, tenant_id, number, status, period_start, period_end, created_by_platform_user_id,
+          cancelled_by_platform_user_id, cancelled_at)
+       VALUES
+         ('00000000-0000-4000-8000-000000000815', 'billing-migration-a',
+          'ACT-BILLING-CANCEL-BEFORE-ISSUE', 'cancelled', '2026-08-01', '2026-08-31',
+          'billing-migration-admin', 'billing-migration-admin', now())`,
+    );
+    await pool.query(
+      `INSERT INTO billing_acts
+         (id, tenant_id, number, status, period_start, period_end, created_by_platform_user_id,
+          issued_by_platform_user_id, issued_at, cancelled_by_platform_user_id, cancelled_at)
+       VALUES
+         ('00000000-0000-4000-8000-000000000816', 'billing-migration-a',
+          'ACT-BILLING-CANCEL-AFTER-ISSUE', 'cancelled', '2026-08-01', '2026-08-31',
+          'billing-migration-admin', 'billing-migration-admin', now(),
+          'billing-migration-admin', now())`,
+    );
+
+    const rows = await pool.query(
+      `SELECT number, issued_by_platform_user_id IS NOT NULL AS was_issued
+       FROM billing_acts
+       WHERE id IN (
+         '00000000-0000-4000-8000-000000000815',
+         '00000000-0000-4000-8000-000000000816'
+       )
+       ORDER BY number`,
+    );
+    expect(rows.rows).toEqual([
+      { number: "ACT-BILLING-CANCEL-AFTER-ISSUE", was_issued: true },
+      { number: "ACT-BILLING-CANCEL-BEFORE-ISSUE", was_issued: false },
+    ]);
+
+    await expect(
+      pool.query(
+        `INSERT INTO billing_acts
+           (tenant_id, number, status, period_start, period_end, created_by_platform_user_id,
+            issued_by_platform_user_id, cancelled_by_platform_user_id, cancelled_at)
+         VALUES
+           ('billing-migration-a', 'ACT-BILLING-CANCEL-PARTIAL-ACTOR', 'cancelled',
+            '2026-08-01', '2026-08-31', 'billing-migration-admin',
+            'billing-migration-admin', 'billing-migration-admin', now())`,
+      ),
     ).rejects.toMatchObject({
-      code: "23503",
-      constraint: "tenant_billing_request_links_tenant_invoice_fk",
+      code: "23514",
+      constraint: "billing_acts_issue_shape_check",
+    });
+
+    await expect(
+      pool.query(
+        `INSERT INTO billing_acts
+           (tenant_id, number, status, period_start, period_end, created_by_platform_user_id,
+            issued_at, cancelled_by_platform_user_id, cancelled_at)
+         VALUES
+           ('billing-migration-a', 'ACT-BILLING-CANCEL-PARTIAL-TIME', 'cancelled',
+            '2026-08-01', '2026-08-31', 'billing-migration-admin', now(),
+            'billing-migration-admin', now())`,
+      ),
+    ).rejects.toMatchObject({
+      code: "23514",
+      constraint: "billing_acts_issue_shape_check",
     });
   });
 });
+
+async function expectForeignKeyViolation(
+  query: Promise<unknown>,
+  constraint: string,
+): Promise<void> {
+  await expect(query).rejects.toMatchObject({ code: "23503", constraint });
+}
 
 function quoteIdentifier(identifier: string): string {
   if (!/^[a-z_][a-z0-9_]*$/.test(identifier)) throw new Error("Unsafe database identifier");

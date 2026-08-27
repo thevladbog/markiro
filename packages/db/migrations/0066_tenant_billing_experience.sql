@@ -47,9 +47,11 @@ CREATE TABLE "billing_acts" (
 	CONSTRAINT "billing_acts_number_uq" UNIQUE("number"),
 	CONSTRAINT "billing_acts_tenant_id_uq" UNIQUE("tenant_id","id"),
 	CONSTRAINT "billing_acts_period_order_check" CHECK ("billing_acts"."period_end" >= "billing_acts"."period_start"),
-	CONSTRAINT "billing_acts_issue_shape_check" CHECK (("billing_acts"."status" = 'draft' and "billing_acts"."issued_by_platform_user_id" is null and "billing_acts"."issued_at" is null and "billing_acts"."cancelled_by_platform_user_id" is null and "billing_acts"."cancelled_at" is null)
-        or ("billing_acts"."status" = 'issued' and "billing_acts"."issued_by_platform_user_id" is not null and "billing_acts"."issued_at" is not null and "billing_acts"."cancelled_by_platform_user_id" is null and "billing_acts"."cancelled_at" is null)
-        or ("billing_acts"."status" = 'cancelled' and "billing_acts"."cancelled_by_platform_user_id" is not null and "billing_acts"."cancelled_at" is not null))
+	CONSTRAINT "billing_acts_issue_shape_check" CHECK ((("billing_acts"."issued_by_platform_user_id" is null and "billing_acts"."issued_at" is null)
+        or ("billing_acts"."issued_by_platform_user_id" is not null and "billing_acts"."issued_at" is not null))
+        and (("billing_acts"."status" = 'draft' and "billing_acts"."issued_by_platform_user_id" is null and "billing_acts"."cancelled_by_platform_user_id" is null and "billing_acts"."cancelled_at" is null)
+          or ("billing_acts"."status" = 'issued' and "billing_acts"."issued_by_platform_user_id" is not null and "billing_acts"."cancelled_by_platform_user_id" is null and "billing_acts"."cancelled_at" is null)
+          or ("billing_acts"."status" = 'cancelled' and "billing_acts"."cancelled_by_platform_user_id" is not null and "billing_acts"."cancelled_at" is not null)))
 );
 --> statement-breakpoint
 CREATE TABLE "commercial_offer_decisions" (

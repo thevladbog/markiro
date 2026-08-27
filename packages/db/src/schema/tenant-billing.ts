@@ -295,9 +295,11 @@ export const billingActs = pgTable(
     check("billing_acts_period_order_check", sql`${table.periodEnd} >= ${table.periodStart}`),
     check(
       "billing_acts_issue_shape_check",
-      sql`(${table.status} = 'draft' and ${table.issuedByPlatformUserId} is null and ${table.issuedAt} is null and ${table.cancelledByPlatformUserId} is null and ${table.cancelledAt} is null)
-        or (${table.status} = 'issued' and ${table.issuedByPlatformUserId} is not null and ${table.issuedAt} is not null and ${table.cancelledByPlatformUserId} is null and ${table.cancelledAt} is null)
-        or (${table.status} = 'cancelled' and ${table.cancelledByPlatformUserId} is not null and ${table.cancelledAt} is not null)`,
+      sql`((${table.issuedByPlatformUserId} is null and ${table.issuedAt} is null)
+        or (${table.issuedByPlatformUserId} is not null and ${table.issuedAt} is not null))
+        and ((${table.status} = 'draft' and ${table.issuedByPlatformUserId} is null and ${table.cancelledByPlatformUserId} is null and ${table.cancelledAt} is null)
+          or (${table.status} = 'issued' and ${table.issuedByPlatformUserId} is not null and ${table.cancelledByPlatformUserId} is null and ${table.cancelledAt} is null)
+          or (${table.status} = 'cancelled' and ${table.cancelledByPlatformUserId} is not null and ${table.cancelledAt} is not null))`,
     ),
   ],
 );

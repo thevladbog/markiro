@@ -74,6 +74,9 @@ describe("tenant billing workflow schema", () => {
     expect(constraintNames(schema.tenantBillingRequestEvents).foreignKeys).toContain(
       "tenant_billing_request_events_tenant_request_fk",
     );
+    expect(constraintNames(schema.tenantBillingRequestEvents).uniqueConstraints).toContain(
+      "tenant_billing_request_events_tenant_idempotency_uq",
+    );
     expect(constraintNames(schema.tenantBillingRequestAttachments).foreignKeys).toContain(
       "tenant_billing_request_attachments_tenant_request_fk",
     );
@@ -90,6 +93,9 @@ describe("tenant billing workflow schema", () => {
     );
     expect(constraintNames(schema.commercialOfferDecisions).foreignKeys).toContain(
       "commercial_offer_decisions_tenant_offer_fk",
+    );
+    expect(constraintNames(schema.commercialOfferDecisions).uniqueConstraints).toContain(
+      "commercial_offer_decisions_tenant_idempotency_uq",
     );
     expect(constraintNames(schema.billingActDocuments).foreignKeys).toContain(
       "billing_act_documents_tenant_act_fk",

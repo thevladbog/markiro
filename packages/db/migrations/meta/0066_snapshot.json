@@ -13389,7 +13389,7 @@
         },
         "billing_acts_issue_shape_check": {
           "name": "billing_acts_issue_shape_check",
-          "value": "(\"billing_acts\".\"status\" = 'draft' and \"billing_acts\".\"issued_by_platform_user_id\" is null and \"billing_acts\".\"issued_at\" is null and \"billing_acts\".\"cancelled_by_platform_user_id\" is null and \"billing_acts\".\"cancelled_at\" is null)\n        or (\"billing_acts\".\"status\" = 'issued' and \"billing_acts\".\"issued_by_platform_user_id\" is not null and \"billing_acts\".\"issued_at\" is not null and \"billing_acts\".\"cancelled_by_platform_user_id\" is null and \"billing_acts\".\"cancelled_at\" is null)\n        or (\"billing_acts\".\"status\" = 'cancelled' and \"billing_acts\".\"cancelled_by_platform_user_id\" is not null and \"billing_acts\".\"cancelled_at\" is not null)"
+          "value": "((\"billing_acts\".\"issued_by_platform_user_id\" is null and \"billing_acts\".\"issued_at\" is null)\n        or (\"billing_acts\".\"issued_by_platform_user_id\" is not null and \"billing_acts\".\"issued_at\" is not null))\n        and ((\"billing_acts\".\"status\" = 'draft' and \"billing_acts\".\"issued_by_platform_user_id\" is null and \"billing_acts\".\"cancelled_by_platform_user_id\" is null and \"billing_acts\".\"cancelled_at\" is null)\n          or (\"billing_acts\".\"status\" = 'issued' and \"billing_acts\".\"issued_by_platform_user_id\" is not null and \"billing_acts\".\"cancelled_by_platform_user_id\" is null and \"billing_acts\".\"cancelled_at\" is null)\n          or (\"billing_acts\".\"status\" = 'cancelled' and \"billing_acts\".\"cancelled_by_platform_user_id\" is not null and \"billing_acts\".\"cancelled_at\" is not null))"
         }
       },
       "isRLSEnabled": false
