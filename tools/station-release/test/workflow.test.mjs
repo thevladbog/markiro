@@ -420,7 +420,10 @@ test("one mutable transaction backs up completely, promotes in order and rolls b
       rollback.lastIndexOf("unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN"),
   );
   assert.match(rollback, /station-github-rollback-verify/);
-  assert.match(rollback, /cmp/);
+  assert.match(
+    rollback,
+    /download-channel-exact beta[\s\\]*"\$RUNNER_TEMP\/station-github-channel-backup\/latest\.json"[\s\\]*"\$RUNNER_TEMP\/station-github-rollback-verify\/latest\.json"/,
+  );
   assert.match(
     rollback,
     /if ! rm -rf "\$RUNNER_TEMP\/station-github-rollback-verify" \|\|[\s\S]*! mkdir "\$RUNNER_TEMP\/station-github-rollback-verify"/,
@@ -445,7 +448,12 @@ test("one mutable transaction backs up completely, promotes in order and rolls b
     /if \[ "\$\{\{ inputs\.mode \}\}" = "seed-baseline" \]; then[\s\S]*gh release create station-beta-channel[\s\S]*else[\s\S]*gh release upload station-beta-channel/,
   );
   assert.doesNotMatch(run, /delete-object|DeleteObject/);
-  assert.equal((run.match(/download-channel beta/g) ?? []).length, 3);
+  assert.equal((run.match(/download-channel beta/g) ?? []).length, 1);
+  assert.equal((run.match(/download-channel-exact beta/g) ?? []).length, 2);
+  assert.match(
+    run,
+    /download-channel-exact beta[\s\\]*"\$github_tree\/latest\.json"[\s\\]*"\$RUNNER_TEMP\/station-github-channel-verify\/latest\.json"/,
+  );
   assert.doesNotMatch(run, /gh release download station-beta-channel/);
   assert.match(
     run,

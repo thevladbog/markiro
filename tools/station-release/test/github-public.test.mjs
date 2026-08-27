@@ -99,6 +99,42 @@ test("retries transient GitHub public failures with bounded backoff", async () =
   assert.deepEqual(waits, [1_000, 2_000]);
 });
 
+test("waits for the public channel asset to match the manifest uploaded with clobber", async () => {
+  const { createGithubPublicReader } = await githubPublic();
+  const waits = [];
+  const staleManifest = Buffer.from('{"version":"1.2.0-beta.5"}\n');
+  const expectedManifest = Buffer.from('{"version":"1.2.0-beta.6"}\n');
+  const responses = [
+    redirect(
+      "https://release-assets.githubusercontent.com/github-production-release-asset/123/stale?sig=bounded",
+    ),
+    new Response(staleManifest, {
+      status: 200,
+      headers: { "content-length": String(staleManifest.byteLength) },
+    }),
+    redirect(
+      "https://release-assets.githubusercontent.com/github-production-release-asset/123/fresh?sig=bounded",
+    ),
+    new Response(expectedManifest, {
+      status: 200,
+      headers: { "content-length": String(expectedManifest.byteLength) },
+    }),
+  ];
+  const reader = createGithubPublicReader({
+    fetchImpl: async () => responses.shift(),
+    waitImpl: async (milliseconds) => waits.push(milliseconds),
+  });
+
+  assert.deepEqual(
+    await reader.readChannelManifestMatching({
+      channel: "beta",
+      expected: expectedManifest,
+    }),
+    expectedManifest,
+  );
+  assert.deepEqual(waits, [2_000]);
+});
+
 test("bounds persistent GitHub public retries and sanitizes the final failure", async () => {
   const { createGithubPublicReader } = await githubPublic();
   const waits = [];
