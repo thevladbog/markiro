@@ -7,9 +7,9 @@ describe("decideApplication", () => {
   it("применяет цену сопоставленному товару", () => {
     const plan = decideApplication({
       known,
-      items: [{ externalRef: "guid-1", name: "Жигулёвское", article: null, unit: "шт" }],
+      items: [{ externalRef: "guid-1", name: "Жигулёвское", article: null, unit: "шт", barcode: null, images: [] }],
       offers: [
-        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "89.90", currency: "руб" }] },
+        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "89.90", currency: "руб" }], barcode: null },
       ],
       configuredPriceType: undefined,
     });
@@ -20,7 +20,7 @@ describe("decideApplication", () => {
   it("несопоставленное уходит в кандидаты, а не создаёт товар", () => {
     const plan = decideApplication({
       known,
-      items: [{ externalRef: "guid-9", name: "Новинка", article: "N-1", unit: "шт" }],
+      items: [{ externalRef: "guid-9", name: "Новинка", article: "N-1", unit: "шт", barcode: null, images: [] }],
       offers: [],
       configuredPriceType: undefined,
     });
@@ -39,6 +39,7 @@ describe("decideApplication", () => {
             { type: "Розничная", value: "89.90", currency: "руб" },
             { type: "Закупочная", value: "54.10", currency: "руб" },
           ],
+          barcode: null,
         },
       ],
       configuredPriceType: undefined,
@@ -64,6 +65,7 @@ describe("decideApplication", () => {
             { type: "Розничная", value: "89.90", currency: "руб" },
             { type: "Закупочная", value: "54.10", currency: "руб" },
           ],
+          barcode: null,
         },
       ],
       configuredPriceType: "Закупочная",
@@ -79,6 +81,7 @@ describe("decideApplication", () => {
         {
           externalRef: "guid-1",
           prices: [{ type: "Закупочная", value: "54.10", currency: "руб" }],
+          barcode: null,
         },
       ],
       configuredPriceType: "Розничная",
@@ -104,6 +107,7 @@ describe("decideApplication", () => {
             { type: "Розничная", value: "89.90", currency: "руб" },
             { type: "Розничная", value: "89.90", currency: "руб" },
           ],
+          barcode: null,
         },
       ],
       configuredPriceType: undefined,
@@ -117,7 +121,7 @@ describe("decideApplication", () => {
       known,
       items: [],
       offers: [
-        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "1.20", currency: "USD" }] },
+        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "1.20", currency: "USD" }], barcode: null },
       ],
       configuredPriceType: undefined,
     });
@@ -136,7 +140,7 @@ describe("decideApplication", () => {
         known,
         items: [],
         offers: [
-          { externalRef: "guid-1", prices: [{ type: "Розничная", value: "10.00", currency }] },
+          { externalRef: "guid-1", prices: [{ type: "Розничная", value: "10.00", currency }], barcode: null },
         ],
         configuredPriceType: undefined,
       });
@@ -154,7 +158,7 @@ describe("decideApplication", () => {
         known,
         items: [],
         offers: [
-          { externalRef: "guid-1", prices: [{ type: "Розничная", value: "10.00", currency }] },
+          { externalRef: "guid-1", prices: [{ type: "Розничная", value: "10.00", currency }], barcode: null },
         ],
         configuredPriceType: undefined,
       });
@@ -166,7 +170,7 @@ describe("decideApplication", () => {
   it("отсутствие цены не обнуляет прежнюю", () => {
     const plan = decideApplication({
       known,
-      items: [{ externalRef: "guid-1", name: "Жигулёвское", article: null, unit: "шт" }],
+      items: [{ externalRef: "guid-1", name: "Жигулёвское", article: null, unit: "шт", barcode: null, images: [] }],
       offers: [],
       configuredPriceType: undefined,
     });
@@ -186,7 +190,7 @@ describe("decideApplication", () => {
       known,
       items: [],
       offers: [
-        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "", currency: "руб" }] },
+        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "", currency: "руб" }], barcode: null },
       ],
       configuredPriceType: undefined,
     });
@@ -199,7 +203,7 @@ describe("decideApplication", () => {
       known,
       items: [],
       offers: [
-        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "89,90", currency: "руб" }] },
+        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "89,90", currency: "руб" }], barcode: null },
       ],
       configuredPriceType: undefined,
     });
@@ -215,6 +219,7 @@ describe("decideApplication", () => {
         {
           externalRef: "guid-1",
           prices: [{ type: "Розничная", value: "123456789012.00", currency: "руб" }],
+          barcode: null,
         },
       ],
       configuredPriceType: undefined,
@@ -246,7 +251,7 @@ describe("decideApplication", () => {
       known,
       items: [],
       offers: [
-        { externalRef: "guid-1", prices: [{ type: "Розничная", value: raw, currency: "руб" }] },
+        { externalRef: "guid-1", prices: [{ type: "Розничная", value: raw, currency: "руб" }], barcode: null },
       ],
       configuredPriceType: undefined,
     });
@@ -265,6 +270,7 @@ describe("decideApplication", () => {
         {
           externalRef: "guid-1",
           prices: [{ type: "Розничная", value: "9999999999.995", currency: "руб" }],
+          barcode: null,
         },
       ],
       configuredPriceType: undefined,
@@ -283,7 +289,7 @@ describe("decideApplication", () => {
         known,
         items: [],
         offers: [
-          { externalRef: "guid-1", prices: [{ type: "Розничная", value, currency: "руб" }] },
+          { externalRef: "guid-1", prices: [{ type: "Розничная", value, currency: "руб" }], barcode: null },
         ],
         configuredPriceType: undefined,
       });
@@ -313,6 +319,7 @@ describe("decideApplication", () => {
             { type: "", typeRef: "type-guid-a", value: "89.90", currency: "руб" },
             { type: "", typeRef: "type-guid-b", value: "54.10", currency: "руб" },
           ],
+          barcode: null,
         },
       ],
       configuredPriceType: undefined,
@@ -332,8 +339,8 @@ describe("decideApplication", () => {
       known: [...known, { id: "p-2", externalRef: "guid-2" }],
       items: [],
       offers: [
-        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "89,90", currency: "руб" }] },
-        { externalRef: "guid-2", prices: [{ type: "Розничная", value: "10.00", currency: "руб" }] },
+        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "89,90", currency: "руб" }], barcode: null },
+        { externalRef: "guid-2", prices: [{ type: "Розничная", value: "10.00", currency: "руб" }], barcode: null },
       ],
       configuredPriceType: undefined,
     });
