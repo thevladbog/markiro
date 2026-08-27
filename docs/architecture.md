@@ -145,10 +145,14 @@ inventories are immutable. The detailed invariants and API surface are defined i
 
 The preparation, execution, reconciliation, correction, close/reopen, document-job, download, and
 tenant-admin UI infrastructure has automated coverage recorded in
-`docs/acceptance/inventory-admin.md`. This is not yet a complete-v1 document release: no production
-inventory XML/tabular contract has an approved fixture or XSD, so the advertised descriptor and
-generator registries remain empty and production completion fails closed. Synthetic generators are
-permitted only in tests and do not establish external compatibility.
+`docs/acceptance/inventory-admin.md`. The production registry now exposes exactly
+`inventory_xml_gismt_aggregation` v1 and `inventory_xml_gismt_disaggregation` v1. Their approved
+fixtures, XSD evidence, and real API-runner path cover frozen result loading, deterministic XML,
+verified artifact publication, individual and ZIP download/checksums, reopen invalidation,
+regeneration, and completion; protected `MOVING_BY_UD` contents remain excluded from both outputs.
+This is still not a complete-v1 document release: TXT, CSV, and XLSX formats remain unapproved and
+absent. Synthetic generators remain test-only and do not establish production format or external
+portal compatibility.
 
 ### Platform administration contract boundary
 
