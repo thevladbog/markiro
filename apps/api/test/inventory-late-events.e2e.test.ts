@@ -681,7 +681,7 @@ describe.skipIf(!ready)("inventory late events", () => {
     await fixture.agent
       .post(`/inventories/${fixture.inventoryId}/complete`)
       .send({ documentsDownloadedAndChecked: true })
-      .expect(409, { code: "INVENTORY_DOCUMENT_ARTIFACTS_UNAVAILABLE", requiredTask: 8 });
+      .expect(409, { code: "INVENTORY_DOCUMENT_ARTIFACTS_NOT_READY", missingFormats: [] });
     const [resolved] = await db
       .select({
         resolution: schema.inventoryLateEvents.resolution,

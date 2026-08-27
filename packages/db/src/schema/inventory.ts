@@ -337,6 +337,12 @@ export const inventoryDocumentRuns = pgTable(
       .$type<InventoryDocumentFormatSelection[]>()
       .notNull(),
     requestDigest: char("request_digest", { length: 64 }).notNull(),
+    organizationNameSnapshot: text("organization_name_snapshot").notNull(),
+    organizationInnSnapshot: text("organization_inn_snapshot"),
+    inventoryNumberSnapshot: text("inventory_number_snapshot").notNull(),
+    inventoryClosedAtSnapshot: timestamp("inventory_closed_at_snapshot", {
+      withTimezone: true,
+    }).notNull(),
     status: inventoryDocumentRunStatusEnum("status").notNull().default("queued"),
     errorCode: text("error_code"),
     createdByUserId: text("created_by_user_id")

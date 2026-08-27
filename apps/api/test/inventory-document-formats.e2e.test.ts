@@ -37,6 +37,30 @@ type JsonSchema = {
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
+const expectedFormats = {
+  items: [
+    {
+      id: "inventory_xml_gismt_aggregation",
+      version: 1,
+      label: "[XML][ГИСМТ] Формирование упаковки",
+      extension: "xml",
+      mimeType: "application/xml; charset=utf-8",
+      requiredSourceCategories: ["verified", "protected", "newBoxes"],
+      supportsParts: false,
+      availability: "available",
+    },
+    {
+      id: "inventory_xml_gismt_disaggregation",
+      version: 1,
+      label: "[XML][ГИСМТ] Расформирование упаковки",
+      extension: "xml",
+      mimeType: "application/xml; charset=utf-8",
+      requiredSourceCategories: ["verified", "protected", "newBoxes"],
+      supportsParts: false,
+      availability: "available",
+    },
+  ],
+};
 
 describe.skipIf(!ready)("inventory document formats e2e", () => {
   let app: INestApplication | undefined;
@@ -77,9 +101,9 @@ describe.skipIf(!ready)("inventory document formats e2e", () => {
     return { agent, tenantId };
   }
 
-  it("advertises no format until an approved checked-in contract fixture exists", async () => {
+  it("advertises the two approved GISMT XML formats and rejects an unknown format", async () => {
     const { agent } = await owner();
-    await agent.get("/inventory-document-formats").expect(200, { items: [] });
+    await agent.get("/inventory-document-formats").expect(200, expectedFormats);
     await agent
       .post(`/inventories/${randomUUID()}/document-runs`)
       .send({
@@ -116,7 +140,7 @@ describe.skipIf(!ready)("inventory document formats e2e", () => {
       .set({ status: "expired", endsAt: new Date(Date.now() - 1_000), updatedAt: new Date() })
       .where(eq(schema.tenantSubscriptions.id, subscription.subscriptionId));
 
-    await agent.get("/inventory-document-formats").expect(200, { items: [] });
+    await agent.get("/inventory-document-formats").expect(200, expectedFormats);
   });
 
   it("publishes the exact strict response schema without unavailable candidate ids", () => {

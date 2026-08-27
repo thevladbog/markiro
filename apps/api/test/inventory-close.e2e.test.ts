@@ -493,7 +493,7 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
     expect(secondClose?.revision).toBe(8);
   });
 
-  it("fails completion closed until Task 8 provides verified document artifacts", async () => {
+  it("fails completion until a ready document run has verified artifacts", async () => {
     const fixture = await seedRunningInventory();
     await fixture.agent.post(`/inventories/${fixture.inventoryId}/close`).send({}).expect(201);
     await fixture.agent
@@ -504,8 +504,8 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
       .post(`/inventories/${fixture.inventoryId}/complete`)
       .send({ documentsDownloadedAndChecked: true })
       .expect(409, {
-        code: "INVENTORY_DOCUMENT_ARTIFACTS_UNAVAILABLE",
-        requiredTask: 8,
+        code: "INVENTORY_DOCUMENT_ARTIFACTS_NOT_READY",
+        missingFormats: [],
       });
     const completedAt = new Date("2026-08-26T13:00:00.000Z");
     await db

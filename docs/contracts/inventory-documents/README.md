@@ -5,9 +5,16 @@ contract and a sanitized golden fixture are approved and checked in together wit
 generator, and byte-level tests. Until then it must remain absent from `GET
 /inventory-document-formats` and must not be accepted by a document-run request.
 
-There are currently **no approved inventory document fixtures or XSDs**. Consequently the
-production catalog is intentionally empty. The candidate names below are planning labels, not API
-ids or promises of file compatibility.
+Two v1 XML formats are now implemented for manual upload: aggregation of newly formed packages and
+disaggregation of old packages. Their official-source provenance, normalized source copies,
+sanitized golden fixtures, eligibility rules, and validation boundary are recorded in
+[`v1/README.md`](./v1/README.md). They are published as
+`inventory_xml_gismt_aggregation` and `inventory_xml_gismt_disaggregation`.
+Both golden files pass the available XSD checks; successful upload in the Chestny ZNAK personal
+account remains the external acceptance gate.
+
+The TXT, CSV, XLSX, and ZIP sections below remain approval gates and planning labels. They are not
+advertised by the production catalog yet.
 
 ## Rules shared by every candidate
 
@@ -46,33 +53,37 @@ Changing any approved byte-level rule requires a new descriptor version and an e
 and retention decision. A superseded version is not requestable for a new run; already verified
 artifacts remain governed by their recorded checksum and retention policy.
 
-## Candidate: aggregation XML for new boxes
+## Implemented v1: aggregation XML for new boxes
 
-- [ ] Obtain the authoritative GIS MT/Chestny ZNAK aggregation XSD and accepted sample for this
+- [x] Record the official GIS MT/Chestny ZNAK aggregation XSD and sample for this
       product group; record document type/version and required organization/document metadata.
-- [ ] Approve exact XML declaration, namespaces, root/element order, cardinalities, encoding,
+- [x] Approve exact XML declaration, namespaces, root/element order, cardinalities, encoding,
       whitespace, escaping, schema-location policy, and validation command/result.
-- [ ] Approve each `newBoxes` SSCC representation and deterministic ordering of its verified child
+- [x] Approve each `newBoxes` SSCC representation and deterministic ordering of its verified child
       KMs; define invalidated/open/unprinted boxes and mixed observed-date behavior.
-- [ ] Confirm `MOVING_BY_UD`, protected, ineligible, unknown, voided, and write-off candidates are
+- [x] Confirm `MOVING_BY_UD`, protected, ineligible, unknown, voided, and write-off candidates are
       excluded from aggregation children even when scanned.
-- [ ] Approve filenames, maximum boxes/KMs or bytes per part, whether a box may split (normally no),
-      part numbering, signatures, checksums, manifest entries, and retention.
-- [ ] Add sanitized aggregation input/XML golden pair and authoritative validation evidence.
+- [x] Generate one deterministic, unsplit XML artifact with the existing verified SHA-256 storage
+      and retention lifecycle.
+- [x] Add sanitized aggregation input/XML golden pair and authoritative validation evidence.
+- [ ] Confirm a generated artifact by successful manual upload in the Chestny ZNAK personal
+      account.
 
-## Candidate: disaggregation XML for old boxes
+## Implemented v1: disaggregation XML for old boxes
 
-- [ ] Obtain the authoritative disaggregation XSD/sample and define whether one old SSCC, many
+- [x] Obtain the authoritative disaggregation XSD/sample and define whether one old SSCC, many
       SSCCs, or explicit child KMs are required.
-- [ ] Approve XML declaration, namespaces, element order/cardinality, encoding, whitespace,
+- [x] Approve XML declaration, namespaces, element order/cardinality, encoding, whitespace,
       escaping, and exact old-SSCC representation.
-- [ ] Define which `oldBoxes` qualify after simple check versus repack, including already
+- [x] Define which `oldBoxes` qualify after simple check versus repack, including already
       disaggregated, unknown, invalid, partially scanned, and corrected boxes.
-- [ ] Confirm protected/`MOVING_BY_UD` contents never cause a destructive disaggregation action
+- [x] Confirm protected/`MOVING_BY_UD` contents never cause a destructive disaggregation action
       unless the authoritative protocol explicitly and safely requires representation.
-- [ ] Approve date semantics, filenames, per-part grouping, no-split rules, signatures, checksums,
-      manifest entries, and retention.
-- [ ] Add sanitized disaggregation input/XML golden pair and authoritative validation evidence.
+- [x] Generate one deterministic, unsplit XML artifact with the existing verified SHA-256 storage
+      and retention lifecycle.
+- [x] Add sanitized disaggregation input/XML golden pair and authoritative validation evidence.
+- [ ] Confirm a generated artifact by successful manual upload in the Chestny ZNAK personal
+      account.
 
 ## Candidate: write-off TXT
 

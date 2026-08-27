@@ -142,6 +142,17 @@ export type {
   InventoryDocumentSourceCategory,
 } from "./inventory/index.js";
 export {
+  generateInventoryAggregationXml,
+  generateInventoryDisaggregationXml,
+  InventoryDocumentGenerationError,
+} from "./inventory/index.js";
+export type {
+  InventoryDocumentGeneratedPart,
+  InventoryDocumentGenerationErrorCode,
+  InventoryDocumentGenerationMetadata,
+  InventoryDocumentGenerationSource,
+} from "./inventory/index.js";
+export {
   INVENTORY_EVENT_BATCH_SIZE,
   INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE,
   INVENTORY_EVENT_CLAIM_OUTCOME_SIZE,

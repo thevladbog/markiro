@@ -1,0 +1,1248 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified"
+           attributeFormDefault="unqualified">
+    <!--Общие простые типы-->
+    <xs:simpleType name="datetimeoffset_type">
+        <xs:annotation>
+            <xs:documentation>Значение даты и времени, а также смещение относительно времени в формате UTC
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:dateTime">
+            <xs:minInclusive value="0001-01-01T00:00:00Z"/>
+            <xs:pattern
+                    value="((000[1-9])|(00[1-9][0-9])|(0[1-9][0-9]{2})|([1-9][0-9]{3}))-((0[1-9])|(1[012]))-((0[1-9])|([12][0-9])|(3[01]))T(([01][0-9])|(2[0-3]))(:[0-5][0-9]){2}(\.[0-9]+)?(([+-]((((0[0-9])|(1[0-3]))(:[0-5][0-9]))|14:00))|Z)"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="string50_type">
+        <xs:annotation>
+            <xs:documentation>Текстовое значение не более 50 символов</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="50"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="string200_type">
+        <xs:annotation>
+            <xs:documentation>Текстовое значение не более 200 символов</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="200"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="string255_type">
+        <xs:annotation>
+            <xs:documentation>Текстовое значение не более 255 символов</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="255"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="string1000_type">
+        <xs:annotation>
+            <xs:documentation>Текстовое значение не более 1000 символов</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="1000"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="string1024_type">
+        <xs:annotation>
+            <xs:documentation>Текстовое значение не более 1024 символов</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="1024"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="product_group_type">
+        <xs:annotation>
+            <xs:documentation>Справочник товарных групп
+                "Предметы одежды, белье постельное, столовое, туалетное и кухонное - CLOTHES",
+                "Обувные товары - SHOES",
+                "Духи и туалетная вода - PERFUMERY",
+                "Шины и покрышки пневматические резиновые новые - TIRES",
+                "Фотокамеры (кроме кинокамер), фотовспышки и лампы-вспышки - ELECTRONICS",
+                "Молочная продукция - MILK",
+                "Велосипеды и велосипедные рамы - BICYCLE",
+                "Кресла-коляски - WHEELCHAIRS",
+                "Альтернативная табачная продукция - OTP",
+                "Вода - WATER",
+                "Лекарственные препараты для медицинского применения" - "PHARMA",
+                "Табак" - "TOBACCO"
+                "Алкоголь (Казахстан)" - "ALCOHOL"
+                "Товары из натурального меха" - "FURS"
+                "Пиво" - "BEER"
+                "Никотиносодержащая продукция" - "NCP"
+                "БАДы" - "BIO"
+                "Корма для животных" - "PETFOOD"
+                "Морепродукты" - "SEAFOOD"
+                "Безалкогольное пиво" - "NABEER"
+                "Безалкогольные напитки (соки/воды)" - "SOFTDRINKS"
+                "Плодоовощная продукция" - "VEGS"
+                "Мясо" - "MEAT"
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="CLOTHES"/>
+            <xs:enumeration value="SHOES"/>
+            <xs:enumeration value="PERFUMERY"/>
+            <xs:enumeration value="TIRES"/>
+            <xs:enumeration value="ELECTRONICS"/>
+            <xs:enumeration value="MILK"/>
+            <xs:enumeration value="BICYCLE"/>
+            <xs:enumeration value="WHEELCHAIRS"/>
+            <xs:enumeration value="OTP"/>
+            <xs:enumeration value="WATER"/>
+            <xs:enumeration value="PHARMA"/>
+            <xs:enumeration value="TOBACCO"/>
+            <xs:enumeration value="ALCOHOL"/>
+            <xs:enumeration value="FURS"/>
+            <xs:enumeration value="BEER"/>
+            <xs:enumeration value="NCP"/>
+            <xs:enumeration value="BIO"/>
+            <xs:enumeration value="PETFOOD"/>
+            <xs:enumeration value="SEAFOOD"/>
+            <xs:enumeration value="NABEER"/>
+            <xs:enumeration value="SOFTDRINKS"/>
+            <xs:enumeration value="VEGS"/>
+            <xs:enumeration value="MEAT"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!--Типы, описывающие параметры участника оборота товаров-->
+    <xs:simpleType name="inn_type">
+        <xs:annotation>
+            <xs:documentation>ИНН участника оборота</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:minLength value="9"/>
+            <xs:maxLength value="12"/>
+            <xs:pattern value="([0-9]{9})|([0-9]{1}[1-9]{1}|[1-9]{1}[0-9]{1})([0-9]{8})|(([0-9]{1}[1-9]{1}|[1-9]{1}[0-9]{1})[0-9]{10})"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="participant_type">
+        <xs:annotation>
+            <xs:documentation>Справочник типов участников
+                Участник оборота товаров - TRADE_PARTICIPANT
+                Оператор ИС МП - OPERATOR
+                ЦЭМ - LABELLING_CENTER
+                ОГВ - OGV
+                Эмитент - EMITENT
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="TRADE_PARTICIPANT"/>
+            <xs:enumeration value="OPERATOR"/>
+            <xs:enumeration value="LABELLING_CENTER"/>
+            <xs:enumeration value="OGV"/>
+            <xs:enumeration value="EMITENT"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="kpp_type">
+        <xs:annotation>
+            <xs:documentation>КПП участника оборота</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:length value="9"/>
+            <xs:pattern value="([0-9]{1}[1-9]{1}|[1-9]{1}[0-9]{1})[0-9]{7}"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!--Типы, описывающие форматы кодов-->
+    <xs:simpleType name="guid_type">
+        <xs:annotation>
+            <xs:documentation>GUID (Globally Unique Identifier)</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:length value="36"/>
+            <xs:pattern value="([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="gtin_type">
+        <xs:annotation>
+            <xs:documentation>GTIN</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:length value="14"/>
+            <xs:pattern value="[0-9]{14}"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="tnved_code_type">
+        <xs:annotation>
+            <xs:documentation>Код ТН ВЭД ЕАС товара</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:length value="10"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="tnved_code_4_type">
+        <xs:annotation>
+            <xs:documentation>Код товарной номенклатуры (4 знака)</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:length value="4"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="tnved_code_2_type">
+        <xs:annotation>
+            <xs:documentation>Код товарной номенклатуры (2 знака)</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:length value="2"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="kitu_type">
+        <xs:annotation>
+            <xs:documentation>КИТУ (код идентификации транспортной упаковки)</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:minLength value="18"/>
+            <xs:maxLength value="74"/>
+            <xs:pattern value="[a-zA-Z0-9_%&amp;&apos;&quot;()*+,\-./:;=&lt;&gt;?!]{18,74}"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="ki_type">
+        <xs:annotation>
+            <xs:documentation>КИ (код идентификации)</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:minLength value="20"/>
+            <xs:maxLength value="45"/>
+            <xs:pattern value="(RU|AM|BY|KZ|KG)-[A-Z0-9]{6}-[A-Z0-9]{10}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{24}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{25}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{27}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{29}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{31}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{33}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{34}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{37}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{38}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{40}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{44}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{39}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{45}"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="cis_type">
+        <xs:annotation>
+            <xs:documentation>КИ (код идентификации)</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:minLength value="18"/>
+            <xs:maxLength value="74"/>
+            <xs:pattern value="(RU|AM|BY|KZ|KG)-[A-Z0-9]{6}-[A-Z0-9]{10}|[a-zA-Z0-9_%&amp;&apos;&quot;()*+,\-./:;=&lt;&gt;?!]{18,74}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{24}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{25}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{27}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{29}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{31}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{33}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{34}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{37}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{38}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{40}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{44}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{39}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{45}"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="atk_type">
+        <xs:annotation>
+            <xs:documentation>Агрегированный таможенный код</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:length value="25"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="oksm_type">
+        <xs:annotation>
+            <xs:documentation>Цифровой код идентификации страны в соответствии с ОКСМ</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:pattern value="[0-9]{3}"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="vsd_number_type">
+        <xs:annotation>
+            <xs:documentation>Идентификатор ВСД</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:minLength value="36"/>
+            <xs:maxLength value="39"/>
+            <xs:pattern value="[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}|[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!--Типы для формирования документов передачи-->
+    <xs:simpleType name="turnover_enum_type">
+        <xs:annotation>
+            <xs:documentation>Справочник видов оборота товаров
+                Продажа - SELLING
+                Комиссия - COMMISSION
+                Агент - AGENT
+                Продажа комиссионером - COMMISSIONAIRE_SALE
+                Подряд - CONTRACT
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="SELLING"/>
+            <xs:enumeration value="COMMISSION"/>
+            <xs:enumeration value="AGENT"/>
+            <xs:enumeration value="COMMISSIONAIRE_SALE"/>
+            <xs:enumeration value="CONTRACT"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="price_type">
+        <xs:annotation>
+            <xs:documentation>Стоимость/Налог</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:decimal">
+            <xs:totalDigits value="19"/>
+            <xs:fractionDigits value="2"/>
+            <xs:minInclusive value="0"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="shipment_primary_document_type_type">
+        <xs:annotation>
+            <xs:documentation>Справочник типов первичных документов для отгрузки
+                Товарная накладная - CONSIGNMENT_NOTE
+                Универсальный передаточный документ - UTD
+                Прочее - OTHER
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="CONSIGNMENT_NOTE"/>
+            <xs:enumeration value="UTD"/>
+            <xs:enumeration value="OTHER"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!--Типы для формирования документов ввода и возврата в оборот-->
+    <xs:simpleType name="production_order_type">
+        <xs:annotation>
+            <xs:documentation>Справочник типов производственного заказа
+                Собственное производство - OWN_PRODUCTION
+                Контрактное производство - CONTRACT_PRODUCTION
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="OWN_PRODUCTION"/>
+            <xs:enumeration value="CONTRACT_PRODUCTION"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="certificate_type_type">
+        <xs:annotation>
+            <xs:documentation>Справочник видов документов, подтверждающих соответствие
+                Сертификат соответствия - CONFORMITY_CERTIFICATE
+                Декларация о соответствии - CONFORMITY_DECLARATION
+                Свидетельство государственной регистрации - STATE_REGISTRATION_CERTIFICATE
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="CONFORMITY_CERTIFICATE"/>
+            <xs:enumeration value="CONFORMITY_DECLARATION"/>
+            <xs:enumeration value="STATE_REGISTRATION_CERTIFICATE"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:complexType name="certificate_document_data_type">
+        <xs:sequence>
+            <xs:element name="product" maxOccurs="unbounded">
+                <xs:annotation>
+                    <xs:documentation>Данные документов, подтверждающих соответствие</xs:documentation>
+                </xs:annotation>
+                <xs:complexType>
+                    <xs:all>
+                        <xs:element name="certificate_type" type="certificate_type_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Вид документа, подтверждающего соответствие</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_number" type="string255_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Номер документа, подтверждающего соответствие</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_date" type="xs:date" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Дата документа, подтверждающего соответствие</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="well_number" type="string255_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Номер скважины (только для ТГ Упакованная вода)</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                    </xs:all>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="licence_data_type">
+        <xs:sequence>
+            <xs:element name="licence" minOccurs="0"
+                        maxOccurs="unbounded">
+                <xs:annotation>
+                    <xs:documentation>Сведения о лицензиях</xs:documentation>
+                </xs:annotation>
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="number" type="string50_type">
+                            <xs:annotation>
+                                <xs:documentation>Номер лицензии (договора) на
+                                    добычу воды (только для ТГ Вода)
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="date" type="xs:date">
+                            <xs:annotation>
+                                <xs:documentation>Дата выдачи лицензии (только для
+                                    ТГ Вода)
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:simpleType name="release_method_type">
+        <xs:annotation>
+            <xs:documentation>Справочник способов ввода товаров в оборот
+                Произведен в РФ - PRODUCED_IN_RF
+                Ввезен в РФ - IMPORTED_INTO_RF
+                Остатки - OSTATKI
+                Ввезен в РФ из стран ЕАЭС - CROSSBORDER
+                Перемаркировка - REMARK
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="PRODUCED_IN_RF"/>
+            <xs:enumeration value="IMPORTED_INTO_RF"/>
+            <xs:enumeration value="OSTATKI"/>
+            <xs:enumeration value="CROSSBORDER"/>
+            <xs:enumeration value="REMARK"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="declaration_number_type">
+        <xs:annotation>
+            <xs:documentation>Регистрационный номер ДТ</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:pattern value="[0-9]{2}/[0-9]{6}/[0-9]{7}|[0-9]{5}/[0-9]{6}/[0-9]{7}|[0-9]{8}/[0-9]{6}/[0-9]{7}"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="decision_code_type">
+        <xs:annotation>
+            <xs:documentation>Справочник кодов принятого решения
+                10 - Выпуск товаров разрешен
+                11 - Выпуск товаров при условии обеспечения исполнения обязанности по уплате таможенных пошлин, налогов,
+                специальных, антидемпинговых, компенсационных пошлин, за исключением выпуска товаров, поименованного в
+                позициях с кодами 12 и 13
+                12 - Выпуск товаров с особенностями, предусмотренными статьей 121 Таможенного кодекса Евразийского
+                экономического союза
+                13 - Выпуск товаров с особенностями, предусмотренными статьей 122 Таможенного кодекса Евразийского
+                экономического союза
+                14 - Выпуск товаров с особенностями, предусмотренными статьей 123 Таможенного кодекса Евразийского
+                экономического союза
+                20 - Условный выпуск товаров
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:int">
+            <xs:enumeration value="10"/>
+            <xs:enumeration value="11"/>
+            <xs:enumeration value="12"/>
+            <xs:enumeration value="13"/>
+            <xs:enumeration value="14"/>
+            <xs:enumeration value="20"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="customs_code_type">
+        <xs:annotation>
+            <xs:documentation>Код таможенного органа</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:length value="8"/>
+            <xs:pattern value="[0-9]{8}"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="shoe_size">
+        <xs:annotation>
+            <xs:documentation>Размер в штихмассовой системе</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:decimal">
+            <xs:minInclusive value="14.5"/>
+            <xs:maxInclusive value="47"/>
+            <xs:pattern value="(\d+)|(\d+\.[05])"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="remark_cause_type">
+        <xs:annotation>
+            <xs:documentation>Справочник причин перемаркировки
+                Испорчено либо утеряно СИ с КМ - KM_SPOILED_OR_LOST
+                Выявлены ошибки описания товара - DESCRIPTION_ERRORS
+                Возврат товаров с поврежденным СИ/без СИ при розничной реализации - RETAIL_RETURN
+                Возврат товаров с поврежденным СИ/без СИ при дистанционном способе продажи - REMOTE_SALE_RETURN
+                Возврат от конечного покупателя (юр.лица/ИП) - LEGAL_RETURN
+                Решение о реализации товаров, приобретенных ранее в целях, не связанных с их реализацией - INTERNAL_RETURN
+                Возврат ранее экспортированного в ЕАЭС - EEC_EXPORT_RETURN
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="KM_SPOILED"/>
+            <xs:enumeration value="DESCRIPTION_ERRORS"/>
+            <xs:enumeration value="RETAIL_RETURN"/>
+            <xs:enumeration value="REMOTE_SALE_RETURN"/>
+            <xs:enumeration value="LEGAL_RETURN"/>
+            <xs:enumeration value="INTERNAL_RETURN"/>
+            <xs:enumeration value="EEC_EXPORT_RETURN"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="remark_primary_document_type">
+        <xs:annotation>
+            <xs:documentation>Справочник типов первичных документов для перемаркировки
+                Кассовый чек - RECEIPT
+                Товарный чек - SALES_RECEIPT
+                Товарная накладная - CONSIGNMENT_NOTE
+                Универсальный передаточный документ - UTD
+                Прочее - OTHER
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="RECEIPT"/>
+            <xs:enumeration value="SALES_RECEIPT"/>
+            <xs:enumeration value="CONSIGNMENT_NOTE"/>
+            <xs:enumeration value="UTD"/>
+            <xs:enumeration value="OTHER"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="return_primary_document_type_type">
+        <xs:annotation>
+            <xs:documentation>Справочник типов первичных документов для возврата в оборот
+                Кассовый чек - RECEIPT
+                Товарный чек - SALES_RECEIPT
+                Прочее - OTHER
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="RECEIPT"/>
+            <xs:enumeration value="SALES_RECEIPT"/>
+            <xs:enumeration value="OTHER"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="return_type_type">
+        <xs:annotation>
+            <xs:documentation>Справочник видов возврата
+                Возврат при розничной реализации - RETAIL_RETURN
+                Возврат при дистанционном способе реализации - REMOTE_SALE_RETURN
+                Возврат товара, проданного по сделке с ИГК - STATE_CONTRACT_RETURN (только ТГ Молочная продукция)
+                Возврат товара выведенного из оборота для собственных нужд - PRODUCTION_USE_RETURN
+                Возврат товара выведенного из оборота для производственных целей - OWN_USE_RETURN
+                Возврат товара, возвращенного покупателем, приобретавшим его в целях, не связанных с последующей реализацией - NOT_FOR_SALE_RETURN
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="RETAIL_RETURN"/>
+            <xs:enumeration value="REMOTE_SALE_RETURN"/>
+            <xs:enumeration value="STATE_CONTRACT_RETURN"/>
+            <xs:enumeration value="PRODUCTION_USE_RETURN"/>
+            <xs:enumeration value="OWN_USE_RETURN"/>
+            <xs:enumeration value="NOT_FOR_SALE_RETURN"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!--Типы для формирования документов вывода из оборота-->
+    <xs:simpleType name="withdrawal_type">
+        <xs:annotation>
+            <xs:documentation>Справочник причин вывода из оборота
+                Розничная продажа - RETAIL
+                Продажа по образцам - BY_SAMPLES
+                Дистанционная продажа - DISTANCE
+                Продажа через вендинговый аппарат - VENDING
+                Безвозмездная передача - DONATION
+                Использование для собственных нужд - OWN_USE
+                Использование для производственных целей - PRODUCTION_USE
+                Продажа по государственному (муниципального) контракту - STATE_CONTRACT
+                Продажа по сделке с государственной тайной - STATE_SECRET
+                Экспорт за пределы ЕАЭС - BEYOND_EEC_EXPORT
+                Трансграничная продажа в страны ЕАЭС - EAS_TRADE
+                Возврат физическому лицу - RETURN
+                Утрата - LOSS
+                Уничтожение - DESTRUCTION
+                Конфискация - CONFISCATION
+                Другое - OTHER
+                Утилизация - UTILIZATION
+                Отзыв с рынка - RECALL
+                Фасовка - PACKING
+                Истечение срока годности - EXPIRATION
+                Экспорт в страны ЕАЭС - EEC_EXPORT
+                Продажа по образцам, дистанционный способ продажи - REMOTE_SALE
+                Утрата или повреждение - DAMAGE_LOSS
+                Использование для собственных нужд предприятия - ENTERPRISE_USE
+                Ликвидация предприятия - LIQUIDATION
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="RETAIL"/>
+            <xs:enumeration value="BY_SAMPLES"/>
+            <xs:enumeration value="DISTANCE"/>
+            <xs:enumeration value="VENDING"/>
+            <xs:enumeration value="DONATION"/>
+            <xs:enumeration value="OWN_USE"/>
+            <xs:enumeration value="PRODUCTION_USE"/>
+            <xs:enumeration value="STATE_CONTRACT"/>
+            <xs:enumeration value="STATE_SECRET"/>
+            <xs:enumeration value="BEYOND_EEC_EXPORT"/>
+            <xs:enumeration value="EAS_TRADE"/>
+            <xs:enumeration value="RETURN"/>
+            <xs:enumeration value="LOSS"/>
+            <xs:enumeration value="DESTRUCTION"/>
+            <xs:enumeration value="CONFISCATION"/>
+            <xs:enumeration value="OTHER"/>
+            <xs:enumeration value="UTILIZATION"/>
+            <xs:enumeration value="RECALL"/>
+            <xs:enumeration value="PACKING"/>
+            <xs:enumeration value="EXPIRATION"/>
+            <xs:enumeration value="EEC_EXPORT"/>
+            <xs:enumeration value="REMOTE_SALE"/>
+            <xs:enumeration value="DAMAGE_LOSS"/>
+            <xs:enumeration value="ENTERPRISE_USE"/>
+            <xs:enumeration value="LIQUIDATION"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="withdrawal_shipment_type">
+        <xs:annotation>
+            <xs:documentation>Причины вывода из оборота при отгрузке
+                Безвозмездная передача - DONATION
+                Приобретение гос.предприятием - STATE_ENTERPRISE
+                Использование для собственных нужд - OWN_USE
+                Использование для производственных целей - PRODUCTION_USE
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="DONATION"/>
+            <xs:enumeration value="STATE_ENTERPRISE"/>
+            <xs:enumeration value="OWN_USE"/>
+            <xs:enumeration value="NO_RETAIL_USE"/>
+            <xs:enumeration value="PRODUCTION_USE"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="withdrawal_primary_document_type">
+        <xs:annotation>
+            <xs:documentation>Справочник типов первичных документов для вывода из оборота
+                Кассовый чек - RECEIPT
+                Товарный чек - SALES_RECEIPT
+                Таможенная декларация на товары - CUSTOMS_DECLARATION
+                Товарная накладная - CONSIGNMENT_NOTE
+                Универсальный передаточный документ - UTD
+                Акт уничтожения (утраты/утилизации) - DESTRUCTION_ACT
+                Прочее - OTHER
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="RECEIPT"/>
+            <xs:enumeration value="SALES_RECEIPT"/>
+            <xs:enumeration value="CUSTOMS_DECLARATION"/>
+            <xs:enumeration value="CONSIGNMENT_NOTE"/>
+            <xs:enumeration value="UTD"/>
+            <xs:enumeration value="DESTRUCTION_ACT"/>
+            <xs:enumeration value="OTHER"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="km_cancellation_reason_type">
+        <xs:annotation>
+            <xs:documentation>Справочник причин списания кодов маркировки
+                Испорчен - KM_SPOILED
+                Утерян - KM_LOST
+                Уничтожен - KM_DESTROYED
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="KM_SPOILED"/>
+            <xs:enumeration value="KM_LOST"/>
+            <xs:enumeration value="KM_DESTROYED"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="state_contract_id_type">
+        <xs:annotation>
+            <xs:documentation>Идентификатор государственного контракта</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="255"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!--Типы для формирования прочих документов-->
+    <xs:simpleType name="transformation_type_type">
+        <xs:annotation>
+            <xs:documentation>Справочник типов трансформации упаковки
+                Изъятие - REMOVING
+                Добавление - ADDING
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="REMOVING"/>
+            <xs:enumeration value="ADDING"/>
+        </xs:restriction>
+    </xs:simpleType>
+
+    <!--Типы для указания в документе списка КИ/КИТУ в составе транспортной упаковки-->
+    <xs:complexType name="children_introduce_rf_type">
+        <xs:sequence>
+            <xs:element name="product" maxOccurs="unbounded">
+                <xs:annotation>
+                    <xs:documentation>Список товаров в составе транспортной упаковки для ввода в оборот</xs:documentation>
+                </xs:annotation>
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="ki" minOccurs="0" type="ki_type">
+                            <xs:annotation>
+                                <xs:documentation>Код идентификации (КИ)</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="kitu" minOccurs="0" type="kitu_type">
+                            <xs:annotation>
+                                <xs:documentation>Код идентификации транспортной упаковки (КИТУ)</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="production_date" type="xs:date" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Дата производства</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="tnved_code" type="tnved_code_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Код ТН ВЭД ЕАС товара</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_type" type="certificate_type_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Вид документа, подтверждающего соответствие</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_number" type="string255_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Номер документа, подтверждающего соответствие</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_date" type="xs:date" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Дата документа, подтверждающего соответствие</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_document_data" type="certificate_document_data_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Данные документов, подтверждающих соответствие
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="licences_list" type="licence_data_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Список лицензий на добычу воды (только для ТГ Вода)
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="vsd_number" type="vsd_number_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Идентификатор ВСД. Только для ТГ Молоко</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="children" minOccurs="0"
+                                    type="children_introduce_rf_type">
+                            <xs:annotation>
+                                <xs:documentation>Список товаров в составе транспортной упаковки для ввода в оборот
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="children_introduce_individuals_type">
+        <xs:sequence>
+            <xs:element name="product" maxOccurs="unbounded">
+                <xs:annotation>
+                    <xs:documentation>Список КИ\КИТУ в составе транспортной упаковки для ввода в оборот (полученных от
+                        физических лиц)
+                    </xs:documentation>
+                </xs:annotation>
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="kit" minOccurs="0" type="kit_type">
+                            <xs:annotation>
+                                <xs:documentation>КИ</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="kitu" minOccurs="0" type="kitu_type">
+                            <xs:annotation>
+                                <xs:documentation>КИТУ</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="product_receiving_date" type="xs:date" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Дата получения товара</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="children" minOccurs="0"
+                                    type="children_introduce_individuals_type">
+                            <xs:annotation>
+                                <xs:documentation>Список КИ\КИТУ в составе транспортной упаковки для ввода в оборот
+                                    (полученных от физических лиц)
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="children_introduce_import_type">
+        <xs:sequence>
+            <xs:element name="product" maxOccurs="unbounded">
+                <xs:annotation>
+                    <xs:documentation>Список КИ/КИТУ в составе КИТУ/АТК для ввода в оборот импортных товаров с ФТС
+                    </xs:documentation>
+                </xs:annotation>
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="ki" type="ki_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Код идентификации единицы товара (КИ)</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="kitu" type="kitu_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Код идентификации транспортной упаковки (КИТУ)
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_type" type="certificate_type_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Вид документа, подтверждающего соответствие
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_number" type="string255_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Номер документа, подтверждающего соответствие
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_date" type="xs:date" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Дата документа, подтверждающего соответствие
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_document_data" type="certificate_document_data_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Данные документов, подтверждающих соответствие
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="tnved_code" type="tnved_code_type">
+                            <xs:annotation>
+                                <xs:documentation>Код ТН ВЭД ЕАС товара</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="vsd_number" type="vsd_number_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Идентификатор ВСД. Только для ТГ Молоко</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="children" minOccurs="0" type="children_introduce_import_type">
+                            <xs:annotation>
+                                <xs:documentation>Список КИ в составе агрегата</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="children_introduce_import_fts_type">
+        <xs:sequence>
+            <xs:element name="product" maxOccurs="unbounded">
+                <xs:annotation>
+                    <xs:documentation>Список КИ/КИТУ в составе КИТУ/АТК для ввода в оборот импортных товаров с ФТС
+                    </xs:documentation>
+                </xs:annotation>
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="ki" type="kit_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>КИ (код идентификации)</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="kitu" type="kitu_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>КИТУ (код идентификации транспортной упаковки)</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="color" type="string1024_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Цвет. Только для ТГ Одежда и Обувь</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="product_size" type="shoe_size" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Размер. Только для ТГ Одежда и Обувь</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="production_date" type="xs:date" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Дата производства. Только для ТГ Молочная продукция</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="vsd_number" type="vsd_number_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Идентификатор ВСД. Только для ТГ Молочная продукция</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="children" minOccurs="0"
+                                    type="children_introduce_import_fts_type">
+                            <xs:annotation>
+                                <xs:documentation>Список КИ/КИТУ в составе КИТУ/АТК для ввода в оборот импортных товаров
+                                    с ФТС
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="children_introduce_crossborder_type">
+        <xs:sequence>
+            <xs:element name="product" maxOccurs="unbounded">
+                <xs:annotation>
+                    <xs:documentation>Список КИ\КИТУ в составе транспортной упаковки для ввода в оборот (трансграничная
+                        торговля)
+                    </xs:documentation>
+                </xs:annotation>
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="ki" type="ki_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Код идентификации единицы товара (КИ)</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="kitu" type="kitu_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Код идентификации транспортной упаковки (КИТУ)
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="tnved_code" type="tnved_code_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Код ТН ВЭД ЕАС товара</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="cost" type="price_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Цена за единицу</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="vat_value" type="price_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Сумма НДС</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_type" type="certificate_type_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Вид документа, подтверждающего соответствие
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_number" type="string255_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Номер документа, подтверждающего соответствие
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_date" type="xs:date" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Дата документа, подтверждающего соответствие
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_document_data" type="certificate_document_data_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Данные документов, подтверждающих соответствие
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="vsd_number" type="vsd_number_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Идентификатор ВСД. Только для ТГ Молоко</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="import_data" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Данные импорта</xs:documentation>
+                            </xs:annotation>
+                            <xs:complexType>
+                                <xs:all>
+                                    <xs:element name="importer_id" type="string50_type" minOccurs="0">
+                                        <xs:annotation>
+                                            <xs:documentation>Идентификатор импортера</xs:documentation>
+                                        </xs:annotation>
+                                    </xs:element>
+                                    <xs:element name="importer_name" type="string255_type" minOccurs="0">
+                                        <xs:annotation>
+                                            <xs:documentation>Наименование импортера</xs:documentation>
+                                        </xs:annotation>
+                                    </xs:element>
+                                    <xs:element name="declaration_number" type="declaration_number_type" minOccurs="0">
+                                        <xs:annotation>
+                                            <xs:documentation>Регистрационный номер декларации на товары</xs:documentation>
+                                        </xs:annotation>
+                                    </xs:element>
+                                    <xs:element name="declaration_date" type="xs:date" minOccurs="0">
+                                        <xs:annotation>
+                                            <xs:documentation>Дата декларации на товары</xs:documentation>
+                                        </xs:annotation>
+                                    </xs:element>
+                                </xs:all>
+                            </xs:complexType>
+                        </xs:element>
+                        <xs:element name="production_data" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Данные производства</xs:documentation>
+                            </xs:annotation>
+                            <xs:complexType>
+                                <xs:all>
+                                    <xs:element name="producer_id" type="string50_type" minOccurs="0">
+                                        <xs:annotation>
+                                            <xs:documentation>Идентификатор производителя</xs:documentation>
+                                        </xs:annotation>
+                                    </xs:element>
+                                    <xs:element name="producer_name" type="string255_type" minOccurs="0">
+                                        <xs:annotation>
+                                            <xs:documentation>Наименование производителя</xs:documentation>
+                                        </xs:annotation>
+                                    </xs:element>
+                                </xs:all>
+                            </xs:complexType>
+                        </xs:element>
+                        <xs:element name="children" minOccurs="0"
+                                    type="children_introduce_crossborder_type">
+                            <xs:annotation>
+                                <xs:documentation>Список КИ/КИТУ в составе транспортной упаковки для ввода в оборот
+                                    (трансграничная торговля)
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="children_introduce_contract_type">
+        <xs:sequence>
+            <xs:element name="product" maxOccurs="unbounded">
+                <xs:annotation>
+                    <xs:documentation>Список КИ\КИТУ в составе транспортной упаковки для ввода в оборот (трансграничная
+                        торговля)
+                    </xs:documentation>
+                </xs:annotation>
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="ki" type="ki_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Код идентификации единицы товара (КИ)</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="kitu" type="kitu_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Код идентификации транспортной упаковки (КИТУ)
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="production_date" type="xs:date">
+                            <xs:annotation>
+                                <xs:documentation>Дата производства</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="tnved_code" type="tnved_code_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Код ТН ВЭД ЕАЭС товара</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_type" type="certificate_type_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Вид документа, подтверждающего соответствие
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_number" type="string255_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Номер документа, подтверждающего соответствие
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_date" type="xs:date" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Дата документа, подтверждающего соответствие
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="certificate_document_data" type="certificate_document_data_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Данные документов, подтверждающих соответствие
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="licences_list" type="licence_data_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Список лицензий на добычу воды (только для ТГ Вода)
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="vsd_number" type="vsd_number_type" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>Идентификатор ВСД. Только для ТГ Молоко</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="children" minOccurs="0"
+                                    type="children_introduce_contract_type">
+                            <xs:annotation>
+                                <xs:documentation>Список КИ/КИТУ в составе транспортной упаковки для ввода в оборот
+                                    (трансграничная торговля)
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="children_shipment_type">
+        <xs:sequence>
+            <xs:element name="product" maxOccurs="unbounded">
+                <xs:annotation>
+                    <xs:documentation>Список КИ/КИТУ в составе транспортной упаковки (отгрузка)</xs:documentation>
+                </xs:annotation>
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="ki" minOccurs="0" type="ki_type">
+                            <xs:annotation>
+                                <xs:documentation>КИ</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="kitu" minOccurs="0" type="kitu_type">
+                            <xs:annotation>
+                                <xs:documentation>КИТУ</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="cost" minOccurs="0" type="price_type">
+                            <xs:annotation>
+                                <xs:documentation>Цена за единицу</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="vat_value" minOccurs="0" type="price_type">
+                            <xs:annotation>
+                                <xs:documentation>Сумма НДС</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="children_products_list" minOccurs="0"
+                                    type="children_shipment_type">
+                            <xs:annotation>
+                                <xs:documentation>Список КИ\КИТУ составе транспортной упаковки (отгрузка)
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+    <xs:complexType name="children_acceptance_type">
+        <xs:sequence>
+            <xs:element name="product" maxOccurs="unbounded">
+                <xs:annotation>
+                    <xs:documentation>Список КИ\КИТУ в составе транспортной упаковки (приемка)</xs:documentation>
+                </xs:annotation>
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="ki" minOccurs="0" type="ki_type">
+                            <xs:annotation>
+                                <xs:documentation>КИ</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="kitu" minOccurs="0" type="kitu_type">
+                            <xs:annotation>
+                                <xs:documentation>КИТУ</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="accept_type" type="xs:boolean">
+                            <xs:annotation>
+                                <xs:documentation>Товар принят</xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                        <xs:element name="children" minOccurs="0"
+                                    type="children_acceptance_type">
+                            <xs:annotation>
+                                <xs:documentation>Список КИ\КИТУ в составе транспортной упаковки (приемка)
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+    </xs:complexType>
+
+
+    <!--Устаревшие типы-->
+    <xs:simpleType name="date_type">
+        <xs:annotation>
+            <xs:documentation>(УСТАРЕВШИЙ ТИП) Значение даты в формате ДД.ММ.ГГГГ.</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:length value="10"/>
+            <xs:pattern value="(0[1-9]{1}|[1-2]{1}[0-9]{1}|3[0-1]{1})\.(0[1-9]{1}|1[0-2]{1})\.(1[0-9]{3}|20[0-9]{2})"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="reaggregation_type_type">
+        <xs:annotation>
+            <xs:documentation>(УСТАРЕВШИЙ ТИП) Справочник типов трансформации упаковки
+                Изъятие - REMOVING
+                Добавление - ADDING
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="REMOVING"/>
+            <xs:enumeration value="ADDING"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="gs1_uit_uitu_type">
+        <xs:annotation>
+            <xs:documentation>(УСТАРЕВШИЙ ТИП) Уникальный идентификатор транспортной упаковки или товара</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:pattern value="[0-9]{18}|[A-Za-z0-9]{31}|[A-Za-z0-9]{37}|[A-Za-z0-9]{38}|[A-Za-z0-9]{44}"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="kit_type">
+        <xs:annotation>
+            <xs:documentation>(УСТАРЕВШИЙ ТИП) КИТ (код идентификации товара)</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:minLength value="20"/>
+            <xs:maxLength value="44"/>
+            <xs:pattern
+                    value="(RU|AM|BY|KZ|KG)-[A-Z0-9]{6}-[A-Z0-9]{10}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{24}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{25}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{27}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{29}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{31}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{33}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{34}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{37}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{38}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{39}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{40}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{44}|[a-zA-Z0-9_.,()/=!@$^\\|\[\]&quot;#%&amp;*;&lt;&gt;&apos;+:?\-{}~`]{45}"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="product_gender_type">
+        <xs:annotation>
+            <xs:documentation>(Устаревший тип) Пол обуви для описания остатков товара
+                Мужской - MALE
+                Женский - FEMALE
+                Детская - BABY
+                Унисекс - UNISEX
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="MALE"/>
+            <xs:enumeration value="FEMALE"/>
+            <xs:enumeration value="BABY"/>
+            <xs:enumeration value="UNISEX"/>
+        </xs:restriction>
+    </xs:simpleType>
+    <xs:simpleType name="age_category_type">
+        <xs:annotation>
+            <xs:documentation>(УСТАРЕВШИЙ ТИП) Возраст потребителя для описания остатков
+                Детское - BABY
+                Взрослое - ADULT
+                Без возраста - NO_AGE
+            </xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="BABY"/>
+            <xs:enumeration value="ADULT"/>
+            <xs:enumeration value="NO_AGE"/>
+        </xs:restriction>
+    </xs:simpleType>
+</xs:schema>

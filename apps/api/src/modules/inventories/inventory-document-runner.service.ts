@@ -6,7 +6,12 @@ import { strToU8, zipSync, type Zippable } from "fflate";
 import { schema, type Db } from "@markiro/db";
 import {
   createInventoryDocumentRegistry,
+  generateInventoryAggregationXml,
+  generateInventoryDisaggregationXml,
+  getInventoryDocumentFormat,
+  InventoryDocumentGenerationError,
   InventoryDocumentRegistryError,
+  type InventoryDocumentGenerationMetadata,
   type InventoryDocumentFormatDescriptor,
   type InventoryDocumentRegistry,
 } from "@markiro/domain";
@@ -55,6 +60,7 @@ export interface InventoryDocumentGenerator {
   descriptor: InventoryDocumentFormatDescriptor;
   generate(
     source: InventoryResultSource,
+    metadata: InventoryDocumentGenerationMetadata,
   ): readonly InventoryDocumentGeneratedPart[] | Promise<readonly InventoryDocumentGeneratedPart[]>;
 }
 
@@ -83,9 +89,16 @@ export class InventoryDocumentGeneratorRegistry {
   }
 }
 
-export const productionInventoryDocumentGeneratorRegistry = new InventoryDocumentGeneratorRegistry(
-  [],
-);
+export const productionInventoryDocumentGeneratorRegistry = new InventoryDocumentGeneratorRegistry([
+  {
+    descriptor: getInventoryDocumentFormat("inventory_xml_gismt_aggregation", 1),
+    generate: generateInventoryAggregationXml,
+  },
+  {
+    descriptor: getInventoryDocumentFormat("inventory_xml_gismt_disaggregation", 1),
+    generate: generateInventoryDisaggregationXml,
+  },
+]);
 
 type InventoryDocumentRunRow = typeof schema.inventoryDocumentRuns.$inferSelect;
 type InventoryDocumentTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -161,7 +174,7 @@ export class InventoryDocumentRunnerService {
         part: InventoryDocumentGeneratedPart;
       }> = [];
       for (const { selection, generator } of selected) {
-        const parts = await generator.generate(source);
+        const parts = await generator.generate(source, generationMetadata(claimed));
         validateGeneratedParts(generator.descriptor, parts);
         rendered.push(
           ...parts.map((part) => ({
@@ -429,7 +442,19 @@ function safeDocumentErrorCode(error: unknown): InventoryDocumentSafeErrorCode |
         return "GENERATION_FAILED";
     }
   }
+  if (error instanceof InventoryDocumentGenerationError) return "GENERATION_FAILED";
   return null;
+}
+
+function generationMetadata(run: InventoryDocumentRunRow): InventoryDocumentGenerationMetadata {
+  return {
+    documentId: run.id,
+    inventoryNumber: run.inventoryNumberSnapshot,
+    fileDateTime: run.createdAt.toISOString(),
+    operationDateTime: run.inventoryClosedAtSnapshot.toISOString(),
+    organizationName: run.organizationNameSnapshot,
+    organizationInn: run.organizationInnSnapshot ?? "",
+  };
 }
 
 function validateGeneratedParts(
