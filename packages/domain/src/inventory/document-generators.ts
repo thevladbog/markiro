@@ -1,6 +1,8 @@
 import { DomainError } from "../errors.js";
+import { GismtAggregationError, renderGismtAggregationXml } from "../gismt-aggregation.js";
 import { parseKmSegments } from "../gs1/km.js";
 import { formatSsccWithAi } from "../gs1/sscc.js";
+import { selectEligibleInventoryFinalBoxes } from "./document-selection.js";
 
 export interface InventoryDocumentGenerationMetadata {
   documentId: string;
@@ -12,7 +14,11 @@ export interface InventoryDocumentGenerationMetadata {
 }
 
 export interface InventoryDocumentGenerationSource {
-  verified: readonly { codeHash: string; canonicalRaw: string }[];
+  verified: readonly {
+    codeHash: string;
+    canonicalRaw: string;
+    observedProductionDate: string | null;
+  }[];
   protected: readonly { codeHash: string; canonicalRaw: string; parentSscc: string | null }[];
   oldBoxes: readonly { sscc: string }[];
   newBoxes: readonly {
@@ -20,6 +26,7 @@ export interface InventoryDocumentGenerationSource {
     oldSsccContext: string | null;
     state: "open" | "closed" | "invalidated";
     printState: "not_ready" | "pending" | "printing" | "printed" | "failed";
+    productionDate: string;
     codeHashes: readonly string[];
   }[];
 }
@@ -59,7 +66,7 @@ export function generateInventoryAggregationXml(
   metadata: InventoryDocumentGenerationMetadata,
 ): InventoryDocumentGeneratedPart[] {
   validateAggregationMetadata(metadata);
-  const boxes = eligibleRepackedBoxes(source);
+  const boxes = frozenAggregationV1Boxes(source);
   if (boxes.length === 0) throw new InventoryDocumentGenerationError("EMPTY_SOURCE");
 
   const lines = [
@@ -90,6 +97,47 @@ export function generateInventoryAggregationXml(
   ];
 }
 
+export function generateInventoryAggregationXmlV2(
+  source: InventoryDocumentGenerationSource,
+  metadata: InventoryDocumentGenerationMetadata,
+): InventoryDocumentGeneratedPart[] {
+  validateAggregationMetadata(metadata);
+  const boxes = selectEligibleInventoryFinalBoxes(source);
+  if (boxes.length === 0) throw new InventoryDocumentGenerationError("EMPTY_SOURCE");
+
+  try {
+    const rendered = renderGismtAggregationXml({
+      organizationInn: metadata.organizationInn,
+      boxes: boxes.map((box) => ({
+        sscc: box.sscc,
+        codes: box.codes.map((code) => code.canonicalRaw),
+      })),
+    });
+    return [
+      {
+        partNumber: 1,
+        filename: `${inventoryFilenamePrefix(metadata.inventoryNumber)}-aggregation.xml`,
+        mimeType: XML_MIME_TYPE,
+        bytes: rendered.bytes,
+        rowCount: rendered.physicalLineCount,
+        codeCount: rendered.codeCount,
+        boxCount: rendered.boxCount,
+      },
+    ];
+  } catch (error) {
+    if (error instanceof GismtAggregationError) {
+      throw new InventoryDocumentGenerationError(
+        error.code === "INVALID_CIS"
+          ? "INVALID_CIS"
+          : error.code === "INVALID_SSCC"
+            ? "INVALID_SSCC"
+            : "INVALID_ORGANIZATION_INN",
+      );
+    }
+    throw error;
+  }
+}
+
 export function generateInventoryDisaggregationXml(
   source: InventoryDocumentGenerationSource,
   metadata: InventoryDocumentGenerationMetadata,
@@ -101,7 +149,9 @@ export function generateInventoryDisaggregationXml(
   const protectedParents = new Set(
     source.protected.flatMap((code) => (code.parentSscc === null ? [] : [code.parentSscc])),
   );
-  const boxes = [...new Set(eligibleRepackedBoxes(source).map((box) => box.oldSsccContext))]
+  const boxes = [
+    ...new Set(selectEligibleInventoryFinalBoxes(source).map((box) => box.oldSsccContext)),
+  ]
     .filter((sscc): sscc is string => sscc !== null)
     .filter((sscc) => !protectedParents.has(sscc))
     .sort(compareText)
@@ -131,7 +181,7 @@ export function generateInventoryDisaggregationXml(
   ];
 }
 
-function eligibleRepackedBoxes(source: InventoryDocumentGenerationSource): {
+function frozenAggregationV1Boxes(source: InventoryDocumentGenerationSource): {
   sscc: string;
   oldSsccContext: string | null;
   codes: string[];

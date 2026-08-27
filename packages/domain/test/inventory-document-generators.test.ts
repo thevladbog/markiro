@@ -3,11 +3,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   generateInventoryAggregationXml,
+  generateInventoryAggregationXmlV2,
   generateInventoryDisaggregationXml,
   InventoryDocumentGenerationError,
   type InventoryDocumentGenerationMetadata,
   type InventoryDocumentGenerationSource,
 } from "../src/inventory/document-generators.js";
+import { selectEligibleInventoryFinalBoxes } from "../src/inventory/document-selection.js";
+import { renderShiftExport } from "../src/shift-exports.js";
 
 const decoder = new TextDecoder();
 const GTIN = "04680089900017";
@@ -47,8 +50,16 @@ const metadata: InventoryDocumentGenerationMetadata = {
 function source(): InventoryDocumentGenerationSource {
   return {
     verified: [
-      { codeHash: "hash-b", canonicalRaw: km("SERIAL-B") },
-      { codeHash: "hash-a", canonicalRaw: km("SERIAL-A") },
+      {
+        codeHash: "hash-b",
+        canonicalRaw: km("SERIAL-B"),
+        observedProductionDate: "2026-08-08",
+      },
+      {
+        codeHash: "hash-a",
+        canonicalRaw: km("SERIAL-A"),
+        observedProductionDate: "2026-08-08",
+      },
     ],
     protected: [
       {
@@ -68,6 +79,7 @@ function source(): InventoryDocumentGenerationSource {
         oldSsccContext: "046800899000256032",
         state: "closed",
         printState: "printed",
+        productionDate: "2026-08-08",
         codeHashes: ["hash-b", "hash-a"],
       },
       {
@@ -75,6 +87,7 @@ function source(): InventoryDocumentGenerationSource {
         oldSsccContext: null,
         state: "invalidated",
         printState: "not_ready",
+        productionDate: "2026-08-08",
         codeHashes: [],
       },
       {
@@ -82,11 +95,160 @@ function source(): InventoryDocumentGenerationSource {
         oldSsccContext: "046800899000256049",
         state: "closed",
         printState: "printed",
+        productionDate: "2026-08-08",
         codeHashes: ["hash-protected"],
       },
     ],
   };
 }
+
+function selectionSource(): InventoryDocumentGenerationSource {
+  const base = source();
+  return {
+    ...base,
+    verified: [
+      ...base.verified,
+      ...["OPEN", "INVALIDATED", "PENDING", "FAILED", "PROTECTED", "DUPLICATE"].map((serial) => ({
+        codeHash: `hash-${serial.toLowerCase()}`,
+        canonicalRaw: km(serial),
+        observedProductionDate: "2026-08-08",
+      })),
+      {
+        codeHash: "hash-missing-date",
+        canonicalRaw: km("MISSING-DATE"),
+        observedProductionDate: null,
+      },
+      {
+        codeHash: "hash-date-mismatch",
+        canonicalRaw: km("DATE-MISMATCH"),
+        observedProductionDate: "2026-08-09",
+      },
+      {
+        codeHash: "hash-invalid-date",
+        canonicalRaw: km("INVALID-DATE"),
+        observedProductionDate: "2026-02-30",
+      },
+    ],
+    protected: base.protected,
+    newBoxes: [
+      ...base.newBoxes,
+      {
+        sscc: "046800899000256056",
+        oldSsccContext: null,
+        state: "open",
+        printState: "printed",
+        productionDate: "2026-08-08",
+        codeHashes: ["hash-open"],
+      },
+      {
+        sscc: "046800899000256063",
+        oldSsccContext: null,
+        state: "closed",
+        printState: "printed",
+        productionDate: "2026-08-08",
+        codeHashes: [],
+      },
+      {
+        sscc: "046800899000256070",
+        oldSsccContext: null,
+        state: "invalidated",
+        printState: "printed",
+        productionDate: "2026-08-08",
+        codeHashes: ["hash-invalidated"],
+      },
+      {
+        sscc: "046800899000256087",
+        oldSsccContext: null,
+        state: "closed",
+        printState: "pending",
+        productionDate: "2026-08-08",
+        codeHashes: ["hash-pending"],
+      },
+      {
+        sscc: "046800899000256094",
+        oldSsccContext: null,
+        state: "closed",
+        printState: "failed",
+        productionDate: "2026-08-08",
+        codeHashes: ["hash-failed"],
+      },
+      {
+        sscc: "046800899000256100",
+        oldSsccContext: null,
+        state: "closed",
+        printState: "printed",
+        productionDate: "2026-08-08",
+        codeHashes: ["hash-protected"],
+      },
+      {
+        sscc: "046800899000256117",
+        oldSsccContext: null,
+        state: "closed",
+        printState: "printed",
+        productionDate: "2026-08-08",
+        codeHashes: ["hash-not-found"],
+      },
+      {
+        sscc: "046800899000256124",
+        oldSsccContext: null,
+        state: "closed",
+        printState: "printed",
+        productionDate: "2026-08-08",
+        codeHashes: ["hash-duplicate", "hash-duplicate"],
+      },
+      {
+        sscc: "046800899000256131",
+        oldSsccContext: null,
+        state: "closed",
+        printState: "printed",
+        productionDate: "2026-08-08",
+        codeHashes: ["hash-missing-date"],
+      },
+      {
+        sscc: "046800899000256148",
+        oldSsccContext: null,
+        state: "closed",
+        printState: "printed",
+        productionDate: "2026-08-08",
+        codeHashes: ["hash-date-mismatch"],
+      },
+      {
+        sscc: "046800899000256155",
+        oldSsccContext: null,
+        state: "closed",
+        printState: "printed",
+        productionDate: "2026-02-30",
+        codeHashes: ["hash-invalid-date"],
+      },
+    ],
+  };
+}
+
+describe("current inventory final-box selection", () => {
+  it("keeps only closed printed boxes whose unique verified members share a valid date", () => {
+    const selected = selectEligibleInventoryFinalBoxes(selectionSource());
+
+    expect(selected.map((box) => box.sscc)).toEqual(["046800899000256001"]);
+    expect(selected[0]?.codes.map((code) => code.canonicalRaw)).toEqual([
+      km("SERIAL-A"),
+      km("SERIAL-B"),
+    ]);
+  });
+
+  it("sorts eligible boxes by their normalized stored SSCC", () => {
+    const base = source();
+    const valid = base.newBoxes[0]!;
+    const selected = selectEligibleInventoryFinalBoxes({
+      ...base,
+      newBoxes: [
+        { ...valid, sscc: "046800899000256018", codeHashes: ["hash-b"] },
+        { ...valid, sscc: "046800899000256001", codeHashes: ["hash-a"] },
+      ],
+    });
+
+    expect(selected.map((box) => box.sscc)).toEqual(["046800899000256001", "046800899000256018"]);
+  });
+});
 
 describe("inventory GISMT aggregation XML", () => {
   it("keeps the checked-in source example structurally aligned with the production serializer", () => {
@@ -116,6 +278,36 @@ describe("inventory GISMT aggregation XML", () => {
     expect(decoder.decode(part?.bytes)).not.toContain("PROTECTED");
     expect(decoder.decode(part?.bytes)).not.toContain("00046800899000256049");
   });
+
+  it("renders aggregation v2 byte-identically to the shared shift serializer", () => {
+    const eligibleBoxes = selectEligibleInventoryFinalBoxes(source());
+    const [inventoryPart] = generateInventoryAggregationXmlV2(source(), metadata);
+    const [shiftPart] = renderShiftExport({
+      formatId: "shift_xml_gismt_aggregation",
+      formatVersion: 1,
+      productName: "ignored-for-bytes",
+      shiftDate: "2026-08-27",
+      maxLines: null,
+      organizationInn: metadata.organizationInn,
+      source: {
+        mode: "boxes",
+        boxes: eligibleBoxes.map((box) => ({
+          sscc: box.sscc,
+          codes: box.codes.map((code) => code.canonicalRaw),
+        })),
+      },
+    });
+
+    expect(inventoryPart).toMatchObject({
+      partNumber: 1,
+      filename: "inventory-INV-2026-0001-aggregation.xml",
+      mimeType: "application/xml; charset=utf-8",
+      rowCount: 15,
+      codeCount: 2,
+      boxCount: 1,
+    });
+    expect(inventoryPart?.bytes).toEqual(shiftPart?.bytes);
+  });
 });
 
 describe("inventory GISMT disaggregation XML", () => {
@@ -126,7 +318,27 @@ describe("inventory GISMT disaggregation XML", () => {
   });
 
   it("renders only old boxes used by eligible repacking and omits simple checks and MOVING_BY_UD", () => {
-    const [part] = generateInventoryDisaggregationXml(source(), metadata);
+    const withDateMismatch = source();
+    withDateMismatch.verified = [
+      ...withDateMismatch.verified,
+      {
+        codeHash: "hash-date-mismatch",
+        canonicalRaw: km("DATE-MISMATCH"),
+        observedProductionDate: "2026-08-09",
+      },
+    ];
+    withDateMismatch.newBoxes = [
+      ...withDateMismatch.newBoxes,
+      {
+        sscc: "046800899000256018",
+        oldSsccContext: "046800899000256025",
+        state: "closed",
+        printState: "printed",
+        productionDate: "2026-08-08",
+        codeHashes: ["hash-date-mismatch"],
+      },
+    ];
+    const [part] = generateInventoryDisaggregationXml(withDateMismatch, metadata);
 
     expect(part).toMatchObject({
       partNumber: 1,

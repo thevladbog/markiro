@@ -144,6 +144,7 @@ export type {
 } from "./inventory/index.js";
 export {
   generateInventoryAggregationXml,
+  generateInventoryAggregationXmlV2,
   generateInventoryDisaggregationXml,
   InventoryDocumentGenerationError,
 } from "./inventory/index.js";
@@ -153,6 +154,8 @@ export type {
   InventoryDocumentGenerationMetadata,
   InventoryDocumentGenerationSource,
 } from "./inventory/index.js";
+export { selectEligibleInventoryFinalBoxes } from "./inventory/index.js";
+export type { EligibleInventoryFinalBox } from "./inventory/index.js";
 export {
   INVENTORY_EVENT_BATCH_SIZE,
   INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE,

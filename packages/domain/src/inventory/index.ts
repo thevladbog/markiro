@@ -71,6 +71,7 @@ export {
 } from "./documents.js";
 export {
   generateInventoryAggregationXml,
+  generateInventoryAggregationXmlV2,
   generateInventoryDisaggregationXml,
   InventoryDocumentGenerationError,
 } from "./document-generators.js";
@@ -80,6 +81,8 @@ export type {
   InventoryDocumentGenerationMetadata,
   InventoryDocumentGenerationSource,
 } from "./document-generators.js";
+export { selectEligibleInventoryFinalBoxes } from "./document-selection.js";
+export type { EligibleInventoryFinalBox } from "./document-selection.js";
 export type {
   InventoryDocumentFormatAvailability,
   InventoryDocumentFormatDescriptor,
