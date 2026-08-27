@@ -1,10 +1,24 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { FileDropZone } from "@markiro/ui";
+import { FileDropZone, fileMatchesAccept } from "../src/index.js";
 
 afterEach(() => {
   cleanup();
+});
+
+describe("fileMatchesAccept", () => {
+  it("matches an extension pattern case-insensitively", () => {
+    expect(fileMatchesAccept({ name: "data.CSV", type: "" }, ".csv")).toBe(true);
+  });
+
+  it("matches a universal MIME pattern by prefix", () => {
+    expect(fileMatchesAccept({ name: "photo.png", type: "image/png" }, "image/*")).toBe(true);
+  });
+
+  it("rejects a file matching neither the extension nor the MIME type", () => {
+    expect(fileMatchesAccept({ name: "report.pdf", type: "application/pdf" }, ".csv")).toBe(false);
+  });
 });
 
 describe("FileDropZone", () => {
@@ -40,6 +54,15 @@ describe("FileDropZone", () => {
     );
     const zone = screen.getByRole("button");
     const file = new File(["a"], "report.csv", { type: "text/csv" });
+    fireEvent.drop(zone, { dataTransfer: { files: [file] } });
+    expect(onFile).not.toHaveBeenCalled();
+  });
+
+  it("ignores a dropped file that does not match accept", () => {
+    const onFile = vi.fn();
+    render(<FileDropZone label="Перетащите файл или нажмите" accept=".csv" onFile={onFile} />);
+    const zone = screen.getByRole("button");
+    const file = new File(["a"], "photo.png", { type: "image/png" });
     fireEvent.drop(zone, { dataTransfer: { files: [file] } });
     expect(onFile).not.toHaveBeenCalled();
   });
