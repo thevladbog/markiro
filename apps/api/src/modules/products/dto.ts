@@ -25,6 +25,7 @@ export const createProductSchema = z.object({
   egaisCode: z.string().trim().min(1).max(64).nullable().optional(),
   shelfLifeDays: z.number().int().min(1).max(3650).nullable().optional(),
   externalRef: z.string().trim().min(1).max(200).nullable().optional(),
+  archived: z.boolean().optional(),
 });
 export type CreateProductDto = z.infer<typeof createProductSchema>;
 
@@ -45,13 +46,21 @@ export const updateProductSchema = z.object({
   egaisCode: z.string().trim().min(1).max(64).nullable().optional(),
   shelfLifeDays: z.number().int().min(1).max(3650).nullable().optional(),
   externalRef: z.string().trim().min(1).max(200).nullable().optional(),
+  archived: z.boolean().optional(),
 });
 export type UpdateProductDto = z.infer<typeof updateProductSchema>;
 
-/** GET /products query schema. */
+/**
+ * GET /products query schema. `archived` defaults to `"false"` in the service:
+ * without an explicit opt-in every selection surface (shift form, kiosk
+ * allowlist, station GTIN resolution, 1С link modal) hides archived products.
+ * `"all"` is the opt-in for the catalog page, the inventory form, and other
+ * history-aware readers; `"true"` powers the catalog's "not in use" filter.
+ */
 export const listProductsQuerySchema = z.object({
   search: z.string().min(1).optional(),
   status: z.enum(PRODUCT_STATUSES).optional(),
+  archived: z.enum(["true", "false", "all"]).optional(),
 });
 export type ListProductsQueryDto = z.infer<typeof listProductsQuerySchema>;
 
@@ -80,6 +89,8 @@ export interface ProductDto {
   boxCapacity: number | null;
   palletCapacity: number | null;
   status: ProductStatus;
+  /** Operator-set "do not use" flag; archived products are hidden from selection surfaces except inventory. */
+  archived: boolean;
   defaultCounterpartyId: string | null;
   unitPrice: string | null;
   egaisCode: string | null;

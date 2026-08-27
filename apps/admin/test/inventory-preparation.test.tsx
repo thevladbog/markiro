@@ -190,7 +190,7 @@ function shellDependency(url: string): Response | null {
 }
 
 function parameterDependency(url: string): Response | null {
-  if (url === "/api/products") {
+  if (url === "/api/products" || url.startsWith("/api/products?")) {
     return response({
       items: [
         {

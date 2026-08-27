@@ -52,6 +52,7 @@ const CURRENT_PRODUCT_SELECTION = {
   boxCapacity: schema.products.boxCapacity,
   palletCapacity: schema.products.palletCapacity,
   status: schema.products.status,
+  archived: schema.products.archived,
   defaultCounterpartyId: schema.products.defaultCounterpartyId,
   unitPrice: schema.products.unitPrice,
   egaisCode: schema.products.egaisCode,
@@ -87,6 +88,13 @@ export class ProductsService {
     query: ListProductsQueryDto,
   ): Promise<ListProductsResponseDto> {
     const conditions = [eq(schema.products.tenantId, tenantId)];
+
+    // Deny-by-default: archived products only appear when the caller opts in
+    // ("all" for history-aware readers, "true" for the catalog's archive filter).
+    const archivedFilter = query.archived ?? "false";
+    if (archivedFilter !== "all") {
+      conditions.push(eq(schema.products.archived, archivedFilter === "true"));
+    }
 
     if (query.status) {
       conditions.push(eq(schema.products.status, query.status));
@@ -132,6 +140,7 @@ export class ProductsService {
           boxCapacity,
           palletCapacity,
           status,
+          archived: data.archived ?? false,
           defaultCounterpartyId: data.defaultCounterpartyId ?? null,
           unitPrice: data.unitPrice ?? null,
           printName: data.printName ?? null,
@@ -189,6 +198,7 @@ export class ProductsService {
           defaultCounterpartyId,
           status,
         };
+        if (data.archived !== undefined) set.archived = data.archived;
         if (data.unitPrice !== undefined) set.unitPrice = data.unitPrice;
         if (data.printName !== undefined) set.printName = data.printName;
         if (data.egaisCode !== undefined) set.egaisCode = data.egaisCode;
@@ -753,6 +763,7 @@ export class ProductsService {
       boxCapacity: row.boxCapacity,
       palletCapacity: row.palletCapacity,
       status: row.status,
+      archived: row.archived,
       defaultCounterpartyId: row.defaultCounterpartyId,
       unitPrice: row.unitPrice,
       egaisCode: row.egaisCode,

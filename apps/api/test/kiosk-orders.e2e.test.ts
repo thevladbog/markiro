@@ -248,6 +248,57 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     expect(res.body.conflicts[0].reason).toBe("not_allowed");
   });
 
+  it("drops an archived product off the bootstrap and stops admitting its codes", async () => {
+    // A product that WAS allowlisted (assignment row stays for history) and
+    // then got flagged "do not use" in the catalog.
+    const GTIN_ARCHIVED = "04600682000051"; // valid check digit, same vector family as GTIN; distinct from GTIN_UNKNOWN
+    const archivedProductId = randomUUID();
+    await db.insert(schema.products).values({
+      id: archivedProductId,
+      tenantId,
+      gtin14: GTIN_ARCHIVED,
+      name: "Снятый товар",
+      archived: true,
+    });
+    await db
+      .insert(schema.kioskProducts)
+      .values({ tenantId, kioskId, productId: archivedProductId });
+
+    const bootstrap = await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", TOKEN)
+      .expect(200);
+    expect(bootstrap.body.products.some((p: { gtin14: string }) => p.gtin14 === GTIN)).toBe(true);
+    expect(
+      bootstrap.body.products.every((p: { gtin14: string }) => p.gtin14 !== GTIN_ARCHIVED),
+    ).toBe(true);
+
+    const res = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
+      .send({
+        deviceSeq: 971,
+        badgeCode: BADGE,
+        reason: "buy",
+        items: [{ rawKm: `01${GTIN_ARCHIVED}21ARCH1${GS}93Abcd` }],
+      })
+      .expect(201);
+    expect(res.body.itemCount).toBe(0);
+    expect(res.body.conflicts).toHaveLength(1);
+    expect(res.body.conflicts[0].reason).toBe("not_allowed");
+
+    // Keep the shared fixture kiosk's allowlist as later tests expect it.
+    await db
+      .delete(schema.kioskProducts)
+      .where(
+        and(
+          eq(schema.kioskProducts.tenantId, tenantId),
+          eq(schema.kioskProducts.kioskId, kioskId),
+          eq(schema.kioskProducts.productId, archivedProductId),
+        ),
+      );
+  });
+
   /**
    * A BAD BADGE IS NOT A BAD DEVICE, and the status has to say so.
    *

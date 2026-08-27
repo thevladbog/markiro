@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
 import { CABINET_CAPABILITY, isValidGtin } from "@markiro/domain";
-import { Alert, Button, Input, Select, SidePanel } from "@markiro/ui";
+import { Alert, Button, Checkbox, Input, Select, SidePanel } from "@markiro/ui";
 import type { OverlayDismissReason, SelectOption } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
@@ -82,6 +82,7 @@ const productFormSchema = z.object({
       "pages.catalog.form.errors.shelfLifeInvalid",
     ),
   defaultCounterpartyId: z.string().trim().optional(),
+  archived: z.boolean(),
 });
 
 export type ProductFormValues = z.infer<typeof productFormSchema>;
@@ -129,6 +130,7 @@ const EMPTY_VALUES: ProductFormValues = {
   egaisCode: "",
   shelfLifeDays: "",
   defaultCounterpartyId: "",
+  archived: false,
 };
 
 const FORM_ID = "product-form";
@@ -224,6 +226,7 @@ export function ProductForm({
 
   const gtinValue = watch("gtin");
   const defaultCounterpartyId = watch("defaultCounterpartyId");
+  const archivedValue = watch("archived");
 
   // Re-seed clean forms when their server values change. A background refetch
   // must never overwrite unsaved operator input, so dirty forms retain their
@@ -313,7 +316,7 @@ export function ProductForm({
   }, [gtinValue]);
 
   const submit = handleSubmit(async (values) => {
-    await onSubmit(toCreateInput(values), selectedImage);
+    await onSubmit(toCreateInput(values, mode), selectedImage);
   });
 
   const counterpartyOptions: SelectOption[] = [
@@ -369,6 +372,17 @@ export function ProductForm({
           <h3 id="product-form-basic">{t("pages.catalog.form.sections.basic")}</h3>
           {mode === "edit" && productStatus === "draft" && (
             <Alert tone="warn">{t("pages.catalog.form.draftBanner")}</Alert>
+          )}
+
+          {mode === "edit" && (
+            <Checkbox
+              label={t("pages.catalog.form.archivedLabel")}
+              hint={t("pages.catalog.form.archivedHint")}
+              checked={archivedValue}
+              onCheckedChange={(checked) =>
+                setValue("archived", checked, { shouldDirty: true, shouldValidate: true })
+              }
+            />
           )}
 
           {mode === "edit" && linkedExternalRef && (
@@ -530,8 +544,12 @@ export function ProductForm({
   );
 }
 
-/** Normalizes raw form values into the API's create/update payload shape. */
-function toCreateInput(values: ProductFormValues): CreateProductInput {
+/**
+ * Normalizes raw form values into the API's create/update payload shape.
+ * `archived` travels only from the edit form — the create form has no
+ * "do not use" control, so create payloads stay free of the field.
+ */
+function toCreateInput(values: ProductFormValues, mode: "create" | "edit"): CreateProductInput {
   const printName = values.printName?.trim();
   const productGroup = values.productGroup?.trim();
   const boxCapacity = values.boxCapacity?.trim();
@@ -551,5 +569,6 @@ function toCreateInput(values: ProductFormValues): CreateProductInput {
     egaisCode: egaisCode ? egaisCode : null,
     shelfLifeDays: shelfLifeDays ? Number(shelfLifeDays) : null,
     defaultCounterpartyId: defaultCounterpartyId ? defaultCounterpartyId : null,
+    ...(mode === "edit" ? { archived: values.archived } : {}),
   };
 }
