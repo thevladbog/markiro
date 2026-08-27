@@ -71,7 +71,12 @@ function scanner() {
   return {
     source,
     emit(scannerRaw: string) {
-      act(() => listener?.(scannerRaw));
+      const activeListener = listener;
+      if (activeListener === null) throw new Error("test scanner is not listening");
+      act(() => activeListener(scannerRaw));
+    },
+    isListening() {
+      return listener !== null;
     },
     stop,
   };
@@ -222,6 +227,7 @@ describe("simple inventory work screen", () => {
     expect(screen.getByText("Пиво светлое 0,45 л")).toBeDefined();
     expect(screen.getByText("19.08.2026")).toBeDefined();
     await waitFor(() => expect(onQueueRegister).toHaveBeenCalledOnce());
+    await waitFor(() => expect(scan.isListening()).toBe(true));
 
     scan.emit(raw("EXPECTED"));
     expect(await screen.findByText("Код принят")).toBeDefined();
@@ -332,6 +338,7 @@ describe("simple inventory work screen", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Применить дату" }));
     await screen.findByText("20.08.2026");
+    await waitFor(() => expect(scan.isListening()).toBe(true));
 
     scan.emit(raw("EXPECTED"));
     await waitFor(() =>
@@ -369,6 +376,7 @@ describe("simple inventory work screen", () => {
       />,
     );
     await screen.findByText("19.08.2026");
+    await waitFor(() => expect(scan.isListening()).toBe(true));
     scan.emit(raw("EXPECTED"));
     await waitFor(() => expect(held).toBe(true));
     fireEvent.click(screen.getByRole("button", { name: "Изменить дату производства" }));
@@ -379,6 +387,7 @@ describe("simple inventory work screen", () => {
     gate.release();
     await screen.findByText("Код принят");
     await screen.findByText("20.08.2026");
+    await waitFor(() => expect(scan.isListening()).toBe(true));
     scan.emit(raw("INELIGIBLE"));
     await screen.findByText("Код не участвует в инвентаризации");
 
