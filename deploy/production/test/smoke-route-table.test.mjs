@@ -733,12 +733,56 @@ test("public smoke accepts the exact live release identity", async () => {
   assert.ok(client.requests.length > 1);
 });
 
+test("landing smoke permits the exact stable Station download as an outbound link", async () => {
+  const client = smokeClient();
+  const original = client.request;
+  client.request = async (url, init) => {
+    const parsed = new URL(url);
+    if (parsed.hostname === "markiro.example" && parsed.pathname === "/")
+      return landingResponse({
+        body: landingShell().replace(
+          "</main>",
+          '<a href="https://releases.markiro.app/station/download">Station</a></main>',
+        ),
+        headers: { "cache-control": "no-cache", "content-type": "text/html" },
+      });
+    return original(url, init);
+  };
+
+  await runPublicSmoke(
+    {
+      adminBaseUrl: "https://app.markiro.example",
+      kioskBaseUrl: "https://kiosk.markiro.example",
+      landingBaseUrl: "https://markiro.example",
+    },
+    client,
+  );
+});
+
 test("landing smoke permits only the public canonical URL outside the deployment origin", async (t) => {
   for (const [name, mutate, expected] of [
     [
       "external runtime asset",
       (body) =>
         body.replace("</head>", '<script src="https://cdn.example/app.js"></script></head>'),
+      /external origin/,
+    ],
+    [
+      "different release path",
+      (body) =>
+        body.replace(
+          "</main>",
+          '<a href="https://releases.markiro.app/station/other">Station</a></main>',
+        ),
+      /external origin/,
+    ],
+    [
+      "stable Station download used as a script",
+      (body) =>
+        body.replace(
+          "</head>",
+          '<script src="https://releases.markiro.app/station/download"></script></head>',
+        ),
       /external origin/,
     ],
     [
