@@ -13,7 +13,7 @@ import {
 } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { schema, type Db } from "@markiro/db";
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Response } from "express";
 import { DB } from "../../auth/auth.module";
 import type { IntegrationChannelType } from "../integrations/channel-registry";
@@ -22,7 +22,7 @@ import {
   PickupOrdersService,
   type ApplyExternalStatusResult,
 } from "../pickup-orders/pickup-orders.service";
-import { decideApplication, type KnownProduct } from "./commerceml/apply";
+import { decideApplication, type CatalogProduct } from "./commerceml/apply";
 import { parseCommerceMl } from "./commerceml/parse";
 import { parseOrderStatusDocuments, resolveMappedStatus } from "./commerceml/order-status";
 import { buildOrdersDocument, planExport } from "./commerceml/order-export";
@@ -638,15 +638,18 @@ export class ExchangeController {
       return;
     }
 
-    const knownRows = await this.db
-      .select({ id: schema.products.id, externalRef: schema.products.externalRef })
+    const productRows = await this.db
+      .select({
+        id: schema.products.id,
+        gtin14: schema.products.gtin14,
+        externalRef: schema.products.externalRef,
+      })
       .from(schema.products)
-      .where(
-        and(eq(schema.products.tenantId, session.tenantId), isNotNull(schema.products.externalRef)),
-      );
-    const known: KnownProduct[] = knownRows.map((row) => ({
+      .where(eq(schema.products.tenantId, session.tenantId));
+    const products: CatalogProduct[] = productRows.map((row) => ({
       id: row.id,
-      externalRef: row.externalRef!,
+      gtin14: row.gtin14,
+      externalRef: row.externalRef,
     }));
 
     const [channelRow] = await this.db
@@ -661,7 +664,7 @@ export class ExchangeController {
     const configuredPriceType = (channelRow?.settings as { priceType?: string } | undefined)
       ?.priceType;
 
-    const plan = decideApplication({ known, items, offers, configuredPriceType });
+    const plan = decideApplication({ products, items, offers, configuredPriceType });
 
     // Offers decideApplication had nothing to do with at all: no known link
     // to price, and offers carry no name/article/unit, so unlike catalog
@@ -669,7 +672,14 @@ export class ExchangeController {
     // connection's fault and not necessarily wrong -- the matching catalog
     // item may simply not have arrived (or been linked) yet -- but it must
     // not vanish without a trace either, per this task's brief.
-    const knownRefs = new Set(known.map((product) => product.externalRef));
+    //
+    // Adapted minimally for the `products`/`CatalogProduct` shape (Task 2):
+    // `knownRefs` is still exactly "products already linked to a 1С <Ид>" --
+    // it does not yet account for `plan.links` (this round's own new GTIN
+    // links), which is Task 6's job alongside the worklist/journal wiring.
+    const knownRefs = new Set(
+      products.flatMap((product) => (product.externalRef !== null ? [product.externalRef] : [])),
+    );
     const unmatchedOfferRefs = [
       ...new Set(
         offers.filter((offer) => !knownRefs.has(offer.externalRef)).map((o) => o.externalRef),
