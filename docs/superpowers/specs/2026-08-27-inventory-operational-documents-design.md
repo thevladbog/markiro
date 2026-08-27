@@ -86,8 +86,8 @@ retried historical run continues to resolve its exact registered generator.
 
 `inventory_xml_gismt_aggregation@1` and its current metadata-rich serializer remain registered as
 hidden legacy behavior. `inventory_xml_gismt_aggregation@2` is advertised and uses the common
-proven serializer. Stored selections and artifact metadata already contain id and version, so this
-change requires no database migration.
+proven serializer. Stored selections and artifact metadata already contain id and version, so
+format versioning needs no data rewrite.
 
 ## Production catalog
 
@@ -225,6 +225,11 @@ in `box_count`.
 The runner normally rejects zero-byte artifacts. It may accept one only when the registered
 generator explicitly declares that its empty TXT is valid and all reported counts are zero.
 
+The applied artifact schema currently enforces `byte_size > 0`. Add a new forward-only migration
+that replaces only this check with `byte_size >= 0`, and update the Drizzle schema, API DTO,
+OpenAPI, and Admin response parser to accept non-negative sizes. Do not rewrite the applied
+inventory document migration. Existing positive-size rows remain valid and require no backfill.
+
 ## Run, ZIP, and error behavior
 
 The existing all-or-nothing render boundary remains:
@@ -288,6 +293,13 @@ or audit metadata. Infrastructure failures retain the existing retry behavior.
 - Connected acceptance uses a disposable Postgres instance and real migrations; skipped database
   coverage is reported rather than treated as passing.
 
+### Database
+
+- Schema tests require the named non-negative artifact byte-size check and reject negative sizes.
+- A migration test applies the forward migration after the legacy inventory document migrations,
+  proves that a zero-byte artifact row is accepted, and proves that a negative row is rejected.
+- `@markiro/db` is rebuilt before API tests so consumers do not execute stale compiled schema.
+
 ### Admin
 
 - Catalog-provided formats render and can be selected without a local id list.
@@ -295,9 +307,9 @@ or audit metadata. Infrastructure failures retain the existing retry behavior.
 - Individual and ZIP downloads, disabled states, retries, prior revisions, and localized errors
   remain covered.
 
-Final gates are the focused domain/API/Admin tests followed by package test, typecheck, lint, and
-build for affected packages, `git diff --check`, and formatting verification. Because domain
-exports are consumed by API, `@markiro/domain` is built before API tests.
+Final gates are the focused domain/DB/API/Admin tests followed by package test, typecheck, lint,
+and build for affected packages, `git diff --check`, and formatting verification. Because DB and
+domain exports are consumed by API, `@markiro/db` and `@markiro/domain` are built before API tests.
 
 ## Out of scope and external acceptance
 
