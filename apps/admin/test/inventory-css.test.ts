@@ -16,4 +16,8 @@ describe("inventory.css contracts", () => {
       /\.mk-inventory-terminal-line > \.mk-chip\s*\{[^}]*flex-shrink:\s*0;[^}]*white-space:\s*nowrap;/s,
     );
   });
+
+  it("caps the detail page content width", () => {
+    expect(css).toMatch(/\.mk-inventory-page\s*\{[^}]*max-width:\s*1200px;/s);
+  });
 });
