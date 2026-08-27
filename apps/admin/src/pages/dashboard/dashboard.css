@@ -11,7 +11,8 @@
 
 .mk-dashboard-page a:focus-visible,
 .mk-dashboard-page button:focus-visible,
-.mk-dashboard-series__scroll:focus-visible {
+.mk-dashboard-series__scroll:focus-visible,
+.mk-dashboard-table-scroll:focus-visible {
   outline: var(--focus-ring-w) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
 }

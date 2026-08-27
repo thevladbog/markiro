@@ -310,6 +310,61 @@ describe("DashboardPage", () => {
     );
   });
 
+  it("discloses fetching when returning to a cached period until fresh data swaps atomically", async () => {
+    const initialFixture = dashboardFixture({ hasRunShift: true });
+    const thirtyDayFixture = {
+      ...initialFixture,
+      generatedAt: "2026-08-27T10:00:00.000Z",
+      today: { ...initialFixture.today, validationAcceptedUnits: 30000 },
+      dynamics: { ...initialFixture.dynamics, period: "30d" },
+    };
+    const refreshedFixture = {
+      ...initialFixture,
+      generatedAt: "2026-08-27T10:15:00.000Z",
+      today: { ...initialFixture.today, validationAcceptedUnits: 128490 },
+    };
+    let sevenDayRequestCount = 0;
+    let resolveRevisit!: (response: Response) => void;
+    const revisitResponse = new Promise<Response>((resolve) => {
+      resolveRevisit = resolve;
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/dashboard/overview?period=7d")) {
+          sevenDayRequestCount += 1;
+          return sevenDayRequestCount === 1 ? jsonResponse(200, initialFixture) : revisitResponse;
+        }
+        if (url.endsWith("/api/dashboard/overview?period=30d")) {
+          return jsonResponse(200, thirtyDayFixture);
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    renderDashboard();
+    const sevenDays = await screen.findByRole("button", { name: "7 дней" });
+    fireEvent.click(screen.getByRole("button", { name: "30 дней" }));
+    expect(await screen.findByLabelText(/30[\s\u00a0]?000 проверенных единиц/)).toBeDefined();
+
+    fireEvent.click(sevenDays);
+
+    expect(screen.getByRole("status", { name: "Обновление данных" })).toBeDefined();
+    expect(screen.getByLabelText(/128[\s\u00a0]?489 проверенных единиц/)).toBeDefined();
+    expect(screen.queryByLabelText(/128[\s\u00a0]?490 проверенных единиц/)).toBeNull();
+
+    resolveRevisit(jsonResponse(200, refreshedFixture));
+
+    expect(await screen.findByLabelText(/128[\s\u00a0]?490 проверенных единиц/)).toBeDefined();
+    await waitFor(() =>
+      expect(screen.queryByRole("status", { name: "Обновление данных" })).toBeNull(),
+    );
+    expect(screen.queryByLabelText(/128[\s\u00a0]?489 проверенных единиц/)).toBeNull();
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps ordinary empty production distinct from an insufficient rate", async () => {
     const fixture = dashboardFixture({ hasRunShift: true });
     vi.stubGlobal(
@@ -369,6 +424,69 @@ describe("DashboardPage", () => {
     expect(screen.getByText("Недостаточно данных для темпа")).toBeDefined();
   });
 
+  it("renders eligible numeric zero rates safely when every chart value is zero", async () => {
+    const fixture = dashboardFixture({ hasRunShift: true });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          ...fixture,
+          dynamics: {
+            ...fixture.dynamics,
+            currentWindow: {
+              ...fixture.dynamics.currentWindow,
+              validation: { acceptedUnits: 0, shiftHours: 4, unitsPerShiftHour: 0 },
+              aggregation: {
+                closedBoxes: 0,
+                containedUnits: 0,
+                shiftHours: 3.5,
+                boxesPerShiftHour: 0,
+                containedUnitsPerShiftHour: 0,
+              },
+            },
+            buckets: [
+              {
+                ...fixture.dynamics.buckets[0],
+                validation: { acceptedUnits: 0, shiftHours: 4, unitsPerShiftHour: 0 },
+                aggregation: {
+                  closedBoxes: 0,
+                  containedUnits: 0,
+                  shiftHours: 3.5,
+                  boxesPerShiftHour: 0,
+                  containedUnitsPerShiftHour: 0,
+                },
+              },
+            ],
+            quality: {
+              ...fixture.dynamics.quality,
+              status: "complete",
+              reasons: [],
+              activeShiftCount: 0,
+              lateDataShiftCount: 0,
+            },
+          },
+        }),
+      ),
+    );
+
+    renderDashboard();
+
+    const validation = await screen.findByRole("region", { name: "Проверка — темп" });
+    const aggregation = screen.getByRole("region", { name: "Агрегация — темп" });
+    const zeroValidationBar = within(validation).getByRole("img", {
+      name: /21 авг\.: 0 шт\.\/час смены/,
+    });
+    expect(zeroValidationBar.className).not.toContain("track--missing");
+    expect(
+      zeroValidationBar
+        .querySelector<HTMLElement>(".mk-dashboard-bars__bar")
+        ?.style.getPropertyValue("--mk-dashboard-bar-scale"),
+    ).toBe("0");
+    expect(within(aggregation).getAllByRole("img", { name: /21 авг\.: 0/ })).toHaveLength(2);
+    expect(screen.queryAllByRole("img", { name: /—/ })).toHaveLength(0);
+    expect(screen.queryByText("Нет длительности смены — темп не рассчитан.")).toBeNull();
+  });
+
   it("links active shifts by access level and formats mode-specific output", async () => {
     const fixture = dashboardFixture({ hasRunShift: true });
     vi.stubGlobal(
@@ -383,12 +501,44 @@ describe("DashboardPage", () => {
       "/shifts/11111111-1111-4111-8111-111111111111/edit",
     );
     expect(screen.getByText(/412 кор\. · 10[\s\u00a0]?712 шт\./)).toBeDefined();
+    const scrollRegion = screen.getByRole("region", { name: "Активные производственные смены" });
+    expect(scrollRegion.getAttribute("tabindex")).toBe("0");
 
     cleanup();
     renderDashboard({ canWrite: false });
     expect(
       (await screen.findByRole("link", { name: "S-2026-08-27-001" })).getAttribute("href"),
     ).toBe("/shifts");
+  });
+
+  it("does not mark an empty active-shift section as provisional", async () => {
+    const fixture = dashboardFixture({ hasRunShift: true });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          ...fixture,
+          today: { ...fixture.today, activeShiftCount: 0 },
+          dynamics: {
+            ...fixture.dynamics,
+            quality: {
+              ...fixture.dynamics.quality,
+              status: "complete",
+              reasons: [],
+              activeShiftCount: 0,
+              lateDataShiftCount: 0,
+            },
+          },
+          activeShifts: [],
+        }),
+      ),
+    );
+
+    renderDashboard();
+
+    expect(await screen.findByText("Сейчас нет активных смен.")).toBeDefined();
+    expect(screen.getByText("Данные полные")).toBeDefined();
+    expect(screen.queryByText("Предварительно")).toBeNull();
   });
 
   it("formats validation shift output in its own unit", async () => {

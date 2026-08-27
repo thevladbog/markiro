@@ -97,7 +97,7 @@ export function DashboardPage() {
           period={period}
           onPeriodChange={setPeriod}
           canWrite={canWrite}
-          refreshing={overview.dynamics.period !== period}
+          refreshing={overviewQuery.isFetching}
         />
       )}
     </div>
@@ -348,12 +348,19 @@ function ActiveShifts({
       <div className="mk-dashboard-section__header">
         <div className="mk-dashboard-section__title-group">
           <h2 id="dashboard-active-title">{t("pages.dashboard.active.title")}</h2>
-          <StatusChip status="info" label={t("pages.dashboard.active.provisional")} />
+          {overview.activeShifts.length > 0 ? (
+            <StatusChip status="info" label={t("pages.dashboard.active.provisional")} />
+          ) : null}
         </div>
         <Link to="/shifts">{t("pages.dashboard.viewAll")}</Link>
       </div>
       {overview.activeShifts.length > 0 ? (
-        <div className="mk-dashboard-table-scroll">
+        <div
+          className="mk-dashboard-table-scroll"
+          role="region"
+          aria-label={t("pages.dashboard.active.tableLabel")}
+          tabIndex={0}
+        >
           <table className="mk-dashboard-table">
             <caption className="mk-dashboard-sr-only">
               {t("pages.dashboard.active.tableLabel")}
