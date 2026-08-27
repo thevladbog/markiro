@@ -16,6 +16,8 @@ import {
   type InventoryDocumentGeneratedPart,
   type InventoryDocumentZipArtifact,
 } from "../src/modules/inventories/inventory-document-runner.service";
+import { InventoryDocumentsService } from "../src/modules/inventories/inventory-documents.service";
+import type { PgBossService } from "../src/jobs/jobs.module";
 import type { InventoryResultSourceService } from "../src/modules/inventories/inventory-result-source.service";
 import type { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 
@@ -100,6 +102,75 @@ describe("inventory document ZIP", () => {
     expect(createHash("sha256").update(archive["empty.txt"]!).digest("hex")).toBe(
       "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     );
+  });
+
+  it("downloads a zero-byte artifact through a positive storage read ceiling", async () => {
+    const run = {
+      id: "50000000-0000-4000-8000-000000000001",
+      tenantId: "tenant-1",
+      inventoryId: "60000000-0000-4000-8000-000000000001",
+      resultRevision: 7,
+      selectedFormats: [{ id: "inventory_txt_write_off", version: 1 }],
+    };
+    const artifact = {
+      id: "70000000-0000-4000-8000-000000000001",
+      tenantId: run.tenantId,
+      runId: run.id,
+      objectKey: "tenants/tenant-1/inventory-documents/run/empty.txt",
+      ...artifacts[0]!,
+    };
+    const db = {
+      select: () => ({
+        from: (table: unknown) => {
+          const rows = table === schema.inventoryDocumentRuns ? [run] : [artifact];
+          const query = {
+            where: () => query,
+            limit: async () => rows,
+            orderBy: async () => rows,
+          };
+          return query;
+        },
+      }),
+      transaction: async (callback: (tx: Db) => Promise<unknown>) =>
+        callback({
+          update: () => ({
+            set: () => ({
+              where: () => ({ returning: async () => [{ id: artifact.id }] }),
+            }),
+          }),
+          insert: () => ({ values: async () => undefined }),
+        } as unknown as Db),
+    } as unknown as Db;
+    const storage = {
+      get: vi.fn(async (_key: string, options: { maxBytes: number }) => {
+        if (options.maxBytes < 1) throw new Error("maxBytes must be positive");
+        return { body: Buffer.alloc(0), contentType: artifact.mimeType };
+      }),
+      putVerified: vi.fn(async (_key: string, body: Buffer, _mime: string, sha256: string) => ({
+        byteSize: body.byteLength,
+        sha256,
+      })),
+      presignRead: vi.fn(async () => "https://storage.test/package.zip"),
+      delete: vi.fn(async () => undefined),
+    } as unknown as ObjectStorageService & {
+      get: ReturnType<typeof vi.fn>;
+      putVerified: ReturnType<typeof vi.fn>;
+    };
+    const service = new InventoryDocumentsService(
+      db,
+      {} as PgBossService,
+      storage,
+      {} as InventoryDocumentGeneratorRegistry,
+    );
+
+    await expect(service.downloadZip(run.tenantId, "user-1", run.id)).resolves.toEqual({
+      url: "https://storage.test/package.zip",
+      filename: `inventory-${run.inventoryId}-revision-7.zip`,
+      expiresInSeconds: 300,
+    });
+    expect(storage.get).toHaveBeenCalledWith(artifact.objectKey, { maxBytes: 1 });
+    const zipBody = storage.putVerified.mock.calls[0]?.[1] as Buffer;
+    expect(unzipSync(zipBody)[artifact.filename]).toHaveLength(0);
   });
 
   it.each([

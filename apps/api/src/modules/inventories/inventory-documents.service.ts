@@ -285,7 +285,9 @@ export class InventoryDocumentsService {
     }
     const artifacts: InventoryDocumentZipArtifact[] = [];
     for (const row of rows) {
-      const stored = await this.storage.get(row.objectKey, { maxBytes: row.byteSize });
+      const stored = await this.storage.get(row.objectKey, {
+        maxBytes: Math.max(1, row.byteSize),
+      });
       artifacts.push({
         filename: row.filename,
         mimeType: row.mimeType,
