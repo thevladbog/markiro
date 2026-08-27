@@ -263,7 +263,7 @@ async function chooseDate(
 function fileInput(status: string): HTMLInputElement {
   const slot = document.getElementById(`inventory-slot-${status}`);
   if (!slot) throw new Error(`Missing inventory-slot-${status}`);
-  return within(slot).getByTestId("file-picker-input") as HTMLInputElement;
+  return within(slot).getByTestId("file-drop-input") as HTMLInputElement;
 }
 
 afterEach(async () => {

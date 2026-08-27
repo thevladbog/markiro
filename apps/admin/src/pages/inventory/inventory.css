@@ -270,17 +270,8 @@
   white-space: nowrap;
 }
 
-.mk-file-picker {
-  display: inline-flex;
+.mk-inventory-upload-slot__file-drop {
   margin: 12px 0;
-}
-
-.mk-file-picker__input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
 }
 .mk-inventory-import-history {
   display: grid;

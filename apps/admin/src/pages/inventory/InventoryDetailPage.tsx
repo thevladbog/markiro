@@ -11,6 +11,7 @@ import {
   Card,
   Checkbox,
   EmptyState,
+  FileDropZone,
   PageHeader,
   RadioGroup,
   Spinner,
@@ -26,7 +27,6 @@ import {
   useUpdateInventory,
   useUploadInventoryImport,
 } from "./api.js";
-import { FilePickerButton } from "./FilePickerButton.js";
 import { InventoryParametersForm } from "./InventoryParametersForm.js";
 import { InventoryLivePage } from "./InventoryLivePage.js";
 import { PreparationSteps } from "./PreparationSteps.js";
@@ -259,7 +259,9 @@ function ExportsStep({
                 )}
               </div>
               {canMutate ? (
-                <FilePickerButton
+                <FileDropZone
+                  compact
+                  className="mk-inventory-upload-slot__file-drop"
                   label={t("pages.inventory.exports.chooseFile")}
                   busyLabel={t("pages.inventory.exports.uploading")}
                   ariaLabel={t("pages.inventory.exports.fileLabel", { status })}
