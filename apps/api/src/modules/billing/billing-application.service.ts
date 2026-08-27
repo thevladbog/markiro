@@ -38,6 +38,17 @@ export class BillingApplicationService {
   ): Promise<InvoiceApplicationResult> {
     return this.db.transaction(async (tx) => {
       const invoice = await this.requirePaidInvoice(tx, invoiceId);
+      const [completion] = await tx
+        .select({ billingPaymentId: schema.invoicePaymentCompletions.billingPaymentId })
+        .from(schema.invoicePaymentCompletions)
+        .where(
+          and(
+            eq(schema.invoicePaymentCompletions.tenantId, invoice.tenantId),
+            eq(schema.invoicePaymentCompletions.invoiceId, invoice.id),
+          ),
+        )
+        .limit(1);
+      if (!completion) throw new ConflictException({ code: "invoice_payment_missing" });
       const [payment] = await tx
         .select()
         .from(schema.billingPayments)
@@ -45,10 +56,9 @@ export class BillingApplicationService {
           and(
             eq(schema.billingPayments.tenantId, invoice.tenantId),
             eq(schema.billingPayments.invoiceId, invoice.id),
+            eq(schema.billingPayments.id, completion.billingPaymentId),
           ),
         )
-        // Confirmation order is authoritative here; paidAt is bank/economic time and may be backdated.
-        .orderBy(desc(schema.billingPayments.createdAt), desc(schema.billingPayments.id))
         .limit(1);
       if (!payment) throw new ConflictException({ code: "invoice_payment_missing" });
 

@@ -470,6 +470,13 @@
       "when": 1787853209877,
       "tag": "0066_tenant_billing_experience",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1787857075947,
+      "tag": "0067_invoice_payment_completion",
+      "breakpoints": true
     }
   ]
 }

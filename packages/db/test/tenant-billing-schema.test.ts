@@ -121,4 +121,20 @@ describe("tenant billing workflow schema", () => {
     expect(paymentConstraints.uniqueConstraints).toContain("billing_payments_idempotency_uq");
     expect(paymentConstraints.indexes).toContain("billing_payments_tenant_invoice_paid_idx");
   });
+
+  it("persists one tenant-scoped completing payment for each paid invoice", () => {
+    expect(schema.invoicePaymentCompletions).toBeDefined();
+    expect(getTableName(schema.invoicePaymentCompletions)).toBe("invoice_payment_completions");
+    const constraints = constraintNames(schema.invoicePaymentCompletions);
+    expect(constraints.foreignKeys).toEqual(
+      expect.arrayContaining([
+        "invoice_payment_completions_tenant_invoice_fk",
+        "invoice_payment_completions_tenant_payment_fk",
+      ]),
+    );
+    expect(constraints.uniqueConstraints).toContain(
+      "invoice_payment_completions_tenant_invoice_uq",
+    );
+    expect(constraints.uniqueConstraints).toContain("invoice_payment_completions_payment_uq");
+  });
 });

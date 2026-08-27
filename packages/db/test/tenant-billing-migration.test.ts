@@ -28,14 +28,18 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
     const legacyMigrations = join(temporaryRoot, "migrations");
     await cp(migrationsFolder, legacyMigrations, { recursive: true });
     await rm(join(legacyMigrations, "0066_tenant_billing_experience.sql"));
+    await rm(join(legacyMigrations, "0067_invoice_payment_completion.sql"));
     await rm(join(legacyMigrations, "meta", "0066_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0067_snapshot.json"));
 
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
     };
     journal.entries = journal.entries.filter(
-      (entry) => entry.tag !== "0066_tenant_billing_experience",
+      (entry) =>
+        entry.tag !== "0066_tenant_billing_experience" &&
+        entry.tag !== "0067_invoice_payment_completion",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 
@@ -59,10 +63,10 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
     await pool.query(
       `INSERT INTO invoices
          (id, tenant_id, number, status, issue_date, seller_snapshot, buyer_snapshot,
-          created_by_platform_user_id, issued_by_platform_user_id, issued_at, paid_at)
+          total, created_by_platform_user_id, issued_by_platform_user_id, issued_at, paid_at)
        VALUES
          ('00000000-0000-4000-8000-000000000801', 'billing-migration-a',
-          'INV-BILLING-LEGACY-1', 'paid', now(), '{}', '{}', 'billing-migration-admin',
+          'INV-BILLING-LEGACY-1', 'paid', now(), '{}', '{}', 100, 'billing-migration-admin',
           'billing-migration-admin', now(), now())`,
     );
     await pool.query(
@@ -120,9 +124,12 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
 
   it("preserves a paid invoice and its confirmed payment", async () => {
     const result = await pool.query(
-      `SELECT i.number, i.status, p.amount::text AS amount, p.bank_reference
+      `SELECT i.number, i.status, p.id AS payment_id, p.amount::text AS amount, p.bank_reference,
+              completion.billing_payment_id AS completing_payment_id
        FROM invoices i
        JOIN billing_payments p ON p.tenant_id = i.tenant_id AND p.invoice_id = i.id
+       JOIN invoice_payment_completions completion
+         ON completion.tenant_id = i.tenant_id AND completion.invoice_id = i.id
        WHERE i.id = '00000000-0000-4000-8000-000000000801'`,
     );
 
@@ -130,6 +137,8 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
       {
         number: "INV-BILLING-LEGACY-1",
         status: "paid",
+        payment_id: "00000000-0000-4000-8000-000000000802",
+        completing_payment_id: "00000000-0000-4000-8000-000000000802",
         amount: "100.00",
         bank_reference: "legacy-payment",
       },

@@ -560,6 +560,30 @@ export const billingPayments = pgTable(
   ],
 );
 
+export const invoicePaymentCompletions = pgTable(
+  "invoice_payment_completions",
+  {
+    tenantId: text("tenant_id").notNull(),
+    invoiceId: uuid("invoice_id").notNull(),
+    billingPaymentId: uuid("billing_payment_id").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("invoice_payment_completions_tenant_invoice_uq").on(table.tenantId, table.invoiceId),
+    unique("invoice_payment_completions_payment_uq").on(table.billingPaymentId),
+    foreignKey({
+      name: "invoice_payment_completions_tenant_invoice_fk",
+      columns: [table.tenantId, table.invoiceId],
+      foreignColumns: [invoices.tenantId, invoices.id],
+    }),
+    foreignKey({
+      name: "invoice_payment_completions_tenant_payment_fk",
+      columns: [table.tenantId, table.invoiceId, table.billingPaymentId],
+      foreignColumns: [billingPayments.tenantId, billingPayments.invoiceId, billingPayments.id],
+    }),
+  ],
+);
+
 export const invoiceApplicationEvents = pgTable(
   "invoice_application_events",
   {

@@ -171,8 +171,16 @@ export class BillingPaymentsService {
           idempotencyKey: input.idempotencyKey,
         })
         .returning();
+      if (!payment) throw new ConflictException({ code: "payment_recording_failed" });
       const confirmedAfter = confirmedBefore + paymentAmount;
       const invoiceStatus = confirmedAfter === total ? "paid" : "partially_paid";
+      if (invoiceStatus === "paid") {
+        await tx.insert(schema.invoicePaymentCompletions).values({
+          tenantId: invoice.tenantId,
+          invoiceId,
+          billingPaymentId: payment.id,
+        });
+      }
       await tx
         .update(schema.invoices)
         .set({
@@ -203,7 +211,7 @@ export class BillingPaymentsService {
             })),
           );
         }
-        if (invoice.applicationMode === "automatic" && payment) {
+        if (invoice.applicationMode === "automatic") {
           await this.application.applyAutomaticInTransaction(
             tx,
             principal,
@@ -213,7 +221,6 @@ export class BillingPaymentsService {
           );
         }
       }
-      if (!payment) throw new ConflictException({ code: "payment_recording_failed" });
       await this.audit.record(tx, {
         actorPlatformUserId: principal.userId,
         actorRole: principal.role,
@@ -481,6 +488,13 @@ export class BillingPaymentsService {
         if (!payment) throw new ConflictException({ code: "payment_recording_failed" });
         const confirmedAfter = confirmedBefore + paymentAmount;
         const invoiceStatus = confirmedAfter === total ? "paid" : "partially_paid";
+        if (invoiceStatus === "paid") {
+          await tx.insert(schema.invoicePaymentCompletions).values({
+            tenantId: input.tenantId,
+            invoiceId: input.invoiceId,
+            billingPaymentId: payment.id,
+          });
+        }
         await tx
           .update(schema.invoices)
           .set({

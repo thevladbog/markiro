@@ -45,6 +45,7 @@ function makeHarness({
     kind: "plan",
   };
   const insertedPayments: Array<Record<string, unknown>> = [];
+  const completionInserts: Array<Record<string, unknown>> = [];
   const invoiceUpdates: Array<Record<string, unknown>> = [];
   let paymentSelect = 0;
 
@@ -91,6 +92,9 @@ function makeHarness({
         if (table === schema.billingPayments && !Array.isArray(values)) {
           insertedPayments.push(values);
         }
+        if (table === schema.invoicePaymentCompletions && !Array.isArray(values)) {
+          completionInserts.push(values);
+        }
         const created =
           table === schema.billingPayments && !Array.isArray(values)
             ? paymentRow({
@@ -131,7 +135,7 @@ function makeHarness({
   const audit = testDouble<PlatformAuditService>()({ record: vi.fn(async () => undefined) });
   const service = new BillingPaymentsService(db, application, audit);
 
-  return { application, insertedPayments, invoiceUpdates, service };
+  return { application, completionInserts, insertedPayments, invoiceUpdates, service };
 }
 
 function paymentRow(
@@ -176,6 +180,7 @@ describe("BillingPaymentsService confirmed payment reconciliation", () => {
       remainingAmount: "28000.00",
     });
     expect(harness.invoiceUpdates).toEqual([{ status: "partially_paid", paidAt: null }]);
+    expect(harness.completionInserts).toHaveLength(0);
     expect(harness.application.applyAutomaticInTransaction).not.toHaveBeenCalled();
   });
 
@@ -221,6 +226,7 @@ describe("BillingPaymentsService confirmed payment reconciliation", () => {
     };
     const partial = paymentRow();
     const invoiceUpdates: Array<Record<string, unknown>> = [];
+    const completionInserts: Array<Record<string, unknown>> = [];
     let paymentSelect = 0;
     const tx = {
       select: vi.fn(() => {
@@ -263,6 +269,9 @@ describe("BillingPaymentsService confirmed payment reconciliation", () => {
       }),
       insert: vi.fn((table: unknown) => ({
         values: vi.fn((values: Record<string, unknown> | Array<Record<string, unknown>>) => {
+          if (table === schema.invoicePaymentCompletions && !Array.isArray(values)) {
+            completionInserts.push(values);
+          }
           const created =
             table === schema.billingPayments && !Array.isArray(values)
               ? {
@@ -315,6 +324,13 @@ describe("BillingPaymentsService confirmed payment reconciliation", () => {
       }),
     ).resolves.toMatchObject({ status: "matched", invoiceId });
     expect(invoiceUpdates).toEqual([{ status: "paid", paidAt: row.operationDate }]);
+    expect(completionInserts).toEqual([
+      {
+        tenantId,
+        invoiceId,
+        billingPaymentId: expect.any(String),
+      },
+    ]);
     expect(application.applyAutomaticInTransaction).toHaveBeenCalledTimes(1);
   });
 
@@ -337,6 +353,13 @@ describe("BillingPaymentsService confirmed payment reconciliation", () => {
       remainingAmount: "0.00",
     });
     expect(harness.application.applyAutomaticInTransaction).toHaveBeenCalledTimes(1);
+    expect(harness.completionInserts).toEqual([
+      {
+        tenantId,
+        invoiceId,
+        billingPaymentId: result.id,
+      },
+    ]);
   });
 
   it("rejects an amount greater than the locked remaining balance", async () => {
@@ -354,6 +377,7 @@ describe("BillingPaymentsService confirmed payment reconciliation", () => {
       }),
     ).rejects.toMatchObject({ response: { code: "payment_amount_exceeds_remaining" } });
     expect(harness.insertedPayments).toHaveLength(0);
+    expect(harness.completionInserts).toHaveLength(0);
   });
 
   it("returns the original reconciliation for an exact idempotent replay", async () => {
@@ -378,6 +402,7 @@ describe("BillingPaymentsService confirmed payment reconciliation", () => {
       remainingAmount: "28000.00",
     });
     expect(harness.insertedPayments).toHaveLength(0);
+    expect(harness.completionInserts).toHaveLength(0);
     expect(harness.application.applyAutomaticInTransaction).not.toHaveBeenCalled();
   });
 });

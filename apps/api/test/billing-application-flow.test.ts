@@ -593,7 +593,7 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
     });
   });
 
-  it("uses the final confirmed payment as manual service provenance", async () => {
+  it("uses the true lock-waiting completing payment as manual service provenance", async () => {
     const tenantId = await createOrganization(db);
     const itemId = randomUUID();
     const serviceVersionId = randomUUID();
@@ -656,19 +656,84 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
       lineTotal: "150.00",
     });
 
-    const partial = await payments.recordManual(actor, invoiceId, {
-      amount: "50.00",
-      paidAt: new Date("2026-08-27T12:00:00.000Z"),
-      bankReference: `manual-service-partial-${randomUUID()}`,
-      idempotencyKey: `manual-service-partial-${randomUUID()}`,
-    });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    const final = await payments.recordManual(actor, invoiceId, {
-      amount: "100.00",
-      paidAt: new Date("2026-08-28T12:00:00.000Z"),
-      bankReference: `manual-service-final-${randomUUID()}`,
-      idempotencyKey: `manual-service-final-${randomUUID()}`,
-    });
+    const finalKey = `manual-service-final-${randomUUID()}`;
+    const finalLockName = `billing-payment:${finalKey}`;
+    const triggerLockPartOne = 2_608_028;
+    const triggerLockPartTwo = Math.floor(Math.random() * 1_000_000_000);
+    const suffix = randomUUID().replaceAll("-", "_");
+    const functionName = `test_block_partial_payment_${suffix}`;
+    const triggerName = `test_block_partial_payment_${suffix}`;
+    const blocker = await connection.pool.connect();
+    await blocker.query("select pg_advisory_lock(hashtextextended($1, 0))", [finalLockName]);
+    await blocker.query("select pg_advisory_lock($1, $2)", [
+      triggerLockPartOne,
+      triggerLockPartTwo,
+    ]);
+    await connection.pool.query(`
+      create function ${functionName}() returns trigger language plpgsql as $$
+      begin
+        if new.status = 'partially_paid' then
+          perform pg_advisory_xact_lock(${triggerLockPartOne}, ${triggerLockPartTwo});
+        end if;
+        return new;
+      end
+      $$
+    `);
+    await connection.pool.query(
+      `create trigger ${triggerName} before update on invoices for each row execute function ${functionName}()`,
+    );
+    let partial: Awaited<ReturnType<typeof payments.recordManual>>;
+    let final: Awaited<ReturnType<typeof payments.recordManual>>;
+    try {
+      const finalPromise = payments.recordManual(actor, invoiceId, {
+        amount: "100.00",
+        paidAt: new Date("2026-08-26T12:00:00.000Z"),
+        bankReference: `manual-service-final-${randomUUID()}`,
+        idempotencyKey: finalKey,
+      });
+      await waitForScratchLock(async () => {
+        const result = await connection.pool.query<{ waiting: number }>(
+          "select count(*)::int as waiting from pg_locks locks join pg_stat_activity activity on activity.pid = locks.pid where activity.datname = current_database() and locks.locktype = 'advisory' and not locks.granted",
+        );
+        return (result.rows[0]?.waiting ?? 0) >= 1;
+      }, "the older final-payment transaction advisory lock");
+
+      const partialPromise = payments.recordManual(actor, invoiceId, {
+        amount: "50.00",
+        paidAt: new Date("2026-08-28T12:00:00.000Z"),
+        bankReference: `manual-service-partial-${randomUUID()}`,
+        idempotencyKey: `manual-service-partial-${randomUUID()}`,
+      });
+      await waitForScratchLock(async () => {
+        const result = await connection.pool.query<{ waiting: number }>(
+          "select count(*)::int as waiting from pg_locks locks join pg_stat_activity activity on activity.pid = locks.pid where activity.datname = current_database() and locks.locktype = 'advisory' and not locks.granted",
+        );
+        return (result.rows[0]?.waiting ?? 0) >= 2;
+      }, "the partial payment while it owns the invoice row lock");
+
+      await blocker.query("select pg_advisory_unlock(hashtextextended($1, 0))", [finalLockName]);
+      await waitForScratchLock(async () => {
+        const result = await connection.pool.query<{ waiting: boolean }>(
+          "select exists(select 1 from pg_locks locks join pg_stat_activity activity on activity.pid = locks.pid where activity.datname = current_database() and locks.locktype = 'transactionid' and not locks.granted) as waiting",
+        );
+        return result.rows[0]?.waiting === true;
+      }, "the older transaction waiting behind the partial invoice update");
+      await blocker.query("select pg_advisory_unlock($1, $2)", [
+        triggerLockPartOne,
+        triggerLockPartTwo,
+      ]);
+
+      [partial, final] = await Promise.all([partialPromise, finalPromise]);
+    } finally {
+      await blocker.query("select pg_advisory_unlock(hashtextextended($1, 0))", [finalLockName]);
+      await blocker.query("select pg_advisory_unlock($1, $2)", [
+        triggerLockPartOne,
+        triggerLockPartTwo,
+      ]);
+      blocker.release();
+      await connection.pool.query(`drop trigger if exists ${triggerName} on invoices`);
+      await connection.pool.query(`drop function if exists ${functionName}()`);
+    }
 
     await application.apply(actor, invoiceId, {
       reason: "Применить оплаченную услугу",
@@ -677,6 +742,14 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
 
     expect(partial.invoiceStatus).toBe("partially_paid");
     expect(final.invoiceStatus).toBe("paid");
+    if (!(partial.createdAt instanceof Date) || !(final.createdAt instanceof Date)) {
+      throw new Error("Expected persisted payment creation timestamps");
+    }
+    if (!(partial.paidAt instanceof Date) || !(final.paidAt instanceof Date)) {
+      throw new Error("Expected persisted payment dates");
+    }
+    expect(final.createdAt.getTime()).toBeLessThan(partial.createdAt.getTime());
+    expect(final.paidAt.getTime()).toBeLessThan(partial.paidAt.getTime());
     expect(
       await db
         .select({
