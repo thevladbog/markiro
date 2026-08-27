@@ -71,7 +71,6 @@ export function generateInventoryAggregationXml(
 ): InventoryDocumentGeneratedPart[] {
   validateAggregationMetadata(metadata);
   const boxes = frozenAggregationV1Boxes(source);
-  if (boxes.length === 0) throw new InventoryDocumentGenerationError("EMPTY_SOURCE");
 
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -107,7 +106,6 @@ export function generateInventoryAggregationXmlV2(
 ): InventoryDocumentGeneratedPart[] {
   validateAggregationMetadata(metadata);
   const boxes = selectEligibleInventoryFinalBoxes(source);
-  if (boxes.length === 0) throw new InventoryDocumentGenerationError("EMPTY_SOURCE");
 
   try {
     const rendered = renderGismtAggregationXml({
@@ -160,7 +158,6 @@ export function generateInventoryDisaggregationXml(
     .filter((sscc) => !protectedParents.has(sscc))
     .sort(compareText)
     .map(validateSscc);
-  if (boxes.length === 0) throw new InventoryDocumentGenerationError("EMPTY_SOURCE");
 
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',

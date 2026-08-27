@@ -381,15 +381,36 @@ describe("inventory GISMT disaggregation XML", () => {
     expect(decoder.decode(part?.bytes)).not.toContain("046800899000256049");
   });
 
-  it("rejects empty actionable output and malformed organization metadata", () => {
+  it("renders an empty packings list for zero actionable output instead of failing", () => {
     const onlyProtected = source();
     onlyProtected.newBoxes = onlyProtected.newBoxes.filter(
       (box) => box.oldSsccContext === "046800899000256049",
     );
 
-    expect(() => generateInventoryDisaggregationXml(onlyProtected, metadata)).toThrow(
-      new InventoryDocumentGenerationError("EMPTY_SOURCE"),
+    const [part] = generateInventoryDisaggregationXml(onlyProtected, metadata);
+
+    expect(part).toMatchObject({
+      partNumber: 1,
+      filename: "inventory-INV-2026-0001-disaggregation.xml",
+      mimeType: "application/xml; charset=utf-8",
+      rowCount: 6,
+      codeCount: 0,
+      boxCount: 0,
+    });
+    expect(decoder.decode(part?.bytes)).toBe(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<disaggregation action_id="31" version="2">',
+        `    <trade_participant_inn>${metadata.organizationInn}</trade_participant_inn>`,
+        "    <packings_list>",
+        "    </packings_list>",
+        "</disaggregation>",
+        "",
+      ].join("\n"),
     );
+  });
+
+  it("rejects malformed organization metadata regardless of actionable output", () => {
     expect(() =>
       generateInventoryDisaggregationXml(source(), { ...metadata, organizationInn: "0000000000" }),
     ).toThrow(new InventoryDocumentGenerationError("INVALID_ORGANIZATION_INN"));

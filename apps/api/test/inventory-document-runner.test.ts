@@ -550,6 +550,28 @@ describe("inventory document runner", () => {
     });
   });
 
+  it("renders all eight production formats as succeeded artifacts for a closed inventory with zero scans", async () => {
+    const fake = runnerDb(
+      runRow({
+        selectedFormats: INVENTORY_DOCUMENT_FORMATS.map(({ id, version }) => ({ id, version })),
+      }),
+    );
+    const storage = runnerStorage();
+    const runner = new InventoryDocumentRunnerService(
+      fake.db,
+      inventorySource(),
+      storage,
+      productionInventoryDocumentGeneratorRegistry,
+    );
+
+    await runner.run(fake.state.row.id, { retryCount: 0, retryLimit: 5 });
+
+    expect(fake.state.row.status).toBe("ready");
+    expect(fake.state.row.errorCode).toBeNull();
+    expect(fake.state.artifacts).toHaveLength(INVENTORY_DOCUMENT_FORMATS.length);
+    expect(fake.state.artifacts.every((artifact) => artifact.byteSize !== null)).toBe(true);
+  });
+
   it("hashes, stores, and publishes an explicitly valid zero-byte TXT artifact", async () => {
     const fake = runnerDb(runRow({ selectedFormats: [{ id: txtDescriptor.id, version: 1 }] }));
     const storage = runnerStorage();
