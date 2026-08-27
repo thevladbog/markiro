@@ -5,6 +5,7 @@ import type { LabelTemplateSpec, StationInventoryBundleManifest } from "@markiro
 import {
   attemptInventoryBoxPrint,
   listInventoryBoxPrintAttempts,
+  processNextInventoryRemoteReprint,
   recoverInterruptedInventoryPrint,
 } from "../src/lib/inventory-box-printing.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
@@ -453,6 +454,103 @@ describe("durable inventory box printing", () => {
     ]);
     expect(db.prepare("SELECT new_sscc FROM inventory_repack_boxes_mirror").get()).toEqual({
       new_sscc: SSCC,
+    });
+  });
+
+  it("consumes an admin reprint request once through the existing outcome pipeline", async () => {
+    const { db, exec } = await setup({ printState: "printed" });
+    db.prepare(
+      `INSERT INTO inventory_remote_reprint_requests
+         (inventory_id, snapshot_id, correction_id, box_id, owner_device_id, requested_at)
+       VALUES (?, ?, ?, ?, ?, '2026-08-25T10:02:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, ATTEMPT_ID, BOX_ID, DEVICE_ID);
+    const configured = input(exec);
+    const process = () =>
+      processNextInventoryRemoteReprint({
+        exec,
+        manifest: MANIFEST,
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        deviceId: DEVICE_ID,
+        operatorId: OPERATOR_ID,
+        createEventId: () => EVENT_ID,
+        now: () => "2026-08-25T10:02:01.000Z",
+        printing: configured.printing,
+        render: configured.render,
+      });
+
+    await expect(process()).resolves.toMatchObject({
+      attemptId: ATTEMPT_ID,
+      boxId: BOX_ID,
+      kind: "reprint",
+      state: "printed",
+    });
+    await expect(process()).resolves.toBeNull();
+    expect(configured.printing.print).toHaveBeenCalledOnce();
+    expect(
+      db.prepare("SELECT correction_id, completed_at FROM inventory_remote_reprint_requests").get(),
+    ).toEqual({ correction_id: ATTEMPT_ID, completed_at: "2026-08-25T10:02:01.000Z" });
+    const outbox = db.prepare("SELECT payload_json FROM inventory_outbox").get() as {
+      payload_json: string;
+    };
+    expect(JSON.parse(outbox.payload_json)).toMatchObject({
+      eventId: EVENT_ID,
+      repack: { action: "reprint-outcome", boxId: BOX_ID, attemptId: ATTEMPT_ID },
+    });
+  });
+
+  it("recovers a crashed remote reprint without automatically printing it twice", async () => {
+    const { db, exec } = await setup({ printState: "printed" });
+    db.prepare(
+      `INSERT INTO inventory_remote_reprint_requests
+         (inventory_id, snapshot_id, correction_id, box_id, owner_device_id, requested_at)
+       VALUES (?, ?, ?, ?, ?, '2026-08-25T10:02:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, ATTEMPT_ID, BOX_ID, DEVICE_ID);
+    db.prepare(
+      `INSERT INTO inventory_repack_print_attempts
+         (inventory_id, snapshot_id, attempt_id, box_id, kind, attempt_number, state, attempted_at)
+       VALUES (?, ?, ?, ?, 'reprint', 1, 'printing', '2026-08-25T10:02:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, ATTEMPT_ID, BOX_ID);
+    const configured = input(exec);
+    const process = () =>
+      processNextInventoryRemoteReprint({
+        exec,
+        manifest: MANIFEST,
+        inventoryId: INVENTORY_ID,
+        snapshotId: SNAPSHOT_ID,
+        deviceId: DEVICE_ID,
+        operatorId: OPERATOR_ID,
+        createEventId: () => EVENT_ID,
+        now: () => "2026-08-25T10:02:01.000Z",
+        printing: configured.printing,
+        render: configured.render,
+      });
+
+    await expect(process()).rejects.toThrow();
+    expect(configured.printing.print).not.toHaveBeenCalled();
+    expect(db.prepare("SELECT completed_at FROM inventory_remote_reprint_requests").get()).toEqual({
+      completed_at: null,
+    });
+
+    await recoverInterruptedInventoryPrint(exec, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      deviceId: DEVICE_ID,
+      operatorId: OPERATOR_ID,
+      boxId: BOX_ID,
+      attemptId: ATTEMPT_ID,
+      eventId: EVENT_ID,
+      completedAt: "2026-08-25T10:02:01.000Z",
+    });
+    await expect(process()).resolves.toMatchObject({
+      attemptId: ATTEMPT_ID,
+      kind: "reprint",
+      state: "failed",
+      errorCode: "persistence_failed",
+    });
+    expect(configured.printing.print).not.toHaveBeenCalled();
+    expect(db.prepare("SELECT completed_at FROM inventory_remote_reprint_requests").get()).toEqual({
+      completed_at: "2026-08-25T10:02:01.000Z",
     });
   });
 });

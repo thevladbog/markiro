@@ -38,6 +38,12 @@ export const NAV_ITEMS: ReadonlyArray<{
     sectionKey: "shell.sections.production",
     capability: C.OPERATIONS_READ,
   },
+  {
+    to: "/inventory",
+    key: "nav.inventory",
+    sectionKey: "shell.sections.production",
+    capability: C.OPERATIONS_READ,
+  },
   // "/boxes" has no sidebar entry of its own: it is reachable as the
   // "Короба" tab inside the code-search section (see
   // pages/code-search/RegistryTabs.tsx).

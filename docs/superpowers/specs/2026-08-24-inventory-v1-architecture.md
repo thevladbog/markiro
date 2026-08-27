@@ -163,6 +163,11 @@ tenant-scoped unique key for their public identifier.
 
 - immutable revision and combined digest;
 - exact six selected import ids;
+- product name, line name, and box capacity captured from the same tenant at fixation; the ready
+  task form and the later Station manifest consume these same immutable catalog facts;
+- when upgrading snapshots that already belong to a running, closed, or completed inventory, valid
+  stored manifest values for those three facts take precedence over the mutable catalog; missing or
+  malformed legacy values fall back to the same-tenant catalog without unsafe coercion;
 - per-status counts, protected count, expected count, package and loose counts;
 - fixation actor and time.
 
@@ -284,8 +289,9 @@ between source and observed dates is visible in reconciliation.
   A partial download can never replace a usable local snapshot.
 - The bundle includes product facts, mode, date range, parent SSCC membership, the exact selected
   box-label descriptor and spec, and a device SSCC block when repacking. Starting the inventory
-  freezes that template for all new boxes and later reprints even if the organization default or
-  source template changes.
+  uses the product name, line name, and box capacity already frozen by snapshot fixation, then
+  freezes the remaining print facts and template for all new boxes and later reprints even if the
+  catalog, organization default, or source template changes.
 - The same required selector is reused by inventory repacking, standalone repacking, and future
   scenarios that create a new box. It is hidden when no new box is created.
 
@@ -374,6 +380,12 @@ inventory repack boxes. Exact disaggregation XML, tabular columns, file names, s
 retention remain a contract gate already recorded in the product brief. No implementation may
 invent those formats. Until an approved fixture/XSD exists, the descriptor is not advertised
 and the UI cannot select it.
+
+The printable task form is a self-contained one-page A4 HTML document. It contains the exact
+Station task token in an inline Code 128 barcode and no raw KMs or runtime network dependency.
+User-controlled names are visibly shortened to at most 200 Unicode code points before HTML
+escaping and layout selection; their unbounded originals are not embedded elsewhere in the
+document.
 
 ## API surface
 

@@ -629,6 +629,7 @@ export const inventoryRepackBoxesMirror = sqliteTable(
     openedAt: text("opened_at").notNull(),
     closedAt: text("closed_at"),
     invalidatedAt: text("invalidated_at"),
+    invalidationSource: text("invalidation_source"),
     printedAt: text("printed_at"),
     updatedAt: text("updated_at").notNull(),
   },
@@ -776,6 +777,30 @@ export const inventoryRepackPrintJournal = sqliteTable(
       table.eventId,
     ),
     check("inventory_repack_print_journal_payload_check", sql`json_valid(${table.payloadJson})`),
+  ],
+);
+
+/** Durable admin-originated reprint work received through the progress stream. */
+export const inventoryRemoteReprintRequests = sqliteTable(
+  "inventory_remote_reprint_requests",
+  {
+    inventoryId: text("inventory_id").notNull(),
+    snapshotId: text("snapshot_id").notNull(),
+    correctionId: text("correction_id").notNull(),
+    boxId: text("box_id").notNull(),
+    ownerDeviceId: text("owner_device_id").notNull(),
+    requestedAt: text("requested_at").notNull(),
+    completedAt: text("completed_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.inventoryId, table.snapshotId, table.correctionId] }),
+    index("inventory_remote_reprint_pending_idx").on(
+      table.inventoryId,
+      table.snapshotId,
+      table.ownerDeviceId,
+      table.completedAt,
+      table.requestedAt,
+    ),
   ],
 );
 

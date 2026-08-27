@@ -13,7 +13,7 @@ import {
 import { and, desc, eq, sql } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
-import type { InventoryChzStatus } from "@markiro/domain";
+import { INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
 import { ObjectStorageService } from "../storage/object-storage.service";
@@ -25,13 +25,17 @@ import type {
   InventoryDto,
   InventoryDetailDto,
   InventoryImportDto,
+  InventoryImportHistoryDto,
   InventoryLifecycleStatus,
   InventoryMode,
   ListInventoriesResponseDto,
   InventorySnapshotDto,
+  InventorySnapshotInputSelectionDto,
   UpdateInventoryDto,
 } from "./dto";
 import { InventorySnapshotService } from "./inventory-snapshot.service";
+import type { InventoryTaskFormData } from "./inventory-task-form";
+import { parseStationInventoryManifest } from "./station-inventory.dto";
 
 type InventoryTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type InventoryImport = typeof schema.inventoryImports.$inferSelect;
@@ -164,7 +168,7 @@ export class InventoriesService {
 
   async getDetail(tenantId: string, id: string): Promise<InventoryDetailDto> {
     const inventory = await this.get(tenantId, id);
-    const [[participantBlockers], [boxBlockers]] = await Promise.all([
+    const [[participantBlockers], [boxBlockers], importRows, activeSnapshot] = await Promise.all([
       this.db
         .select({
           activeParticipantCount: sql<number>`count(*) filter (where ${schema.inventoryDeviceParticipants.leftAt} is null)::int`,
@@ -190,6 +194,17 @@ export class InventoriesService {
             eq(schema.inventoryRepackBoxes.inventoryId, id),
           ),
         ),
+      this.db
+        .select()
+        .from(schema.inventoryImports)
+        .where(
+          and(
+            eq(schema.inventoryImports.tenantId, tenantId),
+            eq(schema.inventoryImports.inventoryId, id),
+          ),
+        )
+        .orderBy(desc(schema.inventoryImports.createdAt), desc(schema.inventoryImports.id)),
+      this.activeSnapshotProjection(tenantId, id, inventory.activeSnapshotId),
     ]);
     return {
       ...inventory,
@@ -200,6 +215,109 @@ export class InventoriesService {
         openRepackBoxCount: boxBlockers?.openRepackBoxCount ?? 0,
         unresolvedPrintBoxCount: boxBlockers?.unresolvedPrintBoxCount ?? 0,
       },
+      imports: await Promise.all(
+        importRows.map((row) => this.importHistoryDtoWithStoredDiagnostic(row)),
+      ),
+      activeSnapshot,
+    };
+  }
+
+  async taskFormData(
+    tenantId: string,
+    id: string,
+    generatedAt = new Date(),
+  ): Promise<InventoryTaskFormData> {
+    const [row] = await this.db
+      .select({
+        id: schema.inventories.id,
+        number: schema.inventories.number,
+        status: schema.inventories.status,
+        mode: schema.inventories.mode,
+        gtin14: schema.inventories.gtin14Snapshot,
+        productionDateFrom: schema.inventories.productionDateFrom,
+        productionDateTo: schema.inventories.productionDateTo,
+        activeSnapshotId: schema.inventories.activeSnapshotId,
+        stationManifest: schema.inventories.stationManifest,
+        organizationName: schema.organization.name,
+        snapshotId: schema.inventorySnapshots.id,
+        expectedCount: schema.inventorySnapshots.expectedCount,
+        snapshotProductName: schema.inventorySnapshots.productName,
+        snapshotLineName: schema.inventorySnapshots.lineName,
+        snapshotBoxCapacity: schema.inventorySnapshots.boxCapacity,
+      })
+      .from(schema.inventories)
+      .innerJoin(schema.organization, eq(schema.organization.id, schema.inventories.tenantId))
+      .leftJoin(
+        schema.inventorySnapshots,
+        and(
+          eq(schema.inventorySnapshots.tenantId, schema.inventories.tenantId),
+          eq(schema.inventorySnapshots.inventoryId, schema.inventories.id),
+          eq(schema.inventorySnapshots.id, schema.inventories.activeSnapshotId),
+        ),
+      )
+      .where(and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, id)))
+      .limit(1);
+    if (!row) throw new NotFoundException();
+    if (
+      row.activeSnapshotId === null ||
+      row.snapshotId === null ||
+      row.expectedCount === null ||
+      row.snapshotProductName === null ||
+      row.snapshotLineName === null ||
+      (row.status !== "ready" &&
+        row.status !== "running" &&
+        row.status !== "closed" &&
+        row.status !== "completed")
+    ) {
+      throw new ConflictException({ code: "INVENTORY_TASK_FORM_SNAPSHOT_REQUIRED" });
+    }
+
+    if (row.status === "running" || row.status === "closed" || row.status === "completed") {
+      let manifest;
+      try {
+        manifest = parseStationInventoryManifest(row.stationManifest);
+      } catch {
+        throw new ConflictException({ code: "INVENTORY_STORED_MANIFEST_INVALID" });
+      }
+      return {
+        inventoryId: row.id,
+        inventoryNumber: row.number,
+        status: row.status,
+        organizationName: row.organizationName,
+        productName: manifest.productName,
+        gtin14: manifest.gtin14,
+        lineName: manifest.lineName,
+        mode: manifest.mode,
+        productionDateFrom: manifest.productionDateFrom,
+        productionDateTo: manifest.productionDateTo,
+        expectedCount: row.expectedCount,
+        boxCapacity: manifest.mode === "repack" ? manifest.boxCapacity : null,
+        generatedAt,
+      };
+    }
+
+    if (
+      row.mode === "repack" &&
+      (!Number.isInteger(row.snapshotBoxCapacity) ||
+        row.snapshotBoxCapacity === null ||
+        row.snapshotBoxCapacity <= 0)
+    ) {
+      throw new ConflictException({ code: "INVENTORY_TASK_FORM_CONFIGURATION_INVALID" });
+    }
+    return {
+      inventoryId: row.id,
+      inventoryNumber: row.number,
+      status: row.status,
+      organizationName: row.organizationName,
+      productName: row.snapshotProductName,
+      gtin14: row.gtin14,
+      lineName: row.snapshotLineName,
+      mode: row.mode,
+      productionDateFrom: row.productionDateFrom,
+      productionDateTo: row.productionDateTo,
+      expectedCount: row.expectedCount,
+      boxCapacity: row.mode === "repack" ? row.snapshotBoxCapacity : null,
+      generatedAt,
     };
   }
 
@@ -746,6 +864,98 @@ export class InventoriesService {
       .orderBy(desc(schema.tenantAuditEvents.createdAt))
       .limit(1);
     return this.toImportDto(row, this.errorRowNumber(audit?.after));
+  }
+
+  private async importHistoryDtoWithStoredDiagnostic(
+    row: InventoryImport,
+  ): Promise<InventoryImportHistoryDto> {
+    return {
+      ...(await this.importDtoWithStoredDiagnostic(this.db, row)),
+      fileName: row.fileName,
+      createdAt: row.createdAt.toISOString(),
+    };
+  }
+
+  private async activeSnapshotProjection(
+    tenantId: string,
+    inventoryId: string,
+    snapshotId: string | null,
+  ): Promise<InventorySnapshotDto | null> {
+    if (snapshotId === null) return null;
+    const [[snapshot], inputs] = await Promise.all([
+      this.db
+        .select({
+          id: schema.inventorySnapshots.id,
+          revision: schema.inventorySnapshots.revision,
+          combinedDigest: schema.inventorySnapshots.combinedDigest,
+          fixedAt: schema.inventorySnapshots.fixedAt,
+          emitted: schema.inventorySnapshots.emittedCount,
+          introduced: schema.inventorySnapshots.introducedCount,
+          applied: schema.inventorySnapshots.appliedCount,
+          retired: schema.inventorySnapshots.retiredCount,
+          writtenOff: schema.inventorySnapshots.writtenOffCount,
+          disaggregation: schema.inventorySnapshots.disaggregationCount,
+          protected: schema.inventorySnapshots.protectedCount,
+          expected: schema.inventorySnapshots.expectedCount,
+          packages: schema.inventorySnapshots.packageCount,
+          loose: schema.inventorySnapshots.looseCount,
+        })
+        .from(schema.inventorySnapshots)
+        .where(
+          and(
+            eq(schema.inventorySnapshots.tenantId, tenantId),
+            eq(schema.inventorySnapshots.inventoryId, inventoryId),
+            eq(schema.inventorySnapshots.id, snapshotId),
+          ),
+        )
+        .limit(1),
+      this.db
+        .select({
+          status: schema.inventorySnapshotInputs.status,
+          importId: schema.inventorySnapshotInputs.importId,
+        })
+        .from(schema.inventorySnapshotInputs)
+        .where(
+          and(
+            eq(schema.inventorySnapshotInputs.tenantId, tenantId),
+            eq(schema.inventorySnapshotInputs.inventoryId, inventoryId),
+            eq(schema.inventorySnapshotInputs.snapshotId, snapshotId),
+          ),
+        ),
+    ]);
+    const byStatus = new Map(inputs.map((input) => [input.status, input.importId]));
+    if (!snapshot || INVENTORY_CHZ_STATUSES.some((status) => !byStatus.has(status))) {
+      throw new ConflictException({ code: "INVENTORY_SNAPSHOT_INCOMPLETE" });
+    }
+    const selected = Object.fromEntries(
+      INVENTORY_CHZ_STATUSES.map((status) => {
+        const importId = byStatus.get(status);
+        if (importId === undefined) {
+          throw new ConflictException({ code: "INVENTORY_SNAPSHOT_INCOMPLETE" });
+        }
+        return [status, importId];
+      }),
+    ) as InventorySnapshotInputSelectionDto;
+    return {
+      id: snapshot.id,
+      inventoryId,
+      revision: snapshot.revision,
+      combinedDigest: snapshot.combinedDigest,
+      fixedAt: snapshot.fixedAt.toISOString(),
+      inputs: selected,
+      counts: {
+        emitted: snapshot.emitted,
+        introduced: snapshot.introduced,
+        applied: snapshot.applied,
+        retired: snapshot.retired,
+        writtenOff: snapshot.writtenOff,
+        disaggregation: snapshot.disaggregation,
+        protected: snapshot.protected,
+        expected: snapshot.expected,
+        packages: snapshot.packages,
+        loose: snapshot.loose,
+      },
+    };
   }
 
   private async findCommittedPublishedAttempt(

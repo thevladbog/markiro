@@ -57,6 +57,24 @@ export {
   parseInventoryEventBatchResponse,
   parseInventoryProgressPage,
 } from "./station-sync.js";
+export {
+  createInventoryDocumentRegistry,
+  getInventoryDocumentFormat,
+  INVENTORY_DOCUMENT_FORMAT_AVAILABILITIES,
+  INVENTORY_DOCUMENT_FORMATS,
+  INVENTORY_DOCUMENT_MIME_TYPE_PATTERN,
+  INVENTORY_DOCUMENT_SOURCE_CATEGORIES,
+  inventoryDocumentFormatDescriptorSchema,
+  inventoryDocumentRegistry,
+  InventoryDocumentRegistryError,
+} from "./documents.js";
+export type {
+  InventoryDocumentFormatAvailability,
+  InventoryDocumentFormatDescriptor,
+  InventoryDocumentRegistry,
+  InventoryDocumentRegistryErrorCode,
+  InventoryDocumentSourceCategory,
+} from "./documents.js";
 export { createInventoryRepackingState, reduceInventoryRepacking } from "./repacking.js";
 export type {
   InventoryRepackBoxState,

@@ -173,6 +173,7 @@ describe.skipIf(!ready)("inventory immutable snapshot fixation e2e", () => {
         tenantId,
         gtin14: GTIN,
         name: "Snapshot Water",
+        boxCapacity: 20,
         status: "active",
       });
       await db.insert(schema.lines).values({ id: lineId, tenantId, name: "Snapshot line" });
@@ -308,6 +309,9 @@ describe.skipIf(!ready)("inventory immutable snapshot fixation e2e", () => {
       expectedCount: 2,
       packageCount: 2,
       looseCount: 2,
+      productName: "Snapshot Water",
+      lineName: "Snapshot line",
+      boxCapacity: 20,
     });
     const links = await db
       .select({
@@ -397,6 +401,52 @@ describe.skipIf(!ready)("inventory immutable snapshot fixation e2e", () => {
     expect(JSON.stringify(audit)).not.toMatch(
       /objectKey|fileName|canonicalRaw|21PROTECTED|credential/i,
     );
+  });
+
+  it("keeps the ready form and started manifest on catalog facts captured by fixation", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const { tenantId, inventoryId, productId, lineId } = await seedPreparation(agent);
+    const templateId = randomUUID();
+    await db.insert(schema.labelTemplates).values({
+      id: templateId,
+      tenantId,
+      name: "Snapshot box label",
+      spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+    });
+    await db
+      .update(schema.inventories)
+      .set({ mode: "repack", boxLabelTemplateId: templateId })
+      .where(
+        and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventoryId)),
+      );
+    const imports = await uploadSelection(agent, inventoryId);
+    await agent
+      .post(`/inventories/${inventoryId}/snapshots`)
+      .send(selectionBody(imports))
+      .expect(201);
+
+    await db
+      .update(schema.products)
+      .set({ name: "Changed product", boxCapacity: 24 })
+      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
+    await db
+      .update(schema.lines)
+      .set({ name: "Changed line" })
+      .where(and(eq(schema.lines.tenantId, tenantId), eq(schema.lines.id, lineId)));
+
+    const form = await agent.get(`/inventories/${inventoryId}/task-form`).expect(200);
+    expect(form.text).toContain("Snapshot Water");
+    expect(form.text).toContain("Snapshot line");
+    expect(form.text).toContain("20 бутылок");
+    expect(form.text).not.toContain("Changed product");
+    expect(form.text).not.toContain("Changed line");
+
+    const started = await agent.post(`/inventories/${inventoryId}/start`).expect(201);
+    expect(started.body).toMatchObject({
+      productName: "Snapshot Water",
+      lineName: "Snapshot line",
+      boxCapacity: 20,
+    });
   });
 
   it("rejects missing, extra, and duplicate status slots before fixation", async () => {

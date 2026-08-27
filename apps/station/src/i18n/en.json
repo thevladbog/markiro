@@ -208,6 +208,7 @@
       "scanning": "Scan every bottle",
       "pendingPrint": "Box closed. Label printing is pending",
       "invalidated": "Box blocked by an ownership conflict",
+      "adminInvalidated": "Box invalidated by an administrator",
       "oldSelected": "Source box selected",
       "accepted": "Bottle added to the new box",
       "discrepancy": "Scan saved, but the bottle was not added",

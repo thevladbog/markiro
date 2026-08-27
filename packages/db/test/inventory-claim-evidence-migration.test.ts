@@ -91,23 +91,14 @@ describe.skipIf(!databaseUrl)("inventory claim evidence migration", () => {
       productionDateTo: "2026-08-31",
       createdByUserId: userId,
     });
-    await db.insert(schema.inventorySnapshots).values({
-      id: snapshotId,
-      tenantId,
-      inventoryId,
-      combinedDigest: "0".repeat(64),
-      emittedCount: 0,
-      introducedCount: 3,
-      appliedCount: 0,
-      retiredCount: 0,
-      writtenOffCount: 0,
-      disaggregationCount: 0,
-      protectedCount: 0,
-      expectedCount: 3,
-      packageCount: 1,
-      looseCount: 0,
-      fixedByUserId: userId,
-    });
+    await pool.query(
+      `INSERT INTO inventory_snapshots
+         (id, tenant_id, inventory_id, combined_digest, emitted_count, introduced_count,
+          applied_count, retired_count, written_off_count, disaggregation_count,
+          protected_count, expected_count, package_count, loose_count, fixed_by_user_id)
+       VALUES ($1, $2, $3, $4, 0, 3, 0, 0, 0, 0, 0, 3, 1, 0, $5)`,
+      [snapshotId, tenantId, inventoryId, "0".repeat(64), userId],
+    );
     await db.insert(schema.inventorySnapshotCodes).values(
       [itemHash, boxHashB, boxHashC].map((codeHash, index) => ({
         tenantId,

@@ -132,6 +132,24 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
   Integrations section of the cabinet (`docs/design-briefs/08-integrations.md`,
   `docs/superpowers/specs/2026-07-29-commerceml-design.md`).
 
+### Inventory v1 boundary and release status
+
+Inventory is a dedicated tenant-scoped aggregate, not a synthetic production shift. Tenant admin
+owns preparation and lifecycle; Station devices execute the frozen task through their own offline
+journal, participant, claim, repack, and sync models. One inventory contains one product, one line,
+one inclusive production-date range, and either check or repack mode. `INTRODUCED` is the expected
+status, while `MOVING_BY_UD` is always protected and excluded from expected stock and destructive
+outputs. Reopen increments the result revision and invalidates older document artifacts; completed
+inventories are immutable. The detailed invariants and API surface are defined in
+`docs/superpowers/specs/2026-08-24-inventory-v1-architecture.md`.
+
+The preparation, execution, reconciliation, correction, close/reopen, document-job, download, and
+tenant-admin UI infrastructure has automated coverage recorded in
+`docs/acceptance/inventory-admin.md`. This is not yet a complete-v1 document release: no production
+inventory XML/tabular contract has an approved fixture or XSD, so the advertised descriptor and
+generator registries remain empty and production completion fails closed. Synthetic generators are
+permitted only in tests and do not establish external compatibility.
+
 ### Platform administration contract boundary
 
 `packages/platform-contracts` owns the platform administration wire contract. Its exported Zod
