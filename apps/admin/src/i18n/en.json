@@ -1926,6 +1926,8 @@
     "devices": {
       "title": "Devices",
       "add": "Add device",
+      "downloadStation": "Download Station for Windows",
+      "downloadStationHint": "Install Station on the production PC, then pair it with the organization using the code shown after the device is created.",
       "cancel": "Cancel",
       "create": "Create",
       "done": "Done",
