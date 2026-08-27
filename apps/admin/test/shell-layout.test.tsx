@@ -15,6 +15,7 @@ import i18n from "../src/i18n/index.js";
 import { CatalogPage } from "../src/pages/catalog/index.js";
 import { CounterpartiesPage } from "../src/pages/counterparties/index.js";
 import { DashboardPage } from "../src/pages/dashboard/index.js";
+import type { DashboardOverviewDto } from "../src/pages/dashboard/api.js";
 import { SettingsPage } from "../src/pages/settings/index.js";
 import { ShiftsPage } from "../src/pages/shifts/index.js";
 import { ShellPage } from "../src/pages/Shell.js";
@@ -34,6 +35,60 @@ function jsonResponse(status: number, body: unknown): Response {
     json: async () => body,
     text: async () => (body === undefined ? "" : JSON.stringify(body)),
   } as Response;
+}
+
+function dashboardOverviewFixture(): DashboardOverviewDto {
+  return {
+    generatedAt: "2026-08-27T09:45:00.000Z",
+    timeZone: "Europe/Moscow",
+    metricVersion: "operations-dashboard-v1",
+    setup: { productCount: 0, shiftCount: 0, hasRunShift: false },
+    verdict: { status: "under_control", reasons: [] },
+    today: {
+      validationAcceptedUnits: 0,
+      aggregationClosedBoxes: 0,
+      aggregationContainedUnits: 0,
+      activeShiftCount: 0,
+      includedClosedShiftCount: 0,
+    },
+    dynamics: {
+      period: "7d",
+      grain: "day",
+      currentWindow: {
+        start: "2026-08-20T21:00:00.000Z",
+        end: "2026-08-27T09:45:00.000Z",
+        validation: { acceptedUnits: 0, shiftHours: 0, unitsPerShiftHour: null },
+        aggregation: {
+          closedBoxes: 0,
+          containedUnits: 0,
+          shiftHours: 0,
+          boxesPerShiftHour: null,
+          containedUnitsPerShiftHour: null,
+        },
+      },
+      comparisonWindow: {
+        start: "2026-08-13T21:00:00.000Z",
+        end: "2026-08-20T09:45:00.000Z",
+        validation: { acceptedUnits: 0, shiftHours: 0, unitsPerShiftHour: null },
+        aggregation: {
+          closedBoxes: 0,
+          containedUnits: 0,
+          shiftHours: 0,
+          boxesPerShiftHour: null,
+          containedUnitsPerShiftHour: null,
+        },
+      },
+      buckets: [],
+      quality: {
+        status: "complete",
+        reasons: [],
+        activeShiftCount: 0,
+        lateDataShiftCount: 0,
+        sources: ["code_registry", "boxes", "box_items"],
+      },
+    },
+    activeShifts: [],
+  };
 }
 
 beforeEach(() => {
@@ -61,6 +116,9 @@ beforeEach(() => {
         });
       }
       if (url.includes("/api/pickup-orders")) return jsonResponse(200, { items: [] });
+      if (url.endsWith("/api/dashboard/overview?period=7d")) {
+        return jsonResponse(200, dashboardOverviewFixture());
+      }
       if (
         url.endsWith("/api/products") ||
         url.endsWith("/api/shifts") ||
