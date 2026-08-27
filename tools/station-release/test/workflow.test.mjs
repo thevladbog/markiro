@@ -245,6 +245,7 @@ test("beta dispatch validation rejects adversarial repair-tag and mode combinati
 test("publish and seed build once and stage two closed origin trees from one input", async () => {
   const workflow = load(await source());
   const build = workflow.jobs.build;
+  const verifyStep = build.steps.find((step) => step.name === "Build and verify station");
   const signingStep = build.steps.find(
     (step) => step.name === "Build signed Windows NSIS updater artifacts",
   );
@@ -254,7 +255,19 @@ test("publish and seed build once and stage two closed origin trees from one inp
   const artifactStep = build.steps.find(
     (step) => step.name === "Upload dual-origin release candidate",
   );
+  assert.match(
+    verifyStep.run,
+    /if \[ "\$\{\{ inputs\.mode \}\}" = "seed-baseline" \]; then[\s\S]*cargo test --manifest-path apps\/station\/src-tauri\/Cargo\.toml --features legacy-github-updater[\s\S]*fi/,
+  );
   assert.equal((signingStep.run.match(/tauri build/g) ?? []).length, 1);
+  assert.match(
+    signingStep.run,
+    /set --[\s\S]*if \[ "\$\{\{ inputs\.mode \}\}" = "seed-baseline" \]; then[\s\S]*set -- --features legacy-github-updater --config src-tauri\/tauri\.beta-seed\.conf\.json[\s\S]*fi[\s\S]*tauri build "\$@"/,
+  );
+  assert.match(
+    signingStep.run,
+    /if \[ "\$\{\{ inputs\.mode \}\}" = "seed-baseline" \]; then[\s\S]*verify-seed-updater-binary\.mjs apps\/station\/src-tauri\/target\/release\/markiro-station\.exe[\s\S]*fi/,
+  );
   assert.equal(stageStep.if, "inputs.mode == 'publish' || inputs.mode == 'seed-baseline'");
   assert.match(
     stageStep.run,
