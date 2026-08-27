@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   createInventoryDocumentRegistry,
+  getInventoryDocumentFormat,
+  getRegisteredInventoryDocumentFormat,
   INVENTORY_DOCUMENT_FORMATS,
   InventoryDocumentRegistryError,
   inventoryDocumentFormatDescriptorSchema,
@@ -21,11 +23,11 @@ const availableDescriptor: InventoryDocumentFormatDescriptor = {
 };
 
 describe("inventory document format registry", () => {
-  it("advertises only the two fixture-backed GISMT inventory documents", () => {
+  it("advertises the current operational document catalog", () => {
     expect(INVENTORY_DOCUMENT_FORMATS).toEqual([
       {
         id: "inventory_xml_gismt_aggregation",
-        version: 1,
+        version: 2,
         label: "[XML][ГИСМТ] Формирование упаковки",
         extension: "xml",
         mimeType: "application/xml; charset=utf-8",
@@ -39,6 +41,66 @@ describe("inventory document format registry", () => {
         label: "[XML][ГИСМТ] Расформирование упаковки",
         extension: "xml",
         mimeType: "application/xml; charset=utf-8",
+        requiredSourceCategories: ["verified", "protected", "newBoxes"],
+        supportsParts: false,
+        availability: "available",
+      },
+      {
+        id: "inventory_txt_write_off",
+        version: 1,
+        label: "[TXT] Коды к списанию",
+        extension: "txt",
+        mimeType: "text/plain; charset=utf-8",
+        requiredSourceCategories: ["writeOffCandidates", "protected"],
+        supportsParts: false,
+        availability: "available",
+      },
+      {
+        id: "inventory_csv_write_off",
+        version: 1,
+        label: "[CSV] Коды к списанию",
+        extension: "csv",
+        mimeType: "text/csv; charset=utf-8",
+        requiredSourceCategories: ["writeOffCandidates", "protected"],
+        supportsParts: false,
+        availability: "available",
+      },
+      {
+        id: "inventory_csv_current_stock",
+        version: 1,
+        label: "[CSV] Коды на учёт",
+        extension: "csv",
+        mimeType: "text/csv; charset=utf-8",
+        requiredSourceCategories: ["verified", "protected"],
+        supportsParts: false,
+        availability: "available",
+      },
+      {
+        id: "inventory_csv_final_box_contents",
+        version: 1,
+        label: "[CSV] Состав итоговых коробов",
+        extension: "csv",
+        mimeType: "text/csv; charset=utf-8",
+        requiredSourceCategories: ["verified", "protected", "newBoxes"],
+        supportsParts: false,
+        availability: "available",
+      },
+      {
+        id: "inventory_txt_final_boxes",
+        version: 1,
+        label: "[TXT] Номера итоговых коробов",
+        extension: "txt",
+        mimeType: "text/plain; charset=utf-8",
+        requiredSourceCategories: ["verified", "protected", "newBoxes"],
+        supportsParts: false,
+        availability: "available",
+      },
+      {
+        id: "inventory_csv_balances_by_production_date",
+        version: 1,
+        label: "[CSV] Остатки по датам производства",
+        extension: "csv",
+        mimeType: "text/csv; charset=utf-8",
         requiredSourceCategories: ["verified", "protected", "newBoxes"],
         supportsParts: false,
         availability: "available",
@@ -65,12 +127,18 @@ describe("inventory document format registry", () => {
     ).toThrow();
   });
 
-  it("rejects duplicate format ids during registry construction", () => {
+  it("registers each id and version once", () => {
+    const legacy = { ...availableDescriptor, version: 1, availability: "unavailable" } as const;
+    const current = { ...availableDescriptor, version: 2, availability: "available" } as const;
+
+    expect(() => createInventoryDocumentRegistry([legacy, { ...legacy }])).toThrowError(
+      expect.objectContaining({
+        name: "InventoryDocumentRegistryError",
+        code: "DUPLICATE_FORMAT_VERSION",
+      }),
+    );
     expect(() =>
-      createInventoryDocumentRegistry([
-        availableDescriptor,
-        { ...availableDescriptor, version: 3 },
-      ]),
+      createInventoryDocumentRegistry([current, { ...current, version: 3 }]),
     ).toThrowError(
       expect.objectContaining({
         name: "InventoryDocumentRegistryError",
@@ -79,15 +147,33 @@ describe("inventory document format registry", () => {
     );
   });
 
-  it("resolves only the exact advertised version", () => {
-    const registry = createInventoryDocumentRegistry([availableDescriptor]);
+  it("uses the current version for new selections and registered versions for stored runs", () => {
+    const legacy = { ...availableDescriptor, version: 1, availability: "unavailable" } as const;
+    const current = { ...availableDescriptor, version: 2, availability: "available" } as const;
+    const registry = createInventoryDocumentRegistry([legacy, current]);
 
-    expect(registry.resolve("synthetic_current_stock_csv", 2)).toEqual(availableDescriptor);
+    expect(registry.listAvailable()).toEqual([current]);
+    expect(registry.resolve(current.id, 2)).toEqual(current);
+    expect(() => registry.resolve(current.id, 1)).toThrowError(
+      expect.objectContaining({ code: "FORMAT_SUPERSEDED" }),
+    );
+    expect(registry.resolveRegistered(current.id, 1)).toEqual(legacy);
     expect(() => registry.resolve("unknown", 1)).toThrowError(
       expect.objectContaining({ code: "FORMAT_UNKNOWN" }),
     );
-    expect(() => registry.resolve("synthetic_current_stock_csv", 1)).toThrowError(
-      expect.objectContaining({ code: "FORMAT_SUPERSEDED" }),
+    expect(() => registry.resolveRegistered("synthetic_current_stock_csv", 3)).toThrowError(
+      expect.objectContaining({ code: "FORMAT_UNKNOWN" }),
+    );
+  });
+
+  it("keeps the legacy format helper as an exact registered lookup", () => {
+    expect(getInventoryDocumentFormat("inventory_xml_gismt_aggregation", 1)).toMatchObject({
+      id: "inventory_xml_gismt_aggregation",
+      version: 1,
+      availability: "unavailable",
+    });
+    expect(getRegisteredInventoryDocumentFormat("inventory_xml_gismt_aggregation", 1)).toEqual(
+      getInventoryDocumentFormat("inventory_xml_gismt_aggregation", 1),
     );
   });
 

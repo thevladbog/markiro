@@ -126,6 +126,7 @@ export {
 export {
   createInventoryDocumentRegistry,
   getInventoryDocumentFormat,
+  getRegisteredInventoryDocumentFormat,
   INVENTORY_DOCUMENT_FORMAT_AVAILABILITIES,
   INVENTORY_DOCUMENT_FORMATS,
   INVENTORY_DOCUMENT_MIME_TYPE_PATTERN,
