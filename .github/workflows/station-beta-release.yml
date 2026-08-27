@@ -497,13 +497,16 @@ jobs:
               if(e.releaseSha!==process.env.RELEASE_SHA)process.exit(1)
             ' "$evidence_path"
           done
-          github_manifest_sha256="$(sha256sum "$github_public/latest.json" | cut -d ' ' -f 1)"
-          yandex_manifest_sha256="$(sha256sum "$yandex_public/latest.json" | cut -d ' ' -f 1)"
-          github_evidence_sha256="$(sha256sum "$github_public/release-evidence.json" | cut -d ' ' -f 1)"
-          yandex_evidence_sha256="$(sha256sum "$yandex_public/release-evidence.json" | cut -d ' ' -f 1)"
-          installer_sha256="$(sha256sum "$github_public/$installer" | cut -d ' ' -f 1)"
-          bundle_sha256="$(sha256sum "$github_public/$bundle" | cut -d ' ' -f 1)"
-          signature_sha256="$(sha256sum "$github_public/$bundle.sig" | cut -d ' ' -f 1)"
+          sha256_file() {
+            node -e 'const{createHash}=require("node:crypto"),{readFileSync}=require("node:fs");process.stdout.write(createHash("sha256").update(readFileSync(process.argv[1])).digest("hex"))' "$1"
+          }
+          github_manifest_sha256="$(sha256_file "$github_public/latest.json")"
+          yandex_manifest_sha256="$(sha256_file "$yandex_public/latest.json")"
+          github_evidence_sha256="$(sha256_file "$github_public/release-evidence.json")"
+          yandex_evidence_sha256="$(sha256_file "$yandex_public/release-evidence.json")"
+          installer_sha256="$(sha256_file "$github_public/$installer")"
+          bundle_sha256="$(sha256_file "$github_public/$bundle")"
+          signature_sha256="$(sha256_file "$github_public/$bundle.sig")"
           node tools/station-release/release-summary.mjs beta-update \
             "$RUNNER_TEMP/station-beta-release-summary.json" \
             githubManifestSha256 "$github_manifest_sha256" \
