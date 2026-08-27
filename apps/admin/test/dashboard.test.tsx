@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -17,7 +17,7 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
-function renderDashboard() {
+function renderDashboard({ canWrite = true }: { canWrite?: boolean } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -27,7 +27,10 @@ function renderDashboard() {
       <AccessProvider
         value={{
           roles: ["manager"],
-          capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.OPERATIONS_WRITE],
+          capabilities: [
+            CABINET_CAPABILITY.OPERATIONS_READ,
+            ...(canWrite ? [CABINET_CAPABILITY.OPERATIONS_WRITE] : []),
+          ],
         }}
       >
         <MemoryRouter>
@@ -47,7 +50,7 @@ function dashboardFixture(
     metricVersion: "operations-dashboard-v1",
     setup: { productCount: 0, shiftCount: 0, hasRunShift: false, ...setup },
     verdict: {
-      status: "needs_attention",
+      status: "critical",
       reasons: [
         {
           code: "unreviewed_conflicts",
@@ -183,6 +186,248 @@ describe("DashboardPage", () => {
     renderDashboard();
 
     expect(await screen.findByRole("columnheader", { name: "Выпуск" })).toBeDefined();
+  });
+
+  it("answers whether production is under control with separate headline facts and reasons", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, dashboardFixture({ hasRunShift: true }))),
+    );
+
+    renderDashboard();
+
+    expect(await screen.findByRole("heading", { name: "Производство сегодня" })).toBeDefined();
+    expect(screen.getByText("Europe/Moscow")).toBeDefined();
+    expect(document.querySelector('time[datetime="2026-08-27T09:45:00.000Z"]')).not.toBeNull();
+    expect(screen.getByText("Критическое состояние")).toBeDefined();
+    expect(screen.getByRole("link", { name: /1 конфликт без разбора/ }).getAttribute("href")).toBe(
+      "/conflicts",
+    );
+
+    expect(screen.getByText("Проверено поштучно")).toBeDefined();
+    expect(screen.getByLabelText(/128[\s\u00a0]?489 проверенных единиц/)).toBeDefined();
+    expect(screen.getByLabelText(/412 закрытых коробов/)).toBeDefined();
+    expect(screen.getByLabelText(/10[\s\u00a0]?712 единиц в коробах/)).toBeDefined();
+    expect(screen.queryByText(/138[\s\u00a0]?789/)).toBeNull();
+    expect(
+      screen.getByRole("region", {
+        name: "Активные смены и смены, завершённые сегодня",
+      }),
+    ).toBeDefined();
+
+    expect(screen.getByText("Предварительные данные")).toBeDefined();
+    expect(screen.getByText(/Поздние данные: 1 смена/)).toBeDefined();
+    expect(screen.queryByText(/качество|план|цель|простой/i)).toBeNull();
+  });
+
+  it("keeps rate and output controls independent from the selected period", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, dashboardFixture({ hasRunShift: true }))),
+    );
+
+    renderDashboard();
+
+    const rate = await screen.findByRole("button", { name: "Темп" });
+    const output = screen.getByRole("button", { name: "Выпуск" });
+    const sevenDays = screen.getByRole("button", { name: "7 дней" });
+    expect(rate.getAttribute("aria-pressed")).toBe("true");
+    expect(output.getAttribute("aria-pressed")).toBe("false");
+    expect(sevenDays.getAttribute("aria-pressed")).toBe("true");
+
+    const validationRate = screen.getByRole("region", { name: "Проверка — темп" });
+    const aggregationRate = screen.getByRole("region", { name: "Агрегация — темп" });
+    expect(
+      within(validationRate).getByLabelText(/21 авг\.: 4[\s\u00a0]?650 шт\.\/час смены/),
+    ).toBeDefined();
+    expect(
+      within(aggregationRate).getByLabelText(/21 авг\.: 16,6 коробов\/час смены/),
+    ).toBeDefined();
+    expect(within(aggregationRate).getByLabelText(/21 авг\.: 430,9 шт\.\/час смены/)).toBeDefined();
+
+    fireEvent.click(output);
+
+    expect(output.getAttribute("aria-pressed")).toBe("true");
+    expect(rate.getAttribute("aria-pressed")).toBe("false");
+    expect(sevenDays.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("region", { name: "Проверка — выпуск" })).toBeDefined();
+    expect(screen.getByRole("region", { name: "Агрегация — выпуск" })).toBeDefined();
+    expect(screen.getByLabelText(/21 авг\.: 18[\s\u00a0]?600 шт\./)).toBeDefined();
+    expect(screen.getByLabelText(/21 авг\.: 58 кор\./)).toBeDefined();
+    expect(screen.getByLabelText(/21 авг\.: 1[\s\u00a0]?508 шт\./)).toBeDefined();
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+  });
+
+  it("requests a new coherent overview when the period changes", async () => {
+    const thirtyDayFixture = dashboardFixture({ hasRunShift: true });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/dashboard/overview?period=7d")) {
+          return jsonResponse(200, dashboardFixture({ hasRunShift: true }));
+        }
+        if (url.endsWith("/api/dashboard/overview?period=30d")) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          return jsonResponse(200, {
+            ...thirtyDayFixture,
+            dynamics: { ...thirtyDayFixture.dynamics, period: "30d" },
+          });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    renderDashboard();
+    const thirtyDays = await screen.findByRole("button", { name: "30 дней" });
+    fireEvent.click(screen.getByRole("button", { name: "Выпуск" }));
+    fireEvent.click(thirtyDays);
+
+    expect(screen.getByRole("status", { name: "Обновление данных" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "30 дней" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Выпуск" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByText(/Показана предыдущая сводка/)).toBeDefined();
+    expect(screen.getByRole("link", { name: /1 конфликт без разбора/ })).toBeDefined();
+
+    await waitFor(() =>
+      expect(vi.mocked(fetch).mock.calls.map(([input]) => String(input))).toContain(
+        "/api/dashboard/overview?period=30d",
+      ),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByRole("status", { name: "Обновление данных" })).toBeNull(),
+    );
+    expect(screen.getByRole("button", { name: "30 дней" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Выпуск" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+  });
+
+  it("keeps ordinary empty production distinct from an insufficient rate", async () => {
+    const fixture = dashboardFixture({ hasRunShift: true });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          ...fixture,
+          verdict: {
+            status: "needs_attention",
+            reasons: [
+              {
+                code: "missing_shift_duration",
+                severity: "needs_attention",
+                count: 1,
+                affectedModes: ["aggregation"],
+              },
+            ],
+          },
+          dynamics: {
+            ...fixture.dynamics,
+            buckets: [
+              {
+                ...fixture.dynamics.buckets[0],
+                validation: { acceptedUnits: 0, shiftHours: 0, unitsPerShiftHour: null },
+                aggregation: {
+                  closedBoxes: 12,
+                  containedUnits: 300,
+                  shiftHours: 0,
+                  boxesPerShiftHour: null,
+                  containedUnitsPerShiftHour: null,
+                },
+              },
+            ],
+            quality: {
+              ...fixture.dynamics.quality,
+              status: "insufficient",
+              reasons: ["missing_shift_duration"],
+              activeShiftCount: 0,
+              lateDataShiftCount: 0,
+            },
+          },
+        }),
+      ),
+    );
+
+    renderDashboard();
+
+    const validation = await screen.findByRole("region", { name: "Проверка — темп" });
+    const aggregation = screen.getByRole("region", { name: "Агрегация — темп" });
+    expect(
+      within(validation).getByText("За выбранный период проверенных единиц нет."),
+    ).toBeDefined();
+    expect(within(aggregation).getAllByRole("img", { name: /—/ })).toHaveLength(2);
+    expect(
+      within(aggregation).getByText("Нет длительности смены — темп не рассчитан."),
+    ).toBeDefined();
+    expect(screen.getByText("Недостаточно данных для темпа")).toBeDefined();
+  });
+
+  it("links active shifts by access level and formats mode-specific output", async () => {
+    const fixture = dashboardFixture({ hasRunShift: true });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, fixture)),
+    );
+
+    renderDashboard();
+
+    const shiftLink = await screen.findByRole("link", { name: "S-2026-08-27-001" });
+    expect(shiftLink.getAttribute("href")).toBe(
+      "/shifts/11111111-1111-4111-8111-111111111111/edit",
+    );
+    expect(screen.getByText(/412 кор\. · 10[\s\u00a0]?712 шт\./)).toBeDefined();
+
+    cleanup();
+    renderDashboard({ canWrite: false });
+    expect(
+      (await screen.findByRole("link", { name: "S-2026-08-27-001" })).getAttribute("href"),
+    ).toBe("/shifts");
+  });
+
+  it("formats validation shift output in its own unit", async () => {
+    const fixture = dashboardFixture({ hasRunShift: true });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          ...fixture,
+          activeShifts: [
+            {
+              ...fixture.activeShifts[0],
+              output: { mode: "validation", acceptedUnits: 128489 },
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderDashboard();
+
+    expect(await screen.findByText(/128[\s\u00a0]?489 шт\./)).toBeDefined();
+    expect(screen.queryByText(/128[\s\u00a0]?489 кор\./)).toBeNull();
+  });
+
+  it("provides the mode-separated production vocabulary in English", async () => {
+    await i18n.changeLanguage("en");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, dashboardFixture({ hasRunShift: true }))),
+    );
+
+    renderDashboard();
+
+    expect(await screen.findByRole("heading", { name: "Production today" })).toBeDefined();
+    expect(screen.getByRole("region", { name: "Validation — rate" })).toBeDefined();
+    expect(screen.getByRole("region", { name: "Aggregation — rate" })).toBeDefined();
+    expect(screen.getAllByLabelText(/units\/shift hour/).length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText(/boxes\/shift hour/).length).toBeGreaterThan(0);
   });
 
   it("renders a layout-shaped loading state while the dashboard overview is unresolved", () => {
