@@ -325,6 +325,11 @@ export const billingActDocuments = pgTable(
     unique("billing_act_documents_tenant_id_uq").on(table.tenantId, table.id),
     unique("billing_act_documents_act_revision_uq").on(table.tenantId, table.actId, table.revision),
     unique("billing_act_documents_object_key_uq").on(table.objectKey),
+    index("billing_act_documents_tenant_created_id_idx").on(
+      table.tenantId,
+      table.createdAt,
+      table.id,
+    ),
     uniqueIndex("billing_act_documents_current_act_uq")
       .on(table.tenantId, table.actId)
       .where(sql`${table.isCurrent} = true`),

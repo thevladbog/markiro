@@ -115,6 +115,12 @@ describe("tenant billing workflow schema", () => {
     expect(constraintNames(schema.billingActDocuments).indexes).toContain(
       "billing_act_documents_current_act_uq",
     );
+    expect(constraintNames(schema.billingActDocuments).indexes).toContain(
+      "billing_act_documents_tenant_created_id_idx",
+    );
+    expect(constraintNames(schema.commercialOfferDocuments).indexes).toContain(
+      "commercial_offer_documents_tenant_created_id_idx",
+    );
 
     const paymentConstraints = constraintNames(schema.billingPayments);
     expect(paymentConstraints.uniqueConstraints).not.toContain("billing_payments_invoice_uq");

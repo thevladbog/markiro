@@ -358,6 +358,11 @@ export const commercialOfferDocuments = pgTable(
       table.revision,
       table.format,
     ),
+    index("commercial_offer_documents_tenant_created_id_idx").on(
+      table.tenantId,
+      table.createdAt,
+      table.id,
+    ),
     foreignKey({
       name: "commercial_offer_documents_tenant_offer_fk",
       columns: [table.tenantId, table.offerId],

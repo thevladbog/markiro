@@ -242,10 +242,10 @@ function encodeRfc5987Filename(filename: string): string {
 }
 
 function assertSafeKey(key: string): void {
+  const tenantBillingActKey =
+    /^tenant-billing\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})\/acts\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.pdf$/;
   if (
-    (!key.startsWith("users/") &&
-      !key.startsWith("tenants/") &&
-      !/^tenant-billing\/[0-9a-f-]+\/acts\/[0-9a-f-]+\/[0-9a-f-]+\.pdf$/.test(key)) ||
+    (!key.startsWith("users/") && !key.startsWith("tenants/") && !tenantBillingActKey.test(key)) ||
     key.includes("..") ||
     key.includes("\\") ||
     key.includes("//") ||

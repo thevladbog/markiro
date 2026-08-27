@@ -22,6 +22,7 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
   let tenantB: string;
   let actorId: string;
   let foreignInvoiceId: string;
+  let foreignOfferId: string;
   let service: TenantBillingReadService;
 
   beforeAll(async () => {
@@ -102,6 +103,19 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
         updatedAt: timestamp,
       })),
     );
+    foreignOfferId = randomUUID();
+    await db.insert(schema.commercialOffers).values({
+      id: foreignOfferId,
+      tenantId: tenantB,
+      familyId: randomUUID(),
+      revision: 1,
+      status: "published",
+      number: "B-offer",
+      total: "1.00",
+      createdByPlatformUserId: actorId,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
     await db.insert(schema.commercialOfferDocuments).values(
       offerDocuments.map(({ offerId, documentId }) => ({
         id: documentId,
@@ -178,6 +192,9 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
       [...page.items.map((item) => item.id)].sort().reverse(),
     );
     await expect(service.invoiceDetail(tenantA, foreignInvoiceId)).rejects.toMatchObject({
+      status: 404,
+    });
+    await expect(service.offerDetail(tenantA, foreignOfferId)).rejects.toMatchObject({
       status: 404,
     });
   });

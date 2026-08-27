@@ -128,6 +128,25 @@ describe("ObjectStorageService", () => {
     expect(presign).toHaveBeenCalledTimes(1);
   });
 
+  it("accepts only canonical tenant billing act paths", async () => {
+    const presign = vi.fn().mockResolvedValue("signed-read");
+    const storage = new ObjectStorageService(env, { send: vi.fn() } as never, presign);
+    const actId = "11111111-1111-4111-8111-111111111111";
+    const documentId = "22222222-2222-4222-8222-222222222222";
+    await expect(
+      storage.presignRead(`tenant-billing/acme_2026/acts/${actId}/${documentId}.pdf`, 300),
+    ).resolves.toBe("signed-read");
+    for (const key of [
+      `tenant-billing/acme/../acts/${actId}/${documentId}.pdf`,
+      `tenant-billing/acme%2Fother/acts/${actId}/${documentId}.pdf`,
+      `tenant-billing/acme\n/acts/${actId}/${documentId}.pdf`,
+      `tenant-billing/acme/acts/${actId}/2222----2222-4222-8222-222222222222.pdf`,
+      `tenant-billing/acme/acts/${actId}/not-a-uuid.pdf`,
+    ]) {
+      await expect(storage.presignRead(key, 300)).rejects.toThrow("Unsafe object key");
+    }
+  });
+
   it("returns a bounded private object body and its content type", async () => {
     const send = vi.fn().mockResolvedValue({
       Body: (async function* () {
