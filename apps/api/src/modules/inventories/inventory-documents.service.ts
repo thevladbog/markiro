@@ -62,7 +62,7 @@ export class InventoryDocumentsService {
     }
     for (const selected of selectedFormats) {
       try {
-        this.generators.resolve(selected.id, selected.version);
+        this.generators.resolveForSelection(selected.id, selected.version);
       } catch (error) {
         throw formatSelectionError(error);
       }
@@ -285,7 +285,9 @@ export class InventoryDocumentsService {
     }
     const artifacts: InventoryDocumentZipArtifact[] = [];
     for (const row of rows) {
-      const stored = await this.storage.get(row.objectKey, { maxBytes: row.byteSize });
+      const stored = await this.storage.get(row.objectKey, {
+        maxBytes: Math.max(1, row.byteSize),
+      });
       artifacts.push({
         filename: row.filename,
         mimeType: row.mimeType,

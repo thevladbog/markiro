@@ -9,18 +9,41 @@ import { ThemeProvider } from "@markiro/ui";
 
 import i18n from "../src/i18n/index.js";
 import { InventoryDocuments } from "../src/pages/inventory/InventoryDocuments.js";
+import { inventoryDocumentArtifactSchema } from "../src/pages/inventory/schemas.js";
 
 const INVENTORY_ID = "11111111-1111-4111-8111-111111111111";
 const RUN_ID = "22222222-2222-4222-8222-222222222222";
 const ARTIFACT_ID = "33333333-3333-4333-8333-333333333333";
 
 const format = {
-  id: "write_off_csv",
-  version: 3,
-  label: "Коды к списанию (CSV)",
+  id: "inventory_csv_current_stock",
+  version: 1,
+  label: "[CSV] Коды на учёт",
   extension: "csv",
   mimeType: "text/csv; charset=utf-8",
-  requiredSourceCategories: ["writeOffCandidates"],
+  requiredSourceCategories: ["verified"],
+  supportsParts: false,
+  availability: "available",
+} as const;
+
+const balancesFormat = {
+  id: "inventory_csv_balances_by_production_date",
+  version: 1,
+  label: "[CSV] Остатки по датам производства",
+  extension: "csv",
+  mimeType: "text/csv; charset=utf-8",
+  requiredSourceCategories: ["verified", "protected", "newBoxes"],
+  supportsParts: false,
+  availability: "available",
+} as const;
+
+const emptyTxtFormat = {
+  id: "inventory_txt_write_off",
+  version: 1,
+  label: "[TXT] Коды к списанию",
+  extension: "txt",
+  mimeType: "text/plain; charset=utf-8",
+  requiredSourceCategories: ["writeOffCandidates", "protected"],
   supportsParts: false,
   availability: "available",
 } as const;
@@ -112,7 +135,7 @@ it("shows the catalog gate without inventing formats or a generate action", asyn
   expect(screen.queryByRole("button", { name: "Сформировать документы" })).toBeNull();
 });
 
-it("submits only catalog selections with exact versions and polls pending runs every two seconds", async () => {
+it("submits arbitrary catalog selections in server order with exact versions and polls pending runs", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const requests: Array<{ url: string; init?: RequestInit }> = [];
   let listCount = 0;
@@ -121,7 +144,9 @@ it("submits only catalog selections with exact versions and polls pending runs e
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       requests.push({ url, ...(init ? { init } : {}) });
-      if (url === "/api/inventory-document-formats") return response({ items: [format] });
+      if (url === "/api/inventory-document-formats") {
+        return response({ items: [format, balancesFormat] });
+      }
       if (url === `/api/inventories/${INVENTORY_ID}/document-runs` && !init?.method) {
         listCount += 1;
         return response({
@@ -136,11 +161,15 @@ it("submits only catalog selections with exact versions and polls pending runs e
   );
   renderDocuments();
 
-  const choice = await screen.findByRole("checkbox", { name: /Коды к списанию/ });
+  const currentStockChoice = await screen.findByRole("checkbox", { name: /\[CSV\] Коды на учёт/ });
+  const balancesChoice = screen.getByRole("checkbox", {
+    name: /\[CSV\] Остатки по датам производства/,
+  });
   expect(
     screen.getByRole("button", { name: "Сформировать документы" }).hasAttribute("disabled"),
   ).toBe(true);
-  await userEvent.click(choice);
+  await userEvent.click(balancesChoice);
+  await userEvent.click(currentStockChoice);
   await userEvent.click(screen.getByRole("button", { name: "Сформировать документы" }));
 
   await waitFor(() => expect(requests.some(({ init }) => init?.method === "POST")).toBe(true));
@@ -149,7 +178,10 @@ it("submits only catalog selections with exact versions and polls pending runs e
     selectedFormats: unknown;
     idempotencyKey: string;
   };
-  expect(body.selectedFormats).toEqual([{ id: format.id, version: format.version }]);
+  expect(body.selectedFormats).toEqual([
+    { id: "inventory_csv_current_stock", version: 1 },
+    { id: "inventory_csv_balances_by_production_date", version: 1 },
+  ]);
   expect(body.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
   expect(await screen.findByText("В очереди")).toBeDefined();
 
@@ -158,6 +190,15 @@ it("submits only catalog selections with exact versions and polls pending runs e
   const countAfterReady = listCount;
   await act(async () => vi.advanceTimersByTimeAsync(4_000));
   expect(listCount).toBe(countAfterReady);
+});
+
+it("accepts zero-byte artifact metadata but rejects negative byte sizes", () => {
+  expect(inventoryDocumentArtifactSchema.safeParse({ ...artifact, byteSize: 0 }).success).toBe(
+    true,
+  );
+  expect(inventoryDocumentArtifactSchema.safeParse({ ...artifact, byteSize: -1 }).success).toBe(
+    false,
+  );
 });
 
 it("keeps polling a pending run after reopen until stale-revision failure is visible", async () => {
@@ -208,7 +249,7 @@ it("turns server contract failures into an actionable localized message", async 
   );
   renderDocuments();
 
-  await userEvent.click(await screen.findByRole("checkbox", { name: /Коды к списанию/ }));
+  await userEvent.click(await screen.findByRole("checkbox", { name: /Коды на учёт/ }));
   await userEvent.click(screen.getByRole("button", { name: "Сформировать документы" }));
 
   expect(
@@ -245,6 +286,65 @@ it("retries safe failures while an inventory remains closed", async () => {
   await waitFor(() => expect(retry).toHaveBeenCalledTimes(1));
 });
 
+it("explains a missing verified production date in actionable Russian", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/inventory-document-formats") return response({ items: [format] });
+      if (url === `/api/inventories/${INVENTORY_ID}/document-runs`) {
+        return response({
+          items: [
+            run("failed", {
+              errorCode: "VERIFIED_PRODUCTION_DATE_MISSING",
+            }),
+          ],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+
+  renderDocuments("closed");
+
+  expect(
+    await screen.findByText(
+      "У проверенных кодов не указана дата производства. Возобновите инвентаризацию, исправьте даты и сформируйте документы заново.",
+    ),
+  ).toBeDefined();
+  expect(screen.queryByText(/VERIFIED_PRODUCTION_DATE_MISSING/)).toBeNull();
+});
+
+it("explains a missing verified production date in actionable English", async () => {
+  await i18n.changeLanguage("en");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/inventory-document-formats") return response({ items: [format] });
+      if (url === `/api/inventories/${INVENTORY_ID}/document-runs`) {
+        return response({
+          items: [
+            run("failed", {
+              errorCode: "VERIFIED_PRODUCTION_DATE_MISSING",
+            }),
+          ],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+
+  renderDocuments("closed");
+
+  expect(
+    await screen.findByText(
+      "Verified codes do not have a production date. Resume the inventory, correct the dates, and generate the documents again.",
+    ),
+  ).toBeDefined();
+  expect(screen.queryByText(/VERIFIED_PRODUCTION_DATE_MISSING/)).toBeNull();
+});
+
 it("keeps invalidated artifacts visibly unavailable after reopening", async () => {
   vi.stubGlobal(
     "fetch",
@@ -279,18 +379,28 @@ it("keeps invalidated artifacts visibly unavailable after reopening", async () =
 
 it("downloads an artifact or ZIP through the tenant-scoped API response", async () => {
   const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  const emptyTxtArtifact = {
+    ...artifact,
+    formatId: emptyTxtFormat.id,
+    formatVersion: emptyTxtFormat.version,
+    filename: "write-off.txt",
+    mimeType: emptyTxtFormat.mimeType,
+    rowCount: 0,
+    codeCount: 0,
+    byteSize: 0,
+  };
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === "/api/inventory-document-formats") return response({ items: [format] });
+      if (url === "/api/inventory-document-formats") return response({ items: [emptyTxtFormat] });
       if (url === `/api/inventories/${INVENTORY_ID}/document-runs`) {
-        return response({ items: [run("ready")] });
+        return response({ items: [run("ready", { artifacts: [emptyTxtArtifact] })] });
       }
       if (url === `/api/inventory-document-runs/${RUN_ID}/artifacts/${ARTIFACT_ID}/download`) {
         return response({
           url: "https://objects.example/download-artifact",
-          filename: artifact.filename,
+          filename: emptyTxtArtifact.filename,
           expiresInSeconds: 300,
         });
       }
@@ -306,8 +416,13 @@ it("downloads an artifact or ZIP through the tenant-scoped API response", async 
   );
   renderDocuments();
 
-  await userEvent.click(await screen.findByRole("button", { name: "Скачать write-off.csv" }));
-  await userEvent.click(screen.getByRole("button", { name: "Скачать ZIP" }));
+  expect(await screen.findByText("кодов: 0 · коробов: 0 · 0 байт")).toBeDefined();
+  const artifactDownload = screen.getByRole("button", { name: "Скачать write-off.txt" });
+  const zipDownload = screen.getByRole("button", { name: "Скачать ZIP" });
+  expect(artifactDownload.hasAttribute("disabled")).toBe(false);
+  expect(zipDownload.hasAttribute("disabled")).toBe(false);
+  await userEvent.click(artifactDownload);
+  await userEvent.click(zipDownload);
 
   await waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(2));
   expect((anchorClick.mock.instances[0] as HTMLAnchorElement | undefined)?.href).toBe(

@@ -448,7 +448,7 @@ export const inventoryDocumentArtifacts = pgTable(
       sql`${table.codeCount} >= 0`,
     ),
     check("inventory_document_artifacts_box_count_nonnegative_check", sql`${table.boxCount} >= 0`),
-    check("inventory_document_artifacts_byte_size_positive_check", sql`${table.byteSize} > 0`),
+    check("inventory_document_artifacts_byte_size_nonnegative_check", sql`${table.byteSize} >= 0`),
     check("inventory_document_artifacts_sha256_check", sql`${table.sha256} ~ '^[0-9a-f]{64}$'`),
     check(
       "inventory_document_artifacts_download_fields_check",

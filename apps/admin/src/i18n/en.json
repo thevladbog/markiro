@@ -519,7 +519,8 @@
           "catalogUnavailable": "Approved document formats are not available yet.",
           "notReady": "Current documents are not ready or have not been downloaded yet.",
           "notAcknowledged": "Confirm that the downloaded documents were checked.",
-          "lateEvents": "Resolve every late inventory event first."
+          "lateEvents": "Resolve every late inventory event first.",
+          "verifiedProductionDateMissing": "Verified codes do not have a production date. Resume the inventory, correct the dates, and generate the documents again."
         }
       },
       "late": {
