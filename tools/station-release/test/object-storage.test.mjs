@@ -29,8 +29,12 @@ function fakeClient(handler) {
   };
 }
 
-function createStore(client, fetchImpl = async () => new Response("public bytes")) {
-  return createStationObjectStore({ client, bucket, publicBaseUrl, fetchImpl });
+function createStore(
+  client,
+  fetchImpl = async () => new Response("public bytes"),
+  waitImpl = async () => {},
+) {
+  return createStationObjectStore({ client, bucket, publicBaseUrl, fetchImpl, waitImpl });
 }
 
 test("distinguishes an absent object from present and forbidden objects", async () => {
@@ -304,6 +308,42 @@ test("bounds public reads and rejects non-2xx responses and redirects", async ()
     okStore.readPublic(mutableManifestKey, { ...expected, maxBytes: 0 }),
     /invalid station object storage request/,
   );
+});
+
+test("canonical public reader retries a transient failure before accepting exact metadata", async () => {
+  const expected = {
+    contentType: "application/json",
+    cacheControl: "public, max-age=0, must-revalidate",
+    contentDisposition: null,
+    maxBytes: 256 * 1024,
+  };
+  const delays = [];
+  let attempts = 0;
+  const store = createStore(
+    fakeClient(async () => ({})),
+    async () => {
+      attempts += 1;
+      if (attempts === 1) return new Response("temporarily unavailable", { status: 503 });
+      return new Response("public manifest", {
+        status: 200,
+        headers: {
+          "content-length": "15",
+          "content-type": expected.contentType,
+          "cache-control": expected.cacheControl,
+        },
+      });
+    },
+    async (milliseconds) => {
+      delays.push(milliseconds);
+    },
+  );
+
+  assert.deepEqual(
+    await store.readPublic(mutableManifestKey, expected),
+    Buffer.from("public manifest"),
+  );
+  assert.equal(attempts, 2);
+  assert.deepEqual(delays, [1_000]);
 });
 
 test("sanitizes provider failures for puts, gets, and copies", async () => {

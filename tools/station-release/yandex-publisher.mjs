@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { setTimeout as wait } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -48,6 +49,7 @@ const CONTENT_TYPES = Object.freeze({
   notes: "text/markdown",
   evidence: "application/json",
 });
+const PUBLIC_READ_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
 
 function invalid() {
   throw new Error("invalid station release publication");
@@ -153,13 +155,15 @@ async function readBoundedPublicBody(body, contentLength, maxBytes) {
   return Buffer.concat(chunks, total);
 }
 
-export function createYandexProviderReader({ bucket, fetchImpl = fetch } = {}) {
-  if (!validBucket(bucket) || typeof fetchImpl !== "function") bootstrapInvalid();
+export function createYandexProviderReader({ bucket, fetchImpl = fetch, waitImpl = wait } = {}) {
+  if (!validBucket(bucket) || typeof fetchImpl !== "function" || typeof waitImpl !== "function") {
+    bootstrapInvalid();
+  }
   return Object.freeze({
     async readPublic(key, expected) {
       if (
         typeof key !== "string" ||
-        !/^station\/[a-z0-9./_-]+$/.test(key) ||
+        !/^station\/[A-Za-z0-9./_-]+$/.test(key) ||
         key.includes("..") ||
         key.includes("//") ||
         !hasExactKeys(expected, [
@@ -175,27 +179,32 @@ export function createYandexProviderReader({ bucket, fetchImpl = fetch } = {}) {
         bootstrapInvalid();
       }
       const url = `${YANDEX_S3_ENDPOINT}/${bucket}/${key}`;
-      let response;
-      try {
-        response = await fetchImpl(url, { redirect: "error", cache: "no-store" });
-        if (
-          !response?.ok ||
-          response.redirected === true ||
-          (typeof response.url === "string" && response.url.length > 0 && response.url !== url) ||
-          response.headers?.get?.("content-type") !== expected.contentType ||
-          response.headers?.get?.("cache-control") !== expected.cacheControl ||
-          response.headers?.get?.("content-disposition") !== expected.contentDisposition
-        ) {
-          bootstrapInvalid();
+      for (let attempt = 0; ; attempt += 1) {
+        let response;
+        try {
+          response = await fetchImpl(url, { redirect: "error", cache: "no-store" });
+          if (
+            !response?.ok ||
+            response.redirected === true ||
+            (typeof response.url === "string" && response.url.length > 0 && response.url !== url) ||
+            response.headers?.get?.("content-type") !== expected.contentType ||
+            response.headers?.get?.("cache-control") !== expected.cacheControl ||
+            response.headers?.get?.("content-disposition") !== expected.contentDisposition
+          ) {
+            bootstrapInvalid();
+          }
+          const lengthText = response.headers?.get?.("content-length");
+          const contentLength =
+            lengthText === null || lengthText === undefined ? undefined : Number(lengthText);
+          return await readBoundedPublicBody(response.body, contentLength, expected.maxBytes);
+        } catch (error) {
+          await closePublicBody(response?.body);
+          if (attempt === PUBLIC_READ_RETRY_DELAYS_MS.length) {
+            if (error?.message === "invalid station release bootstrap") throw error;
+            bootstrapInvalid();
+          }
+          await waitImpl(PUBLIC_READ_RETRY_DELAYS_MS[attempt]);
         }
-        const lengthText = response.headers?.get?.("content-length");
-        const contentLength =
-          lengthText === null || lengthText === undefined ? undefined : Number(lengthText);
-        return await readBoundedPublicBody(response.body, contentLength, expected.maxBytes);
-      } catch (error) {
-        await closePublicBody(response?.body);
-        if (error?.message === "invalid station release bootstrap") throw error;
-        bootstrapInvalid();
       }
     },
   });

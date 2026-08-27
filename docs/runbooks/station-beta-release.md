@@ -214,6 +214,9 @@ legacy beta с GitHub-only evidence: workflow обязан собрать и п�
 immutable trees в новые каталоги, валидирует их и сравнивает common assets.
 Yandex tree в seed читается через фиксированный provider host
 `https://storage.yandexcloud.net`, не через ещё выключенный release DNS.
+Provider и canonical public reads выполняются максимум четырьмя попытками с
+паузами 1, 2 и 4 секунды; каждая попытка заново проверяет status, URL, metadata,
+размер и bytes, поэтому retry не ослабляет immutable validation.
 Оператор передаёт точный JSON evidence отдельно одобренного и применённого
 инфраструктурного plan, в котором
 `enableStationReleasePublicDns` равно `false`; значение `true`, лишнее поле или
@@ -246,6 +249,14 @@ immutable evidence, проверьте audit/versioning и выпустите н
 только для первоначального DNS-disabled baseline и не является общим repair
 режимом. Если обе immutable trees валидны, а сбой затронул только mutable
 targets, используйте `promote-existing`.
+
+Исключение для ещё не созданного initial baseline: если упавшая публикация успела
+создать и позднее полностью provider-validate обе immutable trees, но GitHub
+channel release и Yandex mutable pair всё ещё отсутствуют, `promote-existing`
+неприменим — у него нет обязательного полного baseline backup. Не повышайте и не
+переиспользуйте эту версию. После исправления причины выпустите строго новую beta
+через всё ещё одноразовый `seed-baseline`; предыдущая версия остаётся неизменяемым
+неповышенным incident evidence.
 
 ## Установка на станции
 
