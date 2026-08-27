@@ -12,6 +12,8 @@ const indexNames = [
   "billing_act_documents_tenant_created_id_idx",
   "commercial_offer_documents_tenant_created_id_idx",
 ] as const;
+const originalMigrationTimestamp = 1_787_859_000_000;
+const originalMigrationHash = "f1d1b9a161fce1cc0e810cf0a97c34678731ffa18ecff89852cd8c7461cea633";
 
 function quoteIdentifier(identifier: string): string {
   if (!/^[a-z_][a-z0-9_]*$/.test(identifier)) {
@@ -30,7 +32,7 @@ describe("tenant billing document pagination migration metadata", () => {
     const previous = JSON.parse(previousText) as { id: string };
     const current = JSON.parse(currentText) as { id: string; prevId: string };
     const journal = JSON.parse(journalText) as {
-      entries: Array<{ idx: number; tag: string }>;
+      entries: Array<{ idx: number; tag: string; when: number }>;
     };
 
     expect(current.id).not.toBe(previous.id);
@@ -38,6 +40,7 @@ describe("tenant billing document pagination migration metadata", () => {
     expect(journal.entries.at(-1)).toMatchObject({
       idx: 68,
       tag: "0068_tenant_billing_document_pagination_indexes",
+      when: originalMigrationTimestamp,
     });
   });
 });
@@ -117,6 +120,27 @@ describe.skipIf(!databaseUrl)("tenant billing document pagination migration", ()
     await maintenancePool.end();
   });
 
+  it("records 0068 with its original Drizzle timestamp and SQL hash", async () => {
+    const result = await pool.query<{
+      id: number;
+      hash: string;
+      created_at: string;
+    }>(
+      `SELECT id, hash, created_at
+       FROM drizzle.__drizzle_migrations
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+    );
+
+    expect(result.rows).toEqual([
+      {
+        id: 69,
+        hash: originalMigrationHash,
+        created_at: String(originalMigrationTimestamp),
+      },
+    ]);
+  });
+
   it("installs both indexes with the exact tenant/date/id column order", async () => {
     const result = await pool.query<{
       table_name: string;
@@ -175,5 +199,83 @@ describe.skipIf(!databaseUrl)("tenant billing document pagination migration", ()
       expect(plan, tableName).toContain(indexName);
       expect(plan, tableName).toContain('"Scan Direction":"Backward"');
     }
+  });
+
+  it("does not reapply 0068 when the database records its original timestamp and hash", async () => {
+    const originalRecord = await pool.query<{
+      id: number;
+      hash: string;
+      created_at: string;
+    }>(
+      `UPDATE drizzle.__drizzle_migrations
+       SET hash = $1, created_at = $2
+       WHERE id = (
+         SELECT id
+         FROM drizzle.__drizzle_migrations
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1
+       )
+       RETURNING id, hash, created_at`,
+      [originalMigrationHash, originalMigrationTimestamp],
+    );
+    expect(originalRecord.rows).toEqual([
+      {
+        id: 69,
+        hash: originalMigrationHash,
+        created_at: String(originalMigrationTimestamp),
+      },
+    ]);
+
+    const migrationsBefore = await pool.query<{
+      id: number;
+      hash: string;
+      created_at: string;
+    }>(
+      `SELECT id, hash, created_at
+       FROM drizzle.__drizzle_migrations
+       ORDER BY id`,
+    );
+    const indexesBefore = await pool.query<{
+      oid: string;
+      index_name: string;
+      definition: string;
+    }>(
+      `SELECT index_relation.oid::text AS oid,
+              index_relation.relname AS index_name,
+              pg_get_indexdef(index_relation.oid) AS definition
+       FROM pg_class AS index_relation
+       WHERE index_relation.relname = ANY($1::text[])
+       ORDER BY index_relation.relname`,
+      [[...indexNames]],
+    );
+    expect(indexesBefore.rows).toHaveLength(indexNames.length);
+
+    await migrate(drizzle(pool), { migrationsFolder });
+
+    const migrationsAfter = await pool.query<{
+      id: number;
+      hash: string;
+      created_at: string;
+    }>(
+      `SELECT id, hash, created_at
+       FROM drizzle.__drizzle_migrations
+       ORDER BY id`,
+    );
+    const indexesAfter = await pool.query<{
+      oid: string;
+      index_name: string;
+      definition: string;
+    }>(
+      `SELECT index_relation.oid::text AS oid,
+              index_relation.relname AS index_name,
+              pg_get_indexdef(index_relation.oid) AS definition
+       FROM pg_class AS index_relation
+       WHERE index_relation.relname = ANY($1::text[])
+       ORDER BY index_relation.relname`,
+      [[...indexNames]],
+    );
+
+    expect(migrationsAfter.rows).toEqual(migrationsBefore.rows);
+    expect(indexesAfter.rows).toEqual(indexesBefore.rows);
   });
 });
