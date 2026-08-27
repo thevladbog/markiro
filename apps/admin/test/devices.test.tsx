@@ -14,7 +14,12 @@ vi.mock("../src/layout/useActiveOrg.js", () => ({
 }));
 
 function response(body: unknown): Response {
-  return { ok: true, status: 200, json: async () => body } as Response;
+  return {
+    ok: true,
+    status: 200,
+    json: async () => body,
+    text: async () => (body === undefined ? "" : JSON.stringify(body)),
+  } as Response;
 }
 
 function activeExpiry(): string {

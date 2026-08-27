@@ -119,6 +119,34 @@ export class IntegrationsController {
     return result;
   }
 
+  // Полное отключение интеграции (см. `IntegrationsService.deleteChannel`).
+  // `CREDENTIALS_MANAGE` в дополнение к `INTEGRATIONS_WRITE`: удаление
+  // стирает `credentialLogin`/`credentialHash`, то есть отзывает учётные
+  // данные обмена -- та же граница, что у их выпуска выше. По той же причине
+  // -- запись в аудит безопасности.
+  //
+  // 204, а не дефолтный 200: тела у ответа нет, и статус говорит это явно.
+  // (`apiFetch` в админке теперь переживает и пустое тело с 200 -- см.
+  // apps/admin/src/api/client.ts, -- но 204 остаётся честным контрактом, а
+  // не полагается на толерантность клиента.)
+  @Delete(":type")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE, CABINET_CAPABILITY.CREDENTIALS_MANAGE)
+  async deleteChannel(
+    @Req() req: RequestWithTenant,
+    @Param("type") type: IntegrationChannelType,
+  ): Promise<void> {
+    await this.integrations.deleteChannel(req.tenantId!, type);
+    this.audit.credentialMutation({
+      tenantId: req.tenantId!,
+      userId: req.userId!,
+      action: "integration_channel.delete",
+      resourceId: type,
+      outcome: "succeeded",
+    });
+  }
+
   @Get(":type/candidates")
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_READ)
   async listCandidates(
