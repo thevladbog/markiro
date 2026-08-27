@@ -15,19 +15,23 @@ interface OpenApiSchema {
   items?: OpenApiSchema;
   oneOf?: OpenApiSchema[];
   enum?: unknown[];
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
 }
 
-type Equal<Actual, Expected> =
-  (<Value>() => Value extends Actual ? 1 : 2) extends <Value>() => Value extends Expected ? 1 : 2
-    ? true
-    : false;
-type Expect<Condition extends true> = Condition;
-type DashboardSourcesAreExact = Expect<
-  Equal<DashboardDataQualityDto["sources"], readonly ["code_registry", "boxes", "box_items"]>
->;
+const nonCanonicalSources: DashboardDataQualityDto["sources"] = [
+  "boxes",
+  "code_registry",
+  "box_items",
+] as const;
+// @ts-expect-error duplicate source labels are never a valid dashboard source tuple
+const duplicateSources: DashboardDataQualityDto["sources"] = ["code_registry", "code_registry", "box_items"] as const;
+// @ts-expect-error every dashboard source tuple contains all three source labels
+const incompleteSources: DashboardDataQualityDto["sources"] = ["code_registry", "boxes"] as const;
 
-const dashboardSourcesAreExact: DashboardSourcesAreExact = true;
-void dashboardSourcesAreExact;
+void duplicateSources;
+void incompleteSources;
 
 function schemaProperty(schema: OpenApiSchema, name: string): OpenApiSchema {
   const property = schema.properties?.[name];
@@ -58,7 +62,14 @@ function matchesOpenApiSchema(schema: OpenApiSchema, value: unknown): boolean {
 
   switch (schema.type) {
     case "array":
-      return Array.isArray(value) && !!schema.items && value.every((item) => matchesOpenApiSchema(schema.items!, item));
+      return (
+        Array.isArray(value) &&
+        !!schema.items &&
+        (schema.minItems === undefined || value.length >= schema.minItems) &&
+        (schema.maxItems === undefined || value.length <= schema.maxItems) &&
+        (!schema.uniqueItems || new Set(value).size === value.length) &&
+        value.every((item) => matchesOpenApiSchema(schema.items!, item))
+      );
     case "boolean":
       return typeof value === "boolean";
     case "integer":
@@ -121,7 +132,7 @@ const validOverview = {
       reasons: [],
       activeShiftCount: 0,
       lateDataShiftCount: 0,
-      sources: ["code_registry", "boxes", "box_items"],
+      sources: nonCanonicalSources,
     },
   },
   activeShifts: [
@@ -264,6 +275,7 @@ describe("dashboard overview DTO contract", () => {
       minItems: 3,
       maxItems: 3,
       uniqueItems: true,
+      items: { enum: ["code_registry", "boxes", "box_items"] },
     });
 
     const activeShift = schemaItems(schemaProperty(overview, "activeShifts"));
@@ -290,6 +302,30 @@ describe("dashboard overview DTO contract", () => {
       matchesOpenApiSchema(overview, {
         ...validOverview,
         setup: { ...validOverview.setup, unexpected: true },
+      }),
+    ).toBe(false);
+    expect(
+      matchesOpenApiSchema(overview, {
+        ...validOverview,
+        dynamics: {
+          ...validOverview.dynamics,
+          quality: {
+            ...validOverview.dynamics.quality,
+            sources: ["code_registry", "code_registry", "box_items"],
+          },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      matchesOpenApiSchema(overview, {
+        ...validOverview,
+        dynamics: {
+          ...validOverview.dynamics,
+          quality: {
+            ...validOverview.dynamics.quality,
+            sources: ["code_registry", "boxes"],
+          },
+        },
       }),
     ).toBe(false);
     expect(

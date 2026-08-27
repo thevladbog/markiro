@@ -10,6 +10,13 @@ export type DashboardQualityReasonCode = "active_shifts" | "late_data" | "missin
 export type DashboardGrain = "hour" | "day" | "week";
 export type DashboardMode = "validation" | "aggregation";
 export type DashboardDataSource = "code_registry" | "boxes" | "box_items";
+export type DashboardDataSources =
+  | readonly ["code_registry", "boxes", "box_items"]
+  | readonly ["code_registry", "box_items", "boxes"]
+  | readonly ["boxes", "code_registry", "box_items"]
+  | readonly ["boxes", "box_items", "code_registry"]
+  | readonly ["box_items", "code_registry", "boxes"]
+  | readonly ["box_items", "boxes", "code_registry"];
 
 export const dashboardOverviewQuerySchema = z.object({
   period: z.enum(dashboardPeriods).default("7d"),
@@ -68,7 +75,7 @@ export interface DashboardDataQualityDto {
   reasons: DashboardQualityReasonCode[];
   activeShiftCount: number;
   lateDataShiftCount: number;
-  sources: readonly ["code_registry", "boxes", "box_items"];
+  sources: DashboardDataSources;
 }
 
 export interface DashboardOverviewDto {
@@ -201,7 +208,7 @@ const qualityOpenApiSchema = {
       minItems: 3,
       maxItems: 3,
       uniqueItems: true,
-      description: "Always code_registry, boxes, then box_items",
+      description: "Exactly one each of code_registry, boxes, and box_items",
       items: { type: "string", enum: ["code_registry", "boxes", "box_items"] },
     },
   },
