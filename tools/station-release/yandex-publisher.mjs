@@ -2,7 +2,7 @@ import { S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -12,6 +12,7 @@ import {
   validateLegacyGithubStationReleaseDirectory,
   validateStationReleaseDirectory,
 } from "./artifacts.mjs";
+import { isCanonicalAbsolutePath } from "./canonical-path.mjs";
 import { createStationObjectStore, validateStationImmutableObject } from "./object-storage.mjs";
 import { stationReleaseLocation } from "./origins.mjs";
 import { parseStationBetaTag, parseStationStableTag } from "./version.mjs";
@@ -213,7 +214,7 @@ function ensureChannelVersion(channel, version) {
 }
 
 async function canonicalExistingDirectory(path) {
-  if (typeof path !== "string" || !isAbsolute(path) || resolve(path) !== path) invalid();
+  if (!isCanonicalAbsolutePath(path)) invalid();
   try {
     const info = await lstat(path);
     if (!info.isDirectory() || info.isSymbolicLink()) invalid();
@@ -225,7 +226,7 @@ async function canonicalExistingDirectory(path) {
 }
 
 function ensureNewAbsoluteDirectory(path) {
-  if (typeof path !== "string" || !isAbsolute(path) || resolve(path) !== path) invalid();
+  if (!isCanonicalAbsolutePath(path)) invalid();
 }
 
 async function validateLocalTree(tree, channel, version) {
@@ -454,7 +455,7 @@ function hasExactKeys(value, keys) {
 }
 
 async function readBootstrapJson(path) {
-  if (typeof path !== "string" || !isAbsolute(path) || resolve(path) !== path) bootstrapInvalid();
+  if (!isCanonicalAbsolutePath(path)) bootstrapInvalid();
   let bytes;
   try {
     const info = await lstat(path);
@@ -521,7 +522,7 @@ function validateBootstrapRelease(release, channel, sourceTag, evidence) {
 }
 
 async function ensureNewBootstrapOutput(path) {
-  if (typeof path !== "string" || !isAbsolute(path) || resolve(path) !== path) bootstrapInvalid();
+  if (!isCanonicalAbsolutePath(path)) bootstrapInvalid();
   try {
     await canonicalExistingDirectory(dirname(path));
     await lstat(path);
@@ -1193,7 +1194,7 @@ export function createYandexPublisher({ store, providerReader } = {}) {
 }
 
 function ensureCliPath(path) {
-  if (typeof path !== "string" || !isAbsolute(path) || resolve(path) !== path) commandInvalid();
+  if (!isCanonicalAbsolutePath(path)) commandInvalid();
 }
 
 function ensureCliChannel(channel) {

@@ -1,7 +1,8 @@
 import { appendFile, lstat, open, readFile, rename, rm } from "node:fs/promises";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { isCanonicalAbsolutePath } from "./canonical-path.mjs";
 import { parseStationBetaTag, parseStationStableTag } from "./version.mjs";
 
 const MODES = new Set(["publish", "promote-existing", "seed-baseline"]);
@@ -534,7 +535,7 @@ export function renderBetaReleaseSummary(state) {
 }
 
 function ensureAbsolutePath(path) {
-  if (typeof path !== "string" || !isAbsolute(path) || resolve(path) !== path) invalid();
+  if (!isCanonicalAbsolutePath(path)) invalid();
 }
 
 async function readState(path, validator = validateState) {

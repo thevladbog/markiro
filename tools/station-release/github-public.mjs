@@ -1,8 +1,9 @@
 import { lstat, mkdir, open, rm } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { stationAssetNames } from "./artifacts.mjs";
+import { isCanonicalAbsolutePath } from "./canonical-path.mjs";
 import { stationReleaseLocation } from "./origins.mjs";
 
 const CHANNELS = new Set(["beta", "stable"]);
@@ -198,9 +199,7 @@ export function createGithubPublicReader({ fetchImpl = fetch } = {}) {
 }
 
 async function ensureNewDirectory(directory) {
-  if (typeof directory !== "string" || !isAbsolute(directory) || resolve(directory) !== directory) {
-    invalid();
-  }
+  if (!isCanonicalAbsolutePath(directory)) invalid();
   try {
     await lstat(directory);
     invalid();
@@ -241,9 +240,7 @@ export async function downloadGithubChannelManifest({ channel, outputPath, reade
   if (
     !reader ||
     typeof reader.readChannelManifest !== "function" ||
-    typeof outputPath !== "string" ||
-    !isAbsolute(outputPath) ||
-    resolve(outputPath) !== outputPath
+    !isCanonicalAbsolutePath(outputPath)
   ) {
     invalid();
   }
