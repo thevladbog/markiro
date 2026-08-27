@@ -304,6 +304,8 @@ test("Station release CDN uses HTTPS GET/HEAD and origin-owned cache metadata be
   assert.match(cdn, /redirect_https_to_http\s*=\s*false/);
   assert.match(cdn, /allowed_http_methods\s*=\s*\["GET",\s*"HEAD"\]/);
   assert.match(cdn, /edge_cache_settings\s*=\s*0/);
+  assert.match(cdn, /custom_host_header\s*=\s*yandex_storage_bucket\.releases\.bucket_domain_name/);
+  assert.doesNotMatch(cdn, /forward_host_header\s*=\s*true/);
   assert.doesNotMatch(cdn, /browser_cache_settings|cache_http_headers/);
   assert.match(
     cdn,

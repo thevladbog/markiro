@@ -159,6 +159,7 @@ resource "yandex_cdn_resource" "releases" {
     allowed_http_methods   = ["GET", "HEAD"]
     redirect_http_to_https = true
     redirect_https_to_http = false
+    custom_host_header     = yandex_storage_bucket.releases.bucket_domain_name
 
     # Cache-Control object metadata remains authoritative. Objects without
     # explicit metadata receive no CDN fallback cache lifetime.
