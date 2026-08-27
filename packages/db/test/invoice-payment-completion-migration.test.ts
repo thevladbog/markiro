@@ -99,6 +99,76 @@ describe.skipIf(!databaseUrl)("invoice payment completion migration", () => {
     });
   }, 120_000);
 
+  it("backfills an old completing payment inserted before trigger DDL after waiting for its transaction", async () => {
+    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0066 }) => {
+      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0066 });
+      await seedBillingActors(pool);
+      const invoiceId = "00000000-0000-4000-8000-000000000941";
+      const paymentId = "00000000-0000-4000-8000-000000000942";
+      await seedIssuedInvoice(pool, {
+        invoiceId,
+        number: "INV-COMPLETION-PRE-TRIGGER",
+      });
+
+      const oldTransaction = await pool.connect();
+      const migrationConnection = await pool.connect();
+      let oldTransactionOpen = false;
+      let migrationPromise: Promise<void> | undefined;
+      try {
+        await oldTransaction.query("BEGIN");
+        oldTransactionOpen = true;
+        await oldTransaction.query("SELECT id FROM invoices WHERE id = $1 FOR UPDATE", [invoiceId]);
+        await oldTransaction.query(
+          `INSERT INTO billing_payments
+             (id, tenant_id, invoice_id, source, paid_at, amount, bank_reference,
+              platform_user_id, idempotency_key)
+           VALUES
+             ($1, 'billing-completion-tenant', $2, 'manual', '2026-08-22T12:00:00.000Z',
+              100, 'pre-trigger-manual', 'billing-completion-admin', 'pre-trigger-manual')`,
+          [paymentId, invoiceId],
+        );
+
+        const oldBackendPid = await backendPid(oldTransaction);
+        const migrationBackendPid = await backendPid(migrationConnection);
+        migrationPromise = migrate(drizzle(migrationConnection), { migrationsFolder });
+        void migrationPromise.catch(() => undefined);
+
+        const blockedMigration = await waitForBlockedMigration(
+          pool,
+          migrationBackendPid,
+          oldBackendPid,
+        );
+
+        await oldTransaction.query(
+          "UPDATE invoices SET status = 'paid', paid_at = '2026-08-22T12:00:00.000Z' WHERE id = $1",
+          [invoiceId],
+        );
+        await oldTransaction.query("COMMIT");
+        oldTransactionOpen = false;
+        await migrationPromise;
+
+        expect(blockedMigration).toMatchObject({
+          wait_event_type: "Lock",
+          wait_event: "relation",
+        });
+        expect(blockedMigration.query.replaceAll(/\s+/g, " ")).toContain(
+          'CREATE TRIGGER "billing_payments_record_completion"',
+        );
+        expect(await completionRows(pool)).toEqual([
+          {
+            invoice_id: invoiceId,
+            billing_payment_id: paymentId,
+          },
+        ]);
+      } finally {
+        if (oldTransactionOpen) await oldTransaction.query("ROLLBACK");
+        if (migrationPromise) await Promise.allSettled([migrationPromise]);
+        oldTransaction.release();
+        migrationConnection.release();
+      }
+    });
+  }, 120_000);
+
   it("captures old manual and imported completions after DDL even when a transaction started first", async () => {
     await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0066 }) => {
       await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0066 });
@@ -323,6 +393,41 @@ async function expectMigrationFailure(promise: Promise<void>, message: string): 
     return;
   }
   throw new Error(`Expected migration to fail with: ${message}`);
+}
+
+async function backendPid(client: pg.PoolClient): Promise<number> {
+  const result = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+  const pid = result.rows[0]?.pid;
+  if (pid === undefined) throw new Error("PostgreSQL did not return a backend PID");
+  return pid;
+}
+
+async function waitForBlockedMigration(
+  pool: pg.Pool,
+  migrationBackendPid: number,
+  oldBackendPid: number,
+): Promise<{ query: string; wait_event_type: string | null; wait_event: string | null }> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query<{
+      query: string;
+      wait_event_type: string | null;
+      wait_event: string | null;
+      blocked_by_old_transaction: boolean;
+    }>(
+      `SELECT query, wait_event_type, wait_event,
+              $1 = ANY(pg_blocking_pids(pid)) AS blocked_by_old_transaction
+       FROM pg_stat_activity
+       WHERE pid = $2`,
+      [oldBackendPid, migrationBackendPid],
+    );
+    const row = result.rows[0];
+    if (row?.blocked_by_old_transaction) return row;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(
+    `Timed out waiting for migration backend ${migrationBackendPid} to be blocked by old transaction ${oldBackendPid}`,
+  );
 }
 
 function quoteIdentifier(identifier: string): string {
