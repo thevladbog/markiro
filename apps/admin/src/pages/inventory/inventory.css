@@ -176,6 +176,7 @@
 .mk-inventory-import-attempt > span,
 .mk-inventory-terminal-line > span,
 .mk-inventory-list__stack {
+  display: flex;
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
