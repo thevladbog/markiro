@@ -1595,7 +1595,7 @@ describe("App", () => {
     try {
       render(<App />);
       await signInAsOperator();
-      fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Warehouse operations/ }));
       fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
       await database.publicationStarted;
       fireEvent.click(screen.getByRole("button", { name: "Change operator" }));
@@ -1746,7 +1746,7 @@ describe("App", () => {
     try {
       render(<App />);
       await signInAsOperator();
-      fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Warehouse operations/ }));
       const continueTask = await screen.findByRole("button", { name: "Continue INV-REPACK-1" });
       await database.exec.run(
         `INSERT INTO inventory_terminal_state
@@ -1976,7 +1976,7 @@ describe("App", () => {
     try {
       render(<App />);
       await signInAsOperator();
-      fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Warehouse operations/ }));
       fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
       await database.publicationStarted;
 
@@ -2109,7 +2109,7 @@ describe("App", () => {
     try {
       render(<App />);
       await signInAsOperator();
-      fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
+      fireEvent.click(screen.getByRole("button", { name: /Warehouse operations/ }));
       fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
       await database.publicationStarted;
 

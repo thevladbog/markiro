@@ -23,6 +23,7 @@ export interface StationInventoryTask {
   inventoryId: string;
   inventoryNumber: string;
   productName: string;
+  productPrintName: string | null;
   mode: "check" | "repack";
   lineId: string;
   lineName: string;
@@ -52,6 +53,8 @@ const inventoryTaskSchema = z
     inventoryId: z.uuid(),
     inventoryNumber: z.string().min(1),
     productName: z.string().min(1),
+    // default(null) keeps older API responses (without the field) parseable.
+    productPrintName: z.string().min(1).nullable().default(null),
     mode: z.enum(["check", "repack"]),
     lineId: z.uuid(),
     lineName: z.string().min(1),

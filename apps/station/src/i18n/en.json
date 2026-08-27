@@ -177,9 +177,8 @@
     "actions": "Warehouse actions",
     "refresh": "Refresh tasks",
     "categories": {
-      "label": "Floor task categories",
-      "production": "Production shifts {{count}}",
-      "warehouse": "Warehouse operations {{count}}"
+      "warehouse": "Warehouse operations {{count}}",
+      "backToShifts": "Back to shifts {{count}}"
     },
     "scanTitle": "Scan the task-form barcode",
     "scanHint": "Inventory opens automatically. A task assigned to another line requires confirmation.",
@@ -213,6 +212,7 @@
       "accepted": "Bottle added to the new box",
       "discrepancy": "Scan saved, but the bottle was not added",
       "corrections": "Corrections",
+      "openBoxTitle": "Open box",
       "removeLast": "Remove last bottle",
       "clear": "Clear open box",
       "resolveConflict": "Clear conflict and continue",
@@ -237,10 +237,12 @@
       "reprint": {
         "title": "Reprint a box label",
         "sscc": "Box SSCC",
-        "find": "Check box",
-        "candidate": "Reprint this SSCC",
-        "missing": "No printed box with this SSCC was found on this terminal.",
-        "action": "Reprint label"
+        "hint": "Type at least 4 digits of the number — matching boxes appear automatically.",
+        "noMatches": "No matches among the boxes printed by this terminal.",
+        "action": "Reprint",
+        "keypad": "SSCC entry keypad",
+        "keypadBackspace": "Backspace",
+        "keypadClear": "Clear"
       },
       "position": "Position {{position}}: {{status}}",
       "occupied": "occupied",

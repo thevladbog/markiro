@@ -346,11 +346,22 @@ body,
   }
 }
 
-#root .mk-alert > span,
-#root .mk-alert > div > span,
+#root .mk-alert > span:not(.mk-badge),
+#root .mk-alert > div > span:not(.mk-badge),
 #root .mk-alert > div > div {
   font-size: 18px !important;
   line-height: 26px !important;
+}
+
+/* Floor-size the alert badge separately: the generic 18px bump above made the
+   mono space inside two-word badges read as a double space. */
+#root .mk-alert .mk-badge {
+  height: auto !important;
+  padding: 2px 8px !important;
+  font-size: 14px !important;
+  line-height: 20px !important;
+  /* IBM Plex Mono's space is a full cell; pull word gaps back to sans-like width. */
+  word-spacing: -0.35ch;
 }
 
 .station-screen-slot {
@@ -953,25 +964,17 @@ body,
   grid-template-rows: minmax(0, 1fr) 64px;
 }
 
-.shift-selection__content--categorized {
-  gap: var(--sp-2);
-  grid-template-rows: 64px minmax(0, 1fr) 64px;
-}
-
 .shift-selection__content--alternate {
-  grid-template-rows: 64px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
-.floor-task-categories {
-  display: grid;
-  min-width: 0;
-  min-height: 64px;
-  gap: var(--sp-2);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+/* Top-right escape hatch in the screen header (e.g. «Складские операции»). */
+.shift-selection__header-action {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
-.floor-task-categories .mk-btn {
-  width: 100%;
+.shift-selection__header-action .mk-btn {
   min-height: 64px;
 }
 
@@ -1081,17 +1084,18 @@ body,
 }
 
 .inventory-task-selection__body {
-  display: grid;
+  display: flex;
   min-width: 0;
   min-height: 64px;
   overflow: hidden;
   gap: var(--sp-2);
-  grid-template-rows: minmax(0, 1fr) auto;
+  flex-direction: column;
   align-items: stretch;
 }
 
 .inventory-task-selection__body > p {
   display: grid;
+  flex: 1;
   color: var(--fg-3);
   font: var(--floor-body);
   place-items: center start;
@@ -1152,6 +1156,7 @@ body,
   display: grid;
   min-width: 0;
   min-height: 64px;
+  margin-top: auto;
   gap: var(--sp-2);
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
@@ -1552,32 +1557,38 @@ body,
 }
 
 .repack-prompt {
-  display: grid;
+  display: flex;
   min-width: 0;
-  min-height: 0;
-  gap: var(--sp-1);
+  min-height: 64px;
+  padding: var(--sp-2) var(--sp-3);
+  gap: var(--sp-2);
   border: 1px solid var(--info-border);
   border-radius: var(--r-2);
   background: var(--info-bg);
-  align-content: center;
-  justify-items: center;
-  text-align: center;
+  align-items: center;
+  text-align: left;
 }
 
 .repack-prompt > span {
-  font: var(--floor-title);
+  font: var(--floor-body-strong);
 }
 
 .repack-prompt h2,
 .repack-prompt p {
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .repack-prompt h2 {
-  font: var(--floor-title);
+  min-width: 0;
+  font: var(--floor-body-strong);
 }
 
 .repack-prompt p {
+  min-width: 0;
+  margin-left: auto;
   color: var(--fg-2);
   font: var(--floor-body-strong);
 }
@@ -1592,36 +1603,48 @@ body,
   background: var(--err-bg);
 }
 
+/* The box-fill visualization is the hero of the repack screen: the operator's
+   main question is "how full is the box", so the counter and cells take the
+   flexible middle row while the scan prompt collapses to a status strip. */
 .repack-capacity {
   display: grid;
-  gap: var(--sp-1);
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-2);
+  gap: var(--sp-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-raised);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .repack-capacity > strong {
-  min-width: 72px;
   color: var(--ok-fg);
   font: var(--floor-counter-sm);
+  font-size: clamp(40px, 8vh, 72px);
+  line-height: 1.1;
+  text-align: center;
 }
 
 .repack-capacity ol {
   display: grid;
   min-width: 0;
+  min-height: 0;
   margin: 0;
   padding: 0;
-  gap: 6px;
+  gap: var(--sp-1);
   list-style: none;
   grid-template-columns: repeat(10, minmax(28px, 1fr));
+  grid-auto-rows: minmax(48px, 1fr);
 }
 
 .repack-capacity li {
   display: grid;
-  min-height: 36px;
+  min-height: 48px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-1);
   color: var(--fg-2);
-  font: 700 13px/18px var(--font-ui);
+  font: 700 18px/24px var(--font-ui);
   place-items: center;
 }
 
@@ -1631,20 +1654,49 @@ body,
   color: var(--ok-fg);
 }
 
+/* Corrections dialog: the open-box actions sit in a narrow left rail while the
+   reprint search owns the rest — keypad on the left, live matches on the right
+   so several candidate SSCCs have room to breathe and scroll. */
 .repack-corrections {
   display: grid;
-  gap: var(--sp-3);
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  height: 100%;
+  min-height: 0;
+  gap: var(--sp-4);
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 2.2fr);
 }
 
-.repack-corrections__open-box,
-.repack-reprint,
-.repack-reprint__candidate {
+.repack-corrections > section {
+  min-width: 0;
+  min-height: 0;
+}
+
+.repack-corrections h3 {
+  margin: 0;
+  font: var(--floor-body-strong);
+}
+
+.repack-corrections__open {
+  display: grid;
+  padding: var(--sp-3);
+  gap: var(--sp-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  align-content: start;
+}
+
+.repack-corrections__open-box {
   display: grid;
   gap: var(--sp-2);
 }
 
-.repack-reprint h3,
+.repack-reprint {
+  display: grid;
+  min-height: 0;
+  gap: var(--sp-2);
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
 .repack-reprint p {
   margin: 0;
 }
@@ -1652,30 +1704,114 @@ body,
 .repack-reprint__lookup {
   display: grid;
   gap: var(--sp-1);
-  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .repack-reprint__lookup label {
-  grid-column: 1 / -1;
-  font: var(--floor-body-strong);
+  color: var(--fg-2);
+  font: var(--floor-caption);
 }
 
 .repack-reprint__lookup input {
   min-width: 0;
   min-height: var(--control-floor);
-  padding: 0 var(--sp-2);
+  padding: 0 var(--sp-3);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-2);
   background: var(--surface-card);
   color: var(--fg-1);
-  font: 700 18px/24px var(--font-mono);
+  font: 700 28px/36px var(--font-mono);
+  letter-spacing: 0.12em;
 }
 
-.repack-reprint__candidate {
-  padding: var(--sp-2);
-  border: 1px solid var(--ok-border);
+.repack-reprint__lookup input::placeholder {
+  color: var(--fg-3);
+}
+
+.repack-reprint__hint {
+  color: var(--fg-3);
+  font: var(--floor-caption);
+}
+
+.repack-reprint__workspace {
+  display: grid;
+  min-height: 0;
+  gap: var(--sp-4);
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+}
+
+.repack-reprint__keypad {
+  display: grid;
+  justify-content: start;
+}
+
+.repack-reprint__results {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
   border-radius: var(--r-2);
-  background: var(--ok-bg);
+  background: var(--surface-raised);
+}
+
+.repack-reprint__placeholder {
+  display: grid;
+  padding: var(--sp-3);
+  color: var(--fg-3);
+  font: var(--floor-body);
+  place-items: center;
+  text-align: center;
+}
+
+.repack-reprint__matches {
+  display: grid;
+  margin: 0;
+  padding: var(--sp-2);
+  overflow-y: auto;
+  gap: var(--sp-2);
+  list-style: none;
+  align-content: start;
+}
+
+.repack-reprint__match {
+  display: grid;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  gap: var(--sp-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.repack-reprint__match > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.repack-reprint__match strong {
+  overflow: hidden;
+  color: var(--fg-2);
+  font: 700 22px/28px var(--font-mono);
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repack-reprint__match mark {
+  background: transparent;
+  color: var(--ok-fg);
+}
+
+.repack-reprint__match span {
+  overflow: hidden;
+  color: var(--fg-2);
+  font: var(--floor-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .inventory-box-print {
@@ -1972,6 +2108,7 @@ body,
   display: grid;
   min-width: 0;
   min-height: 0;
+  padding: var(--sp-2) var(--sp-2) var(--sp-1) 0;
   overflow: hidden;
   gap: var(--sp-1);
   grid-template-rows: auto minmax(0, 1fr) auto auto 72px;
@@ -2058,6 +2195,9 @@ body,
 .shift-card__product {
   display: -webkit-box;
   align-self: start;
+  /* The row is minmax(0, 1fr): without this cap a long clamped title still
+     overflows the track and overlaps the dates/mode rows below. */
+  max-height: 100%;
   overflow: hidden;
   font: var(--floor-lg);
   letter-spacing: -0.015em;
@@ -2065,15 +2205,34 @@ body,
   -webkit-line-clamp: 6;
 }
 
-.shift-card__number {
+/* Short kiosk viewports (1366×768 and 1280×800): the compact overrides below
+   only trigger on narrow widths, so tighten the title here by height instead —
+   otherwise the clamped 6-line title overflows its row or clips mid-line. */
+@media (max-height: 820px) {
+  .shift-card__product {
+    font: 600 20px/24px var(--font-ui);
+    -webkit-line-clamp: 4;
+  }
+}
+
+/* Number and status render as floor-sized chips (like the status bar tags). */
+.shift-card__heading .mk-chip {
+  height: 34px;
   min-width: 0;
+  padding: 0 14px;
   overflow: hidden;
-  color: var(--fg-1);
-  font: var(--floor-body-strong);
+  border-radius: 999px;
+  font: 700 15px/1 var(--font-ui);
+}
+
+.shift-card__heading .mk-chip > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shift-card__number.mk-chip {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .shift-card__meta {
@@ -2110,13 +2269,8 @@ body,
   white-space: nowrap;
 }
 
-.shift-card__status {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--ok-fg);
-  font: var(--floor-body-strong);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.shift-card__status.mk-chip {
+  flex-shrink: 0;
 }
 
 .shift-card__counterparty {

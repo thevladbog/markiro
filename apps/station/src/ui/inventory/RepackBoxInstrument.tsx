@@ -22,6 +22,7 @@ export interface RepackBoxInstrumentProps {
     discrepancy: string;
     writeFailed: string;
     position: (position: number, filled: boolean) => string;
+    formatDate: (value: string) => string;
   };
 }
 
@@ -68,13 +69,8 @@ export function RepackBoxInstrument({
         </div>
         <div>
           <span>{labels.productionDate}</span>
-          <strong>{box?.productionDate ?? "—"}</strong>
+          <strong>{box?.productionDate ? labels.formatDate(box.productionDate) : "—"}</strong>
         </div>
-      </div>
-      <div className={`repack-prompt repack-prompt--${state.phase}`}>
-        <span aria-hidden="true">⌗</span>
-        <h2>{prompt}</h2>
-        {verdict ? <p role="status">{verdict}</p> : null}
       </div>
       <div className="repack-capacity" aria-label={`${count} / ${capacity}`}>
         <strong data-testid="repack-count">
@@ -95,6 +91,11 @@ export function RepackBoxInstrument({
             );
           })}
         </ol>
+      </div>
+      <div className={`repack-prompt repack-prompt--${state.phase}`}>
+        <span aria-hidden="true">⌗</span>
+        <h2>{prompt}</h2>
+        {verdict ? <p role="status">{verdict}</p> : null}
       </div>
     </section>
   );

@@ -1,4 +1,4 @@
-import { Button, Card } from "@markiro/ui";
+import { Button, Card, StatusChip } from "@markiro/ui";
 import { formatShiftPlannedDate, stationDisplayLocale } from "../lib/format-date.js";
 import type { SqlExecutor, StationProductImageDescriptor } from "../lib/mirror.js";
 import { ProductImage } from "./ProductImage.js";
@@ -81,8 +81,20 @@ export function ShiftCard({
         )}
         <div className="shift-card__details">
           <div className="shift-card__heading">
-            {number ? <div className="shift-card__number">{number}</div> : null}
-            <div className="shift-card__status">{statusLabel ?? status}</div>
+            {number ? (
+              <StatusChip
+                className="shift-card__number"
+                status="neutral"
+                glyph={null}
+                label={number}
+              />
+            ) : null}
+            <StatusChip
+              className="shift-card__status"
+              status={status === "active" ? "ok" : status === "closed" ? "neutral" : "info"}
+              glyph={status === "active" ? "●" : status === "closed" ? "■" : "◷"}
+              label={statusLabel ?? status}
+            />
           </div>
           <div className="shift-card__product">{productName ?? "—"}</div>
           <div className="shift-card__meta">

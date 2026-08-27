@@ -851,6 +851,7 @@ export interface StationInventoryTaskDto {
   inventoryId: string;
   inventoryNumber: string;
   productName: string;
+  productPrintName: string | null;
   mode: InventoryMode;
   lineId: string;
   lineName: string;
@@ -958,6 +959,7 @@ const stationInventoryTaskOpenApiSchema: SchemaObject = {
     "inventoryId",
     "inventoryNumber",
     "productName",
+    "productPrintName",
     "mode",
     "lineId",
     "lineName",
@@ -968,6 +970,7 @@ const stationInventoryTaskOpenApiSchema: SchemaObject = {
     inventoryId: { type: "string", format: "uuid" },
     inventoryNumber: { type: "string" },
     productName: { type: "string" },
+    productPrintName: { type: "string", nullable: true },
     mode: { type: "string", enum: ["check", "repack"] },
     lineId: { type: "string", format: "uuid" },
     lineName: { type: "string" },

@@ -60,7 +60,7 @@ export function InventoryTaskConfirmation({
           </section>
         </div>
         <section className="inventory-confirmation__task">
-          <strong>{task.productName}</strong>
+          <strong>{task.productPrintName ?? task.productName}</strong>
           <span>{t(task.mode === "repack" ? "inventory.modeRepack" : "inventory.modeCheck")}</span>
         </section>
         <Alert tone="warn">{t("inventory.confirmation.warning")}</Alert>

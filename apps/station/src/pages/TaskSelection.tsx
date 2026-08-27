@@ -70,6 +70,9 @@ function taskMatchesManifest(
     task.inventoryId === manifest.inventoryId &&
     task.inventoryNumber === manifest.inventoryNumber &&
     task.productName === manifest.productName &&
+    // null means the task came from an older list response without the field,
+    // so only a present-but-different print name counts as a mismatch.
+    (task.productPrintName === null || task.productPrintName === manifest.productPrintName) &&
     task.mode === manifest.mode &&
     task.lineId === manifest.lineId &&
     task.lineName === manifest.lineName &&
@@ -565,7 +568,7 @@ export function TaskSelection({
             <article className="inventory-task-card" key={task.inventoryId}>
               <div>
                 <strong>{task.inventoryNumber}</strong>
-                <span>{task.productName}</span>
+                <span>{task.productPrintName ?? task.productName}</span>
                 <small>
                   {t(task.mode === "repack" ? "inventory.modeRepack" : "inventory.modeCheck")}
                 </small>
@@ -626,34 +629,29 @@ export function TaskSelection({
         productionActionsVisible={category === "production"}
         alternateActive={category === "warehouse"}
         alternateContent={inventoryPanel}
-        categoryNavigation={(openShiftCount) => (
-          <div
-            className="floor-task-categories"
-            role="tablist"
-            aria-label={t("inventory.categories.label")}
-          >
+        headerAction={(openShiftCount) =>
+          category === "production" ? (
             <Button
               size="floor"
-              variant={category === "production" ? "primary" : "secondary"}
-              role="tab"
-              aria-selected={category === "production"}
+              variant="secondary"
               disabled={routePending}
-              onClick={() => setCategory("production")}
-            >
-              {t("inventory.categories.production", { count: openShiftCount })}
-            </Button>
-            <Button
-              size="floor"
-              variant={category === "warehouse" ? "primary" : "secondary"}
-              role="tab"
-              aria-selected={category === "warehouse"}
-              disabled={routePending}
+              data-floor-category="warehouse"
               onClick={() => setCategory("warehouse")}
             >
               {t("inventory.categories.warehouse", { count: tasks.length })}
             </Button>
-          </div>
-        )}
+          ) : (
+            <Button
+              size="floor"
+              variant="secondary"
+              disabled={routePending}
+              data-floor-category="production"
+              onClick={() => setCategory("production")}
+            >
+              {t("inventory.categories.backToShifts", { count: openShiftCount })}
+            </Button>
+          )
+        }
       />
       {confirmation ? (
         <InventoryTaskConfirmation

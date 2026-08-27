@@ -82,7 +82,7 @@ export function Alert({
           <div style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>{children}</div>
         )}
       </div>
-      {action}
+      {action ? <div style={{ alignSelf: "center", flexShrink: 0 }}>{action}</div> : null}
     </div>
   );
 }

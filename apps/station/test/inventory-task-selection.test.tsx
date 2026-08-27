@@ -246,7 +246,7 @@ function client(
 }
 
 function openWarehouseCategoryIfPresent() {
-  const warehouse = screen.queryByRole("tab", { name: /Warehouse operations/ });
+  const warehouse = screen.queryByRole("button", { name: /Warehouse operations/ });
   if (warehouse) fireEvent.click(warehouse);
 }
 
@@ -283,7 +283,7 @@ describe("TaskSelection inventory entry", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Open" }));
     expect(await screen.findByText("Action failed. Please try again.")).toBeDefined();
-    fireEvent.click(screen.getByRole("tab", { name: /Warehouse operations/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Warehouse operations/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
 
     await waitFor(() => expect(onInventorySelected).toHaveBeenCalledOnce());
@@ -386,7 +386,7 @@ describe("TaskSelection inventory entry", () => {
     );
     const newShift = screen.getByRole("button", { name: "New shift" });
     const setup = screen.getByRole("button", { name: "Workstation setup" });
-    const warehouse = screen.getByRole("tab", { name: /Warehouse operations/ });
+    const warehouse = screen.getByRole("button", { name: /Warehouse operations/ });
     expect(newShift.hasAttribute("disabled")).toBe(true);
     expect(setup.hasAttribute("disabled")).toBe(true);
     expect(warehouse.hasAttribute("disabled")).toBe(true);
@@ -484,7 +484,7 @@ describe("TaskSelection inventory entry", () => {
     await act(async () => {});
     expect(onShiftSelected).not.toHaveBeenCalled();
 
-    fireEvent.click(await screen.findByRole("tab", { name: /Warehouse operations/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Warehouse operations/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
     await waitFor(() => expect(onInventorySelected).toHaveBeenCalledOnce());
     expect(replacement.posts.filter(({ path }) => path.endsWith("/join"))).toHaveLength(1);
@@ -669,7 +669,7 @@ describe("TaskSelection inventory entry", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Continue INV-00047" }));
       await suspended.started;
 
-      const production = screen.queryByRole("tab", { name: /Production shifts/ });
+      const production = screen.queryByRole("button", { name: /Back to shifts/ });
       if (destination !== "setup" && production) fireEvent.click(production);
       if (destination === "production shift") {
         fireEvent.click(screen.getByRole("button", { name: "Open" }));
@@ -802,12 +802,12 @@ describe("TaskSelection inventory entry", () => {
 
       let routeCallback: ReturnType<typeof vi.fn> | null = null;
       if (destination === "production shift") {
-        const production = screen.queryByRole("tab", { name: /Production shifts/ });
+        const production = screen.queryByRole("button", { name: /Back to shifts/ });
         if (production) fireEvent.click(production);
         fireEvent.click(screen.getByRole("button", { name: "Open" }));
         routeCallback = onShiftSelected;
       } else if (destination === "new shift") {
-        const production = screen.queryByRole("tab", { name: /Production shifts/ });
+        const production = screen.queryByRole("button", { name: /Back to shifts/ });
         if (production) fireEvent.click(production);
         fireEvent.click(screen.getByRole("button", { name: "New shift" }));
         routeCallback = onNew;
@@ -943,7 +943,9 @@ describe("TaskSelection inventory entry", () => {
     expect(screen.queryByText("INV-00047")).toBeNull();
     expect(screen.getByText("No inventory tasks are assigned to this line.")).toBeDefined();
     expect(gets.filter((path) => path === "/station/inventory-tasks")).toHaveLength(2);
-    expect(screen.getByRole("tab", { name: /Warehouse operations 0/ })).toBeDefined();
+    // The refreshed zero count shows on the shifts screen's header button.
+    fireEvent.click(screen.getByRole("button", { name: /Back to shifts/ }));
+    expect(screen.getByRole("button", { name: /Warehouse operations 0/ })).toBeDefined();
     vi.useRealTimers();
   });
 
@@ -969,17 +971,14 @@ describe("TaskSelection inventory entry", () => {
 
     expect(await screen.findAllByRole("button", { name: "Open" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Rejoin" })).toBeDefined();
-    const categories = screen.getByRole("tablist", { name: "Floor task categories" });
-    const production = screen.getByRole("tab", { name: "Production shifts 2" });
-    const warehouse = screen.getByRole("tab", { name: "Warehouse operations 1" });
-    expect(categories.contains(production)).toBe(true);
-    expect(categories.contains(warehouse)).toBe(true);
-    expect(production.getAttribute("aria-selected")).toBe("true");
-    expect(production.classList.contains("mk-btn--floor")).toBe(true);
+    const warehouse = screen.getByRole("button", { name: "Warehouse operations 1" });
     expect(warehouse.classList.contains("mk-btn--floor")).toBe(true);
+    expect(screen.queryByRole("button", { name: /Back to shifts/ })).toBeNull();
     expect(screen.queryByText("INV-00047")).toBeNull();
 
     fireEvent.click(warehouse);
+    expect(screen.getByRole("button", { name: "Back to shifts 2" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /Warehouse operations/ })).toBeNull();
     expect(await screen.findByText("INV-00047")).toBeDefined();
     expect(screen.getByText("Scan the task-form barcode")).toBeDefined();
     expect(screen.queryByText("Production water")).toBeNull();
@@ -988,7 +987,7 @@ describe("TaskSelection inventory entry", () => {
     expect(screen.getByRole("button", { name: "Continue INV-00047" })).toBeDefined();
     expect(screen.queryByText("Standalone disaggregation")).toBeNull();
 
-    fireEvent.click(production);
+    fireEvent.click(screen.getByRole("button", { name: "Back to shifts 2" }));
     expect(await screen.findByText("Production water")).toBeDefined();
     expect(screen.getByText("Production juice")).toBeDefined();
     expect(screen.queryByText("INV-00047")).toBeNull();

@@ -647,6 +647,58 @@ export async function findInventoryPrintedBoxBySscc(
     : null;
 }
 
+export interface InventoryPrintedBoxMatch {
+  boxId: string;
+  sscc: string;
+  quantity: number;
+  productionDate: string;
+}
+
+/**
+ * Live reprint lookup: matches printed boxes of this terminal by any digit
+ * fragment of the SSCC, so the operator can stop typing as soon as the list
+ * narrows down instead of entering all 18 digits.
+ */
+export async function searchInventoryPrintedBoxesBySscc(
+  exec: SqlExecutor,
+  input: {
+    inventoryId: string;
+    snapshotId: string;
+    deviceId: string;
+    fragment: string;
+    limit?: number;
+  },
+): Promise<InventoryPrintedBoxMatch[]> {
+  if (!/^[0-9]{1,18}$/.test(input.fragment)) return [];
+  const limit = input.limit ?? 8;
+  const rows = await exec.all<{
+    box_id: string;
+    new_sscc: string;
+    production_date: string;
+    quantity: number;
+  }>(
+    `SELECT box.box_id, box.new_sscc, box.production_date,
+            COUNT(item.item_id) AS quantity
+       FROM inventory_repack_boxes_mirror box
+       INNER JOIN inventory_repack_items_mirror item
+         ON item.inventory_id = box.inventory_id AND item.snapshot_id = box.snapshot_id
+        AND item.box_id = box.box_id AND item.removed_at IS NULL
+      WHERE box.inventory_id = ? AND box.snapshot_id = ? AND box.owner_device_id = ?
+        AND box.new_sscc LIKE ? AND box.state = 'closed' AND box.print_state = 'printed'
+        AND box.invalidated_at IS NULL
+      GROUP BY box.inventory_id, box.snapshot_id, box.box_id
+      ORDER BY box.new_sscc
+      LIMIT ?`,
+    [input.inventoryId, input.snapshotId, input.deviceId, `%${input.fragment}%`, limit],
+  );
+  return rows.map((row) => ({
+    boxId: row.box_id,
+    sscc: row.new_sscc,
+    quantity: row.quantity,
+    productionDate: row.production_date,
+  }));
+}
+
 export async function readInventoryBoxPrintFacts(
   exec: SqlExecutor,
   input: {

@@ -286,6 +286,7 @@ const GALLERY_INVENTORY_TASK = {
   inventoryId: "11111111-1111-4111-8111-111111111111",
   inventoryNumber: "INV-00047",
   productName: "Вода питьевая 0,5 л / Drinking water 0.5 L",
+  productPrintName: "Вода 0,5 л",
   mode: "check" as const,
   lineId: "22222222-2222-4222-8222-222222222222",
   lineName: "Линия розлива 2 / Filling line 2",
@@ -302,7 +303,6 @@ const GALLERY_CHECK_MANIFEST: StationInventoryBundleManifest & { mode: "check" }
   contentDigest: "b".repeat(64),
   codeCount: 124,
   productId: "55555555-5555-4555-8555-555555555555",
-  productPrintName: null,
   egaisCode: null,
   shelfLifeDays: null,
   gtin14: "04600000000015",
@@ -318,7 +318,6 @@ const GALLERY_REPACK_MANIFEST: StationInventoryBundleManifest & { mode: "repack"
   ...GALLERY_CHECK_MANIFEST,
   inventoryNumber: "INV-R-00012",
   mode: "repack",
-  productPrintName: GALLERY_INVENTORY_TASK.productName,
   boxLabelTemplate: {
     id: "66666666-6666-4666-8666-666666666666",
     name: "Gallery box label",
@@ -389,7 +388,7 @@ function InventoryFixture({ variant }: { variant: string }) {
 function InventoryTaskSelectionFixture() {
   const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    rootRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[1]?.click();
+    rootRef.current?.querySelector<HTMLButtonElement>('[data-floor-category="warehouse"]')?.click();
   }, []);
   return (
     <div ref={rootRef} style={{ width: "100%", height: "100%", minHeight: 0 }}>
@@ -552,15 +551,37 @@ function RepackInventoryFixture({ variant }: { variant: string }) {
               productionDate: GALLERY_INVENTORY_DATE,
             }
           : null,
-        reprintSscc: reprint ? GALLERY_INVENTORY_SSCC : "",
-        reprintCandidate: reprint
+        reprintSscc: reprint ? "0000" : "",
+        ...(reprint
           ? {
-              boxId: "gallery-repack-box",
-              sscc: GALLERY_INVENTORY_SSCC,
-              quantity: 20,
-              productionDate: GALLERY_INVENTORY_DATE,
+              reprintMatches: [
+                {
+                  boxId: "gallery-repack-box",
+                  sscc: GALLERY_INVENTORY_SSCC,
+                  quantity: 20,
+                  productionDate: GALLERY_INVENTORY_DATE,
+                },
+                {
+                  boxId: "gallery-repack-box-2",
+                  sscc: "046006820000000039",
+                  quantity: 20,
+                  productionDate: GALLERY_INVENTORY_DATE,
+                },
+                {
+                  boxId: "gallery-repack-box-3",
+                  sscc: "046006820000000046",
+                  quantity: 14,
+                  productionDate: "2026-08-18",
+                },
+                {
+                  boxId: "gallery-repack-box-4",
+                  sscc: "046006820000000053",
+                  quantity: 20,
+                  productionDate: "2026-08-18",
+                },
+              ],
             }
-          : null,
+          : {}),
       }}
     />
   );
@@ -1179,7 +1200,16 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
   return (
     <StationScreen
       title={ru ? "Смены" : "Shifts"}
-      header={<div className="shift-selection__message" aria-hidden="true" />}
+      header={
+        <>
+          <div className="shift-selection__message" aria-hidden="true" />
+          <div className="shift-selection__header-action">
+            <Button size="floor" variant="secondary">
+              {ru ? "Складские операции 1" : "Warehouse operations 1"}
+            </Button>
+          </div>
+        </>
+      }
       actions={<GalleryFooter locale={locale} primary={ru ? "Новая смена" : "New shift"} />}
     >
       <div className="shift-selection__content">

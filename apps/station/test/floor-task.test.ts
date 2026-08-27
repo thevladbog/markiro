@@ -53,6 +53,7 @@ const task = {
   inventoryId,
   inventoryNumber: "INV-00042",
   productName: "Вода питьевая 0,5 л",
+  productPrintName: null,
   mode: "check" as const,
   lineId,
   lineName: "Розлив №2",
@@ -77,6 +78,16 @@ describe("floor task contracts", () => {
     const shift = { id: "shift-1", status: "active", mode: "aggregation" };
 
     expect(productionFloorTask(shift)).toEqual({ kind: "production", shift });
+  });
+
+  it("defaults an omitted productPrintName to null and preserves a provided one", () => {
+    const withoutPrintName: Partial<typeof task> = { ...task };
+    delete withoutPrintName.productPrintName;
+    expect(parseInventoryTaskList({ items: [withoutPrintName] })).toEqual([
+      { ...task, productPrintName: null },
+    ]);
+    const named = { ...task, productPrintName: "Вода 0,5 л" };
+    expect(parseInventoryTaskList({ items: [named] })).toEqual([named]);
   });
 
   it("strictly validates inventory task discovery and barcode resolution", () => {
