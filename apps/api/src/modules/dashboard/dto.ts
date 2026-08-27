@@ -13,7 +13,7 @@ export type DashboardDataSource = "code_registry" | "boxes" | "box_items";
 
 export const dashboardOverviewQuerySchema = z.object({
   period: z.enum(dashboardPeriods).default("7d"),
-});
+}).strict();
 export type DashboardOverviewQueryDto = z.infer<typeof dashboardOverviewQuerySchema>;
 
 export interface DashboardValidationMetricsDto {
@@ -68,7 +68,7 @@ export interface DashboardDataQualityDto {
   reasons: DashboardQualityReasonCode[];
   activeShiftCount: number;
   lateDataShiftCount: number;
-  sources: DashboardDataSource[];
+  sources: readonly ["code_registry", "boxes", "box_items"];
 }
 
 export interface DashboardOverviewDto {
@@ -201,6 +201,7 @@ const qualityOpenApiSchema = {
       minItems: 3,
       maxItems: 3,
       uniqueItems: true,
+      description: "Always code_registry, boxes, then box_items",
       items: { type: "string", enum: ["code_registry", "boxes", "box_items"] },
     },
   },
