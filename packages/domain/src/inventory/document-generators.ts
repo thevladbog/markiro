@@ -14,7 +14,7 @@ export interface InventoryDocumentGenerationMetadata {
 }
 
 export interface InventoryDocumentGenerationSource {
-  writeOffCandidates?: readonly { codeHash: string; canonicalRaw: string }[];
+  writeOffCandidates: readonly { codeHash: string; canonicalRaw: string }[];
   verified: readonly {
     codeHash: string;
     canonicalRaw: string;

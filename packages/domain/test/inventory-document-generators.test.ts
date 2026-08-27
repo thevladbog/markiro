@@ -49,6 +49,7 @@ const metadata: InventoryDocumentGenerationMetadata = {
 
 function source(): InventoryDocumentGenerationSource {
   return {
+    writeOffCandidates: [],
     verified: [
       {
         codeHash: "hash-b",
@@ -106,6 +107,7 @@ function selectionSource(): InventoryDocumentGenerationSource {
   const base = source();
   return {
     ...base,
+    writeOffCandidates: base.writeOffCandidates,
     verified: [
       ...base.verified,
       ...["OPEN", "INVALIDATED", "PENDING", "FAILED", "PROTECTED", "DUPLICATE"].map((serial) => ({

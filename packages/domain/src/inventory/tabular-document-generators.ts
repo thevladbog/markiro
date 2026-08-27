@@ -1,4 +1,8 @@
+import { z } from "zod";
+
 import { encodeLfText, encodeSemicolonCsv } from "../document-text-encoding.js";
+import { DomainError } from "../errors.js";
+import { formatSsccWithAi } from "../gs1/sscc.js";
 import {
   InventoryDocumentGenerationError,
   inventoryDocumentFilenamePrefix,
@@ -10,7 +14,7 @@ import { selectEligibleInventoryFinalBoxes } from "./document-selection.js";
 
 const CSV_MIME_TYPE = "text/csv; charset=utf-8" as const;
 const TXT_MIME_TYPE = "text/plain; charset=utf-8" as const;
-const PRODUCTION_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const civilDateSchema = z.iso.date();
 
 export function generateInventoryWriteOffTxt(
   source: InventoryDocumentGenerationSource,
@@ -113,7 +117,7 @@ export function generateInventoryBalancesByProductionDateCsv(
   const counts = new Map<string, { codeCount: number; boxCount: number }>();
   for (const code of verifiedEntries(source)) {
     const date = code.observedProductionDate;
-    if (date === null || !PRODUCTION_DATE_PATTERN.test(date)) {
+    if (date === null || !civilDateSchema.safeParse(date).success) {
       throw new InventoryDocumentGenerationError("VERIFIED_PRODUCTION_DATE_MISSING");
     }
     const entry = counts.get(date) ?? { codeCount: 0, boxCount: 0 };
@@ -146,7 +150,7 @@ export function generateInventoryBalancesByProductionDateCsv(
 
 function writeOffCodes(source: InventoryDocumentGenerationSource): string[] {
   const protectedHashes = new Set(source.protected.map((code) => code.codeHash));
-  return (source.writeOffCandidates ?? [])
+  return source.writeOffCandidates
     .filter((code) => !protectedHashes.has(code.codeHash))
     .map((code) => code.canonicalRaw)
     .sort(compareText);
@@ -164,7 +168,14 @@ function verifiedCodes(source: InventoryDocumentGenerationSource): string[] {
 }
 
 function formatOutputSscc(sscc: string): string {
-  return `00${sscc}`;
+  try {
+    return formatSsccWithAi(sscc);
+  } catch (error) {
+    if (error instanceof DomainError) {
+      throw new InventoryDocumentGenerationError("INVALID_SSCC");
+    }
+    throw error;
+  }
 }
 
 function generatedPart(

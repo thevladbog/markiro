@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
   generateInventoryBalancesByProductionDateCsv,
@@ -122,6 +122,16 @@ function decodeCsv(part: InventoryDocumentGeneratedPart | undefined): string {
 }
 
 describe("inventory tabular document generators", () => {
+  it("requires frozen write-off candidates in every generation source", () => {
+    type WriteOffCandidatesAreRequired = InventoryDocumentGenerationSource extends {
+      writeOffCandidates: readonly { codeHash: string; canonicalRaw: string }[];
+    }
+      ? true
+      : false;
+
+    expectTypeOf<WriteOffCandidatesAreRequired>().toEqualTypeOf<true>();
+  });
+
   it("renders sorted full canonical write-off codes as exact LF TXT and BOM CSV bytes", () => {
     const [txt] = generateInventoryWriteOffTxt(source(), metadata);
     const [csv] = generateInventoryWriteOffCsv(source(), metadata);
@@ -190,6 +200,25 @@ describe("inventory tabular document generators", () => {
     );
   });
 
+  it.each([
+    ["contents CSV", generateInventoryFinalBoxContentsCsv],
+    ["box list TXT", generateInventoryFinalBoxesTxt],
+  ])("rejects a malformed stored SSCC in the final-box %s", (_name, generate) => {
+    const invalid = source();
+    const eligibleBox = invalid.newBoxes.find((box) => box.sscc === "046800899000256001");
+    if (eligibleBox === undefined) throw new Error("expected eligible final-box fixture");
+    invalid.newBoxes = [
+      {
+        ...eligibleBox,
+        sscc: "bad",
+      },
+    ];
+
+    expect(() => generate(invalid, metadata)).toThrow(
+      new InventoryDocumentGenerationError("INVALID_SSCC"),
+    );
+  });
+
   it("groups verified codes directly and eligible boxes by production date", () => {
     const [part] = generateInventoryBalancesByProductionDateCsv(source(), metadata);
 
@@ -229,7 +258,7 @@ describe("inventory tabular document generators", () => {
     expect(balances).toMatchObject({ rowCount: 1, codeCount: 0, boxCount: 0 });
   });
 
-  it.each([null, "2026/08/08"])(
+  it.each([null, "2026/08/08", "2026-02-30"])(
     "fails closed when a verified code has missing or invalid production date %s",
     (observedProductionDate) => {
       const invalid = emptySource();
