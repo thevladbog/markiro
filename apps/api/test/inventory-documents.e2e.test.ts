@@ -621,10 +621,12 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
       events: InventoryEvent[],
       openBoxCount: number,
     ) => {
+      const lastEvent = events.at(-1);
+      if (!lastEvent) throw new Error("Expected at least one event in an acceptance batch");
       const payload: InventoryEventBatchPayload = {
         snapshotId,
         snapshotRevision: 1,
-        sequenceCeiling: events.at(-1)!.deviceSequence,
+        sequenceCeiling: lastEvent.deviceSequence,
         pendingEventCount: 0,
         openBoxCount,
         events,
@@ -1163,7 +1165,9 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     const zip = objects.get(zipKey);
     if (!zip) throw new Error(`Expected production revision ${resultRevision} ZIP`);
     const archive = unzipSync(zip);
-    const manifest = JSON.parse(strFromU8(archive["manifest.json"]!)) as {
+    const manifestEntry = archive["manifest.json"];
+    if (!manifestEntry) throw new Error("Expected manifest.json in production ZIP");
+    const manifest = JSON.parse(strFromU8(manifestEntry)) as {
       schemaVersion: number;
       runId: string;
       resultRevision: number;
