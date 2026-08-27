@@ -257,7 +257,7 @@ it("fails closed when the live endpoint adds an unknown response field", async (
   );
 });
 
-it("keeps zero metrics neutral and colors only non-zero ones", async () => {
+it("keeps metric cards colored even when their counts are zero", async () => {
   const zeroed = {
     ...progress,
     verifiedCount: 0,
@@ -270,11 +270,11 @@ it("keeps zero metrics neutral and colors only non-zero ones", async () => {
   expect(await screen.findByRole("heading", { level: 1, name: "ИНВ-00042" })).toBeDefined();
 
   const verified = screen.getByText("Проверено").closest(".mk-inventory-live-metric")!;
-  expect(verified.className).not.toContain("mk-inventory-live-metric--ok");
+  expect(verified.className).toContain("mk-inventory-live-metric--ok");
   const missing = screen.getByText("Не найдено").closest(".mk-inventory-live-metric")!;
-  expect(missing.className).not.toContain("mk-inventory-live-metric--warn");
+  expect(missing.className).toContain("mk-inventory-live-metric--warn");
   const discrepancies = screen.getByText("Расхождения").closest(".mk-inventory-live-metric")!;
-  expect(discrepancies.className).not.toContain("mk-inventory-live-metric--error");
+  expect(discrepancies.className).toContain("mk-inventory-live-metric--error");
 });
 
 it("colors non-zero metrics with the expected tone", async () => {

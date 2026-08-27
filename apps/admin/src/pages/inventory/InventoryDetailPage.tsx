@@ -422,44 +422,46 @@ function TerminalsStep({
       {presence.isError ? (
         <Alert tone="error">{t("pages.inventory.terminals.loadError")}</Alert>
       ) : null}
-      {line ? (
-        <div className="mk-inventory-terminal-line">
-          <span>
-            <strong>{line.lineName}</strong>
-            <small>
-              {t("pages.inventory.terminals.assigned", { count: line.assignedStations })}
-            </small>
-          </span>
-          <StatusChip
-            status={line.onlineStations > 0 ? "ok" : "neutral"}
-            label={t("pages.inventory.terminals.online", {
-              online: line.onlineStations,
-              total: line.assignedStations,
-            })}
-          />
+      <div className="mk-inventory-terminals">
+        {line ? (
+          <div className="mk-inventory-terminal-line">
+            <span>
+              <strong>{line.lineName}</strong>
+              <small>
+                {t("pages.inventory.terminals.assigned", { count: line.assignedStations })}
+              </small>
+            </span>
+            <StatusChip
+              status={line.onlineStations > 0 ? "ok" : "neutral"}
+              label={t("pages.inventory.terminals.online", {
+                online: line.onlineStations,
+                total: line.assignedStations,
+              })}
+            />
+          </div>
+        ) : null}
+        <Alert tone="info">
+          {t("pages.inventory.snapshot.expected", {
+            count: count(snapshot.counts.expected, i18n.language),
+          })}
+        </Alert>
+        <div className="mk-inventory-task-form">
+          <strong>{t("pages.inventory.terminals.formTitle")}</strong>
+          <p>{t("pages.inventory.terminals.formDescription")}</p>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() =>
+              window.open(
+                `/api/inventories/${inventory.id}/task-form`,
+                "_blank",
+                "noopener,noreferrer",
+              )
+            }
+          >
+            {t("pages.inventory.terminals.openForm")}
+          </Button>
         </div>
-      ) : null}
-      <Alert tone="info">
-        {t("pages.inventory.snapshot.expected", {
-          count: count(snapshot.counts.expected, i18n.language),
-        })}
-      </Alert>
-      <div className="mk-inventory-task-form">
-        <strong>{t("pages.inventory.terminals.formTitle")}</strong>
-        <p>{t("pages.inventory.terminals.formDescription")}</p>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() =>
-            window.open(
-              `/api/inventories/${inventory.id}/task-form`,
-              "_blank",
-              "noopener,noreferrer",
-            )
-          }
-        >
-          {t("pages.inventory.terminals.openForm")}
-        </Button>
       </div>
       <div className="mk-inventory-actions">
         <Button variant="secondary" type="button" onClick={onBack}>

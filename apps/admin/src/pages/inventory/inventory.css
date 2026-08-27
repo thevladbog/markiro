@@ -45,12 +45,17 @@
   gap: 12px;
 }
 
-.mk-inventory-document-run > header > span,
-.mk-inventory-document-artifacts > li > span {
+.mk-inventory-document-run > header > span:not(.mk-chip),
+.mk-inventory-document-artifacts > li > span:not(.mk-chip) {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 3px;
+}
+
+.mk-inventory-page .mk-chip {
+  flex-direction: row;
+  flex-shrink: 0;
 }
 
 .mk-inventory-document-run small,
@@ -246,6 +251,12 @@
   border-radius: var(--r-2);
   padding: 14px;
   background: var(--surface-page);
+}
+
+.mk-inventory-terminals {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .mk-inventory-upload-slot__header,

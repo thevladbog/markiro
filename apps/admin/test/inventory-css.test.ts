@@ -17,6 +17,18 @@ describe("inventory.css contracts", () => {
     );
   });
 
+  it("guards every StatusChip in the inventory page from column stacking", () => {
+    expect(css).toMatch(
+      /\.mk-inventory-page \.mk-chip\s*\{[^}]*flex-direction:\s*row;[^}]*flex-shrink:\s*0;/s,
+    );
+  });
+
+  it("gives the terminals step vertical breathing room between its blocks", () => {
+    expect(css).toMatch(
+      /\.mk-inventory-terminals\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*gap:\s*14px;/s,
+    );
+  });
+
   it("caps the detail page content width", () => {
     expect(css).toMatch(/\.mk-inventory-page\s*\{[^}]*max-width:\s*1200px;/s);
   });

@@ -74,12 +74,12 @@ export function InventoryLivePage({
         <LiveMetric
           label={t("pages.inventory.live.verified")}
           value={formatCount(data.verifiedCount, i18n.language)}
-          {...(data.verifiedCount > 0 ? { tone: "ok" as const } : {})}
+          tone="ok"
         />
         <LiveMetric
           label={t("pages.inventory.live.missing")}
           value={formatCount(data.missingCount, i18n.language)}
-          {...(data.missingCount > 0 ? { tone: "warn" as const } : {})}
+          tone="warn"
         />
         <LiveMetric
           label={t("pages.inventory.live.discrepancies")}
@@ -87,9 +87,7 @@ export function InventoryLivePage({
             data.ineligibleCount + data.unknownCount + data.dateMismatchCount,
             i18n.language,
           )}
-          {...(data.ineligibleCount + data.unknownCount + data.dateMismatchCount > 0
-            ? { tone: "error" as const }
-            : {})}
+          tone="error"
         />
       </section>
 
