@@ -657,6 +657,75 @@ describe("platform commercial contracts", () => {
     ).toBe(false);
   });
 
+  it("rejects invoice details whose aggregate amounts contradict the lifecycle boundary", () => {
+    const relations = {
+      ...invoiceBase,
+      ...issuedInvoiceMetadata,
+      lines: [invoiceLine],
+      documents: [],
+    } as const;
+    const notPaid = { status: "not_paid", latestByLine: [], attempts: [] } as const;
+    const paidApplication = {
+      status: "pending",
+      latestByLine: [],
+      attempts: [],
+    } as const;
+    const fullyAllocatedPayment = { ...billingPayment, amount: "15000.00" };
+    const partialPayment = { ...billingPayment, amount: "5000.00" };
+    const invalid = [
+      {
+        name: "partially paid with zero remaining",
+        detail: {
+          ...relations,
+          status: "partially_paid",
+          payments: [fullyAllocatedPayment],
+          paymentSummary: {
+            confirmedAmount: "15000.00",
+            remainingAmount: "0.00",
+            status: "partially_paid",
+          },
+          application: notPaid,
+        },
+      },
+      {
+        name: "partially paid with zero confirmed",
+        detail: {
+          ...relations,
+          status: "partially_paid",
+          payments: [{ ...billingPayment, amount: "0.00" }],
+          paymentSummary: {
+            confirmedAmount: "0.00",
+            remainingAmount: "15000.00",
+            status: "partially_paid",
+          },
+          application: notPaid,
+        },
+      },
+      {
+        name: "paid with a remaining balance",
+        detail: {
+          ...relations,
+          status: "paid",
+          paidAt: CREATED_AT,
+          payments: [partialPayment],
+          paymentSummary: {
+            confirmedAmount: "5000.00",
+            remainingAmount: "10000.00",
+            status: "paid",
+          },
+          application: paidApplication,
+        },
+      },
+    ] as const;
+
+    for (const { name, detail } of invalid) {
+      expect(
+        platformCommercialContracts.invoices.detail.response.safeParse(detail).success,
+        name,
+      ).toBe(false);
+    }
+  });
+
   it("parses only the application states possible for each invoice detail status", () => {
     const relations = {
       lines: [invoiceLine],
@@ -923,6 +992,43 @@ describe("platform commercial contracts", () => {
         createdAt: CREATED_AT,
       }).status,
     ).toBe("ready");
+  });
+
+  it("rejects manual payment responses whose balance contradicts their invoice status", () => {
+    const contract = platformCommercialContracts.payments.manual.response;
+    const invalid = [
+      {
+        name: "partial response with zero remaining",
+        response: {
+          ...billingPayment,
+          invoiceStatus: "partially_paid",
+          confirmedAmount: "15000.00",
+          remainingAmount: "0.00",
+        },
+      },
+      {
+        name: "paid response with a remaining balance",
+        response: {
+          ...billingPayment,
+          invoiceStatus: "paid",
+          confirmedAmount: "14999.99",
+          remainingAmount: "0.01",
+        },
+      },
+      {
+        name: "partial response with zero confirmed",
+        response: {
+          ...billingPayment,
+          invoiceStatus: "partially_paid",
+          confirmedAmount: "0.00",
+          remainingAmount: "15000.00",
+        },
+      },
+    ] as const;
+
+    for (const { name, response } of invalid) {
+      expect(contract.safeParse(response).success, name).toBe(false);
+    }
   });
 
   it("exposes only masked payer account evidence in payment matches", () => {

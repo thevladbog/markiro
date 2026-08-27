@@ -47,6 +47,8 @@ export class BillingApplicationService {
             eq(schema.billingPayments.invoiceId, invoice.id),
           ),
         )
+        // Confirmation order is authoritative here; paidAt is bank/economic time and may be backdated.
+        .orderBy(desc(schema.billingPayments.createdAt), desc(schema.billingPayments.id))
         .limit(1);
       if (!payment) throw new ConflictException({ code: "invoice_payment_missing" });
 

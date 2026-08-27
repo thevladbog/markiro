@@ -136,6 +136,18 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
     return { tenantId, invoiceId, lineId, planVersionId };
   }
 
+  async function waitForScratchLock(
+    predicate: () => Promise<boolean>,
+    description: string,
+  ): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      if (await predicate()) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`Timed out waiting for ${description}`);
+  }
+
   it("rejects payment before an invoice is issued", async () => {
     const invoice = await createInvoice({
       status: "draft",
@@ -579,6 +591,173 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
       status: "applied",
       afterSnapshot: { kind: "custom", entitlementApplied: false },
     });
+  });
+
+  it("uses the final confirmed payment as manual service provenance", async () => {
+    const tenantId = await createOrganization(db);
+    const itemId = randomUUID();
+    const serviceVersionId = randomUUID();
+    await db.insert(schema.catalogItems).values({
+      id: itemId,
+      code: `manual-service-${itemId}`,
+      nameRu: "Настройка",
+      nameEn: "Configuration",
+      kind: "service",
+    });
+    await db.insert(schema.catalogItemVersions).values({
+      id: serviceVersionId,
+      catalogItemId: itemId,
+      kind: "service",
+      version: 1,
+      status: "published",
+      publishedAt: new Date(),
+      nameRu: "Настройка",
+      nameEn: "Configuration",
+      unit: "service",
+      billingMode: "one_time",
+      unitPrice: "150.00",
+      vatIncluded: true,
+    });
+    const invoiceId = randomUUID();
+    const serviceLineId = randomUUID();
+    const issuedAt = new Date();
+    await db.insert(schema.invoices).values({
+      id: invoiceId,
+      tenantId,
+      number: `INV-${randomUUID()}`,
+      status: "issued",
+      issueDate: issuedAt,
+      sellerSnapshot: { name: "Markiro" },
+      buyerSnapshot: { name: tenantId },
+      subtotal: "150.00",
+      vatTotal: "0.00",
+      total: "150.00",
+      applicationMode: "manual",
+      createdByPlatformUserId: actor.userId,
+      issuedByPlatformUserId: actor.userId,
+      issuedAt,
+    });
+    await db.insert(schema.invoiceLines).values({
+      id: serviceLineId,
+      tenantId,
+      invoiceId,
+      position: 1,
+      kind: "service",
+      catalogVersionId: serviceVersionId,
+      catalogKind: "service",
+      nameRu: "Настройка",
+      nameEn: "Configuration",
+      quantity: 1,
+      unit: "service",
+      agreedUnitPrice: "150.00",
+      vatIncluded: true,
+      lineSubtotal: "150.00",
+      lineVat: "0.00",
+      lineTotal: "150.00",
+    });
+
+    const partial = await payments.recordManual(actor, invoiceId, {
+      amount: "50.00",
+      paidAt: new Date("2026-08-27T12:00:00.000Z"),
+      bankReference: `manual-service-partial-${randomUUID()}`,
+      idempotencyKey: `manual-service-partial-${randomUUID()}`,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const final = await payments.recordManual(actor, invoiceId, {
+      amount: "100.00",
+      paidAt: new Date("2026-08-28T12:00:00.000Z"),
+      bankReference: `manual-service-final-${randomUUID()}`,
+      idempotencyKey: `manual-service-final-${randomUUID()}`,
+    });
+
+    await application.apply(actor, invoiceId, {
+      reason: "Применить оплаченную услугу",
+      lines: [{ lineId: serviceLineId }],
+    });
+
+    expect(partial.invoiceStatus).toBe("partially_paid");
+    expect(final.invoiceStatus).toBe("paid");
+    expect(
+      await db
+        .select({
+          billingPaymentId: schema.orderedServices.billingPaymentId,
+          orderedAt: schema.orderedServices.orderedAt,
+        })
+        .from(schema.orderedServices)
+        .where(eq(schema.orderedServices.invoiceLineId, serviceLineId)),
+    ).toEqual([{ billingPaymentId: final.id, orderedAt: final.paidAt }]);
+  });
+
+  it("does not let cancellation overwrite a payment holding the invoice lock", async () => {
+    const invoice = await createInvoice({
+      applicationMode: "manual",
+      activationPolicy: "manual",
+    });
+    const lockPartOne = 2_608_027;
+    const lockPartTwo = Math.floor(Math.random() * 1_000_000_000);
+    const suffix = randomUUID().replaceAll("-", "_");
+    const functionName = `test_block_payment_invoice_${suffix}`;
+    const triggerName = `test_block_payment_invoice_${suffix}`;
+    const blocker = await connection.pool.connect();
+    await blocker.query("select pg_advisory_lock($1, $2)", [lockPartOne, lockPartTwo]);
+    await connection.pool.query(`
+      create function ${functionName}() returns trigger language plpgsql as $$
+      begin
+        if new.status in ('partially_paid', 'paid') then
+          perform pg_advisory_xact_lock(${lockPartOne}, ${lockPartTwo});
+        end if;
+        return new;
+      end
+      $$
+    `);
+    await connection.pool.query(
+      `create trigger ${triggerName} before update on invoices for each row execute function ${functionName}()`,
+    );
+    try {
+      const paymentPromise = payments.recordManual(actor, invoice.invoiceId, {
+        amount: "1000.00",
+        paidAt: new Date("2026-08-27T14:00:00.000Z"),
+        bankReference: `cancel-race-${randomUUID()}`,
+        idempotencyKey: `cancel-race-${randomUUID()}`,
+      });
+      await waitForScratchLock(async () => {
+        const result = await connection.pool.query<{ waiting: boolean }>(
+          "select exists(select 1 from pg_locks where locktype = 'advisory' and classid = $1 and objid = $2 and not granted) as waiting",
+          [lockPartOne, lockPartTwo],
+        );
+        return result.rows[0]?.waiting === true;
+      }, "the payment trigger advisory lock");
+
+      const cancelPromise = billing.cancel(actor, invoice.invoiceId);
+      await waitForScratchLock(async () => {
+        const result = await connection.pool.query<{ waiting: boolean }>(
+          "select exists(select 1 from pg_locks locks join pg_stat_activity activity on activity.pid = locks.pid where activity.datname = current_database() and locks.locktype = 'transactionid' and not locks.granted) as waiting",
+        );
+        return result.rows[0]?.waiting === true;
+      }, "the cancellation invoice-row lock");
+      await blocker.query("select pg_advisory_unlock($1, $2)", [lockPartOne, lockPartTwo]);
+
+      const [paymentResult, cancelResult] = await Promise.allSettled([
+        paymentPromise,
+        cancelPromise,
+      ]);
+      expect(paymentResult.status).toBe("fulfilled");
+      expect(cancelResult).toMatchObject({
+        status: "rejected",
+        reason: { response: { code: "invoice_paid" } },
+      });
+      expect(
+        await db
+          .select({ status: schema.invoices.status })
+          .from(schema.invoices)
+          .where(eq(schema.invoices.id, invoice.invoiceId)),
+      ).toEqual([{ status: "paid" }]);
+    } finally {
+      await blocker.query("select pg_advisory_unlock($1, $2)", [lockPartOne, lockPartTwo]);
+      blocker.release();
+      await connection.pool.query(`drop trigger if exists ${triggerName} on invoices`);
+      await connection.pool.query(`drop function if exists ${functionName}()`);
+    }
   });
 
   it("retries a failed line with a monotonic attempt and keeps the first failure", async () => {

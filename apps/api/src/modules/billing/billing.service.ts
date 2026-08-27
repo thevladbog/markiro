@@ -164,88 +164,96 @@ export class BillingService {
   }
 
   async get(id: string): Promise<InvoiceServiceDetailSource> {
-    const [invoice] = await this.db
-      .select()
-      .from(schema.invoices)
-      .where(eq(schema.invoices.id, id))
-      .limit(1);
-    if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
-    const lines = await this.db
-      .select()
-      .from(schema.invoiceLines)
-      .where(eq(schema.invoiceLines.invoiceId, id))
-      .orderBy(schema.invoiceLines.position);
-    const documents = await this.db
-      .select({
-        id: schema.invoiceDocuments.id,
-        revision: schema.invoiceDocuments.revision,
-        format: schema.invoiceDocuments.format,
-        status: schema.invoiceDocuments.status,
-        contentType: schema.invoiceDocuments.contentType,
-        byteSize: schema.invoiceDocuments.byteSize,
-        sha256: schema.invoiceDocuments.sha256,
-        errorCode: schema.invoiceDocuments.errorCode,
-        createdAt: schema.invoiceDocuments.createdAt,
-        updatedAt: schema.invoiceDocuments.updatedAt,
-      })
-      .from(schema.invoiceDocuments)
-      .where(eq(schema.invoiceDocuments.invoiceId, id))
-      .orderBy(desc(schema.invoiceDocuments.revision));
-    const payments = await this.db
-      .select()
-      .from(schema.billingPayments)
-      .where(
-        and(
-          eq(schema.billingPayments.tenantId, invoice.tenantId),
-          eq(schema.billingPayments.invoiceId, id),
-        ),
-      )
-      .orderBy(schema.billingPayments.paidAt, schema.billingPayments.id);
-    const attempts = await this.db
-      .select()
-      .from(schema.invoiceApplicationEvents)
-      .where(
-        and(
-          eq(schema.invoiceApplicationEvents.tenantId, invoice.tenantId),
-          eq(schema.invoiceApplicationEvents.invoiceId, id),
-        ),
-      )
-      .orderBy(schema.invoiceApplicationEvents.createdAt, schema.invoiceApplicationEvents.attempt);
-    const latestAttempts = new Map<string, (typeof attempts)[number]>();
-    for (const attempt of attempts) {
-      const previous = latestAttempts.get(attempt.invoiceLineId);
-      if (!previous || attempt.attempt >= previous.attempt) {
-        latestAttempts.set(attempt.invoiceLineId, attempt);
-      }
-    }
-    const latestByLine = lines.flatMap((line) => {
-      const event = latestAttempts.get(line.id);
-      return event ? [event] : [];
-    });
-    const applicationStatus =
-      invoice.status !== "paid"
-        ? "not_paid"
-        : latestByLine.some((event) => event.status === "failed")
-          ? "partial_failure"
-          : latestByLine.length < lines.length ||
-              latestByLine.some((event) => event.status === "pending")
-            ? "pending"
-            : "applied";
-    return {
-      ...invoice,
-      lines,
-      documents,
-      payments,
-      paymentSummary:
-        invoice.status === "draft" || invoice.status === "cancelled"
-          ? null
-          : invoicePaymentSummary(invoice.total, payments),
-      application: {
-        status: applicationStatus,
-        latestByLine,
-        attempts,
+    return this.db.transaction(
+      async (tx) => {
+        const [invoice] = await tx
+          .select()
+          .from(schema.invoices)
+          .where(eq(schema.invoices.id, id))
+          .limit(1);
+        if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
+        const lines = await tx
+          .select()
+          .from(schema.invoiceLines)
+          .where(eq(schema.invoiceLines.invoiceId, id))
+          .orderBy(schema.invoiceLines.position);
+        const documents = await tx
+          .select({
+            id: schema.invoiceDocuments.id,
+            revision: schema.invoiceDocuments.revision,
+            format: schema.invoiceDocuments.format,
+            status: schema.invoiceDocuments.status,
+            contentType: schema.invoiceDocuments.contentType,
+            byteSize: schema.invoiceDocuments.byteSize,
+            sha256: schema.invoiceDocuments.sha256,
+            errorCode: schema.invoiceDocuments.errorCode,
+            createdAt: schema.invoiceDocuments.createdAt,
+            updatedAt: schema.invoiceDocuments.updatedAt,
+          })
+          .from(schema.invoiceDocuments)
+          .where(eq(schema.invoiceDocuments.invoiceId, id))
+          .orderBy(desc(schema.invoiceDocuments.revision));
+        const payments = await tx
+          .select()
+          .from(schema.billingPayments)
+          .where(
+            and(
+              eq(schema.billingPayments.tenantId, invoice.tenantId),
+              eq(schema.billingPayments.invoiceId, id),
+            ),
+          )
+          .orderBy(schema.billingPayments.paidAt, schema.billingPayments.id);
+        const attempts = await tx
+          .select()
+          .from(schema.invoiceApplicationEvents)
+          .where(
+            and(
+              eq(schema.invoiceApplicationEvents.tenantId, invoice.tenantId),
+              eq(schema.invoiceApplicationEvents.invoiceId, id),
+            ),
+          )
+          .orderBy(
+            schema.invoiceApplicationEvents.createdAt,
+            schema.invoiceApplicationEvents.attempt,
+          );
+        const latestAttempts = new Map<string, (typeof attempts)[number]>();
+        for (const attempt of attempts) {
+          const previous = latestAttempts.get(attempt.invoiceLineId);
+          if (!previous || attempt.attempt >= previous.attempt) {
+            latestAttempts.set(attempt.invoiceLineId, attempt);
+          }
+        }
+        const latestByLine = lines.flatMap((line) => {
+          const event = latestAttempts.get(line.id);
+          return event ? [event] : [];
+        });
+        const applicationStatus =
+          invoice.status !== "paid"
+            ? "not_paid"
+            : latestByLine.some((event) => event.status === "failed")
+              ? "partial_failure"
+              : latestByLine.length < lines.length ||
+                  latestByLine.some((event) => event.status === "pending")
+                ? "pending"
+                : "applied";
+        return {
+          ...invoice,
+          lines,
+          documents,
+          payments,
+          paymentSummary:
+            invoice.status === "draft" || invoice.status === "cancelled"
+              ? null
+              : invoicePaymentSummary(invoice.total, payments),
+          application: {
+            status: applicationStatus,
+            latestByLine,
+            attempts,
+          },
+        };
       },
-    };
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   }
 
   async issue(principal: PlatformPrincipal, id: string): Promise<InvoiceServiceRecordSource> {
@@ -305,22 +313,25 @@ export class BillingService {
   }
 
   async cancel(principal: PlatformPrincipal, id: string): Promise<InvoiceServiceRecordSource> {
-    const [invoice] = await this.db
-      .select()
-      .from(schema.invoices)
-      .where(eq(schema.invoices.id, id))
-      .limit(1);
-    if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
-    if (invoice.status === "paid" || invoice.status === "partially_paid") {
-      throw new ConflictException({ code: "invoice_paid" });
-    }
-    const [updated] = await this.db
-      .update(schema.invoices)
-      .set({ status: "cancelled", cancelledAt: new Date() })
-      .where(eq(schema.invoices.id, id))
-      .returning();
-    if (!updated) throw new ConflictException({ code: "invoice_cancel_failed" });
-    return updated;
+    return this.db.transaction(async (tx) => {
+      const [invoice] = await tx
+        .select()
+        .from(schema.invoices)
+        .where(eq(schema.invoices.id, id))
+        .for("update")
+        .limit(1);
+      if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
+      if (invoice.status === "paid" || invoice.status === "partially_paid") {
+        throw new ConflictException({ code: "invoice_paid" });
+      }
+      const [updated] = await tx
+        .update(schema.invoices)
+        .set({ status: "cancelled", cancelledAt: new Date() })
+        .where(and(eq(schema.invoices.id, id), eq(schema.invoices.status, invoice.status)))
+        .returning();
+      if (!updated) throw new ConflictException({ code: "invoice_cancel_failed" });
+      return updated;
+    });
   }
 }
 

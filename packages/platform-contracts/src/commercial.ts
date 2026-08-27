@@ -975,7 +975,21 @@ export const manualBillingPaymentSchema = billingPaymentSchema
     confirmedAmount: platformMoneySchema,
     remainingAmount: platformMoneySchema,
   })
-  .strict();
+  .strict()
+  .superRefine((payment, context) => {
+    const confirmed = moneyCents(payment.confirmedAmount);
+    const remaining = moneyCents(payment.remainingAmount);
+    if (
+      !paymentSummaryStateIsValid(payment.invoiceStatus, confirmed, remaining) ||
+      confirmed < moneyCents(payment.amount)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["invoiceStatus"],
+        message: "Invoice status must match the confirmed and remaining amounts",
+      });
+    }
+  });
 
 const invoiceApplicationEventCommonSchema = z
   .object({
@@ -1105,6 +1119,13 @@ export const invoiceDetailSchema = z
       0n,
     );
     const remaining = moneyCents(invoice.total) - confirmed;
+    if (!paymentSummaryStateIsValid(invoice.paymentSummary.status, confirmed, remaining)) {
+      context.addIssue({
+        code: "custom",
+        path: ["paymentSummary", "status"],
+        message: "Payment summary status must match its amount boundaries",
+      });
+    }
     if (invoice.paymentSummary.confirmedAmount !== centsMoney(confirmed)) {
       context.addIssue({
         code: "custom",
@@ -1120,6 +1141,16 @@ export const invoiceDetailSchema = z
       });
     }
   });
+
+function paymentSummaryStateIsValid(
+  status: "issued" | "partially_paid" | "paid",
+  confirmed: bigint,
+  remaining: bigint,
+): boolean {
+  if (status === "issued") return confirmed === 0n && remaining >= 0n;
+  if (status === "partially_paid") return confirmed > 0n && remaining > 0n;
+  return confirmed > 0n && remaining === 0n;
+}
 
 export const invoiceServiceDetailSchema = invoiceServiceRecordSchema
   .extend({

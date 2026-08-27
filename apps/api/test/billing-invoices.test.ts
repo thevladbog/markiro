@@ -15,6 +15,7 @@ function queryFor(rowsFor: (table: unknown, ordered: boolean) => unknown[]) {
       return query;
     }),
     where: vi.fn(() => query),
+    for: vi.fn(() => query),
     orderBy: vi.fn(() => {
       ordered = true;
       return query;
@@ -59,6 +60,9 @@ describe("BillingService invoice payment detail", () => {
     };
     const db = Object.assign(Object.create(null), {
       select: vi.fn(() => queryFor(rowsFor)),
+      transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) =>
+        run({ select: vi.fn(() => queryFor(rowsFor)) }),
+      ),
     }) as Db;
     const service = new BillingService(db, {} as PlatformAuditService);
 
@@ -86,6 +90,9 @@ describe("BillingService invoice payment detail", () => {
     const db = Object.assign(Object.create(null), {
       select: vi.fn(() => queryFor(rowsFor)),
       update: vi.fn(),
+      transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) =>
+        run({ select: vi.fn(() => queryFor(rowsFor)), update: vi.fn() }),
+      ),
     }) as Db;
     const service = new BillingService(db, {} as PlatformAuditService);
 
@@ -93,5 +100,171 @@ describe("BillingService invoice payment detail", () => {
       response: { code: "invoice_paid" },
     });
     expect(db.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps invoice status and payment aggregate in one read snapshot", async () => {
+    const invoiceId = "31111111-1111-4111-8111-111111111111";
+    const tenantId = "21111111-1111-4111-8111-111111111111";
+    const issuedInvoice = {
+      id: invoiceId,
+      tenantId,
+      status: "issued" as const,
+      total: "48000.00",
+    };
+    const partialPayment = {
+      id: "51111111-1111-4111-8111-111111111111",
+      tenantId,
+      invoiceId,
+      paidAt: new Date("2026-08-27T09:00:00.000Z"),
+      amount: "20000.00",
+    };
+    let committed = {
+      invoice: issuedInvoice as Record<string, unknown>,
+      payments: [] as unknown[],
+    };
+    let paymentCommittedDuringRead = false;
+
+    const makeSelect = (
+      snapshot: typeof committed | undefined,
+      commitAfterInvoiceRead: boolean,
+    ) => {
+      let table: unknown;
+      let invoiceRead = false;
+      const rows = () => {
+        const state = snapshot ?? committed;
+        if (table === schema.invoices) return [state.invoice];
+        if (table === schema.billingPayments) return state.payments;
+        return [];
+      };
+      const query = {
+        from: vi.fn((value: unknown) => {
+          table = value;
+          return query;
+        }),
+        where: vi.fn(() => query),
+        orderBy: vi.fn(() => query),
+        limit: vi.fn(async () => {
+          const result = rows().slice(0, 1);
+          if (table === schema.invoices && commitAfterInvoiceRead && !invoiceRead) {
+            invoiceRead = true;
+            paymentCommittedDuringRead = true;
+            committed = {
+              invoice: { ...issuedInvoice, status: "partially_paid" },
+              payments: [partialPayment],
+            };
+          }
+          return result;
+        }),
+        then: (resolve: (value: unknown[]) => unknown) => Promise.resolve(rows()).then(resolve),
+      };
+      return query;
+    };
+    const db = Object.assign(Object.create(null), {
+      select: vi.fn(() => makeSelect(undefined, true)),
+      transaction: vi.fn(
+        async (
+          run: (tx: unknown) => Promise<unknown>,
+          config?: { isolationLevel?: string; accessMode?: string },
+        ) => {
+          const snapshot = { invoice: { ...committed.invoice }, payments: [...committed.payments] };
+          void config;
+          return run({ select: vi.fn(() => makeSelect(snapshot, true)) });
+        },
+      ),
+    }) as Db;
+    const service = new BillingService(db, {} as PlatformAuditService);
+
+    const detail = await service.get(invoiceId);
+
+    expect(paymentCommittedDuringRead).toBe(true);
+    expect(detail).toMatchObject({
+      status: "issued",
+      payments: [],
+      paymentSummary: {
+        confirmedAmount: "0.00",
+        remainingAmount: "48000.00",
+        status: "issued",
+      },
+    });
+    expect(db.transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "repeatable read",
+      accessMode: "read only",
+    });
+  });
+
+  it("does not let cancellation overwrite a payment that wins the invoice lock", async () => {
+    const invoiceId = "31111111-1111-4111-8111-111111111111";
+    const tenantId = "21111111-1111-4111-8111-111111111111";
+    let status: "issued" | "partially_paid" | "cancelled" = "issued";
+    let paymentCommitted = false;
+    let invoiceLocked = false;
+    let paymentWaiting = false;
+
+    const makeSelect = (insideTransaction: boolean) => {
+      let table: unknown;
+      let lockedForUpdate = false;
+      const query = {
+        from: vi.fn((value: unknown) => {
+          table = value;
+          return query;
+        }),
+        where: vi.fn(() => query),
+        for: vi.fn((mode: string) => {
+          if (mode === "update") {
+            lockedForUpdate = true;
+            invoiceLocked = true;
+          }
+          return query;
+        }),
+        limit: vi.fn(async () => {
+          if (table !== schema.invoices) return [];
+          const observed = status;
+          if (insideTransaction && lockedForUpdate) {
+            paymentWaiting = true;
+          } else {
+            status = "partially_paid";
+            paymentCommitted = true;
+          }
+          return [{ id: invoiceId, tenantId, status: observed }];
+        }),
+      };
+      return query;
+    };
+    const makeUpdate = () => ({
+      set: vi.fn((values: { status: "cancelled" }) => ({
+        where: vi.fn(() => ({
+          returning: vi.fn(async () => {
+            status = values.status;
+            return [{ id: invoiceId, tenantId, status }];
+          }),
+        })),
+      })),
+    });
+    const db = Object.assign(Object.create(null), {
+      select: vi.fn(() => makeSelect(false)),
+      update: vi.fn(() => makeUpdate()),
+      transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) => {
+        try {
+          return await run({
+            select: vi.fn(() => makeSelect(true)),
+            update: vi.fn(() => makeUpdate()),
+          });
+        } finally {
+          invoiceLocked = false;
+          if (paymentWaiting && status === "issued") {
+            status = "partially_paid";
+            paymentCommitted = true;
+          }
+        }
+      }),
+    }) as Db;
+    const service = new BillingService(db, {} as PlatformAuditService);
+
+    await expect(service.cancel({} as PlatformPrincipal, invoiceId)).resolves.toMatchObject({
+      status: "cancelled",
+    });
+    expect(invoiceLocked).toBe(false);
+    expect(status).toBe("cancelled");
+    expect(paymentCommitted).toBe(false);
   });
 });
