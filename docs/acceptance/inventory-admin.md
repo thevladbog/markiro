@@ -2,19 +2,20 @@
 
 ## Result
 
-**PASS — implemented workflow and automated evidence.** The tenant-admin, API, PostgreSQL, and
-Station test surfaces cover inventory creation and preparation, six Chestny ZNAK status inputs,
-snapshot fixation, multi-device execution, reconciliation and corrections, close/reopen, and the
-document job infrastructure. The focused connected journey passed 212 tests in 13 API files. The
-full package gates also passed after one stale Station access fixture was updated to include all
-facts now required by the frozen manifest contract.
+**PASS — implemented workflow and the two approved production XML formats.** The tenant-admin,
+API, PostgreSQL, and Station test surfaces cover inventory creation and preparation, six Chestny
+ZNAK status inputs, snapshot fixation, multi-device execution, reconciliation and corrections,
+close/reopen, and the document lifecycle. A focused DB-backed acceptance now drives
+`inventory_xml_gismt_aggregation` v1 and `inventory_xml_gismt_disaggregation` v1 through the real
+production registry and API runner from a frozen closed result revision to verified private
+artifacts, individual downloads, a checksummed ZIP manifest, reopen invalidation, regeneration,
+and completion.
 
-**NOT PASSED — complete-v1 document contract gate.** There are no approved inventory XML/CSV/XLSX
-fixtures or XSDs in the repository. The production descriptor and generator registries are
-therefore intentionally empty. No production document can be selected or generated, and a real
-inventory cannot currently reach `completed`; completion remains fail-closed until at least one
-approved format is generated, downloaded, and acknowledged. Synthetic generators below are test
-doubles only and are not production compatibility evidence.
+**NOT PASSED — complete-v1 document contract gate.** TXT, CSV, and XLSX inventory formats remain
+unapproved and absent from the production descriptor and generator registries. The two approved
+XML formats are real production outputs, but they do not justify a complete-v1 claim for the wider
+planned document set. No missing tabular format is advertised, generated, or implied by this
+acceptance result.
 
 **NOT RUN — physical and external acceptance.** This run did not exercise a packaged Windows/Tauri
 application, two physical terminals, a HID or serial scanner, a printer/driver, printed barcode or
@@ -27,101 +28,125 @@ Chestny ZNAK submission. Inventory v1 sends no document externally.
 - Disposable PostgreSQL 16 container with fresh databases migrated through the repository journal.
   No shared or production database was used.
 - Tests used repository CHZ CSV fixtures plus bounded synthetic rows constructed with the same
-  verified 35-column contract. Document tests injected synthetic generators and in-memory private
-  storage; the production registries remained empty.
+  verified 35-column contract. The production document acceptance used real PostgreSQL result
+  rows and the production generator registry; object publication stayed at an in-memory private
+  storage boundary so exact bytes, checksums, presigned paths, and ZIP contents could be inspected.
+  Other document endpoint tests still use synthetic generators for failure and lifecycle branches.
 - No tracked OpenAPI snapshot exists in the repository. OpenAPI was validated by the existing
   generated-document contract tests, so no public snapshot was created or hand-edited.
 
 ## Automated journey composition
 
-A DB-backed scenario named `regenerates and completes revision 8 after reopening invalidates
-revision 7` now proves the complete document lifecycle in one tenant-authorized sequence. It creates
-and processes a selected synthetic run at closed revision 7, downloads its artifact and ZIP,
-reopens and verifies invalidation plus revision 8, closes again, creates a new-key revision-8 run,
-processes and downloads it, acknowledges the documents, and observes completion at revision 8.
+A DB-backed scenario named `runs one inventory continuously through preparation, two-station work,
+correction, both production XML revisions, and completion` proves the requested operation as one
+continuous tenant-authorized journey over one inventory. It creates that inventory through the
+cabinet API, uploads all six status files (including five valid zero-result exports), fixes one
+snapshot, starts the inventory, joins two distinct Station devices, records protected simple work
+and eligible old-box-to-new-box repack work, and observes a cross-device duplicate conflict. The
+admin then voids the accepted protected scan implicated in that duplicate and restores it after
+review, proving both projection transitions and their audit evidence before both devices leave and
+the inventory closes normally. The same inventory then traverses the real production registry,
+result loader, and document runner for both approved XML formats.
 
-The entire inventory operation is not collapsed into that one test. It spans three trust and
-persistence boundaries: cabinet session APIs, Station device/offline behavior, and asynchronous
-document publication. Duplicating all established fixtures in one test would bypass or weaken those
-boundaries. The following connected and UI suites form the rest of the reproducible journey, with
-the test registry substitution confined to document tests.
+The first document run is verified artifact by artifact and again from the downloaded ZIP: every
+stored and archived byte stream is SHA-256 checked against artifact metadata, every complete
+`manifest.json` entry is compared with that metadata, and both eligible codes/new SSCCs are present
+in aggregation XML. For disaggregation, one repacked old box deliberately contains an eligible code
+and a protected `MOVING_BY_UD` source code under the same frozen parent SSCC, while a second repacked
+old box is clean. The protected shared parent is absent and the clean old SSCC is present, making the
+parent-level exclusion observable through the real result loader and runner. The protected KM is
+absent from both formats. The journey then reopens the same inventory, proves both first-run
+artifacts are invalidated and no longer downloadable, closes at the next result revision,
+regenerates and fully re-verifies both XML files and the new ZIP, records the individual and ZIP
+downloads, and completes that revision.
 
-| Journey stage                                                                                                             | Evidence                                                                                                          |
-| ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Create one-product inventory and configure line, inclusive dates, check/repack mode, and label template                   | `inventories.e2e.test.ts`, `inventory-preparation.test.tsx`                                                       |
-| Upload and select all six statuses, including valid zero-row results                                                      | `inventory-chz-import.test.ts`, `inventory-snapshot.e2e.test.ts`                                                  |
-| Freeze counts, parents, source dates, and immutable product/line/capacity facts                                           | `inventory-snapshot.e2e.test.ts`, `inventory-lifecycle.e2e.test.ts`                                               |
-| Keep `MOVING_BY_UD` protected and outside expected/destructive groups                                                     | `inventory-snapshot.e2e.test.ts`, `inventory-reconciliation.e2e.test.ts`, `inventory-result-source.test.ts`       |
-| Start and expose the frozen task to an assigned line; join/rejoin and cross-line barcode confirmation                     | `inventory-lifecycle.e2e.test.ts`, `station-inventory-access.e2e.test.ts`, `station-inventory-bundle.e2e.test.ts` |
-| Synchronize two distinct devices, simple scans, known-box expansion, repack ownership/capacity/date, conflicts, and leave | `station-inventory-sync.e2e.test.ts`, Station inventory work/outbox tests                                         |
-| Apply an append-only correction with revision and audit protection                                                        | `inventory-corrections.e2e.test.ts`, `inventory-corrections.test.tsx`                                             |
-| Evaluate blockers, leave, close, quarantine late work, and freeze a result revision                                       | `inventory-close.e2e.test.ts`, `inventory-late-events.e2e.test.ts`                                                |
-| Generate selected synthetic artifacts, verify SHA-256, deterministic ZIP and manifest, and tenant-scoped downloads        | `inventory-document-runner.test.ts`, `inventory-documents.e2e.test.ts`                                            |
-| Reopen, invalidate prior artifacts, increment revision, close again, regenerate, download, acknowledge, and complete      | Exact DB-backed `regenerates and completes revision 8…` scenario in `inventory-documents.e2e.test.ts`             |
+The following table identifies what the continuous scenario proves directly. The adjacent suites
+remain useful regression depth for branches and UI behavior, but are not used to assemble or
+substitute for continuity of the acceptance journey.
 
-The connected snapshot fixture selects six independently stored imports. Its introduced rows include
-an inclusive-range pair, an out-of-range row, and a `MOVING_BY_UD` row; the asserted result is two
-expected codes and one protected code. Empty APPLIED and other empty slots are accepted only through
-the exact known no-results marker. Multi-device tests use distinct authorized device identities and
-real PostgreSQL locks. Repack UI tests separately prove 20 fixed positions, mandatory bottle scans,
-automatic full-box closure/printing, and no “next box” button.
+| Journey stage                                                                                             | Direct continuous evidence in `inventory-documents.e2e.test.ts`                                                                                                                    |
+| --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create one-product repack inventory with line, inclusive dates, capacity-two product, and label template  | Real `POST /inventories`; returned draft inventory is retained for every later step                                                                                                |
+| Upload and select all six statuses, including valid zero-row results                                      | Six real multipart import requests; one four-row INTRODUCED file plus five exact no-results files                                                                                  |
+| Freeze counts, parents, source dates, and immutable inputs                                                | Real snapshot request; six inputs and stored counts `introduced=4`, `protected=1`, `expected=3`, `packages=2`, `loose=1` asserted                                                  |
+| Keep `MOVING_BY_UD` protected and outside expected/destructive groups                                     | Tenant/snapshot-scoped frozen row proves `protected=true`, `expected=false`, and the exact shared parent; protected KM and shared old SSCC are excluded                            |
+| Start and expose the frozen task to an assigned line                                                      | Real start request followed by joins from two separately paired Station devices                                                                                                    |
+| Perform simple and repack work across two devices, including a conflict                                   | Protected simple scan on device B; shared-parent and clean old/new boxes are repacked on A; duplicate protected scan conflicts on A                                                |
+| Correct the accepted result implicated in the duplicate, leave from both devices, and close               | `void_scan` changes `protected → voided`; `restore_scan` changes it back; both revisions, digests, correction/progress audit rows, two leaves, and blocker-free close are asserted |
+| Generate both production GISMT XML artifacts from eligible repack old/new data and exclude protected data | Aggregation emits both eligible new boxes; disaggregation excludes the protected shared old SSCC and emits the clean old SSCC; every byte and manifest entry is verified           |
+| Reopen, invalidate, advance revision, close, regenerate, download, acknowledge, and complete              | Both first-run artifacts return 404 after reopen; the second run receives the same full verification before completion                                                             |
+
+The continuous snapshot selects six independently stored imports. Its introduced rows comprise an
+eligible and a protected `MOVING_BY_UD` code sharing one old-box parent, an eligible code in a clean
+old box, and an eligible loose code, producing exactly three expected codes and one protected code.
+The protected-row lookup is scoped by tenant, snapshot, and code hash and asserts the shared parent
+SSCC. Empty APPLIED and the four other empty status slots are accepted only through the exact known
+no-results marker. The journey uses distinct authorized device identities and real PostgreSQL
+locks. Separate Station and admin suites continue to cover broader offline, UI, capacity-20, audit,
+quarantine, and error branches.
 
 ## Document contract gate
 
-The complete-v1 claim is blocked by design:
+The production XML slice passes while the complete-v1 claim remains blocked by design:
 
-- `INVENTORY_DOCUMENT_FORMATS` is an immutable empty production catalog;
-- the production generator registry contains no generators;
-- `GET /inventory-document-formats` advertises no guessed format;
-- unknown/unavailable id-version pairs are rejected;
+- `INVENTORY_DOCUMENT_FORMATS` and the production generator registry contain exactly
+  `inventory_xml_gismt_aggregation` v1 and `inventory_xml_gismt_disaggregation` v1;
+- `GET /inventory-document-formats` advertises those two approved formats and no guessed TXT, CSV,
+  or XLSX format;
+- both XML generators have sanitized golden fixtures and available XSD validation, and both now
+  traverse the production API runner and tested ZIP manifest;
+- unknown, unavailable, and superseded id-version pairs remain rejected;
 - completion requires a ready current-revision run whose selected artifacts are all present,
   non-invalidated, downloaded, and explicitly checked;
 - reopen invalidates old-revision artifacts transactionally;
-- synthetic CSV/ZIP bytes prove job, checksum, archive, retry, and lifecycle mechanics only.
+- synthetic CSV/ZIP bytes in other tests prove infrastructure branches only and are not promoted
+  to production formats.
 
-The gate can change to PASS only after every required production format has an approved sanitized
-golden fixture (and XSD/schema where applicable), an immutable descriptor version, deterministic
-generator output, and an entry in the tested ZIP manifest. The unresolved contract checklist is in
-`docs/contracts/inventory-documents/README.md`.
+The wider gate can change to complete-v1 only after every required TXT, CSV, and XLSX format has an
+approved sanitized golden fixture (and schema where applicable), an immutable descriptor version,
+deterministic generator output, and an entry in the tested ZIP manifest. The unresolved contract
+checklist is in `docs/contracts/inventory-documents/README.md`.
 
 ## Commands and results
 
 ```text
-Focused connected inventory API journey on disposable PostgreSQL:
-13 files passed; 212 tests passed
+Production document API acceptance on disposable PostgreSQL:
+inventory-documents.e2e.test.ts: 15 tests passed (focused production scenario: 1 passed)
+
+Production document domain and runner regression suites:
+inventory-documents.test.ts + inventory-document-generators.test.ts: 12 tests passed
+inventory-document-runner.test.ts: 16 tests passed
 
 @markiro/domain test / typecheck / lint / build:
-29 files passed; 404 tests passed; all remaining gates passed
+30 files passed; 409 tests passed; all remaining gates passed
 
 @markiro/db test / typecheck / lint / build on disposable PostgreSQL:
-40 files passed; 256 tests passed; all remaining gates passed
+41 files passed; 258 tests passed; all remaining gates passed
 
 @markiro/api test on a fresh disposable PostgreSQL database:
-206 files total: 205 passed, 1 skipped; 2093 tests total: 2091 passed, 2 skipped
+206 files total: 205 passed, 1 skipped; 2095 tests total: 2093 passed, 2 skipped
 @markiro/api typecheck / lint / build: PASS
 
 @markiro/admin test / typecheck / lint / build:
 71 files passed; 752 tests passed; all remaining gates passed
 
 @markiro/station test / typecheck / lint / build:
-83 files passed; 1192 tests passed; all remaining gates passed
+83 files passed; 1194 tests passed; all remaining gates passed
 ```
 
 The two API skips are the environment-gated local Mailpit/MinIO lifecycle and the explicit
 real-command local-infrastructure smoke. The full run used mocked storage at the inventory document
-boundary and did not validate MinIO publication or mail delivery. Expected injected-failure logs,
-jsdom canvas/navigation diagnostics, five pre-existing Admin hook lint warnings, and existing Vite
+boundary and did not validate MinIO publication or mail delivery. Admin DOM/component tests passed,
+but no live-browser or visual acceptance was run. Expected injected-failure logs, jsdom
+canvas/navigation diagnostics, five inherited Admin hook lint warnings, and existing Vite
 large-chunk warnings did not fail their gates.
-
-During the full API gate, four Station task-access assertions first failed with the expected
-fail-closed `409` because their handcrafted snapshot/manifest fixture lacked the now-authoritative
-box capacity and nullable product metadata. The fixture was updated without changing production
-code; its focused rerun passed 6/6, and the subsequent full API run passed on another fresh database.
 
 ## Remaining release acceptance
 
-- Approve each required XML/tabular contract and sanitized golden output; then enable its production
-  descriptor and generator and repeat the full close/generate/download/complete journey.
+- Validate the two generated XML files by manual upload to the intended Chestny ZNAK/GIS MT portal;
+  automated XSD and lifecycle evidence does not establish live portal acceptance.
+- Approve each required TXT, CSV, and XLSX contract and sanitized golden output before enabling its
+  production descriptor and generator; none is currently present or claimed.
 - Validate private object-storage publication, presigned individual and ZIP download, reconciliation
   after ambiguous publication, retention, and cleanup against the deployment's actual S3-compatible
   service.
