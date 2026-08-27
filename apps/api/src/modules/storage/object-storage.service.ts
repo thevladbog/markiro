@@ -243,7 +243,9 @@ function encodeRfc5987Filename(filename: string): string {
 
 function assertSafeKey(key: string): void {
   if (
-    (!key.startsWith("users/") && !key.startsWith("tenants/")) ||
+    (!key.startsWith("users/") &&
+      !key.startsWith("tenants/") &&
+      !/^tenant-billing\/[0-9a-f-]+\/acts\/[0-9a-f-]+\/[0-9a-f-]+\.pdf$/.test(key)) ||
     key.includes("..") ||
     key.includes("\\") ||
     key.includes("//") ||

@@ -24,6 +24,7 @@ type QueryCall = { table: unknown; where: unknown[]; limit?: number; offset?: nu
 function queryDb(rowsFor: (table: unknown) => unknown[]) {
   const calls: QueryCall[] = [];
   const db = {
+    execute: vi.fn(async () => ({ rows: [] })),
     select: vi.fn(() => {
       let table: unknown;
       const where: unknown[] = [];
@@ -163,7 +164,7 @@ describe("TenantBillingReadService", () => {
             id: actDocumentId,
             tenantId,
             actId,
-            objectKey: `tenants/${tenantId}/acts/${actId}/r1.pdf`,
+            objectKey: `tenant-billing/${tenantId}/acts/${actId}/${actDocumentId}.pdf`,
           },
         ];
       }
@@ -204,13 +205,13 @@ describe("TenantBillingReadService", () => {
       300,
     );
     expect(storage.presignRead).toHaveBeenCalledWith(
-      `tenants/${tenantId}/acts/${actId}/r1.pdf`,
+      `tenant-billing/${tenantId}/acts/${actId}/${actDocumentId}.pdf`,
       300,
     );
     expect(foreignTenantId).not.toBe(tenantId);
   });
 
-  it("does not sign a tenant-scoped row with a foreign entity key", async () => {
+  it("does not sign poisoned invoice, offer, or act keys", async () => {
     const { db } = queryDb((table) => {
       if (table === schema.invoiceDocuments) {
         return [
@@ -223,6 +224,27 @@ describe("TenantBillingReadService", () => {
           },
         ];
       }
+      if (table === schema.commercialOfferDocuments) {
+        return [
+          {
+            id: offerDocumentId,
+            tenantId,
+            offerId,
+            status: "ready",
+            objectKey: `tenants/${foreignTenantId}/offers/${offerId}/r1.pdf`,
+          },
+        ];
+      }
+      if (table === schema.billingActDocuments) {
+        return [
+          {
+            id: actDocumentId,
+            tenantId,
+            actId,
+            objectKey: `tenant-billing/${tenantId}/acts/${actId}/other-document.pdf`,
+          },
+        ];
+      }
       return [];
     });
     const storage = { presignRead: vi.fn() };
@@ -230,6 +252,12 @@ describe("TenantBillingReadService", () => {
 
     await expect(
       service.downloadInvoiceDocument(tenantId, invoiceId, invoiceDocumentId),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.downloadOfferDocument(tenantId, offerId, offerDocumentId),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.downloadActDocument(tenantId, actId, actDocumentId),
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(storage.presignRead).not.toHaveBeenCalled();
   });
@@ -248,10 +276,6 @@ describe("TenantBillingReadService", () => {
 
     expect(calls).toContainEqual(expect.objectContaining({ table: schema.invoices, offset: 150 }));
     expect(calls).toContainEqual(expect.objectContaining({ table: schema.invoices, limit: 25 }));
-    for (const table of [schema.commercialOfferDocuments, schema.billingActDocuments]) {
-      expect(calls).toContainEqual(expect.objectContaining({ table, offset: 0 }));
-      expect(calls).toContainEqual(expect.objectContaining({ table, limit: 175 }));
-    }
   });
 
   it("rejects unknown persisted workflow states at the DTO boundary", () => {
