@@ -16,7 +16,7 @@ import {
 const csp =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://storage.yandexcloud.net; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
 const landingCsp =
-  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://www.googletagmanager.com https://mc.yandex.ru; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru https://www.googletagmanager.com https://mc.yandex.ru https://yastatic.net; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://mc.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
+  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://www.googletagmanager.com https://mc.yandex.ru; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru https://cdn.jsdelivr.net/gh/yandex/webmaster-gtm-template@467fdc0c3ab3124a40ddf229fc8cd20392c71938/webmaster-verification.js https://www.googletagmanager.com https://mc.yandex.ru https://yastatic.net; frame-src 'self' https://smartcaptcha.cloud.yandex.ru https://mc.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://mc.yandex.ru wss://mc.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
 const shell =
   '<html><head><title>Markiro</title><script type="module" src="/assets/main.js"></script></head><body></body></html>';
 const saasAdminShell =
@@ -733,12 +733,56 @@ test("public smoke accepts the exact live release identity", async () => {
   assert.ok(client.requests.length > 1);
 });
 
+test("landing smoke permits the exact stable Station download as an outbound link", async () => {
+  const client = smokeClient();
+  const original = client.request;
+  client.request = async (url, init) => {
+    const parsed = new URL(url);
+    if (parsed.hostname === "markiro.example" && parsed.pathname === "/")
+      return landingResponse({
+        body: landingShell().replace(
+          "</main>",
+          '<a href="https://releases.markiro.app/station/download">Station</a></main>',
+        ),
+        headers: { "cache-control": "no-cache", "content-type": "text/html" },
+      });
+    return original(url, init);
+  };
+
+  await runPublicSmoke(
+    {
+      adminBaseUrl: "https://app.markiro.example",
+      kioskBaseUrl: "https://kiosk.markiro.example",
+      landingBaseUrl: "https://markiro.example",
+    },
+    client,
+  );
+});
+
 test("landing smoke permits only the public canonical URL outside the deployment origin", async (t) => {
   for (const [name, mutate, expected] of [
     [
       "external runtime asset",
       (body) =>
         body.replace("</head>", '<script src="https://cdn.example/app.js"></script></head>'),
+      /external origin/,
+    ],
+    [
+      "different release path",
+      (body) =>
+        body.replace(
+          "</main>",
+          '<a href="https://releases.markiro.app/station/other">Station</a></main>',
+        ),
+      /external origin/,
+    ],
+    [
+      "stable Station download used as a script",
+      (body) =>
+        body.replace(
+          "</head>",
+          '<script src="https://releases.markiro.app/station/download"></script></head>',
+        ),
       /external origin/,
     ],
     [

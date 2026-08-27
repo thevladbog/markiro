@@ -38,6 +38,14 @@ export interface FaqEntry {
   answer: string;
 }
 
+export interface StationDownloadContent {
+  eyebrow: string;
+  title: string;
+  description: string;
+  actionLabel: string;
+  meta: string;
+}
+
 export interface SeoPageDefinition {
   path: CanonicalPath;
   alternatePath: CanonicalPath;
@@ -54,6 +62,7 @@ export interface SeoPageDefinition {
   relatedPaths: readonly CanonicalPath[];
   sections: readonly ContentSection[];
   faq?: readonly FaqEntry[];
+  stationDownload?: StationDownloadContent;
 }
 
 const SHARED_IMAGE = "/og-markiro.jpg";
@@ -223,8 +232,16 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "Станция Markiro — это рабочий интерфейс оператора и локальный контур выполнения: она принимает сканы, проверяет шаг процесса, готовит печать и сохраняет операции до синхронизации.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT,
-    reviewedAt: "2026-08-14",
+    reviewedAt: "2026-08-28",
     relatedPaths: ["/oflayn-rabota/", "/sscc-i-agregatsiya/", "/markirovka-chestny-znak/"],
+    stationDownload: {
+      eyebrow: "Приложение для рабочего места",
+      title: "Station для Windows",
+      description:
+        "Приложение для производственного рабочего места. Для запуска нужна организация Markiro и сопряжение устройства в кабинете.",
+      actionLabel: "Скачать стабильную версию",
+      meta: "Windows x64 · установщик .exe",
+    },
     sections: [
       {
         heading: "Оператор видит следующий допустимый шаг",
@@ -578,12 +595,20 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "The Markiro station is both the operator interface and the local execution layer: it accepts scans, validates each step, prepares printing, and retains operations until synchronization.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: "Markiro — production serialization, aggregation, and traceability",
-    reviewedAt: "2026-08-14",
+    reviewedAt: "2026-08-28",
     relatedPaths: [
       "/en/offline-production/",
       "/en/sscc-and-aggregation/",
       "/en/chestny-znak-serialization/",
     ],
+    stationDownload: {
+      eyebrow: "Workstation application",
+      title: "Station for Windows",
+      description:
+        "The application for a production workstation. A Markiro organization and device pairing in the admin cabinet are required to start.",
+      actionLabel: "Download the stable release",
+      meta: "Windows x64 · .exe installer",
+    },
     sections: [
       {
         heading: "The operator sees the next valid step",

@@ -17,6 +17,7 @@ interface Props {
 const { page, phone } = Astro.props;
 const copy = getUiCopy(page.locale).common;
 const homePath = page.locale === "ru" ? "/" : "/en/";
+const stationDownloadUrl = "https://releases.markiro.app/station/download";
 ---
 
 <BaseLayout metadata={page} graph={buildPageGraph(page)}>
@@ -53,6 +54,27 @@ const homePath = page.locale === "ru" ? "/" : "/en/";
             </section>
           ))}
         </div>
+      )}
+
+      {page.stationDownload && (
+        <section class="seo-download" data-station-download aria-labelledby="station-download-title">
+          <p class="section-index">{page.stationDownload.eyebrow}</p>
+          <div class="seo-download__content">
+            <h2 id="station-download-title">{page.stationDownload.title}</h2>
+            <p>{page.stationDownload.description}</p>
+            <div class="seo-download__actions">
+              <a
+                class="button"
+                href={stationDownloadUrl}
+                data-analytics="station_download_click"
+                data-placement="workstation-page"
+              >
+                {page.stationDownload.actionLabel} <span aria-hidden="true">↓</span>
+              </a>
+              <span>{page.stationDownload.meta}</span>
+            </div>
+          </div>
+        </section>
       )}
 
       <RelatedPages page={page} />
