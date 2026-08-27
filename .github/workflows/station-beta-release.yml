@@ -479,7 +479,7 @@ jobs:
             SHA256SUMS \
             release-evidence.json \
             release-notes.md; do
-            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 \
+            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
               --output "$yandex_public/$asset" \
               "$yandex_release_base/$asset"
           done
@@ -489,15 +489,24 @@ jobs:
             "$yandex_public" "$version"
           node tools/station-release/artifacts.mjs compare-origins \
             "$github_public" "$yandex_public" beta "$version"
-          test "$(grep -o \"\\\"releaseSha\\\"[[:space:]]*:[[:space:]]*\\\"$release_sha\\\"\" \
-            "$github_public/release-evidence.json" | wc -l)" = 1
-          github_manifest_sha256="$(sha256sum "$github_public/latest.json" | cut -d ' ' -f 1)"
-          yandex_manifest_sha256="$(sha256sum "$yandex_public/latest.json" | cut -d ' ' -f 1)"
-          github_evidence_sha256="$(sha256sum "$github_public/release-evidence.json" | cut -d ' ' -f 1)"
-          yandex_evidence_sha256="$(sha256sum "$yandex_public/release-evidence.json" | cut -d ' ' -f 1)"
-          installer_sha256="$(sha256sum "$github_public/$installer" | cut -d ' ' -f 1)"
-          bundle_sha256="$(sha256sum "$github_public/$bundle" | cut -d ' ' -f 1)"
-          signature_sha256="$(sha256sum "$github_public/$bundle.sig" | cut -d ' ' -f 1)"
+          for evidence_path in \
+            "$github_public/release-evidence.json" \
+            "$yandex_public/release-evidence.json"; do
+            RELEASE_SHA="$release_sha" node -e '
+              const e=require(process.argv[1]);
+              if(e.releaseSha!==process.env.RELEASE_SHA)process.exit(1)
+            ' "$evidence_path"
+          done
+          sha256_file() {
+            node -e 'const{createHash}=require("node:crypto"),{readFileSync}=require("node:fs");process.stdout.write(createHash("sha256").update(readFileSync(process.argv[1])).digest("hex"))' "$1"
+          }
+          github_manifest_sha256="$(sha256_file "$github_public/latest.json")"
+          yandex_manifest_sha256="$(sha256_file "$yandex_public/latest.json")"
+          github_evidence_sha256="$(sha256_file "$github_public/release-evidence.json")"
+          yandex_evidence_sha256="$(sha256_file "$yandex_public/release-evidence.json")"
+          installer_sha256="$(sha256_file "$github_public/$installer")"
+          bundle_sha256="$(sha256_file "$github_public/$bundle")"
+          signature_sha256="$(sha256_file "$github_public/$bundle.sig")"
           node tools/station-release/release-summary.mjs beta-update \
             "$RUNNER_TEMP/station-beta-release-summary.json" \
             githubManifestSha256 "$github_manifest_sha256" \
@@ -670,10 +679,10 @@ jobs:
               "$RUNNER_TEMP/station-yandex-public" beta "$yandex_backup"
             rm -rf "$RUNNER_TEMP/station-yandex-channel-verify"
             mkdir "$RUNNER_TEMP/station-yandex-channel-verify"
-            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 \
+            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
               --output "$RUNNER_TEMP/station-yandex-channel-verify/latest.json" \
               "https://releases.markiro.app/station/beta/latest.json"
-            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 \
+            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
               --output "$RUNNER_TEMP/station-yandex-channel-verify/download" \
               "https://releases.markiro.app/station/beta/download"
             cmp "$RUNNER_TEMP/station-yandex-channel-verify/latest.json" \

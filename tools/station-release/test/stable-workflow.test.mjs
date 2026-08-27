@@ -339,6 +339,11 @@ test("both public stable trees are proven before the complete mutable transactio
     "Download and validate public immutable stable trees",
   );
   const promote = workflowStep(workflow, "release", "Promote stable mutable targets");
+  const acceptedBeta = workflowStep(
+    workflow,
+    "build",
+    "Resolve and verify dual-origin accepted beta",
+  );
   const resolve = workflowStep(workflow, "release", "Resolve stable publication candidate");
 
   assert.equal(github.if, "inputs.mode == 'publish'");
@@ -374,6 +379,10 @@ test("both public stable trees are proven before the complete mutable transactio
   assert.match(publicValidation.run, /artifacts\.mjs compare-origins/);
   assert.match(
     publicValidation.run,
+    /curl --fail[^\n]*--retry 3 --retry-all-errors --retry-max-time 30/,
+  );
+  assert.match(
+    publicValidation.run,
     /yandex-publisher\.mjs validate-public[\s\\]*"\$yandex_public" stable "\$version"/,
   );
   assert.ok(
@@ -390,6 +399,15 @@ test("both public stable trees are proven before the complete mutable transactio
   assert.match(resolve.run, /releaseSha "\$release_sha"/);
   assert.match(resolve.run, /githubBetaEvidenceSha256 "\$summary_github_beta_evidence_sha256"/);
   assert.match(resolve.run, /yandexBetaEvidenceSha256 "\$summary_yandex_beta_evidence_sha256"/);
+  assert.match(
+    acceptedBeta.run,
+    /curl --fail[^\n]*--retry 3 --retry-all-errors --retry-max-time 30/,
+  );
+  assert.equal(
+    [...promote.run.matchAll(/curl --fail[^\n]*--retry 3 --retry-all-errors --retry-max-time 30/g)]
+      .length,
+    2,
+  );
   assert.doesNotMatch(publicValidation.run, /publish-immutable|tauri build/);
   assert.doesNotMatch(promote.run, /gh release create "\$tag"|publish-immutable|tauri build/);
 });

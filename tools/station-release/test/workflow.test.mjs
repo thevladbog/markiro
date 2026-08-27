@@ -358,10 +358,25 @@ test("immutable publication and public dual-origin validation precede every mode
   assert.match(publicValidation.run, /artifacts\.mjs compare-origins/);
   assert.match(
     publicValidation.run,
-    /releaseSha.*\[\[:space:\]\]\*:\[\[:space:\]\]\*.*\$release_sha/,
+    /curl --fail[^\n]*--retry 3 --retry-all-errors --retry-max-time 30/,
   );
+  assert.match(publicValidation.run, /RELEASE_SHA="\$release_sha" node -e/);
+  assert.match(publicValidation.run, /e\.releaseSha!==process\.env\.RELEASE_SHA/);
+  assert.match(publicValidation.run, /"\$yandex_public\/release-evidence\.json"/);
+  assert.doesNotMatch(publicValidation.run, /grep -o[\s\S]*wc -l/);
+  assert.match(publicValidation.run, /sha256_file\(\)/);
+  assert.match(
+    publicValidation.run,
+    /createHash\("sha256"\)[\s\S]*readFileSync\(process\.argv\[1\]\)[\s\S]*digest\("hex"\)/,
+  );
+  assert.doesNotMatch(publicValidation.run, /sha256sum/);
   assert.doesNotMatch(publicValidation.run, /publish-immutable|tauri build/);
   assert.doesNotMatch(promote.run, /gh release create "\$tag"|publish-immutable|tauri build/);
+  assert.equal(
+    [...promote.run.matchAll(/curl --fail[^\n]*--retry 3 --retry-all-errors --retry-max-time 30/g)]
+      .length,
+    2,
+  );
 });
 
 test("one mutable transaction backs up completely, promotes in order and rolls back in reverse", async () => {

@@ -214,9 +214,12 @@ legacy beta с GitHub-only evidence: workflow обязан собрать и п�
 immutable trees в новые каталоги, валидирует их и сравнивает common assets.
 Yandex tree в seed читается через фиксированный provider host
 `https://storage.yandexcloud.net`, не через ещё выключенный release DNS.
-Provider и canonical public reads выполняются максимум четырьмя попытками с
-паузами 1, 2 и 4 секунды; каждая попытка заново проверяет status, URL, metadata,
-размер и bytes, поэтому retry не ослабляет immutable validation.
+GitHub public release/channel reads, Yandex provider и canonical public reads,
+а также прямые workflow-downloads immutable и mutable объектов выполняются
+максимум четырьмя попытками с паузами 1, 2 и 4 секунды. Каждая попытка заново
+проверяет status и redirect, а принятый download затем проходит прежнюю проверку
+metadata, размера и bytes. Небезопасный redirect не повторяется, поэтому retry
+не ослабляет immutable validation.
 Оператор передаёт точный JSON evidence отдельно одобренного и применённого
 инфраструктурного plan, в котором
 `enableStationReleasePublicDns` равно `false`; значение `true`, лишнее поле или
