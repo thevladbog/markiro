@@ -5,6 +5,7 @@ import {
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { lstat, readFile } from "node:fs/promises";
+import { setTimeout as wait } from "node:timers/promises";
 
 import { stationAssetNames } from "./artifacts.mjs";
 import { stationReleaseLocation } from "./origins.mjs";
@@ -17,6 +18,7 @@ const SOURCE_KEY_METADATA = "station-source-key";
 const MAX_ARTIFACT_BYTES = 512 * 1024 * 1024;
 const MAX_SIGNATURE_BYTES = 64 * 1024;
 const MAX_TEXT_BYTES = 256 * 1024;
+const PUBLIC_READ_RETRY_DELAYS_MS = [1_000, 2_000, 4_000];
 
 function invalid() {
   throw new Error("invalid station object storage request");
@@ -267,10 +269,17 @@ export function createStationObjectStore({
   bucket,
   publicBaseUrl,
   fetchImpl = fetch,
+  waitImpl = wait,
 } = {}) {
   if (!client || typeof client.send !== "function") invalid();
   ensureBucket(bucket);
-  if (publicBaseUrl !== PUBLIC_BASE_URL || typeof fetchImpl !== "function") invalid();
+  if (
+    publicBaseUrl !== PUBLIC_BASE_URL ||
+    typeof fetchImpl !== "function" ||
+    typeof waitImpl !== "function"
+  ) {
+    invalid();
+  }
 
   return Object.freeze({
     async assertAbsent(key) {
@@ -394,26 +403,33 @@ export function createStationObjectStore({
       const maxBytes = maxBytesForKey(key);
       ensurePublicExpectation(key, expected, maxBytes);
       const url = `${PUBLIC_BASE_URL}/${key}`;
-      let response;
-      try {
-        response = await fetchImpl(url, { redirect: "error", cache: "no-store" });
-        if (
-          !response?.ok ||
-          response.redirected === true ||
-          (typeof response.url === "string" && response.url.length > 0 && response.url !== url) ||
-          response.headers?.get?.("content-type") !== expected.contentType ||
-          response.headers?.get?.("cache-control") !== expected.cacheControl ||
-          response.headers?.get?.("content-disposition") !== expected.contentDisposition
-        ) {
-          throw publicFailure();
+      for (let attempt = 0; ; attempt += 1) {
+        let response;
+        try {
+          response = await fetchImpl(url, { redirect: "error", cache: "no-store" });
+          if (
+            !response?.ok ||
+            response.redirected === true ||
+            (typeof response.url === "string" && response.url.length > 0 && response.url !== url) ||
+            response.headers?.get?.("content-type") !== expected.contentType ||
+            response.headers?.get?.("cache-control") !== expected.cacheControl ||
+            response.headers?.get?.("content-disposition") !== expected.contentDisposition
+          ) {
+            throw publicFailure();
+          }
+          const lengthText = response.headers?.get?.("content-length");
+          const contentLength =
+            lengthText === null || lengthText === undefined ? undefined : Number(lengthText);
+          return await readBoundedBody(response.body, contentLength, maxBytes);
+        } catch {
+          await closeBody(response?.body);
+          if (attempt === PUBLIC_READ_RETRY_DELAYS_MS.length) throw publicFailure();
+          try {
+            await waitImpl(PUBLIC_READ_RETRY_DELAYS_MS[attempt]);
+          } catch {
+            throw publicFailure();
+          }
         }
-        const lengthText = response.headers?.get?.("content-length");
-        const contentLength =
-          lengthText === null || lengthText === undefined ? undefined : Number(lengthText);
-        return await readBoundedBody(response.body, contentLength, maxBytes);
-      } catch {
-        await closeBody(response?.body);
-        throw publicFailure();
       }
     },
   });

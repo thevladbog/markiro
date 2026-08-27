@@ -603,6 +603,102 @@ test("provider reader uses only the fixed Yandex storage hostname and exact resp
   ]);
 });
 
+test("provider reader accepts the canonical uppercase checksum asset key", async () => {
+  const bytes = Buffer.from("checksum bytes");
+  let requestedUrl;
+  const reader = createYandexProviderReader({
+    bucket: "markiro-station-releases",
+    fetchImpl: async (url) => {
+      requestedUrl = url;
+      return new Response(bytes, {
+        status: 200,
+        headers: {
+          "content-length": String(bytes.byteLength),
+          "content-type": "text/plain",
+          "cache-control": "public, max-age=31536000, immutable",
+        },
+      });
+    },
+  });
+  const key = `station/beta/releases/${version}/${names.checksums}`;
+
+  assert.deepEqual(
+    await reader.readPublic(key, {
+      maxBytes: 256 * 1024,
+      contentType: "text/plain",
+      cacheControl: "public, max-age=31536000, immutable",
+      contentDisposition: null,
+    }),
+    bytes,
+  );
+  assert.equal(requestedUrl, `https://storage.yandexcloud.net/markiro-station-releases/${key}`);
+});
+
+test("provider reader retries a transient public failure before accepting exact bytes", async () => {
+  const bytes = Buffer.from('{"version":"0.2.0-beta.7"}');
+  const delays = [];
+  let attempts = 0;
+  const reader = createYandexProviderReader({
+    bucket: "markiro-station-releases",
+    fetchImpl: async () => {
+      attempts += 1;
+      if (attempts === 1) return new Response("temporarily unavailable", { status: 503 });
+      return new Response(bytes, {
+        status: 200,
+        headers: {
+          "content-length": String(bytes.byteLength),
+          "content-type": "application/json",
+          "cache-control": "public, max-age=0, must-revalidate",
+        },
+      });
+    },
+    waitImpl: async (milliseconds) => {
+      delays.push(milliseconds);
+    },
+  });
+
+  assert.deepEqual(
+    await reader.readPublic("station/beta/latest.json", {
+      maxBytes: 256 * 1024,
+      contentType: "application/json",
+      cacheControl: "public, max-age=0, must-revalidate",
+      contentDisposition: null,
+    }),
+    bytes,
+  );
+  assert.equal(attempts, 2);
+  assert.deepEqual(delays, [1_000]);
+});
+
+test("provider reader bounds persistent public failures and keeps provider details private", async () => {
+  const delays = [];
+  let attempts = 0;
+  const reader = createYandexProviderReader({
+    bucket: "markiro-station-releases",
+    fetchImpl: async () => {
+      attempts += 1;
+      throw new Error("provider leak-sentinel");
+    },
+    waitImpl: async (milliseconds) => {
+      delays.push(milliseconds);
+    },
+  });
+
+  await assert.rejects(
+    reader.readPublic("station/beta/latest.json", {
+      maxBytes: 256 * 1024,
+      contentType: "application/json",
+      cacheControl: "public, max-age=0, must-revalidate",
+      contentDisposition: null,
+    }),
+    (error) =>
+      error.message === "invalid station release bootstrap" &&
+      !error.message.includes("leak-sentinel"),
+  );
+  assert.equal(attempts, 4);
+  assert.deepEqual(delays, [1_000, 2_000, 4_000]);
+});
+
 test("requires both current mutable objects before creating a backup", async () => {
   const directory = await mkdtemp(join(tmpdir(), "markiro-missing-backup-parent-"));
   const backupDirectory = join(directory, "backup");
