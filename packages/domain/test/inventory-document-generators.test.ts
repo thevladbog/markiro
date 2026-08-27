@@ -23,6 +23,17 @@ const disaggregationGolden = readFileSync(
   ),
   "utf8",
 );
+const aggregationSourceExample = readFileSync(
+  new URL(
+    "../../../docs/contracts/inventory-documents/v1/source/aggregation.example.xml",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const disaggregationCompatibilitySchema = readFileSync(
+  new URL("../../../docs/contracts/inventory-documents/v1/LP_base_types_v2.xsd", import.meta.url),
+  "utf8",
+);
 
 const metadata: InventoryDocumentGenerationMetadata = {
   documentId: "11111111-1111-4111-8111-111111111111",
@@ -78,6 +89,18 @@ function source(): InventoryDocumentGenerationSource {
 }
 
 describe("inventory GISMT aggregation XML", () => {
+  it("keeps the checked-in source example structurally aligned with the production serializer", () => {
+    expect(aggregationSourceExample).toContain(
+      '<unit_pack document_id="11111111-1111-4111-8111-111111111111" VerForm="1.03" file_date_time="2026-08-27T09:10:11.000Z" action_id="30" version="1">',
+    );
+    expect(aggregationSourceExample).toContain(
+      '<Document operation_date_time="2026-08-26T18:00:00.000Z" document_number="INV-EXAMPLE-001">',
+    );
+    expect(aggregationSourceExample).toContain(
+      '<LP_info org_name="ООО «Пример»" LP_TIN="7777777777" />',
+    );
+  });
+
   it("renders the XSD-required document metadata and only eligible verified new boxes", () => {
     const [part] = generateInventoryAggregationXml(source(), metadata);
 
@@ -96,6 +119,12 @@ describe("inventory GISMT aggregation XML", () => {
 });
 
 describe("inventory GISMT disaggregation XML", () => {
+  it("checks in the compatibility schema at the exact official include path", () => {
+    expect(disaggregationCompatibilitySchema).toContain(
+      '<xs:include schemaLocation="source/LP_base_types.xsd"/>',
+    );
+  });
+
   it("renders only old boxes used by eligible repacking and omits simple checks and MOVING_BY_UD", () => {
     const [part] = generateInventoryDisaggregationXml(source(), metadata);
 

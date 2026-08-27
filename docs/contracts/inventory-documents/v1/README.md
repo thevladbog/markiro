@@ -5,8 +5,10 @@ and XSD files were downloaded by the repository owner from the official document
 section. Successful portal upload has not yet been performed and remains the external acceptance
 gate.
 Their original SHA-256 digests are recorded below so a later upstream replacement is reviewable.
-The text copies under `source/` are review-friendly LF-normalized copies; their separate digests
-are recorded after the table and are not presented as byte-identical downloads.
+The XSDs, common types, and disaggregation example under `source/` are review-friendly
+LF-normalized copies. The aggregation example also fills the metadata omitted by the official
+example so it validates against the official XSD and mirrors the production serializer. Their
+separate digests are recorded after the table and are not presented as byte-identical downloads.
 
 ## Source provenance
 
@@ -20,11 +22,13 @@ are recorded after the table and are not presented as byte-identical downloads.
 
 Official source page: <https://docs.crpt.ru/gismt/Раздел_шаблоны_документов/>.
 
-Repository-copy SHA-256 values: `aggregation.example.xml` `f337ae38a0cf66befeef23d1e6d58b90affe18f888b1085e27e5cdf337077dac`,
+Repository-copy SHA-256 values: `aggregation.example.xml` `ddccad5f604f5bbea35c3cdb953cd7adaa61f6aedb1ca9563a03af5c292d81f4`,
 `aggregation.xsd` `b6e806d682a69271e7ef62863640b43b1e87c76b061d12d91e0aa8b5381409a7`,
 `disaggregation.example.xml` `d5641a981d522190337c1f791070050053a3905651017dc90966e34d7d875d33`,
 `disaggregation.xsd` `9491ce5bdf5bf4038c46b3e689dca0cd1f5bd3e55e349ec5ffba9bab3404f27c`,
-and `LP_base_types.xsd` `7e6f1dabb42f986edb530fcfdfc5930fc5647ab43253cad0a91fe6a07c02b5b3`.
+`LP_base_types.xsd` `7e6f1dabb42f986edb530fcfdfc5930fc5647ab43253cad0a91fe6a07c02b5b3`,
+and compatibility wrapper `LP_base_types_v2.xsd`
+`f9e841fc41f7043e9021833b4064e32bb902b36a966cfe6e10396f2d8c752c89`.
 
 ## Shared byte contract
 
@@ -57,10 +61,10 @@ and `LP_base_types.xsd` `7e6f1dabb42f986edb530fcfdfc5930fc5647ab43253cad0a91fe6a
 - Duplicate boxes are removed and remaining boxes are sorted by SSCC.
 - An old box is omitted when the frozen source contains a protected/`MOVING_BY_UD` code whose
   `parentSscc` is that box. An empty actionable result fails generation.
-- The supplied XSD cannot compile standalone because its official `LP_base_types_v2.xsd` link is
-  unavailable. The checked golden output was compatibility-validated with the current official
-  `LP_base_types.xsd`; `xmllint --schema` accepts the golden fixture when that file is supplied
-  under the referenced v2 filename. Successful manual upload remains the external acceptance gate.
+- The supplied XSD references an unavailable official `LP_base_types_v2.xsd`. A checked-in
+  compatibility wrapper now resolves that exact include path to the current official
+  `LP_base_types.xsd`; `xmllint --schema` accepts the golden fixture without validation-time file
+  staging. Successful manual upload remains the external acceptance gate.
 
 ## Explicitly out of scope
 

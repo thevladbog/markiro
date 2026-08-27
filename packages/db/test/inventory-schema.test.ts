@@ -920,6 +920,11 @@ describe("inventory document schema", () => {
     expect(migration).toContain(
       'ADD COLUMN "inventory_closed_at_snapshot" timestamp with time zone',
     );
+    expect(migration).not.toContain('coalesce("inventory"."closed_at", "run"."created_at")');
+    expect(migration).toContain("inventory.emergency_closed");
+    expect(migration).toContain("inventory.reopened");
+    expect(migration).toContain("resultRevision");
+    expect(migration).toContain("closedAt");
     expect(snapshot).toContain('"organization_name_snapshot"');
     expect(snapshot).toContain('"inventory_number_snapshot"');
     expect(snapshot).toContain('"inventory_closed_at_snapshot"');
