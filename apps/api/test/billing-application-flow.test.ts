@@ -292,9 +292,16 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
         .where(eq(schema.invoiceApplicationEvents.invoiceLineId, invoice.lineId)),
     ).toEqual([{ status: "pending" }]);
     const pendingDetail = await billing.get(invoice.invoiceId);
-    expect(pendingDetail.payment).toMatchObject({
-      id: payment.id,
-      bankReference: expect.any(String),
+    expect(pendingDetail.payments).toEqual([
+      expect.objectContaining({
+        id: payment.id,
+        bankReference: expect.any(String),
+      }),
+    ]);
+    expect(pendingDetail.paymentSummary).toEqual({
+      confirmedAmount: "1000.00",
+      remainingAmount: "0.00",
+      status: "paid",
     });
     expect(pendingDetail.application).toMatchObject({
       status: "pending",

@@ -416,6 +416,12 @@ describe("platform commercial contracts", () => {
         },
         {
           ...invoiceBase,
+          id: "33111111-1111-4111-8111-111111111112",
+          status: "partially_paid",
+          ...issuedInvoiceMetadata,
+        },
+        {
+          ...invoiceBase,
           id: "33111111-1111-4111-8111-111111111111",
           status: "paid",
           ...issuedInvoiceMetadata,
@@ -433,6 +439,7 @@ describe("platform commercial contracts", () => {
     expect(list.items.map((invoice) => invoice.status)).toEqual([
       "draft",
       "issued",
+      "partially_paid",
       "paid",
       "cancelled",
     ]);
@@ -462,7 +469,12 @@ describe("platform commercial contracts", () => {
           updatedAt: CREATED_AT,
         },
       ],
-      payment: billingPayment,
+      payments: [billingPayment],
+      paymentSummary: {
+        confirmedAmount: "15000.00",
+        remainingAmount: "0.00",
+        status: "paid",
+      },
       application: {
         status: "applied",
         latestByLine: [applicationEvent],
@@ -598,12 +610,49 @@ describe("platform commercial contracts", () => {
         paidAt: CREATED_AT,
         lines: [invoiceLine],
         documents: [],
-        payment: null,
+        payments: [],
+        paymentSummary: {
+          confirmedAmount: "15000.00",
+          remainingAmount: "0.00",
+          status: "paid",
+        },
         application: {
           status: "not_paid",
           latestByLine: [],
           attempts: [],
         },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("parses an exact partially-paid invoice detail with ordered payment relations", () => {
+    const partialPayment = { ...billingPayment, amount: "5000.00" };
+    const parsed = platformCommercialContracts.invoices.detail.response.parse({
+      ...invoiceBase,
+      ...issuedInvoiceMetadata,
+      status: "partially_paid",
+      lines: [invoiceLine],
+      documents: [],
+      payments: [partialPayment],
+      paymentSummary: {
+        confirmedAmount: "5000.00",
+        remainingAmount: "10000.00",
+        status: "partially_paid",
+      },
+      application: { status: "not_paid", latestByLine: [], attempts: [] },
+    });
+
+    expect(parsed.paymentSummary).toEqual({
+      confirmedAmount: "5000.00",
+      remainingAmount: "10000.00",
+      status: "partially_paid",
+    });
+    expect(parsed).not.toHaveProperty("payment");
+
+    expect(
+      platformCommercialContracts.invoices.detail.response.safeParse({
+        ...parsed,
+        paymentSummary: { ...parsed.paymentSummary, confirmedAmount: "4999.99" },
       }).success,
     ).toBe(false);
   });
@@ -649,7 +698,12 @@ describe("platform commercial contracts", () => {
         status: "paid",
         paidAt: CREATED_AT,
         ...relations,
-        payment: billingPayment,
+        payments: [billingPayment],
+        paymentSummary: {
+          confirmedAmount: "15000.00",
+          remainingAmount: "0.00",
+          status: "paid",
+        },
         application,
       });
       expect(parsed.application.status).toBe(application.status);
@@ -678,7 +732,16 @@ describe("platform commercial contracts", () => {
     } as const;
 
     for (const { name, record } of unpaidRecords) {
-      const valid = { ...record, ...relations, payment: null, application: notPaidApplication };
+      const valid = {
+        ...record,
+        ...relations,
+        payments: [],
+        paymentSummary:
+          name === "issued"
+            ? { confirmedAmount: "0.00", remainingAmount: "15000.00", status: "issued" }
+            : null,
+        application: notPaidApplication,
+      };
       expect(
         platformCommercialContracts.invoices.detail.response.parse(valid).application.status,
         `${name} valid`,
@@ -686,9 +749,9 @@ describe("platform commercial contracts", () => {
       expect(
         platformCommercialContracts.invoices.detail.response.safeParse({
           ...valid,
-          payment: billingPayment,
+          payments: [billingPayment],
         }).success,
-        `${name} payment`,
+        `${name} payments`,
       ).toBe(false);
       expect(
         platformCommercialContracts.invoices.detail.response.safeParse({
@@ -705,15 +768,20 @@ describe("platform commercial contracts", () => {
       status: "paid",
       paidAt: CREATED_AT,
       ...relations,
-      payment: billingPayment,
+      payments: [billingPayment],
+      paymentSummary: {
+        confirmedAmount: "15000.00",
+        remainingAmount: "0.00",
+        status: "paid",
+      },
       application: paidApplications[0],
     } as const;
     expect(
       platformCommercialContracts.invoices.detail.response.safeParse({
         ...paid,
-        payment: null,
+        payments: [],
       }).success,
-      "paid payment",
+      "paid payments",
     ).toBe(false);
     expect(
       platformCommercialContracts.invoices.detail.response.safeParse({
@@ -833,9 +901,14 @@ describe("platform commercial contracts", () => {
       items: [billingPayment, importedPayment],
     });
     expect(list.items.map((payment) => payment.source)).toEqual(["manual", "bank_import"]);
-    expect(platformCommercialContracts.payments.manual.response.parse(billingPayment).source).toBe(
-      "manual",
-    );
+    expect(
+      platformCommercialContracts.payments.manual.response.parse({
+        ...billingPayment,
+        invoiceStatus: "paid",
+        confirmedAmount: "15000.00",
+        remainingAmount: "0.00",
+      }).source,
+    ).toBe("manual");
     expect(
       platformCommercialContracts.payments.import.response.parse({
         id: "64111111-1111-4111-8111-111111111111",

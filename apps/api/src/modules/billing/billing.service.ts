@@ -191,7 +191,7 @@ export class BillingService {
       .from(schema.invoiceDocuments)
       .where(eq(schema.invoiceDocuments.invoiceId, id))
       .orderBy(desc(schema.invoiceDocuments.revision));
-    const [payment] = await this.db
+    const payments = await this.db
       .select()
       .from(schema.billingPayments)
       .where(
@@ -200,7 +200,7 @@ export class BillingService {
           eq(schema.billingPayments.invoiceId, id),
         ),
       )
-      .limit(1);
+      .orderBy(schema.billingPayments.paidAt, schema.billingPayments.id);
     const attempts = await this.db
       .select()
       .from(schema.invoiceApplicationEvents)
@@ -222,19 +222,24 @@ export class BillingService {
       const event = latestAttempts.get(line.id);
       return event ? [event] : [];
     });
-    const applicationStatus = !payment
-      ? "not_paid"
-      : latestByLine.some((event) => event.status === "failed")
-        ? "partial_failure"
-        : latestByLine.length < lines.length ||
-            latestByLine.some((event) => event.status === "pending")
-          ? "pending"
-          : "applied";
+    const applicationStatus =
+      invoice.status !== "paid"
+        ? "not_paid"
+        : latestByLine.some((event) => event.status === "failed")
+          ? "partial_failure"
+          : latestByLine.length < lines.length ||
+              latestByLine.some((event) => event.status === "pending")
+            ? "pending"
+            : "applied";
     return {
       ...invoice,
       lines,
       documents,
-      payment: payment ?? null,
+      payments,
+      paymentSummary:
+        invoice.status === "draft" || invoice.status === "cancelled"
+          ? null
+          : invoicePaymentSummary(invoice.total, payments),
       application: {
         status: applicationStatus,
         latestByLine,
@@ -306,7 +311,9 @@ export class BillingService {
       .where(eq(schema.invoices.id, id))
       .limit(1);
     if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
-    if (invoice.status === "paid") throw new ConflictException({ code: "invoice_paid" });
+    if (invoice.status === "paid" || invoice.status === "partially_paid") {
+      throw new ConflictException({ code: "invoice_paid" });
+    }
     const [updated] = await this.db
       .update(schema.invoices)
       .set({ status: "cancelled", cancelledAt: new Date() })
@@ -315,6 +322,24 @@ export class BillingService {
     if (!updated) throw new ConflictException({ code: "invoice_cancel_failed" });
     return updated;
   }
+}
+
+function invoicePaymentSummary(
+  total: string,
+  payments: Array<typeof schema.billingPayments.$inferSelect>,
+) {
+  const totalCents = cents(total);
+  const confirmed = payments.reduce((sum, payment) => sum + cents(payment.amount), 0n);
+  return {
+    confirmedAmount: money(confirmed),
+    remainingAmount: money(totalCents - confirmed),
+    status:
+      confirmed === 0n
+        ? ("issued" as const)
+        : confirmed === totalCents
+          ? ("paid" as const)
+          : ("partially_paid" as const),
+  };
 }
 
 function nextInvoiceNumber(last: string | undefined): string {

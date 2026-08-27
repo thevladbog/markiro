@@ -12,6 +12,7 @@ import {
   payerAccountEvidenceSchema,
   type PayerAccountEvidence,
   BillingPaymentServiceSource,
+  type ManualBillingPaymentServiceResultSource,
   type PaymentMatchResolveDto,
   type PaymentMatchServiceSource,
   PaymentImportServiceResultSource,
@@ -82,7 +83,7 @@ export class BillingPaymentsService {
     principal: PlatformPrincipal,
     invoiceId: string,
     input: ManualPaymentDto,
-  ): Promise<BillingPaymentServiceSource> {
+  ): Promise<ManualBillingPaymentServiceResultSource> {
     return this.db.transaction(async (tx) => {
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`billing-payment:${input.idempotencyKey}`}, 0))`,
@@ -95,11 +96,30 @@ export class BillingPaymentsService {
       if (existing) {
         if (
           existing.invoiceId === invoiceId &&
+          existing.source === "manual" &&
+          existing.importRowId === null &&
+          existing.currency === "RUB" &&
           existing.amount === input.amount &&
           existing.bankReference === input.bankReference &&
           existing.paidAt.getTime() === input.paidAt.getTime()
         ) {
-          return existing;
+          await tx.execute(sql`select id from invoices where id = ${invoiceId} for update`);
+          const [invoice] = await tx
+            .select()
+            .from(schema.invoices)
+            .where(eq(schema.invoices.id, invoiceId))
+            .limit(1);
+          if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
+          const confirmedPayments = await tx
+            .select()
+            .from(schema.billingPayments)
+            .where(
+              and(
+                eq(schema.billingPayments.tenantId, invoice.tenantId),
+                eq(schema.billingPayments.invoiceId, invoiceId),
+              ),
+            );
+          return paymentResult(existing, invoice.total, confirmedPayments);
         }
         throw new ConflictException({ code: "payment_idempotency_key_reused" });
       }
@@ -110,7 +130,7 @@ export class BillingPaymentsService {
         .where(eq(schema.invoices.id, invoiceId))
         .limit(1);
       if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
-      if (invoice.status !== "issued")
+      if (invoice.status !== "issued" && invoice.status !== "partially_paid")
         throw new ConflictException({
           code:
             invoice.status === "cancelled"
@@ -119,8 +139,25 @@ export class BillingPaymentsService {
                 ? "invoice_already_paid"
                 : "invoice_not_issued",
         });
-      if (input.amount !== invoice.total)
-        throw new BadRequestException({ code: "payment_amount_mismatch" });
+      const confirmedPayments = await tx
+        .select()
+        .from(schema.billingPayments)
+        .where(
+          and(
+            eq(schema.billingPayments.tenantId, invoice.tenantId),
+            eq(schema.billingPayments.invoiceId, invoiceId),
+          ),
+        );
+      const total = cents(invoice.total);
+      const confirmedBefore = confirmedPayments.reduce(
+        (sum, payment) => sum + cents(payment.amount),
+        0n,
+      );
+      const remainingBefore = total - confirmedBefore;
+      const paymentAmount = cents(input.amount);
+      if (paymentAmount > remainingBefore) {
+        throw new ConflictException({ code: "payment_amount_exceeds_remaining" });
+      }
       const [payment] = await tx
         .insert(schema.billingPayments)
         .values({
@@ -134,39 +171,47 @@ export class BillingPaymentsService {
           idempotencyKey: input.idempotencyKey,
         })
         .returning();
+      const confirmedAfter = confirmedBefore + paymentAmount;
+      const invoiceStatus = confirmedAfter === total ? "paid" : "partially_paid";
       await tx
         .update(schema.invoices)
-        .set({ status: "paid", paidAt: input.paidAt })
+        .set({
+          status: invoiceStatus,
+          paidAt: invoiceStatus === "paid" ? input.paidAt : null,
+        })
         .where(eq(schema.invoices.id, invoiceId));
-      const lines = await tx
-        .select()
-        .from(schema.invoiceLines)
-        .where(eq(schema.invoiceLines.invoiceId, invoiceId));
-      if (lines.length > 0) {
-        await tx.insert(schema.invoiceApplicationEvents).values(
-          lines.map((line) => ({
-            tenantId: invoice.tenantId,
-            invoiceId,
-            invoiceLineId: line.id,
-            attempt: 1,
-            status: "pending" as const,
-            kind: line.kind,
-            source: "payment",
-            beforeSnapshot: null,
-            afterSnapshot: null,
-            errorCode: null,
-            actorPlatformUserId: principal.userId,
-          })),
-        );
-      }
-      if (invoice.applicationMode === "automatic" && payment) {
-        await this.application.applyAutomaticInTransaction(
-          tx,
-          principal,
-          { ...invoice, status: "paid", paidAt: input.paidAt },
-          payment,
-          lines,
-        );
+      let lines: Array<typeof schema.invoiceLines.$inferSelect> = [];
+      if (invoiceStatus === "paid") {
+        lines = await tx
+          .select()
+          .from(schema.invoiceLines)
+          .where(eq(schema.invoiceLines.invoiceId, invoiceId));
+        if (lines.length > 0) {
+          await tx.insert(schema.invoiceApplicationEvents).values(
+            lines.map((line) => ({
+              tenantId: invoice.tenantId,
+              invoiceId,
+              invoiceLineId: line.id,
+              attempt: 1,
+              status: "pending" as const,
+              kind: line.kind,
+              source: "payment",
+              beforeSnapshot: null,
+              afterSnapshot: null,
+              errorCode: null,
+              actorPlatformUserId: principal.userId,
+            })),
+          );
+        }
+        if (invoice.applicationMode === "automatic" && payment) {
+          await this.application.applyAutomaticInTransaction(
+            tx,
+            principal,
+            { ...invoice, status: "paid", paidAt: input.paidAt },
+            payment,
+            lines,
+          );
+        }
       }
       if (!payment) throw new ConflictException({ code: "payment_recording_failed" });
       await this.audit.record(tx, {
@@ -180,13 +225,23 @@ export class BillingPaymentsService {
         reason: null,
         before: { invoiceStatus: invoice.status },
         after: {
-          invoiceStatus: "paid",
+          invoiceStatus,
+          confirmedAmount: money(confirmedAfter),
+          remainingAmount: money(total - confirmedAfter),
           applicationMode: invoice.applicationMode,
           lineCount: lines.length,
         },
         requestId: null,
       });
-      return payment;
+      return {
+        ...payment,
+        source: "manual",
+        importRowId: null,
+        currency: "RUB",
+        invoiceStatus,
+        confirmedAmount: money(confirmedAfter),
+        remainingAmount: money(total - confirmedAfter),
+      };
     });
   }
 
@@ -354,16 +409,14 @@ export class BillingPaymentsService {
         .for("update")
         .limit(1);
       if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
-      if (invoice.status !== "issued" && invoice.status !== "paid") {
+      if (
+        invoice.status !== "issued" &&
+        invoice.status !== "partially_paid" &&
+        invoice.status !== "paid"
+      ) {
         throw new ConflictException({ code: "invoice_not_issued" });
       }
-      if (
-        !row.amount ||
-        row.amount !== invoice.total ||
-        row.currency !== "RUB" ||
-        !row.operationDate ||
-        !row.bankReference
-      ) {
+      if (!row.amount || row.currency !== "RUB" || !row.operationDate || !row.bankReference) {
         throw new ConflictException({ code: "payment_match_evidence_incomplete" });
       }
 
@@ -393,17 +446,24 @@ export class BillingPaymentsService {
         .where(eq(schema.billingPayments.importRowId, row.id))
         .limit(1);
       if (!existingPayment) {
-        const [invoicePayment] = await tx
-          .select({ id: schema.billingPayments.id })
+        const confirmedPayments = await tx
+          .select()
           .from(schema.billingPayments)
           .where(
             and(
               eq(schema.billingPayments.tenantId, input.tenantId),
               eq(schema.billingPayments.invoiceId, input.invoiceId),
             ),
-          )
-          .limit(1);
-        if (invoicePayment) throw new ConflictException({ code: "invoice_already_paid" });
+          );
+        const total = cents(invoice.total);
+        const confirmedBefore = confirmedPayments.reduce(
+          (sum, payment) => sum + cents(payment.amount),
+          0n,
+        );
+        const paymentAmount = cents(row.amount);
+        if (paymentAmount > total - confirmedBefore) {
+          throw new ConflictException({ code: "payment_amount_exceeds_remaining" });
+        }
         const [payment] = await tx
           .insert(schema.billingPayments)
           .values({
@@ -419,39 +479,46 @@ export class BillingPaymentsService {
           })
           .returning();
         if (!payment) throw new ConflictException({ code: "payment_recording_failed" });
+        const confirmedAfter = confirmedBefore + paymentAmount;
+        const invoiceStatus = confirmedAfter === total ? "paid" : "partially_paid";
         await tx
           .update(schema.invoices)
-          .set({ status: "paid", paidAt: row.operationDate })
+          .set({
+            status: invoiceStatus,
+            paidAt: invoiceStatus === "paid" ? row.operationDate : null,
+          })
           .where(eq(schema.invoices.id, input.invoiceId));
-        const lines = await tx
-          .select()
-          .from(schema.invoiceLines)
-          .where(eq(schema.invoiceLines.invoiceId, input.invoiceId));
-        if (lines.length > 0) {
-          await tx.insert(schema.invoiceApplicationEvents).values(
-            lines.map((line) => ({
-              tenantId: input.tenantId,
-              invoiceId: input.invoiceId,
-              invoiceLineId: line.id,
-              attempt: 1,
-              status: "pending" as const,
-              kind: line.kind,
-              source: "payment",
-              beforeSnapshot: null,
-              afterSnapshot: null,
-              errorCode: null,
-              actorPlatformUserId: principal.userId,
-            })),
-          );
-        }
-        if (invoice.applicationMode === "automatic") {
-          await this.application.applyAutomaticInTransaction(
-            tx,
-            principal,
-            { ...invoice, status: "paid", paidAt: row.operationDate },
-            payment,
-            lines,
-          );
+        if (invoiceStatus === "paid") {
+          const lines = await tx
+            .select()
+            .from(schema.invoiceLines)
+            .where(eq(schema.invoiceLines.invoiceId, input.invoiceId));
+          if (lines.length > 0) {
+            await tx.insert(schema.invoiceApplicationEvents).values(
+              lines.map((line) => ({
+                tenantId: input.tenantId,
+                invoiceId: input.invoiceId,
+                invoiceLineId: line.id,
+                attempt: 1,
+                status: "pending" as const,
+                kind: line.kind,
+                source: "payment",
+                beforeSnapshot: null,
+                afterSnapshot: null,
+                errorCode: null,
+                actorPlatformUserId: principal.userId,
+              })),
+            );
+          }
+          if (invoice.applicationMode === "automatic") {
+            await this.application.applyAutomaticInTransaction(
+              tx,
+              principal,
+              { ...invoice, status: "paid", paidAt: row.operationDate },
+              payment,
+              lines,
+            );
+          }
         }
       } else if (
         existingPayment.invoiceId !== input.invoiceId ||
@@ -548,6 +615,34 @@ type TenantAccount = typeof schema.tenantBankAccounts.$inferSelect;
 type PaymentMatchRow = typeof schema.paymentMatches.$inferSelect;
 type PaymentImportRow = typeof schema.paymentImportRows.$inferSelect;
 type DbTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+function cents(value: string): bigint {
+  const [whole = "0", fraction = "00"] = value.split(".");
+  return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
+}
+
+function money(value: bigint): string {
+  return `${value / 100n}.${(value % 100n).toString().padStart(2, "0")}`;
+}
+
+function paymentResult(
+  payment: typeof schema.billingPayments.$inferSelect,
+  invoiceTotal: string,
+  confirmedPayments: Array<typeof schema.billingPayments.$inferSelect>,
+): ManualBillingPaymentServiceResultSource {
+  const total = cents(invoiceTotal);
+  const confirmed = confirmedPayments.reduce((sum, row) => sum + cents(row.amount), 0n);
+  const remaining = total - confirmed;
+  return {
+    ...payment,
+    source: "manual",
+    importRowId: null,
+    currency: "RUB",
+    invoiceStatus: remaining === 0n ? "paid" : confirmed === 0n ? "issued" : "partially_paid",
+    confirmedAmount: money(confirmed),
+    remainingAmount: money(remaining),
+  };
+}
 
 function payerEvidence(payerAccount: string | null, account?: TenantAccount): PayerAccountEvidence {
   if (account) {

@@ -332,6 +332,7 @@
     "statuses": {
       "draft": "Черновик",
       "issued": "Выставлен",
+      "partially_paid": "Частично оплачен",
       "paid": "Оплачен",
       "cancelled": "Отменён"
     },

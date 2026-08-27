@@ -329,7 +329,13 @@
       "downloadError": "Could not get the print-form link. Please try again.",
       "popupBlocked": "The browser blocked the print form. Allow pop-ups and try again."
     },
-    "statuses": { "draft": "Draft", "issued": "Issued", "paid": "Paid", "cancelled": "Cancelled" },
+    "statuses": {
+      "draft": "Draft",
+      "issued": "Issued",
+      "partially_paid": "Partially paid",
+      "paid": "Paid",
+      "cancelled": "Cancelled"
+    },
     "modes": { "manual": "After operator decision", "automatic": "Automatically after payment" },
     "policies": {
       "immediate": "Immediately",

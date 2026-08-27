@@ -29,6 +29,13 @@ const nonNullUnknownSchema = z
   .unknown()
   .refine((value) => value !== null && value !== undefined, "Value must be present");
 
+const moneyCents = (value: string): bigint => {
+  const [whole = "0", fraction = "00"] = value.split(".");
+  return BigInt(whole) * 100n + BigInt(fraction);
+};
+const centsMoney = (value: bigint): string =>
+  `${value / 100n}.${(value % 100n).toString().padStart(2, "0")}`;
+
 export const billingProfileKindSchema = z.enum([
   "individual",
   "self_employed",
@@ -791,6 +798,14 @@ const issuedInvoiceSchema = invoiceRecordCommonSchema
     cancelledAt: z.null(),
   })
   .strict();
+const partiallyPaidInvoiceSchema = invoiceRecordCommonSchema
+  .extend({
+    status: z.literal("partially_paid"),
+    ...issuedInvoiceFields,
+    paidAt: z.null(),
+    cancelledAt: z.null(),
+  })
+  .strict();
 const paidInvoiceSchema = invoiceRecordCommonSchema
   .extend({
     status: z.literal("paid"),
@@ -811,13 +826,14 @@ const cancelledInvoiceSchema = invoiceRecordCommonSchema
 export const invoiceSchema = z.discriminatedUnion("status", [
   draftInvoiceSchema,
   issuedInvoiceSchema,
+  partiallyPaidInvoiceSchema,
   paidInvoiceSchema,
   cancelledInvoiceSchema,
 ]);
 
 export const invoiceServiceRecordSchema = invoiceRecordCommonSchema
   .extend({
-    status: z.enum(["draft", "issued", "paid", "cancelled"]),
+    status: z.enum(["draft", "issued", "partially_paid", "paid", "cancelled"]),
     currency: z.string().min(1),
     issueDate: nullableServiceTimestampSchema,
     dueDate: nullableServiceTimestampSchema,
@@ -945,8 +961,20 @@ export const billingPaymentServiceSchema = billingPaymentSchema
   })
   .strict();
 
-const manualBillingPaymentSchema = billingPaymentSchema
-  .extend({ source: z.literal("manual"), importRowId: z.null() })
+export const invoicePaymentSummarySchema = z.strictObject({
+  confirmedAmount: platformMoneySchema,
+  remainingAmount: platformMoneySchema,
+  status: z.enum(["issued", "partially_paid", "paid"]),
+});
+
+export const manualBillingPaymentSchema = billingPaymentSchema
+  .extend({
+    source: z.literal("manual"),
+    importRowId: z.null(),
+    invoiceStatus: invoicePaymentSummarySchema.shape.status,
+    confirmedAmount: platformMoneySchema,
+    remainingAmount: platformMoneySchema,
+  })
   .strict();
 
 const invoiceApplicationEventCommonSchema = z
@@ -1028,33 +1056,77 @@ const invoiceDetailRelationFields = {
 };
 const unpaidInvoiceDetailFields = {
   ...invoiceDetailRelationFields,
-  payment: z.null(),
+  payments: z.array(billingPaymentSchema).length(0),
+  paymentSummary: invoicePaymentSummarySchema.extend({ status: z.literal("issued") }).strict(),
+  application: unpaidInvoiceApplicationStateSchema,
+};
+const inactiveInvoiceDetailFields = {
+  ...invoiceDetailRelationFields,
+  payments: z.array(billingPaymentSchema).length(0),
+  paymentSummary: z.null(),
+  application: unpaidInvoiceApplicationStateSchema,
+};
+const partiallyPaidInvoiceDetailFields = {
+  ...invoiceDetailRelationFields,
+  payments: z.array(billingPaymentSchema).min(1),
+  paymentSummary: invoicePaymentSummarySchema
+    .extend({ status: z.literal("partially_paid") })
+    .strict(),
   application: unpaidInvoiceApplicationStateSchema,
 };
 const paidInvoiceDetailFields = {
   ...invoiceDetailRelationFields,
-  payment: billingPaymentSchema,
+  payments: z.array(billingPaymentSchema).min(1),
+  paymentSummary: invoicePaymentSummarySchema.extend({ status: z.literal("paid") }).strict(),
   application: paidInvoiceApplicationStateSchema,
 };
-const draftInvoiceDetailSchema = draftInvoiceSchema.extend(unpaidInvoiceDetailFields).strict();
+const draftInvoiceDetailSchema = draftInvoiceSchema.extend(inactiveInvoiceDetailFields).strict();
 const issuedInvoiceDetailSchema = issuedInvoiceSchema.extend(unpaidInvoiceDetailFields).strict();
+const partiallyPaidInvoiceDetailSchema = partiallyPaidInvoiceSchema
+  .extend(partiallyPaidInvoiceDetailFields)
+  .strict();
 const paidInvoiceDetailSchema = paidInvoiceSchema.extend(paidInvoiceDetailFields).strict();
 const cancelledInvoiceDetailSchema = cancelledInvoiceSchema
-  .extend(unpaidInvoiceDetailFields)
+  .extend(inactiveInvoiceDetailFields)
   .strict();
 
-export const invoiceDetailSchema = z.discriminatedUnion("status", [
-  draftInvoiceDetailSchema,
-  issuedInvoiceDetailSchema,
-  paidInvoiceDetailSchema,
-  cancelledInvoiceDetailSchema,
-]);
+export const invoiceDetailSchema = z
+  .discriminatedUnion("status", [
+    draftInvoiceDetailSchema,
+    issuedInvoiceDetailSchema,
+    partiallyPaidInvoiceDetailSchema,
+    paidInvoiceDetailSchema,
+    cancelledInvoiceDetailSchema,
+  ])
+  .superRefine((invoice, context) => {
+    if (invoice.paymentSummary === null) return;
+    const confirmed = invoice.payments.reduce(
+      (sum, payment) => sum + moneyCents(payment.amount),
+      0n,
+    );
+    const remaining = moneyCents(invoice.total) - confirmed;
+    if (invoice.paymentSummary.confirmedAmount !== centsMoney(confirmed)) {
+      context.addIssue({
+        code: "custom",
+        path: ["paymentSummary", "confirmedAmount"],
+        message: "Confirmed amount must equal the payment aggregate",
+      });
+    }
+    if (remaining < 0n || invoice.paymentSummary.remainingAmount !== centsMoney(remaining)) {
+      context.addIssue({
+        code: "custom",
+        path: ["paymentSummary", "remainingAmount"],
+        message: "Remaining amount must equal invoice total minus confirmed payments",
+      });
+    }
+  });
 
 export const invoiceServiceDetailSchema = invoiceServiceRecordSchema
   .extend({
     lines: z.array(invoiceServiceLineSchema),
     documents: z.array(commercialDocumentListItemServiceSchema),
-    payment: billingPaymentServiceSchema.nullable(),
+    payments: z.array(billingPaymentServiceSchema),
+    paymentSummary: invoicePaymentSummarySchema.nullable(),
     application: invoiceApplicationServiceStateSchema,
   })
   .strict();
@@ -1361,6 +1433,9 @@ export type ManualPaymentDto = z.output<typeof manualPaymentSchema>;
 export type BillingPayment = z.output<typeof billingPaymentSchema>;
 export type BillingPaymentSource = z.input<typeof billingPaymentSchema>;
 export type BillingPaymentServiceSource = z.input<typeof billingPaymentServiceSchema>;
+export type InvoicePaymentSummary = z.output<typeof invoicePaymentSummarySchema>;
+export type ManualBillingPayment = z.output<typeof manualBillingPaymentSchema>;
+export type ManualBillingPaymentServiceResultSource = z.input<typeof manualBillingPaymentSchema>;
 export type PaymentImportInput = z.input<typeof paymentImportSchema>;
 export type PaymentImportDto = z.output<typeof paymentImportSchema>;
 export type PaymentImportResult = z.output<typeof paymentImportResultSchema>;

@@ -143,7 +143,8 @@ function installInvoiceEditorApi({
           updatedAt: CREATED_AT,
           lines: [],
           documents: [],
-          payment: null,
+          payments: [],
+          paymentSummary: null,
           application: { status: "not_paid", latestByLine: [], attempts: [] },
         });
       }
