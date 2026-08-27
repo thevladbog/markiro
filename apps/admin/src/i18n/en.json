@@ -2305,6 +2305,8 @@
         "cardTitle": "Organisation profile",
         "glnLabel": "GLN",
         "innLabel": "Tax ID",
+        "timeZoneLabel": "Production timezone",
+        "timeZoneHint": "Controls calendar-day boundaries on production dashboards.",
         "prefixesLabel": "GS1 prefixes",
         "prefixesHint": "Comma-separated, e.g. 4600000, 4600001",
         "defaultBoxLabelTemplateLabel": "Default box label template",

@@ -2305,6 +2305,8 @@
         "cardTitle": "Профиль организации",
         "glnLabel": "GLN",
         "innLabel": "ИНН",
+        "timeZoneLabel": "Часовой пояс производства",
+        "timeZoneHint": "Определяет границы календарных дней на производственных дашбордах.",
         "prefixesLabel": "Префиксы GS1",
         "prefixesHint": "Через запятую, например 4600000, 4600001",
         "defaultBoxLabelTemplateLabel": "Шаблон этикетки короба по умолчанию",

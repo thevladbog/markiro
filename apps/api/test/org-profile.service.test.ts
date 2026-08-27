@@ -51,6 +51,7 @@ describe("OrgProfileService box label defaults", () => {
     gln: null,
     gs1Prefixes: [],
     inn: null,
+    timeZone: "Europe/Moscow",
     defaultBoxLabelTemplateId: null,
     pickupLimitsEnabled: true,
     logoRevision: null,
@@ -69,6 +70,25 @@ describe("OrgProfileService box label defaults", () => {
     const service = new OrgProfileService({ select } as never, {} as never, {} as never);
 
     await expect(service.getProfile("tenant-a")).resolves.toEqual(emptyProfile);
+  });
+
+  it("returns the persisted operational timezone", async () => {
+    const queryResults = [[{ timeZone: "Asia/Irkutsk" }], [{ limitsEnabled: true }], []];
+    const select = vi.fn(() => {
+      const rows = queryResults.shift() ?? [];
+      const result = Object.assign(Promise.resolve(rows), { limit: () => result });
+      return {
+        from: () => ({
+          where: () => result,
+          innerJoin: () => ({ where: () => result }),
+        }),
+      };
+    });
+    const service = new OrgProfileService({ select } as never, {} as never, {} as never);
+
+    await expect(service.getProfile("tenant-a")).resolves.toMatchObject({
+      timeZone: "Asia/Irkutsk",
+    });
   });
 
   it.each([
@@ -112,6 +132,33 @@ describe("OrgProfileService box label defaults", () => {
     expect(values.mock.calls[0]?.[0]).not.toHaveProperty("defaultBoxLabelTemplateId");
     const conflict = onConflictDoUpdate.mock.calls[0]?.[0] as { set: Record<string, unknown> };
     expect(conflict.set).not.toHaveProperty("defaultBoxLabelTemplateId");
+  });
+
+  it("writes a supplied operational timezone on insert and conflict update", async () => {
+    const { db, onConflictDoUpdate, values } = profileUpsertDb();
+    const service = new OrgProfileService(db as never, {} as never, {} as never);
+    vi.spyOn(service, "getProfile").mockResolvedValue({
+      ...emptyProfile,
+      timeZone: "Asia/Irkutsk",
+    });
+
+    await service.upsertProfile("tenant-a", "actor-a", { timeZone: "Asia/Irkutsk" });
+
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({ timeZone: "Asia/Irkutsk" }));
+    expect(onConflictDoUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ set: expect.objectContaining({ timeZone: "Asia/Irkutsk" }) }),
+    );
+  });
+
+  it("leaves the stored operational timezone untouched when omitted", async () => {
+    const { db, onConflictDoUpdate } = profileUpsertDb();
+    const service = new OrgProfileService(db as never, {} as never, {} as never);
+    vi.spyOn(service, "getProfile").mockResolvedValue(emptyProfile);
+
+    await service.upsertProfile("tenant-a", "actor-a", { inn: "7701234567" });
+
+    const conflict = onConflictDoUpdate.mock.calls[0]?.[0] as { set: Record<string, unknown> };
+    expect(conflict.set).not.toHaveProperty("timeZone");
   });
 
   it("maps a foreign template FK violation to a bounded 400 without fetching a partial profile", async () => {

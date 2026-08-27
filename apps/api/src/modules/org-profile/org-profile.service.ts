@@ -64,6 +64,7 @@ export class OrgProfileService {
       gln: row?.gln ?? null,
       gs1Prefixes: row?.gs1Prefixes ?? [],
       inn: row?.inn ?? null,
+      timeZone: row?.timeZone ?? "Europe/Moscow",
       defaultBoxLabelTemplateId: row?.defaultBoxLabelTemplateId ?? null,
       pickupLimitsEnabled: pickupPolicy.limitsEnabled,
       logoRevision: logo?.revision ?? null,
@@ -86,6 +87,7 @@ export class OrgProfileService {
     if (patch.gln !== undefined) setClause.gln = patch.gln;
     if (patch.gs1Prefixes !== undefined) setClause.gs1Prefixes = patch.gs1Prefixes;
     if (patch.inn !== undefined) setClause.inn = patch.inn;
+    if (patch.timeZone !== undefined) setClause.timeZone = patch.timeZone;
     if (patch.defaultBoxLabelTemplateId !== undefined) {
       setClause.defaultBoxLabelTemplateId = patch.defaultBoxLabelTemplateId;
     }
@@ -99,6 +101,7 @@ export class OrgProfileService {
             gln: patch.gln ?? null,
             gs1Prefixes: patch.gs1Prefixes ?? [],
             inn: patch.inn ?? null,
+            timeZone: patch.timeZone ?? "Europe/Moscow",
             ...(patch.defaultBoxLabelTemplateId !== undefined
               ? { defaultBoxLabelTemplateId: patch.defaultBoxLabelTemplateId }
               : {}),

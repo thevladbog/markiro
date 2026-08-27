@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { hasValidCheckDigit } from "@markiro/domain";
+import { isIanaTimeZone } from "../../lib/time-zone";
 
 import type { SchemaObject } from "@nestjs/swagger";
 
@@ -12,10 +13,13 @@ const glnSchema = z
 /** GS1 company prefix: 4-12 digits. */
 const gs1PrefixSchema = z.string().regex(/^\d{4,12}$/, "gs1Prefixes entries must be 4-12 digits");
 
+const timeZoneSchema = z.string().refine(isIanaTimeZone, "timeZone must be an IANA timezone");
+
 export const putOrgProfileSchema = z.object({
   gln: glnSchema.nullable().optional(),
   gs1Prefixes: z.array(gs1PrefixSchema).optional(),
   inn: z.string().nullable().optional(),
+  timeZone: timeZoneSchema.optional(),
   defaultBoxLabelTemplateId: z.string().uuid().nullable().optional(),
   pickupLimitsEnabled: z.boolean().optional(),
 });
@@ -25,6 +29,7 @@ export interface OrgProfileDto {
   gln: string | null;
   gs1Prefixes: string[];
   inn: string | null;
+  timeZone: string;
   defaultBoxLabelTemplateId: string | null;
   pickupLimitsEnabled: boolean;
   logoUrl: string | null;
