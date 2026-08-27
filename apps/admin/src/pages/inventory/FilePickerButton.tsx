@@ -23,6 +23,7 @@ export function FilePickerButton({
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <span className="mk-file-picker">
+      {/* eslint-disable-next-line no-restricted-syntax -- visually hidden native file input driven by the DS Button; ui Input renders the native chrome this component replaces */}
       <input
         ref={inputRef}
         data-testid="file-picker-input"
