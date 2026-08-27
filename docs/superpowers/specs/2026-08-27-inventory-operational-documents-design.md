@@ -91,16 +91,16 @@ format versioning needs no data rewrite.
 
 ## Production catalog
 
-| Format id | Version | Admin label | Artifact | Source | Empty result |
-| --- | ---: | --- | --- | --- | --- |
-| `inventory_xml_gismt_aggregation` | 2 | `[XML][ГИСМТ] Формирование упаковки` | XML | eligible final new boxes | fail |
-| `inventory_xml_gismt_disaggregation` | 1 | `[XML][ГИСМТ] Расформирование упаковки` | XML | eligible old-box contexts | fail |
-| `inventory_txt_write_off` | 1 | `[TXT] Коды к списанию` | TXT | write-off candidates | zero bytes |
-| `inventory_csv_write_off` | 1 | `[CSV] Коды к списанию` | CSV | write-off candidates | header only |
-| `inventory_csv_current_stock` | 1 | `[CSV] Коды на учёт` | CSV | verified current codes | header only |
-| `inventory_csv_final_box_contents` | 1 | `[CSV] Состав итоговых коробов` | CSV | eligible final new boxes and their codes | header only |
-| `inventory_txt_final_boxes` | 1 | `[TXT] Номера итоговых коробов` | TXT | eligible final new boxes | zero bytes |
-| `inventory_csv_balances_by_production_date` | 1 | `[CSV] Остатки по датам производства` | CSV | verified current codes and eligible final boxes | header only |
+| Format id                                   | Version | Admin label                             | Artifact | Source                                          | Empty result |
+| ------------------------------------------- | ------: | --------------------------------------- | -------- | ----------------------------------------------- | ------------ |
+| `inventory_xml_gismt_aggregation`           |       2 | `[XML][ГИСМТ] Формирование упаковки`    | XML      | eligible final new boxes                        | fail         |
+| `inventory_xml_gismt_disaggregation`        |       1 | `[XML][ГИСМТ] Расформирование упаковки` | XML      | eligible old-box contexts                       | fail         |
+| `inventory_txt_write_off`                   |       1 | `[TXT] Коды к списанию`                 | TXT      | write-off candidates                            | zero bytes   |
+| `inventory_csv_write_off`                   |       1 | `[CSV] Коды к списанию`                 | CSV      | write-off candidates                            | header only  |
+| `inventory_csv_current_stock`               |       1 | `[CSV] Коды на учёт`                    | CSV      | verified current codes                          | header only  |
+| `inventory_csv_final_box_contents`          |       1 | `[CSV] Состав итоговых коробов`         | CSV      | eligible final new boxes and their codes        | header only  |
+| `inventory_txt_final_boxes`                 |       1 | `[TXT] Номера итоговых коробов`         | TXT      | eligible final new boxes                        | zero bytes   |
+| `inventory_csv_balances_by_production_date` |       1 | `[CSV] Остатки по датам производства`   | CSV      | verified current codes and eligible final boxes | header only  |
 
 The exact Russian labels may be reused directly from this table in the server catalog. Admin must
 render the returned label, extension, and version and must not add a second local format list.

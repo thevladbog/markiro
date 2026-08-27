@@ -126,9 +126,7 @@ expect([...encodeLfText([])]).toEqual([]);
 expect(new TextDecoder().decode(encodeLfText(["A\u001dB"]))).toBe("A\u001dB\n");
 const csv = encodeSemicolonCsv(["box_sscc", "code"], [["00...", '01A;B"C']]);
 expect([...csv.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
-expect(new TextDecoder().decode(csv.slice(3))).toBe(
-  'box_sscc;code\r\n00...;"01A;B""C"\r\n',
-);
+expect(new TextDecoder().decode(csv.slice(3))).toBe('box_sscc;code\r\n00...;"01A;B""C"\r\n');
 ```
 
 - [ ] **Step 2: Run the new tests and confirm the missing modules fail**
@@ -162,10 +160,7 @@ export interface GismtAggregationRenderResult {
 
 export const GISMT_AGGREGATION_OVERHEAD_LINE_COUNT = 10;
 
-export type GismtAggregationErrorCode =
-  | "ORG_INN_MISSING"
-  | "INVALID_SSCC"
-  | "INVALID_CIS";
+export type GismtAggregationErrorCode = "ORG_INN_MISSING" | "INVALID_SSCC" | "INVALID_CIS";
 
 export class GismtAggregationError extends Error {
   constructor(readonly code: GismtAggregationErrorCode) {
@@ -264,9 +259,9 @@ expect(registry.resolveRegistered(current.id, 1)).toEqual(legacy);
 expect(() => createInventoryDocumentRegistry([legacy, { ...legacy }])).toThrowError(
   expect.objectContaining({ code: "DUPLICATE_FORMAT_VERSION" }),
 );
-expect(() =>
-  createInventoryDocumentRegistry([current, { ...current, version: 3 }]),
-).toThrowError(expect.objectContaining({ code: "DUPLICATE_FORMAT_ID" }));
+expect(() => createInventoryDocumentRegistry([current, { ...current, version: 3 }])).toThrowError(
+  expect.objectContaining({ code: "DUPLICATE_FORMAT_ID" }),
+);
 ```
 
 Assert `INVENTORY_DOCUMENT_FORMATS` has exactly the eight rows from the spec, with aggregation v2
@@ -356,9 +351,9 @@ protected-member, missing-member, duplicate-member, missing-date, and date-misma
 expect(selectEligibleInventoryFinalBoxes(source).map((box) => box.sscc)).toEqual([
   "046800899000256001",
 ]);
-expect(selectEligibleInventoryFinalBoxes(source)[0]?.codes.map((code) => code.canonicalRaw)).toEqual(
-  [km("SERIAL-A"), km("SERIAL-B")],
-);
+expect(
+  selectEligibleInventoryFinalBoxes(source)[0]?.codes.map((code) => code.canonicalRaw),
+).toEqual([km("SERIAL-A"), km("SERIAL-B")]);
 ```
 
 Add a v2 parity test that builds the same boxes through `renderShiftExport` and compares bytes:
@@ -500,14 +495,14 @@ Expected: FAIL on missing exports.
 
 Each generator returns one part with this exact contract:
 
-| Function | Filename suffix | Header | Empty bytes |
-| --- | --- | --- | --- |
-| `generateInventoryWriteOffTxt` | `-write-off.txt` | none | zero bytes |
-| `generateInventoryWriteOffCsv` | `-write-off.csv` | `code` | BOM plus `code\r\n` |
-| `generateInventoryCurrentStockCsv` | `-current-stock.csv` | `code` | BOM plus `code\r\n` |
-| `generateInventoryFinalBoxContentsCsv` | `-final-box-contents.csv` | `box_sscc;code` | BOM plus `box_sscc;code\r\n` |
-| `generateInventoryFinalBoxesTxt` | `-final-boxes.txt` | none | zero bytes |
-| `generateInventoryBalancesByProductionDateCsv` | `-balances-by-production-date.csv` | `production_date;code_count;box_count` | BOM plus header and CRLF |
+| Function                                       | Filename suffix                    | Header                                 | Empty bytes                  |
+| ---------------------------------------------- | ---------------------------------- | -------------------------------------- | ---------------------------- |
+| `generateInventoryWriteOffTxt`                 | `-write-off.txt`                   | none                                   | zero bytes                   |
+| `generateInventoryWriteOffCsv`                 | `-write-off.csv`                   | `code`                                 | BOM plus `code\r\n`          |
+| `generateInventoryCurrentStockCsv`             | `-current-stock.csv`               | `code`                                 | BOM plus `code\r\n`          |
+| `generateInventoryFinalBoxContentsCsv`         | `-final-box-contents.csv`          | `box_sscc;code`                        | BOM plus `box_sscc;code\r\n` |
+| `generateInventoryFinalBoxesTxt`               | `-final-boxes.txt`                 | none                                   | zero bytes                   |
+| `generateInventoryBalancesByProductionDateCsv` | `-balances-by-production-date.csv` | `production_date;code_count;box_count` | BOM plus header and CRLF     |
 
 Rename and export the existing private filename helper as:
 
@@ -602,9 +597,9 @@ await pool.query(`
      '00000000-0000-4000-8000-000000000002', 'inventory_txt_write_off', 1, 1, 'empty.txt',
      'text/plain; charset=utf-8', 0, 0, 0, 0, repeat('0', 64), 'probe/empty')
 `);
-await expect(
-  pool.query(`UPDATE artifact_size_probe SET byte_size = -1`),
-).rejects.toMatchObject({ code: "23514" });
+await expect(pool.query(`UPDATE artifact_size_probe SET byte_size = -1`)).rejects.toMatchObject({
+  code: "23514",
+});
 ```
 
 - [ ] **Step 2: Run the focused DB tests and verify they fail**
@@ -963,7 +958,7 @@ Expected: FAIL because `byteSize: 0` is rejected and the run error is not locali
 Change the Admin artifact parser to:
 
 ```ts
-byteSize: z.number().int().min(0)
+byteSize: z.number().int().min(0);
 ```
 
 Add a pure mapping used by the failed-run alert:
@@ -1041,7 +1036,7 @@ pnpm format:check
 ```
 
 - [ ] If `graphify-out/graph.json` exists in the execution checkout, update the local graph and
-verify the new dependency path:
+      verify the new dependency path:
 
 ```bash
 graphify update .
@@ -1049,8 +1044,8 @@ graphify path "InventoryDocuments" "renderGismtAggregationXml"
 ```
 
 - [ ] Review the final diff against the spec and record external limits explicitly: no live
-Chestny ZNAK upload, production S3, Windows Station, scanner, or printer acceptance was performed.
+      Chestny ZNAK upload, production S3, Windows Station, scanner, or printer acceptance was performed.
 
 - [ ] Confirm the final gates did not modify tracked source. If a formatter changes a file, return
-to the task that owns that exact file, inspect the change, rerun that task's checks, and amend that
-task's scoped commit. Do not create an empty verification commit.
+      to the task that owns that exact file, inspect the change, rerun that task's checks, and amend that
+      task's scoped commit. Do not create an empty verification commit.

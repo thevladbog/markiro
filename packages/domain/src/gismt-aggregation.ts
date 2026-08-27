@@ -62,10 +62,9 @@ export function renderGismtAggregationXml(input: {
 
   return {
     bytes: textEncoder.encode(`${lines.join("\n")}\n`),
-    physicalLineCount: GISMT_AGGREGATION_OVERHEAD_LINE_COUNT + input.boxes.reduce(
-      (count, box) => count + gismtAggregationBoxLineCount(box),
-      0,
-    ),
+    physicalLineCount:
+      GISMT_AGGREGATION_OVERHEAD_LINE_COUNT +
+      input.boxes.reduce((count, box) => count + gismtAggregationBoxLineCount(box), 0),
     codeCount: input.boxes.reduce((count, box) => count + box.codes.length, 0),
     boxCount: input.boxes.length,
   };

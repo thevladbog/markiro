@@ -184,7 +184,10 @@ export function renderShiftExport(input: RenderShiftExportInput): ShiftExportPar
 
   const blocks = createBlocks(descriptor, input.source);
   if (descriptor.extension === "xml") {
-    renderXmlPart(organizationInn, blocks.map((block) => requireXmlBox(block)));
+    renderXmlPart(
+      organizationInn,
+      blocks.map((block) => requireXmlBox(block)),
+    );
   }
   if (blocks.reduce((total, block) => total + block.codeCount, 0) === 0) {
     throw new ShiftExportDomainError("EMPTY_SOURCE");
@@ -198,7 +201,10 @@ export function renderShiftExport(input: RenderShiftExportInput): ShiftExportPar
     const partNumber = index + 1;
     const xmlRendered =
       descriptor.extension === "xml"
-        ? renderXmlPart(organizationInn, part.blocks.map((block) => requireXmlBox(block)))
+        ? renderXmlPart(
+            organizationInn,
+            part.blocks.map((block) => requireXmlBox(block)),
+          )
         : null;
     const codeCount =
       xmlRendered?.codeCount ?? part.blocks.reduce((total, block) => total + block.codeCount, 0);
@@ -283,8 +289,7 @@ function createBlocks(
     return {
       csvRows,
       physicalLineCount: box.codes.reduce(
-        (total, code) =>
-          total + countCsvPhysicalLines(ssccOut) + countCsvPhysicalLines(code) - 1,
+        (total, code) => total + countCsvPhysicalLines(ssccOut) + countCsvPhysicalLines(code) - 1,
         0,
       ),
       codeCount: box.codes.length,

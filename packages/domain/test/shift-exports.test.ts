@@ -614,20 +614,14 @@ describe("GISMT aggregation XML format", () => {
   });
 
   it("validates XML boxes before empty-source and line-limit decisions", () => {
+    expect(() => renderXml({ mode: "boxes", boxes: [{ sscc: "not-an-sscc", codes: [] }] })).toThrow(
+      new ShiftExportDomainError("INVALID_BOX_SSCC"),
+    );
     expect(() =>
-      renderXml({ mode: "boxes", boxes: [{ sscc: "not-an-sscc", codes: [] }] }),
+      renderXml({ mode: "boxes", boxes: [{ sscc: "not-an-sscc", codes: [km("A")] }] }, 10),
     ).toThrow(new ShiftExportDomainError("INVALID_BOX_SSCC"));
     expect(() =>
-      renderXml(
-        { mode: "boxes", boxes: [{ sscc: "not-an-sscc", codes: [km("A")] }] },
-        10,
-      ),
-    ).toThrow(new ShiftExportDomainError("INVALID_BOX_SSCC"));
-    expect(() =>
-      renderXml(
-        { mode: "boxes", boxes: [{ sscc: "046800899000256001", codes: ["KM-1"] }] },
-        10,
-      ),
+      renderXml({ mode: "boxes", boxes: [{ sscc: "046800899000256001", codes: ["KM-1"] }] }, 10),
     ).toThrow(new ShiftExportDomainError("INVALID_CIS"));
   });
 

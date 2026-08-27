@@ -44,16 +44,33 @@ describe("GISMT aggregation XML", () => {
     });
 
     expect(decoder.decode(rendered.bytes)).toContain('<LP_info LP_TIN="IN&quot;N&amp;1" />');
-    expect(decoder.decode(rendered.bytes)).toContain("<cis>010468008990001721A&amp;&lt;B&gt;</cis>");
+    expect(decoder.decode(rendered.bytes)).toContain(
+      "<cis>010468008990001721A&amp;&lt;B&gt;</cis>",
+    );
   });
 
   it.each([
-    ["missing INN", { organizationInn: "", boxes: [{ sscc: "046800899000256001", codes: [km] }] }, "ORG_INN_MISSING"],
-    ["invalid SSCC", { organizationInn: "9705119097", boxes: [{ sscc: "invalid", codes: [km] }] }, "INVALID_SSCC"],
-    ["invalid KM", { organizationInn: "9705119097", boxes: [{ sscc: "046800899000256001", codes: ["KM-1"] }] }, "INVALID_CIS"],
+    [
+      "missing INN",
+      { organizationInn: "", boxes: [{ sscc: "046800899000256001", codes: [km] }] },
+      "ORG_INN_MISSING",
+    ],
+    [
+      "invalid SSCC",
+      { organizationInn: "9705119097", boxes: [{ sscc: "invalid", codes: [km] }] },
+      "INVALID_SSCC",
+    ],
+    [
+      "invalid KM",
+      { organizationInn: "9705119097", boxes: [{ sscc: "046800899000256001", codes: ["KM-1"] }] },
+      "INVALID_CIS",
+    ],
     [
       "XML-illegal CIS character",
-      { organizationInn: "9705119097", boxes: [{ sscc: "046800899000256001", codes: [km.replace("SERIAL-A", "A\u0000B")] }] },
+      {
+        organizationInn: "9705119097",
+        boxes: [{ sscc: "046800899000256001", codes: [km.replace("SERIAL-A", "A\u0000B")] }],
+      },
       "INVALID_CIS",
     ],
   ] as const)("rejects %s", (_case, input, code) => {
