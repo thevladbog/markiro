@@ -348,6 +348,21 @@
   border: 0;
 }
 
+.mk-file-drop {
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.mk-file-drop[data-dragover="true"] {
+  border-color: var(--accent, var(--info-border));
+  background: var(--info-bg);
+}
+
+.mk-file-drop[data-disabled="true"] {
+  cursor: not-allowed;
+}
+
 .mk-select__item[data-highlighted] {
   background: var(--surface-panel);
 }
@@ -404,7 +419,8 @@
 .mk-date-picker__trigger:focus-visible,
 .mk-date-picker__navigation:focus-visible,
 .mk-date-picker__day:focus-visible,
-.mk-textarea__control:focus-visible {
+.mk-textarea__control:focus-visible,
+.mk-file-drop:focus-visible {
   outline: 2px solid var(--focus-ring) !important;
   outline-offset: 2px !important;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-ring) 25%, transparent) !important;
