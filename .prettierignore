@@ -10,6 +10,10 @@ docs/design-briefs/design_handoff_markiro/
 # but Prettier only reads the root .gitignore, so we list them here to prevent CI failures.
 apps/station/src-tauri/target/
 apps/station/src-tauri/gen/schemas/
+# Same issue for the signer agent: gitignored via apps/signer/.gitignore and
+# apps/signer/src-tauri/.gitignore, but Prettier only reads the root one.
+apps/signer/target/
+apps/signer/src-tauri/gen/schemas/
 # Agent-harness scratch: local-only (hidden via .git/info/exclude or a global
 # gitignore), so it never reaches CI — but Prettier still walks it locally and
 # reports failures for files that aren't ours. Listing them keeps a local

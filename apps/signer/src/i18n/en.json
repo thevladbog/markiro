@@ -1,0 +1,35 @@
+{
+  "app": { "loading": "Loading…" },
+  "pairing": {
+    "title": "Pair the agent",
+    "hint": "Create a pairing code in the Markiro cabinet and enter it here. Computer: {{hostname}}.",
+    "codeLabel": "Pairing code",
+    "submit": "Pair",
+    "error": {
+      "rejected": "The code is not valid, has expired, or was already used. Create a new one in the cabinet.",
+      "unavailable": "Could not reach the server. Check the connection and try again."
+    }
+  },
+  "status": {
+    "title": "KEP agent",
+    "phase": {
+      "unpaired": "not paired",
+      "idle": "waiting for a task",
+      "working": "signing",
+      "degraded": "error"
+    },
+    "tokenExpires": "Token valid until {{at}}",
+    "noToken": "No token received yet",
+    "unpair": "Unpair the agent"
+  },
+  "certificates": {
+    "label": "Certificate for signing",
+    "loading": "Reading the certificate store…",
+    "empty": "No GOST certificate with a private key was found. Check that CryptoPro is installed and the token is plugged in.",
+    "unavailable": "Could not read the certificate store.",
+    "refresh": "Refresh list",
+    "expiring": "The certificate expires {{at}}. Issue a new one, or token refresh will stop working.",
+    "expired": "The certificate expired {{at}}. Signing is not possible."
+  },
+  "journal": { "empty": "No events yet" }
+}
