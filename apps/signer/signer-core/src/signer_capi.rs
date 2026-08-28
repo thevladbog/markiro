@@ -304,6 +304,18 @@ unsafe fn sign_with_context(
 /// so the admin journal says "insert the token" rather than a bare hex code.
 fn classify_last_error() -> SignerError {
     let code = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+    classify_hresult(code)
+}
+
+/// Maps a raw HRESULT (or, for `ERROR_CANCELLED`, a plain Win32 error code —
+/// `GetLastError` returns both shapes depending on the failing call) onto the
+/// wire error codes the cloud understands. Shared with `signer_cades.rs`:
+/// CryptoPro reports the same underlying codes whether the private-key
+/// operation goes through raw CryptoAPI (`GetLastError`) or through CAdESCOM
+/// over COM (`windows::core::Error::code()`), so both backends classify a
+/// dismissed PIN dialog as `SignerError::PinRequired` instead of the generic
+/// "check the token" fallback.
+pub(crate) fn classify_hresult(code: u32) -> SignerError {
     match code {
         // NTE_BAD_KEYSET / NTE_KEYSET_NOT_DEF / SCARD_W_REMOVED_CARD
         0x8009_0016 | 0x8009_0019 | 0x8010_0069 => SignerError::ContainerUnavailable(format!(

@@ -6,6 +6,7 @@
 //! Requires the CryptoPro CAdES SDK / browser plug-in in addition to the CSP.
 
 use windows::core::BSTR;
+use windows::Win32::Foundation::{RPC_E_CHANGED_MODE, S_FALSE, S_OK};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, IDispatch,
 };
@@ -24,8 +25,27 @@ impl Signer for CadesSigner {
     }
 
     fn sign_attached(&self, thumbprint: &str, payload: &[u8]) -> Result<String, SignerError> {
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        // `sign_attached` runs synchronously on a tokio worker thread, which
+        // may already be MTA-initialised by something else on the runtime;
+        // that yields RPC_E_CHANGED_MODE here rather than a fresh apartment.
+        // The apartment-model object still gets created (marshalled through
+        // the host's STA), so treat it as proceed-able. S_OK/S_FALSE are the
+        // ordinary "initialised" / "already initialised, same mode" results.
+        // Anything else means COM init genuinely failed, and letting that
+        // fall through to `CoCreateInstance` would misreport as "CAdESCOM.Store
+        // is not registered" — a truthful error here sends the operator to
+        // the right place instead of a reinstall they don't need.
+        let hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+        if hr == RPC_E_CHANGED_MODE {
+            tracing::warn!(
+                hresult = %hr,
+                "CoInitializeEx returned RPC_E_CHANGED_MODE: this thread was already \
+                 COM-initialised in a different apartment model; continuing with it"
+            );
+        } else if hr != S_OK && hr != S_FALSE {
+            return Err(SignerError::CryptoProviderMissing(format!(
+                "CoInitializeEx failed ({hr})"
+            )));
         }
         let store = create_object("CAdESCOM.Store")?;
         let signer = create_object("CAdESCOM.CPSigner")?;
@@ -57,6 +77,11 @@ const CADESCOM_CADES_BES: i32 = 1;
 /// `SignedData.Content = base64(payload)` →
 /// `SignedData.SignCades(Signer, CADES_BES, false)`, which returns the
 /// attached signature already base64-encoded.
+///
+/// `Store.Close` must run on every path once `Open` has succeeded, not just
+/// the ones the original code happened to return from explicitly. The body
+/// after `Open` runs in a closure so there is exactly one `Close` call,
+/// reached whether the closure returns `Ok` or any `Err`.
 fn sign_via_cadescom(
     store: &IDispatch,
     signer: &IDispatch,
@@ -75,54 +100,66 @@ fn sign_via_cadescom(
             VARIANT::from(CAPICOM_CURRENT_USER_STORE),
         ],
     )?;
-    let certificates = get(store, "Certificates")?.to_dispatch()?;
-    let found = call(
-        &certificates,
-        "Find",
-        &[
-            VARIANT::from(BSTR::from(thumbprint)),
-            VARIANT::from(CAPICOM_CERTIFICATE_FIND_SHA1_HASH),
-        ],
-    )?
-    .to_dispatch()?;
-    let count = get(&found, "Count")?.to_i32()?;
-    if count < 1 {
-        let _ = call(store, "Close", &[]);
-        return Err(SignerError::CertNotFound(thumbprint.to_string()));
-    }
-    // CAPICOM collections are 1-based.
-    let certificate = call(&found, "Item", &[VARIANT::from(1i32)])?.to_dispatch()?;
 
-    put(signer, "Certificate", VARIANT::from(certificate))?;
-    put(
-        signed_data,
-        "ContentEncoding",
-        VARIANT::from(CADESCOM_BASE64_TO_BINARY),
-    )?;
-    put(
-        signed_data,
-        "Content",
-        VARIANT::from(BSTR::from(
-            base64::engine::general_purpose::STANDARD.encode(payload),
-        )),
-    )?;
+    let result = (|| -> Result<String, SignerError> {
+        let certificates = get(store, "Certificates")?.to_dispatch()?;
+        let found = call(
+            &certificates,
+            "Find",
+            &[
+                VARIANT::from(BSTR::from(thumbprint)),
+                VARIANT::from(CAPICOM_CERTIFICATE_FIND_SHA1_HASH),
+            ],
+        )?
+        .to_dispatch()?;
+        let count = get(&found, "Count")?.to_i32()?;
+        if count < 1 {
+            return Err(SignerError::CertNotFound(thumbprint.to_string()));
+        }
+        // CAPICOM collections are 1-based.
+        let certificate = call(&found, "Item", &[VARIANT::from(1i32)])?.to_dispatch()?;
 
-    let signature = call(
-        signed_data,
-        "SignCades",
-        &[
-            // Arguments are passed right-to-left by IDispatch convention.
-            VARIANT::from(false),
-            VARIANT::from(CADESCOM_CADES_BES),
-            VARIANT::from(signer.clone()),
-        ],
-    );
+        put(signer, "Certificate", VARIANT::from(certificate))?;
+        put(
+            signed_data,
+            "ContentEncoding",
+            VARIANT::from(CADESCOM_BASE64_TO_BINARY),
+        )?;
+        put(
+            signed_data,
+            "Content",
+            VARIANT::from(BSTR::from(
+                base64::engine::general_purpose::STANDARD.encode(payload),
+            )),
+        )?;
+
+        let signature = call(
+            signed_data,
+            "SignCades",
+            &[
+                // Arguments are passed right-to-left by IDispatch convention.
+                VARIANT::from(false),
+                VARIANT::from(CADESCOM_CADES_BES),
+                VARIANT::from(signer.clone()),
+            ],
+        )?;
+        signature.to_string_value()
+    })();
+
     let _ = call(store, "Close", &[]);
-    signature?.to_string_value()
+
+    // CAdESCOM's base64 comes out CryptBinaryToString-style, wrapped every 64
+    // characters with CR/LF; the CryptoAPI backend returns one unbroken line,
+    // so normalise here to keep the two `Signer` implementations shaped the
+    // same for `trueapi.rs`.
+    result.map(|signature| crate::signer_backend::strip_base64_line_breaks(&signature))
 }
 
-/// Minimal late-bound IDispatch helpers. CAdESCOM ships no type library we can
-/// bind statically, so every call goes through `GetIDsOfNames` + `Invoke`.
+/// Minimal late-bound IDispatch helpers. CAdESCOM.dll does embed a type
+/// library — that is how VBScript early-binds against it — but `windows-rs`
+/// statically binds against Windows metadata (`.winmd`), not COM type
+/// libraries, and CAdESCOM does not publish `.winmd`. Late binding through
+/// `GetIDsOfNames` + `Invoke` is the pragmatic route from Rust as a result.
 mod dispatch {
     use super::*;
     use windows::Win32::System::Com::{
@@ -173,13 +210,29 @@ mod dispatch {
                     None,
                     None,
                 )
-                .map_err(|e| SignerError::ContainerUnavailable(format!("{name}: {e}")))?;
+                // Reuse `signer_capi`'s CryptoAPI classification table rather
+                // than a second copy: `windows::core::Error::code()` is the
+                // same HRESULT shape CryptoPro reports through `GetLastError`,
+                // so a dismissed PIN dialog (NTE_BAD_KEY_STATE,
+                // SCARD_W_CANCELLED_BY_USER, ...) still surfaces as
+                // `SignerError::PinRequired` here instead of the generic
+                // "check the token" fallback.
+                .map_err(|e| crate::signer_capi::classify_hresult(e.code().0 as u32))?;
         }
         Ok(result)
     }
 
+    /// CAPICOM/CAdESCOM collections and object accessors that read like
+    /// properties (`Item`, `Find`, ...) are declared `[propget, id(...)]` in
+    /// the type library, so `ITypeInfo::Invoke` needs `DISPATCH_PROPERTYGET`
+    /// in the flag mask to resolve them; `DISPATCH_METHOD` alone finds no
+    /// `INVOKE_FUNC` funcdesc for that DISPID and fails with
+    /// `DISP_E_MEMBERNOTFOUND`. Asking for both is harmless for genuine
+    /// methods (`Open`/`Close`/`Find`/`SignCades`) and matches the same "ask
+    /// for both, let the object pick" reasoning `put` below already uses for
+    /// PUT vs. PUTREF.
     pub fn call(target: &IDispatch, name: &str, args: &[VARIANT]) -> Result<VARIANT, SignerError> {
-        invoke(target, name, DISPATCH_METHOD, args)
+        invoke(target, name, DISPATCH_METHOD | DISPATCH_PROPERTYGET, args)
     }
 
     pub fn get(target: &IDispatch, name: &str) -> Result<VARIANT, SignerError> {
@@ -188,9 +241,9 @@ mod dispatch {
 
     /// Combines PUT and PUTREF: CAdESCOM properties are a mix of plain values
     /// (`ContentEncoding`, `Content`) and object references (`Certificate`),
-    /// and nothing here has a type library to tell them apart ahead of time.
-    /// A scripting host would resolve that per-property; we just ask for
-    /// both, which every property accepts one of.
+    /// and this late-bound path does not consume CAdESCOM's type library to
+    /// tell them apart ahead of time the way an early-bound scripting host
+    /// would. We just ask for both, which every property accepts one of.
     pub fn put(target: &IDispatch, name: &str, value: VARIANT) -> Result<(), SignerError> {
         let id = dispid(target, name)?;
         let mut arguments = [value];
@@ -213,7 +266,12 @@ mod dispatch {
                     None,
                     None,
                 )
-                .map_err(|e| SignerError::ContainerUnavailable(format!("{name}: {e}")))?;
+                // Same reasoning as the Invoke failure mapping in `invoke`
+                // above: this is a raw `Invoke` call too (it bypasses that
+                // helper only to attach the named PUT argument), so it can
+                // fail with the same PIN-related HRESULTs — e.g. assigning
+                // `Certificate` can touch the key container.
+                .map_err(|e| crate::signer_capi::classify_hresult(e.code().0 as u32))?;
         }
         Ok(())
     }
