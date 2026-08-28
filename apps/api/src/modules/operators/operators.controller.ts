@@ -11,8 +11,14 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { ApiOkResponse, ApiOperation, ApiParam, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
+import {
+  ApiCabinetAuth,
+  ApiHttpErrors,
+  ApiZodBody,
+  ApiZodValidationError,
+} from "../../lib/openapi";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import {
@@ -24,6 +30,8 @@ import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard"
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   grantStationAccessSchema,
+  listOperatorsOpenApiSchema,
+  stationAccessOpenApiSchema,
   updateStationAccessSchema,
   type GrantStationAccessDto,
   type ListOperatorsResponseDto,
@@ -41,11 +49,15 @@ import { OperatorsService } from "./operators.service";
 @Controller("operators")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
+@ApiCabinetAuth()
 export class OperatorsController {
   constructor(private readonly operatorsService: OperatorsService) {}
 
   @Get()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "List operators" })
+  @ApiOkResponse({ schema: listOperatorsOpenApiSchema })
+  @ApiHttpErrors(401, 403)
   async listOperators(@Req() req: RequestWithTenant): Promise<ListOperatorsResponseDto> {
     return this.operatorsService.listOperators(req.tenantId!);
   }
@@ -53,6 +65,12 @@ export class OperatorsController {
   @Put(":employeeId")
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Grant an employee station access" })
+  @ApiParam({ name: "employeeId", format: "uuid" })
+  @ApiZodBody(grantStationAccessSchema)
+  @ApiOkResponse({ schema: stationAccessOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
   async grantAccess(
     @Req() req: RequestWithTenant,
     @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
@@ -64,6 +82,12 @@ export class OperatorsController {
   @Patch(":employeeId")
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Update an operator's station access" })
+  @ApiParam({ name: "employeeId", format: "uuid" })
+  @ApiZodBody(updateStationAccessSchema)
+  @ApiOkResponse({ schema: stationAccessOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
   async updateAccess(
     @Req() req: RequestWithTenant,
     @Param("employeeId", new ParseUUIDPipe()) employeeId: string,
@@ -76,6 +100,10 @@ export class OperatorsController {
   @HttpCode(204)
   @AllowSubscriptionReadOnly("security")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Revoke an operator's station access" })
+  @ApiParam({ name: "employeeId", format: "uuid" })
+  @ApiResponse({ status: 204, description: "Station access was revoked." })
+  @ApiHttpErrors(400, 401, 403, 404)
   async revokeAccess(
     @Req() req: RequestWithTenant,
     @Param("employeeId", new ParseUUIDPipe()) employeeId: string,

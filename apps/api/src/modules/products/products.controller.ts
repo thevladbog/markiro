@@ -19,11 +19,28 @@ import {
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { memoryStorage } from "multer";
-import { ApiBody, ApiConsumes, ApiTags } from "@nestjs/swagger";
+import {
+  ApiBody,
+  ApiConsumes,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import type { Response } from "express";
 import { AllowStationOrPermissions, RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import {
+  ApiCabinetAuth,
+  ApiCabinetOrStationAuth,
+  ApiHttpErrors,
+  ApiZodBody,
+  ApiZodQuery,
+  ApiZodValidationError,
+} from "../../lib/openapi";
 import {
   AllowSubscriptionReadOnly,
   RequireSubscriptionWrite,
@@ -35,8 +52,11 @@ import { ObjectStorageService } from "../storage/object-storage.service";
 import { sendPrivateImage } from "../storage/private-image-response";
 import {
   createProductSchema,
+  gtinCheckResponseOpenApiSchema,
   gtinCheckSchema,
+  listProductsOpenApiSchema,
   listProductsQuerySchema,
+  productOpenApiSchema,
   updateProductSchema,
   type CreateProductDto,
   type GtinCheckDto,
@@ -61,6 +81,12 @@ export class ProductsController {
 
   @Get()
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "List products" })
+  @ApiZodQuery(listProductsQuerySchema)
+  @ApiOkResponse({ schema: listProductsOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
+  @ApiCabinetOrStationAuth()
   async listProducts(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(listProductsQuerySchema)) query: ListProductsQueryDto,
@@ -72,6 +98,16 @@ export class ProductsController {
   @HttpCode(HttpStatus.OK)
   @AllowSubscriptionReadOnly("read")
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Check GTIN ownership",
+    description:
+      "Normalizes the GTIN, then reports whether it matches the tenant's own GS1 prefixes, a counterparty's prefixes (first match wins), or is unknown. An unparseable GTIN yields a 400 with code GTIN_INVALID.",
+  })
+  @ApiZodBody(gtinCheckSchema)
+  @ApiOkResponse({ schema: gtinCheckResponseOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
+  @ApiCabinetOrStationAuth()
   async checkGtinOwner(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(gtinCheckSchema)) body: GtinCheckDto,
@@ -84,6 +120,11 @@ export class ProductsController {
   // endpoint, so it never needs get-by-id or any of the catalog mutations.
   @Get(":id")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "Get a product" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiOkResponse({ schema: productOpenApiSchema })
+  @ApiHttpErrors(401, 403, 404)
+  @ApiCabinetAuth()
   async getProduct(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ProductDto> {
     return this.productsService.getProduct(req.tenantId!, id);
   }
@@ -91,6 +132,16 @@ export class ProductsController {
   @Post()
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({
+    summary: "Create a product",
+    description:
+      "`status` is server-computed: active when productGroup, boxCapacity, and palletCapacity are all set, draft otherwise.",
+  })
+  @ApiZodBody(createProductSchema)
+  @ApiCreatedResponse({ schema: productOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 409)
+  @ApiCabinetAuth()
   async createProduct(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createProductSchema)) body: CreateProductDto,
@@ -101,6 +152,17 @@ export class ProductsController {
   @Patch(":id")
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({
+    summary: "Update a product",
+    description:
+      "Partial update: untouched fields are preserved, explicit null clears a nullable field. `status` is recomputed from the merged values.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(updateProductSchema)
+  @ApiOkResponse({ schema: productOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
+  @ApiCabinetAuth()
   async updateProduct(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -110,6 +172,12 @@ export class ProductsController {
   }
 
   @Post(":id/image")
+  @ApiOperation({
+    summary: "Upload a product image",
+    description:
+      "Replaces the product's image. Accepts one source file of at most 5 MiB; the server re-encodes it to WebP. A missing, oversized, or undecodable file yields a 400.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiConsumes("multipart/form-data")
   @ApiBody({
     schema: {
@@ -127,6 +195,9 @@ export class ProductsController {
   @UseFilters(ProductImageUploadFilter)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiCreatedResponse({ schema: productOpenApiSchema })
+  @ApiHttpErrors(400, 401, 403, 404, 503)
+  @ApiCabinetAuth()
   async uploadImage(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -146,12 +217,37 @@ export class ProductsController {
   @HttpCode(204)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Delete a product image" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiResponse({
+    status: 204,
+    description: "Image removed (a no-op when the product has no image).",
+  })
+  @ApiHttpErrors(401, 403, 404)
+  @ApiCabinetAuth()
   async deleteImage(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.productsService.deleteImage(req.tenantId!, req.userId!, id);
   }
 
   @Get(":id/image/:checksum")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Download a product image",
+    description: "Streams the product's current WebP image through the API origin.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiParam({
+    name: "checksum",
+    schema: { type: "string" },
+    description: "Content checksum of the current image (see `image.checksum`).",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "The current product image.",
+    content: { "image/webp": { schema: { type: "string", format: "binary" } } },
+  })
+  @ApiHttpErrors(401, 403, 404)
+  @ApiCabinetAuth()
   async readImage(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -166,6 +262,11 @@ export class ProductsController {
   @HttpCode(204)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Delete a product" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiResponse({ status: 204, description: "Product deleted." })
+  @ApiHttpErrors(401, 403, 404, 409)
+  @ApiCabinetAuth()
   async deleteProduct(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.productsService.deleteProduct(req.tenantId!, id);
   }

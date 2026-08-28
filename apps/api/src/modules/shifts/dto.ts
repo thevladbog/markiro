@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SchemaObject } from "@nestjs/swagger";
 import type { LabelTemplateSpec } from "@markiro/domain";
 import type { OperatorMirrorRecord } from "@markiro/db";
 import type { ProductDto, ProductImageDescriptor } from "../products/dto";
@@ -303,6 +304,38 @@ export const updateShiftOpenApiSchema = {
     boxCapacity: nullablePositiveIntegerOpenApiSchema,
     palletCapacity: nullablePositiveIntegerOpenApiSchema,
     palletsEnabled: { type: "boolean" },
+  },
+};
+
+export const shiftPlanningConfigOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["defaultBoxLabelTemplateId"],
+  properties: { defaultBoxLabelTemplateId: nullableUuidOpenApiSchema },
+};
+
+export const shiftBoxLabelTemplatesOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items", "defaultBoxLabelTemplateId"],
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "name", "widthMm", "heightMm", "dpi", "language"],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          name: { type: "string" },
+          widthMm: { type: "number", minimum: 0 },
+          heightMm: { type: "number", minimum: 0 },
+          dpi: { type: "integer", enum: [203, 300] },
+          language: { type: "string", enum: ["zpl", "tspl"] },
+        },
+      },
+    },
+    defaultBoxLabelTemplateId: nullableUuidOpenApiSchema,
   },
 };
 

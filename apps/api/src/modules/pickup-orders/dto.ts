@@ -1,6 +1,8 @@
 import { isCanonicalDigestB64, isValidSscc } from "@markiro/domain";
+import type { SchemaObject } from "@nestjs/swagger";
 import { z } from "zod";
 import type { SubscriptionAccessSnapshot } from "../../subscriptions/entitlements.types";
+import { subscriptionAccessSchema } from "../device-pairing/secret-response.openapi";
 import type { KioskBrandingDto } from "../org-profile/dto";
 import type { ProductImageDescriptor } from "../products/dto";
 
@@ -340,3 +342,286 @@ export const exportPickupCodesSchema = z.object({
   orderIds: z.array(z.string().uuid()).min(1),
 });
 export type ExportPickupCodesDto = z.infer<typeof exportPickupCodesSchema>;
+
+// --- OpenAPI response schemas (hand-written: the response DTOs above are ---
+// --- interfaces, not zod schemas; see inventories/dto.ts for the pattern) ---
+
+const uuidSchema = { type: "string", format: "uuid" } as const;
+const dateTimeSchema = { type: "string", format: "date-time" } as const;
+
+export const orderConflictOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["rawKm", "reason"],
+  properties: {
+    rawKm: { type: "string" },
+    reason: {
+      type: "string",
+      enum: ["not_km", "incomplete", "unknown_product", "not_allowed", "duplicate", "over_limit"],
+    },
+  },
+};
+
+export const boxConflictOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["sscc", "bottleCount", "reason"],
+  properties: {
+    sscc: { type: "string", pattern: "^[0-9]{18}$" },
+    bottleCount: { type: "integer", nullable: true },
+    reason: {
+      type: "string",
+      enum: [
+        "unknown_box",
+        "box_not_closed",
+        "box_disassembled",
+        "box_contents_changed",
+        "mixed_product_box",
+        "duplicate",
+        "over_limit",
+      ],
+    },
+  },
+};
+
+export const createOrderAdmissionResultOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["claimedAt", "admissionProof"],
+  properties: {
+    claimedAt: dateTimeSchema,
+    admissionProof: {
+      type: "string",
+      description: "Opaque token the device replays as admissionProof in POST /kiosk/orders.",
+    },
+  },
+};
+
+export const kioskBootstrapOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: [
+    "generatedAt",
+    "subscription",
+    "branding",
+    "pickupPolicy",
+    "config",
+    "badgeSalt",
+    "reasons",
+    "products",
+    "employees",
+    "operators",
+  ],
+  properties: {
+    generatedAt: {
+      ...dateTimeSchema,
+      description: "Server time; feeds the device's 24h-warning / 7d-block staleness gates.",
+    },
+    subscription: subscriptionAccessSchema,
+    branding: {
+      type: "object",
+      required: ["organizationName", "logoUrl", "logoRevision"],
+      properties: {
+        organizationName: { type: "string" },
+        logoUrl: { type: "string", nullable: true },
+        logoRevision: { ...uuidSchema, nullable: true },
+      },
+    },
+    pickupPolicy: {
+      type: "object",
+      required: ["limitsEnabled"],
+      properties: { limitsEnabled: { type: "boolean" } },
+    },
+    config: {
+      type: "object",
+      required: ["dayLimitPerEmployee", "showPrices", "printEmployeeQrOnSlip"],
+      properties: {
+        dayLimitPerEmployee: { type: "integer", minimum: 0 },
+        showPrices: { type: "boolean" },
+        printEmployeeQrOnSlip: { type: "boolean" },
+      },
+    },
+    badgeSalt: {
+      type: "string",
+      format: "byte",
+      description: "The PBKDF2 salt every badgeHash below shares.",
+    },
+    reasons: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "name"],
+        properties: { id: uuidSchema, name: { type: "string" } },
+      },
+    },
+    products: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "gtin14", "name", "unitPrice", "egaisCode"],
+        properties: {
+          id: uuidSchema,
+          gtin14: { type: "string" },
+          name: { type: "string" },
+          unitPrice: { type: "string", nullable: true },
+          egaisCode: { type: "string", nullable: true },
+          image: {
+            type: "object",
+            nullable: true,
+            description: "Optional for rolling compatibility with older kiosk snapshots.",
+            required: ["checksum", "contentType", "byteSize", "width", "height"],
+            properties: {
+              checksum: { type: "string" },
+              contentType: { type: "string", enum: ["image/webp"] },
+              byteSize: { type: "integer", minimum: 0 },
+              width: { type: "integer", minimum: 0 },
+              height: { type: "integer", minimum: 0 },
+            },
+          },
+        },
+      },
+    },
+    employees: {
+      type: "array",
+      items: {
+        type: "object",
+        required: [
+          "id",
+          "fullName",
+          "role",
+          "badgeHash",
+          "limitMode",
+          "dayLimit",
+          "canWriteoff",
+          "takenTodayElsewhere",
+        ],
+        properties: {
+          id: uuidSchema,
+          fullName: { type: "string" },
+          role: { type: "string", nullable: true },
+          badgeHash: {
+            type: "string",
+            nullable: true,
+            description: "Offline verifier, not a plaintext badge code.",
+          },
+          limitMode: { type: "string", enum: ["limited", "unlimited"] },
+          dayLimit: { type: "integer", minimum: 0 },
+          canWriteoff: { type: "boolean" },
+          takenTodayElsewhere: {
+            type: "integer",
+            minimum: 0,
+            description:
+              "Items this employee took today at every kiosk BUT the one asking; the device adds its own journal on top.",
+          },
+        },
+      },
+    },
+    operators: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["employeeId", "name", "login", "role", "pinHash", "badgeHash", "active"],
+        properties: {
+          employeeId: uuidSchema,
+          name: { type: "string" },
+          login: { type: "string" },
+          role: { type: "string" },
+          pinHash: { type: "string", description: "Offline verifier, not a plaintext PIN." },
+          badgeHash: { type: "string", nullable: true },
+          active: { type: "boolean" },
+        },
+      },
+    },
+  },
+};
+
+export const pickupOrderRowOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: [
+    "id",
+    "orderNo",
+    "employeeName",
+    "kioskName",
+    "reason",
+    "writeoffReasonName",
+    "itemCount",
+    "totalPrice",
+    "status",
+    "createdAt",
+    "exportedAt",
+    "conflictCount",
+  ],
+  properties: {
+    id: uuidSchema,
+    orderNo: { type: "string" },
+    employeeName: { type: "string" },
+    kioskName: { type: "string" },
+    reason: { type: "string", enum: ["buy", "writeoff"] },
+    writeoffReasonName: { type: "string", nullable: true },
+    itemCount: { type: "integer", minimum: 0 },
+    totalPrice: { type: "string", nullable: true },
+    status: { type: "string", enum: [...PICKUP_ORDER_STATUSES] },
+    createdAt: dateTimeSchema,
+    exportedAt: {
+      ...dateTimeSchema,
+      nullable: true,
+      description:
+        "Set once 1С confirms receipt over the CommerceML exchange; null — not yet exported.",
+    },
+    conflictCount: {
+      type: "integer",
+      minimum: 0,
+      description: "How many scanned codes the server refused when this order synced.",
+    },
+  },
+};
+
+export const listPickupOrdersOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["items"],
+  properties: { items: { type: "array", items: pickupOrderRowOpenApiSchema } },
+};
+
+const pickupOrderItemOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["id", "gtin14", "serial", "rawKm", "productName", "unitPrice"],
+  properties: {
+    id: uuidSchema,
+    gtin14: { type: "string" },
+    serial: { type: "string" },
+    rawKm: { type: "string" },
+    productName: { type: "string" },
+    unitPrice: { type: "string", nullable: true },
+  },
+};
+
+export const pickupOrderDetailOpenApiSchema: SchemaObject = {
+  ...pickupOrderRowOpenApiSchema,
+  required: [
+    ...(pickupOrderRowOpenApiSchema.required ?? []),
+    "employeeBadgeCode",
+    "items",
+    "receiptNo",
+    "actNo",
+    "syncConflicts",
+    "boxConflicts",
+    "exportHeldProductNames",
+    "commercemlConfigured",
+  ],
+  properties: {
+    ...pickupOrderRowOpenApiSchema.properties,
+    employeeBadgeCode: { type: "string", nullable: true },
+    items: { type: "array", items: pickupOrderItemOpenApiSchema },
+    receiptNo: { type: "string", nullable: true },
+    actNo: { type: "string", nullable: true },
+    syncConflicts: { type: "array", items: orderConflictOpenApiSchema },
+    boxConflicts: { type: "array", items: boxConflictOpenApiSchema },
+    exportHeldProductNames: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Products this order's items reference that carry no 1С link yet; non-empty means the order is held back from mode=query.",
+    },
+    commercemlConfigured: {
+      type: "boolean",
+      description:
+        "True only after this tenant has issued credentials for the CommerceML exchange channel.",
+    },
+  },
+};

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SchemaObject } from "@nestjs/swagger";
 
 /** POST /disaggregation-reasons schema. */
 export const createReasonSchema = z.object({
@@ -25,3 +26,21 @@ export interface ReasonDto {
 export interface ListReasonsResponseDto {
   items: ReasonDto[];
 }
+
+export const disaggregationReasonOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "name", "sortOrder"],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    name: { type: "string", minLength: 1, maxLength: 120 },
+    sortOrder: { type: "integer" },
+  },
+};
+
+export const listDisaggregationReasonsOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: { items: { type: "array", items: disaggregationReasonOpenApiSchema } },
+};

@@ -1,3 +1,4 @@
+import type { SchemaObject } from "@nestjs/swagger";
 import { z } from "zod";
 
 /** POST /pickup-reasons schema. */
@@ -25,3 +26,22 @@ export interface ReasonDto {
 export interface ListReasonsResponseDto {
   items: ReasonDto[];
 }
+
+// --- OpenAPI response schemas (hand-written: the response DTOs above are ---
+// --- interfaces, not zod schemas; see inventories/dto.ts for the pattern) ---
+
+export const reasonOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["id", "name", "sortOrder"],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    name: { type: "string" },
+    sortOrder: { type: "integer" },
+  },
+};
+
+export const listReasonsOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["items"],
+  properties: { items: { type: "array", items: reasonOpenApiSchema } },
+};

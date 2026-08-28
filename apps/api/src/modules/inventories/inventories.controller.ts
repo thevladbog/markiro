@@ -21,6 +21,7 @@ import {
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiParam,
   ApiProduces,
   ApiQuery,
@@ -38,6 +39,7 @@ import {
 
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import { ApiCabinetAuth, ApiHttpErrors, ApiZodValidationError } from "../../lib/openapi";
 import {
   AllowSubscriptionReadOnly,
   RequireSubscriptionWrite,
@@ -148,6 +150,7 @@ import {
 } from "./station-inventory.dto";
 
 @ApiTags("inventories")
+@ApiCabinetAuth()
 @Controller("inventories")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
@@ -163,15 +166,20 @@ export class InventoriesController {
 
   @Get()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "List inventories" })
   @ApiOkResponse({ schema: listInventoriesOpenApiSchema })
+  @ApiHttpErrors(401, 403)
   list(@Req() req: RequestWithTenant): Promise<ListInventoriesResponseDto> {
     return this.inventories.list(req.tenantId!);
   }
 
   @Get(":id/progress")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "Get live inventory progress" })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiOkResponse({ schema: inventoryProgressOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   progress(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -181,8 +189,11 @@ export class InventoriesController {
 
   @Get(":id/close-preview")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "Preview inventory close blockers" })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiOkResponse({ schema: inventoryClosePreviewOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   closePreview(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -192,9 +203,15 @@ export class InventoriesController {
 
   @Get(":id/task-form")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Render the printable inventory task form",
+    description: "Responds with a self-contained text/html page for printing, not JSON.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiProduces("text/html")
   @ApiOkResponse({ schema: { type: "string" } })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   async taskForm(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -208,6 +225,7 @@ export class InventoriesController {
 
   @Get(":id/discrepancies")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "List inventory discrepancies" })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiQuery({ name: "category", required: false, enum: INVENTORY_DISCREPANCY_CATEGORIES })
   @ApiQuery({ name: "page", required: false, schema: { type: "integer", minimum: 1, default: 1 } })
@@ -217,6 +235,8 @@ export class InventoriesController {
     schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
   })
   @ApiOkResponse({ schema: listInventoryDiscrepanciesOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   discrepancies(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -228,6 +248,7 @@ export class InventoriesController {
 
   @Get(":id/evidence")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "List inventory scan evidence" })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiQuery({ name: "search", required: false, schema: { type: "string", maxLength: 128 } })
   @ApiQuery({ name: "kind", required: false, enum: INVENTORY_EVIDENCE_KINDS })
@@ -243,6 +264,8 @@ export class InventoriesController {
     schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
   })
   @ApiOkResponse({ schema: listInventoryEvidenceOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   evidence(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -254,6 +277,10 @@ export class InventoriesController {
 
   @Get(":id/late-events")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "List inventory late events",
+    description: "Scan event batches that arrived after the inventory was closed.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiQuery({ name: "page", required: false, schema: { type: "integer", minimum: 1, default: 1 } })
   @ApiQuery({
@@ -262,6 +289,8 @@ export class InventoriesController {
     schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
   })
   @ApiOkResponse({ schema: listInventoryLateEventsOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   lateEvents(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -273,8 +302,11 @@ export class InventoriesController {
 
   @Get(":id/document-runs")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "List inventory document runs" })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiOkResponse({ schema: inventoryDocumentRunsOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   documentRuns(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -285,9 +317,16 @@ export class InventoriesController {
   @Post(":id/document-runs")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({
+    summary: "Create an inventory document run",
+    description:
+      "Queues generation of the selected document formats; idempotent per idempotencyKey.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: createInventoryDocumentRunOpenApiSchema })
   @ApiCreatedResponse({ schema: inventoryDocumentRunOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   createDocumentRun(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -300,9 +339,12 @@ export class InventoriesController {
   @Post(":id/late-events/discard")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({ summary: "Discard inventory late events" })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: discardInventoryLateEventsOpenApiSchema })
   @ApiCreatedResponse({ schema: inventoryLateEventsDiscardOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   discardLateEvents(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -315,12 +357,19 @@ export class InventoriesController {
   @Post(":id/late-events/:lateEventId/replay")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({
+    summary: "Replay an inventory late event",
+    description:
+      "Re-ingests the late event's recorded scan batch; only available while the event is replayable.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiParam({ name: "lateEventId", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: reopenInventoryOpenApiSchema })
   @ApiCreatedResponse({
     schema: inventoryLateEventReplayOpenApiSchema(stationInventoryEventBatchResponseOpenApiSchema),
   })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   replayLateEvent(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -333,10 +382,16 @@ export class InventoriesController {
   @Post(":id/close")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({
+    summary: "Close an inventory",
+    description: "Rejected with 409 and the blocker list while close blockers remain.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: closeInventoryOpenApiSchema })
   @ApiCreatedResponse({ schema: inventoryCloseOpenApiSchema })
   @ApiConflictResponse({ schema: inventoryCloseBlockedOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   close(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -348,9 +403,16 @@ export class InventoriesController {
   @Post(":id/emergency-close")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({
+    summary: "Emergency-close an inventory",
+    description:
+      "Closes despite outstanding blockers; requires a reason and explicit blocker acknowledgement.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: emergencyCloseInventoryOpenApiSchema })
   @ApiCreatedResponse({ schema: inventoryCloseOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   emergencyClose(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -363,9 +425,16 @@ export class InventoriesController {
   @Post(":id/reopen")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({
+    summary: "Reopen a closed inventory",
+    description:
+      "Returns the inventory to running and invalidates previously generated document artifacts.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: reopenInventoryOpenApiSchema })
   @ApiCreatedResponse({ schema: inventoryReopenOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   reopen(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -377,10 +446,17 @@ export class InventoriesController {
   @Post(":id/complete")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({
+    summary: "Complete an inventory",
+    description:
+      "Requires confirming the generated documents were downloaded and checked; rejected with 409 while document artifacts are unavailable.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: completeInventoryOpenApiSchema })
   @ApiCreatedResponse({ schema: inventoryCompleteOpenApiSchema })
   @ApiConflictResponse({ schema: inventoryCompletionUnavailableOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   complete(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -392,9 +468,16 @@ export class InventoriesController {
   @Post(":id/corrections")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({
+    summary: "Apply an inventory correction",
+    description:
+      "Applies a single correction action (void/restore scan, change date, remove item, invalidate box, reprint), guarded by expectedResultRevision and an idempotency key.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: createInventoryCorrectionOpenApiSchema })
   @ApiCreatedResponse({ schema: inventoryCorrectionOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   correct(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -407,8 +490,11 @@ export class InventoriesController {
   @Post()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({ summary: "Create an inventory" })
   @ApiBody({ schema: createInventoryOpenApiSchema })
   @ApiCreatedResponse({ schema: inventoryOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   create(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createInventorySchema)) body: CreateInventoryDto,
@@ -418,8 +504,11 @@ export class InventoriesController {
 
   @Get(":id")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "Get an inventory" })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiOkResponse({ schema: inventoryDetailOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   get(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -430,9 +519,12 @@ export class InventoriesController {
   @Patch(":id")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({ summary: "Update an inventory" })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: updateInventoryOpenApiSchema })
   @ApiOkResponse({ schema: inventoryOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   update(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -459,6 +551,11 @@ export class InventoriesController {
     }),
   )
   @ApiConsumes("multipart/form-data")
+  @ApiOperation({
+    summary: "Import a CHZ code export file",
+    description:
+      "Uploads the CHZ tabular export declared for the given status; a failed parse returns 422 with diagnostics.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiParam({ name: "status", enum: INVENTORY_CHZ_STATUSES })
   @ApiBody({
@@ -471,6 +568,8 @@ export class InventoriesController {
   })
   @ApiCreatedResponse({ schema: inventoryImportOpenApiSchema })
   @ApiUnprocessableEntityResponse({ schema: inventoryImportOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   async importEvidence(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -491,9 +590,15 @@ export class InventoriesController {
   @Post(":id/snapshots")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({
+    summary: "Fix an inventory input snapshot",
+    description: "Freezes the expected-code snapshot from one selected import per CHZ status.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: fixInventorySnapshotOpenApiSchema })
   @ApiCreatedResponse({ schema: inventorySnapshotOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   fixSnapshot(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -505,8 +610,14 @@ export class InventoriesController {
   @Post(":id/start")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({
+    summary: "Start an inventory",
+    description: "Moves the inventory to running and returns the station work manifest.",
+  })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiCreatedResponse({ schema: stationInventoryManifestOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   start(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
@@ -516,6 +627,7 @@ export class InventoriesController {
 }
 
 @ApiTags("inventory-documents")
+@ApiCabinetAuth()
 @Controller("inventory-document-runs")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
@@ -525,9 +637,12 @@ export class InventoryDocumentRunsController {
   @Post(":runId/retry")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({ summary: "Retry a failed inventory document run" })
   @ApiParam({ name: "runId", schema: { type: "string", format: "uuid" } })
   @ApiBody({ schema: retryInventoryDocumentRunOpenApiSchema })
   @ApiCreatedResponse({ schema: inventoryDocumentRunOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   retry(
     @Req() req: RequestWithTenant,
     @Param("runId", new ZodValidationPipe(inventoryIdSchema)) runId: string,
@@ -539,9 +654,15 @@ export class InventoryDocumentRunsController {
 
   @Get(":runId/artifacts/:artifactId/download")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Get an inventory document artifact download link",
+    description: "Returns a short-lived signed URL rather than the file bytes.",
+  })
   @ApiParam({ name: "runId", schema: { type: "string", format: "uuid" } })
   @ApiParam({ name: "artifactId", schema: { type: "string", format: "uuid" } })
   @ApiOkResponse({ schema: inventoryDocumentDownloadOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   downloadArtifact(
     @Req() req: RequestWithTenant,
     @Param("runId", new ZodValidationPipe(inventoryIdSchema)) runId: string,
@@ -552,8 +673,15 @@ export class InventoryDocumentRunsController {
 
   @Get(":runId/download")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Get an inventory document run archive download link",
+    description:
+      "Returns a short-lived signed URL for the ZIP of all run artifacts rather than the file bytes.",
+  })
   @ApiParam({ name: "runId", schema: { type: "string", format: "uuid" } })
   @ApiOkResponse({ schema: inventoryDocumentDownloadOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   downloadZip(
     @Req() req: RequestWithTenant,
     @Param("runId", new ZodValidationPipe(inventoryIdSchema)) runId: string,

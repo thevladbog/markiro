@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SchemaObject } from "@nestjs/swagger";
 import {
   canonicalizeKm,
   kmHash,
@@ -276,3 +277,75 @@ export interface SyncBatchResponseDto {
   /** Present only when the client negotiated station-recovery-v1. */
   denied?: DeniedStationRecordDto[];
 }
+
+const codeHashOpenApiSchema = { type: "string", pattern: "^[0-9a-f]{64}$" } as const;
+
+export const stationConflictStatusResponseOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["reviewedCodeHashes"],
+  properties: {
+    reviewedCodeHashes: { type: "array", items: codeHashOpenApiSchema },
+  },
+};
+
+export const stationCodeReleasesResponseOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["until", "releasedCodeHashes"],
+  properties: {
+    until: {
+      type: "string",
+      pattern: "^(0|[1-9][0-9]{0,18})$",
+      description: "Release-log revision this page is complete through.",
+    },
+    releasedCodeHashes: { type: "array", items: codeHashOpenApiSchema },
+    nextCursor: {
+      type: "string",
+      description: "Present when more pages remain; resend it with the same `until`.",
+    },
+  },
+};
+
+const batchConflictOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["codeHash", "winningTerminalId", "winningScannedAt"],
+  properties: {
+    codeHash: codeHashOpenApiSchema,
+    winningTerminalId: { type: "string", nullable: true },
+    winningScannedAt: { type: "string", format: "date-time" },
+  },
+};
+
+const deniedStationRecordOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["recordKind", "recordIndex", "shiftId", "code"],
+  properties: {
+    recordKind: { type: "string", enum: ["item", "box", "exception"] },
+    recordIndex: { type: "integer", minimum: 0 },
+    shiftId: { type: "string", format: "uuid" },
+    code: { type: "string", enum: ["subscription_read_only", "legacy_unbound_replay"] },
+  },
+};
+
+export const syncBatchResponseOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["applied", "alreadyApplied", "conflicts"],
+  properties: {
+    applied: { type: "integer", minimum: 0 },
+    alreadyApplied: { type: "boolean" },
+    conflicts: {
+      type: "array",
+      items: batchConflictOpenApiSchema,
+      description: "Only this batch's own losses to earlier scans elsewhere.",
+    },
+    denied: {
+      type: "array",
+      items: deniedStationRecordOpenApiSchema,
+      description: "Present only when the client negotiated station-recovery-v1.",
+    },
+  },
+};
