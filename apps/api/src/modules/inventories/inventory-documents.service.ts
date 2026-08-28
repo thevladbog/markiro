@@ -10,7 +10,7 @@ import {
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
-import { InventoryDocumentRegistryError } from "@markiro/domain";
+import { InventoryDocumentRegistryError, isParticipantInn } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
 import { PgBossService } from "../../jobs/jobs.module";
@@ -544,6 +544,12 @@ export class InventoryDocumentsService {
    * `create` does. Retries must reflect the issuer's current details rather
    * than the (possibly stale or invalid) values captured when the run was
    * first created.
+   *
+   * Formats are resolved with execution semantics here (not selection
+   * semantics): the run's `selectedFormats` were already fixed when it was
+   * first created, so a retry must be able to resolve a format that has since
+   * been superseded in the catalog (e.g. a frozen historical aggregation
+   * version) rather than reject it as if it were a brand-new selection.
    */
   private async reloadOrganizationSnapshot(
     tx: InventoryDocumentTransaction,
@@ -559,7 +565,9 @@ export class InventoryDocumentsService {
       .where(eq(schema.organization.id, existing.tenantId))
       .limit(1);
     if (!organization) throw new NotFoundException();
-    const resolvedGenerators = this.resolveGeneratorsForFormats(existing.selectedFormats);
+    const resolvedGenerators = this.resolveGeneratorsForFormats(existing.selectedFormats, {
+      mode: "execution",
+    });
     this.ensureOrganizationInnAvailable(resolvedGenerators, organization.inn);
     return {
       organizationNameSnapshot: organization.name,
@@ -569,10 +577,14 @@ export class InventoryDocumentsService {
 
   private resolveGeneratorsForFormats(
     selectedFormats: readonly { id: string; version: number }[],
+    options?: { mode?: "selection" | "execution" },
   ): ReturnType<InventoryDocumentGeneratorRegistry["resolveForSelection"]>[] {
+    const mode = options?.mode ?? "selection";
     return selectedFormats.map((selected) => {
       try {
-        return this.generators.resolveForSelection(selected.id, selected.version);
+        return mode === "execution"
+          ? this.generators.resolveForExecution(selected.id, selected.version)
+          : this.generators.resolveForSelection(selected.id, selected.version);
       } catch (error) {
         throw formatSelectionError(error);
       }
@@ -588,7 +600,16 @@ export class InventoryDocumentsService {
     const needsInn = resolvedGenerators.some(
       (generator) => generator.descriptor.requiresOrganizationInn === true,
     );
-    if (needsInn && !inn?.trim()) {
+    if (!needsInn) return;
+    const trimmed = inn?.trim() ?? "";
+    // Minimum shared validation: non-empty AND shaped like a usable
+    // organization/participant INN (isParticipantInn's 9/10/12-digit forms).
+    // This deliberately does not enforce aggregation's stricter 10-digit-only
+    // requirement, so a 12-digit individual-entrepreneur INN can still pass
+    // this gate and only fail later at generation for aggregation formats —
+    // a pre-existing discrepancy between the aggregation and disaggregation
+    // domain validators, not introduced by this gate.
+    if (trimmed.length === 0 || !isParticipantInn(trimmed)) {
       throw new ConflictException({ code: "ORGANIZATION_INN_REQUIRED" });
     }
   }

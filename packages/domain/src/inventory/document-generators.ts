@@ -278,7 +278,16 @@ function validateCommonMetadata(metadata: InventoryDocumentGenerationMetadata): 
   }
 }
 
-function isParticipantInn(value: string): boolean {
+/**
+ * Shared "is this shaped like a usable organization/participant INN" predicate.
+ * Accepts the 9-digit, 10-digit (legal entity), and 12-digit (individual
+ * entrepreneur) forms used by the ГИС МТ disaggregation `trade_participant_inn`
+ * field. Aggregation is stricter — it only accepts the 10-digit legal-entity
+ * form (see the inline regex in `validateAggregationMetadata`) — so a value
+ * that passes this predicate can still be rejected by the aggregation
+ * generator.
+ */
+export function isParticipantInn(value: string): boolean {
   return /^\d{9}$/.test(value) || /^(?:\d[1-9]|[1-9]\d)(?:\d{8}|\d{10})$/.test(value);
 }
 
