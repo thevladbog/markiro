@@ -16,7 +16,7 @@ const LINE_ID = "33333333-3333-4333-8333-333333333333";
 
 const DETAIL = {
   id: INVENTORY_ID,
-  number: "ИНВ-00042",
+  number: "IVN-26-0042",
   status: "ready",
   mode: "repack",
   productId: "22222222-2222-4222-8222-222222222222",

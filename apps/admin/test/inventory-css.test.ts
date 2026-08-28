@@ -29,7 +29,11 @@ describe("inventory.css contracts", () => {
     );
   });
 
-  it("caps the detail page content width", () => {
-    expect(css).toMatch(/\.mk-inventory-page\s*\{[^}]*max-width:\s*1200px;/s);
+  it("leaves the content width to the shell rail on every inventory step", () => {
+    // Regression: a page-level cap made the inventory routes render a second,
+    // narrower rail than the rest of the admin on wide screens.
+    expect(css).toMatch(/\.mk-inventory-page\s*\{[^}]*min-width:\s*0;[^}]*\}/s);
+    // Only `@media (max-width: ...)` preludes may mention it -- no declaration.
+    expect(css).not.toMatch(/^\s*max-width:/m);
   });
 });

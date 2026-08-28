@@ -10,7 +10,7 @@ const RAW_KM = "010468008990038321SECRET-SERIAL\u001d93CRYPTO";
 function fixture(overrides: Partial<InventoryTaskFormData> = {}): InventoryTaskFormData {
   return {
     inventoryId: "11111111-1111-4111-8111-111111111111",
-    inventoryNumber: "ИНВ-00042",
+    inventoryNumber: "IVN-26-0042",
     status: "ready",
     organizationName: "ООО «Пивоварня»",
     productName: "Пиво светлое 0,45 л",
@@ -33,7 +33,7 @@ describe("renderInventoryTaskFormHtml", () => {
     expect(html).toContain(
       'data-task-token="markiro:inventory:v1:11111111-1111-4111-8111-111111111111"',
     );
-    expect(html).toContain("ИНВ-00042");
+    expect(html).toContain("IVN-26-0042");
     expect(html).toContain("Отсканируйте на терминале, чтобы открыть задание");
   });
 

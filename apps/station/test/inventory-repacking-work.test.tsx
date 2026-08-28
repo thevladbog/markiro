@@ -21,7 +21,7 @@ const OLD_SSCC = "346006820000000014";
 
 const manifest: StationInventoryBundleManifest & { mode: "repack" } = {
   inventoryId: INVENTORY_ID,
-  inventoryNumber: "ИНВ-Р-42",
+  inventoryNumber: "IVN-26-0043",
   snapshotId: SNAPSHOT_ID,
   snapshotRevision: 1,
   snapshotFixedAt: "2026-08-25T01:00:00.000Z",
@@ -100,7 +100,7 @@ describe("repack inventory work screen", () => {
     };
     await applyMigrations(exec);
     db.prepare(
-      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'ИНВ-Р-42', ?)",
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0043', ?)",
     ).run(INVENTORY_ID, SNAPSHOT_ID);
     db.prepare(
       `INSERT INTO sscc_pool
@@ -190,7 +190,7 @@ describe("repack inventory work screen", () => {
     const exec = makeExec(db);
     await applyMigrations(exec);
     db.prepare(
-      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'ИНВ-Р-42', ?)",
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0043', ?)",
     ).run(INVENTORY_ID, SNAPSHOT_ID);
     const boxId = "88888888-8888-4888-8888-888888888888";
     const losingEventId = "99999999-9999-4999-8999-999999999999";
@@ -260,7 +260,7 @@ describe("repack inventory work screen", () => {
     const exec = makeExec(db);
     await applyMigrations(exec);
     db.prepare(
-      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'ИНВ-Р-42', ?)",
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0043', ?)",
     ).run(INVENTORY_ID, SNAPSHOT_ID);
     const boxId = "12121212-1212-4212-8212-121212121212";
     db.prepare(
@@ -312,7 +312,7 @@ describe("repack inventory work screen", () => {
     const exec = makeExec(db);
     await applyMigrations(exec);
     db.prepare(
-      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'ИНВ-Р-42', ?)",
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0043', ?)",
     ).run(INVENTORY_ID, SNAPSHOT_ID);
     db.prepare(
       `INSERT INTO sscc_pool
