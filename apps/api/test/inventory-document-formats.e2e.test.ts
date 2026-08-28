@@ -47,6 +47,7 @@ const expectedFormats = {
       mimeType: "application/xml; charset=utf-8",
       requiredSourceCategories: ["verified", "protected", "newBoxes"],
       supportsParts: false,
+      requiresOrganizationInn: true,
       availability: "available",
     },
     {
@@ -57,6 +58,7 @@ const expectedFormats = {
       mimeType: "application/xml; charset=utf-8",
       requiredSourceCategories: ["verified", "protected", "newBoxes"],
       supportsParts: false,
+      requiresOrganizationInn: true,
       availability: "available",
     },
     {
@@ -314,6 +316,7 @@ describe.skipIf(!ready)("inventory document formats e2e", () => {
       "mimeType",
       "requiredSourceCategories",
       "supportsParts",
+      "requiresOrganizationInn",
       "availability",
     ]);
     expect(item?.properties?.availability?.enum).toEqual(["available"]);

@@ -34,6 +34,7 @@ describe("inventory document format registry", () => {
         requiredSourceCategories: ["verified", "protected", "newBoxes"],
         supportsParts: false,
         availability: "available",
+        requiresOrganizationInn: true,
       },
       {
         id: "inventory_xml_gismt_disaggregation",
@@ -44,6 +45,7 @@ describe("inventory document format registry", () => {
         requiredSourceCategories: ["verified", "protected", "newBoxes"],
         supportsParts: false,
         availability: "available",
+        requiresOrganizationInn: true,
       },
       {
         id: "inventory_txt_write_off",

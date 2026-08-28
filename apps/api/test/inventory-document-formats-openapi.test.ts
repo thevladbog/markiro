@@ -26,6 +26,7 @@ describe("inventory document formats OpenAPI MIME contract", () => {
       "mimeType",
       "requiredSourceCategories",
       "supportsParts",
+      "requiresOrganizationInn",
       "availability",
     ]);
     const mimeType = inventoryDocumentFormatOpenApiSchema.properties?.mimeType;
