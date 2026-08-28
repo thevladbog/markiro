@@ -4,6 +4,8 @@
 
 pub mod contracts;
 pub mod cloud;
+pub mod journal;
+pub mod runtime;
 pub mod signer;
 #[cfg(windows)]
 pub mod signer_capi;
