@@ -76,6 +76,12 @@ the only retained idempotency key, act id, or PDF. Exact retry and authoritative
 the same operation identity; successful retry or reconciliation releases navigation. Ordinary
 unsaved forms continue to use the existing discard confirmation contract.
 
+The shared guard also clears an earlier discard/success allowance when either a new dirty form or a
+new busy operation activates. This matters because `AppShell` and its guard provider persist across
+child routes: a discard confirmed on one route can no longer authorize a later retained offer or act
+route. The reset effect depends on both aggregate states, so it does not re-run and deadlock the same
+explicitly allowed navigation while that activation remains unchanged.
+
 Every act create, issue, and reconcile outcome invalidates the whole request registry family as
 well as exact request/act/document keys, so registry `latestEvent` cannot stay stale. Reconciliation
 to an issued act with a ready PDF resets the earlier ambiguous issue error before showing success;
@@ -140,6 +146,12 @@ provenance column, or privacy model changed.
 - **Fix round 4 GREEN:** retained-operation tests pass **2 files / 22 tests**; the broader offer,
   act, request, and ordinary document-guard run passes **4 files / 39 tests**; complete SaaS passes
   **25 files / 234 tests**.
+- **Fix round 5 RED:** the same-shell act regression passed **0 of 1** because an ordinary catalog
+  discard left the provider allowance set; the later retained busy-only act navigated to Catalog
+  instead of showing the busy guard and preserving its act identity.
+- **Fix round 5 GREEN:** the same-shell regression passes **1 of 1**; navigation, ordinary dirty,
+  retained offer, and retained act coverage passes **4 files / 65 tests**; complete SaaS passes
+  **25 files / 235 tests**.
 
 ## Changed areas
 
@@ -149,15 +161,16 @@ provenance column, or privacy model changed.
   request-bound offer transaction/controller, bounded registry, and one-row latest-event query.
 - `apps/api/src/modules/platform-offers` — transaction-aware draft insertion shared with direct
   offer creation.
-- request, invoice, offer, act, composer, routing, and RU/EN SaaS files — whole-surface retry freeze,
-  locked request tenant, mutation-time forbidden latches, destination authority, exact provenance,
-  immutable offer retry, guarded navigation, durable act recovery, and resumable act issue.
+- request, invoice, offer, act, composer, routing, navigation guard, and RU/EN SaaS files —
+  whole-surface retry freeze, locked request tenant, mutation-time forbidden latches, destination
+  authority, exact provenance, immutable offer retry, same-shell guard activation reset, durable act
+  recovery, and resumable act issue.
 - focused contract, OpenAPI, real DB service, and SaaS tests.
 
 ## Verification
 
-- PASS — latest fix-round SaaS focused Vitest: **4 files / 39 tests**.
-- PASS — full SaaS Vitest: **25 files / 234 tests**.
+- PASS — latest fix-round SaaS focused Vitest: **4 files / 65 tests**.
+- PASS — full SaaS Vitest: **25 files / 235 tests**.
 - PASS — SaaS source/test TypeScript no-emit, full ESLint, and production Vite build. The existing
   > 500-kB chunk advisory remains.
 - PASS — platform-contracts Vitest **9 files / 69 tests**, typecheck, ESLint, and build.

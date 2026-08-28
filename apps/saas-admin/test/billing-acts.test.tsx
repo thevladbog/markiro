@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -137,6 +137,75 @@ describe("platform billing act issue", () => {
     expect(createBodies).toHaveLength(1);
     expect(issueBodies).toHaveLength(2);
     expect(issueBodies[0]?.get("idempotencyKey")).toBe(issueBodies[1]?.get("idempotencyKey"));
+  });
+
+  it("resets a discarded form allowance before a retained act starts in the same shell", async () => {
+    const issueBodies: FormData[] = [];
+    let createCount = 0;
+    let issueCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+        if (url.endsWith("/api/platform/catalog/items") && method === "GET") {
+          return jsonResponse(200, { items: [] });
+        }
+        if (url.endsWith("/api/platform/settings/demo-plan") && method === "GET") {
+          return jsonResponse(200, { catalogVersionId: null });
+        }
+        if (url.endsWith("/api/platform/offers") && method === "GET") {
+          return jsonResponse(200, []);
+        }
+        if (url.endsWith("/api/platform/billing/acts") && method === "POST") {
+          createCount += 1;
+          return jsonResponse(201, act("draft", null));
+        }
+        if (url.endsWith(`/api/platform/billing/acts/${ACT_ID}/issue`) && method === "POST") {
+          issueCount += 1;
+          if (init?.body instanceof FormData) issueBodies.push(init.body);
+          if (issueCount === 1) return jsonResponse(503, { code: "storage_unavailable" });
+          return jsonResponse(201, act("issued", readyDocument()));
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    const rendered = renderSaasApp({ initialEntry: "/catalog" });
+
+    await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
+    await user.type(screen.getByLabelText("Код позиции"), "unfinished-item");
+    await user.click(screen.getByRole("link", { name: "Предложения" }));
+    await user.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Отменить изменения",
+      }),
+    );
+    expect(await screen.findByRole("heading", { name: "Коммерческие предложения" })).toBeDefined();
+
+    await rendered.router.navigate(
+      `/billing-acts/new?tenantId=${TENANT_ID}&requestId=${REQUEST_ID}`,
+    );
+    await fillActForm(user);
+    await user.click(screen.getByRole("button", { name: "Выпустить акт" }));
+
+    expect(await screen.findByText("Черновик акта сохранён")).toBeDefined();
+    expect(screen.getByText(ACT_ID)).toBeDefined();
+    await user.click(screen.getByRole("link", { name: "Каталог" }));
+    expect(await screen.findByText("Операция выполняется. Дождитесь её завершения.")).toBeDefined();
+    expect(screen.getByText(ACT_ID)).toBeDefined();
+    await user.click(screen.getByRole("link", { name: "Вернуться к заявке" }));
+    expect(screen.getByText(ACT_ID)).toBeDefined();
+
+    await user.click(screen.getByRole("button", { name: "Продолжить выпуск черновика" }));
+    expect(await screen.findByText("Акт выпущен")).toBeDefined();
+    expect(createCount).toBe(1);
+    expect(issueBodies).toHaveLength(2);
+    expect(issueBodies[0]?.get("idempotencyKey")).toBe(issueBodies[1]?.get("idempotencyKey"));
+
+    await user.click(screen.getByRole("link", { name: "Каталог" }));
+    expect(await screen.findByRole("heading", { name: "Каталог" })).toBeDefined();
   });
 
   it.each(["create", "issue", "reconcile"] as const)(
