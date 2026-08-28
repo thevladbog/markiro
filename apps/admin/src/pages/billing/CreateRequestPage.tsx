@@ -5,6 +5,8 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { Alert, Button, Card, Input, Select, Textarea } from "@markiro/ui";
 
+import { CABINET_ACCESS_QUERY_KEY } from "../../access/api.js";
+import { ForbiddenPage } from "../../access/ForbiddenPage.js";
 import { ApiRequestError } from "../../api/client.js";
 import {
   createBillingRequest,
@@ -69,6 +71,7 @@ export function CreateRequestPage() {
   const [uploading, setUploading] = useState<string | null>(null);
   const attempt = useRef<CreateAttempt | null>(null);
   const lock = useRef(false);
+  const forbiddenLock = useRef(false);
 
   const update = (next: BillingRequestFormValues) => {
     setValues(next);
@@ -79,7 +82,7 @@ export function CreateRequestPage() {
 
   const submit = (reuse = false) =>
     void (async () => {
-      if (lock.current) return;
+      if (lock.current || forbiddenLock.current) return;
       const validation = validateBillingRequestForm(values);
       setErrors(validation);
       if (hasBillingRequestFormErrors(validation)) return;
@@ -109,6 +112,12 @@ export function CreateRequestPage() {
         } catch (cause) {
           const kind = createError(cause);
           setActionError(kind);
+          if (kind === "forbidden") {
+            forbiddenLock.current = true;
+            void client
+              .invalidateQueries({ queryKey: CABINET_ACCESS_QUERY_KEY })
+              .catch(() => undefined);
+          }
           if (kind !== "retryable") {
             attempt.current = null;
           }
@@ -149,6 +158,7 @@ export function CreateRequestPage() {
   const descriptionError = errors.description
     ? t(`pages.billing.requests.create.errors.description.${errors.description}`)
     : undefined;
+  if (actionError === "forbidden") return <ForbiddenPage />;
   return (
     <section className="mk-billing-request-create" aria-labelledby="billing-request-create-heading">
       <div className="mk-billing-section-intro">

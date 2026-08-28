@@ -216,10 +216,6 @@ it("shows all five server request types and validates description, desired date,
 
 it.each([
   {
-    failure: json({ code: "forbidden" }, 403),
-    message: "Доступ к созданию заявок отозван. Вернитесь к списку заявок.",
-  },
-  {
     failure: json({ code: "validation_failed" }, 400),
     message: "Сервер отклонил данные заявки. Проверьте поля и отправьте снова.",
   },
@@ -238,6 +234,33 @@ it.each([
   fireEvent.click(screen.getByRole("button", { name: "Создать заявку" }));
   expect(await screen.findByText(message)).toBeDefined();
   expect(screen.queryByRole("button", { name: "Повторить отправку" })).toBeNull();
+});
+
+it("enters the established forbidden state after create 403 and blocks stale form submissions", async () => {
+  const uuid = vi
+    .fn()
+    .mockReturnValueOnce("00000000-0000-4000-8000-000000000591")
+    .mockReturnValueOnce("00000000-0000-4000-8000-000000000592");
+  vi.stubGlobal("crypto", { randomUUID: uuid });
+  const fetch = vi
+    .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
+    .mockResolvedValueOnce(json({ code: "forbidden" }, 403))
+    .mockResolvedValueOnce(json(request));
+  vi.stubGlobal("fetch", fetch);
+  renderBilling(<CreateRequestPage />, "/billing/requests/new");
+  fireEvent.change(screen.getByLabelText("Описание"), { target: { value: "Продлить" } });
+  const submit = screen.getByRole("button", { name: "Создать заявку" });
+  const form = submit.closest("form");
+  if (!form) throw new Error("create request form fixture is missing");
+  fireEvent.click(submit);
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+  expect(screen.getByText("Эта страница недоступна")).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Создать заявку" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Повторить отправку" })).toBeNull();
+  fireEvent.click(submit);
+  fireEvent.submit(form);
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+  expect(uuid).toHaveBeenCalledTimes(1);
 });
 
 it.each([new Error("offline"), new ApiRequestError(503, "unavailable", "unavailable")])(

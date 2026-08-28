@@ -158,3 +158,41 @@ contain its own final SHA.
 
 No browser, responsive screenshot, live API, or object-storage verification was
 performed; Task 13 remains the browser and live-storage gate.
+
+## Fix Round 2 / 5
+
+### Reviewer finding resolved
+
+An authoritative 403 from request creation now transitions the route into the
+same accessible `ForbiddenPage` used by capability guards. The request form,
+primary submit, and retry action are all removed. A synchronous revocation lock
+also rejects stale click or form-submit events before validation or UUID
+generation, so the first rejected POST is the only POST and the first
+idempotency attempt is the only attempt.
+
+The page invalidates the cabinet-access query prefix after the 403 so the shell
+can reconcile its capability document. This refresh is best-effort; the local
+forbidden lock does not depend on it, and server authorization remains
+authoritative. Validation 400, conflict 409, network, and 5xx branches retain
+their previously tested semantics.
+
+### RED / GREEN
+
+- **RED:** the dedicated 403 test failed because the create form and primary
+  submit remained mounted after membership revocation.
+- **GREEN:** the same test proves the established forbidden surface, absent
+  submit/retry controls, exactly one POST, and exactly one generated UUID after
+  attempted stale click and keyboard/form submission. Focused Task 10 plus i18n
+  remains **3 files / 33 tests** green.
+
+### Fix-round verification
+
+- PASS — current-worktree admin TypeScript no-emit.
+- PASS — full admin ESLint with 0 errors; the same 5 unrelated
+  hook-dependency warnings remain in boxes/conflicts.
+- PASS — admin production build; the existing large-chunk advisory remains.
+- PASS — scoped Prettier and `git diff --check`.
+- Temporary TypeScript and Vite alias configs were removed; existing untracked
+  workspace `node_modules` symlinks remain unstaged.
+
+No browser or live authorization run was performed.
