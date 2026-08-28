@@ -85,11 +85,11 @@ const copy = {
 } as const;
 
 export function boundedBillingSubjectName(value: string): string {
-  return value
+  const normalized = value
     .replace(/<[^>]*>/g, "")
     .replace(/[\r\n\t]+/g, " ")
-    .trim()
-    .slice(0, 120);
+    .trim();
+  return truncateGraphemes(normalized, 120);
 }
 
 export function tenantBillingNotificationSubject(
@@ -97,9 +97,8 @@ export function tenantBillingNotificationSubject(
   eventKind: TenantBillingEventKind,
   subjectName: string,
 ): string {
-  const safeName = boundedBillingSubjectName(subjectName);
   const brand = locale === "ru" ? "Маркиро" : "Markiro";
-  return `${copy[locale][eventKind].subject}: ${safeName} — ${brand}`;
+  return `${copy[locale][eventKind].subject}: ${subjectName} — ${brand}`;
 }
 
 export function TenantBillingNotificationEmail({
@@ -111,12 +110,30 @@ export function TenantBillingNotificationEmail({
   actionUrl,
 }: TenantBillingNotificationEmailProps) {
   const event = copy[locale][eventKind];
-  const safeName = boundedBillingSubjectName(subjectName);
   return (
-    <EmailLayout locale={locale} preview={`${event.subject}: ${safeName}`} heading={event.heading}>
+    <EmailLayout
+      locale={locale}
+      preview={`${event.subject}: ${subjectName}`}
+      heading={event.heading}
+    >
       <Text style={emailStyles.greeting}>{copy[locale].greeting(recipientName)}</Text>
-      <Text style={emailStyles.paragraph}>{event.body(safeName, organizationName)}</Text>
+      <Text style={emailStyles.paragraph}>{event.body(subjectName, organizationName)}</Text>
       <EmailAction href={actionUrl}>{event.action}</EmailAction>
     </EmailLayout>
   );
+}
+
+function truncateGraphemes(value: string, maximum: number): string {
+  if (typeof Intl.Segmenter === "function") {
+    const segments = new Intl.Segmenter("und", { granularity: "grapheme" }).segment(value);
+    let result = "";
+    let count = 0;
+    for (const { segment } of segments) {
+      if (count === maximum) break;
+      result += segment;
+      count += 1;
+    }
+    return result;
+  }
+  return Array.from(value).slice(0, maximum).join("");
 }

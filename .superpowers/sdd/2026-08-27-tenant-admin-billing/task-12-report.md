@@ -70,6 +70,20 @@ queries show no count and do not break navigation. The query key remains inside 
   failure rolls database state/history back. The dedicated invoice suite additionally proves a
   concurrent issue produces one committed issue and exactly one recipient delivery/outbox.
 
+### Review fix round 2
+
+- **RED:** after clarification A, a reply, and clarification B, the queued A deliveries still
+  sent because the worker only checked that their old status event existed. **GREEN:** validation
+  now requires the source event to equal the tenant/request-scoped latest `status_changed` event,
+  ordered deterministically by `created_at DESC, id DESC`. A same-timestamp cycle plus a later
+  non-status comment proves A cancels and B sends.
+- **RED:** the email template's UTF-16 `slice(0, 120)` split an astral glyph into an unpaired
+  surrogate and split a combining sequence at the boundary. **GREEN:** the render boundary now
+  normalizes the subject name once and truncates by grapheme through `Intl.Segmenter`, with a
+  deterministic code-point fallback. Direct render and real enqueue/decrypt/worker tests assert
+  the expected glyph boundary and no replacement character or unpaired surrogate in subject,
+  HTML, or text.
+
 ## Changed areas
 
 - `packages/email` — strict typed RU/EN billing notification renderer and escaping/bounds tests.
@@ -93,6 +107,9 @@ queries show no count and do not break navigation. The query key remains inside 
 - PASS — review-fix combined API notification/mail/workflow run: 6 files / 138 tests. Dedicated
   authoritative invoice notification coverage: 2/2. OpenAPI: 13/13; route inventory: 4/4.
 - PASS — review-fix API TypeScript no-emit, ESLint, Nest TypeScript build, and `git diff --check`.
+- PASS — review-fix round 2 complete email suite: 3 files / 23 tests, source/test TypeScript,
+  ESLint, and build. Combined API notification/mail/workflow regression: 6 files / 140 tests;
+  API TypeScript no-emit, ESLint, and build.
 - PASS — API TypeScript no-emit, ESLint, and Nest build.
 - PASS — admin billing routing 15/15, i18n 4/4, TypeScript, ESLint, and production Vite build. ESLint
   retains five inherited hook warnings outside the changed billing files; the build retains the

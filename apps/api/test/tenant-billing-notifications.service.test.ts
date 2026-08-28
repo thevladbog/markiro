@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema, type Db } from "@markiro/db";
-import { renderEmail } from "@markiro/email";
+import { renderEmail, type RenderedEmail } from "@markiro/email";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -567,6 +567,195 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
     expect(transport.send).toHaveBeenCalledOnce();
   });
 
+  it("sends only the latest clarification status transition after a reply and re-entry", async () => {
+    const platformUserId = `platform-${randomUUID()}`;
+    const requestId = randomUUID();
+    const tiedAt = new Date("2026-08-28T18:00:00.000Z");
+    const firstClarificationId = "11111111-1111-4111-8111-111111111111";
+    const replyId = "22222222-2222-4222-8222-222222222222";
+    const latestClarificationId = "33333333-3333-4333-8333-333333333333";
+    await db.insert(schema.platformUsers).values({
+      id: platformUserId,
+      name: "Clarification cycle actor",
+      email: `${platformUserId}@example.test`,
+      role: "platform_admin",
+      status: "active",
+      twoFactorEnabled: true,
+    });
+    await db.insert(schema.tenantBillingRequests).values({
+      id: requestId,
+      tenantId,
+      number: `REQ-CYCLE-${randomUUID()}`,
+      type: "other",
+      status: "clarification_required",
+      description: "Clarification cycle",
+      responsibleSide: "tenant",
+      idempotencyKey: randomUUID(),
+      createdByUserId: `${tenantId}:owner`,
+    });
+    await db.insert(schema.tenantBillingRequestEvents).values({
+      id: firstClarificationId,
+      tenantId,
+      requestId,
+      kind: "status_changed",
+      fromStatus: "under_review",
+      toStatus: "clarification_required",
+      actorKind: "platform_user",
+      actorPlatformUserId: platformUserId,
+      idempotencyKey: randomUUID(),
+      createdAt: tiedAt,
+    });
+    const firstDeliveryIds = await db.transaction((tx) =>
+      service.enqueueInTransaction(tx, {
+        tenantId,
+        eventKind: "clarification_required",
+        entityId: requestId,
+        revision: firstClarificationId,
+        subjectName: "REQ cycle A",
+      }),
+    );
+    await db.insert(schema.tenantBillingRequestEvents).values([
+      {
+        id: replyId,
+        tenantId,
+        requestId,
+        kind: "status_changed",
+        fromStatus: "clarification_required",
+        toStatus: "under_review",
+        actorKind: "platform_user",
+        actorPlatformUserId: platformUserId,
+        idempotencyKey: randomUUID(),
+        createdAt: tiedAt,
+      },
+      {
+        id: latestClarificationId,
+        tenantId,
+        requestId,
+        kind: "status_changed",
+        fromStatus: "under_review",
+        toStatus: "clarification_required",
+        actorKind: "platform_user",
+        actorPlatformUserId: platformUserId,
+        idempotencyKey: randomUUID(),
+        createdAt: tiedAt,
+      },
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        tenantId,
+        requestId,
+        kind: "platform_comment",
+        message: "A later non-status event must not replace the status transition",
+        actorKind: "platform_user",
+        actorPlatformUserId: platformUserId,
+        idempotencyKey: randomUUID(),
+        createdAt: tiedAt,
+      },
+    ]);
+    const latestDeliveryIds = await db.transaction((tx) =>
+      service.enqueueInTransaction(tx, {
+        tenantId,
+        eventKind: "clarification_required",
+        entityId: requestId,
+        revision: latestClarificationId,
+        subjectName: "REQ cycle B",
+      }),
+    );
+    const transport = { verify: vi.fn(async () => true), send: vi.fn(async () => undefined) };
+    const jobs = new MailJobsService(connection.pool as unknown as MailPgPool, crypto, transport);
+
+    for (const deliveryId of [...firstDeliveryIds, ...latestDeliveryIds]) {
+      await jobs.processDelivery(deliveryId);
+    }
+    const cycleDeliveries = await db
+      .select({ id: schema.emailDeliveries.id, status: schema.emailDeliveries.status })
+      .from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.tenantId, tenantId));
+    expect(
+      cycleDeliveries.filter(({ id }) => firstDeliveryIds.includes(id)).map(({ status }) => status),
+    ).toEqual(["canceled", "canceled"]);
+    expect(
+      cycleDeliveries
+        .filter(({ id }) => latestDeliveryIds.includes(id))
+        .map(({ status }) => status),
+    ).toEqual(["sent", "sent"]);
+    expect(transport.send).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps combining and astral glyphs intact through encrypted worker rendering", async () => {
+    const platformUserId = `platform-${randomUUID()}`;
+    const requestId = randomUUID();
+    const eventId = randomUUID();
+    const boundarySubject = `${"a".repeat(118)}e\u0301🙂tail`;
+    await db.insert(schema.platformUsers).values({
+      id: platformUserId,
+      name: "Unicode boundary actor",
+      email: `${platformUserId}@example.test`,
+      role: "platform_admin",
+      status: "active",
+      twoFactorEnabled: true,
+    });
+    await db.insert(schema.tenantBillingRequests).values({
+      id: requestId,
+      tenantId,
+      number: `REQ-UNICODE-${randomUUID()}`,
+      type: "other",
+      status: "clarification_required",
+      description: "Unicode boundary",
+      responsibleSide: "tenant",
+      idempotencyKey: randomUUID(),
+      createdByUserId: `${tenantId}:owner`,
+    });
+    await db.insert(schema.tenantBillingRequestEvents).values({
+      id: eventId,
+      tenantId,
+      requestId,
+      kind: "status_changed",
+      fromStatus: "under_review",
+      toStatus: "clarification_required",
+      actorKind: "platform_user",
+      actorPlatformUserId: platformUserId,
+      idempotencyKey: randomUUID(),
+    });
+    const [deliveryId] = await db.transaction((tx) =>
+      service.enqueueInTransaction(tx, {
+        tenantId,
+        eventKind: "clarification_required",
+        entityId: requestId,
+        revision: eventId,
+        subjectName: boundarySubject,
+      }),
+    );
+    const [queuedDelivery] = await db
+      .select()
+      .from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.id, deliveryId!));
+    expect(
+      tenantBillingNotificationPayloadSchema.parse(
+        crypto.decrypt(queuedDelivery!.id, {
+          encryptedPayload: queuedDelivery!.encryptedPayload!,
+          payloadNonce: queuedDelivery!.payloadNonce!,
+          payloadTag: queuedDelivery!.payloadTag!,
+        }),
+      ).subjectName,
+    ).toBe(boundarySubject);
+    const transport = { verify: vi.fn(async () => true), send: vi.fn(async () => undefined) };
+    const jobs = new MailJobsService(connection.pool as unknown as MailPgPool, crypto, transport);
+
+    await jobs.processDelivery(deliveryId!);
+
+    const rendered = (
+      transport.send.mock.calls as unknown as Array<[RenderedEmail, string]>
+    )[0]?.[0];
+    if (!rendered) throw new Error("worker did not render the billing notification");
+    const expectedBoundary = `${"a".repeat(118)}e\u0301🙂`;
+    for (const value of [rendered.subject, rendered.html, rendered.text]) {
+      expect(value).toContain(expectedBoundary);
+      expect(value).not.toContain("tail");
+      expect(value).not.toContain("\uFFFD");
+      expect(hasUnpairedSurrogate(value)).toBe(false);
+    }
+  });
+
   it("counts only fixed-clock actionable tenant rows across calendar boundaries", async () => {
     const attentionTenantId = `billing-attention-${randomUUID()}`;
     const attentionForeignTenantId = `billing-attention-${randomUUID()}`;
@@ -702,3 +891,17 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
     await expect(service.attention(attentionTenantId)).resolves.toEqual({ count: 3 });
   });
 });
+
+function hasUnpairedSurrogate(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const current = value.charCodeAt(index);
+    if (current >= 0xd800 && current <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next < 0xdc00 || next > 0xdfff) return true;
+      index += 1;
+    } else if (current >= 0xdc00 && current <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}

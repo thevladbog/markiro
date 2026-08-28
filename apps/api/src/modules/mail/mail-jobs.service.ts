@@ -454,6 +454,14 @@ export class MailJobsService {
         "    AND request.status = 'clarification_required'",
         "    AND event.id = $3::uuid AND event.kind = 'status_changed'",
         "    AND event.to_status = 'clarification_required'",
+        "    AND event.id = (",
+        "      SELECT latest_status.id FROM tenant_billing_request_events AS latest_status",
+        "      WHERE latest_status.tenant_id = request.tenant_id",
+        "        AND latest_status.request_id = request.id",
+        "        AND latest_status.kind = 'status_changed'",
+        "      ORDER BY latest_status.created_at DESC, latest_status.id DESC",
+        "      LIMIT 1",
+        "    )",
         ") AS valid",
       ].join("\n");
       values = [entityId, delivery.tenantId, revision];

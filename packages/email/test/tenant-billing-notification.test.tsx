@@ -79,4 +79,50 @@ describe("tenant billing notification email", () => {
     expect(output.html).not.toContain("<script>");
     expect(output.html).not.toMatch(/bank|account|payload|attachment|storage|comment/i);
   });
+
+  it.each([
+    {
+      name: "astral glyph",
+      input: `${"a".repeat(119)}🙂tail`,
+      included: `${"a".repeat(119)}🙂`,
+      excluded: "tail",
+    },
+    {
+      name: "combining sequence",
+      input: `${"a".repeat(119)}e\u0301🙂`,
+      included: `${"a".repeat(119)}e\u0301`,
+      excluded: "🙂",
+    },
+  ])("keeps the $name intact at the subject boundary", async ({ input, included, excluded }) => {
+    const output = await renderEmail({
+      kind: "tenant-billing-notification",
+      locale: "en",
+      recipientName: "Ada",
+      organizationName: "Factory",
+      eventKind: "offer_published",
+      subjectName: input,
+      actionUrl: "https://cabinet.markiro.test/billing/offers/offer-id",
+    });
+
+    expect(output.subject).toContain(included);
+    expect(output.subject).not.toContain(excluded);
+    for (const value of [output.subject, output.html, output.text]) {
+      expect(value).not.toContain("\uFFFD");
+      expect(hasUnpairedSurrogate(value)).toBe(false);
+    }
+  });
 });
+
+function hasUnpairedSurrogate(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const current = value.charCodeAt(index);
+    if (current >= 0xd800 && current <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next < 0xdc00 || next > 0xdfff) return true;
+      index += 1;
+    } else if (current >= 0xdc00 && current <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}

@@ -23,6 +23,7 @@ import {
   type LandingDemoConfirmationEmailProps,
 } from "./landing-demo-confirmation.js";
 import {
+  boundedBillingSubjectName,
   TenantBillingNotificationEmail,
   tenantBillingNotificationSubject,
   type TenantBillingNotificationEmailProps,
@@ -151,14 +152,15 @@ function resolveTemplate(input: EmailTemplateInput): {
       };
     }
     case "tenant-billing-notification": {
+      const subjectName = boundedBillingSubjectName(input.subjectName);
       return {
-        subject: tenantBillingNotificationSubject(input.locale, input.eventKind, input.subjectName),
+        subject: tenantBillingNotificationSubject(input.locale, input.eventKind, subjectName),
         element: createElement(TenantBillingNotificationEmail, {
           locale: input.locale,
           recipientName: input.recipientName,
           organizationName: input.organizationName,
           eventKind: input.eventKind,
-          subjectName: input.subjectName,
+          subjectName,
           actionUrl: input.actionUrl,
         }),
       };
