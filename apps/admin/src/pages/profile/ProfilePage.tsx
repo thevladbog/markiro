@@ -1,8 +1,8 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 
-import { Alert, Button, Input } from "@markiro/ui";
+import { Alert, Button, FileDropZone, Input } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { useAuthClient } from "../../auth/client.js";
@@ -33,7 +33,6 @@ function ProfileContent({ email }: { email: string }) {
   const update = useUpdateProfile();
   const upload = useUploadAvatar();
   const removeAvatar = useDeleteAvatar();
-  const avatarInputId = useId();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [middleName, setMiddleName] = useState("");
@@ -180,23 +179,16 @@ function ProfileContent({ email }: { email: string }) {
                 )}
               </div>
               <div className="mk-account-avatar-actions">
-                <label
-                  className="mk-account-upload"
-                  data-disabled={upload.isPending || undefined}
-                  htmlFor={avatarInputId}
-                >
-                  {profile.data.hasAvatar ? t("profile.changeAvatar") : t("profile.uploadAvatar")}
-                  {/* eslint-disable-next-line no-restricted-syntax -- the browser file picker requires a native file input; the visible control is the associated styled label. */}
-                  <input
-                    className="mk-account-file-input"
-                    id={avatarInputId}
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    aria-label={t("profile.uploadAvatar")}
-                    disabled={upload.isPending}
-                    onChange={(event) => void uploadFile(event.target.files?.[0])}
-                  />
-                </label>
+                <FileDropZone
+                  compact
+                  accept="image/png,image/jpeg,image/webp"
+                  label={
+                    profile.data.hasAvatar ? t("profile.changeAvatar") : t("profile.uploadAvatar")
+                  }
+                  ariaLabel={t("profile.uploadAvatar")}
+                  disabled={upload.isPending}
+                  onFile={(file) => void uploadFile(file)}
+                />
                 {profile.data.hasAvatar ? (
                   <Button
                     type="button"

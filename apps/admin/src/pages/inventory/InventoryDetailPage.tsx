@@ -11,7 +11,7 @@ import {
   Card,
   Checkbox,
   EmptyState,
-  Input,
+  FileDropZone,
   PageHeader,
   RadioGroup,
   Spinner,
@@ -38,6 +38,7 @@ import {
   type InventorySnapshot,
   type InventorySnapshotInputs,
 } from "./schemas.js";
+import { inventoryStatusChipProps } from "./status.js";
 import "./inventory.css";
 
 function latestSuccessfulImports(
@@ -130,7 +131,10 @@ export function InventoryDetailPage() {
       <PageHeader
         title={inventory.number}
         actions={
-          <StatusChip status="neutral" label={t(`pages.inventory.status.${inventory.status}`)} />
+          <StatusChip
+            {...inventoryStatusChipProps(inventory.status)}
+            label={t(`pages.inventory.status.${inventory.status}`)}
+          />
         }
       />
       <p className="mk-inventory-page__description">
@@ -255,18 +259,16 @@ function ExportsStep({
                 )}
               </div>
               {canMutate ? (
-                <Input
-                  className="mk-inventory-file-control"
+                <FileDropZone
+                  compact
+                  className="mk-inventory-upload-slot__file-drop"
                   label={t("pages.inventory.exports.chooseFile")}
-                  type="file"
+                  busyLabel={t("pages.inventory.exports.uploading")}
+                  ariaLabel={t("pages.inventory.exports.fileLabel", { status })}
                   accept=".csv,.zip,.xlsx"
-                  aria-label={t("pages.inventory.exports.fileLabel", { status })}
                   disabled={upload.isPending}
-                  onChange={(event) => {
-                    const file = event.currentTarget.files?.[0];
-                    if (file) upload.mutate({ inventoryId: inventory.id, status, file });
-                    event.currentTarget.value = "";
-                  }}
+                  busy={upload.isPending && upload.variables?.status === status}
+                  onFile={(file) => upload.mutate({ inventoryId: inventory.id, status, file })}
                 />
               ) : null}
               {attempts.length === 0 ? (
@@ -422,44 +424,46 @@ function TerminalsStep({
       {presence.isError ? (
         <Alert tone="error">{t("pages.inventory.terminals.loadError")}</Alert>
       ) : null}
-      {line ? (
-        <div className="mk-inventory-terminal-line">
-          <span>
-            <strong>{line.lineName}</strong>
-            <small>
-              {t("pages.inventory.terminals.assigned", { count: line.assignedStations })}
-            </small>
-          </span>
-          <StatusChip
-            status={line.onlineStations > 0 ? "ok" : "neutral"}
-            label={t("pages.inventory.terminals.online", {
-              online: line.onlineStations,
-              total: line.assignedStations,
-            })}
-          />
+      <div className="mk-inventory-terminals">
+        {line ? (
+          <div className="mk-inventory-terminal-line">
+            <span>
+              <strong>{line.lineName}</strong>
+              <small>
+                {t("pages.inventory.terminals.assigned", { count: line.assignedStations })}
+              </small>
+            </span>
+            <StatusChip
+              status={line.onlineStations > 0 ? "ok" : "neutral"}
+              label={t("pages.inventory.terminals.online", {
+                online: line.onlineStations,
+                total: line.assignedStations,
+              })}
+            />
+          </div>
+        ) : null}
+        <Alert tone="info">
+          {t("pages.inventory.snapshot.expected", {
+            count: count(snapshot.counts.expected, i18n.language),
+          })}
+        </Alert>
+        <div className="mk-inventory-task-form">
+          <strong>{t("pages.inventory.terminals.formTitle")}</strong>
+          <p>{t("pages.inventory.terminals.formDescription")}</p>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() =>
+              window.open(
+                `/api/inventories/${inventory.id}/task-form`,
+                "_blank",
+                "noopener,noreferrer",
+              )
+            }
+          >
+            {t("pages.inventory.terminals.openForm")}
+          </Button>
         </div>
-      ) : null}
-      <Alert tone="info">
-        {t("pages.inventory.snapshot.expected", {
-          count: count(snapshot.counts.expected, i18n.language),
-        })}
-      </Alert>
-      <div className="mk-inventory-task-form">
-        <strong>{t("pages.inventory.terminals.formTitle")}</strong>
-        <p>{t("pages.inventory.terminals.formDescription")}</p>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() =>
-            window.open(
-              `/api/inventories/${inventory.id}/task-form`,
-              "_blank",
-              "noopener,noreferrer",
-            )
-          }
-        >
-          {t("pages.inventory.terminals.openForm")}
-        </Button>
       </div>
       <div className="mk-inventory-actions">
         <Button variant="secondary" type="button" onClick={onBack}>

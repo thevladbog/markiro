@@ -7,7 +7,17 @@ import { Link } from "react-router";
 import { z } from "zod";
 
 import { hasValidCheckDigit } from "@markiro/domain";
-import { Alert, Button, Card, Checkbox, Input, PageHeader, Select, Spinner } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  FileDropZone,
+  Input,
+  PageHeader,
+  Select,
+  Spinner,
+} from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { errorProp } from "../../lib/form-error.js";
@@ -405,12 +415,16 @@ function OrganizationLogoCard({ logoUrl }: { logoUrl: string | null }) {
             Markiro
           </div>
         )}
-        <Input
-          type="file"
+        <FileDropZone
           accept="image/jpeg,image/png,image/webp"
-          label={t("pages.settings.logo.uploadLabel")}
+          label={t("pages.settings.logo.dropLabel")}
+          hint={t("pages.settings.logo.hint")}
+          ariaLabel={t("pages.settings.logo.uploadLabel")}
           disabled={upload.isPending || remove.isPending}
-          onChange={(event) => void uploadFile(event.target.files?.[0])}
+          onFile={(file) => void uploadFile(file)}
+          // Страница валидирует тип сама (ALLOWED_LOGO_TYPES) и показывает
+          // собственное сообщение — отказ зоны не должен быть молчаливым.
+          onRejected={(file) => void uploadFile(file)}
         />
         {previewUrl ? (
           <Button

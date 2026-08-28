@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
@@ -260,6 +260,12 @@ async function chooseDate(
   await user.click(screen.getByRole("button", { name: dayName }));
 }
 
+function fileInput(status: string): HTMLInputElement {
+  const slot = document.getElementById(`inventory-slot-${status}`);
+  if (!slot) throw new Error(`Missing inventory-slot-${status}`);
+  return within(slot).getByTestId("file-drop-input") as HTMLInputElement;
+}
+
 afterEach(async () => {
   cleanup();
   vi.unstubAllGlobals();
@@ -379,7 +385,8 @@ it("keeps six independent slots, zero-row success, replacement history, and exac
   const file = new File(["replacement"], "introduced-replacement.zip", {
     type: "application/zip",
   });
-  await user.upload(screen.getByLabelText("Файл INTRODUCED"), file);
+  expect(screen.getByRole("button", { name: "Выбрать файл INTRODUCED" })).toBeDefined();
+  await user.upload(fileInput("INTRODUCED"), file);
   await waitFor(() =>
     expect(posts.some(({ url }) => url.endsWith("/imports/INTRODUCED"))).toBe(true),
   );
@@ -429,8 +436,9 @@ it("refreshes persisted failed upload attempts and diagnostics after a 422 respo
   });
 
   expect(await screen.findByRole("heading", { name: "Выписки по статусам кодов" })).toBeDefined();
+  expect(screen.getByRole("button", { name: "Выбрать файл WRITTEN_OFF" })).toBeDefined();
   await user.upload(
-    screen.getByLabelText("Файл WRITTEN_OFF"),
+    fileInput("WRITTEN_OFF"),
     new File(["invalid"], "written-off-persisted-failure.zip", { type: "application/zip" }),
   );
 
@@ -621,7 +629,7 @@ it("recovers the active snapshot after reload and blocks start until warehouse c
   ).toBe("false");
   expect(
     screen.queryAllByLabelText(
-      /^Файл (?:EMITTED|INTRODUCED|APPLIED|RETIRED|WRITTEN_OFF|DISAGGREGATION)$/,
+      /^Выбрать файл (?:EMITTED|INTRODUCED|APPLIED|RETIRED|WRITTEN_OFF|DISAGGREGATION)$/,
     ),
   ).toHaveLength(0);
   expect(screen.getAllByRole("radio").every((control) => control.hasAttribute("disabled"))).toBe(

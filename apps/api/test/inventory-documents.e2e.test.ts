@@ -1842,7 +1842,7 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     });
   });
 
-  it("publishes a ready six-format empty tabular package and fails an inapplicable XML package atomically", async () => {
+  it("publishes a ready six-format empty tabular package and a zero-byte XML package for an empty source", async () => {
     registry = productionInventoryDocumentGeneratorRegistry;
     try {
       const owner = await seedInventory();
@@ -2053,7 +2053,10 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
         expect(Buffer.from(archive[artifact.filename]!)).toEqual(expected.body);
       }
 
-      const failed = await owner.agent
+      // The XML package used to fail with EMPTY_SOURCE; empty sources now
+      // publish zero-byte XML artifacts (the ГИС МТ XSD has no valid empty
+      // document shape), so the run comes back ready.
+      const xmlRun = await owner.agent
         .post(`/inventories/${owner.inventoryId}/document-runs`)
         .send({
           selectedFormats: [
@@ -2063,26 +2066,53 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
           idempotencyKey: randomUUID(),
         })
         .expect(201);
-      await runner.run(failed.body.id as string, { retryCount: 0, retryLimit: 0 });
-      const [failedRun] = await db
+      await runner.run(xmlRun.body.id as string, { retryCount: 0, retryLimit: 0 });
+      const [xmlRunRow] = await db
         .select({
           status: schema.inventoryDocumentRuns.status,
           errorCode: schema.inventoryDocumentRuns.errorCode,
         })
         .from(schema.inventoryDocumentRuns)
-        .where(eq(schema.inventoryDocumentRuns.id, failed.body.id));
-      expect(failedRun).toEqual({ status: "failed", errorCode: "GENERATION_FAILED" });
+        .where(eq(schema.inventoryDocumentRuns.id, xmlRun.body.id));
+      expect(xmlRunRow).toEqual({ status: "ready", errorCode: null });
+      const xmlStored = await db
+        .select()
+        .from(schema.inventoryDocumentArtifacts)
+        .where(eq(schema.inventoryDocumentArtifacts.runId, xmlRun.body.id));
+      const emptySha = createHash("sha256").update(Buffer.alloc(0)).digest("hex");
       expect(
-        await db
-          .select({ id: schema.inventoryDocumentArtifacts.id })
-          .from(schema.inventoryDocumentArtifacts)
-          .where(eq(schema.inventoryDocumentArtifacts.runId, failed.body.id)),
-      ).toEqual([]);
-      expect(
-        [...objects.keys()].filter((key) =>
-          key.includes(`/inventory-documents/${failed.body.id}/`),
-        ),
-      ).toEqual([]);
+        xmlStored
+          .map((artifact) => ({
+            formatId: artifact.formatId,
+            filename: artifact.filename,
+            mimeType: artifact.mimeType,
+            byteSize: artifact.byteSize,
+            sha256: artifact.sha256,
+          }))
+          .sort((left, right) => left.formatId.localeCompare(right.formatId)),
+      ).toEqual([
+        {
+          formatId: "inventory_csv_current_stock",
+          filename: `inventory-${owner.inventoryNumber}-current-stock.csv`,
+          mimeType: "text/csv; charset=utf-8",
+          byteSize: UTF8_BOM.byteLength + Buffer.from("code\r\n").byteLength,
+          sha256: createHash("sha256")
+            .update(Buffer.concat([UTF8_BOM, Buffer.from("code\r\n")]))
+            .digest("hex"),
+        },
+        {
+          formatId: "inventory_xml_gismt_aggregation",
+          filename: `inventory-${owner.inventoryNumber}-aggregation.xml`,
+          mimeType: "application/xml; charset=utf-8",
+          byteSize: 0,
+          sha256: emptySha,
+        },
+      ]);
+      for (const artifact of xmlStored) {
+        const stored = objects.get(artifact.objectKey);
+        if (!stored) throw new Error(`Expected stored object for ${artifact.formatId}`);
+        expect(stored.byteLength).toBe(artifact.byteSize);
+      }
     } finally {
       registry = new InventoryDocumentGeneratorRegistry(syntheticGenerators);
     }

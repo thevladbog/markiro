@@ -2,6 +2,7 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  max-width: 1200px;
 }
 
 .mk-inventory-close-panel,
@@ -44,12 +45,17 @@
   gap: 12px;
 }
 
-.mk-inventory-document-run > header > span,
-.mk-inventory-document-artifacts > li > span {
+.mk-inventory-document-run > header > span:not(.mk-chip),
+.mk-inventory-document-artifacts > li > span:not(.mk-chip) {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 3px;
+}
+
+.mk-inventory-page .mk-chip {
+  flex-direction: row;
+  flex-shrink: 0;
 }
 
 .mk-inventory-document-run small,
@@ -176,6 +182,7 @@
 .mk-inventory-import-attempt > span,
 .mk-inventory-terminal-line > span,
 .mk-inventory-list__stack {
+  display: flex;
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
@@ -246,11 +253,24 @@
   background: var(--surface-page);
 }
 
+.mk-inventory-terminals {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .mk-inventory-upload-slot__header,
 .mk-inventory-terminal-line {
   justify-content: space-between;
 }
-.mk-inventory-file-control {
+
+.mk-inventory-terminal-line > .mk-chip {
+  flex-direction: row;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.mk-inventory-upload-slot__file-drop {
   margin: 12px 0;
 }
 .mk-inventory-import-history {
