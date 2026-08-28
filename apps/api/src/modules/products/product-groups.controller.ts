@@ -11,7 +11,7 @@ import { TenantGuard } from "../../tenancy/tenant.guard";
 import {
   ProductGroupsService,
   type ListChzProductGroupsResponseDto,
-} from "./product-groups.service.js";
+} from "./product-groups.service";
 
 const chzProductGroupsOpenApiSchema: SchemaObject = {
   type: "object",

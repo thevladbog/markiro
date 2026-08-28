@@ -31,7 +31,11 @@ export class ProductGroupsService {
       })
       .from(schema.chzProductGroups);
 
-    // Sort using Russian locale collation for proper alphabetical order
+    // Sorted here in Node, not via SQL `ORDER BY name`: the database's
+    // collation is not guaranteed to order Cyrillic correctly (it is very
+    // likely "C" on this deployment), and an explicit `COLLATE "ru-x-icu"`
+    // depends on an ICU collation that isn't guaranteed to be installed on
+    // every deployment image. `localeCompare("ru")` is portable and correct.
     items.sort((a, b) => a.name.localeCompare(b.name, "ru"));
 
     return { items };
