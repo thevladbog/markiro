@@ -53,6 +53,7 @@ export const inventoryDocumentFormatOpenApiSchema: SchemaObject = {
       items: { type: "string", enum: [...INVENTORY_DOCUMENT_SOURCE_CATEGORIES] },
     },
     supportsParts: { type: "boolean" },
+    requiresOrganizationInn: { type: "boolean", enum: [true] },
     availability: { type: "string", enum: ["available"] },
   },
 };

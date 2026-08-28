@@ -386,6 +386,8 @@ export const inventoryDocumentFormatSchema = z.strictObject({
     .min(1)
     .max(128)
     .regex(new RegExp(INVENTORY_DOCUMENT_MIME_TYPE_PATTERN)),
+  // Флаг сервера: формат требует заполненного ИНН организации.
+  requiresOrganizationInn: z.literal(true).optional(),
   requiredSourceCategories: z
     .array(z.enum(INVENTORY_DOCUMENT_SOURCE_CATEGORIES))
     .min(1)
