@@ -107,7 +107,10 @@ export class InventoryDocumentsService {
             selectedFormats,
             requestDigest,
             organizationNameSnapshot: organization.name,
-            organizationInnSnapshot: organization.inn,
+            // Trimmed: the INN gate validates the trimmed value, and the XML
+            // generators reject raw whitespace — a stray space would loop
+            // every retry through INVALID_ORGANIZATION_INN.
+            organizationInnSnapshot: organization.inn?.trim() || null,
             inventoryNumberSnapshot: inventory.number,
             inventoryClosedAtSnapshot: inventory.closedAt,
             createdByUserId: actorUserId,
@@ -571,7 +574,9 @@ export class InventoryDocumentsService {
     this.ensureOrganizationInnAvailable(resolvedGenerators, organization.inn);
     return {
       organizationNameSnapshot: organization.name,
-      organizationInnSnapshot: organization.inn,
+      // Same trim as create: keep the snapshot in the exact form the
+      // generators validate.
+      organizationInnSnapshot: organization.inn?.trim() || null,
     };
   }
 

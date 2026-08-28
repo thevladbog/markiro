@@ -288,7 +288,11 @@ export class InventoryDocumentRunnerService {
       if (publicationAttempted) {
         try {
           if (await this.hasCommittedPublication(claimed)) return;
-        } catch {
+        } catch (verifyError) {
+          this.logger.error(
+            `inventory document run ${claimed.id} publication verification failed`,
+            this.describeErrorForLog(verifyError),
+          );
           throw error;
         }
       }
@@ -452,13 +456,21 @@ export class InventoryDocumentRunnerService {
 
   /**
    * Drizzle embeds the full SQL statement and bound parameters in a query
-   * error's `message`/`stack`, so logging the raw stack can leak row data
-   * into logs. Bound to the message plus the first few stack lines instead.
+   * error's `message`/`stack` (params follow the query on later lines), so
+   * logging either raw can leak row data. Bound to the message's first line,
+   * capped, plus a few real stack frames.
    */
   private describeErrorForLog(error: unknown): string {
     if (!(error instanceof Error)) return String(error);
-    const stackLines = (error.stack ?? "").split("\n").slice(0, 5);
-    return [error.message, ...stackLines].join("\n");
+    // The message itself carries the query/params for driver errors, so cap
+    // it to its first line; keep only real frames (the stack repeats the
+    // message before the first "at ...").
+    const firstLine = error.message.split("\n", 1)[0]!.slice(0, 300);
+    const frames = (error.stack ?? "")
+      .split("\n")
+      .filter((line) => line.trimStart().startsWith("at "))
+      .slice(0, 5);
+    return [firstLine, ...frames].join("\n");
   }
 
   private ownedProcessingAttempt(claimed: InventoryDocumentRunRow) {
