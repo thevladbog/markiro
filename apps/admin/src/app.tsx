@@ -70,6 +70,8 @@ import { BillingLayout, BillingRoutePlaceholder } from "./pages/billing/BillingL
 import { BillingOverviewPage } from "./pages/billing/BillingOverviewPage.js";
 import { BillingSubscriptionPage } from "./pages/billing/BillingSubscriptionPage.js";
 import { InvoiceDetailPage, InvoicesPage } from "./pages/billing/InvoicesPage.js";
+import { DocumentsPage } from "./pages/billing/DocumentsPage.js";
+import { OfferDetailPage } from "./pages/billing/OfferDetailPage.js";
 
 /**
  * The data router is used even though route data is fetched through React
@@ -443,8 +445,8 @@ function appRouteElements() {
           <Route path="subscription" element={<BillingSubscriptionPage />} />
           <Route path="invoices" element={<InvoicesPage />} />
           <Route path="invoices/:id" element={<InvoiceDetailPage />} />
-          <Route path="documents" element={<BillingRoutePlaceholder />} />
-          <Route path="offers/:id" element={<BillingRoutePlaceholder />} />
+          <Route path="documents" element={<DocumentsPage />} />
+          <Route path="offers/:id" element={<OfferDetailPage />} />
           <Route path="requests" element={<BillingRoutePlaceholder />} />
           <Route
             path="requests/new"

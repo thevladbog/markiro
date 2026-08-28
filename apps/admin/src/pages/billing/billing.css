@@ -80,7 +80,9 @@
 }
 
 .mk-billing-invoices,
-.mk-billing-invoice-detail {
+.mk-billing-invoice-detail,
+.mk-billing-documents,
+.mk-billing-offer-detail {
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -91,6 +93,87 @@
   margin: 0;
   color: var(--fg-1);
   font: var(--text-h2);
+}
+
+.mk-billing-section-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.mk-billing-section-intro p,
+.mk-billing-change-form p {
+  margin: var(--sp-1) 0 0;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.mk-billing-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(132px, 1fr));
+  gap: var(--sp-2);
+  width: min(100%, 680px);
+}
+
+.mk-billing-payment-summary {
+  display: grid;
+  gap: var(--sp-1);
+  font: var(--text-caption);
+}
+
+.mk-billing-invoice-cards {
+  display: none;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-billing-invoice-card {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-1);
+  text-decoration: none;
+}
+
+.mk-billing-invoice-card:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.mk-billing-payments-list {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding-left: var(--sp-5);
+}
+
+.mk-billing-payments-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.mk-billing-offer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.mk-billing-change-form {
+  display: grid;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+}
+
+.mk-billing-offer-terms {
+  margin: var(--sp-4) 0 0;
+  white-space: pre-wrap;
 }
 
 .mk-billing-table-wrap {
@@ -343,6 +426,23 @@
   .mk-billing-invoice-document {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .mk-billing-section-intro {
+    flex-direction: column;
+  }
+
+  .mk-billing-filters {
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .mk-billing-invoices__desktop {
+    display: none;
+  }
+
+  .mk-billing-invoice-cards {
+    display: grid;
   }
 }
 

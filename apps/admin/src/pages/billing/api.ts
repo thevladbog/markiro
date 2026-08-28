@@ -136,13 +136,16 @@ export function useBillingSubscription() {
 
 /** Shared post-action refresh boundary for the requests, offers, and document tasks. */
 export function invalidateTenantBilling(queryClient: QueryClient): Promise<void> {
-  return Promise.all([
-    queryClient.invalidateQueries({ queryKey: tenantBillingKeys.overview() }),
-    queryClient.invalidateQueries({ queryKey: tenantBillingKeys.subscription() }),
-    queryClient.invalidateQueries({ queryKey: tenantBillingKeys.documents() }),
-    queryClient.invalidateQueries({ queryKey: tenantBillingKeys.requests() }),
-    queryClient.invalidateQueries({ queryKey: tenantBillingKeys.offers() }),
-  ]).then(() => undefined);
+  return queryClient.invalidateQueries({ queryKey: tenantBillingKeys.all });
+}
+
+export type TenantInvoiceStatus =
+  "draft" | "issued" | "overdue" | "partially_paid" | "paid" | "cancelled";
+
+export interface InvoiceFilters {
+  status?: TenantInvoiceStatus;
+  from?: string;
+  to?: string;
 }
 
 export interface TenantInvoice {
@@ -150,9 +153,14 @@ export interface TenantInvoice {
   number: string;
   issueDate: string | null;
   dueDate: string | null;
-  status: string;
+  status: TenantInvoiceStatus;
   total: string;
   currency: string;
+  paymentSummary: {
+    confirmedAmount: string;
+    remainingAmount: string;
+    status: "issued" | "partially_paid" | "paid";
+  } | null;
 }
 export interface TenantInvoiceDetail extends TenantInvoice {
   subtotal: string;
@@ -170,13 +178,33 @@ export interface TenantInvoiceDetail extends TenantInvoice {
     revision: number;
     format: string;
     status: string;
+    contentType: string | null;
     byteSize: number | null;
+    createdAt: string;
   }>;
+  payments: Array<{ id: string; amount: string; currency: "RUB"; paidAt: string }>;
+  request: { id: string; number: string; status: string } | null;
 }
-export function useInvoices() {
+
+function queryString(filters: Record<string, string | undefined>): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params.set(key, value);
+  }
+  const encoded = params.toString();
+  return encoded ? `?${encoded}` : "";
+}
+
+export function fetchInvoices(filters: InvoiceFilters = {}) {
+  return apiFetch<{ items: TenantInvoice[] }>(
+    `/billing/invoices${queryString({ status: filters.status, from: filters.from, to: filters.to })}`,
+  );
+}
+
+export function useInvoices(filters: InvoiceFilters = {}) {
   return useQuery({
-    queryKey: tenantBillingKeys.invoices(),
-    queryFn: () => apiFetch<{ items: TenantInvoice[] }>("/billing/invoices"),
+    queryKey: [...tenantBillingKeys.invoices(), filters] as const,
+    queryFn: () => fetchInvoices(filters),
   });
 }
 export function useInvoice(id: string) {
@@ -188,4 +216,98 @@ export function useInvoice(id: string) {
 }
 export function downloadInvoice(id: string, documentId: string) {
   return apiFetch<{ url: string }>(`/billing/invoices/${id}/documents/${documentId}/download`);
+}
+
+export interface DocumentFilters {
+  type?: "offer" | "act";
+  from?: string;
+  to?: string;
+}
+
+export interface TenantDocument {
+  id: string;
+  type: "offer" | "act";
+  entityId: string;
+  revision: number;
+  format: "pdf" | "html";
+  status: "pending" | "ready" | "failed";
+  contentType: string | null;
+  byteSize: number | null;
+  createdAt: string;
+}
+
+export type TenantRenderedDocument = Omit<TenantDocument, "type" | "entityId">;
+
+export function fetchDocuments(filters: DocumentFilters = {}) {
+  return apiFetch<{ items: TenantDocument[] }>(
+    `/billing/documents${queryString({ type: filters.type, from: filters.from, to: filters.to })}`,
+  );
+}
+
+export function useDocuments(filters: DocumentFilters = {}) {
+  return useQuery({
+    queryKey: [...tenantBillingKeys.documents(), filters] as const,
+    queryFn: () => fetchDocuments(filters),
+  });
+}
+
+export function downloadOfferDocument(offerId: string, documentId: string) {
+  return apiFetch<{ url: string }>(`/billing/offers/${offerId}/documents/${documentId}/download`);
+}
+
+export function downloadActDocument(actId: string, documentId: string) {
+  return apiFetch<{ url: string }>(`/billing/acts/${actId}/documents/${documentId}/download`);
+}
+
+export interface TenantOffer {
+  id: string;
+  number: string | null;
+  status: "draft" | "published" | "superseded" | "paid" | "cancelled" | "expired";
+  total: string;
+  expiresAt: string | null;
+  publishedAt: string | null;
+  paidAt: string | null;
+  termsMarkdown: string | null;
+  lines: Array<{
+    id: string;
+    position: number;
+    kind: "plan" | "addon" | "service";
+    nameRu: string;
+    quantity: number;
+    unit: string;
+    agreedUnitPrice: string;
+    lineTotal: string;
+  }>;
+  documents: TenantRenderedDocument[];
+  request: { id: string; number: string; status: string } | null;
+}
+
+export interface OfferDecision {
+  id: string;
+  offerId: string;
+  decision: "accepted" | "changes_requested";
+  message: string | null;
+  createdAt: string;
+}
+
+export function useOffer(id: string) {
+  return useQuery({
+    queryKey: [...tenantBillingKeys.offers(), id] as const,
+    queryFn: () => apiFetch<TenantOffer>(`/billing/offers/${id}`),
+    enabled: Boolean(id),
+  });
+}
+
+export function acceptOffer(id: string, idempotencyKey: string) {
+  return apiFetch<OfferDecision>(`/billing/offers/${id}/accept`, {
+    method: "POST",
+    body: JSON.stringify({ idempotencyKey }),
+  });
+}
+
+export function requestOfferChanges(id: string, message: string, idempotencyKey: string) {
+  return apiFetch<OfferDecision>(`/billing/offers/${id}/change-request`, {
+    method: "POST",
+    body: JSON.stringify({ message, idempotencyKey }),
+  });
 }
