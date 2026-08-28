@@ -16,10 +16,16 @@ describe("isForbiddenAddress", () => {
     ["0.0.0.0", true], ["100.64.0.1", true],
     ["::1", true], ["fc00::1", true], ["fe80::1", true], ["::ffff:127.0.0.1", true],
     // IPv4-compatible (::a.b.c.d) и NAT64 (64:ff9b::a.b.c.d) — приватный
-    // IPv4 спрятан в hex-адресе, но узнаваем по dotted-quad хвосту.
+    // IPv4 спрятан в hex-адресе. Проверка декодирует адрес в группы бит, а не
+    // матчит текст, поэтому одинаково ловит и dotted-quad, и hex-хвост
+    // (WHATWG URL нормализует bracketed-литералы именно в hex — см.
+    // downloadImage-тесты ниже).
     ["::127.0.0.1", true],
     ["0:0:0:0:0:0:127.0.0.1", true],
     ["64:ff9b::10.0.0.1", true],
+    ["::7f00:1", true], // hex-нормализация ::127.0.0.1
+    ["64:ff9b::a00:1", true], // hex-нормализация 64:ff9b::10.0.0.1
+    ["64:ff9b::808:808", false], // hex-нормализация 64:ff9b::8.8.8.8 (публичный)
     ["8.8.8.8", false], ["93.184.216.34", false], ["2606:2800:220:1::1", false],
     ["::ffff:8.8.8.8", false],
   ])("%s -> %s", (address, forbidden) => {
@@ -131,6 +137,33 @@ describe("downloadImage", () => {
     const request = fakeRequestFor({});
     await expect(downloadImage("https://[fd00::1]/x", { request }))
       .rejects.toMatchObject({ reason: "forbidden_address" });
+  });
+
+  it("IPv4-compatible IPv6-литерал в скобках (WHATWG нормализует в hex до пре-чека) — forbidden_address без запроса", async () => {
+    // new URL("https://[::127.0.0.1]/x").hostname === "[::7f00:1]" — текстовый
+    // dotted-quad-матчинг такое не узнает, нужно декодировать группы битов.
+    let called = false;
+    const inner = fakeRequestFor({});
+    const request = ((...args: Parameters<typeof httpsRequest>) => {
+      called = true;
+      return inner(...args);
+    }) as typeof httpsRequest;
+    await expect(downloadImage("https://[::127.0.0.1]/x", { request }))
+      .rejects.toMatchObject({ reason: "forbidden_address" });
+    expect(called).toBe(false);
+  });
+
+  it("NAT64 IPv6-литерал в скобках (WHATWG нормализует в hex до пре-чека) — forbidden_address без запроса", async () => {
+    // new URL("https://[64:ff9b::10.0.0.1]/x").hostname === "[64:ff9b::a00:1]".
+    let called = false;
+    const inner = fakeRequestFor({});
+    const request = ((...args: Parameters<typeof httpsRequest>) => {
+      called = true;
+      return inner(...args);
+    }) as typeof httpsRequest;
+    await expect(downloadImage("https://[64:ff9b::10.0.0.1]/x", { request }))
+      .rejects.toMatchObject({ reason: "forbidden_address" });
+    expect(called).toBe(false);
   });
 
   it("редирект с разрешённого хоста на IP-литерал метадаты — forbidden_address", async () => {

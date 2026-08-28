@@ -51,32 +51,91 @@ function isForbiddenIpv4(address: string): boolean {
   return false;
 }
 
+/**
+ * Разворачивает валидный (по `isIP() === 6`) IPv6-адрес в 8 16-битных групп,
+ * учитывая `::`-сжатие и dotted-quad-хвост (v4-mapped/v4-compatible/NAT64
+ * запись вроде `::ffff:1.2.3.4`), приводя такой хвост к двум hex-группам.
+ * Возвращает `null`, если строка не разбирается — сюда это не должно
+ * попадать (вызывающий код уже проверил `isIP() === 6`), но на этот случай
+ * `isForbiddenAddress` трактует `null` как «запрещено» (см. вызов ниже).
+ */
+function expandIpv6(address: string): number[] | null {
+  const parseGroups = (part: string): number[] | null => {
+    if (part === "") return [];
+    const segments = part.split(":");
+    const groups: number[] = [];
+    for (const [i, segment] of segments.entries()) {
+      if (i === segments.length - 1 && segment.includes(".")) {
+        const octets = segment.split(".").map(Number);
+        if (octets.length !== 4 || octets.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
+          return null;
+        }
+        groups.push(((octets[0]! << 8) | octets[1]!) & 0xffff);
+        groups.push(((octets[2]! << 8) | octets[3]!) & 0xffff);
+        continue;
+      }
+      const value = Number.parseInt(segment, 16);
+      if (Number.isNaN(value) || value < 0 || value > 0xffff) return null;
+      groups.push(value);
+    }
+    return groups;
+  };
+
+  const compressionIndex = address.indexOf("::");
+  if (compressionIndex === -1) {
+    const groups = parseGroups(address);
+    return groups !== null && groups.length === 8 ? groups : null;
+  }
+  const headGroups = parseGroups(address.slice(0, compressionIndex));
+  const tailGroups = parseGroups(address.slice(compressionIndex + 2));
+  if (headGroups === null || tailGroups === null) return null;
+  const missing = 8 - headGroups.length - tailGroups.length;
+  if (missing < 0) return null;
+  const padding = new Array<number>(missing).fill(0);
+  return [...headGroups, ...padding, ...tailGroups];
+}
+
+/** Собирает `a.b.c.d` из двух 16-битных групп (последние 32 бита адреса). */
+function embeddedIpv4(hi: number, lo: number): string {
+  return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+}
+
+function allGroupsZero(groups: number[], from: number, to: number): boolean {
+  return groups.slice(from, to).every((group) => group === 0);
+}
+
 /** true для адресов, куда серверу ходить нельзя: loopback, RFC1918, link-local, ULA, v4-mapped. Не-IP тоже запрещён (сюда приходит уже РЕЗУЛЬТАТ резолва). */
 export function isForbiddenAddress(address: string): boolean {
   const kind = isIP(address);
   if (kind === 4) return isForbiddenIpv4(address);
   if (kind === 6) {
-    const lower = address.toLowerCase();
-    if (lower === "::" || lower === "::1") return true;
-    if (lower.startsWith("::ffff:")) {
-      const mapped = lower.slice("::ffff:".length);
-      return isIP(mapped) === 4 ? isForbiddenIpv4(mapped) : true;
+    // Текстовый матчинг (dotted-quad-хвост через regex) не годится: WHATWG
+    // URL нормализует bracketed-литералы в hex ДО того, как этот код их
+    // увидит (`new URL("https://[::127.0.0.1]/x").hostname` ->
+    // `"[::7f00:1]"`, dotted-quad уже нет). Поэтому адрес разбирается в 8
+    // 16-битных групп и решение принимается по структуре — это одинаково
+    // ловит текстовую dotted-quad форму и её hex-эквивалент.
+    const groups = expandIpv6(address.toLowerCase());
+    if (groups === null) return true;
+
+    if (allGroupsZero(groups, 0, 5) && groups[5] === 0xffff) {
+      // v4-mapped: ::ffff:a.b.c.d (или её hex-эквивалент ::ffff:xxxx:xxxx).
+      return isForbiddenIpv4(embeddedIpv4(groups[6]!, groups[7]!));
     }
-    // IPv4-compatible (`::a.b.c.d`) и NAT64 (`64:ff9b::a.b.c.d`) прячут
-    // приватный/служебный IPv4 внутри hex-адреса — тот же риск, что и
-    // v4-mapped выше. Распознаём по dotted-quad хвосту записи. ВАЖНО:
-    // узнаётся только dotted-quad форма — полностью hex-embedded запись
-    // (например `64:ff9b::808:808` для 8.8.8.8) сюда не попадает и уходит
-    // в общие правила ниже; это осознанное ограничение, а не дыра «на
-    // особый случай» — такие адреса на практике не встречаются в URL из
-    // CommerceML-файлов, а общие ULA/link-local правила всё равно
-    // применяются.
-    const embeddedMatch = /:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(lower);
-    if (embeddedMatch) {
-      const embedded = embeddedMatch[1]!;
-      if (isIP(embedded) === 4) return isForbiddenIpv4(embedded);
+    if (allGroupsZero(groups, 0, 6)) {
+      // Unspecified/loopback/v4-compatible: ::, ::1, ::a.b.c.d.
+      if (groups[6] === 0 && (groups[7] === 0 || groups[7] === 1)) return true;
+      return isForbiddenIpv4(embeddedIpv4(groups[6]!, groups[7]!));
     }
-    return /^f[cd]/.test(lower) || /^fe[89ab]/.test(lower);
+    if (groups[0] === 0x64 && groups[1] === 0xff9b && allGroupsZero(groups, 2, 6)) {
+      // NAT64: 64:ff9b::/96 embedding a.b.c.d (dotted-quad или hex-хвост —
+      // структурная проверка ловит оба варианта одинаково, в отличие от
+      // прежнего regex-по-тексту, который узнавал только dotted-quad).
+      return isForbiddenIpv4(embeddedIpv4(groups[6]!, groups[7]!));
+    }
+    if ((groups[0]! & 0xfe00) === 0xfc00) return true; // ULA fc00::/7
+    if ((groups[0]! & 0xffc0) === 0xfe80) return true; // link-local fe80::/10
+    return false;
   }
   return true;
 }
