@@ -5,6 +5,8 @@
 pub mod contracts;
 pub mod cloud;
 pub mod signer;
+#[cfg(windows)]
+pub mod signer_capi;
 pub mod trueapi;
 
 use thiserror::Error;

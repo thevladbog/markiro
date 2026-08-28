@@ -119,6 +119,12 @@ fn rfc3339_from_now(ahead: Duration) -> String {
     format_rfc3339(seconds)
 }
 
+/// Shared with the Windows signer, which must render certificate validity in
+/// the same RFC3339-with-offset shape the cloud contract requires.
+pub fn format_rfc3339_public(unix_seconds: u64) -> String {
+    format_rfc3339(unix_seconds)
+}
+
 fn format_rfc3339(unix_seconds: u64) -> String {
     let days = unix_seconds / 86_400;
     let rem = unix_seconds % 86_400;
