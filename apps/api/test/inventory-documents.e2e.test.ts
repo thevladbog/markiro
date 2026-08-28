@@ -2118,6 +2118,337 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     }
   });
 
+  it("rejects creating a run needing an organization INN when the org has none, but still allows tabular-only runs", async () => {
+    registry = productionInventoryDocumentGeneratorRegistry;
+    try {
+      const owner = await seedInventory();
+      await db
+        .update(schema.orgProfiles)
+        .set({ inn: null })
+        .where(eq(schema.orgProfiles.tenantId, owner.tenantId));
+
+      await owner.agent
+        .post(`/inventories/${owner.inventoryId}/document-runs`)
+        .send({
+          selectedFormats: [
+            { id: "inventory_xml_gismt_aggregation", version: 2 },
+            { id: "inventory_csv_current_stock", version: 1 },
+          ],
+          idempotencyKey: randomUUID(),
+        })
+        .expect(409, { code: "ORGANIZATION_INN_REQUIRED" });
+      const rejectedRuns = await db
+        .select({ id: schema.inventoryDocumentRuns.id })
+        .from(schema.inventoryDocumentRuns)
+        .where(eq(schema.inventoryDocumentRuns.inventoryId, owner.inventoryId));
+      expect(rejectedRuns).toHaveLength(0);
+
+      const tabularOnly = await owner.agent
+        .post(`/inventories/${owner.inventoryId}/document-runs`)
+        .send({
+          selectedFormats: [{ id: "inventory_csv_current_stock", version: 1 }],
+          idempotencyKey: randomUUID(),
+        })
+        .expect(201);
+      expect(tabularOnly.body.status).toBe("queued");
+    } finally {
+      registry = new InventoryDocumentGeneratorRegistry(syntheticGenerators);
+    }
+  });
+
+  it("rejects creating a run needing an organization INN when the org INN is malformed, but still allows tabular-only runs", async () => {
+    registry = productionInventoryDocumentGeneratorRegistry;
+    try {
+      const owner = await seedInventory();
+      await db
+        .update(schema.orgProfiles)
+        .set({ inn: "123" })
+        .where(eq(schema.orgProfiles.tenantId, owner.tenantId));
+
+      await owner.agent
+        .post(`/inventories/${owner.inventoryId}/document-runs`)
+        .send({
+          selectedFormats: [
+            { id: "inventory_xml_gismt_aggregation", version: 2 },
+            { id: "inventory_csv_current_stock", version: 1 },
+          ],
+          idempotencyKey: randomUUID(),
+        })
+        .expect(409, { code: "ORGANIZATION_INN_REQUIRED" });
+      const rejectedRuns = await db
+        .select({ id: schema.inventoryDocumentRuns.id })
+        .from(schema.inventoryDocumentRuns)
+        .where(eq(schema.inventoryDocumentRuns.inventoryId, owner.inventoryId));
+      expect(rejectedRuns).toHaveLength(0);
+
+      const tabularOnly = await owner.agent
+        .post(`/inventories/${owner.inventoryId}/document-runs`)
+        .send({
+          selectedFormats: [{ id: "inventory_csv_current_stock", version: 1 }],
+          idempotencyKey: randomUUID(),
+        })
+        .expect(201);
+      expect(tabularOnly.body.status).toBe("queued");
+    } finally {
+      registry = new InventoryDocumentGeneratorRegistry(syntheticGenerators);
+    }
+  });
+
+  it("retry refreshes organization snapshots and recovers a run fixed by a new INN", async () => {
+    registry = productionInventoryDocumentGeneratorRegistry;
+    try {
+      const owner = await seedInventory();
+      const runId = randomUUID();
+      await db.insert(schema.inventoryDocumentRuns).values({
+        id: runId,
+        tenantId: owner.tenantId,
+        inventoryId: owner.inventoryId,
+        resultRevision: 7,
+        selectedFormats: [{ id: "inventory_xml_gismt_aggregation", version: 2 }],
+        requestDigest: "c".repeat(64),
+        organizationNameSnapshot: "Stale Org Name",
+        organizationInnSnapshot: null,
+        inventoryNumberSnapshot: owner.inventoryNumber,
+        inventoryClosedAtSnapshot: new Date("2026-08-26T09:00:00.000Z"),
+        createdByUserId: owner.userId,
+        idempotencyKey: randomUUID(),
+        status: "failed",
+        errorCode: "INVALID_ORGANIZATION_INN",
+        completedAt: new Date(),
+      });
+
+      const newInn = "7707083893";
+      await db
+        .update(schema.organization)
+        .set({ name: "ООО Документы Обновлено" })
+        .where(eq(schema.organization.id, owner.tenantId));
+      await db
+        .update(schema.orgProfiles)
+        .set({ inn: newInn })
+        .where(eq(schema.orgProfiles.tenantId, owner.tenantId));
+
+      const retried = await owner.agent
+        .post(`/inventory-document-runs/${runId}/retry`)
+        .send({})
+        .expect(201);
+      expect(retried.body.status).toBe("queued");
+
+      const [queuedRun] = await db
+        .select({
+          organizationNameSnapshot: schema.inventoryDocumentRuns.organizationNameSnapshot,
+          organizationInnSnapshot: schema.inventoryDocumentRuns.organizationInnSnapshot,
+        })
+        .from(schema.inventoryDocumentRuns)
+        .where(eq(schema.inventoryDocumentRuns.id, runId));
+      expect(queuedRun).toEqual({
+        organizationNameSnapshot: "ООО Документы Обновлено",
+        organizationInnSnapshot: newInn,
+      });
+
+      await runner.run(runId, { retryCount: 0, retryLimit: 0 });
+      const [readyRun] = await db
+        .select({
+          status: schema.inventoryDocumentRuns.status,
+          errorCode: schema.inventoryDocumentRuns.errorCode,
+          organizationInnSnapshot: schema.inventoryDocumentRuns.organizationInnSnapshot,
+        })
+        .from(schema.inventoryDocumentRuns)
+        .where(eq(schema.inventoryDocumentRuns.id, runId));
+      expect(readyRun).toEqual({
+        status: "ready",
+        errorCode: null,
+        organizationInnSnapshot: newInn,
+      });
+    } finally {
+      registry = new InventoryDocumentGeneratorRegistry(syntheticGenerators);
+    }
+  });
+
+  it("blocks retry with ORGANIZATION_INN_REQUIRED while the org INN is still missing and leaves the run failed", async () => {
+    registry = productionInventoryDocumentGeneratorRegistry;
+    try {
+      const owner = await seedInventory();
+      await db
+        .update(schema.orgProfiles)
+        .set({ inn: null })
+        .where(eq(schema.orgProfiles.tenantId, owner.tenantId));
+      const runId = randomUUID();
+      await db.insert(schema.inventoryDocumentRuns).values({
+        id: runId,
+        tenantId: owner.tenantId,
+        inventoryId: owner.inventoryId,
+        resultRevision: 7,
+        selectedFormats: [{ id: "inventory_xml_gismt_aggregation", version: 2 }],
+        requestDigest: "d".repeat(64),
+        organizationNameSnapshot: "ООО Документы",
+        organizationInnSnapshot: null,
+        inventoryNumberSnapshot: owner.inventoryNumber,
+        inventoryClosedAtSnapshot: new Date("2026-08-26T09:00:00.000Z"),
+        createdByUserId: owner.userId,
+        idempotencyKey: randomUUID(),
+        status: "failed",
+        errorCode: "INVALID_ORGANIZATION_INN",
+        completedAt: new Date(),
+      });
+
+      await owner.agent
+        .post(`/inventory-document-runs/${runId}/retry`)
+        .send({})
+        .expect(409, { code: "ORGANIZATION_INN_REQUIRED" });
+
+      const [stillFailed] = await db
+        .select({
+          status: schema.inventoryDocumentRuns.status,
+          errorCode: schema.inventoryDocumentRuns.errorCode,
+          organizationNameSnapshot: schema.inventoryDocumentRuns.organizationNameSnapshot,
+          organizationInnSnapshot: schema.inventoryDocumentRuns.organizationInnSnapshot,
+        })
+        .from(schema.inventoryDocumentRuns)
+        .where(eq(schema.inventoryDocumentRuns.id, runId));
+      expect(stillFailed).toEqual({
+        status: "failed",
+        errorCode: "INVALID_ORGANIZATION_INN",
+        organizationNameSnapshot: "ООО Документы",
+        organizationInnSnapshot: null,
+      });
+    } finally {
+      registry = new InventoryDocumentGeneratorRegistry(syntheticGenerators);
+    }
+  });
+
+  it("blocks retry with ORGANIZATION_INN_REQUIRED while the org INN is malformed and leaves the run failed", async () => {
+    registry = productionInventoryDocumentGeneratorRegistry;
+    try {
+      const owner = await seedInventory();
+      await db
+        .update(schema.orgProfiles)
+        .set({ inn: "123" })
+        .where(eq(schema.orgProfiles.tenantId, owner.tenantId));
+      const runId = randomUUID();
+      await db.insert(schema.inventoryDocumentRuns).values({
+        id: runId,
+        tenantId: owner.tenantId,
+        inventoryId: owner.inventoryId,
+        resultRevision: 7,
+        selectedFormats: [{ id: "inventory_xml_gismt_aggregation", version: 2 }],
+        requestDigest: "f".repeat(64),
+        organizationNameSnapshot: "ООО Документы",
+        organizationInnSnapshot: "123",
+        inventoryNumberSnapshot: owner.inventoryNumber,
+        inventoryClosedAtSnapshot: new Date("2026-08-26T09:00:00.000Z"),
+        createdByUserId: owner.userId,
+        idempotencyKey: randomUUID(),
+        status: "failed",
+        errorCode: "INVALID_ORGANIZATION_INN",
+        completedAt: new Date(),
+      });
+
+      await owner.agent
+        .post(`/inventory-document-runs/${runId}/retry`)
+        .send({})
+        .expect(409, { code: "ORGANIZATION_INN_REQUIRED" });
+
+      const [stillFailed] = await db
+        .select({
+          status: schema.inventoryDocumentRuns.status,
+          errorCode: schema.inventoryDocumentRuns.errorCode,
+          organizationNameSnapshot: schema.inventoryDocumentRuns.organizationNameSnapshot,
+          organizationInnSnapshot: schema.inventoryDocumentRuns.organizationInnSnapshot,
+        })
+        .from(schema.inventoryDocumentRuns)
+        .where(eq(schema.inventoryDocumentRuns.id, runId));
+      expect(stillFailed).toEqual({
+        status: "failed",
+        errorCode: "INVALID_ORGANIZATION_INN",
+        organizationNameSnapshot: "ООО Документы",
+        organizationInnSnapshot: "123",
+      });
+    } finally {
+      registry = new InventoryDocumentGeneratorRegistry(syntheticGenerators);
+    }
+  });
+
+  it("retry resolves a run pinned to a frozen historical format via execution semantics, not the current-selection catalog", async () => {
+    registry = productionInventoryDocumentGeneratorRegistry;
+    try {
+      const owner = await seedInventory();
+      const runId = randomUUID();
+      await db.insert(schema.inventoryDocumentRuns).values({
+        id: runId,
+        tenantId: owner.tenantId,
+        inventoryId: owner.inventoryId,
+        resultRevision: 7,
+        // Format v1 is superseded (v2 is the current available version), but
+        // it was the run's already-fixed selection at creation time.
+        selectedFormats: [{ id: "inventory_xml_gismt_aggregation", version: 1 }],
+        requestDigest: "e".repeat(64),
+        organizationNameSnapshot: "Stale Org Name",
+        organizationInnSnapshot: null,
+        inventoryNumberSnapshot: owner.inventoryNumber,
+        inventoryClosedAtSnapshot: new Date("2026-08-26T09:00:00.000Z"),
+        createdByUserId: owner.userId,
+        idempotencyKey: randomUUID(),
+        status: "failed",
+        errorCode: "INVALID_ORGANIZATION_INN",
+        completedAt: new Date(),
+      });
+
+      const newInn = "7707083893";
+      await db
+        .update(schema.orgProfiles)
+        .set({ inn: newInn })
+        .where(eq(schema.orgProfiles.tenantId, owner.tenantId));
+
+      // Before the fix this 400s with INVENTORY_DOCUMENT_FORMAT_SUPERSEDED:
+      // reloadOrganizationSnapshot resolved the run's frozen v1 format through
+      // resolveForSelection (current-catalog semantics) instead of
+      // resolveForExecution, so the FORMAT_SUPERSEDED check tripped before the
+      // INN gate ever ran.
+      const retried = await owner.agent
+        .post(`/inventory-document-runs/${runId}/retry`)
+        .send({})
+        .expect(201);
+      expect(retried.body.status).toBe("queued");
+
+      const [queuedRun] = await db
+        .select({
+          organizationNameSnapshot: schema.inventoryDocumentRuns.organizationNameSnapshot,
+          organizationInnSnapshot: schema.inventoryDocumentRuns.organizationInnSnapshot,
+          selectedFormats: schema.inventoryDocumentRuns.selectedFormats,
+        })
+        .from(schema.inventoryDocumentRuns)
+        .where(eq(schema.inventoryDocumentRuns.id, runId));
+      expect(queuedRun).toEqual({
+        organizationNameSnapshot: "ООО Документы",
+        organizationInnSnapshot: newInn,
+        selectedFormats: [{ id: "inventory_xml_gismt_aggregation", version: 1 }],
+      });
+
+      await runner.run(runId, { retryCount: 0, retryLimit: 0 });
+      const [readyRun] = await db
+        .select({
+          status: schema.inventoryDocumentRuns.status,
+          errorCode: schema.inventoryDocumentRuns.errorCode,
+        })
+        .from(schema.inventoryDocumentRuns)
+        .where(eq(schema.inventoryDocumentRuns.id, runId));
+      expect(readyRun).toEqual({ status: "ready", errorCode: null });
+
+      const artifacts = await db
+        .select({
+          formatId: schema.inventoryDocumentArtifacts.formatId,
+          formatVersion: schema.inventoryDocumentArtifacts.formatVersion,
+        })
+        .from(schema.inventoryDocumentArtifacts)
+        .where(eq(schema.inventoryDocumentArtifacts.runId, runId));
+      expect(artifacts).toEqual([
+        { formatId: "inventory_xml_gismt_aggregation", formatVersion: 1 },
+      ]);
+    } finally {
+      registry = new InventoryDocumentGeneratorRegistry(syntheticGenerators);
+    }
+  });
+
   it("runs one inventory continuously through preparation, two-station work, correction, all current formats, frozen aggregation v1, and completion", async () => {
     registry = productionInventoryDocumentGeneratorRegistry;
     try {

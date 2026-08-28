@@ -75,6 +75,7 @@ export {
   generateInventoryDisaggregationXml,
   inventoryDocumentFilenamePrefix,
   InventoryDocumentGenerationError,
+  isParticipantInn,
 } from "./document-generators.js";
 export type {
   InventoryDocumentGeneratedPart,

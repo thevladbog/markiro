@@ -315,6 +315,58 @@ it("explains a missing verified production date in actionable Russian", async ()
   expect(screen.queryByText(/VERIFIED_PRODUCTION_DATE_MISSING/)).toBeNull();
 });
 
+it("explains an invalid organization INN on a run and offers a retry", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/inventory-document-formats") return response({ items: [format] });
+      if (url === `/api/inventories/${INVENTORY_ID}/document-runs`) {
+        return response({
+          items: [run("failed", { errorCode: "INVALID_ORGANIZATION_INN" })],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+
+  renderDocuments("closed");
+
+  expect(
+    await screen.findByText(
+      "Не заполнен или некорректен ИНН организации. Укажите ИНН в разделе «Настройки» и повторите формирование.",
+    ),
+  ).toBeDefined();
+  expect(screen.getByRole("button", { name: "Повторить формирование" })).toBeDefined();
+});
+
+it("explains a 409 organization INN requirement when creating a run", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/inventory-document-formats") return response({ items: [format] });
+      if (url === `/api/inventories/${INVENTORY_ID}/document-runs` && !init?.method) {
+        return response({ items: [] });
+      }
+      if (url === `/api/inventories/${INVENTORY_ID}/document-runs` && init?.method === "POST") {
+        return response({ code: "ORGANIZATION_INN_REQUIRED" }, 409);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  renderDocuments();
+
+  await userEvent.click(await screen.findByRole("checkbox", { name: /Коды на учёт/ }));
+  await userEvent.click(screen.getByRole("button", { name: "Сформировать документы" }));
+
+  expect(
+    await screen.findByText(
+      "Для XML-документов ГИС МТ нужен ИНН организации. Заполните его в разделе «Настройки».",
+    ),
+  ).toBeDefined();
+});
+
 it("explains a missing verified production date in actionable English", async () => {
   await i18n.changeLanguage("en");
   vi.stubGlobal(

@@ -42,6 +42,7 @@ export const inventoryDocumentFormatDescriptorSchema = z.strictObject({
     .readonly(),
   supportsParts: z.boolean(),
   availability: z.enum(INVENTORY_DOCUMENT_FORMAT_AVAILABILITIES),
+  requiresOrganizationInn: z.literal(true).optional(),
 });
 
 export type InventoryDocumentFormatDescriptor = z.infer<
@@ -142,6 +143,7 @@ const legacyAggregationV1 = Object.freeze({
   requiredSourceCategories: Object.freeze(["verified", "protected", "newBoxes"] as const),
   supportsParts: false,
   availability: "unavailable",
+  requiresOrganizationInn: true,
 } as const satisfies InventoryDocumentFormatDescriptor);
 
 export const INVENTORY_DOCUMENT_FORMATS = Object.freeze([
@@ -154,6 +156,7 @@ export const INVENTORY_DOCUMENT_FORMATS = Object.freeze([
     requiredSourceCategories: Object.freeze(["verified", "protected", "newBoxes"] as const),
     supportsParts: false,
     availability: "available",
+    requiresOrganizationInn: true,
   }),
   Object.freeze({
     id: "inventory_xml_gismt_disaggregation",
@@ -164,6 +167,7 @@ export const INVENTORY_DOCUMENT_FORMATS = Object.freeze([
     requiredSourceCategories: Object.freeze(["verified", "protected", "newBoxes"] as const),
     supportsParts: false,
     availability: "available",
+    requiresOrganizationInn: true,
   }),
   Object.freeze({
     id: "inventory_txt_write_off",
