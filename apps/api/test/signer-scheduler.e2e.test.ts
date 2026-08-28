@@ -24,7 +24,6 @@ const ready = Boolean(
 
 describe.skipIf(!ready)("signer token refresh scheduler", () => {
   let app: INestApplication | undefined;
-  let agent: request.Agent;
   let db: Db;
   let svc: SignerSchedulerService;
 
@@ -42,8 +41,6 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
     await listenOnLoopback(app);
     db = ref.get(DB);
     svc = new SignerSchedulerService(db, new JournalService(db));
-
-    agent = request.agent(app.getHttpServer());
   });
 
   afterAll(async () => {

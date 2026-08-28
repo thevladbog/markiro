@@ -1,5 +1,6 @@
 import express from "express";
 import request from "supertest";
+import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
@@ -13,7 +14,8 @@ const ready = Boolean(
 );
 
 describe.skipIf(!ready)("signer agents pairing", () => {
-  let app: any, agent: request.Agent, tenantId: string;
+  let app: INestApplication | undefined;
+  let agent: request.Agent;
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -28,7 +30,7 @@ describe.skipIf(!ready)("signer agents pairing", () => {
     await app.init();
     await listenOnLoopback(app);
     agent = request.agent(app.getHttpServer());
-    tenantId = await signUpAndActivate(agent);
+    await signUpAndActivate(agent);
   });
 
   afterAll(async () => {
@@ -43,11 +45,11 @@ describe.skipIf(!ready)("signer agents pairing", () => {
 
   it("rejects a wrong code and pairs with the right one exactly once", async () => {
     const { body: issued } = await agent.post("/signer-agents/pairing-code").expect(201);
-    await request(app.getHttpServer())
+    await request(app!.getHttpServer())
       .post("/signer-agent/pair")
       .send({ pairingCode: "00000000", hostname: "PC", appVersion: "0.1.0" })
       .expect(401);
-    const pair = await request(app.getHttpServer())
+    const pair = await request(app!.getHttpServer())
       .post("/signer-agent/pair")
       .send({ pairingCode: issued.code, hostname: "BUH-PC", appVersion: "0.1.0" })
       .expect(201);
@@ -55,27 +57,31 @@ describe.skipIf(!ready)("signer agents pairing", () => {
     expect(pair.body.agentSecret.length).toBeGreaterThanOrEqual(32);
     expect(pair.body.tenantName).toBeTruthy();
     // one-time use
-    await request(app.getHttpServer())
+    await request(app!.getHttpServer())
       .post("/signer-agent/pair")
       .send({ pairingCode: issued.code, hostname: "BUH-PC", appVersion: "0.1.0" })
       .expect(401);
     // agent shows up in the overview with the empty token status
     const overview = await agent.get("/signer-agents").expect(200);
     expect(
-      overview.body.agents.some((a: any) => a.name === "BUH-PC" && a.status === "active"),
+      overview.body.agents.some(
+        (a: { name: string; status: string }) => a.name === "BUH-PC" && a.status === "active",
+      ),
     ).toBe(true);
     expect(overview.body.token.status).toBe("none");
   });
 
   it("revokes an agent", async () => {
     const { body: issued } = await agent.post("/signer-agents/pairing-code").expect(201);
-    const pair = await request(app.getHttpServer())
+    const pair = await request(app!.getHttpServer())
       .post("/signer-agent/pair")
       .send({ pairingCode: issued.code, hostname: "PC-2", appVersion: "0.1.0" })
       .expect(201);
     await agent.post(`/signer-agents/${pair.body.agentId}/revoke`).expect(204);
     const overview = await agent.get("/signer-agents").expect(200);
-    const revoked = overview.body.agents.find((a: any) => a.id === pair.body.agentId);
+    const revoked = overview.body.agents.find(
+      (a: { id: string; status: string }) => a.id === pair.body.agentId,
+    );
     expect(revoked.status).toBe("revoked");
   });
 });
