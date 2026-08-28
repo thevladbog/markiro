@@ -6,6 +6,9 @@ import { describe, expect, it } from "vitest";
 // asset URL, which breaks resolution for these non-bundled config files.
 const moduleUrl = import.meta.url;
 
+// These are arbitrary parsed JSON config files; a precise type would just
+// re-describe the Tauri config schema for no benefit to the assertions below.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const read = (name: string): Record<string, any> =>
   JSON.parse(readFileSync(new URL(`../src-tauri/${name}`, moduleUrl), "utf8"));
 

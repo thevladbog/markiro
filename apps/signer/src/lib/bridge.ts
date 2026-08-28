@@ -23,8 +23,7 @@ export interface CertificateSummary {
 }
 
 export type PairOutcome =
-  | { ok: true; tenantName: string }
-  | { ok: false; error: "rejected" | "unavailable" };
+  { ok: true; tenantName: string } | { ok: false; error: "rejected" | "unavailable" };
 
 export const bridge = {
   status: () => invoke<AgentStatus>("signer_status"),

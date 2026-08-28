@@ -77,8 +77,8 @@ it is real).
 5. Force a refresh: in the cabinet, revoke nothing — instead wait for the
    scheduler (runs every 15 minutes) or delete the tenant's `chz_api_tokens`
    row so the next tick enqueues a task immediately.
-6. Watch the agent journal. A healthy run reads: *Task received* → *True API
-   token delivered*.
+6. Watch the agent journal. A healthy run reads: _Task received_ → _True API
+   token delivered_.
 7. Confirm in the cabinet that the token status shows **действует** with an
    expiry roughly ten hours out.
 
@@ -107,8 +107,8 @@ actually accepts:
 Record the date, the CryptoPro version, and the verdict below.
 
 | Date | CryptoPro version | Backend | Verdict |
-|---|---|---|---|
-| | | | |
+| ---- | ----------------- | ------- | ------- |
+|      |                   |         |         |
 
 ## Failure cases worth exercising
 

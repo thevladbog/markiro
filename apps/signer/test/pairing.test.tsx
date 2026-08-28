@@ -18,7 +18,9 @@ describe("Pairing", () => {
     await userEvent.type(screen.getByLabelText(/код привязки|pairing code/i), "0123");
     // No jest-dom matcher in this project's setup (see WorkstationSetup's own
     // tests), so assert the DOM attribute directly.
-    expect((screen.getByRole("button", { name: /привязать|pair/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: /привязать|pair/i }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   it("surfaces a rejected code without guessing why", async () => {

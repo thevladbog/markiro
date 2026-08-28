@@ -29,19 +29,19 @@
 
 **`apps/signer/signer-core/`** — the library (no Tauri, no UI):
 
-| File | Responsibility |
-|---|---|
-| `src/lib.rs` | Crate root, re-exports, `SignerError` |
-| `src/contracts.rs` | serde mirrors of `packages/platform-contracts/src/chz-signer.ts` |
-| `src/cloud.rs` | `CloudClient`: pair / poll / complete / fail against the Markiro API |
-| `src/trueapi.rs` | `auth/key` → sign → `simpleSignIn` |
-| `src/signer.rs` | `Signer` + `CertificateSummary` traits and shared parsing (thumbprint, INN from subject) |
-| `src/signer_capi.rs` | `#[cfg(windows)]` CryptoAPI implementation (`CryptSignMessage`, MY-store enumeration) |
-| `src/signer_cades.rs` | `#[cfg(windows)]` CAdESCOM COM implementation (Task 11) |
-| `src/storage.rs` | `SecretStore` trait, `AgentConfig`, durable JSON write |
-| `src/storage_dpapi.rs` | `#[cfg(windows)]` DPAPI-backed `SecretStore` |
-| `src/runtime.rs` | The loop: poll → execute → report, backoff, revocation handling |
-| `src/journal.rs` | Rolling local journal, redaction |
+| File                   | Responsibility                                                                           |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| `src/lib.rs`           | Crate root, re-exports, `SignerError`                                                    |
+| `src/contracts.rs`     | serde mirrors of `packages/platform-contracts/src/chz-signer.ts`                         |
+| `src/cloud.rs`         | `CloudClient`: pair / poll / complete / fail against the Markiro API                     |
+| `src/trueapi.rs`       | `auth/key` → sign → `simpleSignIn`                                                       |
+| `src/signer.rs`        | `Signer` + `CertificateSummary` traits and shared parsing (thumbprint, INN from subject) |
+| `src/signer_capi.rs`   | `#[cfg(windows)]` CryptoAPI implementation (`CryptSignMessage`, MY-store enumeration)    |
+| `src/signer_cades.rs`  | `#[cfg(windows)]` CAdESCOM COM implementation (Task 11)                                  |
+| `src/storage.rs`       | `SecretStore` trait, `AgentConfig`, durable JSON write                                   |
+| `src/storage_dpapi.rs` | `#[cfg(windows)]` DPAPI-backed `SecretStore`                                             |
+| `src/runtime.rs`       | The loop: poll → execute → report, backoff, revocation handling                          |
+| `src/journal.rs`       | Rolling local journal, redaction                                                         |
 
 **`apps/signer/src-tauri/`** — the shell: `src/main.rs`, `src/lib.rs` (builder, tray, background task), `src/commands.rs` (IPC), `src/events.rs` (event names + payloads), `tauri.conf.json` + `tauri.stable.conf.json`, `capabilities/default.json`, `windows/installer-hooks.nsh`, `icons/`.
 
@@ -54,11 +54,13 @@
 ### Task 1: signer-core skeleton and protocol contracts
 
 **Files:**
+
 - Create: `apps/signer/Cargo.toml`, `apps/signer/.gitignore`
 - Create: `apps/signer/signer-core/Cargo.toml`, `src/lib.rs`, `src/contracts.rs`
 - Test: inline `#[cfg(test)]` in `src/contracts.rs`
 
 **Interfaces:**
+
 - Produces: `PairRequest`, `PairResponse`, `TrueApiAuthPayload`, `SignerTask`, `TaskComplete`, `TaskFail`, `SignerErrorCode`, and `SignerError`. Every later task uses these types.
 
 - [ ] **Step 1: Write the failing test**
@@ -135,6 +137,7 @@ Expected: FAIL — no such manifest / types undefined.
 - [ ] **Step 3: Write the crates and the types**
 
 `apps/signer/Cargo.toml`:
+
 ```toml
 [workspace]
 resolver = "2"
@@ -142,12 +145,14 @@ members = ["signer-core", "src-tauri"]
 ```
 
 `apps/signer/.gitignore`:
+
 ```
 /target/
 /src-tauri/gen/schemas
 ```
 
 `apps/signer/signer-core/Cargo.toml`:
+
 ```toml
 [package]
 name = "signer-core"
@@ -179,6 +184,7 @@ windows-sys = { version = "0.61", features = [
 ```
 
 `apps/signer/signer-core/src/lib.rs`:
+
 ```rust
 //! Core of the Chestny ZNAK signer agent: everything that is testable without
 //! a desktop shell. OS- and network-touching capabilities sit behind traits so
@@ -218,6 +224,7 @@ pub enum SignerError {
 ```
 
 `apps/signer/signer-core/src/contracts.rs` — put this **above** the test module written in Step 1:
+
 ```rust
 //! Rust mirror of `packages/platform-contracts/src/chz-signer.ts`.
 //!
@@ -339,11 +346,13 @@ git commit -m "feat(signer): signer-core crate with protocol contracts mirroring
 ### Task 2: Cloud protocol client
 
 **Files:**
+
 - Create: `apps/signer/signer-core/src/cloud.rs`
 - Modify: `apps/signer/signer-core/src/lib.rs` (add `pub mod cloud;`)
 - Test: inline `#[cfg(test)]` in `src/cloud.rs` (wiremock)
 
 **Interfaces:**
+
 - Consumes: `contracts::*`, `SignerError` (Task 1).
 - Produces: `CloudClient::new(base_url: &str, app_version: &str) -> Result<CloudClient, SignerError>`; `async fn pair(&self, code: &str, hostname: &str) -> Result<PairResponse, PairError>`; `async fn poll(&self, secret: &str, wait_ms: u32) -> Result<Option<SignerTask>, SignerError>`; `async fn complete(&self, secret: &str, task_id: &str, body: &TaskComplete) -> Result<(), SignerError>`; `async fn fail(&self, secret: &str, task_id: &str, body: &TaskFail) -> Result<(), SignerError>`; `enum PairError { Rejected, Network(String) }`. Task 6 drives all of these.
 
@@ -663,17 +672,20 @@ git commit -m "feat(signer): cloud protocol client with wiremock coverage"
 ### Task 3: True API auth flow behind a signing trait
 
 **Files:**
+
 - Create: `apps/signer/signer-core/src/signer.rs`, `apps/signer/signer-core/src/trueapi.rs`
 - Modify: `apps/signer/signer-core/src/lib.rs`
 - Test: inline `#[cfg(test)]` in both files
 
 **Interfaces:**
+
 - Consumes: `SignerError`.
 - Produces: `pub struct CertificateSummary { pub thumbprint: String, pub subject: String, pub inn: Option<String>, pub not_after: String, pub has_private_key: bool }`; `pub trait Signer: Send + Sync { fn list_certificates(&self) -> Result<Vec<CertificateSummary>, SignerError>; fn sign_attached(&self, thumbprint: &str, payload: &[u8]) -> Result<String, SignerError>; }` (returns base64 of the attached CMS/CAdES blob); `pub fn inn_from_subject(subject: &str) -> Option<String>`; `pub async fn obtain_token(http: &reqwest::Client, base_url: &str, inn: Option<&str>, thumbprint: &str, signer: &dyn Signer) -> Result<TrueApiToken, SignerError>`; `pub struct TrueApiToken { pub token: String, pub expires_at: String }`. Task 6 calls `obtain_token`; Tasks 4 and 11 implement `Signer`.
 
 - [ ] **Step 1: Write the failing tests**
 
 `apps/signer/signer-core/src/signer.rs` test module:
+
 ```rust
 #[cfg(test)]
 mod tests {
@@ -702,6 +714,7 @@ mod tests {
 ```
 
 `apps/signer/signer-core/src/trueapi.rs` test module:
+
 ```rust
 #[cfg(test)]
 mod tests {
@@ -829,6 +842,7 @@ Expected: FAIL — `inn_from_subject` / `obtain_token` undefined.
 - [ ] **Step 3: Implement**
 
 `apps/signer/signer-core/src/signer.rs` (above its test module):
+
 ```rust
 //! The signing capability, kept behind a trait so the runtime is testable on
 //! any platform and so a second implementation (CAdESCOM over COM) can replace
@@ -887,6 +901,7 @@ pub fn inn_from_subject(subject: &str) -> Option<String> {
 ```
 
 `apps/signer/signer-core/src/trueapi.rs` (above its test module):
+
 ```rust
 //! True API GIS MT authentication: the only place UKEP is required for reads.
 //!
@@ -1042,6 +1057,7 @@ Expected: PASS, 16 tests total.
 - [ ] **Step 5: Add a regression test for the date formatter and commit**
 
 Append to `trueapi.rs`'s test module:
+
 ```rust
     #[test]
     fn formats_a_known_instant_as_rfc3339_with_offset() {
@@ -1049,6 +1065,7 @@ Append to `trueapi.rs`'s test module:
         assert_eq!(format_rfc3339(1_787_918_400), "2026-08-28T12:00:00.000Z");
     }
 ```
+
 Run: `cargo test --manifest-path apps/signer/Cargo.toml`
 Expected: PASS, 17 tests.
 
@@ -1062,17 +1079,20 @@ git commit -m "feat(signer): True API auth flow behind a signing trait"
 ### Task 4: Windows CryptoAPI signer
 
 **Files:**
+
 - Create: `apps/signer/signer-core/src/signer_capi.rs`
 - Modify: `apps/signer/signer-core/src/lib.rs` (`#[cfg(windows)] pub mod signer_capi;`)
 - Test: inline `#[cfg(test)]` in `signer_capi.rs`
 
 **Interfaces:**
+
 - Consumes: `Signer`, `CertificateSummary`, `inn_from_subject`, `SignerError`.
 - Produces: `pub struct CapiSigner;` implementing `Signer`; `pub fn hash_oid_for_public_key(public_key_oid: &str) -> Option<&'static str>`; `pub fn format_thumbprint(bytes: &[u8]) -> String`; `pub fn filetime_to_rfc3339(low: u32, high: u32) -> String`. Task 6 receives a `Box<dyn Signer>` built from this on Windows.
 
 - [ ] **Step 1: Write the failing test**
 
 Test module in `signer_capi.rs` — the pure helpers are what unit tests can reach; the FFI path is covered by the manual runbook in Task 12:
+
 ```rust
 #[cfg(test)]
 mod tests {
@@ -1117,6 +1137,7 @@ Expected on Windows: FAIL — helpers undefined.
 - [ ] **Step 3: Implement**
 
 `apps/signer/signer-core/src/signer_capi.rs` (above the test module):
+
 ```rust
 //! GOST signing through Win32 CryptoAPI.
 //!
@@ -1434,6 +1455,7 @@ const _: Option<HLOCAL> = None;
 ```
 
 In `trueapi.rs`, expose the formatter for reuse (add next to `format_rfc3339`):
+
 ```rust
 /// Shared with the Windows signer, which must render certificate validity in
 /// the same RFC3339-with-offset shape the cloud contract requires.
@@ -1443,6 +1465,7 @@ pub fn format_rfc3339_public(unix_seconds: u64) -> String {
 ```
 
 Add to `lib.rs`:
+
 ```rust
 #[cfg(windows)]
 pub mod signer_capi;
@@ -1467,17 +1490,20 @@ git commit -m "feat(signer): GOST signing over Win32 CryptoAPI"
 ### Task 5: DPAPI secret storage and durable config
 
 **Files:**
+
 - Create: `apps/signer/signer-core/src/storage.rs`, `apps/signer/signer-core/src/storage_dpapi.rs`
 - Modify: `apps/signer/signer-core/src/lib.rs`
 - Test: inline `#[cfg(test)]` in both
 
 **Interfaces:**
+
 - Consumes: `SignerError`.
 - Produces: `pub struct AgentConfig { pub agent_id: Option<String>, pub tenant_name: Option<String>, pub server_url: Option<String>, pub cert_thumbprint: Option<String>, pub agent_secret_protected: Option<String> }`; `pub fn read_config(dir: &Path) -> Result<AgentConfig, SignerError>`; `pub fn write_config(dir: &Path, config: &AgentConfig) -> Result<(), SignerError>`; `pub fn clear_credential(dir: &Path) -> Result<(), SignerError>`; `pub trait SecretStore: Send + Sync { fn protect(&self, plaintext: &str) -> Result<String, SignerError>; fn unprotect(&self, protected: &str) -> Result<String, SignerError>; }`; `#[cfg(windows)] pub struct DpapiStore;`. Tasks 6 and 8 use these.
 
 - [ ] **Step 1: Write the failing tests**
 
 `storage.rs` test module:
+
 ```rust
 #[cfg(test)]
 mod tests {
@@ -1550,6 +1576,7 @@ mod tests {
 ```
 
 `storage_dpapi.rs` test module:
+
 ```rust
 #[cfg(test)]
 mod tests {
@@ -1772,6 +1799,7 @@ impl SecretStore for DpapiStore {
 ```
 
 Add to `lib.rs`:
+
 ```rust
 pub mod storage;
 #[cfg(windows)]
@@ -1795,17 +1823,20 @@ git commit -m "feat(signer): durable agent config and DPAPI secret storage"
 ### Task 6: Runtime loop
 
 **Files:**
+
 - Create: `apps/signer/signer-core/src/runtime.rs`, `apps/signer/signer-core/src/journal.rs`
 - Modify: `apps/signer/signer-core/src/lib.rs`
 - Test: inline `#[cfg(test)]` in both
 
 **Interfaces:**
+
 - Consumes: `CloudClient`, `Signer`, `SecretStore`, storage functions, `obtain_token`, contracts.
 - Produces: `pub enum AgentPhase { Unpaired, Idle, Working, Degraded }`; `pub struct AgentStatus { pub phase: AgentPhase, pub tenant_name: Option<String>, pub cert_thumbprint: Option<String>, pub last_token_expires_at: Option<String>, pub last_error: Option<String> }`; `pub struct Runtime`; `Runtime::new(config_dir: PathBuf, signer: Arc<dyn Signer>, secrets: Arc<dyn SecretStore>, app_version: String) -> Runtime`; `async fn run(self, on_change: impl Fn(AgentStatus) + Send + 'static)`; `pub fn classify(error: &SignerError) -> Option<SignerErrorCode>`; `JournalEntry`/`Journal::append`. Task 7 spawns `run` and forwards `AgentStatus` to the UI.
 
 - [ ] **Step 1: Write the failing tests**
 
 `journal.rs` test module:
+
 ```rust
 #[cfg(test)]
 mod tests {
@@ -1832,6 +1863,7 @@ mod tests {
 ```
 
 `runtime.rs` test module:
+
 ```rust
 #[cfg(test)]
 mod tests {
@@ -2281,18 +2313,21 @@ git commit -m "feat(signer): agent runtime loop with revocation and backoff hand
 ### Task 7: Tauri shell — tray, window, commands
 
 **Files:**
+
 - Create: `apps/signer/src-tauri/Cargo.toml`, `build.rs`, `src/main.rs`, `src/lib.rs`, `src/commands.rs`, `tauri.conf.json`, `tauri.stable.conf.json`, `capabilities/default.json`, `windows/installer-hooks.nsh`
 - Create: `apps/signer/src-tauri/icons/` (copy the six icon files from `apps/station/src-tauri/icons/` as placeholders)
 - Modify: `apps/signer/Cargo.toml` (restore both workspace members)
 - Test: `apps/signer/test/tauri-release-config.test.ts` (added in Task 10)
 
 **Interfaces:**
+
 - Consumes: `signer-core`'s `Runtime`, `AgentStatus`, `CapiSigner`, `DpapiStore`.
 - Produces: Tauri commands `signer_status`, `signer_pair`, `signer_unpair`, `signer_list_certificates`, `signer_select_certificate`, `signer_set_server_url`; event `signer://status` carrying `AgentStatus`. Task 8's UI calls exactly these.
 
 - [ ] **Step 1: Write the shell**
 
 `apps/signer/src-tauri/Cargo.toml`:
+
 ```toml
 [package]
 name = "markiro-signer"
@@ -2326,6 +2361,7 @@ custom-protocol = ["tauri/custom-protocol"]
 ```
 
 `apps/signer/src-tauri/build.rs`:
+
 ```rust
 fn main() {
     tauri_build::build();
@@ -2333,6 +2369,7 @@ fn main() {
 ```
 
 `apps/signer/src-tauri/src/main.rs`:
+
 ```rust
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -2342,6 +2379,7 @@ fn main() {
 ```
 
 `apps/signer/src-tauri/src/lib.rs`:
+
 ```rust
 mod commands;
 
@@ -2473,6 +2511,7 @@ fn notify_if_actionable(app: &tauri::AppHandle, status: &signer_core::runtime::A
 ```
 
 `apps/signer/src-tauri/src/commands.rs`:
+
 ```rust
 use std::sync::Arc;
 
@@ -2574,6 +2613,7 @@ pub fn unsupported_platform_backends() -> (Arc<dyn Signer>, Arc<dyn SecretStore>
 - [ ] **Step 2: Add the three runtime methods the commands need**
 
 Append to `impl Runtime` in `apps/signer/signer-core/src/runtime.rs`:
+
 ```rust
     pub fn certificates(&self) -> Result<Vec<crate::signer::CertificateSummary>, SignerError> {
         self.signer.list_certificates()
@@ -2596,6 +2636,7 @@ Append to `impl Runtime` in `apps/signer/signer-core/src/runtime.rs`:
 ```
 
 Add a test for `select_certificate` in `runtime.rs`'s test module:
+
 ```rust
     #[test]
     fn selecting_a_certificate_persists_it() {
@@ -2633,6 +2674,7 @@ Add a test for `select_certificate` in `runtime.rs`'s test module:
 - [ ] **Step 3: Write the Tauri configuration**
 
 `apps/signer/src-tauri/tauri.conf.json`:
+
 ```json
 {
   "$schema": "https://schema.tauri.app/config/2",
@@ -2690,6 +2732,7 @@ Add a test for `select_certificate` in `runtime.rs`'s test module:
 Note on the CSP: unlike the Station, the signer's webview never talks to the cloud — all HTTP happens in Rust — so `connect-src` deliberately omits `https:`.
 
 `apps/signer/src-tauri/tauri.stable.conf.json`:
+
 ```json
 {
   "$schema": "https://schema.tauri.app/config/2",
@@ -2702,6 +2745,7 @@ Note on the CSP: unlike the Station, the signer's webview never talks to the clo
 ```
 
 `apps/signer/src-tauri/capabilities/default.json`:
+
 ```json
 {
   "$schema": "../gen/schemas/desktop-schema.json",
@@ -2720,6 +2764,7 @@ Note on the CSP: unlike the Station, the signer's webview never talks to the clo
 ```
 
 `apps/signer/src-tauri/windows/installer-hooks.nsh`:
+
 ```nsis
 !macro NSIS_HOOK_POSTINSTALL
   ; The tray agent must come back after a reboot without the operator opening
@@ -2754,18 +2799,21 @@ git commit -m "feat(signer): Tauri tray shell wiring the agent runtime"
 ### Task 8: Frontend — pairing, certificate picker, status
 
 **Files:**
+
 - Create: `apps/signer/package.json`, `index.html`, `vite.config.ts`, `vitest.config.ts`, `tsconfig.json`, `turbo.json`, `signer.css`
 - Create: `apps/signer/src/main.tsx`, `src/App.tsx`, `src/lib/bridge.ts`, `src/pages/Pairing.tsx`, `src/pages/Status.tsx`, `src/components/CertificatePicker.tsx`, `src/components/JournalList.tsx`, `src/i18n/{index.ts,ru.json,en.json}`
 - Create: `apps/signer/test/setup.ts`, `test/app-state.test.ts`, `test/pairing.test.tsx`
 - Modify: `eslint.config.mjs` (add `signer` to the react-hooks glob)
 
 **Interfaces:**
+
 - Consumes: Tauri commands and the `signer://status` event from Task 7.
 - Produces: `nextSignerView(status: AgentStatus | null): SignerView` where `SignerView = "loading" | "pairing" | "ready"`; the bridge functions `status()`, `pair(code, hostname)`, `unpair()`, `listCertificates()`, `selectCertificate(thumbprint)`, `setServerUrl(url)`, `onStatus(listener)`.
 
 - [ ] **Step 1: Write the failing tests**
 
 `apps/signer/test/app-state.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
 import { nextSignerView } from "../src/App.js";
@@ -2806,6 +2854,7 @@ describe("nextSignerView", () => {
 ```
 
 `apps/signer/test/pairing.test.tsx`:
+
 ```tsx
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -2839,6 +2888,7 @@ describe("Pairing", () => {
 ```
 
 `apps/signer/test/certificate-expiry.test.ts`:
+
 ```ts
 import { describe, expect, it } from "vitest";
 import { expiryWarning } from "../src/components/CertificatePicker.js";
@@ -2870,6 +2920,7 @@ Note: `test/certificate-expiry.test.ts` above belongs to this same step; all thr
 - [ ] **Step 3: Scaffold the package**
 
 `apps/signer/package.json`:
+
 ```json
 {
   "name": "@markiro/signer",
@@ -2912,11 +2963,13 @@ Note: `test/certificate-expiry.test.ts` above belongs to this same step; all thr
   }
 }
 ```
+
 If `@testing-library/user-event` is not already in the lockfile at that version, use whatever version `apps/admin/package.json` pins.
 
 `apps/signer/turbo.json`: `{"extends": ["//"]}`
 
 `apps/signer/index.html`:
+
 ```html
 <!doctype html>
 <html lang="ru" data-theme="dark">
@@ -2933,6 +2986,7 @@ If `@testing-library/user-event` is not already in the lockfile at that version,
 ```
 
 `apps/signer/vite.config.ts`:
+
 ```ts
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
@@ -2947,6 +3001,7 @@ export default defineConfig({
 ```
 
 `apps/signer/vitest.config.ts`:
+
 ```ts
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
@@ -2963,6 +3018,7 @@ export default defineConfig({
 ```
 
 `apps/signer/tsconfig.json`:
+
 ```json
 {
   "extends": "../../tsconfig.base.json",
@@ -2986,6 +3042,7 @@ In `eslint.config.mjs`, extend the react-hooks glob from `apps/{admin,kiosk,stat
 - [ ] **Step 4: Write the UI**
 
 `apps/signer/src/lib/bridge.ts`:
+
 ```ts
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -3012,8 +3069,7 @@ export interface CertificateSummary {
 }
 
 export type PairOutcome =
-  | { ok: true; tenantName: string }
-  | { ok: false; error: "rejected" | "unavailable" };
+  { ok: true; tenantName: string } | { ok: false; error: "rejected" | "unavailable" };
 
 export const bridge = {
   status: () => invoke<AgentStatus>("signer_status"),
@@ -3036,6 +3092,7 @@ export const bridge = {
 ```
 
 `apps/signer/src/App.tsx`:
+
 ```tsx
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -3087,6 +3144,7 @@ export function App(): JSX.Element {
 ```
 
 `apps/signer/src/pages/Pairing.tsx`:
+
 ```tsx
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -3144,6 +3202,7 @@ export function Pairing({ hostname, onPair, onPaired }: PairingProps): JSX.Eleme
 ```
 
 `apps/signer/src/pages/Status.tsx`:
+
 ```tsx
 import { useTranslation } from "react-i18next";
 import { Button, Card, StatusChip } from "@markiro/ui";
@@ -3169,20 +3228,20 @@ export function Status({
   return (
     <Card title={t("status.title")}>
       <p>
-        {status.tenantName} <StatusChip status={PHASE_TONE[status.phase]} label={t(`status.phase.${status.phase}`)} />
+        {status.tenantName}{" "}
+        <StatusChip status={PHASE_TONE[status.phase]} label={t(`status.phase.${status.phase}`)} />
       </p>
       {status.lastTokenExpiresAt ? (
-        <p>{t("status.tokenExpires", { at: new Date(status.lastTokenExpiresAt).toLocaleString() })}</p>
+        <p>
+          {t("status.tokenExpires", { at: new Date(status.lastTokenExpiresAt).toLocaleString() })}
+        </p>
       ) : (
         <p>{t("status.noToken")}</p>
       )}
       {status.lastError ? <p>{status.lastError}</p> : null}
       <CertificatePicker selected={status.certThumbprint} onSelected={onChanged} />
       <JournalList entries={status.journal} />
-      <Button
-        variant="destructive"
-        onClick={() => void bridge.unpair().then(onChanged)}
-      >
+      <Button variant="destructive" onClick={() => void bridge.unpair().then(onChanged)}>
         {t("status.unpair")}
       </Button>
     </Card>
@@ -3191,6 +3250,7 @@ export function Status({
 ```
 
 `apps/signer/src/components/CertificatePicker.tsx`:
+
 ```tsx
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -3272,9 +3332,11 @@ export function CertificatePicker({
   );
 }
 ```
+
 Match `Select`'s and `Input`'s real prop APIs in `packages/ui/src/components/` — adapt if they differ from the shapes above.
 
 `apps/signer/src/components/JournalList.tsx`:
+
 ```tsx
 import { useTranslation } from "react-i18next";
 import { EmptyState } from "@markiro/ui";
@@ -3303,6 +3365,7 @@ export function JournalList({
 ```
 
 `apps/signer/src/main.tsx`:
+
 ```tsx
 import "@markiro/ui/styles.css";
 import "./signer.css";
@@ -3326,6 +3389,7 @@ createRoot(container).render(
 ```
 
 `apps/signer/src/signer.css`:
+
 ```css
 body {
   margin: 0;
@@ -3339,6 +3403,7 @@ body {
 `apps/signer/src/i18n/index.ts` — copy `apps/station/src/i18n/index.ts` verbatim, changing only the imported dictionaries.
 
 `apps/signer/src/i18n/ru.json`:
+
 ```json
 {
   "app": { "loading": "Загрузка…" },
@@ -3389,6 +3454,7 @@ pnpm --filter @markiro/signer lint
 pnpm turbo build --filter '@markiro/signer...'
 cargo test --manifest-path apps/signer/Cargo.toml
 ```
+
 Expected: 6 frontend tests pass; typecheck/lint clean; `dist/` built; `cargo test` passes (the shell now compiles because `apps/signer/dist` exists).
 
 - [ ] **Step 6: Commit**
@@ -3403,9 +3469,11 @@ git commit -m "feat(signer): tray UI for pairing, certificate selection and stat
 ### Task 9: Release-config contract test
 
 **Files:**
+
 - Create: `apps/signer/test/tauri-release-config.test.ts`
 
 **Interfaces:**
+
 - Consumes: the config files from Task 7.
 - Produces: a regression gate mirroring `apps/station/test/tauri-release-config.test.ts`.
 
@@ -3478,9 +3546,11 @@ git commit -m "test(signer): pin the release configuration contract"
 ### Task 10: CI jobs
 
 **Files:**
+
 - Modify: `.github/workflows/ci.yml`
 
 **Interfaces:**
+
 - Consumes: everything above.
 - Produces: jobs `signer-rust` (Linux: build + test the crates) and `signer-windows-build` (Windows: compile the app, run the Windows-only tests).
 
@@ -3489,58 +3559,58 @@ git commit -m "test(signer): pin the release configuration contract"
 Append after the existing `station-windows-build` job, matching its style and pinned action SHAs:
 
 ```yaml
-  signer-rust:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - name: Install Linux webkit deps
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get -o Acquire::Retries=3 update
-          sudo apt-get -o Acquire::Retries=3 install --no-install-recommends -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-      - run: pnpm install --frozen-lockfile
-      # `tauri::generate_context!` needs `apps/signer/dist` at compile time.
-      - name: Build signer webview + workspace deps
-        run: pnpm turbo build --filter '@markiro/signer...'
-      - name: cargo build + test (signer core and shell)
-        run: |
-          cargo build --manifest-path apps/signer/Cargo.toml
-          cargo test  --manifest-path apps/signer/Cargo.toml
+signer-rust:
+  runs-on: ubuntu-latest
+  timeout-minutes: 30
+  steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        persist-credentials: false
+    - name: Install Linux webkit deps
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo apt-get -o Acquire::Retries=3 update
+        sudo apt-get -o Acquire::Retries=3 install --no-install-recommends -y \
+          libwebkit2gtk-4.1-dev \
+          libgtk-3-dev
+    - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 24
+        cache: pnpm
+    - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+    - run: pnpm install --frozen-lockfile
+    # `tauri::generate_context!` needs `apps/signer/dist` at compile time.
+    - name: Build signer webview + workspace deps
+      run: pnpm turbo build --filter '@markiro/signer...'
+    - name: cargo build + test (signer core and shell)
+      run: |
+        cargo build --manifest-path apps/signer/Cargo.toml
+        cargo test  --manifest-path apps/signer/Cargo.toml
 
-  signer-windows-build:
-    runs-on: windows-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-      - run: pnpm install --frozen-lockfile
-      - name: Build signer webview + workspace deps
-        run: pnpm turbo build --filter '@markiro/signer...'
-      # The CryptoAPI and DPAPI modules only compile on Windows, so this is the
-      # only job that exercises them.
-      - name: cargo test (Windows crypto paths)
-        run: cargo test --manifest-path apps/signer/Cargo.toml
-      - name: Compile the Windows Tauri application
-        run: pnpm --filter @markiro/signer tauri build --debug --no-bundle
+signer-windows-build:
+  runs-on: windows-latest
+  timeout-minutes: 40
+  steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        persist-credentials: false
+    - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 24
+        cache: pnpm
+    - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+    - run: pnpm install --frozen-lockfile
+    - name: Build signer webview + workspace deps
+      run: pnpm turbo build --filter '@markiro/signer...'
+    # The CryptoAPI and DPAPI modules only compile on Windows, so this is the
+    # only job that exercises them.
+    - name: cargo test (Windows crypto paths)
+      run: cargo test --manifest-path apps/signer/Cargo.toml
+    - name: Compile the Windows Tauri application
+      run: pnpm --filter @markiro/signer tauri build --debug --no-bundle
 ```
 
 - [ ] **Step 2: Validate the workflow**
@@ -3560,11 +3630,13 @@ git commit -m "ci: build and test the signer agent on Linux and Windows"
 ### Task 11: CAdESCOM fallback behind the same trait
 
 **Files:**
+
 - Create: `apps/signer/signer-core/src/signer_cades.rs`
 - Modify: `apps/signer/signer-core/src/lib.rs`, `apps/signer/signer-core/Cargo.toml`, `apps/signer/src-tauri/src/lib.rs`
 - Test: inline `#[cfg(test)]` in `signer_cades.rs`
 
 **Interfaces:**
+
 - Consumes: `Signer`, `CertificateSummary`, `SignerError`.
 - Produces: `pub struct CadesSigner;` implementing `Signer`; `pub fn signer_backend_from_env() -> SignerBackend` where `pub enum SignerBackend { CryptoApi, Cades }`.
 
@@ -3596,6 +3668,7 @@ Expected: FAIL — `backend_from_value` undefined.
 - [ ] **Step 3: Implement**
 
 Add to `apps/signer/signer-core/Cargo.toml` under the Windows target:
+
 ```toml
 windows = { version = "0.61", features = [
   "Win32_System_Com",
@@ -3605,6 +3678,7 @@ windows = { version = "0.61", features = [
 ```
 
 `apps/signer/signer-core/src/signer_cades.rs`:
+
 ```rust
 //! CAdES-BES signing through CryptoPro's CAdESCOM automation objects.
 //!
@@ -3875,6 +3949,7 @@ use dispatch::{call, get, put, VariantExt as _};
 The `VARIANT`/`BSTR` conversion helpers above target the `windows` crate's `VARIANT` API; if the crate version in the lockfile exposes different constructors, adapt the helpers rather than the call sequence — the CAdESCOM object graph and the constant values are what matter.
 
 In `apps/signer/src-tauri/src/lib.rs`, pick the backend:
+
 ```rust
 #[cfg(windows)]
 let signer: Arc<dyn Signer> = match signer_core::signer_cades::signer_backend_from_env() {
@@ -3906,16 +3981,19 @@ git commit -m "feat(signer): CAdESCOM backend selection behind the signing trait
 ### Task 12: Manual sandbox verification and runbook
 
 **Files:**
+
 - Create: `docs/runbooks/signer-agent-manual-e2e.md`
 - Modify: `apps/signer/src-tauri/tauri.conf.json` (real minisign public key)
 
 **Interfaces:**
+
 - Consumes: the whole app.
 - Produces: a recorded verdict on whether CryptoAPI's CMS signature is accepted by True API, which decides whether Task 11 ships.
 
 - [ ] **Step 1: Write the runbook**
 
 `docs/runbooks/signer-agent-manual-e2e.md`:
+
 ```markdown
 # Signer agent — manual end-to-end verification
 
@@ -3945,8 +4023,8 @@ once per release candidate on a Windows machine that has all three.
 5. Force a refresh: in the cabinet, revoke nothing — instead wait for the
    scheduler (runs every 15 minutes) or delete the tenant's `chz_api_tokens`
    row so the next tick enqueues a task immediately.
-6. Watch the agent journal. A healthy run reads: *Task received* → *True API
-   token delivered*.
+6. Watch the agent journal. A healthy run reads: _Task received_ → _True API
+   token delivered_.
 7. Confirm in the cabinet that the token status shows **действует** with an
    expiry roughly ten hours out.
 
@@ -3964,8 +4042,8 @@ Step 6 is the decision point for the signing backend:
 Record the date, the CryptoPro version, and the verdict below.
 
 | Date | CryptoPro version | Backend | Verdict |
-|---|---|---|---|
-| | | | |
+| ---- | ----------------- | ------- | ------- |
+|      |                   |         |         |
 
 ## Failure cases worth exercising
 
@@ -3984,6 +4062,7 @@ Record the date, the CryptoPro version, and the verdict below.
 ```bash
 pnpm --filter @markiro/signer exec tauri signer generate -w ~/.markiro/signer-updater.key
 ```
+
 Put the printed public key into `apps/signer/src-tauri/tauri.conf.json` under `plugins.updater.pubkey`, and store the private key and its password as the repository secrets `SIGNER_TAURI_SIGNING_PRIVATE_KEY` / `SIGNER_TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Do not commit the private key.
 
 - [ ] **Step 3: Verify the config test still passes**
@@ -4014,6 +4093,7 @@ cargo clippy --manifest-path apps/signer/Cargo.toml -- -D warnings
 pnpm format:check
 pnpm turbo lint typecheck build --concurrency=1 --force
 ```
+
 Expected: all green. Paste counts into the report.
 
 - [ ] **Step 2: Commit any stragglers**

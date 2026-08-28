@@ -27,7 +27,9 @@ export function Status({
         <StatusChip status={PHASE_TONE[status.phase]} label={t(`status.phase.${status.phase}`)} />
       </p>
       {status.lastTokenExpiresAt ? (
-        <p>{t("status.tokenExpires", { at: new Date(status.lastTokenExpiresAt).toLocaleString() })}</p>
+        <p>
+          {t("status.tokenExpires", { at: new Date(status.lastTokenExpiresAt).toLocaleString() })}
+        </p>
       ) : (
         <p>{t("status.noToken")}</p>
       )}
