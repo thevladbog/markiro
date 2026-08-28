@@ -30,9 +30,11 @@ describe.skipIf(!databaseUrl)("tenant billing action reconciliation migration", 
     await rm(join(migrationsThrough0068, "0069_tenant_billing_action_reconciliation.sql"));
     await rm(join(migrationsThrough0068, "0070_tenant_billing_platform_workflow.sql"));
     await rm(join(migrationsThrough0068, "0071_tenant_billing_target_cardinality.sql"));
+    await rm(join(migrationsThrough0068, "0072_tenant_billing_stale_family_repair.sql"));
     await rm(join(migrationsThrough0068, "meta", "0069_snapshot.json"));
     await rm(join(migrationsThrough0068, "meta", "0070_snapshot.json"));
     await rm(join(migrationsThrough0068, "meta", "0071_snapshot.json"));
+    await rm(join(migrationsThrough0068, "meta", "0072_snapshot.json"));
     const journalPath = join(migrationsThrough0068, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -41,7 +43,8 @@ describe.skipIf(!databaseUrl)("tenant billing action reconciliation migration", 
       (entry) =>
         entry.tag !== "0069_tenant_billing_action_reconciliation" &&
         entry.tag !== "0070_tenant_billing_platform_workflow" &&
-        entry.tag !== "0071_tenant_billing_target_cardinality",
+        entry.tag !== "0071_tenant_billing_target_cardinality" &&
+        entry.tag !== "0072_tenant_billing_stale_family_repair",
     );
     await writeFile(journalPath, JSON.stringify(journal));
     await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0068 });

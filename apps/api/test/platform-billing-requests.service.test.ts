@@ -188,6 +188,24 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     ).rejects.toMatchObject({ response: { code: "idempotency_key_reused" }, status: 409 });
   });
 
+  it("preserves case in UUID-shaped semantic text while canonicalizing actual IDs", async () => {
+    const request = await insertRequest(connection.db, tenantA, tenantUser, "under_review");
+    const idempotencyKey = randomUUID();
+    const uppercaseMessage = "A1111111-1111-4111-8111-111111111111";
+    const first = await requests.comment(actor, request.id.toUpperCase(), {
+      message: uppercaseMessage,
+      idempotencyKey: idempotencyKey.toUpperCase(),
+    });
+    expect(first).toMatchObject({ requestId: request.id, message: uppercaseMessage });
+
+    await expect(
+      requests.comment(actor, request.id, {
+        message: uppercaseMessage.toLowerCase(),
+        idempotencyKey,
+      }),
+    ).rejects.toMatchObject({ response: { code: "idempotency_key_reused" }, status: 409 });
+  });
+
   it.each(allowedTransitions)(
     "moves %s to %s with responsibleSide=%s",
     async (fromStatus, toStatus, expectedSide) => {
@@ -519,6 +537,34 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     await expect(
       billing.create(actor, { ...invoiceInput(tenantA), sourceOfferId: published!.id }),
     ).rejects.toMatchObject({ response: { code: "offer_version_stale" }, status: 409 });
+  });
+
+  it("serializes the global invoice number allocator across tenants", async () => {
+    await connection.pool.query(`
+      CREATE FUNCTION task6_invoice_insert_delay() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(0.15); RETURN NEW; END $$;
+      CREATE TRIGGER task6_invoice_insert_delay
+      BEFORE INSERT ON invoices FOR EACH ROW EXECUTE FUNCTION task6_invoice_insert_delay();
+    `);
+    try {
+      const outcomes = await Promise.allSettled([
+        billing.create(actor, invoiceInput(tenantA)),
+        billing.create(actor, invoiceInput(tenantB)),
+      ]);
+      expect(outcomes).toEqual([
+        expect.objectContaining({ status: "fulfilled" }),
+        expect.objectContaining({ status: "fulfilled" }),
+      ]);
+      if (outcomes[0]?.status !== "fulfilled" || outcomes[1]?.status !== "fulfilled") {
+        throw new Error("invoice allocation did not complete for both tenants");
+      }
+      expect(outcomes[0].value.number).not.toBe(outcomes[1].value.number);
+    } finally {
+      await connection.pool.query(`
+        DROP TRIGGER task6_invoice_insert_delay ON invoices;
+        DROP FUNCTION task6_invoice_insert_delay();
+      `);
+    }
   });
 
   it("serializes explicit invoice linking against issue without a deadlock or duplicate history", async () => {

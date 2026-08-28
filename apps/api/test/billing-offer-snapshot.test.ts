@@ -49,6 +49,7 @@ describe("BillingService offer snapshots", () => {
     let transactionSelect = 0;
     let insertCount = 0;
     const tx = {
+      execute: vi.fn(async () => ({ rows: [] })),
       select: vi.fn(() => {
         transactionSelect += 1;
         return resolvedQuery(
@@ -148,6 +149,7 @@ describe("BillingService offer snapshots", () => {
     let transactionSelect = 0;
     let insertCount = 0;
     const tx = {
+      execute: vi.fn(async () => ({ rows: [] })),
       select: vi.fn(() => {
         transactionSelect += 1;
         return resolvedQuery<unknown>(

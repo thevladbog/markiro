@@ -1,5 +1,5 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   platformCommercialContracts,
@@ -247,6 +247,9 @@ export class PlatformBillingRequestsService {
       const request = await lockRequest(tx, located.tenantId, canonicalRequestId);
       await rejectExistingEventKey(tx, located.tenantId, input.idempotencyKey);
       await assertTarget(tx, request.tenantId, input.type, canonicalTargetId);
+      if (input.type === "act") {
+        await alignActRequest(tx, request.tenantId, request.id, canonicalTargetId);
+      }
       await assertTargetNotLinked(tx, request.tenantId, request.id, input.type, canonicalTargetId);
       let link: typeof schema.tenantBillingRequestLinks.$inferSelect | undefined;
       try {
@@ -423,6 +426,38 @@ async function assertTargetNotLinked(
           ? "billing_request_link_exists"
           : "billing_target_already_linked",
     });
+  }
+}
+
+async function alignActRequest(
+  tx: RequestReadExecutor & Pick<Db, "update">,
+  tenantId: string,
+  requestId: string,
+  actId: string,
+): Promise<void> {
+  const [act] = await tx
+    .select({ requestId: schema.billingActs.requestId })
+    .from(schema.billingActs)
+    .where(and(eq(schema.billingActs.tenantId, tenantId), eq(schema.billingActs.id, actId)))
+    .for("update")
+    .limit(1);
+  if (!act) throw new NotFoundException({ code: "act_not_found" });
+  if (act.requestId && act.requestId !== requestId) {
+    throw new ConflictException({ code: "billing_act_request_mismatch" });
+  }
+  if (!act.requestId) {
+    const [updated] = await tx
+      .update(schema.billingActs)
+      .set({ requestId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.billingActs.tenantId, tenantId),
+          eq(schema.billingActs.id, actId),
+          isNull(schema.billingActs.requestId),
+        ),
+      )
+      .returning({ id: schema.billingActs.id });
+    if (!updated) throw new ConflictException({ code: "billing_act_request_mismatch" });
   }
 }
 

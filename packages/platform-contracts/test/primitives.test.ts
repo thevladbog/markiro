@@ -5,7 +5,9 @@ import {
   platformTimestampSchema,
   platformUuidSchema,
   parseTenantBillingActObjectKey,
+  parseTenantBillingRequestAttachmentObjectKey,
   tenantBillingActObjectKey,
+  tenantBillingRequestAttachmentObjectKey,
 } from "../src/index.js";
 
 describe("platform contract primitives", () => {
@@ -31,8 +33,8 @@ describe("platform contract primitives", () => {
     "tenant\u0000child",
     ".tenant",
     "tenant..child",
-  ])("rejects an ambiguous tenant object-key segment: %j", (tenantId) => {
-    expect(platformTenantIdSchema.safeParse(tenantId).success).toBe(false);
+  ])("preserves an opaque tenant id independently from its object-key encoding: %j", (tenantId) => {
+    expect(platformTenantIdSchema.parse(tenantId)).toBe(tenantId);
   });
 
   it("round-trips the one canonical act key for safe tenant segments and UUID aliases", () => {
@@ -49,6 +51,45 @@ describe("platform contract primitives", () => {
     });
     expect(parseTenantBillingActObjectKey(`${key}.bak`)).toBeNull();
     expect(parseTenantBillingActObjectKey(key.replace("factory.eu", "factory%2Feu"))).toBeNull();
+  });
+
+  it("round-trips encoded opaque tenant ids for acts and request attachments", () => {
+    const tenantId = "Производство / линия % A";
+    const requestId = "C1111111-1111-4111-8111-111111111111";
+    const attachmentId = "D1111111-1111-4111-8111-111111111111";
+    const actId = "A1111111-1111-4111-8111-111111111111";
+    const documentId = "B1111111-1111-4111-8111-111111111111";
+
+    const actKey = tenantBillingActObjectKey(tenantId, actId, documentId);
+    const attachmentKey = tenantBillingRequestAttachmentObjectKey(
+      tenantId,
+      requestId,
+      attachmentId,
+    );
+
+    expect(actKey).toMatch(/^tenant-billing\/~u[0-9a-f]+\/acts\//);
+    expect(attachmentKey).toMatch(/^tenant-billing\/~u[0-9a-f]+\/requests\//);
+    expect(parseTenantBillingActObjectKey(actKey)?.tenantId).toBe(tenantId);
+    expect(parseTenantBillingRequestAttachmentObjectKey(attachmentKey)).toEqual({
+      tenantId,
+      requestId: requestId.toLowerCase(),
+      attachmentId: attachmentId.toLowerCase(),
+    });
+
+    expect(parseTenantBillingActObjectKey(actKey.replace("~u", "~U"))).toBeNull();
+    expect(parseTenantBillingActObjectKey(actKey.replace("~u", "%7Eu"))).toBeNull();
+    expect(parseTenantBillingRequestAttachmentObjectKey(`${attachmentKey}/..`)).toBeNull();
+  });
+
+  it("keeps existing safe request-attachment keys byte-for-byte compatible", () => {
+    const key = tenantBillingRequestAttachmentObjectKey(
+      "legacy_better-auth.org:primary",
+      "C1111111-1111-4111-8111-111111111111",
+      "D1111111-1111-4111-8111-111111111111",
+    );
+    expect(key).toBe(
+      "tenant-billing/legacy_better-auth.org:primary/requests/c1111111-1111-4111-8111-111111111111/d1111111-1111-4111-8111-111111111111",
+    );
   });
 
   it("requires a machine code and request id for errors", () => {

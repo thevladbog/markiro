@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { createDb, schema, type Db } from "@markiro/db";
+import { tenantBillingActObjectKey } from "@markiro/platform-contracts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -51,6 +52,7 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
   let tenantB = "";
   let tenantUser = "";
   let requestId = "";
+  let otherRequestId = "";
   let acts: TestBillingActsService;
   let requests: PlatformBillingRequestsService;
 
@@ -77,20 +79,23 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
       role: actor.role,
       status: "active",
     });
-    const [request] = await connection.db
+    const [request, otherRequest] = await connection.db
       .insert(schema.tenantBillingRequests)
-      .values({
-        tenantId: tenantA,
-        number: `BR-ACT-${randomUUID()}`,
-        type: "other",
-        status: "in_progress",
-        description: "Act fixture",
-        responsibleSide: "markiro",
-        idempotencyKey: randomUUID(),
-        createdByUserId: tenantUser,
-      })
+      .values(
+        ["Act fixture", "Other act fixture"].map((description) => ({
+          tenantId: tenantA,
+          number: `BR-ACT-${randomUUID()}`,
+          type: "other" as const,
+          status: "in_progress" as const,
+          description,
+          responsibleSide: "markiro" as const,
+          idempotencyKey: randomUUID(),
+          createdByUserId: tenantUser,
+        })),
+      )
       .returning();
     requestId = request!.id;
+    otherRequestId = otherRequest!.id;
     acts = new TestBillingActsService(
       connection.db,
       storage as unknown as ObjectStorageService,
@@ -138,6 +143,13 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
       issuedAt: null,
       document: null,
     });
+    const links = await connection.db
+      .select()
+      .from(schema.tenantBillingRequestLinks)
+      .where(eq(schema.tenantBillingRequestLinks.actId, created.id));
+    expect(links).toEqual([
+      expect.objectContaining({ tenantId: tenantA, requestId, actId: created.id }),
+    ]);
     await expect(
       acts.create(actor, { ...input, number: `ACT-${randomUUID()}` }),
     ).rejects.toMatchObject({ response: { code: "idempotency_key_reused" }, status: 409 });
@@ -149,6 +161,44 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
         number: `ACT-${randomUUID()}`,
       }),
     ).rejects.toMatchObject({ response: { code: "billing_source_tenant_mismatch" }, status: 409 });
+  });
+
+  it("serializes a globally unique act number across tenants", async () => {
+    await connection.pool.query(`
+      CREATE FUNCTION task6_act_insert_delay() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(0.15); RETURN NEW; END $$;
+      CREATE TRIGGER task6_act_insert_delay
+      BEFORE INSERT ON billing_acts FOR EACH ROW EXECUTE FUNCTION task6_act_insert_delay();
+    `);
+    try {
+      const number = `ACT-GLOBAL-${randomUUID()}`;
+      const outcomes = await Promise.allSettled([
+        acts.create(actor, {
+          tenantId: tenantA,
+          number,
+          periodStart: "2026-08-01",
+          periodEnd: "2026-08-27",
+          idempotencyKey: randomUUID(),
+        }),
+        acts.create(actor, {
+          tenantId: tenantB,
+          number,
+          periodStart: "2026-08-01",
+          periodEnd: "2026-08-27",
+          idempotencyKey: randomUUID(),
+        }),
+      ]);
+      expect(outcomes.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+      expect(outcomes.find(({ status }) => status === "rejected")).toMatchObject({
+        status: "rejected",
+        reason: { response: { code: "billing_act_number_exists" }, status: 409 },
+      });
+    } finally {
+      await connection.pool.query(`
+        DROP TRIGGER task6_act_insert_delay ON billing_acts;
+        DROP FUNCTION task6_act_insert_delay();
+      `);
+    }
   });
 
   it("persists a canonical pending intent before PUT, recovers ambiguity, and issues only once", async () => {
@@ -209,12 +259,12 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
           eq(schema.tenantBillingRequestEvents.kind, "act_linked"),
         ),
       );
-    expect(events).toEqual([
+    expect(events.filter((event) => jsonStringField(event.metadata, "actId") === act.id)).toEqual([
       expect.objectContaining({
         tenantId: tenantA,
         actorKind: "platform_user",
         actorPlatformUserId: actorId,
-        metadata: { actId: act.id, documentId: issued.document!.id },
+        metadata: expect.objectContaining({ actId: act.id }),
       }),
     ]);
     const audits = await connection.db
@@ -404,10 +454,15 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
       periodEnd: "2026-08-27",
       idempotencyKey: randomUUID(),
     });
-    await requests.link(actor, requestId, {
-      type: "act",
-      targetId: act.id,
-      idempotencyKey: randomUUID(),
+    await expect(
+      requests.link(actor, requestId, {
+        type: "act",
+        targetId: act.id,
+        idempotencyKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({
+      response: { code: "billing_request_link_exists" },
+      status: 409,
     });
 
     await expect(
@@ -423,7 +478,11 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
         ),
       );
     expect(
-      linkEvents.filter((event) => jsonStringField(event.metadata, "targetId") === act.id),
+      linkEvents.filter(
+        (event) =>
+          jsonStringField(event.metadata, "targetId") === act.id ||
+          jsonStringField(event.metadata, "actId") === act.id,
+      ),
     ).toHaveLength(1);
     const linkAudits = await connection.db
       .select()
@@ -450,7 +509,7 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
       idempotencyKey: randomUUID(),
     });
     const [linkOutcome, issueOutcome] = await Promise.allSettled([
-      requests.link(actor, requestId, {
+      requests.link(actor, otherRequestId, {
         type: "act",
         targetId: act.id,
         idempotencyKey: randomUUID(),
@@ -459,12 +518,10 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
     ]);
 
     expect(issueOutcome).toMatchObject({ status: "fulfilled", value: { status: "issued" } });
-    if (linkOutcome.status === "rejected") {
-      expect(linkOutcome.reason).toMatchObject({
-        response: { code: "billing_request_link_exists" },
-        status: 409,
-      });
-    }
+    expect(linkOutcome).toMatchObject({
+      status: "rejected",
+      reason: { response: { code: "billing_act_request_mismatch" }, status: 409 },
+    });
     const links = await connection.db
       .select()
       .from(schema.tenantBillingRequestLinks)
@@ -481,6 +538,45 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
           jsonStringField(event.metadata, "targetId") === act.id,
       ),
     ).toHaveLength(1);
+  });
+
+  it("rejects a mismatched act request before pending upload and keeps issue recoverable", async () => {
+    const act = await acts.create(actor, {
+      tenantId: tenantA,
+      requestId,
+      number: `ACT-${randomUUID()}`,
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-27",
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(
+      requests.link(actor, otherRequestId, {
+        type: "act",
+        targetId: act.id,
+        idempotencyKey: randomUUID(),
+      }),
+    ).rejects.toMatchObject({
+      response: { code: "billing_act_request_mismatch" },
+      status: 409,
+    });
+    expect(storage.putVerified).not.toHaveBeenCalled();
+    const documentsBeforeIssue = await connection.db
+      .select()
+      .from(schema.billingActDocuments)
+      .where(eq(schema.billingActDocuments.actId, act.id));
+    expect(documentsBeforeIssue).toHaveLength(0);
+    const links = await connection.db
+      .select()
+      .from(schema.tenantBillingRequestLinks)
+      .where(eq(schema.tenantBillingRequestLinks.actId, act.id));
+    expect(links).toEqual([
+      expect.objectContaining({ tenantId: tenantA, requestId, actId: act.id }),
+    ]);
+
+    await expect(
+      acts.issue(actor, act.id, { idempotencyKey: randomUUID() }, pdfUpload()),
+    ).resolves.toMatchObject({ status: "issued" });
   });
 
   it("writes a canonical act key for public tenant IDs containing dots and colons", async () => {
@@ -502,6 +598,28 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
 
     expect(storage.putVerified).toHaveBeenCalledWith(
       `tenant-billing/${safeTenantId}/acts/${act.id}/${issued.document!.id}.pdf`,
+      expect.any(Buffer),
+      "application/pdf",
+      issued.document!.sha256,
+    );
+  });
+
+  it("writes and issues an encoded canonical act key for an opaque tenant id", async () => {
+    const opaqueTenantId = `Производство / линия % ${randomUUID()}`;
+    await createOrganization(connection.db, opaqueTenantId);
+    const act = await acts.create(actor, {
+      tenantId: opaqueTenantId,
+      number: `ACT-${randomUUID()}`,
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-27",
+      idempotencyKey: randomUUID(),
+    });
+    const issued = await acts.issue(actor, act.id, { idempotencyKey: randomUUID() }, pdfUpload());
+    const expectedKey = tenantBillingActObjectKey(opaqueTenantId, act.id, issued.document!.id);
+
+    expect(expectedKey).toMatch(/^tenant-billing\/~u[0-9a-f]+\/acts\//);
+    expect(storage.putVerified).toHaveBeenCalledWith(
+      expectedKey,
       expect.any(Buffer),
       "application/pdf",
       issued.document!.sha256,

@@ -110,9 +110,6 @@ export class TenantBillingOffersService {
         throw new ConflictException({ code: "offer_request_link_ambiguous" });
       }
       const requestId = links[0]?.requestId ?? null;
-      if (requestId) {
-        await acquireBillingWorkflowLocks(tx, tenantId, [{ kind: "request", id: requestId }]);
-      }
       const family = await tx
         .select()
         .from(schema.commercialOffers)

@@ -669,6 +669,144 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
       });
     }
   }, 15_000);
+
+  it("serializes global offer numbers and payment keys across tenants", async () => {
+    const secondTenantId = await createOrganization(connection.db);
+    const secondTenantUserId = `offer-global-tenant-${randomUUID()}`;
+    await connection.db.insert(schema.user).values({
+      id: secondTenantUserId,
+      name: "Second offer tenant user",
+      email: `${secondTenantUserId}@example.invalid`,
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await connection.db.insert(schema.tenantBillingProfiles).values({
+      tenantId: secondTenantId,
+      revision: 1,
+      kind: "legal_entity",
+      fullName: "Second Revision Buyer",
+      displayName: "Second Buyer",
+      inn: "7801002292",
+      kpp: "780101001",
+      ogrn: "1027800000001",
+      addressRaw: "Saint Petersburg",
+      legalAddressRaw: "Saint Petersburg",
+      isConfirmed: true,
+      confirmedByPlatformUserId: actorId,
+      confirmedAt: new Date("2026-08-27T10:00:00.000Z"),
+      createdByPlatformUserId: actorId,
+    });
+    const [firstDraft, secondDraft] = await connection.db
+      .insert(schema.commercialOffers)
+      .values([
+        {
+          tenantId,
+          familyId: randomUUID(),
+          revision: 42,
+          status: "draft",
+          total: "100.00",
+          createdByPlatformUserId: actorId,
+        },
+        {
+          tenantId: secondTenantId,
+          familyId: randomUUID(),
+          revision: 42,
+          status: "draft",
+          total: "100.00",
+          createdByPlatformUserId: actorId,
+        },
+      ])
+      .returning();
+    await connection.pool.query(`
+      CREATE FUNCTION task6_offer_publish_delay() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF OLD.number IS NULL AND NEW.number IS NOT NULL THEN
+          PERFORM pg_advisory_xact_lock(72042);
+        END IF;
+        RETURN NEW;
+      END $$;
+      CREATE TRIGGER task6_offer_publish_delay
+      BEFORE UPDATE ON commercial_offers
+      FOR EACH ROW EXECUTE FUNCTION task6_offer_publish_delay();
+    `);
+    let published: Awaited<ReturnType<PlatformOffersService["publish"]>>[];
+    const barrier = await connection.pool.connect();
+    try {
+      await barrier.query("select pg_advisory_lock(72042)");
+      const pending = Promise.allSettled([
+        service.publish(revisionActor, firstDraft!.id),
+        service.publish(revisionActor, secondDraft!.id),
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await barrier.query("select pg_advisory_unlock(72042)");
+      const outcomes = await pending;
+      expect(outcomes).toEqual([
+        expect.objectContaining({ status: "fulfilled" }),
+        expect.objectContaining({ status: "fulfilled" }),
+      ]);
+      published = outcomes.flatMap((outcome) =>
+        outcome.status === "fulfilled" ? [outcome.value] : [],
+      );
+      expect(new Set(published.map(({ number }) => number)).size).toBe(2);
+    } finally {
+      await barrier.query("select pg_advisory_unlock_all()");
+      barrier.release();
+      await connection.pool.query(`
+        DROP TRIGGER task6_offer_publish_delay ON commercial_offers;
+        DROP FUNCTION task6_offer_publish_delay();
+      `);
+    }
+    expect(published).toHaveLength(2);
+    await connection.db.insert(schema.commercialOfferDecisions).values([
+      {
+        tenantId,
+        offerId: firstDraft!.id,
+        decision: "accepted",
+        actorUserId: tenantUserId,
+        idempotencyKey: randomUUID(),
+      },
+      {
+        tenantId: secondTenantId,
+        offerId: secondDraft!.id,
+        decision: "accepted",
+        actorUserId: secondTenantUserId,
+        idempotencyKey: randomUUID(),
+      },
+    ]);
+    const paymentKey = randomUUID();
+    await connection.pool.query(`
+      CREATE FUNCTION task6_payment_insert_delay() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(0.15); RETURN NEW; END $$;
+      CREATE TRIGGER task6_payment_insert_delay
+      BEFORE INSERT ON payments FOR EACH ROW EXECUTE FUNCTION task6_payment_insert_delay();
+    `);
+    try {
+      const outcomes = await Promise.allSettled([
+        service.pay(revisionActor, firstDraft!.id, paymentKey, {
+          amount: "100.00",
+          currency: "RUB",
+          bankReference: `GLOBAL-A-${randomUUID()}`,
+        }),
+        service.pay(revisionActor, secondDraft!.id, paymentKey, {
+          amount: "100.00",
+          currency: "RUB",
+          bankReference: `GLOBAL-B-${randomUUID()}`,
+        }),
+      ]);
+      expect(outcomes.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+      expect(outcomes.find(({ status }) => status === "rejected")).toMatchObject({
+        status: "rejected",
+        reason: { response: { code: "idempotency_key_reused" }, status: 409 },
+      });
+    } finally {
+      await connection.pool.query(`
+        DROP TRIGGER task6_payment_insert_delay ON payments;
+        DROP FUNCTION task6_payment_insert_delay();
+      `);
+    }
+  }, 30_000);
 });
 
 function quoteIdentifier(identifier: string): string {

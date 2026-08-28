@@ -99,7 +99,7 @@ export function platformBillingPayloadHash(payload: unknown): string {
 
 function canonicalJson(value: unknown): string {
   if (typeof value === "string") {
-    return JSON.stringify(canonicalBillingResourceId(value));
+    return JSON.stringify(value);
   }
   if (value === null || typeof value === "boolean") {
     return JSON.stringify(value);

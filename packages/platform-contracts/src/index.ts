@@ -16,7 +16,10 @@ export type {
 } from "./primitives.js";
 export {
   parseTenantBillingActObjectKey,
+  parseTenantBillingRequestAttachmentObjectKey,
   tenantBillingActObjectKey,
+  tenantBillingRequestAttachmentObjectKey,
+  tenantBillingTenantKeySegment,
 } from "./tenant-billing-object-key.js";
 export {
   OPERATIONS_RESTRICTION_WINDOW_DAYS,

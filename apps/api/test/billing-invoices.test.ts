@@ -91,7 +91,11 @@ describe("BillingService invoice payment detail", () => {
       select: vi.fn(() => queryFor(rowsFor)),
       update: vi.fn(),
       transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) =>
-        run({ execute: vi.fn(), select: vi.fn(() => queryFor(rowsFor)), update: vi.fn() }),
+        run({
+          execute: vi.fn(async () => ({ rows: [] })),
+          select: vi.fn(() => queryFor(rowsFor)),
+          update: vi.fn(),
+        }),
       ),
     }) as Db;
     const service = new BillingService(db, {} as PlatformAuditService);
@@ -246,7 +250,7 @@ describe("BillingService invoice payment detail", () => {
       transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) => {
         try {
           return await run({
-            execute: vi.fn(),
+            execute: vi.fn(async () => ({ rows: [] })),
             select: vi.fn(() => makeSelect(true)),
             update: vi.fn(() => makeUpdate()),
           });

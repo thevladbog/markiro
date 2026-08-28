@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { tenantBillingRequestAttachmentObjectKey } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import { ObjectStorageService } from "../storage/object-storage.service";
 import type { CreateBillingRequestDto, RequestReplyDto } from "./dto";
@@ -200,7 +201,7 @@ export class TenantBillingRequestsService {
     if (!request) requestNotFound();
     validateBillingAttachment(file);
     const attachmentId = randomUUID();
-    const objectKey = billingAttachmentObjectKey(tenantId, requestId, attachmentId);
+    const objectKey = tenantBillingRequestAttachmentObjectKey(tenantId, requestId, attachmentId);
     const sha256 = createHash("sha256").update(file.buffer).digest("hex");
     await this.db.transaction(async (tx) => {
       const [locked] = await tx
@@ -309,7 +310,7 @@ export class TenantBillingRequestsService {
         ),
       )
       .limit(1);
-    const expectedKey = billingAttachmentObjectKey(tenantId, requestId, attachmentId);
+    const expectedKey = tenantBillingRequestAttachmentObjectKey(tenantId, requestId, attachmentId);
     if (!attachment || attachment.objectKey !== expectedKey) attachmentNotFound();
     return {
       url: await this.storage.presignRead(attachment.objectKey, 300, {
@@ -516,13 +517,6 @@ function isPlainUtf8(body: Buffer): boolean {
   } catch {
     return false;
   }
-}
-
-function billingAttachmentObjectKey(tenantId: string, requestId: string, attachmentId: string) {
-  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(tenantId)) {
-    throw new Error("Tenant ID cannot be represented in an object key");
-  }
-  return `tenant-billing/${tenantId}/requests/${requestId}/${attachmentId}`;
 }
 
 function safeFileName(original: string): string {

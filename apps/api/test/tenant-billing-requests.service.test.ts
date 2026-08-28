@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema, type Db } from "@markiro/db";
+import { tenantBillingRequestAttachmentObjectKey } from "@markiro/platform-contracts";
 import { and, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -263,6 +264,43 @@ describe.skipIf(!ready)("tenant billing requests isolated Postgres service", () 
     ).rejects.toMatchObject({ status: 404 });
     await expect(service.downloadAttachment(tenantA, request.id, attachment.id)).resolves.toEqual({
       url: "https://private.example.test/request-attachment",
+    });
+  });
+
+  it("issues and downloads an attachment for an opaque tenant id through the canonical key", async () => {
+    const opaqueTenantId = `Производство / линия % ${randomUUID()}`;
+    await createOrganization(db, opaqueTenantId);
+    const request = await service.create(opaqueTenantId, userA, {
+      type: "documents",
+      description: "Opaque tenant attachment",
+      idempotencyKey: randomUUID(),
+    });
+    const body = Buffer.from("plain text");
+
+    const attachment = await service.attach(opaqueTenantId, userA, request.id, {
+      originalname: "note.txt",
+      mimetype: "text/plain",
+      size: body.byteLength,
+      buffer: body,
+    });
+
+    const expectedKey = tenantBillingRequestAttachmentObjectKey(
+      opaqueTenantId,
+      request.id,
+      attachment.id,
+    );
+    expect(expectedKey).toMatch(/^tenant-billing\/~u[0-9a-f]+\/requests\//);
+    expect(storage.putVerified).toHaveBeenLastCalledWith(
+      expectedKey,
+      body,
+      "text/plain",
+      createHash("sha256").update(body).digest("hex"),
+    );
+    await expect(
+      service.downloadAttachment(opaqueTenantId, request.id, attachment.id),
+    ).resolves.toEqual({ url: "https://private.example.test/request-attachment" });
+    expect(storage.presignRead).toHaveBeenLastCalledWith(expectedKey, 300, {
+      downloadFilename: "note.txt",
     });
   });
 

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
+import {
+  tenantBillingActObjectKey,
+  tenantBillingRequestAttachmentObjectKey,
+} from "@markiro/platform-contracts";
 import { loadEnv } from "../src/env";
 import {
   createS3Client,
@@ -200,6 +204,12 @@ describe("ObjectStorageService", () => {
     await expect(
       storage.presignRead(`tenant-billing/factory.eu:primary/acts/${actId}/${documentId}.pdf`, 300),
     ).resolves.toBe("signed-read");
+    await expect(
+      storage.presignRead(
+        tenantBillingActObjectKey("Производство / линия % A", actId, documentId),
+        300,
+      ),
+    ).resolves.toBe("signed-read");
     for (const key of [
       `tenant-billing/acme/../acts/${actId}/${documentId}.pdf`,
       `tenant-billing/acme%2Fother/acts/${actId}/${documentId}.pdf`,
@@ -218,6 +228,22 @@ describe("ObjectStorageService", () => {
     const attachmentId = "22222222-2222-4222-8222-222222222222";
     const canonical = `tenant-billing/acme_2026/requests/${requestId}/${attachmentId}`;
     await expect(storage.presignRead(canonical, 300)).resolves.toBe("signed-read");
+    await expect(
+      storage.presignRead(
+        tenantBillingRequestAttachmentObjectKey("factory.eu:primary", requestId, attachmentId),
+        300,
+      ),
+    ).resolves.toBe("signed-read");
+    await expect(
+      storage.presignRead(
+        tenantBillingRequestAttachmentObjectKey(
+          "Производство / линия % A",
+          requestId,
+          attachmentId,
+        ),
+        300,
+      ),
+    ).resolves.toBe("signed-read");
     for (const key of [
       `${canonical}.pdf`,
       `tenant-billing/acme/../requests/${requestId}/${attachmentId}`,

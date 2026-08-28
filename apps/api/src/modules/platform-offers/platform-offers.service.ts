@@ -169,14 +169,20 @@ export class PlatformOffersService {
         .select({
           tenantId: schema.commercialOffers.tenantId,
           familyId: schema.commercialOffers.familyId,
+          revision: schema.commercialOffers.revision,
         })
         .from(schema.commercialOffers)
         .where(eq(schema.commercialOffers.id, canonicalOfferId))
         .limit(1);
       if (!located) throw new ConflictException({ code: "offer_not_draft" });
+      const offerYear = new Date().getFullYear();
+      const primaryNumber = `KP-${offerYear}-${located.revision.toString().padStart(6, "0")}`;
+      const fallbackNumber = `KP-${offerYear}-${canonicalOfferId.slice(0, 8).toUpperCase()}`;
       await acquireBillingWorkflowLocks(tx, located.tenantId, [
         { kind: "offer_family", id: located.familyId },
         { kind: "offer", id: canonicalOfferId },
+        { kind: "offer_number", id: primaryNumber },
+        { kind: "offer_number", id: fallbackNumber },
       ]);
       const family = await tx
         .select()
@@ -204,16 +210,9 @@ export class PlatformOffersService {
       const [latest] = await tx
         .select({ number: schema.commercialOffers.number })
         .from(schema.commercialOffers)
-        .where(
-          eq(
-            schema.commercialOffers.number,
-            `KP-${new Date().getFullYear()}-${draft.revision.toString().padStart(6, "0")}`,
-          ),
-        )
+        .where(eq(schema.commercialOffers.number, primaryNumber))
         .limit(1);
-      const number = latest
-        ? `KP-${new Date().getFullYear()}-${draft.id.slice(0, 8).toUpperCase()}`
-        : `KP-${new Date().getFullYear()}-${draft.revision.toString().padStart(6, "0")}`;
+      const number = latest ? fallbackNumber : primaryNumber;
       const now = new Date();
       await tx
         .update(schema.commercialOffers)
@@ -225,23 +224,31 @@ export class PlatformOffersService {
             eq(schema.commercialOffers.status, "published"),
           ),
         );
-      const [updated] = await tx
-        .update(schema.commercialOffers)
-        .set({
-          status: "published",
-          number,
-          publishedAt: now,
-          publishedByPlatformUserId: actor.userId,
-          sellerBankAccountId: sellerAccount.id,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(schema.commercialOffers.id, canonicalOfferId),
-            eq(schema.commercialOffers.status, "draft"),
-          ),
-        )
-        .returning();
+      let updated: typeof schema.commercialOffers.$inferSelect | undefined;
+      try {
+        [updated] = await tx
+          .update(schema.commercialOffers)
+          .set({
+            status: "published",
+            number,
+            publishedAt: now,
+            publishedByPlatformUserId: actor.userId,
+            sellerBankAccountId: sellerAccount.id,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(schema.commercialOffers.id, canonicalOfferId),
+              eq(schema.commercialOffers.status, "draft"),
+            ),
+          )
+          .returning();
+      } catch (error) {
+        if (uniqueConstraint(error) === "commercial_offers_number_uq") {
+          throw new ConflictException({ code: "offer_number_conflict" });
+        }
+        throw error;
+      }
       if (!updated) throw new ConflictException({ code: "offer_not_draft" });
       const lines = await tx
         .select()
@@ -558,19 +565,32 @@ export class PlatformOffersService {
       if (decision?.decision !== "accepted") {
         throw new ConflictException({ code: "offer_not_accepted" });
       }
-      const [payment] = await tx
-        .insert(schema.payments)
-        .values({
-          tenantId: offer.tenantId,
-          offerId: offer.id,
-          paidAt: new Date(),
-          amount: input.amount,
-          currency: input.currency,
-          bankReference: input.bankReference,
-          platformUserId: actor.userId,
-          idempotencyKey: canonicalKey,
-        })
-        .returning();
+      let payment: typeof schema.payments.$inferSelect | undefined;
+      try {
+        [payment] = await tx
+          .insert(schema.payments)
+          .values({
+            tenantId: offer.tenantId,
+            offerId: offer.id,
+            paidAt: new Date(),
+            amount: input.amount,
+            currency: input.currency,
+            bankReference: input.bankReference,
+            platformUserId: actor.userId,
+            idempotencyKey: canonicalKey,
+          })
+          .returning();
+      } catch (error) {
+        const constraint = uniqueConstraint(error);
+        if (constraint === "payments_idempotency_key_uq") {
+          throw new ConflictException({ code: "idempotency_key_reused" });
+        }
+        if (constraint === "payments_offer_uq") {
+          throw new ConflictException({ code: "offer_already_paid" });
+        }
+        if (constraint) throw new ConflictException({ code: "offer_payment_conflict" });
+        throw error;
+      }
       if (!payment) throw new Error("payment insert failed");
       await tx
         .update(schema.commercialOffers)
@@ -751,4 +771,16 @@ async function lockCommercialOfferFamily(
     )
     .orderBy(desc(schema.commercialOffers.revision), desc(schema.commercialOffers.id))
     .for("update");
+}
+
+function uniqueConstraint(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const value = error as {
+    code?: unknown;
+    constraint?: unknown;
+    cause?: { code?: unknown; constraint?: unknown };
+  };
+  const source =
+    value.code === "23505" ? value : value.cause?.code === "23505" ? value.cause : null;
+  return source && typeof source.constraint === "string" ? source.constraint : null;
 }

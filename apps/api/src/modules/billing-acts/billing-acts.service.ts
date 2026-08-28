@@ -132,20 +132,76 @@ export class BillingActsService {
         .limit(1);
       if (numberCollision) throw new ConflictException({ code: "billing_act_number_exists" });
       await validateActSources(tx, input.tenantId, payload);
-      const [act] = await tx
-        .insert(schema.billingActs)
-        .values({
-          tenantId: input.tenantId,
-          requestId: payload.requestId,
-          invoiceId: payload.invoiceId,
-          orderedServiceId: payload.orderedServiceId,
-          number: payload.number,
-          periodStart: input.periodStart,
-          periodEnd: input.periodEnd,
-          createdByPlatformUserId: actor.userId,
-        })
-        .returning();
+      let act: typeof schema.billingActs.$inferSelect | undefined;
+      try {
+        [act] = await tx
+          .insert(schema.billingActs)
+          .values({
+            tenantId: input.tenantId,
+            requestId: payload.requestId,
+            invoiceId: payload.invoiceId,
+            orderedServiceId: payload.orderedServiceId,
+            number: payload.number,
+            periodStart: input.periodStart,
+            periodEnd: input.periodEnd,
+            createdByPlatformUserId: actor.userId,
+          })
+          .returning();
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          throw new ConflictException({ code: "billing_act_number_exists" });
+        }
+        throw error;
+      }
       if (!act) throw new Error("billing act insert failed");
+      if (act.requestId) {
+        const [request] = await tx
+          .select({
+            id: schema.tenantBillingRequests.id,
+            status: schema.tenantBillingRequests.status,
+          })
+          .from(schema.tenantBillingRequests)
+          .where(
+            and(
+              eq(schema.tenantBillingRequests.tenantId, act.tenantId),
+              eq(schema.tenantBillingRequests.id, act.requestId),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!request) throw new ConflictException({ code: "billing_act_request_invalid" });
+        const [link] = await tx
+          .insert(schema.tenantBillingRequestLinks)
+          .values({ tenantId: act.tenantId, requestId: request.id, actId: act.id })
+          .returning();
+        if (!link) throw new Error("billing act request link insert failed");
+        const [event] = await tx
+          .insert(schema.tenantBillingRequestEvents)
+          .values({
+            tenantId: act.tenantId,
+            requestId: request.id,
+            kind: "act_linked",
+            actorKind: "platform_user",
+            actorPlatformUserId: actor.userId,
+            metadata: { actId: act.id, linkId: link.id },
+            idempotencyKey: input.idempotencyKey,
+          })
+          .returning({ id: schema.tenantBillingRequestEvents.id });
+        if (!event) throw new Error("billing act request event insert failed");
+        await this.audit.record(tx, {
+          actorPlatformUserId: actor.userId,
+          actorRole: actor.role,
+          action: "billing.request.act_linked",
+          outcome: "success",
+          tenantId: act.tenantId,
+          targetType: "tenant_billing_request",
+          targetId: request.id,
+          reason: null,
+          before: { status: request.status },
+          after: { status: request.status, actId: act.id, linkId: link.id, eventId: event.id },
+          requestId: null,
+        });
+      }
       const result = await this.actWithDocument(tx, act);
       await this.audit.record(tx, {
         actorPlatformUserId: actor.userId,
@@ -378,6 +434,7 @@ export class BillingActsService {
       const discovered = await discoverActWorkflowResources(tx, spec.tenantId, actId);
       await acquireBillingWorkflowLocks(tx, spec.tenantId, discovered);
       const act = await lockAct(tx, spec.tenantId, actId);
+      await assertCanonicalActRequestLink(tx, act);
       const [currentDocument] = await tx
         .select()
         .from(schema.billingActDocuments)
@@ -477,6 +534,7 @@ export class BillingActsService {
       const discovered = await discoverActWorkflowResources(tx, prepared.tenantId, prepared.actId);
       await acquireBillingWorkflowLocks(tx, prepared.tenantId, discovered);
       const act = await lockAct(tx, prepared.tenantId, prepared.actId);
+      await assertCanonicalActRequestLink(tx, act);
       const [document] = await tx
         .select()
         .from(schema.billingActDocuments)
@@ -848,13 +906,44 @@ async function discoverActWorkflowResources(
     .where(and(eq(schema.billingActs.tenantId, tenantId), eq(schema.billingActs.id, actId)))
     .limit(1);
   if (!act) actNotFound();
+  const links = await tx
+    .select({ requestId: schema.tenantBillingRequestLinks.requestId })
+    .from(schema.tenantBillingRequestLinks)
+    .where(
+      and(
+        eq(schema.tenantBillingRequestLinks.tenantId, tenantId),
+        eq(schema.tenantBillingRequestLinks.actId, actId),
+      ),
+    );
   const resources: BillingWorkflowResource[] = [{ kind: "act", id: actId }];
   if (act.requestId) resources.push({ kind: "request", id: act.requestId });
+  for (const link of links) resources.push({ kind: "request", id: link.requestId });
   if (act.invoiceId) resources.push({ kind: "invoice", id: act.invoiceId });
   if (act.orderedServiceId) {
     resources.push({ kind: "ordered_service", id: act.orderedServiceId });
   }
   return resources;
+}
+
+async function assertCanonicalActRequestLink(
+  tx: ActReadExecutor,
+  act: typeof schema.billingActs.$inferSelect,
+): Promise<void> {
+  const links = await tx
+    .select({ requestId: schema.tenantBillingRequestLinks.requestId })
+    .from(schema.tenantBillingRequestLinks)
+    .where(
+      and(
+        eq(schema.tenantBillingRequestLinks.tenantId, act.tenantId),
+        eq(schema.tenantBillingRequestLinks.actId, act.id),
+      ),
+    )
+    .for("update");
+  if (links.length > 1) throw new Error("billing act request link ambiguity");
+  const linkedRequestId = links[0]?.requestId ?? null;
+  if (linkedRequestId !== act.requestId) {
+    throw new ConflictException({ code: "billing_act_request_mismatch" });
+  }
 }
 
 function actDocumentSource(
@@ -887,6 +976,12 @@ function businessDate(at: Date): string {
   }).formatToParts(at);
   const value = new Map(parts.map((part) => [part.type, part.value]));
   return `${value.get("year")}-${value.get("month")}-${value.get("day")}`;
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { code?: unknown; cause?: { code?: unknown } };
+  return value.code === "23505" || value.cause?.code === "23505";
 }
 
 function parseActReplay(value: unknown): BillingAct {

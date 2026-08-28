@@ -348,3 +348,133 @@ builds and the Nest API build passed with output isolated under `/private/tmp`. 
   databases and dropped them; storage ambiguity and validation used controlled service boundaries.
   No browser, production deployment, mail, Windows, printer, scanner, 1C, DNS, or hardware check
   was in scope.
+
+## Fix Round 2
+
+### Status and commit
+
+All five Important findings and the Minor lock-identity finding were addressed on top of
+`27a69f51e191b5353d842522a5a7b99bb2e3d53b`. The enclosing follow-up commit is
+`fix(api): close billing upgrade and global-key gaps`; its SHA is reported in the handoff because
+a commit cannot contain its own content-derived hash.
+
+### Behavior corrected
+
+- Forward migration `0072_tenant_billing_stale_family_repair` deterministically retains the
+  highest non-draft generation in each tenant/family and changes every older lingering
+  `published` row to `superseded`. It preserves offer decisions, print snapshots, documents, and
+  immutable terms. An upgrade aborts with `commercial_offer_current_revision_ambiguous` if a
+  corrupt family has more than one highest non-draft revision. The migration also repairs the
+  canonical act/request relation in either direction and aborts on an intrinsic/link mismatch.
+- The 0072 enum rebuild makes `superseded` immediately usable when Drizzle applies 0071 and 0072
+  inside the same transaction; it recreates the offer-line immutability trigger without changing
+  0071 or any earlier migration. A real 0070 fixture now upgrades through both forward migrations
+  in one run.
+- Act numbers, offer numbers, payment idempotency keys, and the invoice allocator now use explicit
+  global advisory resources. The auto-invoice allocator selects the highest numeric `INV-*`
+  suffix rather than transaction-time ordering, increments with `bigint`, and all four insert
+  paths translate defensive unique violations into exact domain conflicts.
+- Workflow lock keys are normalized first, hashed in one database query, then their signed 64-bit
+  physical identities are deduplicated and sorted before acquisition. Each workflow acquires its
+  resource set once before entity row locks; request rows reached through a locked invoice/offer
+  relation use row locks without a late, order-inverting advisory acquisition.
+- Creating an act with `requestId` now atomically creates its canonical request relation and emits
+  exactly one `act_linked` tenant event and platform audit. Explicit linking can fill a legacy null
+  intrinsic source but returns exact `billing_act_request_mismatch` before any write or upload when
+  the act belongs to another request. Prepare and finalize both revalidate the zero-or-one exact
+  relation, so a mismatch cannot strand a pending document intent.
+- Canonical JSON now sorts object keys while preserving arbitrary string values byte-for-byte.
+  Only schema-known UUID fields are lowercased before payload construction, locking, comparison,
+  or persistence. UUID aliases for IDs replay one mutation, while a case change inside a
+  UUID-shaped comment is a different payload and returns `idempotency_key_reused`.
+- `platformTenantIdSchema` is restored to the established trimmed, non-empty, 128-character opaque
+  string contract. One shared builder keeps existing alphanumeric/underscore/hyphen/dot/colon
+  object keys byte-compatible and reversibly encodes other valid tenant IDs. Act and request-
+  attachment writers, both tenant readers, and the object-storage validator require exact keys;
+  slash, backslash, traversal, control, percent, and noncanonical UUID variants cannot be used as
+  poisoned raw paths.
+
+### TDD evidence
+
+#### RED
+
+- A real 0070 fixture retained both P1 and P2 as `published`; stale P1 remained visible as current
+  commercial state. The first combined 0071/0072 attempt also produced PostgreSQL `55P04` because
+  the new enum value could not be consumed in the same migration transaction.
+- Cross-tenant races initially reached globally unique act/offer/payment/invoice constraints under
+  different tenant-scoped locks. The invoice race additionally exposed `createdAt` ordering that
+  could allocate the already-used number when concurrent transactions had overlapping timestamps.
+- An act with intrinsic request A could be linked to request B before issue validation, leaving the
+  upload path vulnerable to a source mismatch after durable intent creation.
+- Payload hashing lowercased any UUID-shaped string, so two comments differing only by UUID letter
+  case incorrectly shared a fingerprint. The narrowed tenant schema and separate request/act key
+  rules rejected valid opaque tenants or could drift between writer, reader, and validator.
+- The original resource helper ordered logical keys before hashing and did not deduplicate physical
+  identities, leaving a 64-bit hash-collision ordering gap.
+- The first broad regression after the fixes exposed four stale unit transaction doubles without
+  the new hash query plus the invoice allocator ordering defect. The route inventory also required
+  its two documented origin/auth environment values. After correcting those test boundaries and
+  the allocator, the same broad command passed without skips or failures.
+
+#### GREEN
+
+The final adjacent API/security/OpenAPI/storage/scratch-Postgres regression passed **19 files / 204
+tests**. It is the Fix Round 1 17-file set plus `billing-workflow-locks.test.ts` and
+`platform-offer-stale-family-upgrade.test.ts`. It proves:
+
+- real 0070 to 0071 to 0072 runtime behavior, platform listing, tenant read, and rejection of stale
+  tenant decisions, payment, invoice source, payment fulfilment, and fallback to an older family
+  revision;
+- concurrent same-number acts and offers, same payment key, and auto-invoice allocation across
+  tenants, with domain outcomes and no raw `23505`, `40P01`, or 500;
+- act A to request B rejection before storage, canonical relation creation/repair, concurrent
+  relink versus issue, recoverable issue, and exact nonduplicated link history;
+- actual UUID alias replay versus case-sensitive UUID-shaped semantic text, plus encoded opaque
+  tenant IDs through both act and request-attachment writers/readers and the real storage-key
+  validator;
+- all previously accepted request transitions, OpenAPI/list-query/413 behavior, stale-offer
+  runtime checks, act cancellation reconciliation, issue-once, invoice payment, and tenant read
+  behavior.
+
+The final DB suite passed **7 files / 26 tests**: schema, fresh chain, platform workflow, action
+reconciliation, document pagination, 0071 cardinality, and 0072 stale-family upgrade. It covers
+ambiguity aborts, act mismatch abort/repair, P1/P2 published backfill, P1 published plus P2 paid,
+snapshot/document/decision preservation, 0070-to-current upgrade, and historical migration
+identity. Drizzle generation reported exactly `No schema changes, nothing to migrate`.
+
+Platform contract commercial and primitive suites passed **2 files / 32 tests**. API source/test,
+DB source/test, and platform-contract source/test TypeScript checks passed. Contract, DB, and
+isolated Nest API emitted builds passed. Scoped ESLint, Prettier, `git diff --check`, and staged
+diff review passed.
+
+### Files and migration scope
+
+- Added `packages/db/migrations/0072_tenant_billing_stale_family_repair.sql`, its generated
+  `0072_snapshot.json`, journal entry, dedicated DB upgrade test, and a real API upgrade/runtime
+  test. Historical migration fixtures only exclude the newly appended migration where their
+  asserted boundary requires it; 0070 and 0071 identities were not rewritten.
+- Updated the shared billing lock/idempotency helpers and the platform offer, invoice, act,
+  request-link, tenant offer-decision, tenant request-attachment, tenant act-read, and object-
+  storage paths, with focused concurrency, source, identity, and storage tests.
+- Updated platform contract tenant-ID and object-key primitives and their parse/poisoning tests.
+
+### Deviations, limits, and risks
+
+- Rebuilding the enum in 0072 is deliberate upgrade compatibility, not a schema-model change. It
+  is required because the repository migration runner may apply 0071 and 0072 in one transaction,
+  where PostgreSQL otherwise forbids use of the newly added enum label. The scratch suite proves
+  this exact path and the migration remains forward-only.
+- The globally unique keys serialize only their corresponding system resources; ordinary entity
+  locks remain tenant-scoped. Invoice allocation still scans the unique number column for the
+  greatest numeric suffix under the global lock; this favors compatibility over introducing a new
+  counter table in a reviewer-fix migration.
+- The repository `pnpm` launcher still could not fetch its configured private-registry executable.
+  No dependency or install-policy change was made; checked-in configs and already-installed local
+  package binaries were used with temporary source aliases, which were removed before staging.
+- Full unrelated monorepo suites were not run. The complete affected API, contracts, DB,
+  migration, OpenAPI, route, security, typecheck, lint, build, format, no-diff, and diff gates were
+  run.
+- No shared database or live object storage was used. Every database test created and dropped a
+  UUID-named scratch database; storage checks used controlled production service boundaries. No
+  browser, deployment, mail, Windows, printer, scanner, 1C, DNS, or hardware validation was in
+  scope.

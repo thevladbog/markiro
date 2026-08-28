@@ -505,6 +505,13 @@
       "when": 1787877614000,
       "tag": "0071_tenant_billing_target_cardinality",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1787882109546,
+      "tag": "0072_tenant_billing_stale_family_repair",
+      "breakpoints": true
     }
   ]
 }

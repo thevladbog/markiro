@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import type {
   InvoiceCreateServiceResultSource,
@@ -54,7 +54,7 @@ export class BillingService {
       const canonicalSourceOfferId = input.sourceOfferId
         ? canonicalBillingUuid(input.sourceOfferId)
         : null;
-      const resources: BillingWorkflowResource[] = [];
+      const resources: BillingWorkflowResource[] = [{ kind: "invoice_number", id: "allocator" }];
       let sourceOfferFamilyId: string | null = null;
       if (canonicalSourceRequestId) {
         resources.push({ kind: "request", id: canonicalSourceRequestId });
@@ -95,24 +95,33 @@ export class BillingService {
       const [last] = await tx
         .select({ number: schema.invoices.number })
         .from(schema.invoices)
-        .orderBy(desc(schema.invoices.createdAt))
+        .where(sql`${schema.invoices.number} ~ '^INV-[0-9]+$'`)
+        .orderBy(desc(sql`substring(${schema.invoices.number} from 5)::bigint`))
         .limit(1);
       const next = nextInvoiceNumber(last?.number);
-      const [invoice] = await tx
-        .insert(schema.invoices)
-        .values({
-          tenantId: input.tenantId,
-          number: next,
-          sellerBankAccountId: input.sellerBankAccountId ?? null,
-          dueDate: input.dueDate ? new Date(input.dueDate) : null,
-          applicationMode: input.applicationMode,
-          sourceOfferId,
-          createdByPlatformUserId: principal.userId,
-          subtotal: "0.00",
-          vatTotal: "0.00",
-          total: "0.00",
-        })
-        .returning();
+      let invoice: typeof schema.invoices.$inferSelect | undefined;
+      try {
+        [invoice] = await tx
+          .insert(schema.invoices)
+          .values({
+            tenantId: input.tenantId,
+            number: next,
+            sellerBankAccountId: input.sellerBankAccountId ?? null,
+            dueDate: input.dueDate ? new Date(input.dueDate) : null,
+            applicationMode: input.applicationMode,
+            sourceOfferId,
+            createdByPlatformUserId: principal.userId,
+            subtotal: "0.00",
+            vatTotal: "0.00",
+            total: "0.00",
+          })
+          .returning();
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          throw new ConflictException({ code: "invoice_number_conflict" });
+        }
+        throw error;
+      }
       if (!invoice) throw new BadRequestException({ code: "invoice_create_failed" });
       if (sourceRequestId) {
         const [link] = await tx
@@ -376,11 +385,6 @@ export class BillingService {
           ),
         );
       if (discoveredLinks.length > 1) throw new Error("invoice request link ambiguity");
-      if (discoveredLinks[0]) {
-        await acquireBillingWorkflowLocks(tx, located.tenantId, [
-          { kind: "request", id: discoveredLinks[0].requestId },
-        ]);
-      }
       const [invoice] = await tx
         .select()
         .from(schema.invoices)
@@ -654,7 +658,13 @@ function invoicePaymentSummary(
   };
 }
 
+function isUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { code?: unknown; cause?: { code?: unknown } };
+  return value.code === "23505" || value.cause?.code === "23505";
+}
+
 function nextInvoiceNumber(last: string | undefined): string {
   const numeric = last?.match(/(\d+)$/)?.[1];
-  return `INV-${String((numeric ? Number(numeric) : 0) + 1).padStart(6, "0")}`;
+  return `INV-${((numeric ? BigInt(numeric) : 0n) + 1n).toString().padStart(6, "0")}`;
 }

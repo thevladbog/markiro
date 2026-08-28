@@ -33,12 +33,14 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
     await rm(join(legacyMigrations, "0069_tenant_billing_action_reconciliation.sql"));
     await rm(join(legacyMigrations, "0070_tenant_billing_platform_workflow.sql"));
     await rm(join(legacyMigrations, "0071_tenant_billing_target_cardinality.sql"));
+    await rm(join(legacyMigrations, "0072_tenant_billing_stale_family_repair.sql"));
     await rm(join(legacyMigrations, "meta", "0066_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0067_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0068_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0069_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0070_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0071_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0072_snapshot.json"));
 
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
@@ -51,7 +53,8 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
         entry.tag !== "0068_tenant_billing_document_pagination_indexes" &&
         entry.tag !== "0069_tenant_billing_action_reconciliation" &&
         entry.tag !== "0070_tenant_billing_platform_workflow" &&
-        entry.tag !== "0071_tenant_billing_target_cardinality",
+        entry.tag !== "0071_tenant_billing_target_cardinality" &&
+        entry.tag !== "0072_tenant_billing_stale_family_repair",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0065_saas_party_actual_addresses");
     await writeFile(journalPath, JSON.stringify(journal));

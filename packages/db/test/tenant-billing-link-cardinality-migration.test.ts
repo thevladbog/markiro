@@ -29,7 +29,7 @@ describe("tenant billing target cardinality migration", () => {
     };
 
     expect(current.prevId).toBe(previous.id);
-    expect(journal.entries.at(-1)).toMatchObject({
+    expect(journal.entries.find(({ idx }) => idx === 71)).toMatchObject({
       idx: 71,
       tag: "0071_tenant_billing_target_cardinality",
     });
@@ -63,13 +63,17 @@ describe.skipIf(!databaseUrl)("tenant billing target cardinality upgrade", () =>
     const migrationsThrough0070 = join(temporaryRoot, "migrations");
     await cp(migrationsFolder, migrationsThrough0070, { recursive: true });
     await rm(join(migrationsThrough0070, "0071_tenant_billing_target_cardinality.sql"));
+    await rm(join(migrationsThrough0070, "0072_tenant_billing_stale_family_repair.sql"));
     await rm(join(migrationsThrough0070, "meta", "0071_snapshot.json"));
+    await rm(join(migrationsThrough0070, "meta", "0072_snapshot.json"));
     const journalPath = join(migrationsThrough0070, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
     };
     journal.entries = journal.entries.filter(
-      ({ tag }) => tag !== "0071_tenant_billing_target_cardinality",
+      ({ tag }) =>
+        tag !== "0071_tenant_billing_target_cardinality" &&
+        tag !== "0072_tenant_billing_stale_family_repair",
     );
     await writeFile(journalPath, JSON.stringify(journal));
     await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0070 });
