@@ -422,6 +422,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+.mk-dashboard-bars__label {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .mk-dashboard-bars__track {
   display: flex;
   align-items: flex-end;
@@ -663,6 +670,10 @@
 }
 
 @media (max-width: 768px) {
+  body:has(.mk-dashboard-page) .mk-app-sidebar {
+    display: none !important;
+  }
+
   .mk-dashboard-page {
     gap: var(--sp-3);
     padding: var(--sp-5) var(--sp-4) var(--sp-7);
@@ -714,6 +725,11 @@
 
   .mk-dashboard-dynamics__controls {
     justify-content: flex-start;
+  }
+
+  .mk-dashboard-segmented {
+    flex-wrap: wrap;
+    max-width: 100%;
   }
 
   .mk-dashboard-mode-chart + .mk-dashboard-mode-chart {
