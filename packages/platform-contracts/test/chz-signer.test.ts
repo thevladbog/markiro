@@ -10,9 +10,7 @@ import {
 } from "../src/chz-signer.js";
 
 const fixture = (name: string): unknown =>
-  JSON.parse(
-    readFileSync(join(__dirname, "..", "fixtures", "chz-signer", name), "utf8"),
-  );
+  JSON.parse(readFileSync(join(__dirname, "..", "fixtures", "chz-signer", name), "utf8"));
 
 describe("chz-signer contracts", () => {
   it("accept the shared fixtures (Rust signer-core parses the same files)", () => {
@@ -26,17 +24,23 @@ describe("chz-signer contracts", () => {
   it("rejects a malformed pairing code", () => {
     expect(
       chzSignerPairRequestSchema.safeParse({
-        pairingCode: "1234", hostname: "PC", appVersion: "0.1.0",
+        pairingCode: "1234",
+        hostname: "PC",
+        appVersion: "0.1.0",
       }).success,
     ).toBe(false);
   });
 
   it("rejects unknown task fail codes and extra keys", () => {
-    expect(chzSignerTaskFailSchema.safeParse({ errorCode: "NOPE", message: "x" }).success).toBe(false);
+    expect(chzSignerTaskFailSchema.safeParse({ errorCode: "NOPE", message: "x" }).success).toBe(
+      false,
+    );
     expect(
       chzSignerTaskCompleteSchema.safeParse({
-        token: "t", expiresAt: "2026-08-28T10:00:00.000Z",
-        certThumbprint: "ab", extra: 1,
+        token: "t",
+        expiresAt: "2026-08-28T10:00:00.000Z",
+        certThumbprint: "ab",
+        extra: 1,
       }).success,
     ).toBe(false);
   });

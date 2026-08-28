@@ -38,12 +38,14 @@ react-i18next (admin), vitest + supertest.
 ### Task 1: DB schema `chz.ts` + migration 0086
 
 **Files:**
+
 - Create: `packages/db/src/schema/chz.ts`
 - Modify: `packages/db/src/schema.ts` (add `export * from "./schema/chz.js";`)
 - Modify: `packages/db/drizzle.config.ts` (add `"./src/schema/chz.ts"` to the schema list)
 - Create (generated): `packages/db/migrations/0086_chz_signer_agent.sql`
 
 **Interfaces:**
+
 - Produces: tables `chzSignerAgents`, `chzSignerPairingCodes`, `chzSignerTasks`, `chzApiTokens`; constants `CHZ_SIGNER_AGENT_STATUSES`, `CHZ_SIGNER_TASK_TYPES`, `CHZ_SIGNER_TASK_STATUSES`; row types `ChzSignerAgentRow`, `ChzSignerTaskRow`, `ChzApiTokenRow`. All later API tasks import these via `schema.*`.
 
 - [ ] **Step 1: Write the schema file**
@@ -68,7 +70,9 @@ import {
 import { organization } from "./auth.js";
 
 const tenantId = () =>
-  text("tenant_id").notNull().references(() => organization.id);
+  text("tenant_id")
+    .notNull()
+    .references(() => organization.id);
 
 const bytea = customType<{ data: Buffer }>({
   dataType() {
@@ -110,9 +114,7 @@ export const chzSignerAgents = pgTable(
     certNotAfter: timestamp("cert_not_after", { withTimezone: true }),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     unique("chz_signer_agents_tenant_id_uq").on(t.tenantId, t.id),
@@ -137,9 +139,7 @@ export const chzSignerPairingCodes = pgTable(
     usedAt: timestamp("used_at", { withTimezone: true }),
     attempts: integer("attempts").notNull().default(0),
     issuedByUserId: text("issued_by_user_id").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("chz_signer_pairing_codes_hash_idx").on(t.codeHash),
@@ -160,19 +160,14 @@ export const chzSignerTasks = pgTable(
     agentId: uuid("agent_id"),
     type: text("type").notNull(),
     status: text("status").notNull().default("pending"),
-    payload: jsonb("payload")
-      .$type<Record<string, unknown>>()
-      .notNull()
-      .default({}),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
     resultSummary: jsonb("result_summary").$type<Record<string, unknown>>(),
     attempts: integer("attempts").notNull().default(0),
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     foreignKey({
@@ -202,9 +197,7 @@ export const chzApiTokens = pgTable("chz_api_tokens", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   agentId: uuid("agent_id"),
   certThumbprint: text("cert_thumbprint"),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export type ChzSignerAgentRow = typeof chzSignerAgents.$inferSelect;
@@ -215,9 +208,11 @@ export type ChzApiTokenRow = typeof chzApiTokens.$inferSelect;
 - [ ] **Step 2: Register the schema file**
 
 In `packages/db/src/schema.ts` add (alphabetically with the other exports):
+
 ```ts
 export * from "./schema/chz.js";
 ```
+
 In `packages/db/drizzle.config.ts` add `"./src/schema/chz.ts"` to the `schema` array.
 
 - [ ] **Step 3: Generate the migration**
@@ -226,6 +221,7 @@ In `packages/db/drizzle.config.ts` add `"./src/schema/chz.ts"` to the `schema` a
 set -a; source .env; set +a
 pnpm --filter @markiro/db db:generate
 ```
+
 Expected: a new `packages/db/migrations/0086_*.sql`. Rename the generated file AND its
 `meta/_journal.json` tag to `0086_chz_signer_agent` (both must match — follow the naming
 style of `0083_inventory_document_rendering_metadata`). Review the SQL: 4 tables, the two
@@ -239,6 +235,7 @@ pnpm --filter @markiro/db build
 pnpm --filter @markiro/db test
 pnpm --filter @markiro/db db:migrate
 ```
+
 Expected: build/test pass, migration applies cleanly.
 
 - [ ] **Step 5: Commit**
@@ -253,17 +250,20 @@ git commit -m "feat(db): chz signer agent tables (agents, pairing codes, tasks, 
 ### Task 2: Protocol contracts in `packages/platform-contracts`
 
 **Files:**
+
 - Create: `packages/platform-contracts/src/chz-signer.ts`
 - Modify: `packages/platform-contracts/src/index.ts` (re-export)
 - Create: `packages/platform-contracts/fixtures/chz-signer/pair-request.json`, `pair-response.json`, `task.json`, `task-complete.json`, `task-fail.json`
 - Test: `packages/platform-contracts/test/chz-signer.test.ts`
 
 **Interfaces:**
+
 - Produces: `chzSignerPairRequestSchema`, `chzSignerPairResponseSchema`, `chzSignerTaskSchema`, `chzTrueApiAuthPayloadSchema`, `chzSignerTaskCompleteSchema`, `chzSignerTaskFailSchema`, `CHZ_SIGNER_ERROR_CODES`, aggregate `chzSignerContracts`, and inferred types (`ChzSignerPairRequest`, `ChzSignerTask`, `ChzSignerTaskComplete`, `ChzSignerTaskFail`). Task 5/6 controllers validate bodies with these. The JSON fixtures are the shared source of truth the future Rust `signer-core` will parse in its own tests.
 
 - [ ] **Step 1: Write the failing test**
 
 `packages/platform-contracts/test/chz-signer.test.ts`:
+
 ```ts
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -277,9 +277,7 @@ import {
 } from "../src/chz-signer.js";
 
 const fixture = (name: string): unknown =>
-  JSON.parse(
-    readFileSync(join(__dirname, "..", "fixtures", "chz-signer", name), "utf8"),
-  );
+  JSON.parse(readFileSync(join(__dirname, "..", "fixtures", "chz-signer", name), "utf8"));
 
 describe("chz-signer contracts", () => {
   it("accept the shared fixtures (Rust signer-core parses the same files)", () => {
@@ -293,17 +291,23 @@ describe("chz-signer contracts", () => {
   it("rejects a malformed pairing code", () => {
     expect(
       chzSignerPairRequestSchema.safeParse({
-        pairingCode: "1234", hostname: "PC", appVersion: "0.1.0",
+        pairingCode: "1234",
+        hostname: "PC",
+        appVersion: "0.1.0",
       }).success,
     ).toBe(false);
   });
 
   it("rejects unknown task fail codes and extra keys", () => {
-    expect(chzSignerTaskFailSchema.safeParse({ errorCode: "NOPE", message: "x" }).success).toBe(false);
+    expect(chzSignerTaskFailSchema.safeParse({ errorCode: "NOPE", message: "x" }).success).toBe(
+      false,
+    );
     expect(
       chzSignerTaskCompleteSchema.safeParse({
-        token: "t", expiresAt: "2026-08-28T10:00:00.000Z",
-        certThumbprint: "ab", extra: 1,
+        token: "t",
+        expiresAt: "2026-08-28T10:00:00.000Z",
+        certThumbprint: "ab",
+        extra: 1,
       }).success,
     ).toBe(false);
   });
@@ -329,6 +333,7 @@ Expected: FAIL — cannot resolve `../src/chz-signer.js`.
 
 `packages/platform-contracts/src/chz-signer.ts` (style mirrors `src/catalog.ts`: strict
 objects, `.js` import extensions, aggregate export):
+
 ```ts
 import { z } from "zod";
 
@@ -413,18 +418,23 @@ export const chzSignerContracts = {
 Fixtures (`packages/platform-contracts/fixtures/chz-signer/`):
 
 `pair-request.json`
+
 ```json
 { "pairingCode": "01234567", "hostname": "BUH-PC-01", "appVersion": "0.1.0" }
 ```
+
 `pair-response.json`
+
 ```json
 {
   "agentId": "3f0e0f5e-8d1c-4d7a-9b1a-111111111111",
-  "agentSecret": "dGVzdC1zZWNyZXQtdGVzdC1zZWNyZXQtdGVzdA",
+  "agentSecret": "example-agent-secret-not-a-real-credential",
   "tenantName": "ООО Ромашка"
 }
 ```
+
 `task.json`
+
 ```json
 {
   "id": "3f0e0f5e-8d1c-4d7a-9b1a-222222222222",
@@ -435,10 +445,12 @@ Fixtures (`packages/platform-contracts/fixtures/chz-signer/`):
   }
 }
 ```
+
 `task-complete.json`
+
 ```json
 {
-  "token": "eyJhbGciOiJSUzI1NiJ9.e30.sig",
+  "token": "example-true-api-token-not-a-real-credential",
   "expiresAt": "2026-08-28T20:00:00.000Z",
   "certThumbprint": "AB12CD34EF56AB12CD34EF56AB12CD34EF56AB12",
   "certSubject": "CN=ООО Ромашка, ИНН=7712345678",
@@ -446,13 +458,16 @@ Fixtures (`packages/platform-contracts/fixtures/chz-signer/`):
   "certNotAfter": "2027-03-01T00:00:00.000Z"
 }
 ```
+
 `task-fail.json`
+
 ```json
 { "errorCode": "CRYPTO_CONTAINER_UNAVAILABLE", "message": "Rutoken is not inserted" }
 ```
 
 In `packages/platform-contracts/src/index.ts` add the named re-exports (values and
 `export type` block) following the existing style, e.g.:
+
 ```ts
 export {
   CHZ_SIGNER_ERROR_CODES,
@@ -473,6 +488,7 @@ export type {
   ChzTrueApiAuthPayload,
 } from "./chz-signer.js";
 ```
+
 If `vitest.config.ts` / `package.json` `files` list excludes `fixtures/`, add the
 directory so it ships with the package.
 
@@ -493,18 +509,21 @@ git commit -m "feat(contracts): chz signer agent protocol schemas and shared fix
 ### Task 3: Env key + `ChzCryptoService` (AES-256-GCM token encryption)
 
 **Files:**
+
 - Modify: `apps/api/src/env.ts`
 - Modify: `.env.example`, `.env.production.example`
 - Create: `apps/api/src/modules/signer-agents/chz-crypto.service.ts`
 - Test: `apps/api/test/chz-crypto.test.ts`
 
 **Interfaces:**
+
 - Consumes: `mailEncryptionKeySchema` pattern at `apps/api/src/env.ts:76-84`.
 - Produces: env field `CHZ_TOKEN_ENCRYPTION_KEY?: Buffer`; class `ChzCryptoService` with `encrypt(tenantId: string, token: string): EncryptedChzToken` and `decrypt(tenantId: string, payload: EncryptedChzToken): string`, where `EncryptedChzToken = { encryptedToken: Buffer; tokenNonce: Buffer; tokenTag: Buffer }`. Task 6 stores/loads `chz_api_tokens` through it; Task 5's module provides it via DI factory.
 
 - [ ] **Step 1: Write the failing test**
 
 `apps/api/test/chz-crypto.test.ts`:
+
 ```ts
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
@@ -545,6 +564,7 @@ Expected: FAIL — module not found.
 
 `apps/api/src/modules/signer-agents/chz-crypto.service.ts` (pattern:
 `apps/api/src/modules/mail/mail-crypto.service.ts`, AAD = tenantId):
+
 ```ts
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { Injectable } from "@nestjs/common";
@@ -589,15 +609,15 @@ export class ChzCryptoService {
     const decipher = createDecipheriv("aes-256-gcm", this.requireKey(), payload.tokenNonce);
     decipher.setAAD(Buffer.from(tenantId, "utf8"));
     decipher.setAuthTag(payload.tokenTag);
-    return Buffer.concat([
-      decipher.update(payload.encryptedToken),
-      decipher.final(),
-    ]).toString("utf8");
+    return Buffer.concat([decipher.update(payload.encryptedToken), decipher.final()]).toString(
+      "utf8",
+    );
   }
 }
 ```
 
 In `apps/api/src/env.ts`:
+
 1. Next to the other optional secrets (near `DADATA_TOKEN`, ~line 189) add, reusing the
    existing base64-32-byte schema from `:76-84` (it already transforms to `Buffer`):
    ```ts
@@ -630,19 +650,23 @@ git commit -m "feat(api): CHZ token encryption key and AES-GCM crypto service"
 ### Task 4: Enable the `chestny_znak` channel in the registry
 
 **Files:**
+
 - Modify: `apps/api/src/modules/integrations/channel-registry.ts:131-138`
 - Test: `apps/api/test/channel-registry.test.ts`
 
 **Interfaces:**
+
 - Produces: `chzSignerSettingsSchema` (exported from `channel-registry.ts`) with shape `{ environment: "production" | "sandbox"; mchdInn?: string }`; descriptor `chestny_znak` becomes `available: true`. Task 7's scheduler parses `integration_channels.settings` with this schema.
 
 - [ ] **Step 1: Update the failing registry test first**
 
 In `apps/api/test/channel-registry.test.ts`:
+
 - Line 15: change to `expect(describeChannel("chestny_znak").available).toBe(true);`
 - Find the test asserting that non-commerceml channels accept arbitrary settings; if it
   uses `chestny_znak` as its sample, switch the sample to `gis_mt_files`.
 - Add:
+
 ```ts
 it("chestny_znak settings accept environment and mchdInn and reject junk", () => {
   const schema = describeChannel("chestny_znak").settingsSchema;
@@ -662,6 +686,7 @@ Expected: FAIL on `available` and on the new settings test.
 - [ ] **Step 3: Implement**
 
 In `channel-registry.ts`, above the `CHANNELS` array:
+
 ```ts
 export const chzSignerSettingsSchema = z
   .object({
@@ -673,6 +698,7 @@ export const chzSignerSettingsSchema = z
   })
   .strict();
 ```
+
 Update the `chestny_znak` descriptor (`:131-138`): `available: true`,
 `settingsSchema: chzSignerSettingsSchema` (keep `inbound` and
 `usesExchangeCredentials: false` as they are; the channel is managed through the
@@ -696,6 +722,7 @@ git commit -m "feat(integrations): enable chestny_znak channel with signer setti
 ### Task 5: `signer-agents` module — pairing + cabinet endpoints
 
 **Files:**
+
 - Create: `apps/api/src/modules/signer-agents/chz-constants.ts`
 - Create: `apps/api/src/modules/signer-agents/dto.ts`
 - Create: `apps/api/src/modules/signer-agents/signer-agents.service.ts`
@@ -706,6 +733,7 @@ git commit -m "feat(integrations): enable chestny_znak channel with signer setti
 - Test: `apps/api/test/signer-agents.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `PairAttemptsService` + `pairAttemptWindowStart`/`mintPairingCode`/`PAIRING_TTL_MS`/`PAIR_CODE_MAX_ATTEMPTS` from `apps/api/src/modules/device-pairing/`; `hashPairingCode`/`generateDeviceToken`/`hashDeviceToken` from `apps/api/src/pickup/device-token.ts`; `JournalService`; `ChzCryptoService` (Task 3); contracts (Task 2); tables (Task 1); guards/decorators from `tenancy`/`authorization`/`subscriptions`; OpenAPI helpers from `apps/api/src/lib/openapi.ts` and `ApiPairingCodeSecretResponse` from `apps/api/src/modules/device-pairing/secret-response.openapi.ts`.
 - Produces: `SignerAgentsService` with `overview(tenantId)`, `issuePairingCode(tenantId, userId)`, `revoke(tenantId, agentId)`, `pair(code, source, hostname, appVersion)`; routes `GET /signer-agents`, `POST /signer-agents/pairing-code`, `POST /signer-agents/:id/revoke`, `POST /signer-agent/pair`. Task 6 adds the tasks controller to this module; Task 8's admin panel calls the cabinet routes.
 
@@ -713,6 +741,7 @@ git commit -m "feat(integrations): enable chestny_znak channel with signer setti
 
 `apps/api/test/signer-agents.e2e.test.ts` (setup copied from
 `apps/api/test/integrations-delete.e2e.test.ts:32-52`; same `ready` gate):
+
 ```ts
 import express from "express";
 import request from "supertest";
@@ -747,7 +776,9 @@ describe.skipIf(!ready)("signer agents pairing", () => {
     tenantId = await signUpAndActivate(agent);
   });
 
-  afterAll(async () => { await app?.close(); });
+  afterAll(async () => {
+    await app?.close();
+  });
 
   it("issues an 8-digit pairing code", async () => {
     const res = await agent.post("/api/signer-agents/pairing-code").expect(201);
@@ -775,7 +806,9 @@ describe.skipIf(!ready)("signer agents pairing", () => {
       .expect(401);
     // agent shows up in the overview with the empty token status
     const overview = await agent.get("/api/signer-agents").expect(200);
-    expect(overview.body.agents.some((a: any) => a.name === "BUH-PC" && a.status === "active")).toBe(true);
+    expect(
+      overview.body.agents.some((a: any) => a.name === "BUH-PC" && a.status === "active"),
+    ).toBe(true);
     expect(overview.body.token.status).toBe("none");
   });
 
@@ -792,6 +825,7 @@ describe.skipIf(!ready)("signer agents pairing", () => {
   });
 });
 ```
+
 Note: if the app is NOT mounted under a `/api` global prefix in other e2e tests, drop
 the `/api` segment to match them (check how `integrations-delete.e2e.test.ts` builds
 paths and mirror it exactly).
@@ -804,6 +838,7 @@ Expected: FAIL — 404 (routes not registered).
 - [ ] **Step 3: Implement constants and DTOs**
 
 `apps/api/src/modules/signer-agents/chz-constants.ts`:
+
 ```ts
 export const CHZ_CHANNEL_TYPE = "chestny_znak" as const;
 
@@ -821,6 +856,7 @@ export type ChzTokenUiStatus = "none" | "active" | "expiring" | "expired";
 ```
 
 `apps/api/src/modules/signer-agents/dto.ts`:
+
 ```ts
 import {
   chzSignerPairRequestSchema,
@@ -883,11 +919,7 @@ import { schema } from "@markiro/db"; // ← copy the exact schema/db import sty
 import { DB } from "../../auth/auth.module";
 import type { Db } from "../../auth/auth.module"; // ← same source journal.service.ts uses for the Db type
 import { loadEnv } from "../../env";
-import {
-  generateDeviceToken,
-  hashDeviceToken,
-  hashPairingCode,
-} from "../../pickup/device-token";
+import { generateDeviceToken, hashDeviceToken, hashPairingCode } from "../../pickup/device-token";
 import {
   mintPairingCode,
   PAIR_CODE_MAX_ATTEMPTS,
@@ -945,9 +977,7 @@ export class SignerAgentsService {
     };
   }
 
-  private tokenStatus(
-    token: typeof schema.chzApiTokens.$inferSelect | null,
-  ): SignerTokenStatusDto {
+  private tokenStatus(token: typeof schema.chzApiTokens.$inferSelect | null): SignerTokenStatusDto {
     if (!token) {
       return { status: "none", obtainedAt: null, expiresAt: null, certThumbprint: null };
     }
@@ -1005,10 +1035,7 @@ export class SignerAgentsService {
           });
         });
       } catch (error) {
-        if (
-          error instanceof PairingCodeHashCollisionError ||
-          this.isUniqueViolation(error)
-        ) {
+        if (error instanceof PairingCodeHashCollisionError || this.isUniqueViolation(error)) {
           continue;
         }
         throw error;
@@ -1022,9 +1049,7 @@ export class SignerAgentsService {
   // apps/api/src/modules/station-pairing/station-pairing.service.ts:482-499
   private isUniqueViolation(error: unknown): boolean {
     const candidates = [error, (error as { cause?: unknown })?.cause];
-    return candidates.some(
-      (e) => (e as { code?: string } | undefined)?.code === "23505",
-    );
+    return candidates.some((e) => (e as { code?: string } | undefined)?.code === "23505");
   }
 
   async revoke(tenantId: string, agentId: string): Promise<void> {
@@ -1041,9 +1066,7 @@ export class SignerAgentsService {
       .returning({ id: schema.chzSignerAgents.id, name: schema.chzSignerAgents.name });
     if (!agent) throw new NotFoundException();
     // Отзыв агента = отзыв доступа: чистим токен тенанта (спека, §Security).
-    await this.db
-      .delete(schema.chzApiTokens)
-      .where(eq(schema.chzApiTokens.tenantId, tenantId));
+    await this.db.delete(schema.chzApiTokens).where(eq(schema.chzApiTokens.tenantId, tenantId));
     await this.journal.append({
       tenantId,
       channelType: CHZ_CHANNEL_TYPE,
@@ -1146,6 +1169,7 @@ export class SignerAgentsService {
   }
 }
 ```
+
 Note: `schema.organization` — use the exact export name the other services use for the
 organization table (check `journal.service.ts` / `station-pairing.service.ts` imports and
 match).
@@ -1157,6 +1181,7 @@ copied from `apps/api/src/modules/integrations/integrations.controller.ts:65-69`
 `kiosks.controller.ts:223-247` — including `SecurityAuditService.credentialMutation`
 audit calls for issue/revoke, actions `chz_signer_pairing_code.issue` and
 `chz_signer_agent.revoke`):
+
 ```ts
 @ApiTags("signer-agents")
 @Controller("signer-agents")
@@ -1180,13 +1205,8 @@ export class SignerAgentsController {
   @Header("Cache-Control", "no-store")
   @ApiPairingCodeSecretResponse()
   @RequireSubscriptionWrite()
-  @RequirePermissions(
-    CABINET_CAPABILITY.INTEGRATIONS_WRITE,
-    CABINET_CAPABILITY.CREDENTIALS_MANAGE,
-  )
-  async issuePairingCode(
-    @Req() req: RequestWithTenant,
-  ): Promise<IssueSignerPairingCodeResultDto> {
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE, CABINET_CAPABILITY.CREDENTIALS_MANAGE)
+  async issuePairingCode(@Req() req: RequestWithTenant): Promise<IssueSignerPairingCodeResultDto> {
     const result = await this.service.issuePairingCode(req.tenantId!, req.userId!);
     this.auditMutation(req, "chz_signer_pairing_code.issue", "succeeded");
     return result;
@@ -1195,10 +1215,7 @@ export class SignerAgentsController {
   @Post(":id/revoke")
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequireSubscriptionWrite()
-  @RequirePermissions(
-    CABINET_CAPABILITY.INTEGRATIONS_WRITE,
-    CABINET_CAPABILITY.CREDENTIALS_MANAGE,
-  )
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE, CABINET_CAPABILITY.CREDENTIALS_MANAGE)
   async revoke(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     await this.service.revoke(req.tenantId!, id);
     this.auditMutation(req, "chz_signer_agent.revoke", "succeeded");
@@ -1206,6 +1223,7 @@ export class SignerAgentsController {
   // auditMutation helper: copy the shape from kiosks.controller.ts:249+
 }
 ```
+
 `signerAgentsOverviewOpenApiSchema`: hand-written `SchemaObject` in `dto.ts` following
 the `apiKeySummaryListOpenApiSchema` pattern (`api-keys.controller.ts:41-45`) —
 `additionalProperties: false`, required `agents`, `token`.
@@ -1213,6 +1231,7 @@ the `apiKeySummaryListOpenApiSchema` pattern (`api-keys.controller.ts:41-45`) �
 `apps/api/src/modules/signer-agents/signer-agent-pair.controller.ts` (deliberately a
 separate controller — no class-level guard, same reasoning as
 `kiosk-pair.controller.ts:9-19`):
+
 ```ts
 @ApiTags("signer-agent")
 @Controller("signer-agent")
@@ -1234,6 +1253,7 @@ export class SignerAgentPairController {
 
 `apps/api/src/modules/signer-agents/signer-agents.module.ts` (DynamicModule — needs env
 for the crypto key; pattern `storage.module.ts:1-19`):
+
 ```ts
 import { Module, type DynamicModule } from "@nestjs/common";
 import type { Env } from "../../env";
@@ -1264,6 +1284,7 @@ export class SignerAgentsModule {
   }
 }
 ```
+
 If `SecurityAuditService` is not globally provided, add it to `providers` the same way
 `kiosks.module.ts` does.
 
@@ -1287,6 +1308,7 @@ git commit -m "feat(api): chz signer agent pairing and cabinet endpoints"
 ### Task 6: Agent guard + task queue endpoints
 
 **Files:**
+
 - Create: `apps/api/src/tenancy/signer-agent.guard.ts`
 - Create: `apps/api/src/modules/signer-agents/signer-tasks.service.ts`
 - Create: `apps/api/src/modules/signer-agents/signer-agent-tasks.controller.ts`
@@ -1294,6 +1316,7 @@ git commit -m "feat(api): chz signer agent pairing and cabinet endpoints"
 - Test: `apps/api/test/signer-agent-tasks.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `hashDeviceToken`; `ChzCryptoService.encrypt`; contracts `chzSignerTaskCompleteSchema` / `chzSignerTaskFailSchema` / `ChzSignerTask`; tables from Task 1.
 - Produces: `SignerAgentGuard` (header `x-signer-token`, sets `req.tenantId` + `req.signerAgentId`, bumps `lastSeenAt`); `SignerTasksService` with `claimNext(tenantId, agentId, waitMs): Promise<ChzSignerTask | null>`, `complete(tenantId, agentId, taskId, body: ChzSignerTaskComplete): Promise<void>`, `fail(tenantId, agentId, taskId, body: ChzSignerTaskFail): Promise<void>`; routes `GET /signer-agent/tasks/next?wait=`, `POST /signer-agent/tasks/:id/complete`, `POST /signer-agent/tasks/:id/fail`. Task 7's scheduler inserts the rows this service serves.
 
@@ -1302,6 +1325,7 @@ git commit -m "feat(api): chz signer agent pairing and cabinet endpoints"
 `apps/api/test/signer-agent-tasks.e2e.test.ts` (same bootstrap as Task 5's test; add a
 local helper that pairs an agent and returns its secret, and a helper that inserts a
 pending task directly via `db`):
+
 ```ts
 // bootstrap identical to signer-agents.e2e.test.ts, plus: const db = ref.get(DB);
 
@@ -1400,10 +1424,15 @@ it("does not let an agent complete a task claimed by another agent", async () =>
   await request(app.getHttpServer())
     .post(`/api/signer-agent/tasks/${taskId}/complete`)
     .set("x-signer-token", a2.secret)
-    .send({ token: "x", expiresAt: new Date(Date.now() + 1000).toISOString(), certThumbprint: "CD" })
+    .send({
+      token: "x",
+      expiresAt: new Date(Date.now() + 1000).toISOString(),
+      certThumbprint: "CD",
+    })
     .expect(404);
 });
 ```
+
 Note: this test requires `CHZ_TOKEN_ENCRYPTION_KEY` in the environment — add
 `CHZ_TOKEN_ENCRYPTION_KEY` (any `openssl rand -base64 32` value) to the dev `.env` and
 include it in the `ready` gate: `const ready = Boolean(... && process.env.CHZ_TOKEN_ENCRYPTION_KEY)`.
@@ -1417,6 +1446,7 @@ Expected: FAIL — 404 on `/signer-agent/tasks/next`.
 
 `apps/api/src/tenancy/signer-agent.guard.ts` (clone of
 `apps/api/src/tenancy/kiosk-device.guard.ts` with the signer header/table):
+
 ```ts
 import {
   CanActivate,
@@ -1472,6 +1502,7 @@ export class SignerAgentGuard implements CanActivate {
 - [ ] **Step 4: Implement `SignerTasksService`**
 
 `apps/api/src/modules/signer-agents/signer-tasks.service.ts`:
+
 ```ts
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, eq, sql } from "drizzle-orm";
@@ -1514,10 +1545,7 @@ export class SignerTasksService {
     }
   }
 
-  private async tryClaim(
-    tenantId: string,
-    agentId: string,
-  ): Promise<ChzSignerTask | null> {
+  private async tryClaim(tenantId: string, agentId: string): Promise<ChzSignerTask | null> {
     // Одностейтментный атомарный claim: SKIP LOCKED защищает от гонки двух агентов.
     const [task] = await this.db
       .update(schema.chzSignerTasks)
@@ -1669,6 +1697,7 @@ export class SignerTasksService {
 - [ ] **Step 5: Implement the controller and register everything**
 
 `apps/api/src/modules/signer-agents/signer-agent-tasks.controller.ts`:
+
 ```ts
 const nextTaskQuerySchema = z.object({
   wait: z.coerce.number().int().min(0).max(25_000).default(25_000),
@@ -1713,6 +1742,7 @@ export class SignerAgentTasksController {
   }
 }
 ```
+
 Add an OpenAPI security scheme for the `x-signer-token` header following how
 `ApiKioskAuth()` is defined in `apps/api/src/lib/openapi.ts`, and apply it to this
 controller (needed for the coverage gate).
@@ -1737,11 +1767,13 @@ git commit -m "feat(api): signer agent auth guard and task queue endpoints"
 ### Task 7: Scheduler service + pg-boss cron
 
 **Files:**
+
 - Create: `apps/api/src/modules/signer-agents/signer-scheduler.service.ts`
 - Modify: `apps/api/src/jobs/jobs.module.ts`
 - Test: `apps/api/test/signer-scheduler.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: tables from Task 1; `chzSignerSettingsSchema` (Task 4); `CHZ_TRUE_API_BASE_URLS`, `CHZ_TOKEN_REFRESH_LEAD_MS`, `CHZ_TASK_STALE_MS` (Task 5); `JournalService`.
 - Produces: `SignerSchedulerService.run(now?: Date): Promise<void>` — the pg-boss handler. Deterministic given `now`, so tests drive it directly.
 
@@ -1750,6 +1782,7 @@ git commit -m "feat(api): signer agent auth guard and task queue endpoints"
 `apps/api/test/signer-scheduler.e2e.test.ts` — instantiate the service directly against
 the test DB (bootstrap the Nest app as in Task 5's test to get `db = ref.get(DB)` and a
 paired tenant, or insert an agent row directly). Cases:
+
 ```ts
 // helper: insertAgent(tenantId) — direct insert into chzSignerAgents (status active, secretHash: randomBytes hash)
 // helper: setToken(tenantId, expiresAt) — upsert chzApiTokens with dummy bytea Buffers
@@ -1788,10 +1821,14 @@ it("skips tenants with a fresh token and fires when it nears expiry", async () =
 
 it("uses sandbox URL and inn from channel settings", async () => {
   await insertAgent(tenantId);
-  await db.insert(schema.integrationChannels).values({
-    tenantId, type: "chestny_znak",
-    settings: { environment: "sandbox", mchdInn: "7712345678" },
-  }).onConflictDoUpdate({ /* target (tenantId,type), set settings */ });
+  await db
+    .insert(schema.integrationChannels)
+    .values({
+      tenantId,
+      type: "chestny_znak",
+      settings: { environment: "sandbox", mchdInn: "7712345678" },
+    })
+    .onConflictDoUpdate({/* target (tenantId,type), set settings */});
   await svc.run(new Date());
   const [task] = await pendingTasks(tenantId);
   expect(task.payload.trueApiBaseUrl).toBe("https://markirovka.sandbox.crptech.ru/api/v3/true-api");
@@ -1800,12 +1837,20 @@ it("uses sandbox URL and inn from channel settings", async () => {
 
 it("expires stale pending and claimed tasks", async () => {
   await insertAgent(tenantId);
-  const [t] = await db.insert(schema.chzSignerTasks).values({
-    tenantId, type: "true_api_auth", payload: {},
-    createdAt: new Date(Date.now() - 31 * 60_000),
-  }).returning();
+  const [t] = await db
+    .insert(schema.chzSignerTasks)
+    .values({
+      tenantId,
+      type: "true_api_auth",
+      payload: {},
+      createdAt: new Date(Date.now() - 31 * 60_000),
+    })
+    .returning();
   await svc.run(new Date());
-  const [row] = await db.select().from(schema.chzSignerTasks).where(eq(schema.chzSignerTasks.id, t.id));
+  const [row] = await db
+    .select()
+    .from(schema.chzSignerTasks)
+    .where(eq(schema.chzSignerTasks.id, t.id));
   expect(row.status).toBe("expired");
 });
 ```
@@ -1818,6 +1863,7 @@ Expected: FAIL — service module not found.
 - [ ] **Step 3: Implement the scheduler**
 
 `apps/api/src/modules/signer-agents/signer-scheduler.service.ts`:
+
 ```ts
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -1954,10 +2000,12 @@ export class SignerSchedulerService {
 In `apps/api/src/jobs/jobs.module.ts`, following the exact pattern of
 `prune-integration-journal` (constants at `:86-87`, register at `:173-180`-style block,
 startup run near `:317`):
+
 ```ts
 const CHZ_SIGNER_SCHEDULER_QUEUE_NAME = "chz-signer-token-scheduler";
 const CHZ_SIGNER_SCHEDULER_QUEUE_CRON = "*/15 * * * *";
 ```
+
 - Import `SignerSchedulerService`, add it (and nothing else — `JournalService` is already
   a provider there) to the module's providers and inject into `PgBossService`.
 - In `onModuleInit`: `createQueue` → `schedule(CHZ_SIGNER_SCHEDULER_QUEUE_NAME, CHZ_SIGNER_SCHEDULER_QUEUE_CRON)` → `work(...)` calling `this.signerScheduler.run()`; add
@@ -1981,6 +2029,7 @@ git commit -m "feat(api): chz signer token refresh scheduler on pg-boss cron"
 ### Task 8: Admin UI — signer panel on the Chestny ZNAK channel page
 
 **Files:**
+
 - Modify: `apps/admin/src/pages/integrations/api.ts`
 - Create: `apps/admin/src/pages/integrations/SignerAgentsPanel.tsx`
 - Modify: `apps/admin/src/pages/integrations/ChannelPage.tsx:600-672` (add the branch)
@@ -1988,6 +2037,7 @@ git commit -m "feat(api): chz signer token refresh scheduler on pg-boss cron"
 - Test: `apps/admin/test/signer-agents-panel.test.tsx`
 
 **Interfaces:**
+
 - Consumes: cabinet routes from Task 5 (`GET /signer-agents`, `POST /signer-agents/pairing-code`, `POST /signer-agents/:id/revoke`); `apiFetch` from `apps/admin/src/api/client.ts`; `useCan` from `apps/admin/src/access/context.js`; components from `@markiro/ui` (`Card`, `Table`, `Button`, `StatusChip`, `ConfirmDialog`, `Alert`, `Spinner`, `EmptyState`).
 - Produces: `SignerAgentsPanel` rendered on `/integrations/chestny_znak`.
 
@@ -1996,6 +2046,7 @@ git commit -m "feat(api): chz signer token refresh scheduler on pg-boss cron"
 `apps/admin/test/signer-agents-panel.test.tsx` — follow the mocking/render pattern of
 `apps/admin/test/device-pairing.test.tsx` (same QueryClient/i18n/router wrappers and
 fetch-mock helper the suite already uses). Test cases:
+
 ```tsx
 it("renders agents and token status", async () => {
   // mock GET /signer-agents → { agents: [{ id: "a1", name: "BUH-PC", status: "active",
@@ -2025,6 +2076,7 @@ Expected: FAIL — component not found.
 Append to `apps/admin/src/pages/integrations/api.ts` (types mirror
 `apps/api/src/modules/signer-agents/dto.ts` — same manual-mirror convention as the rest
 of the file):
+
 ```ts
 export type SignerAgentStatus = "active" | "revoked";
 
@@ -2089,6 +2141,7 @@ export function useRevokeSignerAgent() {
 - [ ] **Step 4: Implement the panel and wire it into `ChannelPage`**
 
 `apps/admin/src/pages/integrations/SignerAgentsPanel.tsx`:
+
 ```tsx
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -2123,8 +2176,7 @@ export function SignerAgentsPanel() {
   const { t } = useTranslation();
   const { data, isLoading, error } = useSignerAgents();
   const canManage =
-    useCan(CABINET_CAPABILITY.INTEGRATIONS_WRITE) &&
-    useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
+    useCan(CABINET_CAPABILITY.INTEGRATIONS_WRITE) && useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
   const revoke = useRevokeSignerAgent();
   const [code, setCode] = useState<SignerPairingCodeResult | null>(null);
   const [issuing, setIssuing] = useState(false);
@@ -2231,19 +2283,25 @@ export function SignerAgentsPanel() {
   );
 }
 ```
+
 Adjust `StatusChip`/`ConfirmDialog`/`Table` props to the actual component APIs used in
 `ChannelPage.tsx` and `index.tsx` (e.g. if `StatusChip` takes `status` + `label` exactly
 as in `index.tsx:87-137`, keep it; otherwise mirror the local idiom). If `useCan` cannot
 be called twice conditionally, hoist both calls unconditionally (hooks rule).
 
 In `ChannelPage.tsx`, inside the type-specific block (`:600-672`), add:
+
 ```tsx
-{channel.type === "chestny_znak" ? <SignerAgentsPanel /> : null}
+{
+  channel.type === "chestny_znak" ? <SignerAgentsPanel /> : null;
+}
 ```
+
 (and the import at the top).
 
 i18n — `apps/admin/src/i18n/ru.json` (mirror the keys into `en.json` with English
 copy):
+
 ```json
 "signer": {
   "title": "Агент КЭП",
@@ -2259,6 +2317,7 @@ copy):
   "loadError": "Не удалось загрузить список агентов"
 }
 ```
+
 Place under `pages.integrations.channel` alongside the existing `settings`/`danger`
 blocks.
 
@@ -2289,6 +2348,7 @@ pnpm --filter @markiro/platform-contracts test
 pnpm --filter @markiro/api test
 pnpm --filter @markiro/admin test
 ```
+
 Expected: all green (API suite runs serially — allow time).
 
 - [ ] **Step 2: Lint and typecheck the touched packages**
@@ -2298,6 +2358,7 @@ pnpm --filter @markiro/api lint && pnpm --filter @markiro/admin lint
 pnpm --filter @markiro/api exec tsc -p tsconfig.json --noEmit
 pnpm --filter @markiro/admin typecheck
 ```
+
 Expected: clean.
 
 - [ ] **Step 3: Update the graphify graph if present**

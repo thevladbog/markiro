@@ -7,7 +7,10 @@
   "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "fixtures"],
+  "files": [
+    "dist",
+    "fixtures"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

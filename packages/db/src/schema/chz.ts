@@ -15,7 +15,9 @@ import {
 import { organization } from "./auth.js";
 
 const tenantId = () =>
-  text("tenant_id").notNull().references(() => organization.id);
+  text("tenant_id")
+    .notNull()
+    .references(() => organization.id);
 
 const bytea = customType<{ data: Buffer }>({
   dataType() {
@@ -57,9 +59,7 @@ export const chzSignerAgents = pgTable(
     certNotAfter: timestamp("cert_not_after", { withTimezone: true }),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     unique("chz_signer_agents_tenant_id_uq").on(t.tenantId, t.id),
@@ -84,9 +84,7 @@ export const chzSignerPairingCodes = pgTable(
     usedAt: timestamp("used_at", { withTimezone: true }),
     attempts: integer("attempts").notNull().default(0),
     issuedByUserId: text("issued_by_user_id").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("chz_signer_pairing_codes_hash_idx").on(t.codeHash),
@@ -107,19 +105,14 @@ export const chzSignerTasks = pgTable(
     agentId: uuid("agent_id"),
     type: text("type").notNull(),
     status: text("status").notNull().default("pending"),
-    payload: jsonb("payload")
-      .$type<Record<string, unknown>>()
-      .notNull()
-      .default({}),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
     resultSummary: jsonb("result_summary").$type<Record<string, unknown>>(),
     attempts: integer("attempts").notNull().default(0),
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     foreignKey({
@@ -157,9 +150,7 @@ export const chzApiTokens = pgTable("chz_api_tokens", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   agentId: uuid("agent_id"),
   certThumbprint: text("cert_thumbprint"),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export type ChzSignerAgentRow = typeof chzSignerAgents.$inferSelect;

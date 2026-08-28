@@ -120,7 +120,9 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
   const inventoryDocumentRunner = {
     run: vi.fn(async () => undefined),
   } as unknown as InventoryDocumentRunnerService;
-  const signerScheduler = { run: vi.fn(async () => undefined) } as unknown as SignerSchedulerService;
+  const signerScheduler = {
+    run: vi.fn(async () => undefined),
+  } as unknown as SignerSchedulerService;
   return {
     service: new PgBossService(
       db,

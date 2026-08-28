@@ -1,5 +1,5 @@
 {
   "agentId": "3f0e0f5e-8d1c-4d7a-9b1a-111111111111",
-  "agentSecret": "dGVzdC1zZWNyZXQtdGVzdC1zZWNyZXQtdGVzdA",
+  "agentSecret": "example-agent-secret-not-a-real-credential",
   "tenantName": "ООО Ромашка"
 }

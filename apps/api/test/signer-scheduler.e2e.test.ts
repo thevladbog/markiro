@@ -18,9 +18,9 @@ import { signUpAndActivate } from "./support/auth";
 
 const ready = Boolean(
   process.env.DATABASE_URL &&
-    process.env.BETTER_AUTH_SECRET &&
-    process.env.BETTER_AUTH_URL &&
-    process.env.CHZ_TOKEN_ENCRYPTION_KEY,
+  process.env.BETTER_AUTH_SECRET &&
+  process.env.BETTER_AUTH_URL &&
+  process.env.CHZ_TOKEN_ENCRYPTION_KEY,
 );
 
 describe.skipIf(!ready)("signer token refresh scheduler", () => {

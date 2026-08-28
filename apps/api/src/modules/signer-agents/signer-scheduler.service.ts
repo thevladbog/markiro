@@ -74,9 +74,7 @@ export class SignerSchedulerService {
       // through a real login just to fail storing the result, expire after
       // 30 minutes, and re-enqueue: a silent infinite signing loop. Skip
       // enqueueing entirely instead; stale-task expiry above still runs.
-      this.logger.error(
-        "CHZ_TOKEN_ENCRYPTION_KEY is not configured; token refresh paused",
-      );
+      this.logger.error("CHZ_TOKEN_ENCRYPTION_KEY is not configured; token refresh paused");
       return;
     }
     const tenants = await this.db
@@ -158,9 +156,7 @@ export class SignerSchedulerService {
     }
   }
 
-  private async loadSettings(
-    tenantId: string,
-  ): Promise<z.infer<typeof chzSignerSettingsSchema>> {
+  private async loadSettings(tenantId: string): Promise<z.infer<typeof chzSignerSettingsSchema>> {
     const [channel] = await this.db
       .select({ settings: schema.integrationChannels.settings })
       .from(schema.integrationChannels)

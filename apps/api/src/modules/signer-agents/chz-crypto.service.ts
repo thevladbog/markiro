@@ -46,9 +46,8 @@ export class ChzCryptoService {
     const decipher = createDecipheriv("aes-256-gcm", this.requireKey(), payload.tokenNonce);
     decipher.setAAD(Buffer.from(tenantId, "utf8"));
     decipher.setAuthTag(payload.tokenTag);
-    return Buffer.concat([
-      decipher.update(payload.encryptedToken),
-      decipher.final(),
-    ]).toString("utf8");
+    return Buffer.concat([decipher.update(payload.encryptedToken), decipher.final()]).toString(
+      "utf8",
+    );
   }
 }

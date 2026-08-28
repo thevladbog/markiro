@@ -2,7 +2,16 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
-import { Alert, Button, Card, ConfirmDialog, EmptyState, Spinner, StatusChip, Table } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  ConfirmDialog,
+  EmptyState,
+  Spinner,
+  StatusChip,
+  Table,
+} from "@markiro/ui";
 import type { StatusChipStatus, TableColumn } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
@@ -128,7 +137,8 @@ export function SignerAgentsPanel() {
       {
         key: "lastSeen",
         title: t("pages.integrations.channel.signer.columns.lastSeen"),
-        render: (agent) => (agent.lastSeenAt ? dateFormatter.format(new Date(agent.lastSeenAt)) : "—"),
+        render: (agent) =>
+          agent.lastSeenAt ? dateFormatter.format(new Date(agent.lastSeenAt)) : "—",
       },
       ...(canManage
         ? [
