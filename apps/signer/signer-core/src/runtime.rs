@@ -269,7 +269,12 @@ impl Runtime {
 
             match client.poll(&secret, POLL_WAIT_MS).await {
                 Ok(None) => {
+                    // A poll that answers is proof the previous failure is over.
+                    // Without this the status panel keeps showing the old error
+                    // under a healthy phase until the next token lands, which
+                    // can be ten hours away.
                     failures = 0;
+                    self.set_last_error(None);
                     on_change(self.status());
                 }
                 Ok(Some(task)) => {
