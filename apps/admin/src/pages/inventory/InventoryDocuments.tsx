@@ -20,7 +20,12 @@ import type {
   InventoryStatus,
 } from "./schemas.js";
 
-const RETRYABLE_ERRORS = new Set(["QUEUE_FAILED", "STORAGE_FAILED", "GENERATION_FAILED"]);
+const RETRYABLE_ERRORS = new Set([
+  "QUEUE_FAILED",
+  "STORAGE_FAILED",
+  "GENERATION_FAILED",
+  "INVALID_ORGANIZATION_INN",
+]);
 
 function openDownload(value: InventoryDocumentDownload): void {
   const anchor = document.createElement("a");
@@ -49,6 +54,9 @@ function statusTone(status: InventoryDocumentRun["status"]): "neutral" | "info" 
 function runFailureMessage(code: string | null, t: TFunction): string {
   if (code === "VERIFIED_PRODUCTION_DATE_MISSING") {
     return t("pages.inventory.documents.errors.verifiedProductionDateMissing");
+  }
+  if (code === "INVALID_ORGANIZATION_INN") {
+    return t("pages.inventory.documents.errors.INVALID_ORGANIZATION_INN");
   }
   return t("pages.inventory.documents.failed", { code: code ?? "UNKNOWN" });
 }
@@ -415,6 +423,7 @@ function errorMessage(error: unknown, t: (key: string) => string): string {
       INVENTORY_DOCUMENT_ARTIFACTS_NOT_READY: "notReady",
       INVENTORY_DOCUMENTS_NOT_ACKNOWLEDGED: "notAcknowledged",
       INVENTORY_LATE_EVENTS_UNRESOLVED: "lateEvents",
+      ORGANIZATION_INN_REQUIRED: "ORGANIZATION_INN_REQUIRED",
     };
     const key = known[error.code];
     if (key) return t(`pages.inventory.documents.errors.${key}`);
