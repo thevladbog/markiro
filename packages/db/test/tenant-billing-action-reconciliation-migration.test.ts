@@ -44,7 +44,8 @@ describe.skipIf(!databaseUrl)("tenant billing action reconciliation migration", 
         entry.tag !== "0069_tenant_billing_action_reconciliation" &&
         entry.tag !== "0070_tenant_billing_platform_workflow" &&
         entry.tag !== "0071_tenant_billing_target_cardinality" &&
-        entry.tag !== "0072_tenant_billing_stale_family_repair",
+        entry.tag !== "0072_tenant_billing_stale_family_repair" &&
+        entry.tag !== "0073_tenant_billing_notification_delivery",
     );
     await writeFile(journalPath, JSON.stringify(journal));
     await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0068 });

@@ -236,6 +236,7 @@
   },
   "shell": {
     "navLabel": "Main navigation",
+    "billingAttention": "Billing, attention required: {{count}}",
     "sections": {
       "production": "Production",
       "reference": "Reference data",

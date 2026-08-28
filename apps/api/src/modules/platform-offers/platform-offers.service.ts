@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
@@ -32,12 +32,14 @@ import {
   beginPlatformBillingMutation,
   commitPlatformBillingMutation,
 } from "../platform-billing-idempotency";
+import { TenantBillingNotificationsService } from "../tenant-billing/tenant-billing-notifications.service";
 
 @Injectable()
 export class PlatformOffersService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly audit: PlatformAuditService,
+    @Optional() private readonly notifications?: TenantBillingNotificationsService,
   ) {}
 
   async create(actor: PlatformPrincipal, input: CreateOfferDto): Promise<OfferServiceDetailSource> {
@@ -197,6 +199,13 @@ export class PlatformOffersService {
           buyerAccountLast4: buyerAccount ? bankAccountLast4(buyerAccount) : null,
         },
         requestId: null,
+      });
+      await this.notifications?.enqueueInTransaction(tx, {
+        tenantId: updated.tenantId,
+        eventKind: "offer_published",
+        entityId: updated.id,
+        revision: updated.revision,
+        subjectName: updated.number ?? `Offer ${updated.revision}`,
       });
       return this.detailWith(tx, updated.tenantId, updated.id);
     });

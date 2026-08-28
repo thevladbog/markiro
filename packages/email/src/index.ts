@@ -22,6 +22,11 @@ import {
   LandingDemoConfirmationEmail,
   type LandingDemoConfirmationEmailProps,
 } from "./landing-demo-confirmation.js";
+import {
+  TenantBillingNotificationEmail,
+  tenantBillingNotificationSubject,
+  type TenantBillingNotificationEmailProps,
+} from "./tenant-billing-notification.js";
 
 export type EmailTemplateInput =
   | ({ kind: "organization-invitation" } & OrganizationInvitationEmailProps)
@@ -30,6 +35,7 @@ export type EmailTemplateInput =
   | ({ kind: "platform-user-activation" } & PlatformUserActivationEmailProps)
   | ({ kind: "landing-demo-notification" } & LandingDemoNotificationEmailProps)
   | ({ kind: "landing-demo-confirmation" } & LandingDemoConfirmationEmailProps)
+  | ({ kind: "tenant-billing-notification" } & TenantBillingNotificationEmailProps)
   | ({ kind: "email-verification" } & EmailVerificationEmailProps);
 
 export interface RenderedEmail {
@@ -144,6 +150,19 @@ function resolveTemplate(input: EmailTemplateInput): {
         }),
       };
     }
+    case "tenant-billing-notification": {
+      return {
+        subject: tenantBillingNotificationSubject(input.locale, input.eventKind, input.subjectName),
+        element: createElement(TenantBillingNotificationEmail, {
+          locale: input.locale,
+          recipientName: input.recipientName,
+          organizationName: input.organizationName,
+          eventKind: input.eventKind,
+          subjectName: input.subjectName,
+          actionUrl: input.actionUrl,
+        }),
+      };
+    }
   }
 }
 
@@ -154,6 +173,9 @@ export type {
   OrganizationInvitationEmailProps,
   PasswordResetEmailProps,
   PlatformUserActivationEmailProps,
+  TenantBillingNotificationEmailProps,
   TenantOwnerActivationEmailProps,
 };
 export type { LandingLocale } from "./landing-demo-notification.js";
+export type { TenantBillingEventKind } from "./tenant-billing-notification.js";
+export { TENANT_BILLING_EVENT_KINDS } from "./tenant-billing-notification.js";

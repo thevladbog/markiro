@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -29,6 +30,7 @@ import {
   resolveCommercialBillingDetails,
 } from "./commercial-snapshots";
 import type { CreateInvoiceDto } from "./dto";
+import { TenantBillingNotificationsService } from "../tenant-billing/tenant-billing-notifications.service";
 
 const cents = (value: string): bigint => {
   const [whole, fraction = "00"] = value.split(".");
@@ -42,6 +44,7 @@ export class BillingService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly audit: PlatformAuditService,
+    @Optional() private readonly notifications?: TenantBillingNotificationsService,
   ) {}
 
   async create(
@@ -517,6 +520,15 @@ export class BillingService {
         },
         requestId: null,
       });
+      if (this.notifications?.isDueSoon(updated.dueDate)) {
+        await this.notifications.enqueueInTransaction(tx, {
+          tenantId: updated.tenantId,
+          eventKind: "invoice_due_soon",
+          entityId: updated.id,
+          revision: 1,
+          subjectName: updated.number,
+        });
+      }
       return { ...updated, sourceRequestId };
     });
   }

@@ -54,7 +54,8 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
         entry.tag !== "0069_tenant_billing_action_reconciliation" &&
         entry.tag !== "0070_tenant_billing_platform_workflow" &&
         entry.tag !== "0071_tenant_billing_target_cardinality" &&
-        entry.tag !== "0072_tenant_billing_stale_family_repair",
+        entry.tag !== "0072_tenant_billing_stale_family_repair" &&
+        entry.tag !== "0073_tenant_billing_notification_delivery",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0065_saas_party_actual_addresses");
     await writeFile(journalPath, JSON.stringify(journal));

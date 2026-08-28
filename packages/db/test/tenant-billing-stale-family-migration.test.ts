@@ -29,7 +29,7 @@ describe("tenant billing stale-family migration metadata", () => {
     };
 
     expect(current.prevId).toBe(previous.id);
-    expect(journal.entries.at(-1)).toMatchObject({
+    expect(journal.entries.find(({ idx }) => idx === 72)).toMatchObject({
       idx: 72,
       tag: "0072_tenant_billing_stale_family_repair",
     });
@@ -70,7 +70,8 @@ describe.skipIf(!databaseUrl)("tenant billing stale-family upgrade", () => {
     journal.entries = journal.entries.filter(
       ({ tag }) =>
         tag !== "0071_tenant_billing_target_cardinality" &&
-        tag !== "0072_tenant_billing_stale_family_repair",
+        tag !== "0072_tenant_billing_stale_family_repair" &&
+        tag !== "0073_tenant_billing_notification_delivery",
     );
     await writeFile(journalPath, JSON.stringify(journal));
     await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0070 });

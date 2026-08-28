@@ -103,9 +103,14 @@ export interface TenantBillingOverviewDto extends TenantSubscriptionBillingDto {
   attentionCount: number;
 }
 
+export interface TenantBillingAttentionDto {
+  count: number;
+}
+
 /** Query-key family reserved for tenant billing; actions invalidate only this family. */
 export const tenantBillingKeys = {
   all: ["tenant-billing"] as const,
+  attention: () => [...tenantBillingKeys.all, "attention"] as const,
   overview: () => [...tenantBillingKeys.all, "overview"] as const,
   subscription: () => [...tenantBillingKeys.all, "subscription"] as const,
   invoices: () => [...tenantBillingKeys.all, "invoices"] as const,
@@ -304,12 +309,26 @@ export function fetchBillingOverview(): Promise<TenantBillingOverviewDto> {
   return apiFetch<TenantBillingOverviewDto>("/billing/overview");
 }
 
+export function fetchBillingAttention(): Promise<TenantBillingAttentionDto> {
+  return apiFetch<TenantBillingAttentionDto>("/billing/attention");
+}
+
 export function fetchBillingSubscription(): Promise<TenantSubscriptionBillingDto> {
   return apiFetch<TenantSubscriptionBillingDto>("/billing/subscription");
 }
 
 export function useBillingOverview() {
   return useQuery({ queryKey: tenantBillingKeys.overview(), queryFn: fetchBillingOverview });
+}
+
+export function useBillingAttention(enabled = true) {
+  return useQuery({
+    queryKey: tenantBillingKeys.attention(),
+    queryFn: fetchBillingAttention,
+    enabled,
+    retry: false,
+    staleTime: 30_000,
+  });
 }
 
 export function useBillingSubscription() {

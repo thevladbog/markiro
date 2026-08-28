@@ -91,6 +91,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /products/:id (ProductsController.getProduct)",
       "GET /products/:id/image/:checksum (ProductsController.readImage)",
       "GET /billing/overview (TenantBillingController.overview)",
+      "GET /billing/attention (TenantBillingController.attention)",
       "GET /billing/subscription (TenantBillingController.subscription)",
       "GET /billing/invoices (TenantBillingController.listInvoices)",
       "GET /billing/invoices/:id (TenantBillingController.invoiceDetail)",

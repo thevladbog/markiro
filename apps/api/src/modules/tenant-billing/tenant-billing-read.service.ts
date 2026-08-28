@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { and, desc, eq, gt, gte, inArray, lt, lte, notInArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { tenantBillingActObjectKey } from "@markiro/platform-contracts";
@@ -16,6 +16,10 @@ import type {
   TenantOfferDetailDto,
   TenantSubscriptionBillingDto,
 } from "./dto";
+import {
+  BILLING_DUE_SOON_DAYS,
+  TenantBillingNotificationsService,
+} from "./tenant-billing-notifications.service";
 
 type InvoiceRow = typeof schema.invoices.$inferSelect;
 type DocumentRow = typeof schema.invoiceDocuments.$inferSelect;
@@ -26,6 +30,7 @@ export class TenantBillingReadService {
     @Inject(DB) private readonly db: Db,
     private readonly storage: ObjectStorageService,
     private readonly entitlements: EntitlementsService,
+    @Optional() private readonly notifications?: TenantBillingNotificationsService,
   ) {}
 
   async overview(tenantId: string): Promise<TenantBillingOverviewDto> {
@@ -82,7 +87,9 @@ export class TenantBillingReadService {
           .where(eq(schema.billingActs.tenantId, tenantId))
           .orderBy(desc(schema.billingActs.updatedAt))
           .limit(20),
-        this.attentionCount(tenantId, now),
+        this.notifications
+          ? this.notifications.attention(tenantId).then(({ count }) => count)
+          : this.attentionCount(tenantId, now),
       ]);
     const actionableOffer = this.actionableOffer(offers, decisions, now);
     const activeRequest = activeRequests[0] ?? null;
@@ -701,7 +708,7 @@ export class TenantBillingReadService {
 
   private async attentionCount(tenantId: string, at: Date): Promise<number> {
     const approachingDeadline = new Date(at);
-    approachingDeadline.setUTCDate(approachingDeadline.getUTCDate() + 7);
+    approachingDeadline.setUTCDate(approachingDeadline.getUTCDate() + BILLING_DUE_SOON_DAYS);
     const result = await this.db.execute<{ attentionCount: number | string }>(sql`
       with latest_published_offers as (
         select distinct on (family_id) id, expires_at

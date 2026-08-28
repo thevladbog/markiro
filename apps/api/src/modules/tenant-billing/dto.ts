@@ -37,6 +37,9 @@ export const invoicePaymentStatusSchema = z.enum(["issued", "partially_paid", "p
 export const tenantOfferStatusSchema = z.enum(schema.OFFER_STATUSES);
 export const tenantDocumentTypeSchema = z.enum(["offer", "act"]);
 export const tenantDocumentStatusSchema = z.enum(["pending", "ready", "failed"]);
+export const tenantBillingAttentionSchema = z.strictObject({
+  count: z.number().int().nonnegative(),
+});
 
 const paginationShape = billingPaginationSchema.unwrap().shape;
 
@@ -336,4 +339,5 @@ export type TenantOfferDetailDto = z.infer<typeof tenantOfferDetailSchema>;
 export type TenantDocumentDto = z.infer<typeof tenantDocumentSchema>;
 export type TenantSubscriptionBillingDto = z.infer<typeof tenantSubscriptionBillingSchema>;
 export type TenantBillingOverviewDto = z.infer<typeof tenantBillingOverviewSchema>;
+export type TenantBillingAttentionDto = z.infer<typeof tenantBillingAttentionSchema>;
 export type PrivateDownloadDto = z.infer<typeof privateDownloadSchema>;

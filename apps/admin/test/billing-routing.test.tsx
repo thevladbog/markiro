@@ -77,6 +77,7 @@ const INVOICE = {
   status: "issued",
   total: "48000",
   currency: "RUB",
+  paymentSummary: null,
 };
 
 const INVOICE_DETAIL = {
@@ -93,7 +94,19 @@ const INVOICE_DETAIL = {
       lineTotal: "40000",
     },
   ],
-  documents: [{ id: "document_1", revision: 1, format: "pdf", status: "ready", byteSize: 123 }],
+  documents: [
+    {
+      id: "document_1",
+      revision: 1,
+      format: "pdf",
+      status: "ready",
+      contentType: "application/pdf",
+      byteSize: 123,
+      createdAt: "2026-08-01T00:00:00.000Z",
+    },
+  ],
+  payments: [],
+  request: null,
 };
 
 const BILLING_OVERVIEW = {
@@ -153,7 +166,11 @@ function createAuthClient(): AuthClientLike {
   };
 }
 
-function renderRoute(path: string, access: AccessDocument) {
+function renderRoute(
+  path: string,
+  access: AccessDocument,
+  attention: { count: number } | "error" = { count: 0 },
+) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
@@ -167,6 +184,11 @@ function renderRoute(path: string, access: AccessDocument) {
         });
       }
       if (url.endsWith("/api/access/me")) return response(access);
+      if (url.endsWith("/api/billing/attention")) {
+        return attention === "error"
+          ? new Response(JSON.stringify({ code: "temporarily_unavailable" }), { status: 503 })
+          : response(attention);
+      }
       if (url.endsWith("/api/billing/overview")) return response(BILLING_OVERVIEW);
       if (url.endsWith("/api/billing/subscription")) return response(BILLING_OVERVIEW);
       if (url.includes("/api/pickup-orders")) return response({ items: [] });
@@ -216,6 +238,30 @@ it.each([
       .getByRole("link", { name: "Обзор" })
       .getAttribute("aria-current"),
   ).toBe("page");
+});
+
+it("shows a localized accessible billing attention badge only above zero", async () => {
+  renderRoute("/", OWNER_ACCESS, { count: 3 });
+
+  const billing = await screen.findByRole("link", {
+    name: "Биллинг, требуется внимание: 3",
+  });
+  expect(within(billing).getByText("3")).toBeDefined();
+
+  await i18n.changeLanguage("en");
+  expect(await screen.findByRole("link", { name: "Billing, attention required: 3" })).toBeDefined();
+});
+
+it("hides the billing badge while loading, at zero, or after an attention failure", async () => {
+  const zero = renderRoute("/", OWNER_ACCESS, { count: 0 });
+  const zeroLink = await screen.findByRole("link", { name: "Биллинг" });
+  expect(within(zeroLink).queryByText("0")).toBeNull();
+  zero.unmount();
+
+  renderRoute("/", OWNER_ACCESS, "error");
+  const errorLink = await screen.findByRole("link", { name: "Биллинг" });
+  expect(within(errorLink).queryByText(/\d+/)).toBeNull();
+  expect(screen.getByRole("main")).toBeDefined();
 });
 
 it.each([
@@ -270,7 +316,7 @@ it("keeps invoice list and detail routes connected to their existing page compon
 
   expect(await screen.findByRole("link", { name: "Счёт №184" })).toBeDefined();
   expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-  expect(screen.getByRole("heading", { name: "Счета", level: 2 })).toBeDefined();
+  expect(screen.getByRole("heading", { name: "Счета и оплаты", level: 2 })).toBeDefined();
   expect(document.querySelectorAll(".mk-admin-page")).toHaveLength(1);
   expect(document.querySelector(".mk-billing-route-placeholder")).toBeNull();
   list.unmount();
@@ -280,7 +326,7 @@ it("keeps invoice list and detail routes connected to their existing page compon
 
   expect(await screen.findByText("Позиции")).toBeDefined();
   expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-  expect(screen.getByRole("heading", { name: "Счет Счёт №184", level: 2 })).toBeDefined();
+  expect(screen.getByRole("heading", { name: "Счёт Счёт №184", level: 2 })).toBeDefined();
   expect(document.querySelectorAll(".mk-admin-page")).toHaveLength(1);
   expect(screen.getByRole("button", { name: "Скачать" })).toBeDefined();
   fireEvent.click(screen.getByRole("button", { name: "Скачать" }));

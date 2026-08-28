@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -34,6 +35,7 @@ import {
 } from "../platform-billing-idempotency";
 import { ObjectStorageService } from "../storage/object-storage.service";
 import type { BillingActListQueryDto } from "./dto";
+import { TenantBillingNotificationsService } from "../tenant-billing/tenant-billing-notifications.service";
 
 const MAX_ACT_PDF_BYTES = 5 * 1024 * 1024;
 const BUSINESS_TIME_ZONE = "Europe/Moscow";
@@ -69,6 +71,7 @@ export class BillingActsService {
     @Inject(DB) private readonly db: Db,
     private readonly storage: ObjectStorageService,
     private readonly audit: PlatformAuditService,
+    @Optional() private readonly notifications?: TenantBillingNotificationsService,
   ) {}
 
   async list(_actor: PlatformPrincipal, query: BillingActListQueryDto = {}) {
@@ -674,6 +677,13 @@ export class BillingActsService {
           byteSize: readyDocument.byteSize,
         },
         requestId: null,
+      });
+      await this.notifications?.enqueueInTransaction(tx, {
+        tenantId: issued.tenantId,
+        eventKind: "act_ready",
+        entityId: issued.id,
+        revision: readyDocument.revision,
+        subjectName: issued.number,
       });
       const result = await this.actWithDocument(tx, issued, readyDocument);
       await commitPlatformBillingMutation(tx, mutation.row.id, issued.id, result);

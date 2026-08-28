@@ -73,7 +73,8 @@ describe.skipIf(!databaseUrl)("tenant billing target cardinality upgrade", () =>
     journal.entries = journal.entries.filter(
       ({ tag }) =>
         tag !== "0071_tenant_billing_target_cardinality" &&
-        tag !== "0072_tenant_billing_stale_family_repair",
+        tag !== "0072_tenant_billing_stale_family_repair" &&
+        tag !== "0073_tenant_billing_notification_delivery",
     );
     await writeFile(journalPath, JSON.stringify(journal));
     await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0070 });

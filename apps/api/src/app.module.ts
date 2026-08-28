@@ -99,7 +99,7 @@ export class AppModule {
           : []),
         AuthorizationModule,
         SubscriptionsModule.forRoot(env.SUBSCRIPTION_ENFORCEMENT_MODE),
-        TenantBillingModule,
+        TenantBillingModule.forRoot(env.ADMIN_ORIGIN),
         JobsModule.forRoot(setup.databaseUrl, env),
         DemoRequestsModule.forRoot(env),
         OrgProfileModule,

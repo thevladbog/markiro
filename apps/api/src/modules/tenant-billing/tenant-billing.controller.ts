@@ -42,6 +42,7 @@ import {
 } from "./dto";
 import { BillingAttachmentUploadFilter } from "./billing-attachment-upload.filter";
 import { TenantBillingOffersService } from "./tenant-billing-offers.service";
+import { TenantBillingNotificationsService } from "./tenant-billing-notifications.service";
 import { TenantBillingReadService } from "./tenant-billing-read.service";
 import { TenantBillingRequestsService } from "./tenant-billing-requests.service";
 
@@ -54,6 +55,7 @@ export class TenantBillingController {
     private readonly billing: TenantBillingReadService,
     private readonly requests: TenantBillingRequestsService,
     private readonly offers: TenantBillingOffersService,
+    private readonly notifications: TenantBillingNotificationsService,
   ) {}
 
   @Get("overview")
@@ -64,6 +66,11 @@ export class TenantBillingController {
   @Get("subscription")
   subscription(@Req() req: RequestWithTenant) {
     return this.billing.subscription(req.tenantId!);
+  }
+
+  @Get("attention")
+  attention(@Req() req: RequestWithTenant) {
+    return this.notifications.attention(req.tenantId!);
   }
 
   @Get("invoices")

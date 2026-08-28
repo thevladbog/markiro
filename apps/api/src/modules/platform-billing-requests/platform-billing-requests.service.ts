@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
@@ -24,6 +24,7 @@ import {
   commitPlatformBillingMutation,
 } from "../platform-billing-idempotency";
 import { createOfferDraft } from "../platform-offers/platform-offer-draft";
+import { TenantBillingNotificationsService } from "../tenant-billing/tenant-billing-notifications.service";
 
 type RequestStatus = typeof schema.tenantBillingRequests.$inferSelect.status;
 type LinkType = PlatformBillingRequestLinkDto["type"];
@@ -46,6 +47,7 @@ export class PlatformBillingRequestsService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly audit: PlatformAuditService,
+    @Optional() private readonly notifications?: TenantBillingNotificationsService,
   ) {}
 
   async list(_actor: PlatformPrincipal, query: PlatformBillingRequestListQueryDto = {}) {
@@ -235,6 +237,15 @@ export class PlatformBillingRequestsService {
         after: { status: input.status, responsibleSide: side, eventId: event.id },
         requestId: null,
       });
+      if (input.status === "clarification_required") {
+        await this.notifications?.enqueueInTransaction(tx, {
+          tenantId: request.tenantId,
+          eventKind: "clarification_required",
+          entityId: request.id,
+          revision: event.id,
+          subjectName: request.number,
+        });
+      }
       await commitPlatformBillingMutation(tx, mutation.row.id, event.id, result);
       return result;
     });

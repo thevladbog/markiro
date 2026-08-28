@@ -155,6 +155,22 @@ const emailTemplateSchema = z.discriminatedUnion("kind", [
       contactEmail: z.email(),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("tenant-billing-notification"),
+      locale: z.enum(["ru", "en"]),
+      recipientName: z.string().trim().min(1).max(160),
+      organizationName: z.string().trim().min(1).max(240),
+      eventKind: z.enum([
+        "clarification_required",
+        "offer_published",
+        "invoice_due_soon",
+        "act_ready",
+      ]),
+      subjectName: z.string().trim().min(1).max(160),
+      actionUrl: httpUrl,
+    })
+    .strict(),
 ]);
 
 function toEmailTemplateInput(input: z.output<typeof emailTemplateSchema>): EmailTemplateInput {

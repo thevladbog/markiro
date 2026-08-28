@@ -7,6 +7,7 @@ import { Sidebar, cn, type SidebarItem } from "@markiro/ui";
 
 import { useCan } from "../access/context.js";
 import { useAuthClient } from "../auth/client.js";
+import { useBillingAttention } from "../pages/billing/api.js";
 import { usePendingOrderCount } from "../pages/pickup/api.js";
 import { useAvatarUrl, useProfile } from "../pages/profile/api.js";
 import { Header } from "./Header.js";
@@ -145,6 +146,8 @@ export function AppShell() {
   const canManageSettings = useCan(C.TENANT_SETTINGS_MANAGE);
   const canManageMembers = useCan(C.MEMBERS_MANAGE);
   const pendingOrderCount = usePendingOrderCount(canReadOperations);
+  const billingAttention = useBillingAttention(canReadBilling);
+  const billingAttentionCount = billingAttention.data?.count ?? 0;
   const profile = useProfile();
   const avatar = useAvatarUrl(Boolean(profile.data?.hasAvatar));
   const profileName = profile.data
@@ -165,6 +168,7 @@ export function AppShell() {
     labelKey: t(key),
     section: t(sectionKey),
     ...(to === "/pickup" && pendingOrderCount > 0 ? { badge: pendingOrderCount } : {}),
+    ...(to === "/billing" && billingAttentionCount > 0 ? { badge: billingAttentionCount } : {}),
   }));
 
   return (
@@ -181,6 +185,11 @@ export function AppShell() {
           <NavLink
             to={item.to}
             end={item.to === "/"}
+            aria-label={
+              item.to === "/billing" && billingAttentionCount > 0
+                ? t("shell.billingAttention", { count: billingAttentionCount })
+                : undefined
+            }
             className={({ isActive }) =>
               cn(
                 "mk-sidebar__link",
