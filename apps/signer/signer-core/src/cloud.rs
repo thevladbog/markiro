@@ -16,11 +16,15 @@ use crate::SignerError;
 const POLL_TIMEOUT_SLACK: Duration = Duration::from_secs(20);
 const REPORT_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The server rejects a larger `wait`, so the cap belongs here once: both the
+/// query string and the client deadline derive from it.
+const MAX_POLL_WAIT_MS: u32 = 25_000;
+
 /// The client-side deadline for a long poll: the server holds for at most
 /// `wait_ms` milliseconds (capped at 25 s), plus slack so a healthy idle poll
 /// is never mistaken for a stuck connection.
 fn poll_timeout(wait_ms: u32) -> Duration {
-    Duration::from_millis(u64::from(wait_ms.min(25_000))) + POLL_TIMEOUT_SLACK
+    Duration::from_millis(u64::from(wait_ms.min(MAX_POLL_WAIT_MS))) + POLL_TIMEOUT_SLACK
 }
 
 /// Pairing has exactly two outcomes worth distinguishing in the UI: the cloud
@@ -84,13 +88,13 @@ impl CloudClient {
     }
 
     pub async fn poll(&self, secret: &str, wait_ms: u32) -> Result<Option<SignerTask>, SignerError> {
-        let wait_capped = wait_ms.min(25_000);
+        let wait_capped = wait_ms.min(MAX_POLL_WAIT_MS);
         let url = format!("{}?wait={}", self.url("/signer-agent/tasks/next"), wait_capped);
         let response = self
             .http
             .get(&url)
             .header("x-signer-token", secret)
-            .timeout(poll_timeout(wait_ms))
+            .timeout(poll_timeout(wait_capped))
             .send()
             .await
             .map_err(|e| SignerError::Network(e.to_string()))?;
