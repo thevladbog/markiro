@@ -53,6 +53,27 @@ pub fn inn_from_subject(subject: &str) -> Option<String> {
     None
 }
 
+/// Parses an uppercase-hex thumbprint (the shape `format_thumbprint` in
+/// `signer_capi` produces, e.g. `"AB120F"`) back into raw bytes so it can be
+/// fed to `CERT_FIND_HASH` as a `CRYPT_INTEGER_BLOB`.
+///
+/// Kept here — rather than in `signer_capi`, which is `#[cfg(windows)]` and so
+/// never compiles or runs its tests on a non-Windows host — because it is
+/// pure string handling with no Win32 dependency.
+pub fn thumbprint_bytes(hex: &str) -> Option<Vec<u8>> {
+    let chars: Vec<char> = hex.chars().collect();
+    if !chars.len().is_multiple_of(2) {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(chars.len() / 2);
+    for pair in chars.chunks(2) {
+        let byte_str: String = pair.iter().collect();
+        let byte = u8::from_str_radix(&byte_str, 16).ok()?;
+        bytes.push(byte);
+    }
+    Some(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,5 +96,22 @@ mod tests {
         // A malformed length is not an INN — better absent than wrong, because
         // the cloud validates 10 or 12 digits and would reject the whole report.
         assert_eq!(inn_from_subject("CN=Test, ИНН=12345"), None);
+    }
+
+    #[test]
+    fn parses_a_thumbprint_hex_string_into_bytes() {
+        assert_eq!(thumbprint_bytes("AB120F"), Some(vec![0xAB, 0x12, 0x0F]));
+        assert_eq!(thumbprint_bytes(""), Some(vec![]));
+    }
+
+    #[test]
+    fn rejects_an_odd_length_thumbprint() {
+        assert_eq!(thumbprint_bytes("ABC"), None);
+    }
+
+    #[test]
+    fn rejects_a_non_hex_thumbprint() {
+        assert_eq!(thumbprint_bytes("ZZ120F"), None);
+        assert_eq!(thumbprint_bytes("ИН1234"), None);
     }
 }

@@ -13,7 +13,7 @@ use base64::Engine as _;
 use windows_sys::Win32::Foundation::FILETIME;
 use windows_sys::Win32::Security::Cryptography::*;
 
-use crate::signer::{inn_from_subject, CertificateSummary, Signer};
+use crate::signer::{inn_from_subject, thumbprint_bytes, CertificateSummary, Signer};
 use crate::SignerError;
 
 const ENCODING: u32 = X509_ASN_ENCODING | PKCS_7_ASN_ENCODING;
@@ -104,9 +104,10 @@ fn open_my_store() -> Result<HCERTSTORE, SignerError> {
         )
     };
     if store.is_null() {
-        return Err(SignerError::CryptoProviderMissing(
-            "the current user's certificate store could not be opened".to_string(),
-        ));
+        let code = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+        return Err(SignerError::CryptoProviderMissing(format!(
+            "the current user's certificate store could not be opened (0x{code:08X})"
+        )));
     }
     Ok(store)
 }
@@ -161,11 +162,20 @@ unsafe fn cert_thumbprint(context: *const CERT_CONTEXT) -> Option<String> {
 }
 
 unsafe fn cert_name_string(context: *const CERT_CONTEXT) -> Option<String> {
+    // pvTypePara for CERT_NAME_RDN_TYPE is a *const u32 holding dwStrType.
+    // NULL there selects CERT_SIMPLE_NAME_STR, which renders RDN values only
+    // ("ООО Ромашка, 7712345678, Ромашка"). We need CERT_X500_NAME_STR so the
+    // result carries attribute names ("CN=..., ИНН=..., O=...") — that is what
+    // `inn_from_subject` searches for. `str_type` must outlive both calls
+    // below since both pass a pointer into it.
+    let str_type: u32 = CERT_X500_NAME_STR;
+    let type_para = &str_type as *const u32 as *const c_void;
+
     let needed = CertGetNameStringW(
         context,
         CERT_NAME_RDN_TYPE,
         0,
-        ptr::null_mut(),
+        type_para,
         ptr::null_mut(),
         0,
     );
@@ -177,7 +187,7 @@ unsafe fn cert_name_string(context: *const CERT_CONTEXT) -> Option<String> {
         context,
         CERT_NAME_RDN_TYPE,
         0,
-        ptr::null_mut(),
+        type_para,
         buffer.as_mut_ptr(),
         needed,
     );
@@ -187,17 +197,32 @@ unsafe fn cert_name_string(context: *const CERT_CONTEXT) -> Option<String> {
     Some(String::from_utf16_lossy(&buffer[..(written as usize - 1)]))
 }
 
+/// Looks the certificate up directly by hash instead of walking the store
+/// with `CertEnumCertificatesInStore`. The enumeration-then-duplicate
+/// approach leaked: `CertEnumCertificatesInStore` only frees its own
+/// enumeration reference when the walk is run to exhaustion, so returning
+/// early on a match after `CertDuplicateCertificateContext` left the
+/// enumeration's reference outstanding on every signing call.
+/// `CertFindCertificateInStore` returns a single owned context (the caller
+/// must still free it, same as before) and is indexed rather than O(n).
 unsafe fn find_by_thumbprint(store: HCERTSTORE, thumbprint: &str) -> Option<*mut CERT_CONTEXT> {
-    let mut context: *mut CERT_CONTEXT = ptr::null_mut();
-    loop {
-        context = CertEnumCertificatesInStore(store, context);
-        if context.is_null() {
-            return None;
-        }
-        if cert_thumbprint(context).as_deref() == Some(thumbprint) {
-            // Duplicate so the caller owns a context independent of enumeration.
-            return Some(CertDuplicateCertificateContext(context));
-        }
+    let bytes = thumbprint_bytes(thumbprint)?;
+    let hash_blob = CRYPT_INTEGER_BLOB {
+        cbData: bytes.len() as u32,
+        pbData: bytes.as_ptr() as *mut u8,
+    };
+    let context = CertFindCertificateInStore(
+        store,
+        ENCODING,
+        0,
+        CERT_FIND_HASH,
+        &hash_blob as *const CRYPT_INTEGER_BLOB as *const c_void,
+        ptr::null(),
+    );
+    if context.is_null() {
+        None
+    } else {
+        Some(context)
     }
 }
 
@@ -285,7 +310,12 @@ fn classify_last_error() -> SignerError {
             "the key container is unavailable (0x{code:08X})"
         )),
         // NTE_BAD_KEY_STATE / SCARD_W_WRONG_CHV — the container wants a PIN.
-        0x8009_000B | 0x8010_006B => SignerError::PinRequired,
+        // SCARD_W_CANCELLED_BY_USER / ERROR_CANCELLED / NTE_SILENT_CONTEXT —
+        // the operator dismissed the PIN prompt instead of entering a wrong
+        // PIN, but the required action is the same: retry and answer it. Map
+        // these here too rather than letting them fall into the catch-all,
+        // which would tell the admin to check the token for no reason.
+        0x8009_000B | 0x8010_006B | 0x8010_006E | 1223 | 0x8009_0022 => SignerError::PinRequired,
         // CRYPT_E_NOT_FOUND
         0x8009_2004 => SignerError::CertNotFound(format!("0x{code:08X}")),
         // NTE_PROVIDER_DLL_FAIL / NTE_PROV_TYPE_NOT_DEF
