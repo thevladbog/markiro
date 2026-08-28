@@ -31,7 +31,12 @@ import {
 
 type InventoryDocumentRunRow = typeof schema.inventoryDocumentRuns.$inferSelect;
 type InventoryDocumentTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
-const RETRYABLE_ERRORS = ["QUEUE_FAILED", "STORAGE_FAILED", "GENERATION_FAILED"] as const;
+const RETRYABLE_ERRORS = [
+  "QUEUE_FAILED",
+  "STORAGE_FAILED",
+  "GENERATION_FAILED",
+  "INVALID_ORGANIZATION_INN",
+] as const;
 const MAX_ZIP_INPUT_BYTES = 50 * 1024 * 1024;
 
 @Injectable()
@@ -60,13 +65,7 @@ export class InventoryDocumentsService {
       if (replay.shouldEnqueue) await this.enqueueOrFail(replay.row, actorUserId);
       return this.getById(tenantId, replay.row.id);
     }
-    const resolvedGenerators = selectedFormats.map((selected) => {
-      try {
-        return this.generators.resolveForSelection(selected.id, selected.version);
-      } catch (error) {
-        throw formatSelectionError(error);
-      }
-    });
+    const resolvedGenerators = this.resolveGeneratorsForFormats(selectedFormats);
 
     let row: InventoryDocumentRunRow;
     let shouldEnqueue = true;
@@ -98,12 +97,7 @@ export class InventoryDocumentsService {
           .where(eq(schema.organization.id, tenantId))
           .limit(1);
         if (!organization) throw new NotFoundException();
-        const needsInn = resolvedGenerators.some(
-          (generator) => generator.descriptor.requiresOrganizationInn === true,
-        );
-        if (needsInn && !organization.inn?.trim()) {
-          throw new ConflictException({ code: "ORGANIZATION_INN_REQUIRED" });
-        }
+        this.ensureOrganizationInnAvailable(resolvedGenerators, organization.inn);
         const [created] = await tx
           .insert(schema.inventoryDocumentRuns)
           .values({
@@ -184,7 +178,9 @@ export class InventoryDocumentsService {
     if (existing.status !== "failed") {
       throw new ConflictException({ code: "INVENTORY_DOCUMENT_RUN_NOT_RETRYABLE" });
     }
-    const restored = await this.restoreFailed(existing, actorUserId, RETRYABLE_ERRORS);
+    const restored = await this.restoreFailed(existing, actorUserId, RETRYABLE_ERRORS, {
+      refreshOrganizationSnapshot: true,
+    });
     if (!restored) throw new ConflictException({ code: "INVENTORY_DOCUMENT_RUN_NOT_RETRYABLE" });
     await this.enqueueOrFail(restored, actorUserId);
     return this.getById(tenantId, runId);
@@ -487,6 +483,7 @@ export class InventoryDocumentsService {
     existing: InventoryDocumentRunRow,
     actorUserId: string,
     errorCodes: readonly string[],
+    options?: { refreshOrganizationSnapshot?: boolean },
   ): Promise<InventoryDocumentRunRow | undefined> {
     return this.db.transaction(async (tx) => {
       const [inventory] = await tx
@@ -505,9 +502,18 @@ export class InventoryDocumentsService {
       if (inventory?.status !== "closed" || inventory.resultRevision !== existing.resultRevision) {
         throw new ConflictException({ code: "INVENTORY_DOCUMENT_RUN_STALE_REVISION" });
       }
+      const organizationSnapshot = options?.refreshOrganizationSnapshot
+        ? await this.reloadOrganizationSnapshot(tx, existing)
+        : undefined;
       const [restored] = await tx
         .update(schema.inventoryDocumentRuns)
-        .set({ status: "queued", errorCode: null, completedAt: null, updatedAt: new Date() })
+        .set({
+          status: "queued",
+          errorCode: null,
+          completedAt: null,
+          updatedAt: new Date(),
+          ...organizationSnapshot,
+        })
         .where(
           and(
             eq(schema.inventoryDocumentRuns.tenantId, existing.tenantId),
@@ -530,6 +536,61 @@ export class InventoryDocumentsService {
       );
       return restored;
     });
+  }
+
+  /**
+   * Re-reads the tenant's current organization name/INN and re-validates the
+   * INN requirement for the run's already-selected formats, the same way
+   * `create` does. Retries must reflect the issuer's current details rather
+   * than the (possibly stale or invalid) values captured when the run was
+   * first created.
+   */
+  private async reloadOrganizationSnapshot(
+    tx: InventoryDocumentTransaction,
+    existing: InventoryDocumentRunRow,
+  ): Promise<{ organizationNameSnapshot: string; organizationInnSnapshot: string | null }> {
+    const [organization] = await tx
+      .select({
+        name: schema.organization.name,
+        inn: schema.orgProfiles.inn,
+      })
+      .from(schema.organization)
+      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
+      .where(eq(schema.organization.id, existing.tenantId))
+      .limit(1);
+    if (!organization) throw new NotFoundException();
+    const resolvedGenerators = this.resolveGeneratorsForFormats(existing.selectedFormats);
+    this.ensureOrganizationInnAvailable(resolvedGenerators, organization.inn);
+    return {
+      organizationNameSnapshot: organization.name,
+      organizationInnSnapshot: organization.inn,
+    };
+  }
+
+  private resolveGeneratorsForFormats(
+    selectedFormats: readonly { id: string; version: number }[],
+  ): ReturnType<InventoryDocumentGeneratorRegistry["resolveForSelection"]>[] {
+    return selectedFormats.map((selected) => {
+      try {
+        return this.generators.resolveForSelection(selected.id, selected.version);
+      } catch (error) {
+        throw formatSelectionError(error);
+      }
+    });
+  }
+
+  private ensureOrganizationInnAvailable(
+    resolvedGenerators: readonly ReturnType<
+      InventoryDocumentGeneratorRegistry["resolveForSelection"]
+    >[],
+    inn: string | null,
+  ): void {
+    const needsInn = resolvedGenerators.some(
+      (generator) => generator.descriptor.requiresOrganizationInn === true,
+    );
+    if (needsInn && !inn?.trim()) {
+      throw new ConflictException({ code: "ORGANIZATION_INN_REQUIRED" });
+    }
   }
 
   private async enqueueOrFail(row: InventoryDocumentRunRow, actorUserId: string): Promise<void> {
