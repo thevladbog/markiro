@@ -9,7 +9,8 @@ confirmed payments reaching `paid`, issued act, and completed request. The tests
 links and events, chronological history, stale and exact-retry behavior, tenant denial, capability
 boundaries, and API-returned signed download URLs.
 
-The evidence run exposed two product defects and fixes them with focused regression coverage:
+The evidence run and independent visual review exposed three product defects and fix them with
+focused regression coverage:
 
 - accepting a revised commercial offer did not find the request link stored against the original
   offer revision, so the request omitted `offer_accepted`; request lookup now stays tenant-scoped
@@ -17,6 +18,9 @@ The evidence run exposed two product defects and fixes them with focused regress
 - the fixed 224 px desktop sidebar clipped almost all admin content at 320/360 px. The shell now
   becomes a top, horizontally scrollable navigation rail on narrow screens while the main region
   remains independently vertically reachable.
+- the sidebar footer's inline display style kept a duplicate profile row visible in the compact
+  mobile shell. The narrow-screen rule now deliberately overrides that inline style, while the
+  organization identity and account controls remain in the header.
 
 MSW is not installed in the workspace manifest, lockfile, store, or linked installation. No new
 dependency was introduced. The component journey therefore uses the repository's established
@@ -97,12 +101,14 @@ PASS — Chromium 8/8 at the final revision:
   operations/request pair. Typography, neutral panels, thin borders, compact density, green
   actions, and text-bearing statuses align with the approved screenshot. Fixture copy and values
   are intentionally real DTO-shaped test data, so this is a hierarchy/style comparison rather
-  than a pixel-identity claim.
+  than a pixel-identity claim. A geometry assertion also requires the page heading to start beyond
+  the measured desktop sidebar edge.
 - 360x800 and 320x800 have no document-level horizontal overflow. The main navigation stays
   reachable as a horizontal rail, the billing tabs remain a labelled horizontal rail, and the
   lower `Активная заявка` card is reachable by scrolling the real main region. The 320 px visual
-  shows the responsive top navigation, identity controls, full title/action, tabs, and an unclipped
-  subscription card.
+  shows the responsive top navigation, one identity/control row, full title/action, tabs, and an
+  unclipped subscription card. The hidden duplicate profile link is asserted in both narrow
+  viewports.
 - `h1`/`h2` semantics, desktop invoice table to mobile cards, textual status labels, explicit
   loading announcement, error, empty, unmanaged, and forbidden states pass through real routes.
 - Keyboard Tab reaches a visibly focused element. The offer alert dialog opens from the real offer

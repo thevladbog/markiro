@@ -34,7 +34,7 @@ body {
 
   .mk-app-sidebar .mk-sidebar__section,
   .mk-app-sidebar > a {
-    display: none;
+    display: none !important;
   }
 
   .mk-app-sidebar .mk-sidebar__link {

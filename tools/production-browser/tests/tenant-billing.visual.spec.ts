@@ -194,6 +194,19 @@ for (const viewport of [
     await expect(page.getByText("Использовано: 3 из 4")).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Основная навигация" })).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Разделы биллинга" })).toBeVisible();
+    if (viewport.width >= 768) {
+      const sidebarBox = await page
+        .getByRole("navigation", { name: "Основная навигация" })
+        .boundingBox();
+      const headingBox = await page
+        .getByRole("heading", { level: 1, name: "Биллинг" })
+        .boundingBox();
+      expect(sidebarBox).not.toBeNull();
+      expect(headingBox).not.toBeNull();
+      expect(headingBox!.x).toBeGreaterThanOrEqual(sidebarBox!.x + sidebarBox!.width);
+    } else {
+      await expect(page.getByRole("link", { name: "Открыть профиль Елена Ким" })).toHaveCount(0);
+    }
     await assertNoPageOverflow(page);
     expect(unexpected).toEqual([]);
     await page.screenshot({
