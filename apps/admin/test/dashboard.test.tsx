@@ -97,7 +97,7 @@ function dashboardFixture(
       },
       buckets: [
         {
-          label: "21 авг.",
+          label: "2026-08-21",
           start: "2026-08-20T21:00:00.000Z",
           end: "2026-08-21T21:00:00.000Z",
           validation: { acceptedUnits: 18600, shiftHours: 4, unitsPerShiftHour: 4650 },
@@ -238,12 +238,20 @@ describe("DashboardPage", () => {
     const validationRate = screen.getByRole("region", { name: "Проверка — темп" });
     const aggregationRate = screen.getByRole("region", { name: "Агрегация — темп" });
     expect(
-      within(validationRate).getByLabelText(/21 авг\.: 4[\s\u00a0]?650 шт\.\/час смены/),
+      within(validationRate).getByLabelText(/21\.08\.2026: 4[\s\u00a0]?650 шт\.\/час смены/),
     ).toBeDefined();
     expect(
-      within(aggregationRate).getByLabelText(/21 авг\.: 16,6 коробов\/час смены/),
+      within(aggregationRate).getByLabelText(/21\.08\.2026: 16,6 коробов\/час смены/),
     ).toBeDefined();
-    expect(within(aggregationRate).getByLabelText(/21 авг\.: 430,9 шт\.\/час смены/)).toBeDefined();
+    expect(
+      within(aggregationRate).getByLabelText(/21\.08\.2026: 430,9 шт\.\/час смены/),
+    ).toBeDefined();
+
+    expect(
+      [...validationRate.querySelectorAll(".mk-dashboard-bars__label")].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(["21"]);
 
     fireEvent.click(output);
 
@@ -252,10 +260,78 @@ describe("DashboardPage", () => {
     expect(sevenDays.getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("region", { name: "Проверка — выпуск" })).toBeDefined();
     expect(screen.getByRole("region", { name: "Агрегация — выпуск" })).toBeDefined();
-    expect(screen.getByLabelText(/21 авг\.: 18[\s\u00a0]?600 шт\./)).toBeDefined();
-    expect(screen.getByLabelText(/21 авг\.: 58 кор\./)).toBeDefined();
-    expect(screen.getByLabelText(/21 авг\.: 1[\s\u00a0]?508 шт\./)).toBeDefined();
+    expect(screen.getByLabelText(/21\.08\.2026: 18[\s\u00a0]?600 шт\./)).toBeDefined();
+    expect(screen.getByLabelText(/21\.08\.2026: 58 кор\./)).toBeDefined();
+    expect(screen.getByLabelText(/21\.08\.2026: 1[\s\u00a0]?508 шт\./)).toBeDefined();
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses compact context-aware dates while keeping complete dates for chart accessibility", async () => {
+    const fixture = dashboardFixture({ hasRunShift: true });
+    const firstBucket = fixture.dynamics.buckets[0];
+    const buckets = Array.from({ length: 30 }, (_, index) => {
+      const start = new Date(Date.UTC(2026, 6, 30 + index));
+      const end = new Date(Date.UTC(2026, 6, 31 + index));
+      return {
+        ...firstBucket,
+        label: start.toISOString().slice(0, 10),
+        start: start.toISOString(),
+        end: end.toISOString(),
+      };
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          ...fixture,
+          dynamics: { ...fixture.dynamics, period: "30d", buckets },
+        }),
+      ),
+    );
+
+    renderDashboard();
+
+    const validation = await screen.findByRole("region", { name: "Проверка — темп" });
+    const labels = [...validation.querySelectorAll(".mk-dashboard-bars__label")].map(
+      (label) => label.textContent,
+    );
+    expect(labels[0]).toBe("30.07");
+    expect(labels[2]).toBe("01.08");
+    expect(labels).not.toContain("2026-07-30");
+    expect(within(validation).getByLabelText(/30\.07\.2026:/)).toBeDefined();
+    expect(within(validation).getByLabelText(/01\.08\.2026:/)).toBeDefined();
+  });
+
+  it("adds the year to axis dates when the selected range crosses a year boundary", async () => {
+    const fixture = dashboardFixture({ hasRunShift: true });
+    const firstBucket = fixture.dynamics.buckets[0];
+    const starts = ["2025-12-30T21:00:00.000Z", "2025-12-31T21:00:00.000Z"];
+    const buckets = starts.map((start, index) => ({
+      ...firstBucket,
+      label: start.slice(0, 10),
+      start,
+      end: index === 0 ? starts[1] : "2026-01-01T21:00:00.000Z",
+    }));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          ...fixture,
+          dynamics: { ...fixture.dynamics, period: "30d", buckets },
+        }),
+      ),
+    );
+
+    renderDashboard();
+
+    const validation = await screen.findByRole("region", { name: "Проверка — темп" });
+    expect(
+      [...validation.querySelectorAll(".mk-dashboard-bars__label")].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(["31.12.2025", "01.01.2026"]);
   });
 
   it("requests a new coherent overview when the period changes", async () => {
@@ -546,7 +622,7 @@ describe("DashboardPage", () => {
     const validation = await screen.findByRole("region", { name: "Проверка — темп" });
     const aggregation = screen.getByRole("region", { name: "Агрегация — темп" });
     const zeroValidationBar = within(validation).getByRole("img", {
-      name: /21 авг\.: 0 шт\.\/час смены/,
+      name: /21\.08\.2026: 0 шт\.\/час смены/,
     });
     expect(zeroValidationBar.className).not.toContain("track--missing");
     expect(
@@ -554,7 +630,7 @@ describe("DashboardPage", () => {
         .querySelector<HTMLElement>(".mk-dashboard-bars__bar")
         ?.style.getPropertyValue("--mk-dashboard-bar-scale"),
     ).toBe("0");
-    expect(within(aggregation).getAllByRole("img", { name: /21 авг\.: 0/ })).toHaveLength(2);
+    expect(within(aggregation).getAllByRole("img", { name: /21\.08\.2026: 0/ })).toHaveLength(2);
     expect(screen.queryAllByRole("img", { name: /—/ })).toHaveLength(0);
     expect(screen.queryByText("Нет длительности смены — темп не рассчитан.")).toBeNull();
   });

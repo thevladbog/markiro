@@ -2,6 +2,7 @@ import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { DashboardOverviewDto, DashboardPeriod } from "./api.js";
+import { resolveDateTimeLocale } from "../../lib/datetime.js";
 
 /* eslint-disable no-restricted-syntax -- The approved dashboard specification requires native aria-pressed segmented buttons. */
 
@@ -15,8 +16,16 @@ interface ProductionDynamicsProps {
 
 interface SeriesPoint {
   label: string;
+  accessibleLabel: string;
+  showLabel: boolean;
   value: number | null;
   hasOutput: boolean;
+}
+
+interface BucketLabel {
+  compact: string;
+  complete: string;
+  show: boolean;
 }
 
 interface SeriesDefinition {
@@ -37,8 +46,14 @@ export function ProductionDynamics({ overview, period, onPeriodChange }: Product
   const dynamics = overview.dynamics;
   const number = new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 1 });
   const metricLabel = t(`pages.dashboard.dynamics.${metric}`);
-  const validationSeries = getValidationSeries(overview, metric, t);
-  const aggregationSeries = getAggregationSeries(overview, metric, t);
+  const bucketLabels = formatBucketLabels(
+    dynamics.buckets,
+    dynamics.grain,
+    overview.timeZone,
+    i18n.language,
+  );
+  const validationSeries = getValidationSeries(overview, metric, bucketLabels, t);
+  const aggregationSeries = getAggregationSeries(overview, metric, bucketLabels, t);
 
   return (
     <section aria-labelledby="dashboard-dynamics-title" className="mk-dashboard-dynamics">
@@ -127,6 +142,7 @@ export function ProductionDynamics({ overview, period, onPeriodChange }: Product
 function getValidationSeries(
   overview: DashboardOverviewDto,
   metric: DashboardMetric,
+  bucketLabels: BucketLabel[],
   t: ReturnType<typeof useTranslation>["t"],
 ): SeriesDefinition {
   const dynamics = overview.dynamics;
@@ -138,8 +154,8 @@ function getValidationSeries(
         ? "pages.dashboard.dynamics.units.unitsPerShiftHour"
         : "pages.dashboard.dynamics.units.units",
     ),
-    points: dynamics.buckets.map((bucket) => ({
-      label: bucket.label,
+    points: dynamics.buckets.map((bucket, index) => ({
+      ...pointLabel(bucket.label, bucketLabels[index]),
       value:
         metric === "rate" ? bucket.validation.unitsPerShiftHour : bucket.validation.acceptedUnits,
       hasOutput: bucket.validation.acceptedUnits > 0,
@@ -159,6 +175,7 @@ function getValidationSeries(
 function getAggregationSeries(
   overview: DashboardOverviewDto,
   metric: DashboardMetric,
+  bucketLabels: BucketLabel[],
   t: ReturnType<typeof useTranslation>["t"],
 ): SeriesDefinition[] {
   const dynamics = overview.dynamics;
@@ -171,8 +188,8 @@ function getAggregationSeries(
           ? "pages.dashboard.dynamics.units.boxesPerShiftHour"
           : "pages.dashboard.dynamics.units.boxes",
       ),
-      points: dynamics.buckets.map((bucket) => ({
-        label: bucket.label,
+      points: dynamics.buckets.map((bucket, index) => ({
+        ...pointLabel(bucket.label, bucketLabels[index]),
         value:
           metric === "rate" ? bucket.aggregation.boxesPerShiftHour : bucket.aggregation.closedBoxes,
         hasOutput: bucket.aggregation.closedBoxes > 0,
@@ -195,8 +212,8 @@ function getAggregationSeries(
           ? "pages.dashboard.dynamics.units.unitsPerShiftHour"
           : "pages.dashboard.dynamics.units.units",
       ),
-      points: dynamics.buckets.map((bucket) => ({
-        label: bucket.label,
+      points: dynamics.buckets.map((bucket, index) => ({
+        ...pointLabel(bucket.label, bucketLabels[index]),
         value:
           metric === "rate"
             ? bucket.aggregation.containedUnitsPerShiftHour
@@ -267,8 +284,15 @@ function SeriesChart({ series, number }: { series: SeriesDefinition; number: Int
           number={number}
         />
       </div>
-      <div className="mk-dashboard-series__scroll" tabIndex={0} aria-label={series.label}>
-        <ol className="mk-dashboard-bars">
+      <div className="mk-dashboard-series__scroll" aria-label={series.label}>
+        <ol
+          className="mk-dashboard-bars"
+          style={
+            {
+              "--mk-dashboard-point-count": Math.max(1, series.points.length),
+            } as CSSProperties
+          }
+        >
           {series.points.map((point, index) => {
             const formattedValue = formatValue(point.value, number);
             const ratio = point.value === null || maximum === 0 ? 0 : point.value / maximum;
@@ -276,7 +300,7 @@ function SeriesChart({ series, number }: { series: SeriesDefinition; number: Int
               "--mk-dashboard-bar-scale": Math.max(0, Math.min(1, ratio)),
             } as CSSProperties;
             const ariaLabel = t("pages.dashboard.dynamics.barLabel", {
-              label: point.label,
+              label: point.accessibleLabel,
               value: formattedValue,
               unit: series.unit,
             });
@@ -291,7 +315,13 @@ function SeriesChart({ series, number }: { series: SeriesDefinition; number: Int
                 >
                   <span className="mk-dashboard-bars__bar" style={style} />
                 </span>
-                <span className="mk-dashboard-bars__label">{point.label}</span>
+                <span
+                  className={`mk-dashboard-bars__label${point.showLabel ? "" : " mk-dashboard-bars__label--hidden"}`}
+                  title={point.accessibleLabel}
+                  aria-hidden="true"
+                >
+                  {point.label}
+                </span>
               </li>
             );
           })}
@@ -301,7 +331,7 @@ function SeriesChart({ series, number }: { series: SeriesDefinition; number: Int
         {series.points.map((point, index) => (
           <li key={`${point.label}-text-${index}`}>
             {t("pages.dashboard.dynamics.barLabel", {
-              label: point.label,
+              label: point.accessibleLabel,
               value: formatValue(point.value, number),
               unit: series.unit,
             })}
@@ -360,4 +390,83 @@ function getComparison(
 
 function formatValue(value: number | null, number: Intl.NumberFormat): string {
   return value === null ? "—" : number.format(value);
+}
+
+function pointLabel(
+  fallback: string,
+  formatted?: BucketLabel,
+): Pick<SeriesPoint, "label" | "accessibleLabel" | "showLabel"> {
+  return formatted
+    ? { label: formatted.compact, accessibleLabel: formatted.complete, showLabel: formatted.show }
+    : { label: fallback, accessibleLabel: fallback, showLabel: true };
+}
+
+function formatBucketLabels(
+  buckets: DashboardOverviewDto["dynamics"]["buckets"],
+  grain: DashboardOverviewDto["dynamics"]["grain"],
+  timeZone: string,
+  language: string,
+): BucketLabel[] {
+  const locale = resolveDateTimeLocale(language);
+  const dates = buckets.map((bucket) => new Date(bucket.start));
+  const calendarFormatter = new Intl.DateTimeFormat(locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone,
+  });
+  const calendarParts = dates.map((date) => dateParts(calendarFormatter, date));
+  const years = new Set(calendarParts.map((parts) => parts.year));
+  const months = new Set(calendarParts.map((parts) => `${parts.year}-${parts.month}`));
+  const sameYear = years.size === 1;
+  const sameMonth = months.size === 1;
+  const compactFormatter =
+    grain === "hour"
+      ? new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", timeZone })
+      : new Intl.DateTimeFormat(locale, {
+          day: "2-digit",
+          ...(sameMonth ? {} : { month: "2-digit" as const }),
+          ...(sameYear ? {} : { year: "numeric" as const }),
+          timeZone,
+        });
+  const completeFormatter = new Intl.DateTimeFormat(locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    ...(grain === "hour" ? { hour: "2-digit" as const, minute: "2-digit" as const } : {}),
+    timeZone,
+  });
+  const labelStride = Math.max(1, Math.ceil((buckets.length - 1) / 6));
+
+  return dates.map((date, index) => {
+    const previous = calendarParts[index - 1];
+    const current = calendarParts[index];
+    const startsNewMonth =
+      previous !== undefined &&
+      current !== undefined &&
+      (previous.year !== current.year || previous.month !== current.month);
+    return {
+      compact: compactFormatter.format(date),
+      complete: completeFormatter.format(date),
+      show:
+        buckets.length <= 12 ||
+        index === 0 ||
+        index === buckets.length - 1 ||
+        index % labelStride === 0 ||
+        startsNewMonth,
+    };
+  });
+}
+
+function dateParts(
+  formatter: Intl.DateTimeFormat,
+  date: Date,
+): { year: string; month: string; day: string } {
+  const values = Object.fromEntries(
+    formatter
+      .formatToParts(date)
+      .filter((part) => part.type === "year" || part.type === "month" || part.type === "day")
+      .map((part) => [part.type, part.value]),
+  );
+  return { year: values.year ?? "", month: values.month ?? "", day: values.day ?? "" };
 }

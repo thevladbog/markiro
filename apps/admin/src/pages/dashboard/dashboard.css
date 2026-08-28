@@ -389,15 +389,13 @@
 
 .mk-dashboard-series__scroll {
   max-width: 100%;
-  overflow-x: auto;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  overflow-x: hidden;
 }
 
 .mk-dashboard-bars {
   display: grid;
-  grid-auto-columns: minmax(42px, 1fr);
-  grid-auto-flow: column;
-  gap: var(--sp-2);
+  grid-template-columns: repeat(var(--mk-dashboard-point-count), minmax(0, 1fr));
+  gap: clamp(2px, 0.45vw, var(--sp-2));
   min-width: 100%;
   margin: 0;
   padding: 0 0 var(--sp-1);
@@ -406,9 +404,10 @@
 
 .mk-dashboard-bars li {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 18px 112px auto;
   gap: var(--sp-1);
-  min-width: 42px;
+  min-width: 0;
 }
 
 .mk-dashboard-bars__value,
@@ -423,10 +422,24 @@
 }
 
 .mk-dashboard-bars__label {
+  display: block;
+  width: max-content;
   overflow: visible;
-  overflow-wrap: anywhere;
   text-overflow: clip;
-  white-space: normal;
+  justify-self: center;
+  white-space: nowrap;
+}
+
+.mk-dashboard-bars__label--hidden {
+  display: none;
+}
+
+.mk-dashboard-bars li:first-child .mk-dashboard-bars__label {
+  justify-self: start;
+}
+
+.mk-dashboard-bars li:last-child .mk-dashboard-bars__label {
+  justify-self: end;
 }
 
 .mk-dashboard-bars__track {
