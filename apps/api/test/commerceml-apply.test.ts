@@ -1,15 +1,38 @@
 import { describe, expect, it } from "vitest";
 import { decideApplication } from "../src/modules/exchange/commerceml/apply";
 
-const known = [{ id: "p-1", externalRef: "guid-1" }];
+// Helper for the pre-existing price/candidate scenarios below: a product
+// already linked to a 1С <Ид>. The GTIN value itself does not matter to any
+// of these tests (none of them exercise GTIN matching), but it must still be
+// a real, checksum-valid GTIN-14 -- `CatalogProduct.gtin14` is not optional.
+const product = (id: string, gtin14: string, externalRef: string | null) => ({
+  id,
+  gtin14,
+  externalRef,
+});
+
+const known = [product("p-1", "00000000000017", "guid-1")];
 
 describe("decideApplication", () => {
   it("применяет цену сопоставленному товару", () => {
     const plan = decideApplication({
-      known,
-      items: [{ externalRef: "guid-1", name: "Жигулёвское", article: null, unit: "шт" }],
+      products: known,
+      items: [
+        {
+          externalRef: "guid-1",
+          name: "Жигулёвское",
+          article: null,
+          unit: "шт",
+          barcode: null,
+          images: [],
+        },
+      ],
       offers: [
-        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "89.90", currency: "руб" }] },
+        {
+          externalRef: "guid-1",
+          prices: [{ type: "Розничная", value: "89.90", currency: "руб" }],
+          barcode: null,
+        },
       ],
       configuredPriceType: undefined,
     });
@@ -19,8 +42,17 @@ describe("decideApplication", () => {
 
   it("несопоставленное уходит в кандидаты, а не создаёт товар", () => {
     const plan = decideApplication({
-      known,
-      items: [{ externalRef: "guid-9", name: "Новинка", article: "N-1", unit: "шт" }],
+      products: known,
+      items: [
+        {
+          externalRef: "guid-9",
+          name: "Новинка",
+          article: "N-1",
+          unit: "шт",
+          barcode: null,
+          images: [],
+        },
+      ],
       offers: [],
       configuredPriceType: undefined,
     });
@@ -30,7 +62,7 @@ describe("decideApplication", () => {
 
   it("при нескольких типах цен и ненастроенном выборе НЕ применяет ничего", () => {
     const plan = decideApplication({
-      known,
+      products: known,
       items: [],
       offers: [
         {
@@ -39,6 +71,7 @@ describe("decideApplication", () => {
             { type: "Розничная", value: "89.90", currency: "руб" },
             { type: "Закупочная", value: "54.10", currency: "руб" },
           ],
+          barcode: null,
         },
       ],
       configuredPriceType: undefined,
@@ -55,7 +88,7 @@ describe("decideApplication", () => {
 
   it("настроенный тип цены выбирает свою из нескольких", () => {
     const plan = decideApplication({
-      known,
+      products: known,
       items: [],
       offers: [
         {
@@ -64,6 +97,7 @@ describe("decideApplication", () => {
             { type: "Розничная", value: "89.90", currency: "руб" },
             { type: "Закупочная", value: "54.10", currency: "руб" },
           ],
+          barcode: null,
         },
       ],
       configuredPriceType: "Закупочная",
@@ -73,12 +107,13 @@ describe("decideApplication", () => {
 
   it("настроенный тип цены побеждает единственную пришедшую цену другого типа", () => {
     const plan = decideApplication({
-      known,
+      products: known,
       items: [],
       offers: [
         {
           externalRef: "guid-1",
           prices: [{ type: "Закупочная", value: "54.10", currency: "руб" }],
+          barcode: null,
         },
       ],
       configuredPriceType: "Розничная",
@@ -95,7 +130,7 @@ describe("decideApplication", () => {
 
   it("несколько записей одного типа не считаются неоднозначностью", () => {
     const plan = decideApplication({
-      known,
+      products: known,
       items: [],
       offers: [
         {
@@ -104,6 +139,7 @@ describe("decideApplication", () => {
             { type: "Розничная", value: "89.90", currency: "руб" },
             { type: "Розничная", value: "89.90", currency: "руб" },
           ],
+          barcode: null,
         },
       ],
       configuredPriceType: undefined,
@@ -114,10 +150,14 @@ describe("decideApplication", () => {
 
   it("не применяет цену в чужой валюте", () => {
     const plan = decideApplication({
-      known,
+      products: known,
       items: [],
       offers: [
-        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "1.20", currency: "USD" }] },
+        {
+          externalRef: "guid-1",
+          prices: [{ type: "Розничная", value: "1.20", currency: "USD" }],
+          barcode: null,
+        },
       ],
       configuredPriceType: undefined,
     });
@@ -133,10 +173,14 @@ describe("decideApplication", () => {
     "принимает рубль в форме %j как свою валюту",
     (currency) => {
       const plan = decideApplication({
-        known,
+        products: known,
         items: [],
         offers: [
-          { externalRef: "guid-1", prices: [{ type: "Розничная", value: "10.00", currency }] },
+          {
+            externalRef: "guid-1",
+            prices: [{ type: "Розничная", value: "10.00", currency }],
+            barcode: null,
+          },
         ],
         configuredPriceType: undefined,
       });
@@ -151,10 +195,14 @@ describe("decideApplication", () => {
     "продолжает отказывать в настоящей чужой валюте %j",
     (currency) => {
       const plan = decideApplication({
-        known,
+        products: known,
         items: [],
         offers: [
-          { externalRef: "guid-1", prices: [{ type: "Розничная", value: "10.00", currency }] },
+          {
+            externalRef: "guid-1",
+            prices: [{ type: "Розничная", value: "10.00", currency }],
+            barcode: null,
+          },
         ],
         configuredPriceType: undefined,
       });
@@ -165,8 +213,17 @@ describe("decideApplication", () => {
 
   it("отсутствие цены не обнуляет прежнюю", () => {
     const plan = decideApplication({
-      known,
-      items: [{ externalRef: "guid-1", name: "Жигулёвское", article: null, unit: "шт" }],
+      products: known,
+      items: [
+        {
+          externalRef: "guid-1",
+          name: "Жигулёвское",
+          article: null,
+          unit: "шт",
+          barcode: null,
+          images: [],
+        },
+      ],
       offers: [],
       configuredPriceType: undefined,
     });
@@ -183,10 +240,14 @@ describe("decideApplication", () => {
   // import moving: one bad offer is skipped with a reason, not a dead loop.
   it("пустое значение цены не применяется и пропускается с причиной", () => {
     const plan = decideApplication({
-      known,
+      products: known,
       items: [],
       offers: [
-        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "", currency: "руб" }] },
+        {
+          externalRef: "guid-1",
+          prices: [{ type: "Розничная", value: "", currency: "руб" }],
+          barcode: null,
+        },
       ],
       configuredPriceType: undefined,
     });
@@ -196,10 +257,14 @@ describe("decideApplication", () => {
 
   it("цена с запятой вместо точки не применяется и пропускается с причиной", () => {
     const plan = decideApplication({
-      known,
+      products: known,
       items: [],
       offers: [
-        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "89,90", currency: "руб" }] },
+        {
+          externalRef: "guid-1",
+          prices: [{ type: "Розничная", value: "89,90", currency: "руб" }],
+          barcode: null,
+        },
       ],
       configuredPriceType: undefined,
     });
@@ -209,12 +274,13 @@ describe("decideApplication", () => {
 
   it("цена, переполняющая numeric(12,2), не применяется и пропускается с причиной", () => {
     const plan = decideApplication({
-      known,
+      products: known,
       items: [],
       offers: [
         {
           externalRef: "guid-1",
           prices: [{ type: "Розничная", value: "123456789012.00", currency: "руб" }],
+          barcode: null,
         },
       ],
       configuredPriceType: undefined,
@@ -243,10 +309,14 @@ describe("decideApplication", () => {
     ["89.999", "90.00"],
   ])("принимает цену %j с более чем двумя дробными знаками и округляет до %j", (raw, rounded) => {
     const plan = decideApplication({
-      known,
+      products: known,
       items: [],
       offers: [
-        { externalRef: "guid-1", prices: [{ type: "Розничная", value: raw, currency: "руб" }] },
+        {
+          externalRef: "guid-1",
+          prices: [{ type: "Розничная", value: raw, currency: "руб" }],
+          barcode: null,
+        },
       ],
       configuredPriceType: undefined,
     });
@@ -259,12 +329,13 @@ describe("decideApplication", () => {
   // value handed on to Postgres that only fails once it gets there.
   it("округление, переполняющее целую часть после округления, тоже пропускается с причиной", () => {
     const plan = decideApplication({
-      known,
+      products: known,
       items: [],
       offers: [
         {
           externalRef: "guid-1",
           prices: [{ type: "Розничная", value: "9999999999.995", currency: "руб" }],
+          barcode: null,
         },
       ],
       configuredPriceType: undefined,
@@ -280,10 +351,14 @@ describe("decideApplication", () => {
     "продолжает отказывать в непригодном значении цены %j",
     (value) => {
       const plan = decideApplication({
-        known,
+        products: known,
         items: [],
         offers: [
-          { externalRef: "guid-1", prices: [{ type: "Розничная", value, currency: "руб" }] },
+          {
+            externalRef: "guid-1",
+            prices: [{ type: "Розничная", value, currency: "руб" }],
+            barcode: null,
+          },
         ],
         configuredPriceType: undefined,
       });
@@ -304,7 +379,7 @@ describe("decideApplication", () => {
   // an unresolved reference instead of an outright ambiguous name.
   it("несколько разных НЕРАЗРЕШЁННЫХ ссылок на тип цены не сливаются в одну — цена не применяется", () => {
     const plan = decideApplication({
-      known,
+      products: known,
       items: [],
       offers: [
         {
@@ -313,6 +388,7 @@ describe("decideApplication", () => {
             { type: "", typeRef: "type-guid-a", value: "89.90", currency: "руб" },
             { type: "", typeRef: "type-guid-b", value: "54.10", currency: "руб" },
           ],
+          barcode: null,
         },
       ],
       configuredPriceType: undefined,
@@ -329,15 +405,117 @@ describe("decideApplication", () => {
 
   it("одна непригодная цена не останавливает остальные предложения того же круга", () => {
     const plan = decideApplication({
-      known: [...known, { id: "p-2", externalRef: "guid-2" }],
+      products: [...known, product("p-2", "00000000000024", "guid-2")],
       items: [],
       offers: [
-        { externalRef: "guid-1", prices: [{ type: "Розничная", value: "89,90", currency: "руб" }] },
-        { externalRef: "guid-2", prices: [{ type: "Розничная", value: "10.00", currency: "руб" }] },
+        {
+          externalRef: "guid-1",
+          prices: [{ type: "Розничная", value: "89,90", currency: "руб" }],
+          barcode: null,
+        },
+        {
+          externalRef: "guid-2",
+          prices: [{ type: "Розничная", value: "10.00", currency: "руб" }],
+          barcode: null,
+        },
       ],
       configuredPriceType: undefined,
     });
     expect(plan.priceUpdates).toEqual([{ productId: "p-2", unitPrice: "10.00" }]);
     expect(plan.skipped).toEqual([{ externalRef: "guid-1", reason: "invalid_price_value" }]);
+  });
+});
+
+describe("автосвязь по GTIN", () => {
+  const item = (externalRef: string, barcode: string | null, images: string[] = []) => ({
+    externalRef,
+    name: "Товар",
+    article: null,
+    unit: null,
+    barcode,
+    images,
+  });
+
+  it("связывает несвязанную карточку по EAN-13 и применяет цену этим же раундом", () => {
+    const plan = decideApplication({
+      products: [product("p1", "04680089900253", null)],
+      items: [item("ref-1", "4680089900253")],
+      offers: [
+        {
+          externalRef: "ref-1",
+          barcode: null,
+          prices: [{ type: "Базовая", value: "9200.00", currency: "руб" }],
+        },
+      ],
+    });
+    expect(plan.links).toEqual([{ productId: "p1", externalRef: "ref-1", gtin: "04680089900253" }]);
+    expect(plan.priceUpdates).toEqual([{ productId: "p1", unitPrice: "9200.00" }]);
+    expect(plan.candidates).toEqual([]);
+  });
+
+  it("карточка связана с другим Ид — конфликт, позиция в кандидаты с GTIN", () => {
+    const plan = decideApplication({
+      products: [product("p1", "04680089900253", "other-ref")],
+      items: [item("ref-1", "4680089900253")],
+      offers: [],
+    });
+    expect(plan.links).toEqual([]);
+    expect(plan.gtinConflicts).toEqual([
+      {
+        externalRef: "ref-1",
+        gtin: "04680089900253",
+        productId: "p1",
+        productExternalRef: "other-ref",
+      },
+    ]);
+    expect(plan.candidates[0]).toMatchObject({ externalRef: "ref-1", gtin: "04680089900253" });
+  });
+
+  it("две позиции файла с одним GTIN — не угадываем: обе в кандидаты", () => {
+    const plan = decideApplication({
+      products: [product("p1", "04680089900253", null)],
+      items: [item("ref-1", "4680089900253"), item("ref-2", "4680089900253")],
+      offers: [],
+    });
+    expect(plan.links).toEqual([]);
+    expect(plan.gtinAmbiguities).toEqual([
+      { gtin: "04680089900253", externalRefs: ["ref-1", "ref-2"] },
+    ]);
+    expect(plan.candidates).toHaveLength(2);
+  });
+
+  it("невалидный штрихкод считается и не рушит кандидата", () => {
+    const plan = decideApplication({
+      products: [],
+      items: [item("ref-1", "4680089900250")],
+      offers: [], // не сошлась контрольная
+    });
+    expect(plan.invalidBarcodes).toBe(1);
+    expect(plan.candidates[0]).toMatchObject({ externalRef: "ref-1", gtin: null });
+  });
+
+  it("штрихкод берётся из предложения, когда у товара его нет", () => {
+    const plan = decideApplication({
+      products: [product("p1", "04680089900253", null)],
+      items: [item("ref-1", null)],
+      offers: [{ externalRef: "ref-1", barcode: "4680089900253", prices: [] }],
+    });
+    expect(plan.links).toHaveLength(1);
+  });
+
+  it("фото планируется для давно связанных и только что связанных", () => {
+    const plan = decideApplication({
+      products: [product("p1", "04680089900253", null), product("p2", "00000000000017", "ref-2")],
+      items: [
+        item("ref-1", "4680089900253", ["import_files/a.png"]),
+        item("ref-2", null, ["https://disk.sbis.ru/x"]),
+        item("ref-3", null, ["import_files/c.png"]), // не связан — фото некуда
+      ],
+      offers: [],
+    });
+    expect(plan.images).toEqual([
+      { productId: "p1", source: "import_files/a.png" },
+      { productId: "p2", source: "https://disk.sbis.ru/x" },
+    ]);
   });
 });

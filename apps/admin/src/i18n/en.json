@@ -2241,6 +2241,7 @@
           "table": {
             "name": "Name",
             "article": "Article",
+            "gtin": "GTIN",
             "externalRef": "1C id",
             "actions": "Actions",
             "suggestion": "Looks like: {{name}}"

@@ -2241,6 +2241,7 @@
           "table": {
             "name": "Название",
             "article": "Артикул",
+            "gtin": "GTIN",
             "externalRef": "Ид из 1С",
             "actions": "Действия",
             "suggestion": "Похоже на: {{name}}"

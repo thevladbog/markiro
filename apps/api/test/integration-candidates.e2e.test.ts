@@ -33,6 +33,7 @@ describe.skipIf(!ready)("candidates", () => {
   let candidateId: string;
   let otherCandidateId: string;
   let hiddenId: string;
+  let gtinCandidateId: string;
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -101,6 +102,20 @@ describe.skipIf(!ready)("candidates", () => {
       })
       .returning({ id: schema.integrationCandidates.id });
     hiddenId = hiddenRow!.id;
+
+    // Четвёртая позиция — несёт gtin (Task 6/7): проверяет, что DTO отдаёт
+    // его как есть, а не молчит про поле, которого раньше не было.
+    const [gtinRow] = await db
+      .insert(schema.integrationCandidates)
+      .values({
+        tenantId,
+        channelType: "commerceml",
+        externalRef: "guid-gtin",
+        name: "Позиция со штрихкодом",
+        gtin: "04680089900253",
+      })
+      .returning({ id: schema.integrationCandidates.id });
+    gtinCandidateId = gtinRow!.id;
   });
 
   afterAll(async () => {
@@ -113,6 +128,14 @@ describe.skipIf(!ready)("candidates", () => {
       (c: { name: string }) => c.name === "Жигулёвское 0,5",
     );
     expect(candidate.suggestedProductId).toBe(productId);
+  });
+
+  it("отдаёт gtin как есть, а без него — null", async () => {
+    const res = await agent.get("/integrations/commerceml/candidates").expect(200);
+    const withGtin = res.body.candidates.find((c: { id: string }) => c.id === gtinCandidateId);
+    expect(withGtin.gtin).toBe("04680089900253");
+    const withoutGtin = res.body.candidates.find((c: { id: string }) => c.id === candidateId);
+    expect(withoutGtin.gtin).toBeNull();
   });
 
   it("связывание проставляет external_ref и убирает позицию из очереди", async () => {
