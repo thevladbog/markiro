@@ -1023,6 +1023,7 @@ const invoiceCreateLineSchema = z
 export const invoiceCreateSchema = z
   .object({
     tenantId: platformTenantIdSchema,
+    idempotencyKey: platformUuidSchema.optional(),
     sourceOfferId: platformUuidSchema.optional(),
     sourceRequestId: platformUuidSchema.optional(),
     sellerBankAccountId: platformUuidSchema.nullable().optional(),
@@ -1030,7 +1031,16 @@ export const invoiceCreateSchema = z
     applicationMode: z.enum(["manual", "automatic"]),
     lines: z.array(invoiceCreateLineSchema).min(1).max(100),
   })
-  .strict();
+  .strict()
+  .superRefine((invoice, context) => {
+    if ((invoice.sourceOfferId || invoice.sourceRequestId) && !invoice.idempotencyKey) {
+      context.addIssue({
+        code: "custom",
+        path: ["idempotencyKey"],
+        message: "Linked invoice creation requires an idempotency key",
+      });
+    }
+  });
 
 export const invoiceApplySchema = z
   .object({

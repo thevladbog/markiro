@@ -8,10 +8,11 @@ import {
 } from "@nestjs/common";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import type {
-  InvoiceCreateServiceResultSource,
-  InvoiceServiceDetailSource,
-  InvoiceServiceRecordSource,
+import {
+  platformCommercialContracts,
+  type InvoiceCreateServiceResultSource,
+  type InvoiceServiceDetailSource,
+  type InvoiceServiceRecordSource,
 } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
@@ -30,6 +31,10 @@ import {
 } from "./commercial-snapshots";
 import type { CreateInvoiceDto } from "./dto";
 import { TenantBillingNotificationsService } from "../tenant-billing/tenant-billing-notifications.service";
+import {
+  beginPlatformBillingMutation,
+  commitPlatformBillingMutation,
+} from "../platform-billing-idempotency";
 
 const cents = (value: string): bigint => {
   const [whole, fraction = "00"] = value.split(".");
@@ -50,13 +55,30 @@ export class BillingService {
     principal: PlatformPrincipal,
     input: CreateInvoiceDto,
   ): Promise<InvoiceCreateServiceResultSource> {
+    const normalizedInput = platformCommercialContracts.invoices.create.body.parse(input);
     return this.db.transaction(async (tx) => {
-      const canonicalSourceRequestId = input.sourceRequestId
-        ? canonicalBillingUuid(input.sourceRequestId)
+      const canonicalSourceRequestId = normalizedInput.sourceRequestId
+        ? canonicalBillingUuid(normalizedInput.sourceRequestId)
         : null;
-      const canonicalSourceOfferId = input.sourceOfferId
-        ? canonicalBillingUuid(input.sourceOfferId)
+      const canonicalSourceOfferId = normalizedInput.sourceOfferId
+        ? canonicalBillingUuid(normalizedInput.sourceOfferId)
         : null;
+      const mutation = normalizedInput.idempotencyKey
+        ? await beginPlatformBillingMutation(tx, {
+            tenantId: normalizedInput.tenantId,
+            idempotencyKey: normalizedInput.idempotencyKey,
+            operation: "billing.invoice.create",
+            targetId: canonicalSourceRequestId ?? canonicalSourceOfferId ?? "create",
+            payload: invoiceCreatePayload(
+              normalizedInput,
+              canonicalSourceRequestId,
+              canonicalSourceOfferId,
+            ),
+            actorPlatformUserId: principal.userId,
+          })
+        : null;
+      if (mutation?.kind === "committed") return parseInvoiceCreateReplay(mutation.result);
+      if (mutation?.kind === "pending") mutationInProgress();
       const resources: BillingWorkflowResource[] = [{ kind: "invoice_number", id: "allocator" }];
       let sourceOfferFamilyId: string | null = null;
       if (canonicalSourceRequestId) {
@@ -65,7 +87,7 @@ export class BillingService {
       if (canonicalSourceOfferId) {
         sourceOfferFamilyId = await locateInvoiceSourceOffer(
           tx,
-          input.tenantId,
+          normalizedInput.tenantId,
           canonicalSourceOfferId,
         );
         resources.push(
@@ -73,15 +95,15 @@ export class BillingService {
           { kind: "offer", id: canonicalSourceOfferId },
         );
       }
-      await acquireBillingWorkflowLocks(tx, input.tenantId, resources);
+      await acquireBillingWorkflowLocks(tx, normalizedInput.tenantId, resources);
       const [tenant] = await tx
         .select({ id: schema.organization.id })
         .from(schema.organization)
-        .where(eq(schema.organization.id, input.tenantId))
+        .where(eq(schema.organization.id, normalizedInput.tenantId))
         .limit(1);
       if (!tenant) throw new NotFoundException({ code: "tenant_not_found" });
       const sourceRequestId = canonicalSourceRequestId
-        ? await lockInvoiceSourceRequest(tx, input.tenantId, canonicalSourceRequestId)
+        ? await lockInvoiceSourceRequest(tx, normalizedInput.tenantId, canonicalSourceRequestId)
         : null;
       let sourceOfferId: string | null = null;
       if (canonicalSourceOfferId) {
@@ -90,7 +112,7 @@ export class BillingService {
         }
         sourceOfferId = await lockAcceptedInvoiceSourceOffer(
           tx,
-          input.tenantId,
+          normalizedInput.tenantId,
           canonicalSourceOfferId,
           sourceOfferFamilyId,
         );
@@ -115,11 +137,11 @@ export class BillingService {
         [invoice] = await tx
           .insert(schema.invoices)
           .values({
-            tenantId: input.tenantId,
+            tenantId: normalizedInput.tenantId,
             number: next,
-            sellerBankAccountId: input.sellerBankAccountId ?? null,
-            dueDate: input.dueDate ? new Date(input.dueDate) : null,
-            applicationMode: input.applicationMode,
+            sellerBankAccountId: normalizedInput.sellerBankAccountId ?? null,
+            dueDate: normalizedInput.dueDate ? new Date(normalizedInput.dueDate) : null,
+            applicationMode: normalizedInput.applicationMode,
             sourceOfferId,
             createdByPlatformUserId: principal.userId,
             subtotal: "0.00",
@@ -138,7 +160,7 @@ export class BillingService {
         const [link] = await tx
           .insert(schema.tenantBillingRequestLinks)
           .values({
-            tenantId: input.tenantId,
+            tenantId: normalizedInput.tenantId,
             requestId: sourceRequestId,
             invoiceId: invoice.id,
           })
@@ -147,13 +169,13 @@ export class BillingService {
         const [event] = await tx
           .insert(schema.tenantBillingRequestEvents)
           .values({
-            tenantId: input.tenantId,
+            tenantId: normalizedInput.tenantId,
             requestId: sourceRequestId,
             kind: "invoice_linked",
             actorKind: "platform_user",
             actorPlatformUserId: principal.userId,
             metadata: { invoiceId: invoice.id, linkId: link.id },
-            idempotencyKey: randomUUID(),
+            idempotencyKey: normalizedInput.idempotencyKey ?? randomUUID(),
           })
           .returning({ id: schema.tenantBillingRequestEvents.id });
         if (!event) throw new Error("invoice request link event insert failed");
@@ -162,7 +184,7 @@ export class BillingService {
           .from(schema.tenantBillingRequests)
           .where(
             and(
-              eq(schema.tenantBillingRequests.tenantId, input.tenantId),
+              eq(schema.tenantBillingRequests.tenantId, normalizedInput.tenantId),
               eq(schema.tenantBillingRequests.id, sourceRequestId),
             ),
           )
@@ -173,7 +195,7 @@ export class BillingService {
           actorRole: principal.role,
           action: "billing.request.invoice_linked",
           outcome: "success",
-          tenantId: input.tenantId,
+          tenantId: normalizedInput.tenantId,
           targetType: "tenant_billing_request",
           targetId: sourceRequestId,
           reason: null,
@@ -191,7 +213,7 @@ export class BillingService {
       let subtotal = 0n;
       let vatTotal = 0n;
       let total = 0n;
-      for (const [index, line] of input.lines.entries()) {
+      for (const [index, line] of normalizedInput.lines.entries()) {
         const catalog = line.catalogVersionId
           ? await tx
               .select()
@@ -233,7 +255,7 @@ export class BillingService {
         vatTotal += lineVat;
         total += lineTotal;
         await tx.insert(schema.invoiceLines).values({
-          tenantId: input.tenantId,
+          tenantId: normalizedInput.tenantId,
           invoiceId: invoice.id,
           position: index + 1,
           kind: line.kind,
@@ -270,7 +292,16 @@ export class BillingService {
         .where(eq(schema.invoices.id, invoice.id))
         .returning();
       if (!updated) throw new BadRequestException({ code: "invoice_create_failed" });
-      return { ...updated, sourceRequestId, lines: input.lines.length };
+      const result = { ...updated, sourceRequestId, lines: normalizedInput.lines.length };
+      if (mutation) {
+        await commitPlatformBillingMutation(
+          tx,
+          mutation.row.id,
+          result.id,
+          platformCommercialContracts.invoices.create.response.parse(result),
+        );
+      }
+      return result;
     });
   }
 
@@ -568,6 +599,40 @@ export class BillingService {
       return updated;
     });
   }
+}
+
+function invoiceCreatePayload(
+  input: CreateInvoiceDto,
+  sourceRequestId: string | null,
+  sourceOfferId: string | null,
+) {
+  return {
+    tenantId: input.tenantId,
+    sourceRequestId,
+    sourceOfferId,
+    sellerBankAccountId: input.sellerBankAccountId ?? null,
+    dueDate: input.dueDate ? new Date(input.dueDate).toISOString() : null,
+    applicationMode: input.applicationMode,
+    lines: input.lines,
+  };
+}
+
+function parseInvoiceCreateReplay(value: unknown): InvoiceCreateServiceResultSource {
+  const invoice = platformCommercialContracts.invoices.create.response.parse(value);
+  return {
+    ...invoice,
+    issueDate: invoice.issueDate ? new Date(invoice.issueDate) : null,
+    dueDate: invoice.dueDate ? new Date(invoice.dueDate) : null,
+    issuedAt: invoice.issuedAt ? new Date(invoice.issuedAt) : null,
+    paidAt: invoice.paidAt ? new Date(invoice.paidAt) : null,
+    cancelledAt: invoice.cancelledAt ? new Date(invoice.cancelledAt) : null,
+    createdAt: new Date(invoice.createdAt),
+    updatedAt: new Date(invoice.updatedAt),
+  };
+}
+
+function mutationInProgress(): never {
+  throw new ConflictException({ code: "billing_mutation_in_progress" });
 }
 
 type InvoiceSourceExecutor = Pick<Db, "select">;

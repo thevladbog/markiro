@@ -55,6 +55,7 @@ function InvoiceEditor() {
   const rawSourceRequestId = (location.state as { sourceRequestId?: unknown } | null)
     ?.sourceRequestId;
   const createdInvoiceId = useRef<string | null>(null);
+  const createAttempt = useRef<{ fingerprint: string; idempotencyKey: string } | null>(null);
   const sourceOfferId = z.uuid().safeParse(rawSourceOfferId).data;
   const sourceRequestId = z.uuid().safeParse(rawSourceRequestId).data;
   const hasSourceNavigation = rawSourceOfferId !== undefined || rawSourceRequestId !== undefined;
@@ -134,7 +135,16 @@ function InvoiceEditor() {
         throw new ApiRequestError(409, "Catalog version unavailable", "catalog_version_stale");
       }
       try {
-        return await createInvoice(toInvoiceCreateInput(draft));
+        const input = toInvoiceCreateInput(draft);
+        const fingerprint = JSON.stringify(input);
+        const attempt =
+          createAttempt.current?.fingerprint === fingerprint
+            ? createAttempt.current
+            : { fingerprint, idempotencyKey: crypto.randomUUID() };
+        createAttempt.current = attempt;
+        const invoice = await createInvoice({ ...input, idempotencyKey: attempt.idempotencyKey });
+        createAttempt.current = null;
+        return invoice;
       } catch (error) {
         if (error instanceof ApiRequestError && error.status === 403) {
           setMutationForbidden(true);

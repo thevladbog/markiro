@@ -1239,6 +1239,7 @@ describe("platform commercial contracts", () => {
 
     const direct = platformCommercialContracts.invoices.create.body.parse({
       tenantId: TENANT_ID,
+      idempotencyKey,
       applicationMode: "manual",
       lines: [
         {
@@ -1254,7 +1255,16 @@ describe("platform commercial contracts", () => {
       sourceOfferId: OFFER_ID,
       sourceRequestId: requestId,
     });
-    expect(direct).toMatchObject({ sourceOfferId: OFFER_ID, sourceRequestId: requestId });
+    expect(direct).toMatchObject({
+      idempotencyKey,
+      sourceOfferId: OFFER_ID,
+      sourceRequestId: requestId,
+    });
+    const linkedWithoutIdempotency = { ...direct, idempotencyKey: undefined };
+    expect(
+      platformCommercialContracts.invoices.create.body.safeParse(linkedWithoutIdempotency).success,
+      "linked invoice creation must carry a durable retry key",
+    ).toBe(false);
     expect(
       platformCommercialContracts.invoices.create.body.safeParse({
         ...direct,

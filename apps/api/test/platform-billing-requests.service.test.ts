@@ -1015,7 +1015,7 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     ]);
   });
 
-  it("creates an invoice only from the current accepted published offer and links its source request", async () => {
+  it("durably replays one linked invoice from the current accepted published offer", async () => {
     const request = await insertRequest(connection.db, tenantA, tenantUser, "offer_prepared");
     const familyId = randomUUID();
     const [published] = await connection.db
@@ -1049,19 +1049,87 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
       })
       .returning();
 
-    const invoice = await billing.create(actor, {
+    const idempotencyKey = randomUUID();
+    const createInput = {
       ...invoiceInput(tenantA),
+      idempotencyKey,
       dueDate: "2026-08-30",
       sourceOfferId: published!.id,
       sourceRequestId: request.id,
-    });
+    };
+    const invoice = await billing.create(actor, createInput);
     expect(invoice).toMatchObject({ sourceOfferId: published!.id, sourceRequestId: request.id });
+    await expect(
+      billing.create(actor, {
+        ...createInput,
+        idempotencyKey: idempotencyKey.toUpperCase(),
+        sourceOfferId: published!.id.toUpperCase(),
+        sourceRequestId: request.id.toUpperCase(),
+      }),
+    ).resolves.toEqual(invoice);
+    await expect(
+      billing.create(actor, { ...createInput, dueDate: "2026-08-31" }),
+    ).rejects.toMatchObject({ response: { code: "idempotency_key_reused" }, status: 409 });
     const links = await connection.db
       .select()
       .from(schema.tenantBillingRequestLinks)
       .where(eq(schema.tenantBillingRequestLinks.invoiceId, invoice.id));
     expect(links).toEqual([
       expect.objectContaining({ tenantId: tenantA, requestId: request.id, invoiceId: invoice.id }),
+    ]);
+    await expect(
+      connection.db
+        .select({ id: schema.invoices.id })
+        .from(schema.invoices)
+        .where(eq(schema.invoices.id, invoice.id)),
+    ).resolves.toEqual([{ id: invoice.id }]);
+    const linkedEvents = await connection.db
+      .select()
+      .from(schema.tenantBillingRequestEvents)
+      .where(
+        and(
+          eq(schema.tenantBillingRequestEvents.requestId, request.id),
+          eq(schema.tenantBillingRequestEvents.kind, "invoice_linked"),
+        ),
+      );
+    expect(linkedEvents).toEqual([
+      expect.objectContaining({
+        tenantId: tenantA,
+        requestId: request.id,
+        kind: "invoice_linked",
+        actorKind: "platform_user",
+        actorPlatformUserId: actorId,
+        idempotencyKey,
+        metadata: { invoiceId: invoice.id, linkId: links[0]!.id },
+      }),
+    ]);
+    const linkAuditsBeforeIssue = await connection.db
+      .select()
+      .from(schema.platformAuditEvents)
+      .where(
+        and(
+          eq(schema.platformAuditEvents.targetId, request.id),
+          eq(schema.platformAuditEvents.action, "billing.request.invoice_linked"),
+        ),
+      );
+    expect(linkAuditsBeforeIssue).toEqual([
+      expect.objectContaining({
+        actorPlatformUserId: actorId,
+        actorRole: "accountant",
+        action: "billing.request.invoice_linked",
+        outcome: "success",
+        tenantId: tenantA,
+        targetType: "tenant_billing_request",
+        targetId: request.id,
+        reason: null,
+        before: { status: "offer_prepared" },
+        after: {
+          status: "offer_prepared",
+          invoiceId: invoice.id,
+          linkId: links[0]!.id,
+          eventId: linkedEvents[0]!.id,
+        },
+      }),
     ]);
     const issued = await billing.issue(actor, invoice.id);
     expect(issued).toMatchObject({
@@ -1355,6 +1423,7 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
 function invoiceInput(tenantId: string): CreateInvoiceDto {
   return {
     tenantId,
+    idempotencyKey: randomUUID(),
     dueDate: null,
     applicationMode: "manual",
     lines: [

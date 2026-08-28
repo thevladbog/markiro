@@ -1,4 +1,4 @@
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -19,6 +19,7 @@ const OFFER_ID = "81111111-1111-4111-8111-111111111111";
 const REQUEST_ID = "71111111-1111-4111-8111-111111111111";
 const CREATED_INVOICE_ID = "91111111-1111-4111-8111-111111111111";
 const CREATED_AT = "2026-08-21T10:00:00.000Z";
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 function publishedOffer(overrides: Record<string, unknown> = {}) {
   return {
     id: OFFER_ID,
@@ -48,12 +49,14 @@ afterEach(() => {
 
 function installInvoiceEditorApi({
   createStatus = 201,
+  loseFirstCreateResponse = false,
   tenantItems = [TENANT_LIST_ITEM],
   offer = null,
   requestAuthority,
   me = ACCOUNTANT_ME,
 }: {
   createStatus?: number;
+  loseFirstCreateResponse?: boolean;
   tenantItems?: Array<Record<string, unknown>>;
   offer?: Record<string, unknown> | null;
   requestAuthority?: Record<string, unknown> | { status: 403 };
@@ -105,6 +108,9 @@ function installInvoiceEditorApi({
       if (url.endsWith("/api/platform/invoices") && method === "POST") {
         const body = JSON.parse(String(init.body));
         calls.push({ method, path: url, body });
+        if (loseFirstCreateResponse && calls.length === 1) {
+          throw new TypeError("response lost after commit");
+        }
         if (createStatus === 403) {
           return jsonResponse(403, { code: "forbidden" });
         }
@@ -181,6 +187,27 @@ async function addPosition(
 }
 
 describe("invoice editor route", () => {
+  it("reuses one invoice idempotency key after a lost successful response", async () => {
+    const api = installInvoiceEditorApi({
+      loseFirstCreateResponse: true,
+    });
+    renderSaasApp({ initialEntry: `/billing/new?tenantId=${TENANT_ID}` });
+    const user = userEvent.setup();
+
+    const submit = await screen.findByRole("button", { name: "Создать черновик счёта" });
+    await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
+    await user.click(submit);
+    expect((await screen.findByRole("alert")).textContent).toContain("Не удалось создать счёт");
+    await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
+
+    await waitFor(() => expect(api.calls()).toHaveLength(2));
+    expect(api.calls()).toHaveLength(2);
+    const firstKey = (api.calls()[0]?.body as { idempotencyKey?: unknown }).idempotencyKey;
+    const secondKey = (api.calls()[1]?.body as { idempotencyKey?: unknown }).idempotencyKey;
+    expect(firstKey).toMatch(UUID_V4);
+    expect(secondKey).toBe(firstKey);
+  });
+
   it("rejects crafted accepted state when request authority is stale", async () => {
     const offer = publishedOffer({ lines: [] });
     installInvoiceEditorApi({ offer, requestAuthority: requestDetail(null) });
@@ -317,6 +344,7 @@ describe("invoice editor route", () => {
         path: "/api/platform/invoices",
         body: {
           tenantId: TENANT_ID,
+          idempotencyKey: expect.stringMatching(UUID_V4),
           dueDate: "2026-09-01",
           applicationMode: "automatic",
           lines: [
@@ -492,6 +520,7 @@ describe("invoice editor route", () => {
 
     expect(api.calls()[0]?.body).toEqual({
       tenantId: TENANT_ID,
+      idempotencyKey: expect.stringMatching(UUID_V4),
       sourceOfferId: OFFER_ID,
       sourceRequestId: REQUEST_ID,
       dueDate: null,
