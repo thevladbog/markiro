@@ -149,6 +149,7 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
     | "currentUndecided"
     | "accepted"
     | "changesRequested"
+    | "changesSuperseded"
     | "expired"
     | "supersededPrior"
     | "currentFamily",
@@ -157,6 +158,7 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
     currentUndecided: { tenantId: "", offerId: "" },
     accepted: { tenantId: "", offerId: "" },
     changesRequested: { tenantId: "", offerId: "" },
+    changesSuperseded: { tenantId: "", offerId: "" },
     expired: { tenantId: "", offerId: "" },
     supersededPrior: { tenantId: "", offerId: "" },
     currentFamily: { tenantId: "", offerId: "" },
@@ -707,6 +709,7 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
       laterPublished: await createOrganization(db),
       accepted: await createOrganization(db),
       changesRequested: await createOrganization(db),
+      changesSuperseded: await createOrganization(db),
       expired: await createOrganization(db),
     };
     const laterDraftFamilyId = randomUUID();
@@ -804,10 +807,11 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
         tenantId: offerTenantIds[name],
         familyId: randomUUID(),
         revision: 1,
-        status: "published",
+        status: name === "accepted" ? "paid" : "published",
         number: `READ-${name}-${offerId}`,
         total: "1.00",
         publishedAt: daysFromNow(-1),
+        ...(name === "accepted" ? { paidAt: fixedNow } : {}),
         createdByPlatformUserId: actorId,
         createdAt: daysFromNow(-1),
         updatedAt: daysFromNow(-1),
@@ -824,6 +828,52 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
       offerCases[name] = { tenantId: offerTenantIds[name], expectedOfferId: null };
       offerDetailCases[name] = { tenantId: offerTenantIds[name], offerId };
     }
+
+    const changesSupersededFamilyId = randomUUID();
+    const changesSupersededId = randomUUID();
+    const changesSupersededCurrentId = randomUUID();
+    await db.insert(schema.commercialOffers).values([
+      {
+        id: changesSupersededId,
+        tenantId: offerTenantIds.changesSuperseded,
+        familyId: changesSupersededFamilyId,
+        revision: 1,
+        status: "published",
+        number: `READ-CHANGES-SUPERSEDED-${changesSupersededId}`,
+        total: "1.00",
+        publishedAt: daysFromNow(-2),
+        createdByPlatformUserId: actorId,
+        createdAt: daysFromNow(-2),
+        updatedAt: daysFromNow(-2),
+      },
+      {
+        id: changesSupersededCurrentId,
+        tenantId: offerTenantIds.changesSuperseded,
+        familyId: changesSupersededFamilyId,
+        revision: 2,
+        previousRevisionId: changesSupersededId,
+        status: "published",
+        number: `READ-CHANGES-SUPERSEDED-CURRENT-${changesSupersededCurrentId}`,
+        total: "2.00",
+        publishedAt: daysFromNow(-1),
+        createdByPlatformUserId: actorId,
+        createdAt: daysFromNow(-1),
+        updatedAt: daysFromNow(-1),
+      },
+    ]);
+    await db.insert(schema.commercialOfferDecisions).values({
+      tenantId: offerTenantIds.changesSuperseded,
+      offerId: changesSupersededId,
+      decision: "changes_requested",
+      message: "Superseded after requested changes",
+      actorUserId: cabinetUserId,
+      idempotencyKey: randomUUID(),
+      createdAt: fixedNow,
+    });
+    offerDetailCases.changesSuperseded = {
+      tenantId: offerTenantIds.changesSuperseded,
+      offerId: changesSupersededId,
+    };
 
     const expiredOfferId = randomUUID();
     await db.insert(schema.commercialOffers).values({
@@ -1131,7 +1181,8 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
     );
     expect(accepted).toMatchObject({
       id: offerDetailCases.accepted.offerId,
-      status: "published",
+      status: "paid",
+      paidAt: "2026-08-27T12:00:00.000Z",
       isCurrent: true,
       actionable: false,
       latestDecision: {
@@ -1155,6 +1206,24 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
       latestDecision: {
         decision: "changes_requested",
         message: "Please revise",
+        createdAt: "2026-08-27T12:00:00.000Z",
+      },
+    });
+
+    const changesSuperseded = tenantOfferDetailSchema.parse(
+      await service.offerDetail(
+        offerDetailCases.changesSuperseded.tenantId,
+        offerDetailCases.changesSuperseded.offerId,
+      ),
+    );
+    expect(changesSuperseded).toMatchObject({
+      id: offerDetailCases.changesSuperseded.offerId,
+      status: "superseded",
+      isCurrent: false,
+      actionable: false,
+      latestDecision: {
+        decision: "changes_requested",
+        message: "Superseded after requested changes",
         createdAt: "2026-08-27T12:00:00.000Z",
       },
     });

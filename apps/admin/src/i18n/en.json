@@ -597,7 +597,9 @@
         "heading": "Offer {{number}}",
         "withoutNumber": "without a number",
         "conditions": "Terms",
-        "statusLabel": "Status",
+        "lifecycleStatus": "Offer status",
+        "currentnessLabel": "Offer revision",
+        "latestDecisionLabel": "Tenant decision",
         "expiresAt": "Valid until",
         "publishedAt": "Published",
         "total": "Total",
@@ -612,7 +614,16 @@
         "changeHelp": "From 1 to 2,000 characters.",
         "submitChanges": "Send request",
         "validationError": "Describe the changes in 1 to 2,000 characters.",
-        "actionError": "Could not send the decision. Your input has been saved; try again.",
+        "actionErrors": {
+          "retryable": "Could not confirm the result. Your input has been saved; try again.",
+          "offer_version_stale": "This offer was superseded by a newer revision. The data has been refreshed.",
+          "offer_expired": "The offer has expired. The data has been refreshed.",
+          "offer_not_published": "This offer can no longer be accepted. The data has been refreshed.",
+          "offer_already_decided": "A decision for this offer has already been recorded. The data has been refreshed.",
+          "idempotency_key_reused": "This retry does not match the original decision. The data has been refreshed.",
+          "conflict": "The offer state changed. The data has been refreshed.",
+          "rejected": "Could not send the decision. Refresh the data and try again."
+        },
         "download": "Download",
         "downloadError": "Could not download the document. Try again later.",
         "confirmTitle": "Accept this offer?",
@@ -625,7 +636,14 @@
           "expired": "Expired",
           "superseded": "Superseded by a newer revision",
           "paid": "Paid",
-          "cancelled": "Cancelled",
+          "cancelled": "Cancelled"
+        },
+        "currentness": {
+          "current": "Current revision",
+          "notCurrent": "Not the current revision"
+        },
+        "latestDecision": {
+          "none": "No decision submitted",
           "accepted": "Accepted",
           "changes_requested": "Changes requested"
         }
