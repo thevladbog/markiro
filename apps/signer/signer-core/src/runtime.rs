@@ -55,6 +55,12 @@ pub fn classify(error: &SignerError) -> Option<SignerErrorCode> {
     }
 }
 
+/// A thumbprint prefix short enough to survive the journal's credential
+/// redaction while still identifying which certificate a message is about.
+pub fn short_thumbprint(thumbprint: &str) -> String {
+    thumbprint.chars().take(8).collect()
+}
+
 pub fn backoff_for(attempt: u32) -> Duration {
     let seconds = 2u64.saturating_pow(attempt.min(6) + 1);
     Duration::from_secs(seconds).min(MAX_BACKOFF)
@@ -290,9 +296,13 @@ impl Runtime {
             Ok(certs) => {
                 let found = certs.into_iter().find(|c| c.thumbprint == thumbprint);
                 if found.is_none() {
+                    // A full thumbprint is a long hex run, which the journal's
+                    // credential redaction rewrites to `[redacted]` -- leaving
+                    // the operator no way to tell which certificate went
+                    // missing. A short prefix identifies it and stays legible.
                     self.note(
                         "Selected certificate is missing from the certificate list",
-                        Some(&thumbprint),
+                        Some(&short_thumbprint(&thumbprint)),
                     );
                 }
                 found
@@ -336,7 +346,13 @@ impl Runtime {
                 let result = loop {
                     let outcome = client.complete(secret, &task.id, &body).await;
                     attempt += 1;
-                    let done = matches!(outcome, Ok(()) | Err(SignerError::Revoked))
+                    // `Revoked` and `Protocol` are terminal verdicts from the
+                    // cloud -- a 401 will not become a 200, and a 404 means the
+                    // claim is already gone. Retrying either only burns time.
+                    let done = matches!(
+                        outcome,
+                        Ok(()) | Err(SignerError::Revoked) | Err(SignerError::Protocol(_))
+                    )
                         || attempt >= COMPLETE_ATTEMPTS;
                     if done {
                         break outcome;
@@ -431,5 +447,19 @@ mod tests {
         assert_eq!(backoff_for(1).as_secs(), 4);
         assert_eq!(backoff_for(2).as_secs(), 8);
         assert_eq!(backoff_for(10).as_secs(), 60, "must be capped so a recovered link is picked up promptly");
+    }
+
+    #[test]
+    fn a_short_thumbprint_survives_journal_redaction() {
+        let full = "AB12CD34EF56AB12CD34EF56AB12CD34EF56AB12";
+        let short = short_thumbprint(full);
+        assert_eq!(short, "AB12CD34");
+        // The whole point: the shortened form must not itself be mistaken for
+        // a credential by the journal.
+        let entry = crate::journal::JournalEntry::new("cert missing", Some(&short));
+        assert_eq!(entry.detail.as_deref(), Some("AB12CD34"));
+        // ...while the full one is redacted, which is why we shorten it.
+        let full_entry = crate::journal::JournalEntry::new("cert missing", Some(full));
+        assert_eq!(full_entry.detail.as_deref(), Some("[redacted]"));
     }
 }
