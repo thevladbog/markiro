@@ -7,6 +7,9 @@ pub mod cloud;
 pub mod journal;
 pub mod runtime;
 pub mod signer;
+pub mod signer_backend;
+#[cfg(windows)]
+pub mod signer_cades;
 #[cfg(windows)]
 pub mod signer_capi;
 pub mod storage;

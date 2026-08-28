@@ -3,7 +3,9 @@ mod commands;
 use std::sync::Arc;
 
 use signer_core::runtime::Runtime;
+#[cfg(windows)]
 use signer_core::signer::Signer;
+#[cfg(windows)]
 use signer_core::storage::SecretStore;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -40,7 +42,15 @@ pub fn run() {
             let version = app.package_info().version.to_string();
 
             #[cfg(windows)]
-            let signer: Arc<dyn Signer> = Arc::new(signer_core::signer_capi::CapiSigner::new());
+            let signer: Arc<dyn Signer> = match signer_core::signer_backend::signer_backend_from_env()
+            {
+                signer_core::signer_backend::SignerBackend::Cades => {
+                    Arc::new(signer_core::signer_cades::CadesSigner)
+                }
+                signer_core::signer_backend::SignerBackend::CryptoApi => {
+                    Arc::new(signer_core::signer_capi::CapiSigner::new())
+                }
+            };
             #[cfg(windows)]
             let secrets: Arc<dyn SecretStore> = Arc::new(signer_core::storage_dpapi::DpapiStore);
             #[cfg(not(windows))]
