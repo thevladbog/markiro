@@ -5,7 +5,6 @@ import {
   Inject,
   Injectable,
   NotFoundException,
-  Optional,
 } from "@nestjs/common";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -44,7 +43,7 @@ export class BillingService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly audit: PlatformAuditService,
-    @Optional() private readonly notifications?: TenantBillingNotificationsService,
+    private readonly notifications: TenantBillingNotificationsService,
   ) {}
 
   async create(
@@ -520,7 +519,7 @@ export class BillingService {
         },
         requestId: null,
       });
-      if (this.notifications?.isDueSoon(updated.dueDate)) {
+      if (this.notifications.isDueSoon(updated.dueDate)) {
         await this.notifications.enqueueInTransaction(tx, {
           tenantId: updated.tenantId,
           eventKind: "invoice_due_soon",

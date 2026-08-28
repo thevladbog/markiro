@@ -1,12 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema, type Db } from "@markiro/db";
+import { renderEmail } from "@markiro/email";
 import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { MailCryptoService } from "../src/modules/mail/mail-crypto.service";
 import { MailDeliveryService } from "../src/modules/mail/mail-delivery.service";
+import { MailJobsService, type MailPgPool } from "../src/modules/mail/mail-jobs.service";
+import {
+  TENANT_BILLING_ORGANIZATION_NAME_MAX,
+  TENANT_BILLING_RECIPIENT_NAME_MAX,
+  TENANT_BILLING_SUBJECT_NAME_MAX,
+  tenantBillingNotificationPayloadSchema,
+} from "../src/modules/mail/tenant-billing-notification-payload";
 import { TenantBillingNotificationsService } from "../src/modules/tenant-billing/tenant-billing-notifications.service";
 
 const ready = Boolean(process.env.DATABASE_URL);
@@ -189,7 +197,393 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
     ]);
   });
 
+  it("normalizes maximum upstream names before encryption so the worker can render them", async () => {
+    const longTenantId = `billing-notifications-${randomUUID()}`;
+    const ownerId = `${longTenantId}:owner`;
+    const platformUserId = `platform-${randomUUID()}`;
+    const actId = randomUUID();
+    await db.insert(schema.organization).values({
+      id: longTenantId,
+      name: `  ${"Завод🏭".repeat(60)}  `,
+      slug: `billing-notifications-${randomUUID()}`,
+      createdAt: fixedNow,
+    });
+    await db.insert(schema.user).values({
+      id: ownerId,
+      name: `  ${"Владелец🙂".repeat(30)}  `,
+      email: `${randomUUID()}@example.test`,
+      emailVerified: true,
+      createdAt: fixedNow,
+      updatedAt: fixedNow,
+    });
+    await db.insert(schema.member).values({
+      id: randomUUID(),
+      organizationId: longTenantId,
+      userId: ownerId,
+      role: "owner",
+      createdAt: fixedNow,
+    });
+    await db.insert(schema.platformUsers).values({
+      id: platformUserId,
+      name: "Platform",
+      email: `${platformUserId}@example.test`,
+      role: "platform_admin",
+      status: "active",
+      twoFactorEnabled: true,
+    });
+    await db.insert(schema.billingActs).values({
+      id: actId,
+      tenantId: longTenantId,
+      number: "АКТ🙂".repeat(60),
+      status: "issued",
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-28",
+      createdByPlatformUserId: platformUserId,
+      issuedByPlatformUserId: platformUserId,
+      issuedAt: fixedNow,
+    });
+    await db.insert(schema.billingActDocuments).values({
+      id: randomUUID(),
+      tenantId: longTenantId,
+      actId,
+      revision: 1,
+      objectKey: `billing/acts/${actId}.pdf`,
+      contentType: "application/pdf",
+      sha256: "a".repeat(64),
+      byteSize: 10,
+      state: "ready",
+      uploadedByPlatformUserId: platformUserId,
+      readyAt: fixedNow,
+    });
+    const longService = new TenantBillingNotificationsService(
+      db,
+      new MailDeliveryService(crypto),
+      "https://cabinet.markiro.test",
+      () => new Date(fixedNow),
+    );
+    const [deliveryId] = await db.transaction((tx) =>
+      longService.enqueueInTransaction(tx, {
+        tenantId: longTenantId,
+        eventKind: "act_ready",
+        entityId: actId,
+        revision: 1,
+        subjectName: "АКТ🙂".repeat(60),
+      }),
+    );
+    const [queuedDelivery] = await db
+      .select()
+      .from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.id, deliveryId!));
+    const payload = tenantBillingNotificationPayloadSchema.parse(
+      crypto.decrypt(queuedDelivery!.id, {
+        encryptedPayload: queuedDelivery!.encryptedPayload!,
+        payloadNonce: queuedDelivery!.payloadNonce!,
+        payloadTag: queuedDelivery!.payloadTag!,
+      }),
+    );
+    expect(Array.from(payload.recipientName)).toHaveLength(TENANT_BILLING_RECIPIENT_NAME_MAX);
+    expect(Array.from(payload.organizationName)).toHaveLength(TENANT_BILLING_ORGANIZATION_NAME_MAX);
+    expect(Array.from(payload.subjectName)).toHaveLength(TENANT_BILLING_SUBJECT_NAME_MAX);
+    expect(
+      `${payload.recipientName}${payload.organizationName}${payload.subjectName}`,
+    ).not.toContain("\uFFFD");
+    await expect(renderEmail(payload)).resolves.toMatchObject({
+      subject: expect.any(String),
+      html: expect.stringContaining("https://cabinet.markiro.test/billing/documents"),
+      text: expect.any(String),
+    });
+    const transport = { verify: vi.fn(async () => true), send: vi.fn(async () => undefined) };
+    const jobs = new MailJobsService(
+      connection.pool as unknown as MailPgPool,
+      crypto,
+      transport,
+      undefined,
+      undefined,
+      () => new Date(fixedNow),
+    );
+
+    await jobs.processDelivery(deliveryId!);
+
+    const [delivery] = await db
+      .select({ status: schema.emailDeliveries.status })
+      .from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.id, deliveryId!));
+    expect(delivery?.status).toBe("sent");
+    expect(transport.send).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an unsafe action URL before any durable delivery or outbox row", async () => {
+    const entityId = randomUUID();
+    const unsafe = new TenantBillingNotificationsService(
+      db,
+      new MailDeliveryService(crypto),
+      `https://${"a".repeat(2_100)}.example.test`,
+      () => new Date(fixedNow),
+    );
+
+    await expect(
+      db.transaction((tx) =>
+        unsafe.enqueueInTransaction(tx, {
+          tenantId,
+          eventKind: "offer_published",
+          entityId,
+          revision: 1,
+          subjectName: "КП-URL",
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      db
+        .select()
+        .from(schema.emailDeliveries)
+        .where(eq(schema.emailDeliveries.sourceId, `billing:offer_published:${entityId}:1`)),
+    ).resolves.toEqual([]);
+  });
+
+  it("cancels billing deliveries whose authoritative action becomes stale before send", async () => {
+    const platformUserId = `platform-${randomUUID()}`;
+    await db.insert(schema.platformUsers).values({
+      id: platformUserId,
+      name: "Worker state actor",
+      email: `${platformUserId}@example.test`,
+      role: "platform_admin",
+      status: "active",
+      twoFactorEnabled: true,
+    });
+    const transport = { verify: vi.fn(async () => true), send: vi.fn(async () => undefined) };
+    const jobs = new MailJobsService(
+      connection.pool as unknown as MailPgPool,
+      crypto,
+      transport,
+      undefined,
+      undefined,
+      () => new Date(fixedNow),
+    );
+    const queued: Array<{ id: string; staleKind: string }> = [];
+    const enqueueOne = async (input: Parameters<typeof service.enqueueInTransaction>[1]) => {
+      const ids = await db.transaction((tx) => service.enqueueInTransaction(tx, input));
+      return ids[0]!;
+    };
+
+    for (const nextStatus of ["under_review", "cancelled"] as const) {
+      const requestId = randomUUID();
+      const eventId = randomUUID();
+      await db.insert(schema.tenantBillingRequests).values({
+        id: requestId,
+        tenantId,
+        number: `REQ-${randomUUID()}`,
+        type: "other",
+        status: "clarification_required",
+        description: "Clarify",
+        responsibleSide: "tenant",
+        idempotencyKey: randomUUID(),
+        createdByUserId: `${tenantId}:owner`,
+      });
+      await db.insert(schema.tenantBillingRequestEvents).values({
+        id: eventId,
+        tenantId,
+        requestId,
+        kind: "status_changed",
+        fromStatus: "under_review",
+        toStatus: "clarification_required",
+        actorKind: "platform_user",
+        actorPlatformUserId: platformUserId,
+        idempotencyKey: randomUUID(),
+      });
+      const id = await enqueueOne({
+        tenantId,
+        eventKind: "clarification_required",
+        entityId: requestId,
+        revision: eventId,
+        subjectName: `REQ-${requestId}`,
+      });
+      await db
+        .update(schema.tenantBillingRequests)
+        .set({
+          status: nextStatus,
+          responsibleSide: nextStatus === "cancelled" ? "none" : "markiro",
+        })
+        .where(eq(schema.tenantBillingRequests.id, requestId));
+      queued.push({ id, staleKind: nextStatus === "cancelled" ? "cancelled" : "replied" });
+    }
+
+    for (const staleKind of ["decided", "superseded"] as const) {
+      const offerId = randomUUID();
+      await db.insert(schema.commercialOffers).values({
+        id: offerId,
+        tenantId,
+        familyId: randomUUID(),
+        revision: 1,
+        status: "published",
+        number: `KP-${randomUUID()}`,
+        total: "10.00",
+        publishedAt: fixedNow,
+        createdByPlatformUserId: platformUserId,
+        publishedByPlatformUserId: platformUserId,
+      });
+      const id = await enqueueOne({
+        tenantId,
+        eventKind: "offer_published",
+        entityId: offerId,
+        revision: 1,
+        subjectName: `KP-${offerId}`,
+      });
+      if (staleKind === "decided") {
+        await db.insert(schema.commercialOfferDecisions).values({
+          tenantId,
+          offerId,
+          decision: "accepted",
+          actorUserId: `${tenantId}:owner`,
+          idempotencyKey: randomUUID(),
+        });
+      } else {
+        await db
+          .update(schema.commercialOffers)
+          .set({ status: "superseded" })
+          .where(eq(schema.commercialOffers.id, offerId));
+      }
+      queued.push({ id, staleKind });
+    }
+
+    for (const staleKind of ["paid", "plus8"] as const) {
+      const invoiceId = randomUUID();
+      await db.insert(schema.invoices).values({
+        id: invoiceId,
+        tenantId,
+        number: `INV-${randomUUID()}`,
+        status: "issued",
+        issueDate: fixedNow,
+        dueDate: new Date("2026-08-30T00:00:00.000Z"),
+        sellerSnapshot: { legalName: "Markiro" },
+        buyerSnapshot: { legalName: "Factory" },
+        subtotal: "10.00",
+        vatTotal: "0.00",
+        total: "10.00",
+        createdByPlatformUserId: platformUserId,
+      });
+      const id = await enqueueOne({
+        tenantId,
+        eventKind: "invoice_due_soon",
+        entityId: invoiceId,
+        revision: 1,
+        subjectName: `INV-${invoiceId}`,
+      });
+      await db
+        .update(schema.invoices)
+        .set(
+          staleKind === "paid"
+            ? { status: "paid" }
+            : { dueDate: new Date("2026-09-06T00:00:00.000Z") },
+        )
+        .where(eq(schema.invoices.id, invoiceId));
+      queued.push({ id, staleKind });
+    }
+
+    const actId = randomUUID();
+    await db.insert(schema.billingActs).values({
+      id: actId,
+      tenantId,
+      number: `ACT-${randomUUID()}`,
+      status: "issued",
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-28",
+      createdByPlatformUserId: platformUserId,
+      issuedByPlatformUserId: platformUserId,
+      issuedAt: fixedNow,
+    });
+    const actDocumentId = randomUUID();
+    await db.insert(schema.billingActDocuments).values({
+      id: actDocumentId,
+      tenantId,
+      actId,
+      revision: 1,
+      objectKey: `billing/acts/${actId}.pdf`,
+      contentType: "application/pdf",
+      sha256: "b".repeat(64),
+      byteSize: 10,
+      state: "ready",
+      uploadedByPlatformUserId: platformUserId,
+      readyAt: fixedNow,
+    });
+    const staleActDelivery = await enqueueOne({
+      tenantId,
+      eventKind: "act_ready",
+      entityId: actId,
+      revision: 1,
+      subjectName: `ACT-${actId}`,
+    });
+    await db
+      .update(schema.billingActDocuments)
+      .set({ state: "pending", readyAt: null })
+      .where(eq(schema.billingActDocuments.id, actDocumentId));
+    queued.push({ id: staleActDelivery, staleKind: "act invalid" });
+
+    const liveRequestId = randomUUID();
+    const liveEventId = randomUUID();
+    await db.insert(schema.tenantBillingRequests).values({
+      id: liveRequestId,
+      tenantId,
+      number: `REQ-${randomUUID()}`,
+      type: "other",
+      status: "clarification_required",
+      description: "Still live",
+      responsibleSide: "tenant",
+      idempotencyKey: randomUUID(),
+      createdByUserId: `${tenantId}:owner`,
+    });
+    await db.insert(schema.tenantBillingRequestEvents).values({
+      id: liveEventId,
+      tenantId,
+      requestId: liveRequestId,
+      kind: "status_changed",
+      fromStatus: "under_review",
+      toStatus: "clarification_required",
+      actorKind: "platform_user",
+      actorPlatformUserId: platformUserId,
+      idempotencyKey: randomUUID(),
+    });
+    const liveId = await enqueueOne({
+      tenantId,
+      eventKind: "clarification_required",
+      entityId: liveRequestId,
+      revision: liveEventId,
+      subjectName: `REQ-${liveRequestId}`,
+    });
+
+    for (const item of queued) {
+      await jobs.processDelivery(item.id);
+      const [delivery] = await db
+        .select({ status: schema.emailDeliveries.status })
+        .from(schema.emailDeliveries)
+        .where(eq(schema.emailDeliveries.id, item.id));
+      expect(delivery?.status, item.staleKind).toBe("canceled");
+    }
+    await jobs.processDelivery(liveId);
+    const [liveDelivery] = await db
+      .select({ status: schema.emailDeliveries.status })
+      .from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.id, liveId));
+    expect(liveDelivery?.status).toBe("sent");
+    expect(transport.send).toHaveBeenCalledOnce();
+  });
+
   it("counts only fixed-clock actionable tenant rows across calendar boundaries", async () => {
+    const attentionTenantId = `billing-attention-${randomUUID()}`;
+    const attentionForeignTenantId = `billing-attention-${randomUUID()}`;
+    await db.insert(schema.organization).values([
+      {
+        id: attentionTenantId,
+        name: "Attention tenant",
+        slug: attentionTenantId,
+        createdAt: fixedNow,
+      },
+      {
+        id: attentionForeignTenantId,
+        name: "Foreign attention tenant",
+        slug: attentionForeignTenantId,
+        createdAt: fixedNow,
+      },
+    ]);
     const platformUserId = `platform-${randomUUID()}`;
     await db.insert(schema.platformUsers).values({
       id: platformUserId,
@@ -202,7 +596,7 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
     const requestId = randomUUID();
     await db.insert(schema.tenantBillingRequests).values({
       id: requestId,
-      tenantId,
+      tenantId: attentionTenantId,
       number: `REQ-${requestId}`,
       type: "other",
       status: "clarification_required",
@@ -215,7 +609,7 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
     const currentOfferId = randomUUID();
     await db.insert(schema.commercialOffers).values({
       id: currentOfferId,
-      tenantId,
+      tenantId: attentionTenantId,
       familyId,
       revision: 2,
       status: "published",
@@ -225,11 +619,22 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
       createdByPlatformUserId: platformUserId,
       publishedByPlatformUserId: platformUserId,
     });
+    await db.insert(schema.commercialOffers).values({
+      id: randomUUID(),
+      tenantId: attentionTenantId,
+      familyId,
+      revision: 3,
+      status: "draft",
+      number: null,
+      total: "10.00",
+      previousRevisionId: currentOfferId,
+      createdByPlatformUserId: platformUserId,
+    });
     const supersededFamilyId = randomUUID();
     await db.insert(schema.commercialOffers).values([
       {
         id: randomUUID(),
-        tenantId,
+        tenantId: attentionTenantId,
         familyId: supersededFamilyId,
         revision: 1,
         status: "published",
@@ -241,7 +646,7 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
       },
       {
         id: randomUUID(),
-        tenantId,
+        tenantId: attentionTenantId,
         familyId: supersededFamilyId,
         revision: 2,
         status: "superseded",
@@ -260,7 +665,7 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
     await db.insert(schema.invoices).values(
       invoiceRows.map(([label, dueDate, status]) => ({
         id: randomUUID(),
-        tenantId,
+        tenantId: attentionTenantId,
         number: `${label}-${randomUUID()}`,
         status,
         issueDate: fixedNow,
@@ -275,7 +680,7 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
     );
     await db.insert(schema.tenantBillingRequests).values({
       id: randomUUID(),
-      tenantId: foreignTenantId,
+      tenantId: attentionForeignTenantId,
       number: `REQ-${randomUUID()}`,
       type: "other",
       status: "clarification_required",
@@ -285,15 +690,15 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
       createdByUserId: `${tenantId}:owner`,
     });
 
-    await expect(service.attention(tenantId)).resolves.toEqual({ count: 4 });
+    await expect(service.attention(attentionTenantId)).resolves.toEqual({ count: 4 });
     await db.insert(schema.commercialOfferDecisions).values({
-      tenantId,
+      tenantId: attentionTenantId,
       offerId: currentOfferId,
       decision: "changes_requested",
       message: "Revise",
       actorUserId: `${tenantId}:owner`,
       idempotencyKey: randomUUID(),
     });
-    await expect(service.attention(tenantId)).resolves.toEqual({ count: 3 });
+    await expect(service.attention(attentionTenantId)).resolves.toEqual({ count: 3 });
   });
 });

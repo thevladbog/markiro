@@ -17,6 +17,10 @@ import {
 } from "../src/platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 import { createOrganization } from "./support/subscription-fixtures";
+import {
+  createTestTenantBillingNotifications,
+  failingTenantBillingNotifications,
+} from "./support/tenant-billing-notifications";
 
 const databaseUrl = process.env.DATABASE_URL;
 type RequestStatus = typeof schema.tenantBillingRequests.$inferSelect.status;
@@ -107,6 +111,13 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
       createdAt: new Date(),
       updatedAt: new Date(),
     });
+    await connection.db.insert(schema.member).values({
+      id: randomUUID(),
+      organizationId: tenantA,
+      userId: tenantUser,
+      role: "owner",
+      createdAt: new Date(),
+    });
     await connection.db.insert(schema.platformUsers).values({
       id: actorId,
       name: "Platform billing actor",
@@ -131,9 +142,10 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
       isDefault: true,
       createdByPlatformUserId: actorId,
     });
-    requests = new PlatformBillingRequestsService(connection.db, audit);
-    billing = new BillingService(connection.db, audit);
-    offers = new PlatformOffersService(connection.db, audit);
+    const notifications = createTestTenantBillingNotifications(connection.db);
+    requests = new PlatformBillingRequestsService(connection.db, audit, notifications);
+    billing = new BillingService(connection.db, audit, notifications);
+    offers = new PlatformOffersService(connection.db, audit, notifications);
     tenantOffers = new TenantBillingOffersService(connection.db);
   }, 120_000);
 
@@ -257,8 +269,63 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
           after: { status: toStatus, responsibleSide: expectedSide, eventId: event.id },
         }),
       ]);
+      if (toStatus === "clarification_required") {
+        const deliveries = await connection.db
+          .select()
+          .from(schema.emailDeliveries)
+          .where(
+            eq(
+              schema.emailDeliveries.sourceId,
+              `billing:clarification_required:${request.id}:${event.id}`,
+            ),
+          );
+        expect(deliveries).toEqual([
+          expect.objectContaining({
+            tenantId: tenantA,
+            recipient: `${tenantUser}@example.invalid`,
+            kind: "tenant-billing-notification",
+            status: "queued",
+          }),
+        ]);
+        await expect(
+          connection.db
+            .select()
+            .from(schema.emailOutbox)
+            .where(eq(schema.emailOutbox.deliveryId, deliveries[0]!.id)),
+        ).resolves.toHaveLength(1);
+      }
     },
   );
+
+  it("rolls back a clarification transition when its mandatory notification cannot enqueue", async () => {
+    const request = await insertRequest(connection.db, tenantA, tenantUser, "under_review");
+    const idempotencyKey = randomUUID();
+    const failed = new PlatformBillingRequestsService(
+      connection.db,
+      audit,
+      failingTenantBillingNotifications(new Error("notification enqueue failed")),
+    );
+
+    await expect(
+      failed.changeStatus(actor, request.id, {
+        status: "clarification_required",
+        message: "Need tenant details",
+        idempotencyKey,
+      }),
+    ).rejects.toThrow("notification enqueue failed");
+    await expect(
+      connection.db
+        .select({ status: schema.tenantBillingRequests.status })
+        .from(schema.tenantBillingRequests)
+        .where(eq(schema.tenantBillingRequests.id, request.id)),
+    ).resolves.toEqual([{ status: "under_review" }]);
+    await expect(
+      connection.db
+        .select()
+        .from(schema.tenantBillingRequestEvents)
+        .where(eq(schema.tenantBillingRequestEvents.idempotencyKey, idempotencyKey)),
+    ).resolves.toEqual([]);
+  });
 
   it("returns the authoritative next transitions in list and detail", async () => {
     const request = await insertRequest(connection.db, tenantA, tenantUser, "under_review");
@@ -360,7 +427,11 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
         },
       },
     });
-    const observedRequests = new PlatformBillingRequestsService(observedDb, audit);
+    const observedRequests = new PlatformBillingRequestsService(
+      observedDb,
+      audit,
+      createTestTenantBillingNotifications(observedDb),
+    );
 
     const result = await observedRequests.list(actor, { tenantId: registryTenant });
 
@@ -765,6 +836,7 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
 
     const invoice = await billing.create(actor, {
       ...invoiceInput(tenantA),
+      dueDate: "2026-08-30",
       sourceOfferId: published!.id,
       sourceRequestId: request.id,
     });
@@ -782,6 +854,24 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
       sourceOfferId: published!.id,
       sourceRequestId: request.id,
     });
+    const invoiceDeliveries = await connection.db
+      .select()
+      .from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.sourceId, `billing:invoice_due_soon:${invoice.id}:1`));
+    expect(invoiceDeliveries).toEqual([
+      expect.objectContaining({
+        tenantId: tenantA,
+        recipient: `${tenantUser}@example.invalid`,
+        kind: "tenant-billing-notification",
+        status: "queued",
+      }),
+    ]);
+    await expect(
+      connection.db
+        .select()
+        .from(schema.emailOutbox)
+        .where(eq(schema.emailOutbox.deliveryId, invoiceDeliveries[0]!.id)),
+    ).resolves.toHaveLength(1);
     const [awaitingPayment] = await connection.db
       .select()
       .from(schema.tenantBillingRequests)
@@ -848,6 +938,44 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     await expect(
       billing.create(actor, { ...invoiceInput(tenantA), sourceOfferId: published!.id }),
     ).rejects.toMatchObject({ response: { code: "offer_version_stale" }, status: 409 });
+  });
+
+  it("rolls invoice issue state and linked events back when notification enqueue fails", async () => {
+    const request = await insertRequest(connection.db, tenantA, tenantUser, "offer_prepared");
+    const invoice = await billing.create(actor, {
+      ...invoiceInput(tenantA),
+      dueDate: "2026-08-30",
+      sourceRequestId: request.id,
+    });
+    const eventsBeforeIssue = await connection.db
+      .select()
+      .from(schema.tenantBillingRequestEvents)
+      .where(eq(schema.tenantBillingRequestEvents.requestId, request.id));
+    const failed = new BillingService(
+      connection.db,
+      audit,
+      failingTenantBillingNotifications(new Error("notification enqueue failed")),
+    );
+
+    await expect(failed.issue(actor, invoice.id)).rejects.toThrow("notification enqueue failed");
+    await expect(
+      connection.db
+        .select({ status: schema.invoices.status })
+        .from(schema.invoices)
+        .where(eq(schema.invoices.id, invoice.id)),
+    ).resolves.toEqual([{ status: "draft" }]);
+    await expect(
+      connection.db
+        .select()
+        .from(schema.tenantBillingRequestEvents)
+        .where(eq(schema.tenantBillingRequestEvents.requestId, request.id)),
+    ).resolves.toEqual(eventsBeforeIssue);
+    await expect(
+      connection.db
+        .select()
+        .from(schema.emailDeliveries)
+        .where(eq(schema.emailDeliveries.sourceId, `billing:invoice_due_soon:${invoice.id}:1`)),
+    ).resolves.toEqual([]);
   });
 
   it("serializes the global invoice number allocator across tenants", async () => {

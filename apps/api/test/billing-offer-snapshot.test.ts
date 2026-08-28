@@ -9,6 +9,7 @@ import { BillingDocumentsService } from "../src/modules/billing/billing-document
 import type { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import type { PlatformPrincipal } from "../src/platform-auth/platform-access-policy";
 import type { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
+import { noopTenantBillingNotifications } from "./support/tenant-billing-notifications";
 
 function testDouble<T>() {
   return <K extends keyof T>(value: Pick<T, K>): T => value as T;
@@ -86,7 +87,11 @@ describe("BillingService offer snapshots", () => {
       twoFactorReady: true,
     };
 
-    await new BillingService(db, {} as PlatformAuditService).create(principal, {
+    await new BillingService(
+      db,
+      {} as PlatformAuditService,
+      noopTenantBillingNotifications(),
+    ).create(principal, {
       tenantId: invoice.tenantId,
       dueDate: null,
       applicationMode: "automatic",
@@ -188,7 +193,11 @@ describe("BillingService offer snapshots", () => {
       twoFactorReady: true,
     };
 
-    await new BillingService(db, {} as PlatformAuditService).create(principal, {
+    await new BillingService(
+      db,
+      {} as PlatformAuditService,
+      noopTenantBillingNotifications(),
+    ).create(principal, {
       tenantId: invoice.tenantId,
       dueDate: null,
       applicationMode: "automatic",

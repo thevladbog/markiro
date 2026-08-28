@@ -5,7 +5,6 @@ import {
   Inject,
   Injectable,
   NotFoundException,
-  Optional,
 } from "@nestjs/common";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -71,7 +70,7 @@ export class BillingActsService {
     @Inject(DB) private readonly db: Db,
     private readonly storage: ObjectStorageService,
     private readonly audit: PlatformAuditService,
-    @Optional() private readonly notifications?: TenantBillingNotificationsService,
+    private readonly notifications: TenantBillingNotificationsService,
   ) {}
 
   async list(_actor: PlatformPrincipal, query: BillingActListQueryDto = {}) {
@@ -678,7 +677,7 @@ export class BillingActsService {
         },
         requestId: null,
       });
-      await this.notifications?.enqueueInTransaction(tx, {
+      await this.notifications.enqueueInTransaction(tx, {
         tenantId: issued.tenantId,
         eventKind: "act_ready",
         entityId: issued.id,

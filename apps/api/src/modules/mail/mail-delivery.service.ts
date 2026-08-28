@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import { Injectable } from "@nestjs/common";
 import { MailCryptoService } from "./mail-crypto.service";
 import type { EnqueueMailInput, MailWriteTransaction } from "./mail.types";
+import { normalizeTenantBillingNotificationPayload } from "./tenant-billing-notification-payload";
 
 type IdFactory = () => string;
 
@@ -51,7 +52,8 @@ export class MailDeliveryService {
   ): Promise<string | null> {
     const id = this.createId();
     const recipient = normalizeRecipient(input.recipient);
-    const encrypted = this.crypto.encrypt(id, input.template);
+    const template = normalizeTenantBillingNotificationPayload(input.template);
+    const encrypted = this.crypto.encrypt(id, template);
     const inserted = await tx
       .insert(schema.emailDeliveries)
       .values({

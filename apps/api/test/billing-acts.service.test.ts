@@ -19,6 +19,10 @@ import {
 } from "../src/platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 import { createOrganization } from "./support/subscription-fixtures";
+import {
+  createTestTenantBillingNotifications,
+  failingTenantBillingNotifications,
+} from "./support/tenant-billing-notifications";
 
 const databaseUrl = process.env.DATABASE_URL;
 const fixedNow = new Date("2026-08-28T10:00:00.000+03:00");
@@ -72,6 +76,13 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
+    await connection.db.insert(schema.member).values({
+      id: randomUUID(),
+      organizationId: tenantA,
+      userId: tenantUser,
+      role: "owner",
+      createdAt: new Date(),
+    });
     await connection.db.insert(schema.platformUsers).values({
       id: actorId,
       name: "Billing acts actor",
@@ -96,12 +107,14 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
       .returning();
     requestId = request!.id;
     otherRequestId = otherRequest!.id;
+    const notifications = createTestTenantBillingNotifications(connection.db);
     acts = new TestBillingActsService(
       connection.db,
       storage as unknown as ObjectStorageService,
       audit,
+      notifications,
     );
-    requests = new PlatformBillingRequestsService(connection.db, audit);
+    requests = new PlatformBillingRequestsService(connection.db, audit, notifications);
   }, 120_000);
 
   beforeEach(() => {
@@ -306,6 +319,24 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
       },
     });
     expect(issued.document!.readyAt).not.toBeNull();
+    const deliveries = await connection.db
+      .select()
+      .from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.sourceId, `billing:act_ready:${act.id}:1`));
+    expect(deliveries).toEqual([
+      expect.objectContaining({
+        tenantId: tenantA,
+        recipient: `${tenantUser}@example.invalid`,
+        kind: "tenant-billing-notification",
+        status: "queued",
+      }),
+    ]);
+    await expect(
+      connection.db
+        .select()
+        .from(schema.emailOutbox)
+        .where(eq(schema.emailOutbox.deliveryId, deliveries[0]!.id)),
+    ).resolves.toHaveLength(1);
     const [putKey] = storage.putVerified.mock.calls[0]!;
     expect(putKey).toBe(`tenant-billing/${tenantA}/acts/${act.id}/${issued.document!.id}.pdf`);
     const links = await connection.db
@@ -356,6 +387,49 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
     await expect(
       acts.issue(actor, act.id, { idempotencyKey: randomUUID() }, file),
     ).rejects.toMatchObject({ response: { code: "billing_act_already_issued" }, status: 409 });
+  });
+
+  it("rolls final act state and event back when its mandatory notification cannot enqueue", async () => {
+    const failedAct = await acts.create(actor, {
+      tenantId: tenantA,
+      requestId,
+      number: `ACT-FAIL-${randomUUID()}`,
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-27",
+      idempotencyKey: randomUUID(),
+    });
+    const eventsBeforeIssue = await connection.db
+      .select()
+      .from(schema.tenantBillingRequestEvents)
+      .where(eq(schema.tenantBillingRequestEvents.requestId, requestId));
+    const failed = new TestBillingActsService(
+      connection.db,
+      storage as unknown as ObjectStorageService,
+      audit,
+      failingTenantBillingNotifications(new Error("notification enqueue failed")),
+    );
+
+    await expect(
+      failed.issue(actor, failedAct.id, { idempotencyKey: randomUUID() }, pdfUpload()),
+    ).rejects.toThrow("notification enqueue failed");
+    await expect(
+      connection.db
+        .select({ status: schema.billingActs.status })
+        .from(schema.billingActs)
+        .where(eq(schema.billingActs.id, failedAct.id)),
+    ).resolves.toEqual([{ status: "draft" }]);
+    await expect(
+      connection.db
+        .select()
+        .from(schema.tenantBillingRequestEvents)
+        .where(eq(schema.tenantBillingRequestEvents.requestId, requestId)),
+    ).resolves.toEqual(eventsBeforeIssue);
+    await expect(
+      connection.db
+        .select()
+        .from(schema.emailDeliveries)
+        .where(eq(schema.emailDeliveries.sourceId, `billing:act_ready:${failedAct.id}:1`)),
+    ).resolves.toEqual([]);
   });
 
   it("requires a completed ordered service, or a period end strictly before the Moscow business date", async () => {

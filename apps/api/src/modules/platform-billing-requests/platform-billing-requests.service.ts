@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable, NotFoundException, Optional } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
@@ -47,7 +47,7 @@ export class PlatformBillingRequestsService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly audit: PlatformAuditService,
-    @Optional() private readonly notifications?: TenantBillingNotificationsService,
+    private readonly notifications: TenantBillingNotificationsService,
   ) {}
 
   async list(_actor: PlatformPrincipal, query: PlatformBillingRequestListQueryDto = {}) {
@@ -238,7 +238,7 @@ export class PlatformBillingRequestsService {
         requestId: null,
       });
       if (input.status === "clarification_required") {
-        await this.notifications?.enqueueInTransaction(tx, {
+        await this.notifications.enqueueInTransaction(tx, {
           tenantId: request.tenantId,
           eventKind: "clarification_required",
           entityId: request.id,

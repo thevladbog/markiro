@@ -93,10 +93,10 @@ export class TenantBillingNotificationsService {
     const now = this.clock();
     const today = businessDate(now);
     const result = await this.db.execute<{ count: number | string }>(sql`
-      with latest_offers as (
-        select distinct on (family_id) id, status, expires_at
+      with latest_published_offers as (
+        select distinct on (family_id) id, family_id, revision, expires_at
         from commercial_offers
-        where tenant_id = ${tenantId}
+        where tenant_id = ${tenantId} and status = 'published'
         order by family_id, revision desc, published_at desc nulls last, id desc
       ), attention_targets as (
         select 'request:' || request.id::text as target
@@ -105,9 +105,16 @@ export class TenantBillingNotificationsService {
           and request.status = 'clarification_required'
         union all
         select 'offer:' || offer.id::text as target
-        from latest_offers as offer
-        where offer.status = 'published'
-          and (offer.expires_at is null or offer.expires_at > ${now})
+        from latest_published_offers as offer
+        where (offer.expires_at is null or offer.expires_at > ${now})
+          and not exists (
+            select 1
+            from commercial_offers as terminal_revision
+            where terminal_revision.tenant_id = ${tenantId}
+              and terminal_revision.family_id = offer.family_id
+              and terminal_revision.revision > offer.revision
+              and terminal_revision.status in ('superseded', 'paid', 'cancelled', 'expired')
+          )
           and not exists (
             select 1
             from commercial_offer_decisions as decision

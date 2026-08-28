@@ -12,6 +12,7 @@ import {
   type PlatformPrincipal,
 } from "../src/platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
+import { createTestTenantBillingNotifications } from "./support/tenant-billing-notifications";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -31,7 +32,11 @@ describe.skipIf(!databaseUrl)("commercial document readiness", () => {
     capabilities: platformCapabilitiesForRole("accountant"),
     twoFactorReady: true,
   };
-  const service = new BillingService(connection.db, new PlatformAuditService());
+  const service = new BillingService(
+    connection.db,
+    new PlatformAuditService(),
+    createTestTenantBillingNotifications(connection.db),
+  );
 
   beforeAll(async () => {
     await maintenance.pool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);

@@ -4,6 +4,7 @@ import { renderEmail, type EmailTemplateInput, type RenderedEmail } from "@marki
 import { z } from "zod";
 import { MailCryptoService } from "./mail-crypto.service";
 import type { MailTransport } from "./mail.types";
+import { tenantBillingNotificationPayloadSchema } from "./tenant-billing-notification-payload";
 
 export const SEND_EMAIL_DELIVERY_QUEUE = "send-email-delivery";
 const MAX_DELIVERY_ATTEMPTS = 5;
@@ -40,6 +41,7 @@ export interface MailQueue {
 
 type MailRenderer = (input: EmailTemplateInput) => Promise<RenderedEmail>;
 type IdFactory = () => string;
+type Clock = () => Date;
 
 interface OutboxRow {
   id: string;
@@ -155,22 +157,7 @@ const emailTemplateSchema = z.discriminatedUnion("kind", [
       contactEmail: z.email(),
     })
     .strict(),
-  z
-    .object({
-      kind: z.literal("tenant-billing-notification"),
-      locale: z.enum(["ru", "en"]),
-      recipientName: z.string().trim().min(1).max(160),
-      organizationName: z.string().trim().min(1).max(240),
-      eventKind: z.enum([
-        "clarification_required",
-        "offer_published",
-        "invoice_due_soon",
-        "act_ready",
-      ]),
-      subjectName: z.string().trim().min(1).max(160),
-      actionUrl: httpUrl,
-    })
-    .strict(),
+  tenantBillingNotificationPayloadSchema,
 ]);
 
 function toEmailTemplateInput(input: z.output<typeof emailTemplateSchema>): EmailTemplateInput {
@@ -191,6 +178,7 @@ export class MailJobsService {
     private readonly transport: MailTransport,
     private readonly renderer: MailRenderer = renderEmail,
     private readonly createId: IdFactory = randomUUID,
+    private readonly clock: Clock = () => new Date(),
   ) {}
 
   async dispatchOutbox(queue: MailQueue): Promise<number> {
@@ -252,7 +240,10 @@ export class MailJobsService {
       const delivery = await this.claimDelivery(client, deliveryId);
       if (!delivery) return;
 
-      if (!(await this.sourceIsValid(client, delivery))) {
+      if (
+        delivery.kind === "organization-invitation" &&
+        !(await this.sourceIsValid(client, delivery))
+      ) {
         await this.cancelInvalidDelivery(client, delivery.id);
         return;
       }
@@ -289,7 +280,7 @@ export class MailJobsService {
         return;
       }
 
-      if (!(await this.sourceIsValid(client, delivery))) {
+      if (!(await this.sourceIsValid(client, delivery, template))) {
         await this.cancelInvalidDelivery(client, delivery.id);
         return;
       }
@@ -405,7 +396,15 @@ export class MailJobsService {
     return result.rows[0];
   }
 
-  private async sourceIsValid(client: MailPgClient, delivery: DeliveryRow): Promise<boolean> {
+  private async sourceIsValid(
+    client: MailPgClient,
+    delivery: DeliveryRow,
+    template?: EmailTemplateInput,
+  ): Promise<boolean> {
+    if (delivery.kind === "tenant-billing-notification") {
+      if (!template || template.kind !== "tenant-billing-notification") return false;
+      return this.billingSourceIsValid(client, delivery, template.eventKind);
+    }
     if (delivery.kind !== "organization-invitation") return true;
     if (!delivery.tenantId || !delivery.sourceId) return false;
     const result = await client.query<{ valid: boolean }>(
@@ -421,6 +420,94 @@ export class MailJobsService {
       ].join("\n"),
       [delivery.sourceId, delivery.tenantId, delivery.recipient],
     );
+    return result.rows[0]?.valid === true;
+  }
+
+  private async billingSourceIsValid(
+    client: MailPgClient,
+    delivery: DeliveryRow,
+    eventKind: Extract<EmailTemplateInput, { kind: "tenant-billing-notification" }>["eventKind"],
+  ): Promise<boolean> {
+    if (!delivery.tenantId || !delivery.sourceId) return false;
+    const sourceParts = delivery.sourceId.split(":");
+    const [namespace, sourceEventKind, entityId, revision] = sourceParts;
+    if (
+      sourceParts.length !== 4 ||
+      namespace !== "billing" ||
+      sourceEventKind !== eventKind ||
+      !z.uuid().safeParse(entityId).success ||
+      !revision
+    ) {
+      return false;
+    }
+
+    let query: string;
+    let values: readonly unknown[];
+    if (eventKind === "clarification_required") {
+      if (!z.uuid().safeParse(revision).success) return false;
+      query = [
+        "SELECT EXISTS (",
+        "  SELECT 1 FROM tenant_billing_requests AS request",
+        "  JOIN tenant_billing_request_events AS event",
+        "    ON event.tenant_id = request.tenant_id AND event.request_id = request.id",
+        "  WHERE request.id = $1::uuid AND request.tenant_id = $2",
+        "    AND request.status = 'clarification_required'",
+        "    AND event.id = $3::uuid AND event.kind = 'status_changed'",
+        "    AND event.to_status = 'clarification_required'",
+        ") AS valid",
+      ].join("\n");
+      values = [entityId, delivery.tenantId, revision];
+    } else if (eventKind === "offer_published") {
+      const numericRevision = positiveRevision(revision);
+      if (numericRevision === null) return false;
+      query = [
+        "SELECT EXISTS (",
+        "  SELECT 1 FROM commercial_offers AS offer",
+        "  WHERE offer.id = $1::uuid AND offer.tenant_id = $2 AND offer.revision = $3",
+        "    AND offer.status = 'published'",
+        "    AND (offer.expires_at IS NULL OR offer.expires_at > $4::timestamptz)",
+        "    AND NOT EXISTS (SELECT 1 FROM commercial_offer_decisions AS decision",
+        "                    WHERE decision.tenant_id = offer.tenant_id AND decision.offer_id = offer.id)",
+        "    AND NOT EXISTS (SELECT 1 FROM commercial_offers AS newer",
+        "                    WHERE newer.tenant_id = offer.tenant_id",
+        "                      AND newer.family_id = offer.family_id",
+        "                      AND newer.status = 'published' AND newer.revision > offer.revision)",
+        "    AND NOT EXISTS (SELECT 1 FROM commercial_offers AS terminal_revision",
+        "                    WHERE terminal_revision.tenant_id = offer.tenant_id",
+        "                      AND terminal_revision.family_id = offer.family_id",
+        "                      AND terminal_revision.revision > offer.revision",
+        "                      AND terminal_revision.status IN ('superseded', 'paid', 'cancelled', 'expired'))",
+        ") AS valid",
+      ].join("\n");
+      values = [entityId, delivery.tenantId, numericRevision, this.clock()];
+    } else if (eventKind === "invoice_due_soon") {
+      if (revision !== "1") return false;
+      query = [
+        "SELECT EXISTS (",
+        "  SELECT 1 FROM invoices AS invoice",
+        "  WHERE invoice.id = $1::uuid AND invoice.tenant_id = $2",
+        "    AND invoice.status IN ('issued', 'partially_paid')",
+        "    AND (invoice.due_date AT TIME ZONE 'Europe/Moscow')::date >= $3::date",
+        "    AND (invoice.due_date AT TIME ZONE 'Europe/Moscow')::date <= ($3::date + 7)",
+        ") AS valid",
+      ].join("\n");
+      values = [entityId, delivery.tenantId, businessDate(this.clock())];
+    } else {
+      const numericRevision = positiveRevision(revision);
+      if (numericRevision === null) return false;
+      query = [
+        "SELECT EXISTS (",
+        "  SELECT 1 FROM billing_acts AS act",
+        "  JOIN billing_act_documents AS document",
+        "    ON document.tenant_id = act.tenant_id AND document.act_id = act.id",
+        "  WHERE act.id = $1::uuid AND act.tenant_id = $2 AND act.status = 'issued'",
+        "    AND document.revision = $3 AND document.is_current = true",
+        "    AND document.state = 'ready' AND document.ready_at IS NOT NULL",
+        ") AS valid",
+      ].join("\n");
+      values = [entityId, delivery.tenantId, numericRevision];
+    }
+    const result = await client.query<{ valid: boolean }>(query, values);
     return result.rows[0]?.valid === true;
   }
 
@@ -474,6 +561,24 @@ export class MailJobsService {
       [deliveryId, status, failure.category, failure.code, failure.diagnostic],
     );
   }
+}
+
+function positiveRevision(value: string): number | null {
+  if (!/^[1-9]\d*$/.test(value)) return null;
+  const revision = Number(value);
+  return Number.isSafeInteger(revision) ? revision : null;
+}
+
+function businessDate(value: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Moscow",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
 async function enqueueStableDelivery(queue: MailQueue, deliveryId: string): Promise<void> {

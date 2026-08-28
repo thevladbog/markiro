@@ -15,6 +15,7 @@ import {
   type PlatformPrincipal,
 } from "../src/platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
+import { createTestTenantBillingNotifications } from "./support/tenant-billing-notifications";
 
 const databaseUrl = process.env.DATABASE_URL;
 const tenantId = "stale-family-runtime";
@@ -139,10 +140,11 @@ describe.skipIf(!databaseUrl)("stale commercial family after a real 0070 to 0072
 
     await migrate(connection.db, { migrationsFolder });
     const audit = new PlatformAuditService();
-    platformOffers = new PlatformOffersService(connection.db, audit);
+    const notifications = createTestTenantBillingNotifications(connection.db);
+    platformOffers = new PlatformOffersService(connection.db, audit, notifications);
     tenantOffers = new TenantBillingOffersService(connection.db);
     tenantRead = new TenantBillingReadService(connection.db, {} as never, {} as never);
-    billing = new BillingService(connection.db, audit);
+    billing = new BillingService(connection.db, audit, notifications);
   }, 120_000);
 
   afterAll(async () => {

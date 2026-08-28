@@ -15,6 +15,11 @@ import { TenantBillingOffersService } from "../src/modules/tenant-billing/tenant
 import type { PlatformPrincipal } from "../src/platform-auth/platform-access-policy";
 import type { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 import { PlatformAuditService as RealPlatformAuditService } from "../src/platform-auth/platform-audit.service";
+import {
+  createTestTenantBillingNotifications,
+  failingTenantBillingNotifications,
+  noopTenantBillingNotifications,
+} from "./support/tenant-billing-notifications";
 import { createOrganization } from "./support/subscription-fixtures";
 
 const actor: PlatformPrincipal = {
@@ -92,7 +97,11 @@ function serviceHarness(
     transaction: vi.fn(async (run: (executor: typeof tx) => Promise<unknown>) => run(tx)),
   } as unknown as Db;
   return {
-    service: new PlatformOffersService(db, {} as PlatformAuditService),
+    service: new PlatformOffersService(
+      db,
+      {} as PlatformAuditService,
+      noopTenantBillingNotifications(),
+    ),
     insertedValues,
     insert: tx.insert,
   };
@@ -289,6 +298,13 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
       createdAt: new Date(),
       updatedAt: new Date(),
     });
+    await connection.db.insert(schema.member).values({
+      id: randomUUID(),
+      organizationId: tenantId,
+      userId: tenantUserId,
+      role: "owner",
+      createdAt: new Date(),
+    });
     const confirmedAt = new Date("2026-08-27T10:00:00.000Z");
     await connection.db.insert(schema.operatorBillingProfiles).values({
       revision: 1,
@@ -379,8 +395,13 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
       actorUserId: tenantUserId,
       idempotencyKey: randomUUID(),
     });
-    service = new PlatformOffersService(connection.db, new RealPlatformAuditService());
-    billing = new BillingService(connection.db, new RealPlatformAuditService());
+    const notifications = createTestTenantBillingNotifications(connection.db);
+    service = new PlatformOffersService(
+      connection.db,
+      new RealPlatformAuditService(),
+      notifications,
+    );
+    billing = new BillingService(connection.db, new RealPlatformAuditService(), notifications);
     tenantOffers = new TenantBillingOffersService(connection.db);
   }, 120_000);
 
@@ -449,9 +470,51 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
     ).rejects.toMatchObject({ response: { code: "offer_revision_draft_exists" }, status: 409 });
   });
 
+  it("rolls publication back when its mandatory notification cannot enqueue", async () => {
+    const failed = new PlatformOffersService(
+      connection.db,
+      new RealPlatformAuditService(),
+      failingTenantBillingNotifications(new Error("notification enqueue failed")),
+    );
+
+    await expect(failed.publish(revisionActor, draftOfferId)).rejects.toThrow(
+      "notification enqueue failed",
+    );
+    await expect(
+      connection.db
+        .select({ status: schema.commercialOffers.status })
+        .from(schema.commercialOffers)
+        .where(eq(schema.commercialOffers.id, draftOfferId)),
+    ).resolves.toEqual([{ status: "draft" }]);
+    await expect(
+      connection.db
+        .select()
+        .from(schema.emailDeliveries)
+        .where(eq(schema.emailDeliveries.tenantId, tenantId)),
+    ).resolves.toEqual([]);
+  });
+
   it("supersedes stale terms on publication and only accepts payment/source use of the accepted current revision", async () => {
     const published = await service.publish(revisionActor, draftOfferId);
     expect(published).toMatchObject({ id: draftOfferId, revision: 5, status: "published" });
+    const deliveries = await connection.db
+      .select()
+      .from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.sourceId, `billing:offer_published:${draftOfferId}:5`));
+    expect(deliveries).toEqual([
+      expect.objectContaining({
+        tenantId,
+        recipient: `${tenantUserId}@example.invalid`,
+        kind: "tenant-billing-notification",
+        status: "queued",
+      }),
+    ]);
+    await expect(
+      connection.db
+        .select()
+        .from(schema.emailOutbox)
+        .where(eq(schema.emailOutbox.deliveryId, deliveries[0]!.id)),
+    ).resolves.toHaveLength(1);
     const familyAfterPublish = await connection.db
       .select()
       .from(schema.commercialOffers)

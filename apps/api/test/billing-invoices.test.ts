@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { BillingService } from "../src/modules/billing/billing.service";
 import type { PlatformPrincipal } from "../src/platform-auth/platform-access-policy";
 import type { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
+import { noopTenantBillingNotifications } from "./support/tenant-billing-notifications";
 
 function queryFor(rowsFor: (table: unknown, ordered: boolean) => unknown[]) {
   let table: unknown;
@@ -64,7 +65,11 @@ describe("BillingService invoice payment detail", () => {
         run({ select: vi.fn(() => queryFor(rowsFor)) }),
       ),
     }) as Db;
-    const service = new BillingService(db, {} as PlatformAuditService);
+    const service = new BillingService(
+      db,
+      {} as PlatformAuditService,
+      noopTenantBillingNotifications(),
+    );
 
     const detail = await service.get(invoiceId);
 
@@ -98,7 +103,11 @@ describe("BillingService invoice payment detail", () => {
         }),
       ),
     }) as Db;
-    const service = new BillingService(db, {} as PlatformAuditService);
+    const service = new BillingService(
+      db,
+      {} as PlatformAuditService,
+      noopTenantBillingNotifications(),
+    );
 
     await expect(service.cancel({} as PlatformPrincipal, invoiceId)).rejects.toMatchObject({
       response: { code: "invoice_paid" },
@@ -176,7 +185,11 @@ describe("BillingService invoice payment detail", () => {
         },
       ),
     }) as Db;
-    const service = new BillingService(db, {} as PlatformAuditService);
+    const service = new BillingService(
+      db,
+      {} as PlatformAuditService,
+      noopTenantBillingNotifications(),
+    );
 
     const detail = await service.get(invoiceId);
 
@@ -263,7 +276,11 @@ describe("BillingService invoice payment detail", () => {
         }
       }),
     }) as Db;
-    const service = new BillingService(db, {} as PlatformAuditService);
+    const service = new BillingService(
+      db,
+      {} as PlatformAuditService,
+      noopTenantBillingNotifications(),
+    );
 
     await expect(service.cancel({} as PlatformPrincipal, invoiceId)).rejects.toMatchObject({
       response: { code: "invoice_paid" },

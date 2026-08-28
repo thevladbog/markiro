@@ -20,6 +20,7 @@ import {
   createPublishedAddon,
   createPublishedPlan,
 } from "./support/subscription-fixtures";
+import { createTestTenantBillingNotifications } from "./support/tenant-billing-notifications";
 
 const ready = Boolean(process.env.DATABASE_URL);
 
@@ -72,7 +73,7 @@ describe.skipIf(!ready)("invoice payment application flow", () => {
     const lifecycle = new SubscriptionLifecycleService(db, audit);
     application = new BillingApplicationService(db, lifecycle, audit);
     payments = new BillingPaymentsService(db, application, audit);
-    billing = new BillingService(db, audit);
+    billing = new BillingService(db, audit, createTestTenantBillingNotifications(db));
   }, 120_000);
 
   afterAll(async () => {

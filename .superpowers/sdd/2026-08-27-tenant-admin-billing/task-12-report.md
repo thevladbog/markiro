@@ -50,6 +50,26 @@ queries show no count and do not break navigation. The query key remains inside 
 - **GREEN:** complete billing routing passes 1 file / 15 tests; i18n lockstep passes 1 file / 4
   tests. The routing fixture was brought to the current invoice DTO and current visible labels.
 
+### Review fix round 1
+
+- **RED:** a newer draft revision incorrectly hid the still-actionable published offer; the fixed
+  clock scratch assertion returned 3 instead of 4. **GREEN:** published filtering now happens
+  inside the per-family CTE while later terminal revisions still exclude history.
+- **RED:** upstream organization, profile-name, and act-number lengths produced a permanent
+  `RENDER` delivery. **GREEN:** one exported strict payload schema now normalizes accepted display
+  strings before encryption and parses the same shape in the worker. The real test decrypts,
+  parses, and renders 200/300/200-code-point maxima without replacement characters. Action URLs
+  remain strict and are rejected, never truncated, before a durable row exists.
+- **RED:** a queued clarification delivery still sent after the tenant replied. **GREEN:** the mail
+  worker now tenant-scopes and validates the exact event/entity/revision against authoritative
+  current state immediately before send. Replied, cancelled, decided, superseded, paid, day +8,
+  and invalid act-document cases cancel; a live event sends.
+- All four authoritative services now require `TenantBillingNotificationsService`; no optional
+  injection or optional call remains. Request, offer, invoice, and act scratch suites prove the
+  authoritative state/history and delivery/outbox share the transaction, while forced notifier
+  failure rolls database state/history back. The dedicated invoice suite additionally proves a
+  concurrent issue produces one committed issue and exactly one recipient delivery/outbox.
+
 ## Changed areas
 
 - `packages/email` — strict typed RU/EN billing notification renderer and escaping/bounds tests.
@@ -70,6 +90,9 @@ queries show no count and do not break navigation. The query key remains inside 
 - PASS — DB focused billing schema/migrations 23/23, source/test TypeScript, ESLint, and build.
 - PASS — API notification + OpenAPI + route inventory 12/12; authoritative workflow regression
   113/113. All database suites used disposable UUID-named scratch databases and dropped them.
+- PASS — review-fix combined API notification/mail/workflow run: 6 files / 138 tests. Dedicated
+  authoritative invoice notification coverage: 2/2. OpenAPI: 13/13; route inventory: 4/4.
+- PASS — review-fix API TypeScript no-emit, ESLint, Nest TypeScript build, and `git diff --check`.
 - PASS — API TypeScript no-emit, ESLint, and Nest build.
 - PASS — admin billing routing 15/15, i18n 4/4, TypeScript, ESLint, and production Vite build. ESLint
   retains five inherited hook warnings outside the changed billing files; the build retains the
