@@ -4,6 +4,8 @@
 
 pub mod contracts;
 pub mod cloud;
+pub mod signer;
+pub mod trueapi;
 
 use thiserror::Error;
 
