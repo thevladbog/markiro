@@ -1,0 +1,8 @@
+{
+  "token": "example-true-api-token-not-a-real-credential",
+  "expiresAt": "2026-08-28T20:00:00.000Z",
+  "certThumbprint": "AB12CD34EF56AB12CD34EF56AB12CD34EF56AB12",
+  "certSubject": "CN=ООО Ромашка, ИНН=7712345678",
+  "certInn": "7712345678",
+  "certNotAfter": "2027-03-01T00:00:00.000Z"
+}

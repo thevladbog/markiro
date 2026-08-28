@@ -115,6 +115,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /shifts/:shiftId/exports (ShiftExportsController.list)",
       "GET /lines/presence (LinesController.listPresence)",
       "GET /shift-close-conflicts (StationShiftCloseController.list)",
+      "GET /signer-agents (SignerAgentsController.overview)",
       "GET /station-devices (StationDevicesController.list)",
       "GET /team (TeamController.list)",
       "POST /products/gtin-check (ProductsController.checkGtinOwner)",
@@ -247,6 +248,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /shifts (ShiftsController.createShift)",
       "POST /shifts/:id/open (ShiftsController.openShift)",
       "POST /shift-close-conflicts/:eventId/dismiss (StationShiftCloseController.dismiss)",
+      "POST /signer-agents/:id/revoke (SignerAgentsController.revoke)",
+      "POST /signer-agents/pairing-code (SignerAgentsController.issuePairingCode)",
       "POST /station-devices (StationDevicesController.create)",
       "POST /station-devices/:id/pairing-code (StationDevicesController.issuePairingCode)",
       "POST /team/invitations (TeamController.createInvitation)",
@@ -425,6 +428,20 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "StationPairController.pair": {
     reason:
       "unpaired station has no device identity; StationPairingService resolves the authoritative tenant and enforces write/quota access",
+  },
+  "SignerAgentPairController.pair": {
+    reason:
+      "unpaired signer agent has no device identity; the single-use pairing code, per-code attempt lockout, and shared fixed-window pairing rate limiter in SignerAgentsService.pair authenticate the exchange before a credential is issued",
+  },
+  "SignerAgentTasksController.complete": {
+    reason:
+      "signer agent task reporting is guarded by the agent's own x-signer-token device identity (SignerAgentGuard), not a cabinet subscription session",
+    requiredGuards: ["SignerAgentGuard"],
+  },
+  "SignerAgentTasksController.fail": {
+    reason:
+      "signer agent task reporting is guarded by the agent's own x-signer-token device identity (SignerAgentGuard), not a cabinet subscription session",
+    requiredGuards: ["SignerAgentGuard"],
   },
   "TenantOwnerActivationController.complete": {
     reason: "single-use tenant-owner activation token is a public authentication lifecycle flow",

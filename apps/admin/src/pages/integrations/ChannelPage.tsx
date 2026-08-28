@@ -26,6 +26,7 @@ import { toast } from "../../lib/toast.js";
 import { ApiKeysPanel } from "./ApiKeysPanel.js";
 import { CandidatesQueue } from "./CandidatesQueue.js";
 import { JournalList } from "./JournalList.js";
+import { SignerAgentsPanel } from "./SignerAgentsPanel.js";
 import {
   useChannelDetail,
   useDeleteChannel,
@@ -654,6 +655,16 @@ export function ChannelPage() {
        * area instead of slotting into `CommercemlSettingsForm`'s branch above.
        */}
       {channel.type === "public_api" && <ApiKeysPanel />}
+
+      {/*
+       * `chestny_znak` has no exchange credentials of its own (task-8-brief.md):
+       * its "credentials" are the paired "Markiro Подписант" desktop agents
+       * holding a КЭП certificate, listed here instead of slotting into
+       * `AuthorizedCredentialsSection`'s login+secret form above -- the same
+       * "own area, not a forced fit" discipline `ApiKeysPanel` follows for
+       * `public_api` just above.
+       */}
+      {channel.type === "chestny_znak" ? <SignerAgentsPanel /> : null}
 
       <JournalList type={type} />
 

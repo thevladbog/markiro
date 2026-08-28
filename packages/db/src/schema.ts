@@ -14,3 +14,4 @@ export * from "./schema/billing.js";
 export * from "./schema/shift-exports.js";
 export * from "./schema/disaggregation.js";
 export * from "./schema/inventory.js";
+export * from "./schema/chz.js";

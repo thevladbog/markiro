@@ -286,3 +286,21 @@ export type {
   PlatformTeamUser,
   PlatformTeamUserParams,
 } from "./platform-auth.js";
+export {
+  CHZ_SIGNER_ERROR_CODES,
+  chzSignerContracts,
+  chzSignerPairRequestSchema,
+  chzSignerPairResponseSchema,
+  chzSignerTaskCompleteSchema,
+  chzSignerTaskFailSchema,
+  chzSignerTaskSchema,
+  chzTrueApiAuthPayloadSchema,
+} from "./chz-signer.js";
+export type {
+  ChzSignerPairRequest,
+  ChzSignerPairResponse,
+  ChzSignerTask,
+  ChzSignerTaskComplete,
+  ChzSignerTaskFail,
+  ChzTrueApiAuthPayload,
+} from "./chz-signer.js";

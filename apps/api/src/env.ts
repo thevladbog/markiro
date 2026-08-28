@@ -73,7 +73,7 @@ const stationOriginSchema = z.url().transform((value, ctx) => {
 
 const explicitBooleanSchema = z.enum(["true", "false"]).transform((value) => value === "true");
 
-const mailEncryptionKeySchema = z
+const encryptionKeySchema = z
   .string()
   .refine((value) => {
     const decoded = Buffer.from(value, "base64");
@@ -169,7 +169,7 @@ const EnvSchema = z
     SMTP_FROM_EMAIL: z.email(),
     SMTP_FROM_NAME: z.string().min(1),
     SMTP_REPLY_TO: z.email().optional(),
-    MAIL_PAYLOAD_ENCRYPTION_KEY: mailEncryptionKeySchema,
+    MAIL_PAYLOAD_ENCRYPTION_KEY: encryptionKeySchema,
     LANDING_DEMO_SUBMISSION_ENABLED: explicitBooleanSchema
       .optional()
       .transform((value) => value ?? false),
@@ -188,6 +188,7 @@ const EnvSchema = z
     S3_FORCE_PATH_STYLE: explicitBooleanSchema,
     DADATA_TOKEN: z.string().trim().min(1).optional(),
     DADATA_SECRET: z.string().trim().min(1).optional(),
+    CHZ_TOKEN_ENCRYPTION_KEY: encryptionKeySchema.optional(),
   })
   .superRefine((env, ctx) => {
     if (env.PLATFORM_AUTH_SECRET === env.BETTER_AUTH_SECRET) {
@@ -287,6 +288,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     ...Object.keys(DEVELOPMENT_STORAGE_DEFAULTS),
     "DADATA_TOKEN",
     "DADATA_SECRET",
+    "CHZ_TOKEN_ENCRYPTION_KEY",
   ]) {
     if (normalizedSource[name]?.trim() === "") delete normalizedSource[name];
   }
