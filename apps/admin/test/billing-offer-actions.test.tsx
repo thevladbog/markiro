@@ -8,6 +8,8 @@ import type * as Domain from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 
 import { AccessProvider } from "../src/access/context.js";
+import { ApiRequestError } from "../src/api/client.js";
+import i18n from "../src/i18n/index.js";
 import { OfferDetailPage } from "../src/pages/billing/OfferDetailPage.js";
 import { acceptOffer, requestOfferChanges, useOffer } from "../src/pages/billing/api.js";
 
@@ -31,6 +33,7 @@ vi.mock("../src/pages/billing/api.js", () => ({
   acceptOffer: vi.fn(),
   requestOfferChanges: vi.fn(),
   downloadOfferDocument: vi.fn(),
+  invalidateTenantBilling: vi.fn(async () => undefined),
 }));
 
 const offer = {
@@ -52,26 +55,31 @@ const offer = {
 
 function renderOffer(canRequest = true) {
   return render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><ThemeProvider defaultTheme="light">
-      <MemoryRouter initialEntries={[`/billing/offers/${offer.id}`]}>
-        <AccessProvider
-          value={{
-            roles: canRequest ? ["owner"] : ["member"],
-            capabilities: canRequest
-              ? [CABINET_CAPABILITY.BILLING_READ, CABINET_CAPABILITY.BILLING_REQUEST]
-              : [CABINET_CAPABILITY.BILLING_READ],
-          }}
-        >
-          <OfferDetailPage />
-        </AccessProvider>
-      </MemoryRouter>
-    </ThemeProvider></QueryClientProvider>,
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <ThemeProvider defaultTheme="light">
+        <MemoryRouter initialEntries={[`/billing/offers/${offer.id}`]}>
+          <AccessProvider
+            value={{
+              roles: canRequest ? ["owner"] : ["member"],
+              capabilities: canRequest
+                ? [CABINET_CAPABILITY.BILLING_READ, CABINET_CAPABILITY.BILLING_REQUEST]
+                : [CABINET_CAPABILITY.BILLING_READ],
+            }}
+          >
+            <OfferDetailPage />
+          </AccessProvider>
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
   );
 }
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.resetAllMocks();
+  await i18n.changeLanguage("ru");
 });
 
 it.each(["expired", "superseded"])("renders %s offer as read-only", (status) => {
@@ -109,6 +117,58 @@ it("uses the server-owned latest decision and actionable state after reload", ()
   expect(screen.getByText("Принято")).toBeDefined();
   expect(screen.queryByRole("button", { name: "Принять" })).toBeNull();
 });
+
+it("renders offer status and actions in Russian and English from the shared dictionaries", async () => {
+  vi.mocked(useOffer).mockReturnValue({ data: offer, isPending: false, isError: false } as never);
+  renderOffer();
+
+  expect(screen.getByRole("heading", { name: "Предложение КП-42" })).toBeDefined();
+  expect(screen.getByRole("button", { name: "Принять" })).toBeDefined();
+
+  await i18n.changeLanguage("en");
+
+  expect(screen.getByRole("heading", { name: "Offer КП-42" })).toBeDefined();
+  expect(screen.getByText("Active")).toBeDefined();
+  expect(screen.getByRole("button", { name: "Accept" })).toBeDefined();
+});
+
+it.each([
+  [404, "Предложение не найдено"],
+  [403, "Нет доступа к предложению"],
+] as const)("renders offer detail HTTP %s without a retry action", (status, title) => {
+  vi.mocked(useOffer).mockReturnValue({
+    data: undefined,
+    isPending: false,
+    isError: true,
+    error: new ApiRequestError(status, title),
+    refetch: vi.fn(),
+  } as never);
+
+  renderOffer();
+
+  expect(screen.getByText(title)).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Повторить" })).toBeNull();
+});
+
+it.each([new ApiRequestError(503, "unavailable"), new Error("offline")])(
+  "renders a retryable offer detail load error for %s",
+  (error) => {
+    const refetch = vi.fn();
+    vi.mocked(useOffer).mockReturnValue({
+      data: undefined,
+      isPending: false,
+      isError: true,
+      error,
+      refetch,
+    } as never);
+
+    renderOffer();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+
+    expect(screen.getByText("Не удалось загрузить предложение")).toBeDefined();
+    expect(refetch).toHaveBeenCalledTimes(1);
+  },
+);
 
 it("requires confirmation, locks acceptance immediately, and retains one retry key", async () => {
   vi.mocked(useOffer).mockReturnValue({ data: offer, isPending: false, isError: false } as never);

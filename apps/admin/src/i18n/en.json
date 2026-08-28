@@ -494,6 +494,142 @@
           "year": "Yearly"
         }
       },
+      "invoices": {
+        "loading": "Loading invoices",
+        "loadError": "Could not load invoices",
+        "heading": "Invoices and payments",
+        "description": "Only payments confirmed by Markiro are shown.",
+        "empty": "No invoices match the selected filters",
+        "registry": "Invoice registry",
+        "cardsLabel": "Invoices",
+        "filters": {
+          "label": "Invoice filters",
+          "status": "Invoice status",
+          "allStatuses": "All statuses",
+          "from": "From date",
+          "to": "To date"
+        },
+        "columns": {
+          "number": "Number",
+          "issued": "Issued",
+          "dueDate": "Due date",
+          "status": "Invoice status",
+          "total": "Total",
+          "confirmedPayment": "Confirmed payment"
+        },
+        "payment": {
+          "confirmed": "Confirmed: {{amount}}",
+          "remaining": "Remaining: {{amount}}"
+        },
+        "detail": {
+          "loading": "Loading invoice",
+          "notFound": "Invoice not found",
+          "forbidden": "You do not have access to this invoice",
+          "loadError": "Could not load invoice",
+          "heading": "Invoice {{number}}",
+          "description": "An unpaid invoice does not by itself restrict production operations.",
+          "back": "Back to invoices",
+          "summary": "Status and amount",
+          "invoiceStatus": "Invoice status",
+          "paymentStatus": "Payment status",
+          "invoiceTotal": "Invoice total",
+          "confirmed": "Confirmed",
+          "remaining": "Remaining",
+          "payments": "Confirmed payments",
+          "noPayments": "There are no confirmed payments yet.",
+          "lines": "Line items",
+          "linesRegistry": "Invoice line items",
+          "documents": "Documents",
+          "documentMeta": "{{format}} · revision {{revision}} · {{status}}"
+        },
+        "lineColumns": {
+          "position": "No.",
+          "name": "Item",
+          "unit": "Unit",
+          "quantity": "Quantity",
+          "total": "Total"
+        },
+        "download": "Download",
+        "downloadError": "Could not download the document. Try again later."
+      },
+      "documents": {
+        "loading": "Loading documents",
+        "loadError": "Could not load documents",
+        "heading": "Documents",
+        "description": "Acts and commercial offers are available after Markiro prepares the file.",
+        "empty": "No documents match the selected filters",
+        "registry": "Document registry",
+        "filters": {
+          "label": "Document filters",
+          "type": "Document type",
+          "allTypes": "All types",
+          "offer": "Offers",
+          "act": "Acts",
+          "status": "Document status",
+          "allStatuses": "All statuses",
+          "from": "From date",
+          "to": "To date"
+        },
+        "types": {
+          "offer": "Commercial offer",
+          "act": "Act"
+        },
+        "status": {
+          "ready": "Ready",
+          "pending": "Preparing",
+          "failed": "Preparation failed"
+        },
+        "columns": {
+          "type": "Type",
+          "date": "Date",
+          "revision": "Revision",
+          "status": "Status",
+          "file": "File"
+        },
+        "download": "Download",
+        "downloadError": "Could not download the document. Try again later."
+      },
+      "offer": {
+        "loading": "Loading offer",
+        "notFound": "Offer not found",
+        "forbidden": "You do not have access to this offer",
+        "loadError": "Could not load offer",
+        "heading": "Offer {{number}}",
+        "withoutNumber": "without a number",
+        "conditions": "Terms",
+        "statusLabel": "Status",
+        "expiresAt": "Valid until",
+        "publishedAt": "Published",
+        "total": "Total",
+        "lines": "Line items",
+        "linesRegistry": "Offer line items",
+        "documents": "Documents",
+        "documentMeta": "{{format}} · revision {{revision}} · {{status}}",
+        "decision": "Your decision",
+        "accept": "Accept",
+        "requestChanges": "Request changes",
+        "changeLabel": "What needs to change",
+        "changeHelp": "From 1 to 2,000 characters.",
+        "submitChanges": "Send request",
+        "validationError": "Describe the changes in 1 to 2,000 characters.",
+        "actionError": "Could not send the decision. Your input has been saved; try again.",
+        "download": "Download",
+        "downloadError": "Could not download the document. Try again later.",
+        "confirmTitle": "Accept this offer?",
+        "confirmDescription": "Markiro will receive your confirmation.",
+        "confirmAccept": "Confirm acceptance",
+        "cancel": "Cancel",
+        "status": {
+          "draft": "Draft",
+          "published": "Active",
+          "expired": "Expired",
+          "superseded": "Superseded by a newer revision",
+          "paid": "Paid",
+          "cancelled": "Cancelled",
+          "accepted": "Accepted",
+          "changes_requested": "Changes requested"
+        }
+      },
       "limits": {
         "lines": "Lines",
         "stations": "Stations",

@@ -24,27 +24,28 @@ const INVOICE_STATUSES: TenantInvoiceStatus[] = [
   "cancelled",
 ];
 
-function invoiceStatusLabel(status: TenantInvoiceStatus): string {
-  return {
-    draft: "Черновик",
-    issued: "Выставлено",
-    overdue: "Просрочено",
-    partially_paid: "Оплачено частично",
-    paid: "Оплачено",
-    cancelled: "Отменено",
-  }[status];
-}
-
 function InvoicePaymentSummary({ invoice }: { invoice: TenantInvoice }) {
+  const { t, i18n } = useTranslation();
   if (!invoice.paymentSummary) return <span>—</span>;
   return (
     <div className="mk-billing-payment-summary">
       <span className="mk-billing-money">
-        Подтверждено:{" "}
-        {formatMoney(invoice.paymentSummary.confirmedAmount, invoice.currency, "ru-RU")}
+        {t("pages.billing.invoices.payment.confirmed", {
+          amount: formatMoney(
+            invoice.paymentSummary.confirmedAmount,
+            invoice.currency,
+            i18n.language,
+          ),
+        })}
       </span>
       <span className="mk-billing-money">
-        Остаток: {formatMoney(invoice.paymentSummary.remainingAmount, invoice.currency, "ru-RU")}
+        {t("pages.billing.invoices.payment.remaining", {
+          amount: formatMoney(
+            invoice.paymentSummary.remainingAmount,
+            invoice.currency,
+            i18n.language,
+          ),
+        })}
       </span>
     </div>
   );
@@ -57,6 +58,7 @@ function InvoiceFiltersForm({
   filters: InvoiceFilters;
   onChange: (next: InvoiceFilters) => void;
 }) {
+  const { t } = useTranslation();
   const clear = (key: keyof InvoiceFilters) => {
     const next = { ...filters };
     delete next[key];
@@ -69,22 +71,26 @@ function InvoiceFiltersForm({
       ...(status ? { status: status as TenantInvoiceStatus } : {}),
     });
   return (
-    <div className="mk-billing-filters" role="group" aria-label="Фильтры счетов">
+    <div
+      className="mk-billing-filters"
+      role="group"
+      aria-label={t("pages.billing.invoices.filters.label")}
+    >
       <Select
         native
-        label="Статус счёта"
+        label={t("pages.billing.invoices.filters.status")}
         value={filters.status ?? ""}
         onValueChange={setStatus}
         options={[
-          { value: "", label: "Все статусы" },
+          { value: "", label: t("pages.billing.invoices.filters.allStatuses") },
           ...INVOICE_STATUSES.map((status) => ({
             value: status,
-            label: invoiceStatusLabel(status),
+            label: t(`pages.billing.status.operation.${status}`),
           })),
         ]}
       />
       <Input
-        label="С даты"
+        label={t("pages.billing.invoices.filters.from")}
         type="date"
         value={filters.from ?? ""}
         onChange={(event) =>
@@ -92,7 +98,7 @@ function InvoiceFiltersForm({
         }
       />
       <Input
-        label="По дату"
+        label={t("pages.billing.invoices.filters.to")}
         type="date"
         value={filters.to ?? ""}
         onChange={(event) =>
@@ -104,15 +110,15 @@ function InvoiceFiltersForm({
 }
 
 export function InvoicesPage() {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [filters, setFilters] = useState<InvoiceFilters>({});
-  const { data, isPending, isError, error, refetch } = useInvoices(filters);
-  if (isPending) return <Spinner label="Загрузка счетов" />;
+  const { data, isPending, isError, refetch } = useInvoices(filters);
+  if (isPending) return <Spinner label={t("pages.billing.invoices.loading")} />;
   if (isError)
     return (
       <EmptyState
-        title="Не удалось загрузить счета"
-        action={<Button onClick={() => void refetch()}>Повторить</Button>}
+        title={t("pages.billing.invoices.loadError")}
+        action={<Button onClick={() => void refetch()}>{t("pages.billing.retry")}</Button>}
       />
     );
   const items = data?.items ?? [];
@@ -121,57 +127,60 @@ export function InvoicesPage() {
       <div className="mk-billing-section-intro">
         <div>
           <h2 className="mk-billing-section-heading" id="billing-invoices-heading">
-            Счета и оплаты
+            {t("pages.billing.invoices.heading")}
           </h2>
-          <p>Показаны только подтверждённые Markiro оплаты.</p>
+          <p>{t("pages.billing.invoices.description")}</p>
         </div>
         <InvoiceFiltersForm filters={filters} onChange={setFilters} />
       </div>
       {items.length === 0 ? (
-        <EmptyState title="Счетов по выбранным фильтрам нет" />
+        <EmptyState title={t("pages.billing.invoices.empty")} />
       ) : (
         <>
           <div className="mk-billing-table-wrap mk-billing-invoices__desktop">
             <Table
-              scrollLabel="Реестр счетов"
+              scrollLabel={t("pages.billing.invoices.registry")}
               columns={[
                 {
                   key: "number",
-                  title: "Номер",
+                  title: t("pages.billing.invoices.columns.number"),
                   render: (row) => <Link to={`/billing/invoices/${row.id}`}>{row.number}</Link>,
                 },
                 {
                   key: "issueDate",
-                  title: "Выставлен",
+                  title: t("pages.billing.invoices.columns.issued"),
                   render: (row) => formatBillingDate(row.issueDate, i18n.language),
                 },
                 {
                   key: "dueDate",
-                  title: "Срок оплаты",
+                  title: t("pages.billing.invoices.columns.dueDate"),
                   render: (row) => formatBillingDate(row.dueDate, i18n.language),
                 },
                 {
                   key: "status",
-                  title: "Статус счёта",
+                  title: t("pages.billing.invoices.columns.status"),
                   render: (row) => <BillingStatusChip kind="operation" value={row.status} />,
                 },
                 {
                   key: "total",
-                  title: "Сумма",
+                  title: t("pages.billing.invoices.columns.total"),
                   mono: true,
                   align: "right",
                   render: (row) => formatMoney(row.total, row.currency, i18n.language),
                 },
                 {
                   key: "payment",
-                  title: "Подтверждённая оплата",
+                  title: t("pages.billing.invoices.columns.confirmedPayment"),
                   render: (row) => <InvoicePaymentSummary invoice={row} />,
                 },
               ]}
               rows={items}
             />
           </div>
-          <ul className="mk-billing-invoice-cards" aria-label="Счета">
+          <ul
+            className="mk-billing-invoice-cards"
+            aria-label={t("pages.billing.invoices.cardsLabel")}
+          >
             {items.map((invoice) => (
               <li key={invoice.id}>
                 <Link to={`/billing/invoices/${invoice.id}`} className="mk-billing-invoice-card">
@@ -194,67 +203,67 @@ export function InvoicesPage() {
 
 export function InvoiceDetailPage() {
   const { id = "" } = useParams();
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { data, isPending, isError, error, refetch } = useInvoice(id);
   const [busy, setBusy] = useState<string | null>(null);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState(false);
   const handleDownload = (documentId: string) =>
     void (async () => {
       setBusy(documentId);
-      setDownloadError(null);
+      setDownloadError(false);
       try {
         const result = await downloadInvoice(id, documentId);
         window.open(result.url, "_blank", "noopener,noreferrer");
       } catch {
-        setDownloadError("Не удалось скачать документ. Повторите попытку позже.");
+        setDownloadError(true);
       } finally {
         setBusy(null);
       }
     })();
-  if (isPending) return <Spinner label="Загрузка счёта" />;
+  if (isPending) return <Spinner label={t("pages.billing.invoices.detail.loading")} />;
   if (isError) {
     const status = error instanceof ApiRequestError ? error.status : 0;
     return (
       <EmptyState
         title={
           status === 404
-            ? "Счёт не найден"
+            ? t("pages.billing.invoices.detail.notFound")
             : status === 403
-              ? "Нет доступа к счёту"
-              : "Не удалось загрузить счёт"
+              ? t("pages.billing.invoices.detail.forbidden")
+              : t("pages.billing.invoices.detail.loadError")
         }
         action={
           status === 404 || status === 403 ? undefined : (
-            <Button onClick={() => void refetch()}>Повторить</Button>
+            <Button onClick={() => void refetch()}>{t("pages.billing.retry")}</Button>
           )
         }
       />
     );
   }
-  if (!data) return <EmptyState title="Счёт не найден" />;
+  if (!data) return <EmptyState title={t("pages.billing.invoices.detail.notFound")} />;
   return (
     <section aria-labelledby="billing-invoice-heading" className="mk-billing-invoice-detail">
       <div className="mk-billing-section-intro">
         <div>
           <h2 className="mk-billing-section-heading" id="billing-invoice-heading">
-            Счёт {data.number}
+            {t("pages.billing.invoices.detail.heading", { number: data.number })}
           </h2>
-          <p>Неоплаченный счёт сам по себе не ограничивает работу производства.</p>
+          <p>{t("pages.billing.invoices.detail.description")}</p>
         </div>
         <Link className="mk-billing-inline-link" to="/billing/invoices">
-          К списку счетов
+          {t("pages.billing.invoices.detail.back")}
         </Link>
       </div>
-      <Card title="Статус и сумма" titleAs="h3">
+      <Card title={t("pages.billing.invoices.detail.summary")} titleAs="h3">
         <dl className="mk-billing-definition-list">
           <div>
-            <dt>Статус счёта</dt>
+            <dt>{t("pages.billing.invoices.detail.invoiceStatus")}</dt>
             <dd>
               <BillingStatusChip kind="operation" value={data.status} />
             </dd>
           </div>
           <div>
-            <dt>Статус оплаты</dt>
+            <dt>{t("pages.billing.invoices.detail.paymentStatus")}</dt>
             <dd>
               {data.paymentSummary ? (
                 <BillingStatusChip kind="operation" value={data.paymentSummary.status} />
@@ -264,13 +273,13 @@ export function InvoiceDetailPage() {
             </dd>
           </div>
           <div>
-            <dt>Сумма счёта</dt>
+            <dt>{t("pages.billing.invoices.detail.invoiceTotal")}</dt>
             <dd className="mk-billing-money">
               {formatMoney(data.total, data.currency, i18n.language)}
             </dd>
           </div>
           <div>
-            <dt>Подтверждено</dt>
+            <dt>{t("pages.billing.invoices.detail.confirmed")}</dt>
             <dd className="mk-billing-money">
               {data.paymentSummary
                 ? formatMoney(data.paymentSummary.confirmedAmount, data.currency, i18n.language)
@@ -278,7 +287,7 @@ export function InvoiceDetailPage() {
             </dd>
           </div>
           <div>
-            <dt>Остаток</dt>
+            <dt>{t("pages.billing.invoices.detail.remaining")}</dt>
             <dd className="mk-billing-money">
               {data.paymentSummary
                 ? formatMoney(data.paymentSummary.remainingAmount, data.currency, i18n.language)
@@ -287,7 +296,7 @@ export function InvoiceDetailPage() {
           </div>
         </dl>
       </Card>
-      <Card title="Подтверждённые оплаты" titleAs="h3">
+      <Card title={t("pages.billing.invoices.detail.payments")} titleAs="h3">
         {data.payments.length ? (
           <ol className="mk-billing-payments-list">
             {data.payments.map((payment) => (
@@ -300,21 +309,30 @@ export function InvoiceDetailPage() {
             ))}
           </ol>
         ) : (
-          <p className="mk-billing-muted">Подтверждённых оплат пока нет.</p>
+          <p className="mk-billing-muted">{t("pages.billing.invoices.detail.noPayments")}</p>
         )}
       </Card>
-      <Card title="Позиции" titleAs="h3">
+      <Card title={t("pages.billing.invoices.detail.lines")} titleAs="h3">
         <div className="mk-billing-table-wrap">
           <Table
-            scrollLabel="Позиции счёта"
+            scrollLabel={t("pages.billing.invoices.detail.linesRegistry")}
             columns={[
-              { key: "position", title: "№", mono: true },
-              { key: "nameRu", title: "Позиция", wrap: true },
-              { key: "unit", title: "Ед." },
-              { key: "quantity", title: "Количество", mono: true, align: "right" },
+              {
+                key: "position",
+                title: t("pages.billing.invoices.lineColumns.position"),
+                mono: true,
+              },
+              { key: "nameRu", title: t("pages.billing.invoices.lineColumns.name"), wrap: true },
+              { key: "unit", title: t("pages.billing.invoices.lineColumns.unit") },
+              {
+                key: "quantity",
+                title: t("pages.billing.invoices.lineColumns.quantity"),
+                mono: true,
+                align: "right",
+              },
               {
                 key: "lineTotal",
-                title: "Сумма",
+                title: t("pages.billing.invoices.lineColumns.total"),
                 mono: true,
                 align: "right",
                 render: (row) => formatMoney(row.lineTotal, data.currency, i18n.language),
@@ -324,17 +342,18 @@ export function InvoiceDetailPage() {
           />
         </div>
       </Card>
-      <Card title="Документы" titleAs="h3">
-        {downloadError ? <Alert tone="error">{downloadError}</Alert> : null}
+      <Card title={t("pages.billing.invoices.detail.documents")} titleAs="h3">
+        {downloadError ? (
+          <Alert tone="error">{t("pages.billing.invoices.downloadError")}</Alert>
+        ) : null}
         {data.documents.map((document) => (
           <div className="mk-billing-invoice-document" key={document.id}>
             <span>
-              {document.format.toUpperCase()} · ревизия {document.revision} ·{" "}
-              {document.status === "ready"
-                ? "Готов"
-                : document.status === "pending"
-                  ? "Подготавливается"
-                  : "Не удалось подготовить"}
+              {t("pages.billing.invoices.detail.documentMeta", {
+                format: document.format.toUpperCase(),
+                revision: document.revision,
+                status: t(`pages.billing.documents.status.${document.status}`),
+              })}
             </span>
             {document.status === "ready" ? (
               <Button
@@ -342,7 +361,7 @@ export function InvoiceDetailPage() {
                 loading={busy === document.id}
                 onClick={() => handleDownload(document.id)}
               >
-                Скачать
+                {t("pages.billing.invoices.download")}
               </Button>
             ) : null}
           </div>

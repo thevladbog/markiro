@@ -1,11 +1,22 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router";
-import { Alert, Button, Card, ConfirmDialog, EmptyState, Spinner, Textarea } from "@markiro/ui";
-import { CABINET_CAPABILITY } from "@markiro/domain";
+import {
+  Alert,
+  Button,
+  Card,
+  ConfirmDialog,
+  EmptyState,
+  Spinner,
+  Table,
+  Textarea,
+} from "@markiro/ui";
+import type { CabinetCapability } from "@markiro/domain";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
+import { formatBillingDate, formatMoney } from "./format.js";
 import {
   acceptOffer,
   downloadOfferDocument,
@@ -16,35 +27,23 @@ import {
 } from "./api.js";
 
 type Attempt = { decision: OfferDecision["decision"]; message: string; key: string };
-
-function statusLabel(status: string, decision: OfferDecision["decision"] | undefined) {
-  if (decision === "accepted") return "Принято";
-  if (decision === "changes_requested") return "Изменения запрошены";
-  return (
-    {
-      published: "Действует",
-      expired: "Срок действия истёк",
-      superseded: "Заменено новой версией",
-      paid: "Оплачено",
-      cancelled: "Отменено",
-      draft: "Черновик",
-    }[status] ?? status
-  );
-}
+const BILLING_REQUEST_CAPABILITY: CabinetCapability = "billing.request";
 
 export function OfferDetailPage() {
+  const { t, i18n } = useTranslation();
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const client = useQueryClient();
-  const canRequest = useCan(CABINET_CAPABILITY.BILLING_REQUEST);
+  const canRequest = useCan(BILLING_REQUEST_CAPABILITY);
   const query = useOffer(id);
   const attempt = useRef<Attempt | null>(null);
   const [acceptOpen, setAcceptOpen] = useState(false);
   const [changeOpen, setChangeOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState<OfferDecision["decision"] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [error, setError] = useState<"validation" | "action" | null>(null);
+  const [downloadError, setDownloadError] = useState(false);
+  const [downloadBusy, setDownloadBusy] = useState<string | null>(null);
   const offer = query.data;
 
   const submit = (decision: OfferDecision["decision"], retry = false) =>
@@ -58,7 +57,7 @@ export function OfferDetailPage() {
         decision === "changes_requested" &&
         (next.message.length < 1 || next.message.length > 2000)
       ) {
-        setError("Опишите изменения: от 1 до 2000 символов.");
+        setError("validation");
         return;
       }
       if (!retry) attempt.current = next;
@@ -71,90 +70,163 @@ export function OfferDetailPage() {
         attempt.current = null;
         setAcceptOpen(false);
         setChangeOpen(false);
-        navigate("/billing/documents");
+        void navigate("/billing/documents");
       } catch {
-        setError("Не удалось отправить решение. Введённые данные сохранены; повторите попытку.");
+        setError("action");
       } finally {
         setPending(null);
       }
     })();
 
-  if (query.isPending) return <Spinner label="Загрузка предложения" />;
+  if (query.isPending) return <Spinner label={t("pages.billing.offer.loading")} />;
   if (query.isError) {
     const status = query.error instanceof ApiRequestError ? query.error.status : 0;
     return (
       <EmptyState
         title={
           status === 404
-            ? "Предложение не найдено"
+            ? t("pages.billing.offer.notFound")
             : status === 403
-              ? "Нет доступа к предложению"
-              : "Не удалось загрузить предложение"
+              ? t("pages.billing.offer.forbidden")
+              : t("pages.billing.offer.loadError")
+        }
+        action={
+          status === 404 || status === 403 ? undefined : (
+            <Button onClick={() => void query.refetch()}>{t("pages.billing.retry")}</Button>
+          )
         }
       />
     );
   }
-  if (!offer) return <EmptyState title="Предложение не найдено" />;
+  if (!offer) return <EmptyState title={t("pages.billing.offer.notFound")} />;
   const retry = () => {
     if (attempt.current && !pending) submit(attempt.current.decision, true);
   };
   const download = (documentId: string) =>
     void (async () => {
       try {
-        setDownloadError(null);
+        setDownloadBusy(documentId);
+        setDownloadError(false);
         const result = await downloadOfferDocument(offer.id, documentId);
         window.open(result.url, "_blank", "noopener,noreferrer");
       } catch {
-        setDownloadError("Не удалось скачать документ. Повторите попытку позже.");
+        setDownloadError(true);
+      } finally {
+        setDownloadBusy(null);
       }
     })();
+  const presentationStatus = offer.latestDecision?.decision ?? offer.status;
   return (
     <section aria-labelledby="billing-offer-heading" className="mk-billing-offer-detail">
       <h2 className="mk-billing-section-heading" id="billing-offer-heading">
-        Предложение {offer.number ?? "без номера"}
+        {t("pages.billing.offer.heading", {
+          number: offer.number ?? t("pages.billing.offer.withoutNumber"),
+        })}
       </h2>
-      <Card title="Условия" titleAs="h3">
-        <p>{statusLabel(offer.status, offer.latestDecision?.decision)}</p>
-        <p className="mk-billing-money">{offer.total} RUB</p>
+      <Card title={t("pages.billing.offer.conditions")} titleAs="h3">
+        <dl className="mk-billing-definition-list">
+          <div>
+            <dt>{t("pages.billing.offer.statusLabel")}</dt>
+            <dd>{t(`pages.billing.offer.status.${presentationStatus}`)}</dd>
+          </div>
+          <div>
+            <dt>{t("pages.billing.offer.expiresAt")}</dt>
+            <dd>{formatBillingDate(offer.expiresAt, i18n.language)}</dd>
+          </div>
+          <div>
+            <dt>{t("pages.billing.offer.publishedAt")}</dt>
+            <dd>{formatBillingDate(offer.publishedAt, i18n.language)}</dd>
+          </div>
+          <div>
+            <dt>{t("pages.billing.offer.total")}</dt>
+            <dd className="mk-billing-money">{formatMoney(offer.total, "RUB", i18n.language)}</dd>
+          </div>
+        </dl>
+        {offer.termsMarkdown ? (
+          <p className="mk-billing-offer-terms">{offer.termsMarkdown}</p>
+        ) : null}
         {offer.latestDecision?.message ? <p>{offer.latestDecision.message}</p> : null}
       </Card>
       {error ? (
         <Alert tone="error">
-          {error}{" "}
-          <Button variant="secondary" onClick={retry}>
-            Повторить
-          </Button>
+          {t(
+            error === "validation"
+              ? "pages.billing.offer.validationError"
+              : "pages.billing.offer.actionError",
+          )}{" "}
+          {error === "action" ? (
+            <Button variant="secondary" onClick={retry}>
+              {t("pages.billing.retry")}
+            </Button>
+          ) : null}
         </Alert>
       ) : null}
-      {downloadError ? <Alert tone="error">{downloadError}</Alert> : null}
-      <Card title="Документы" titleAs="h3">
+      {downloadError ? <Alert tone="error">{t("pages.billing.offer.downloadError")}</Alert> : null}
+      <Card title={t("pages.billing.offer.lines")} titleAs="h3">
+        <div className="mk-billing-table-wrap">
+          <Table
+            scrollLabel={t("pages.billing.offer.linesRegistry")}
+            columns={[
+              {
+                key: "position",
+                title: t("pages.billing.invoices.lineColumns.position"),
+                mono: true,
+              },
+              {
+                key: "nameRu",
+                title: t("pages.billing.invoices.lineColumns.name"),
+                wrap: true,
+              },
+              {
+                key: "quantity",
+                title: t("pages.billing.invoices.lineColumns.quantity"),
+                mono: true,
+              },
+              {
+                key: "lineTotal",
+                title: t("pages.billing.invoices.lineColumns.total"),
+                mono: true,
+                align: "right",
+                render: (row) => formatMoney(row.lineTotal, "RUB", i18n.language),
+              },
+            ]}
+            rows={offer.lines}
+          />
+        </div>
+      </Card>
+      <Card title={t("pages.billing.offer.documents")} titleAs="h3">
         {offer.documents.map((document) => (
           <div className="mk-billing-invoice-document" key={document.id}>
             <span>
-              {document.format.toUpperCase()} ·{" "}
-              {document.status === "ready"
-                ? "Готов"
-                : document.status === "pending"
-                  ? "Подготавливается"
-                  : "Не удалось подготовить"}
+              {t("pages.billing.offer.documentMeta", {
+                format: document.format.toUpperCase(),
+                revision: document.revision,
+                status: t(`pages.billing.documents.status.${document.status}`),
+              })}
             </span>
             {document.status === "ready" ? (
-              <Button onClick={() => download(document.id)}>Скачать</Button>
+              <Button
+                disabled={downloadBusy === document.id}
+                loading={downloadBusy === document.id}
+                onClick={() => download(document.id)}
+              >
+                {t("pages.billing.offer.download")}
+              </Button>
             ) : null}
           </div>
         ))}
       </Card>
       {canRequest && offer.actionable ? (
-        <Card title="Ваше решение" titleAs="h3">
+        <Card title={t("pages.billing.offer.decision")} titleAs="h3">
           <Button disabled={pending !== null} onClick={() => setAcceptOpen(true)}>
-            Принять
+            {t("pages.billing.offer.accept")}
           </Button>
           <Button
             variant="secondary"
             disabled={pending !== null}
             onClick={() => setChangeOpen(true)}
           >
-            Запросить изменения
+            {t("pages.billing.offer.requestChanges")}
           </Button>
           {changeOpen ? (
             <form
@@ -164,16 +236,18 @@ export function OfferDetailPage() {
               }}
             >
               <Textarea
-                label="Что нужно изменить"
+                label={t("pages.billing.offer.changeLabel")}
                 value={message}
                 maxLength={2000}
+                aria-describedby="offer-change-help"
                 onChange={(event) => {
                   setMessage(event.target.value);
                   attempt.current = null;
                 }}
               />
+              <p id="offer-change-help">{t("pages.billing.offer.changeHelp")}</p>
               <Button type="submit" disabled={pending !== null}>
-                Отправить запрос
+                {t("pages.billing.offer.submitChanges")}
               </Button>
             </form>
           ) : null}
@@ -181,10 +255,10 @@ export function OfferDetailPage() {
       ) : null}
       <ConfirmDialog
         open={acceptOpen}
-        title="Принять предложение?"
-        description="Markiro получит подтверждение."
-        confirmLabel="Подтвердить принятие"
-        cancelLabel="Отмена"
+        title={t("pages.billing.offer.confirmTitle")}
+        description={t("pages.billing.offer.confirmDescription")}
+        confirmLabel={t("pages.billing.offer.confirmAccept")}
+        cancelLabel={t("pages.billing.offer.cancel")}
         busy={pending === "accepted"}
         onConfirm={() => submit("accepted")}
         onCancel={() => setAcceptOpen(false)}

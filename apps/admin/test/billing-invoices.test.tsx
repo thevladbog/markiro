@@ -4,6 +4,8 @@ import { afterEach, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 
+import { ApiRequestError } from "../src/api/client.js";
+import i18n from "../src/i18n/index.js";
 import { InvoiceDetailPage, InvoicesPage } from "../src/pages/billing/InvoicesPage.js";
 import { useInvoice, useInvoices } from "../src/pages/billing/api.js";
 
@@ -47,9 +49,20 @@ function renderInvoices() {
   );
 }
 
-afterEach(() => {
+function renderInvoiceDetail() {
+  return render(
+    <ThemeProvider defaultTheme="light">
+      <MemoryRouter initialEntries={["/billing/invoices/00000000-0000-4000-8000-000000000003"]}>
+        <InvoiceDetailPage />
+      </MemoryRouter>
+    </ThemeProvider>,
+  );
+}
+
+afterEach(async () => {
   cleanup();
   vi.resetAllMocks();
+  await i18n.changeLanguage("ru");
 });
 
 it("shows each authoritative invoice state with confirmed and remaining totals", () => {
@@ -69,7 +82,7 @@ it("shows each authoritative invoice state with confirmed and remaining totals",
   expect(screen.getByRole("region", { name: "Реестр счетов" })).toBeDefined();
 });
 
-it("serializes only the status, from, and to invoice filters", () => {
+it("removes cleared invoice dates from the next filter state", () => {
   vi.mocked(useInvoices).mockReturnValue({
     data: { items: [] },
     isPending: false,
@@ -86,6 +99,29 @@ it("serializes only the status, from, and to invoice filters", () => {
     from: "2026-08-01",
     to: "2026-08-31",
   });
+
+  fireEvent.change(screen.getByLabelText("С даты"), { target: { value: "" } });
+  fireEvent.change(screen.getByLabelText("По дату"), { target: { value: "" } });
+
+  expect(vi.mocked(useInvoices).mock.calls.at(-1)?.[0]).toEqual({ status: "overdue" });
+});
+
+it("renders invoice controls in Russian and English from the shared dictionaries", async () => {
+  vi.mocked(useInvoices).mockReturnValue({
+    data: { items: invoices.slice(0, 1) },
+    isPending: false,
+    isError: false,
+  } as never);
+  renderInvoices();
+
+  expect(screen.getByRole("heading", { name: "Счета и оплаты" })).toBeDefined();
+  expect(screen.getByLabelText("Статус счёта")).toBeDefined();
+
+  await i18n.changeLanguage("en");
+
+  expect(screen.getByRole("heading", { name: "Invoices and payments" })).toBeDefined();
+  expect(screen.getByLabelText("Invoice status")).toBeDefined();
+  expect(screen.getAllByText("Issued").length).toBeGreaterThan(0);
 });
 
 it("keeps invoice and payment states separate and lists confirmed payments in API order", () => {
@@ -116,13 +152,7 @@ it("keeps invoice and payment states separate and lists confirmed payments in AP
     isError: false,
   } as never);
 
-  render(
-    <ThemeProvider defaultTheme="light">
-      <MemoryRouter initialEntries={["/billing/invoices/00000000-0000-4000-8000-000000000003"]}>
-        <InvoiceDetailPage />
-      </MemoryRouter>
-    </ThemeProvider>,
-  );
+  renderInvoiceDetail();
 
   expect(screen.getByText("Статус счёта")).toBeDefined();
   expect(screen.getByText("Статус оплаты")).toBeDefined();
@@ -132,3 +162,41 @@ it("keeps invoice and payment states separate and lists confirmed payments in AP
   expect(paymentRows[1]?.textContent).toContain("100,00");
   expect(screen.queryByText(/bank|банк|reference/i)).toBeNull();
 });
+
+it.each([
+  [404, "Счёт не найден"],
+  [403, "Нет доступа к счёту"],
+] as const)("renders invoice detail HTTP %s without a retry action", (status, title) => {
+  vi.mocked(useInvoice).mockReturnValue({
+    data: undefined,
+    isPending: false,
+    isError: true,
+    error: new ApiRequestError(status, title),
+    refetch: vi.fn(),
+  } as never);
+
+  renderInvoiceDetail();
+
+  expect(screen.getByText(title)).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Повторить" })).toBeNull();
+});
+
+it.each([new ApiRequestError(500, "internal"), new Error("offline")])(
+  "renders a retryable invoice detail load error for %s",
+  (error) => {
+    const refetch = vi.fn();
+    vi.mocked(useInvoice).mockReturnValue({
+      data: undefined,
+      isPending: false,
+      isError: true,
+      error,
+      refetch,
+    } as never);
+
+    renderInvoiceDetail();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+
+    expect(screen.getByText("Не удалось загрузить счёт")).toBeDefined();
+    expect(refetch).toHaveBeenCalledTimes(1);
+  },
+);

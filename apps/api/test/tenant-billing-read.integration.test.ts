@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { loadEnv } from "../src/env";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
+import { tenantOfferDetailSchema } from "../src/modules/tenant-billing/dto";
 import { TenantBillingReadService } from "../src/modules/tenant-billing/tenant-billing-read.service";
 import { EntitlementsService } from "../src/subscriptions/entitlements.service";
 import {
@@ -143,6 +144,22 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
     accepted: { tenantId: "", expectedOfferId: null },
     changesRequested: { tenantId: "", expectedOfferId: null },
     expired: { tenantId: "", expectedOfferId: null },
+  };
+  const offerDetailCases: Record<
+    | "currentUndecided"
+    | "accepted"
+    | "changesRequested"
+    | "expired"
+    | "supersededPrior"
+    | "currentFamily",
+    { tenantId: string; offerId: string }
+  > = {
+    currentUndecided: { tenantId: "", offerId: "" },
+    accepted: { tenantId: "", offerId: "" },
+    changesRequested: { tenantId: "", offerId: "" },
+    expired: { tenantId: "", offerId: "" },
+    supersededPrior: { tenantId: "", offerId: "" },
+    currentFamily: { tenantId: "", offerId: "" },
   };
 
   beforeAll(async () => {
@@ -727,6 +744,10 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
       tenantId: offerTenantIds.laterDraft,
       expectedOfferId: laterDraftPublishedId,
     };
+    offerDetailCases.currentUndecided = {
+      tenantId: offerTenantIds.laterDraft,
+      offerId: laterDraftPublishedId,
+    };
 
     const laterPublishedFamilyId = randomUUID();
     const earlierPublishedId = randomUUID();
@@ -764,6 +785,14 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
       tenantId: offerTenantIds.laterPublished,
       expectedOfferId: laterPublishedId,
     };
+    offerDetailCases.supersededPrior = {
+      tenantId: offerTenantIds.laterPublished,
+      offerId: earlierPublishedId,
+    };
+    offerDetailCases.currentFamily = {
+      tenantId: offerTenantIds.laterPublished,
+      offerId: laterPublishedId,
+    };
 
     for (const [name, decision] of [
       ["accepted", "accepted"],
@@ -793,6 +822,7 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
         createdAt: fixedNow,
       });
       offerCases[name] = { tenantId: offerTenantIds[name], expectedOfferId: null };
+      offerDetailCases[name] = { tenantId: offerTenantIds[name], offerId };
     }
 
     const expiredOfferId = randomUUID();
@@ -811,6 +841,7 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
       updatedAt: daysFromNow(-2),
     });
     offerCases.expired = { tenantId: offerTenantIds.expired, expectedOfferId: null };
+    offerDetailCases.expired = { tenantId: offerTenantIds.expired, offerId: expiredOfferId };
 
     const entitlements = new EntitlementsService(db, "all");
     service = new FixedClockTenantBillingReadService(db, storage, entitlements, fixedNow);
@@ -1075,5 +1106,100 @@ describe.skipIf(!ready)("tenant billing read service isolated Postgres integrati
       expect(overview.actionableOffer?.id ?? null, name).toBe(offerCase.expectedOfferId);
       expect(overview.attentionCount, name).toBe(offerCase.expectedOfferId ? 1 : 0);
     }
+  });
+
+  it("projects server-owned offer currency, decisions, expiry, and family authority from real rows", async () => {
+    const currentUndecided = tenantOfferDetailSchema.parse(
+      await service.offerDetail(
+        offerDetailCases.currentUndecided.tenantId,
+        offerDetailCases.currentUndecided.offerId,
+      ),
+    );
+    expect(currentUndecided).toMatchObject({
+      id: offerDetailCases.currentUndecided.offerId,
+      status: "published",
+      isCurrent: true,
+      actionable: true,
+      latestDecision: null,
+    });
+
+    const accepted = tenantOfferDetailSchema.parse(
+      await service.offerDetail(
+        offerDetailCases.accepted.tenantId,
+        offerDetailCases.accepted.offerId,
+      ),
+    );
+    expect(accepted).toMatchObject({
+      id: offerDetailCases.accepted.offerId,
+      status: "published",
+      isCurrent: true,
+      actionable: false,
+      latestDecision: {
+        decision: "accepted",
+        message: null,
+        createdAt: "2026-08-27T12:00:00.000Z",
+      },
+    });
+
+    const changesRequested = tenantOfferDetailSchema.parse(
+      await service.offerDetail(
+        offerDetailCases.changesRequested.tenantId,
+        offerDetailCases.changesRequested.offerId,
+      ),
+    );
+    expect(changesRequested).toMatchObject({
+      id: offerDetailCases.changesRequested.offerId,
+      status: "published",
+      isCurrent: true,
+      actionable: false,
+      latestDecision: {
+        decision: "changes_requested",
+        message: "Please revise",
+        createdAt: "2026-08-27T12:00:00.000Z",
+      },
+    });
+
+    const expired = tenantOfferDetailSchema.parse(
+      await service.offerDetail(
+        offerDetailCases.expired.tenantId,
+        offerDetailCases.expired.offerId,
+      ),
+    );
+    expect(expired).toMatchObject({
+      id: offerDetailCases.expired.offerId,
+      status: "expired",
+      expiresAt: "2026-08-27T12:00:00.000Z",
+      isCurrent: true,
+      actionable: false,
+      latestDecision: null,
+    });
+
+    const supersededPrior = tenantOfferDetailSchema.parse(
+      await service.offerDetail(
+        offerDetailCases.supersededPrior.tenantId,
+        offerDetailCases.supersededPrior.offerId,
+      ),
+    );
+    expect(supersededPrior).toMatchObject({
+      id: offerDetailCases.supersededPrior.offerId,
+      status: "superseded",
+      isCurrent: false,
+      actionable: false,
+      latestDecision: null,
+    });
+
+    const currentFamily = tenantOfferDetailSchema.parse(
+      await service.offerDetail(
+        offerDetailCases.currentFamily.tenantId,
+        offerDetailCases.currentFamily.offerId,
+      ),
+    );
+    expect(currentFamily).toMatchObject({
+      id: offerDetailCases.currentFamily.offerId,
+      status: "published",
+      isCurrent: true,
+      actionable: true,
+      latestDecision: null,
+    });
   });
 });
