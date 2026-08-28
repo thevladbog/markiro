@@ -22,7 +22,7 @@ export default tseslint.config(
     // React surfaces only — apps/api and packages/{db,domain} have no components.
     // The plugin also ships the React Compiler rules; we opt in to just these two
     // for now, so an accidental mount-only effect is caught rather than assumed.
-    files: ["apps/{admin,kiosk,station}/**/*.{ts,tsx}", "packages/{email,ui}/**/*.{ts,tsx}"],
+    files: ["apps/{admin,kiosk,signer,station}/**/*.{ts,tsx}", "packages/{email,ui}/**/*.{ts,tsx}"],
     plugins: { "react-hooks": reactHooks },
     rules: {
       "react-hooks/rules-of-hooks": "error",
