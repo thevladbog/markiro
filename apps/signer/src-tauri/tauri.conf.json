@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Markiro Signer",
+  "version": "0.1.0",
+  "identifier": "app.markiro.signer",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5373",
+    "beforeDevCommand": "pnpm --filter @markiro/signer dev",
+    "beforeBuildCommand": "pnpm --filter @markiro/signer build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Markiro Подписант",
+        "width": 560,
+        "height": 720,
+        "resizable": true,
+        "visible": false,
+        "skipTaskbar": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://releases.markiro.app/signer/beta/latest.json"],
+      "pubkey": "REPLACE_WITH_SIGNER_MINISIGN_PUBLIC_KEY"
+    }
+  }
+}
