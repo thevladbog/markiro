@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 
 import { Button, IconButton, useTheme } from "@markiro/ui";
 
@@ -17,6 +17,7 @@ import { useActiveOrg } from "./useActiveOrg.js";
  */
 export function Header() {
   const { t, i18n } = useTranslation();
+  const location = useLocation();
   const navigate = useNavigate();
   const authClient = useAuthClient();
   const clearAuthQueryCache = useClearAuthQueryCache();
@@ -47,6 +48,7 @@ export function Header() {
 
   return (
     <header
+      className="mk-app-header"
       style={{
         display: "flex",
         alignItems: "center",
@@ -58,7 +60,10 @@ export function Header() {
         flexShrink: 0,
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <div
+        className="mk-app-header__identity"
+        style={{ display: "flex", flexDirection: "column", minWidth: 0 }}
+      >
         <span
           style={{
             font: "600 14px/18px var(--font-ui)",
@@ -82,7 +87,22 @@ export function Header() {
           {session?.user.email}
         </span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+      <div
+        className="mk-app-header__actions"
+        style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
+      >
+        <Link
+          className="mk-app-header__profile-link"
+          to={`/profile?returnTo=${encodeURIComponent(`${location.pathname}${location.search}`)}`}
+          aria-label={t("profile.openNamed", {
+            name: session?.user.name || session?.user.email || t("profile.title"),
+          })}
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <circle cx="10" cy="6.5" r="3" />
+            <path d="M4.5 16c.5-3.1 2.3-4.7 5.5-4.7s5 1.6 5.5 4.7" />
+          </svg>
+        </Link>
         <IconButton
           aria-label={t("shell.header.toggleTheme")}
           variant="secondary"

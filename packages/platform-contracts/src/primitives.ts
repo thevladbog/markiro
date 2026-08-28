@@ -3,7 +3,7 @@ import { z } from "zod";
 export const platformTenantIdSchema = z.string().trim().min(1).max(128);
 export type PlatformTenantId = z.infer<typeof platformTenantIdSchema>;
 
-export const platformUuidSchema = z.uuid();
+export const platformUuidSchema = z.uuid().transform((value) => value.toLowerCase());
 export type PlatformUuid = z.infer<typeof platformUuidSchema>;
 
 export const platformMoneySchema = z.string().regex(/^\d{1,12}\.\d{2}$/);

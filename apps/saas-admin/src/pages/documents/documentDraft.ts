@@ -251,6 +251,8 @@ export function validateDocumentDraft(
 export function toInvoiceCreateInput(draft: DocumentDraft): CreateInvoiceInput {
   return {
     tenantId: draft.tenantId,
+    ...(draft.sourceOfferId !== undefined ? { sourceOfferId: draft.sourceOfferId } : {}),
+    ...(draft.sourceRequestId !== undefined ? { sourceRequestId: draft.sourceRequestId } : {}),
     ...(draft.sellerBankAccountId !== undefined
       ? { sellerBankAccountId: draft.sellerBankAccountId }
       : {}),

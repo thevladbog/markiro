@@ -1,0 +1,2 @@
+CREATE INDEX "commercial_offer_documents_tenant_created_id_idx" ON "commercial_offer_documents" USING btree ("tenant_id","created_at","id");--> statement-breakpoint
+CREATE INDEX "billing_act_documents_tenant_created_id_idx" ON "billing_act_documents" USING btree ("tenant_id","created_at","id");

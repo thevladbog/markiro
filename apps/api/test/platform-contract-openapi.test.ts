@@ -1,8 +1,10 @@
 import { Test } from "@nestjs/testing";
+import type { Server } from "node:http";
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
-import { platformErrorSchema } from "@markiro/platform-contracts";
+import { platformCommercialContracts, platformErrorSchema } from "@markiro/platform-contracts";
 import { z, type ZodType } from "zod";
-import { describe, expect, it } from "vitest";
+import request from "supertest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DB } from "../src/auth/auth.module";
 import { BillingApplicationService } from "../src/modules/billing/billing-application.service";
@@ -11,6 +13,10 @@ import { BillingController } from "../src/modules/billing/billing.controller";
 import { BillingService } from "../src/modules/billing/billing.service";
 import { BillingPaymentsController } from "../src/modules/billing-payments/billing-payments.controller";
 import { BillingPaymentsService } from "../src/modules/billing-payments/billing-payments.service";
+import { BillingActsController } from "../src/modules/billing-acts/billing-acts.controller";
+import { BillingActsService } from "../src/modules/billing-acts/billing-acts.service";
+import { PlatformBillingRequestsController } from "../src/modules/platform-billing-requests/platform-billing-requests.controller";
+import { PlatformBillingRequestsService } from "../src/modules/platform-billing-requests/platform-billing-requests.service";
 import { PlatformDadataController } from "../src/modules/platform-dadata/platform-dadata.controller";
 import { PlatformDadataRateLimit } from "../src/modules/platform-dadata/platform-dadata-rate-limit";
 import { PlatformDadataService } from "../src/modules/platform-dadata/platform-dadata.service";
@@ -39,6 +45,7 @@ import {
   CURRENT_SAAS_ROUTES,
   type PlatformRouteContract,
 } from "./platform-route-contracts";
+import { listenOnLoopback } from "./support/listen-loopback";
 
 const PLATFORM_SESSION_SECURITY = "platformSession";
 const PROTECTED_ERROR_STATUSES = ["400", "401", "403", "404", "409", "422", "429", "500"];
@@ -46,9 +53,12 @@ const PUBLIC_ERROR_STATUSES = ["400", "401", "404", "409", "422", "429", "500"];
 
 const CURRENT_SHARED_SCHEMAS = [
   platformErrorSchema,
-  ...CURRENT_SAAS_ROUTES.flatMap(({ response, body }) => [response, body]).filter(
-    (schema): schema is ZodType => schema !== undefined,
-  ),
+  ...CURRENT_SAAS_ROUTES.flatMap(({ response, body, query, errors }) => [
+    response,
+    body,
+    query,
+    ...(errors ?? []).map((error) => error.schema),
+  ]).filter((schema): schema is ZodType => schema !== undefined),
 ];
 
 function jsonSchema(schema: ZodType): Record<string, unknown> {
@@ -113,6 +123,8 @@ async function createPlatformDocument(): Promise<{
     BillingDocumentsService,
     BillingApplicationService,
     BillingPaymentsService,
+    BillingActsService,
+    PlatformBillingRequestsService,
     BillingAccountsService,
     PlatformDadataService,
     PlatformDadataRateLimit,
@@ -131,6 +143,8 @@ async function createPlatformDocument(): Promise<{
       PlatformOffersController,
       BillingController,
       BillingPaymentsController,
+      BillingActsController,
+      PlatformBillingRequestsController,
       BillingAccountsController,
       PlatformDadataController,
       PlatformOperationsController,
@@ -157,8 +171,8 @@ async function createPlatformDocument(): Promise<{
 }
 
 describe("current SaaS platform OpenAPI contracts", () => {
-  it("converts all 85 current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(85);
+  it("converts all 108 current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(108);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }
@@ -192,11 +206,47 @@ describe("current SaaS platform OpenAPI contracts", () => {
         expectOpenApi30Compatible(successSchema);
 
         if (contract.body) {
-          const bodySchema = inlineJsonSchema(documented.requestBody);
-          expect(bodySchema).toEqual(jsonSchema(contract.body));
-          expectOpenApi30Compatible(bodySchema);
+          if (contract.multipart) {
+            expect(inlineJsonSchema(documented.requestBody)).toBeUndefined();
+            const multipartSchema = inlineContentSchema(
+              documented.requestBody,
+              "multipart/form-data",
+            );
+            expect(multipartSchema).toEqual({
+              type: "object",
+              additionalProperties: false,
+              required: ["idempotencyKey", "file"],
+              properties: {
+                idempotencyKey: { type: "string", format: "uuid" },
+                file: { type: "string", format: "binary" },
+              },
+            });
+            expectOpenApi30Compatible(multipartSchema);
+          } else {
+            const bodySchema = inlineJsonSchema(documented.requestBody);
+            expect(bodySchema).toEqual(jsonSchema(contract.body));
+            expectOpenApi30Compatible(bodySchema);
+          }
         } else {
           expect(documented.requestBody).toBeUndefined();
+        }
+
+        if (contract.query) {
+          const querySchema = jsonSchema(contract.query);
+          const properties = querySchema.properties as Record<string, unknown>;
+          const required = new Set((querySchema.required as string[] | undefined) ?? []);
+          for (const [name, schema] of Object.entries(properties)) {
+            expect(documented.parameters).toEqual(
+              expect.arrayContaining([
+                expect.objectContaining({
+                  name,
+                  in: "query",
+                  required: required.has(name),
+                  schema,
+                }),
+              ]),
+            );
+          }
         }
 
         expect(documented.security ?? []).toEqual(
@@ -208,6 +258,11 @@ describe("current SaaS platform OpenAPI contracts", () => {
           expect(errorSchema).toEqual(jsonSchema(platformErrorSchema));
           expectOpenApi30Compatible(errorSchema);
         }
+        for (const error of contract.errors ?? []) {
+          expect(inlineJsonSchema(documented.responses[error.status])).toEqual(
+            jsonSchema(error.schema),
+          );
+        }
 
         expect(JSON.stringify(inlineJsonSchema(documented.responses[contract.status]))).not.toMatch(
           /secret|session|token|password|totp|recovery/i,
@@ -217,4 +272,108 @@ describe("current SaaS platform OpenAPI contracts", () => {
       await platformDocument.close();
     }
   });
+
+  it("documents every linked invoice source shape as requiring an idempotency key", async () => {
+    const platformDocument = await createPlatformDocument();
+    try {
+      const contract = CURRENT_SAAS_ROUTES.find(
+        (route) => route.method === "post" && route.path === "/platform/invoices",
+      );
+      if (!contract) throw new Error("Missing POST /platform/invoices route contract");
+      const body = inlineJsonSchema(operation(platformDocument.document, contract).requestBody) as {
+        anyOf?: Array<{
+          additionalProperties?: boolean;
+          properties?: Record<string, unknown>;
+          required?: string[];
+        }>;
+      };
+
+      expect(body.anyOf).toHaveLength(4);
+      const direct = body.anyOf?.filter(
+        (candidate) =>
+          !("sourceOfferId" in (candidate.properties ?? {})) &&
+          !("sourceRequestId" in (candidate.properties ?? {})),
+      );
+      const linked = body.anyOf?.filter(
+        (candidate) =>
+          "sourceOfferId" in (candidate.properties ?? {}) ||
+          "sourceRequestId" in (candidate.properties ?? {}),
+      );
+      expect(direct).toEqual([expect.objectContaining({ additionalProperties: false })]);
+      expect(direct?.[0]?.required ?? []).not.toContain("idempotencyKey");
+      expect(linked).toHaveLength(3);
+      for (const candidate of linked ?? []) {
+        const sourceProperties = Object.keys(candidate.properties ?? {}).filter((property) =>
+          property.startsWith("source"),
+        );
+        expect(sourceProperties.length).toBeGreaterThan(0);
+        expect(candidate).toMatchObject({ additionalProperties: false });
+        expect(candidate.required).toEqual(
+          expect.arrayContaining(["idempotencyKey", ...sourceProperties]),
+        );
+      }
+    } finally {
+      await platformDocument.close();
+    }
+  });
+
+  it("documents the explicit billing-request registry truncation signal", async () => {
+    const platformDocument = await createPlatformDocument();
+    try {
+      const contract = CURRENT_SAAS_ROUTES.find(
+        (route) => route.method === "get" && route.path === "/platform/billing/requests",
+      );
+      if (!contract) throw new Error("Missing platform billing request list contract");
+      const responseSchema = inlineJsonSchema(
+        operation(platformDocument.document, contract).responses["200"],
+      );
+
+      expect(responseSchema).toEqual(
+        jsonSchema(platformCommercialContracts.billingRequests.list.response),
+      );
+      expect(responseSchema).toMatchObject({
+        required: expect.arrayContaining(["items", "truncated"]),
+        properties: { truncated: { type: "boolean" } },
+      });
+    } finally {
+      await platformDocument.close();
+    }
+  });
+
+  it("maps a real Multer act overflow to the documented platform 413 shape", async () => {
+    const issue = vi.fn();
+    const moduleRef = await Test.createTestingModule({
+      controllers: [BillingActsController],
+      providers: [{ provide: BillingActsService, useValue: { issue } }],
+    }).compile();
+    const app = moduleRef.createNestApplication();
+    await app.init();
+    await listenOnLoopback(app);
+    try {
+      const response = await request(app.getHttpServer() as Server)
+        .post("/platform/billing/acts/11111111-1111-4111-8111-111111111111/issue")
+        .field("idempotencyKey", "21111111-1111-4111-8111-111111111111")
+        .attach("file", Buffer.alloc(5 * 1024 * 1024 + 1), {
+          filename: "too-large.pdf",
+          contentType: "application/pdf",
+        });
+
+      expect(response.status).toBe(413);
+      expect(response.body).toEqual({
+        code: "billing_act_pdf_too_large",
+        message: "Billing act PDF exceeds the 5 MiB limit",
+        requestId: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        ),
+      });
+      expect(issue).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
 });
+
+function inlineContentSchema(response: unknown, contentType: string): unknown {
+  if (!response || typeof response !== "object" || !("content" in response)) return undefined;
+  return (response.content as Record<string, { schema?: unknown }>)?.[contentType]?.schema;
+}

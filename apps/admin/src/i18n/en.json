@@ -210,7 +210,8 @@
       "trial": "The demo ends in {{days}} days.",
       "expired": "The subscription has expired: writes are disabled.",
       "overLimit": "A limit is exceeded: new writes are blocked.",
-      "link": "View limits"
+      "link": "View limits",
+      "noBillingAccess": "Contact your cabinet administrator."
     },
     "page": {
       "title": "Subscription and limits",
@@ -234,10 +235,12 @@
     "devices": "Devices",
     "integrations": "Integrations",
     "team": "Cabinet access",
+    "billing": "Billing",
     "settings": "Settings"
   },
   "shell": {
     "navLabel": "Main navigation",
+    "billingAttention": "Billing, attention required: {{count}}",
     "mobileNavigation": {
       "trigger": "Sections",
       "openLabel": "Open mobile navigation",
@@ -873,6 +876,452 @@
       },
       "viewAll": "All shifts",
       "notSpecified": "Not specified"
+    },
+    "billing": {
+      "title": "Billing",
+      "description": "Subscription, billing, documents, and requests in Markiro",
+      "createRequest": "Create request",
+      "loading": "Loading billing section",
+      "tabs": {
+        "label": "Billing sections",
+        "overview": "Overview",
+        "subscription": "Subscription and limits",
+        "invoices": "Invoices and payments",
+        "documents": "Documents",
+        "requests": "Requests"
+      },
+      "retry": "Try again",
+      "value": {
+        "notAvailable": "Not specified"
+      },
+      "overview": {
+        "loading": "Loading billing overview",
+        "loadError": "Could not load billing overview",
+        "unmanagedTitle": "No subscription assigned",
+        "unmanagedHint": "Contact the service administrator to connect a plan.",
+        "currentSubscription": "Current subscription",
+        "scheduledOnlySubscription": "Scheduled subscription",
+        "currentOffer": "Current offer",
+        "offerWithoutNumber": "Commercial offer",
+        "openOffer": "Open offer",
+        "limits": "Limits",
+        "recentOperations": "Recent operations",
+        "noOperations": "There are no operations yet.",
+        "activeRequest": "Active request",
+        "noActiveRequest": "There are no open requests.",
+        "openRequest": "Open request",
+        "attention_one": "Needs attention: {{count}} item",
+        "attention_few": "Needs attention: {{count}} items",
+        "attention_many": "Needs attention: {{count}} items",
+        "attention_other": "Needs attention: {{count}} items"
+      },
+      "subscription": {
+        "loading": "Loading subscription",
+        "loadError": "Could not load subscription",
+        "unmanagedTitle": "No subscription assigned",
+        "unmanagedHint": "Plan details will appear once a plan is connected.",
+        "current": "Current subscription",
+        "scheduled": "Next change",
+        "limits": "Limits",
+        "addons": "Add-ons",
+        "services": "Services",
+        "quantity_one": "{{count}} unit",
+        "quantity_few": "{{count}} units",
+        "quantity_many": "{{count}} units",
+        "quantity_other": "{{count}} units",
+        "serviceMeta": "{{quantity}} {{unit}} · ordered {{date}}",
+        "period": "Billing period",
+        "startsAt": "Starts",
+        "endsAt": "Ends",
+        "price": "Price",
+        "periods": {
+          "month": "Monthly",
+          "year": "Yearly"
+        }
+      },
+      "invoices": {
+        "loading": "Loading invoices",
+        "loadError": "Could not load invoices",
+        "heading": "Invoices and payments",
+        "description": "Only payments confirmed by Markiro are shown.",
+        "empty": "No invoices match the selected filters",
+        "registry": "Invoice registry",
+        "cardsLabel": "Invoices",
+        "filters": {
+          "label": "Invoice filters",
+          "status": "Invoice status",
+          "allStatuses": "All statuses",
+          "from": "From date",
+          "to": "To date"
+        },
+        "columns": {
+          "number": "Number",
+          "issued": "Issued",
+          "dueDate": "Due date",
+          "status": "Invoice status",
+          "total": "Total",
+          "confirmedPayment": "Confirmed payment"
+        },
+        "payment": {
+          "confirmed": "Confirmed: {{amount}}",
+          "remaining": "Remaining: {{amount}}"
+        },
+        "detail": {
+          "loading": "Loading invoice",
+          "notFound": "Invoice not found",
+          "forbidden": "You do not have access to this invoice",
+          "loadError": "Could not load invoice",
+          "heading": "Invoice {{number}}",
+          "description": "An unpaid invoice does not by itself restrict production operations.",
+          "back": "Back to invoices",
+          "summary": "Status and amount",
+          "invoiceStatus": "Invoice status",
+          "paymentStatus": "Payment status",
+          "invoiceTotal": "Invoice total",
+          "confirmed": "Confirmed",
+          "remaining": "Remaining",
+          "payments": "Confirmed payments",
+          "noPayments": "There are no confirmed payments yet.",
+          "lines": "Line items",
+          "linesRegistry": "Invoice line items",
+          "documents": "Documents",
+          "documentMeta": "{{format}} · revision {{revision}} · {{status}}"
+        },
+        "lineColumns": {
+          "position": "No.",
+          "name": "Item",
+          "unit": "Unit",
+          "quantity": "Quantity",
+          "total": "Total"
+        },
+        "download": "Download",
+        "downloadError": "Could not download the document. Try again later."
+      },
+      "documents": {
+        "loading": "Loading documents",
+        "loadError": "Could not load documents",
+        "heading": "Documents",
+        "description": "Acts and commercial offers are available after Markiro prepares the file.",
+        "empty": "No documents match the selected filters",
+        "registry": "Document registry",
+        "filters": {
+          "label": "Document filters",
+          "type": "Document type",
+          "allTypes": "All types",
+          "offer": "Offers",
+          "act": "Acts",
+          "status": "Document status",
+          "allStatuses": "All statuses",
+          "from": "From date",
+          "to": "To date"
+        },
+        "types": {
+          "offer": "Commercial offer",
+          "act": "Act"
+        },
+        "status": {
+          "ready": "Ready",
+          "pending": "Preparing",
+          "failed": "Preparation failed"
+        },
+        "columns": {
+          "type": "Type",
+          "date": "Date",
+          "revision": "Revision",
+          "status": "Status",
+          "file": "File"
+        },
+        "download": "Download",
+        "downloadError": "Could not download the document. Try again later."
+      },
+      "offer": {
+        "loading": "Loading offer",
+        "notFound": "Offer not found",
+        "forbidden": "You do not have access to this offer",
+        "loadError": "Could not load offer",
+        "heading": "Offer {{number}}",
+        "withoutNumber": "without a number",
+        "conditions": "Terms",
+        "lifecycleStatus": "Offer status",
+        "currentnessLabel": "Offer revision",
+        "latestDecisionLabel": "Tenant decision",
+        "expiresAt": "Valid until",
+        "publishedAt": "Published",
+        "total": "Total",
+        "lines": "Line items",
+        "linesRegistry": "Offer line items",
+        "documents": "Documents",
+        "documentMeta": "{{format}} · revision {{revision}} · {{status}}",
+        "decision": "Your decision",
+        "accept": "Accept",
+        "requestChanges": "Request changes",
+        "changeLabel": "What needs to change",
+        "changeHelp": "From 1 to 2,000 characters.",
+        "submitChanges": "Send request",
+        "validationError": "Describe the changes in 1 to 2,000 characters.",
+        "actionErrors": {
+          "retryable": "Could not confirm the result. Your input has been saved; try again.",
+          "offer_version_stale": "This offer was superseded by a newer revision. The data has been refreshed.",
+          "offer_expired": "The offer has expired. The data has been refreshed.",
+          "offer_not_published": "This offer can no longer be accepted. The data has been refreshed.",
+          "offer_already_decided": "A decision for this offer has already been recorded. The data has been refreshed.",
+          "idempotency_key_reused": "This retry does not match the original decision. The data has been refreshed.",
+          "conflict": "The offer state changed. The data has been refreshed.",
+          "rejected": "Could not send the decision. Refresh the data and try again."
+        },
+        "download": "Download",
+        "downloadError": "Could not download the document. Try again later.",
+        "confirmTitle": "Accept this offer?",
+        "confirmDescription": "Markiro will receive your confirmation.",
+        "confirmAccept": "Confirm acceptance",
+        "cancel": "Cancel",
+        "status": {
+          "draft": "Draft",
+          "published": "Active",
+          "expired": "Expired",
+          "superseded": "Superseded by a newer revision",
+          "paid": "Paid",
+          "cancelled": "Cancelled"
+        },
+        "currentness": {
+          "current": "Current revision",
+          "notCurrent": "Not the current revision"
+        },
+        "latestDecision": {
+          "none": "No decision submitted",
+          "accepted": "Accepted",
+          "changes_requested": "Changes requested"
+        }
+      },
+      "requests": {
+        "heading": "Requests",
+        "description": "Structured requests and their history without an external conversation.",
+        "loading": "Loading requests",
+        "loadError": "Could not load requests",
+        "forbidden": "You do not have access to requests",
+        "notFound": "Request registry not found",
+        "empty": "No requests match the selected filters",
+        "registry": "Request registry",
+        "filters": {
+          "label": "Request filters",
+          "status": "Request status",
+          "allStatuses": "All statuses",
+          "type": "Request type",
+          "allTypes": "All types",
+          "clear": "Clear filters"
+        },
+        "columns": {
+          "number": "Number",
+          "type": "Type",
+          "status": "Status",
+          "responsible": "Responsible side",
+          "updated": "Updated"
+        },
+        "types": {
+          "renewal": "Renewal",
+          "capacity_change": "Limits or capacity change",
+          "additional_service": "Additional service",
+          "documents": "Document request",
+          "other": "Other"
+        },
+        "responsible": {
+          "tenant": "Customer",
+          "markiro": "Markiro",
+          "none": "No one — work is complete"
+        },
+        "contextTypes": {
+          "limit": "Limit",
+          "subscription": "Subscription",
+          "invoice": "Invoice",
+          "offer": "Offer",
+          "document": "Document"
+        },
+        "create": {
+          "heading": "New request",
+          "description": "Describe the required change; Markiro assigns the number and status.",
+          "back": "Back to requests",
+          "formTitle": "Request details",
+          "type": "Request type",
+          "descriptionLabel": "Description",
+          "desiredAt": "Desired date",
+          "files": "Attachments",
+          "context": "Context: {{type}} — {{id}}",
+          "retry": "Retry submission",
+          "uploading": "Uploading {{name}}",
+          "errors": {
+            "description": {
+              "required": "Describe the request using 1 to 4000 characters.",
+              "tooLong": "The description must not exceed 4000 characters."
+            },
+            "desiredAt": "Enter a real date.",
+            "file": {
+              "type": "{{name}}: only PDF, JPEG, PNG, and TXT are allowed.",
+              "size": "{{name}}: the file must not exceed 5 MiB."
+            },
+            "retryable": "The request result could not be confirmed. Your data is saved; retry the same submission.",
+            "forbidden": "Your access to create requests was revoked. Return to the request list.",
+            "validation": "The server rejected the request data. Check the fields and submit again.",
+            "conflict": "This submission key was already used for another request. Submit the form again.",
+            "terminal": "The server rejected the request. Check the data and submit it again."
+          }
+        },
+        "detail": {
+          "loading": "Loading request",
+          "notFound": "Request not found",
+          "forbidden": "You do not have access to this request",
+          "loadError": "Could not load request",
+          "heading": "Request {{number}}",
+          "back": "Back to requests",
+          "summary": "Request state",
+          "status": "Status",
+          "responsible": "Responsible side",
+          "desiredAt": "Desired date",
+          "createdAt": "Created",
+          "context": "Context",
+          "requestText": "Description",
+          "linkedObjects": "Linked objects",
+          "links": {
+            "offer": "Commercial offer",
+            "invoice": "Invoice",
+            "payment": "Confirmed payment",
+            "act": "Act",
+            "service": "Ordered service",
+            "subscription": "Subscription change"
+          },
+          "attachments": "Attachments",
+          "noAttachments": "No attachments.",
+          "download": "Download",
+          "downloadNamed": "Download {{name}}",
+          "downloadError": "Could not download the attachment.",
+          "uploadResult": {
+            "uploading": "{{name}}: uploading",
+            "failed_retryable": "{{name}}: not uploaded — retry is available",
+            "failed_terminal": "{{name}}: the server rejected this file"
+          },
+          "retryUploadNamed": "Retry upload {{name}}",
+          "history": "Request history",
+          "eventSides": {
+            "tenant": "Customer",
+            "markiro": "Markiro",
+            "system": "System"
+          },
+          "eventKinds": {
+            "created": "Request created",
+            "status_changed": "Status changed",
+            "tenant_reply": "Customer reply",
+            "platform_comment": "Comment",
+            "offer_linked": "Offer linked",
+            "offer_accepted": "Offer accepted",
+            "offer_changes_requested": "Offer changes requested",
+            "invoice_linked": "Invoice linked",
+            "payment_confirmed": "Payment confirmed",
+            "service_linked": "Service linked",
+            "act_linked": "Act linked"
+          },
+          "eventBodies": {
+            "created": "The request was created",
+            "status_changed": "The request status changed",
+            "tenant_reply": "The customer sent a clarification",
+            "platform_comment": "Markiro added a comment",
+            "offer_linked": "An offer was linked to the request",
+            "offer_accepted": "The customer accepted the offer",
+            "offer_changes_requested": "The customer requested offer changes",
+            "invoice_linked": "An invoice was linked to the request",
+            "payment_confirmed": "Markiro confirmed a payment",
+            "service_linked": "A service was linked to the request",
+            "act_linked": "An act was linked to the request"
+          },
+          "eventStatusBody": "{{from}} → {{to}}",
+          "replyTitle": "Clarification reply",
+          "replyLabel": "Clarification reply",
+          "replySubmit": "Send reply",
+          "replyErrors": {
+            "validation": "The reply must contain 1 to 2000 characters.",
+            "retryable": "The submission could not be confirmed. Your reply is saved; retry the same submission.",
+            "terminal": "The request state changed. The data has been refreshed."
+          }
+        }
+      },
+      "limits": {
+        "lines": "Lines",
+        "stations": "Stations",
+        "kiosks": "Kiosks",
+        "cabinetUsers": "Cabinet users",
+        "requestNames": {
+          "lines": "lines",
+          "stations": "stations",
+          "kiosks": "kiosks",
+          "cabinetUsers": "cabinet users"
+        },
+        "unlimited": "Used: {{used}} · unlimited",
+        "usedOf": "Used: {{used}} of {{assigned}}",
+        "progress": "{{name}}: {{used}} used of {{assigned}}",
+        "increase": "Increase {{name}} limit"
+      },
+      "status": {
+        "access": {
+          "managed": "Managed",
+          "read_only": "Read-only",
+          "unmanaged": "Not connected"
+        },
+        "subscription": {
+          "pending_activation": "Awaiting activation",
+          "trial": "Demo",
+          "active": "Active",
+          "scheduled": "Scheduled",
+          "expired": "Expired",
+          "cancelled": "Cancelled",
+          "superseded": "Superseded"
+        },
+        "limit": {
+          "normal": "Within limit",
+          "approaching": "Approaching limit",
+          "reached": "Limit reached",
+          "exceeded": "Limit exceeded"
+        },
+        "addon": {
+          "scheduled": "Scheduled",
+          "active": "Active",
+          "expired": "Expired",
+          "revoked": "Revoked"
+        },
+        "service": {
+          "ordered": "Ordered",
+          "in_progress": "In progress",
+          "completed": "Completed",
+          "cancelled": "Cancelled"
+        },
+        "operation": {
+          "draft": "Draft",
+          "issued": "Issued",
+          "overdue": "Overdue",
+          "partially_paid": "Partially paid",
+          "paid": "Paid",
+          "cancelled": "Cancelled",
+          "published": "Published",
+          "expired": "Expired",
+          "superseded": "Superseded",
+          "new": "New",
+          "under_review": "Under review",
+          "clarification_required": "Clarification required",
+          "offer_prepared": "Offer prepared",
+          "awaiting_payment": "Awaiting payment",
+          "in_progress": "In progress",
+          "completed": "Completed",
+          "ordered": "Ordered",
+          "confirmed": "Confirmed"
+        },
+        "request": {
+          "new": "New",
+          "under_review": "Under review",
+          "clarification_required": "Clarification required",
+          "offer_prepared": "Offer prepared",
+          "awaiting_payment": "Awaiting payment",
+          "in_progress": "In progress",
+          "completed": "Completed",
+          "cancelled": "Cancelled"
+        }
+      }
     },
     "catalog": {
       "title": "Product catalog",

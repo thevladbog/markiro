@@ -3,6 +3,7 @@ import {
   ApiBody,
   ApiResponse,
   ApiSecurity,
+  ApiQuery,
   type DocumentBuilder,
   type SchemaObject,
 } from "@nestjs/swagger";
@@ -17,6 +18,8 @@ const PUBLIC_ERROR_STATUSES = [400, 401, 404, 409, 422, 429, 500] as const;
 interface PlatformOpenApiOptions {
   response: ZodType;
   body?: ZodType;
+  query?: ZodType;
+  errors?: ReadonlyArray<{ status: number; schema: ZodType }>;
 }
 
 export function addPlatformSessionSecurity(
@@ -59,9 +62,22 @@ function platformOperation(
   const decorators: MethodDecorator[] = [
     ApiResponse({ status: successStatus, schema: platformOpenApiSchema(options.response) }),
     ...platformErrorResponses(protectedRoute),
+    ...(options.errors ?? []).map(({ status, schema }) =>
+      ApiResponse({ status, schema: platformOpenApiSchema(schema) }),
+    ),
   ];
   if (options.body) {
     decorators.push(ApiBody({ schema: platformOpenApiSchema(options.body) }));
+  }
+  if (options.query) {
+    const querySchema = platformOpenApiSchema(options.query);
+    const properties = querySchema.properties ?? {};
+    const required = new Set(querySchema.required ?? []);
+    for (const [name, schema] of Object.entries(properties)) {
+      decorators.push(
+        ApiQuery({ name, required: required.has(name), schema: schema as SchemaObject }),
+      );
+    }
   }
   if (protectedRoute) {
     decorators.push(ApiSecurity(PLATFORM_SESSION_SECURITY));

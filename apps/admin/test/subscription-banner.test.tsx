@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { expect, it } from "vitest";
+import { CABINET_CAPABILITY } from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 import { AccessProvider } from "../src/access/context.js";
 import type { AccessDocument } from "../src/access/api.js";
@@ -8,7 +9,7 @@ import { SubscriptionBanner } from "../src/subscription/SubscriptionBanner.js";
 
 const base: AccessDocument = {
   roles: ["owner"],
-  capabilities: [],
+  capabilities: [CABINET_CAPABILITY.BILLING_READ],
   subscription: {
     access: "managed",
     status: "trial",
@@ -35,6 +36,6 @@ it("shows trial days and links to subscription limits", () => {
   );
   expect(screen.getByRole("alert").textContent).toContain("Демо закончится через 3 дн.");
   expect(screen.getByRole("link", { name: "Посмотреть лимиты" }).getAttribute("href")).toBe(
-    "/settings/subscription",
+    "/billing/subscription",
   );
 });

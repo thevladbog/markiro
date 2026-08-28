@@ -16,7 +16,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
-import { catalogItemKind, catalogItemVersions } from "./saas.js";
+import { catalogItemKind, catalogItemVersions, commercialOffers } from "./saas.js";
 import { platformUsers } from "./platform-auth.js";
 
 export const BILLING_PROFILE_KINDS = [
@@ -27,7 +27,7 @@ export const BILLING_PROFILE_KINDS = [
 ] as const;
 export type BillingProfileKind = (typeof BILLING_PROFILE_KINDS)[number];
 
-export const INVOICE_STATUSES = ["draft", "issued", "paid", "cancelled"] as const;
+export const INVOICE_STATUSES = ["draft", "issued", "partially_paid", "paid", "cancelled"] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 
 export const INVOICE_LINE_KINDS = ["plan", "addon", "service", "custom"] as const;
@@ -284,6 +284,7 @@ export const invoices = pgTable(
     subtotal: numeric("subtotal", { precision: 14, scale: 2 }).notNull().default("0"),
     vatTotal: numeric("vat_total", { precision: 14, scale: 2 }).notNull().default("0"),
     total: numeric("total", { precision: 14, scale: 2 }).notNull().default("0"),
+    sourceOfferId: uuid("source_offer_id"),
     applicationMode: invoiceApplicationMode("application_mode").notNull().default("manual"),
     createdByPlatformUserId: text("created_by_platform_user_id")
       .notNull()
@@ -299,6 +300,11 @@ export const invoices = pgTable(
     unique("invoices_number_uq").on(table.number),
     unique("invoices_tenant_id_uq").on(table.tenantId, table.id),
     index("invoices_tenant_status_issued_idx").on(table.tenantId, table.status, table.issuedAt),
+    foreignKey({
+      name: "invoices_tenant_source_offer_fk",
+      columns: [table.tenantId, table.sourceOfferId],
+      foreignColumns: [commercialOffers.tenantId, commercialOffers.id],
+    }),
     check("invoices_currency_rub_check", sql`${table.currency} = 'RUB'`),
     check(
       "invoices_totals_nonnegative",
@@ -527,9 +533,14 @@ export const billingPayments = pgTable(
   },
   (table) => [
     unique("billing_payments_tenant_id_uq").on(table.tenantId, table.id),
-    unique("billing_payments_invoice_uq").on(table.tenantId, table.invoiceId),
     unique("billing_payments_tenant_invoice_id_uq").on(table.tenantId, table.invoiceId, table.id),
     unique("billing_payments_idempotency_uq").on(table.idempotencyKey),
+    index("billing_payments_tenant_invoice_paid_idx").on(
+      table.tenantId,
+      table.invoiceId,
+      table.paidAt,
+      table.id,
+    ),
     foreignKey({
       name: "billing_payments_tenant_invoice_fk",
       columns: [table.tenantId, table.invoiceId],
@@ -546,6 +557,30 @@ export const billingPayments = pgTable(
       "billing_payments_source_row_check",
       sql`(${table.source} = 'manual' and ${table.importRowId} is null) or (${table.source} = 'bank_import' and ${table.importRowId} is not null)`,
     ),
+  ],
+);
+
+export const invoicePaymentCompletions = pgTable(
+  "invoice_payment_completions",
+  {
+    tenantId: text("tenant_id").notNull(),
+    invoiceId: uuid("invoice_id").notNull(),
+    billingPaymentId: uuid("billing_payment_id").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("invoice_payment_completions_tenant_invoice_uq").on(table.tenantId, table.invoiceId),
+    unique("invoice_payment_completions_payment_uq").on(table.billingPaymentId),
+    foreignKey({
+      name: "invoice_payment_completions_tenant_invoice_fk",
+      columns: [table.tenantId, table.invoiceId],
+      foreignColumns: [invoices.tenantId, invoices.id],
+    }),
+    foreignKey({
+      name: "invoice_payment_completions_tenant_payment_fk",
+      columns: [table.tenantId, table.invoiceId, table.billingPaymentId],
+      foreignColumns: [billingPayments.tenantId, billingPayments.invoiceId, billingPayments.id],
+    }),
   ],
 );
 

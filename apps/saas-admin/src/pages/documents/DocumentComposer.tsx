@@ -27,6 +27,7 @@ export interface DocumentComposerProps {
   sellerAccounts?: readonly OperatorBankAccount[];
   loadingSellerAccounts?: boolean;
   loadingSources: boolean;
+  lockedTenantId?: string;
   submitting: boolean;
   submitError?: string;
   onSubmit: (draft: DocumentDraft) => Promise<void>;
@@ -50,6 +51,7 @@ export function DocumentComposer({
   sellerAccounts = [],
   loadingSellerAccounts = false,
   loadingSources,
+  lockedTenantId,
   submitting,
   submitError,
   onSubmit,
@@ -128,13 +130,17 @@ export function DocumentComposer({
             <h1 id="document-lines-title">{t(`documents.title.${kind}`)}</h1>
           </div>
           <div className="document-composer__parties">
-            <TenantPicker
-              tenants={tenants}
-              value={draft.tenantId}
-              loading={loadingSources}
-              {...(errors.tenantId ? { error: t(`documents.errors.${errors.tenantId}`) } : {})}
-              onValueChange={(tenantId) => dispatch({ type: "tenant.selected", tenantId })}
-            />
+            {lockedTenantId ? (
+              <p>{t("documents.lockedRequestTenant", { tenantId: lockedTenantId })}</p>
+            ) : (
+              <TenantPicker
+                tenants={tenants}
+                value={draft.tenantId}
+                loading={loadingSources}
+                {...(errors.tenantId ? { error: t(`documents.errors.${errors.tenantId}`) } : {})}
+                onValueChange={(tenantId) => dispatch({ type: "tenant.selected", tenantId })}
+              />
+            )}
             <SellerAccountPicker
               accounts={sellerAccounts}
               {...(draft.sellerBankAccountId !== undefined

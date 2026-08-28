@@ -103,9 +103,24 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /products (ProductsController.listProducts)",
       "GET /products/:id (ProductsController.getProduct)",
       "GET /products/:id/image/:checksum (ProductsController.readImage)",
-      "GET /billing/invoices (TenantBillingController.list)",
-      "GET /billing/invoices/:id (TenantBillingController.detail)",
-      "GET /billing/invoices/:id/documents/:documentId/download (TenantBillingController.download)",
+      "GET /billing/overview (TenantBillingController.overview)",
+      "GET /billing/attention (TenantBillingController.attention)",
+      "GET /billing/subscription (TenantBillingController.subscription)",
+      "GET /billing/invoices (TenantBillingController.listInvoices)",
+      "GET /billing/invoices/:id (TenantBillingController.invoiceDetail)",
+      "GET /billing/invoices/:id/documents/:documentId/download (TenantBillingController.downloadInvoiceDocument)",
+      "GET /billing/documents (TenantBillingController.listDocuments)",
+      "GET /billing/offers/:id (TenantBillingController.offerDetail)",
+      "GET /billing/offers/:id/documents/:documentId/download (TenantBillingController.downloadOfferDocument)",
+      "GET /billing/acts/:id/documents/:documentId/download (TenantBillingController.downloadActDocument)",
+      "GET /billing/requests (TenantBillingController.listRequests)",
+      "GET /billing/requests/:id (TenantBillingController.requestDetail)",
+      "GET /billing/requests/:id/attachments/:attachmentId/download (TenantBillingController.downloadRequestAttachment)",
+      "POST /billing/requests (TenantBillingController.createRequest)",
+      "POST /billing/requests/:id/replies (TenantBillingController.replyToRequest)",
+      "POST /billing/requests/:id/attachments (TenantBillingController.attachToRequest)",
+      "POST /billing/offers/:id/accept (TenantBillingController.acceptOffer)",
+      "POST /billing/offers/:id/change-request (TenantBillingController.requestOfferChanges)",
       "GET /shift-exports/:exportId/artifacts/:artifactId/download (ShiftExportsController.download)",
       "GET /shift-exports/formats (ShiftExportsController.formats)",
       "GET /shifts (ShiftsController.listShifts)",
@@ -349,6 +364,15 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "BillingAccountsController.setTenantDefault": platform(
     "tenant default-account mutation is guarded by platform billing capabilities",
   ),
+  "BillingActsController.create": platform(
+    "platform billing act creation is guarded by platform billing capabilities",
+  ),
+  "BillingActsController.cancel": platform(
+    "platform billing act cancellation is guarded by platform billing capabilities",
+  ),
+  "BillingActsController.issue": platform(
+    "platform billing act issuance is guarded by platform billing capabilities",
+  ),
   "BillingController.create": platform(
     "platform invoice creation is guarded by platform billing capabilities",
   ),
@@ -384,6 +408,21 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   ),
   "PlatformOffersController.create": platform(
     "platform billing offer creation is guarded by platform capabilities",
+  ),
+  "PlatformBillingRequestsController.comment": platform(
+    "platform billing request comments are guarded by platform billing capabilities",
+  ),
+  "PlatformBillingRequestsController.createOffer": platform(
+    "request-bound platform offer creation is guarded by platform billing capabilities",
+  ),
+  "PlatformBillingRequestsController.link": platform(
+    "platform billing request links are guarded by platform billing capabilities",
+  ),
+  "PlatformBillingRequestsController.status": platform(
+    "platform billing request status changes are guarded by platform billing capabilities",
+  ),
+  "PlatformOffersController.revise": platform(
+    "platform billing offer revision is guarded by platform capabilities",
   ),
   "PlatformOffersController.publish": platform(
     "platform billing offer publication is guarded by platform capabilities",

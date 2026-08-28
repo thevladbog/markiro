@@ -1,4 +1,4 @@
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -16,6 +16,7 @@ import {
 } from "./render.js";
 
 const OFFER_ID = "91111111-1111-4111-8111-111111111111";
+const REQUEST_ID = "81111111-1111-4111-8111-111111111111";
 const OFFER_CREATED_AT = "2026-08-21T10:00:00.000Z";
 
 function offerRecord(overrides: Record<string, unknown> = {}) {
@@ -51,23 +52,36 @@ function installOfferEditorApi({
   failCatalogRefresh = false,
   tenantItems = [TENANT_LIST_ITEM],
   me = ACCOUNTANT_ME,
+  meAfterMutation,
   offers = [],
+  requestDetail = null,
+  requestOfferStatuses = [201],
+  requestOfferGate,
 }: {
   createStatus?: number;
   retireOnRefresh?: boolean;
   failCatalogRefresh?: boolean;
   tenantItems?: Array<Record<string, unknown>>;
   me?: Record<string, unknown>;
+  meAfterMutation?: Record<string, unknown>;
   offers?: Array<Record<string, unknown>>;
+  requestDetail?: Record<string, unknown> | null;
+  requestOfferStatuses?: number[];
+  requestOfferGate?: Promise<void>;
 } = {}) {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
   let catalogFetches = 0;
+  let requestOfferAttempts = 0;
+  let meFetches = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = String(input);
       const method = init.method ?? "GET";
-      if (url.endsWith("/api/platform/me")) return jsonResponse(200, me);
+      if (url.endsWith("/api/platform/me")) {
+        meFetches += 1;
+        return jsonResponse(200, meFetches > 1 && meAfterMutation ? meAfterMutation : me);
+      }
       if (url.endsWith("/api/platform/billing/operator/accounts") && method === "GET") {
         return jsonResponse(200, []);
       }
@@ -84,6 +98,13 @@ function installOfferEditorApi({
       }
       if (url.endsWith(`/api/platform/tenants/${TENANT_ID}`) && method === "GET") {
         return jsonResponse(200, TENANT_DETAIL);
+      }
+      if (
+        url.endsWith(`/api/platform/billing/requests/${REQUEST_ID}`) &&
+        method === "GET" &&
+        requestDetail
+      ) {
+        return jsonResponse(200, requestDetail);
       }
       if (url.endsWith("/api/platform/catalog/items") && method === "GET") {
         catalogFetches += 1;
@@ -116,6 +137,7 @@ function installOfferEditorApi({
           }>;
         };
         calls.push({ method, path: url, body });
+        if (createStatus === 403) return jsonResponse(403, { code: "forbidden" });
         if (createStatus === 409) return jsonResponse(409, { code: "offer_conflict" });
         return jsonResponse(
           201,
@@ -139,6 +161,28 @@ function installOfferEditorApi({
           }),
         );
       }
+      if (url.endsWith(`/api/platform/billing/requests/${REQUEST_ID}/offer`) && method === "POST") {
+        const body = JSON.parse(String(init.body)) as { lines: Array<Record<string, unknown>> };
+        calls.push({ method, path: url, body });
+        const status = requestOfferStatuses[requestOfferAttempts] ?? 201;
+        requestOfferAttempts += 1;
+        if (status === 403) return jsonResponse(403, { code: "forbidden" });
+        if (status >= 500) return jsonResponse(status, { code: "offer_create_unavailable" });
+        if (requestOfferAttempts > 1 && requestOfferGate) await requestOfferGate;
+        return jsonResponse(201, {
+          requestId: REQUEST_ID,
+          tenantId: TENANT_ID,
+          offerId: OFFER_ID,
+          link: {
+            id: "b1111111-1111-4111-8111-111111111111",
+            tenantId: TENANT_ID,
+            requestId: REQUEST_ID,
+            type: "offer",
+            targetId: OFFER_ID,
+            createdAt: OFFER_CREATED_AT,
+          },
+        });
+      }
       throw new Error(`Unexpected request: ${method} ${url}`);
     }),
   );
@@ -156,6 +200,119 @@ async function addPosition(
 }
 
 describe("offer editor route", () => {
+  it("creates a request-bound offer atomically with a locked server tenant", async () => {
+    const api = installOfferEditorApi({ requestDetail: billingRequestDetail() });
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/billing-requests/${REQUEST_ID}/offers/new` });
+
+    expect(await screen.findByText(`Тенант заявки · ${TENANT_ID}`)).toBeDefined();
+    expect(screen.queryByRole("combobox", { name: "Тенант" })).toBeNull();
+    await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
+    await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
+
+    const call = api.calls()[0];
+    expect(call?.path).toBe(`/api/platform/billing/requests/${REQUEST_ID}/offer`);
+    expect(call?.body).not.toHaveProperty("tenantId");
+    expect(call?.body).toHaveProperty("idempotencyKey");
+    expect(await screen.findByRole("heading", { name: "Коммерческие предложения" })).toBeDefined();
+  });
+
+  it("latches a forbidden surface when request-bound offer authority is revoked on mutation", async () => {
+    const api = installOfferEditorApi({
+      requestDetail: billingRequestDetail(),
+      requestOfferStatuses: [403],
+      meAfterMutation: SUPPORT_ME,
+    });
+    const user = userEvent.setup();
+    const rendered = renderSaasApp({
+      initialEntry: `/billing-requests/${REQUEST_ID}/offers/new`,
+    });
+    const invalidate = vi.spyOn(rendered.queryClient, "invalidateQueries");
+
+    await screen.findByText(`Тенант заявки · ${TENANT_ID}`);
+    await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
+    await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Доступ к заявкам ограничен" }),
+    ).toBeDefined();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["platform", "me"] });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["platform", "billing", "requests"],
+    });
+    expect(screen.queryByRole("button", { name: "Создать черновик предложения" })).toBeNull();
+    expect(api.calls()).toHaveLength(1);
+  });
+
+  it("latches the same forbidden surface when direct offer authority is revoked", async () => {
+    const api = installOfferEditorApi({ createStatus: 403, meAfterMutation: SUPPORT_ME });
+    const randomUuid = vi.spyOn(crypto, "randomUUID");
+    const user = userEvent.setup();
+    const rendered = renderSaasApp({ initialEntry: `/offers/new?tenantId=${TENANT_ID}` });
+    const invalidate = vi.spyOn(rendered.queryClient, "invalidateQueries");
+
+    await screen.findByRole("combobox", { name: "Тенант" });
+    await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
+    const uuidCount = randomUuid.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Доступ к заявкам ограничен" }),
+    ).toBeDefined();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["platform", "me"] });
+    expect(screen.queryByRole("button", { name: "Создать черновик предложения" })).toBeNull();
+    expect(api.calls()).toHaveLength(1);
+    expect(randomUuid).toHaveBeenCalledTimes(uuidCount);
+  });
+
+  it("makes an ambiguous request offer non-discardable and retries the exact identity", async () => {
+    let releaseRetry: (() => void) | undefined;
+    const requestOfferGate = new Promise<void>((resolve) => {
+      releaseRetry = resolve;
+    });
+    const api = installOfferEditorApi({
+      requestDetail: billingRequestDetail(),
+      requestOfferStatuses: [503, 201],
+      requestOfferGate,
+    });
+    const randomUuid = vi.spyOn(crypto, "randomUUID");
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/billing-requests/${REQUEST_ID}/offers/new` });
+
+    await screen.findByText(`Тенант заявки · ${TENANT_ID}`);
+    await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
+    const price = screen.getByDisplayValue("15000.00");
+    await user.clear(price);
+    await user.type(price, "17000.00");
+    await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
+
+    const retry = await screen.findByRole("button", { name: "Повторить точно эту попытку" });
+    expect(screen.queryByDisplayValue("17000.00")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Добавить позицию" })).toBeNull();
+    await user.type(price, "19000.00");
+    await user.click(screen.getByRole("link", { name: "Каталог" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Отменить изменения" })).toBeNull();
+    expect(await screen.findByText("Операция выполняется. Дождитесь её завершения.")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Повторить точно эту попытку" })).toBeDefined();
+    const unload = new Event("beforeunload", { cancelable: true });
+    fireEvent(window, unload);
+    expect(unload.defaultPrevented).toBe(true);
+    const uuidCount = randomUuid.mock.calls.length;
+    await user.click(retry);
+    await waitFor(() => expect(api.calls()).toHaveLength(2));
+    await user.click(retry);
+
+    expect(api.calls()).toHaveLength(2);
+    expect(api.calls()[1]?.body).toEqual(api.calls()[0]?.body);
+    expect(api.calls()[0]?.body).toMatchObject({
+      idempotencyKey: expect.any(String),
+      lines: [expect.objectContaining({ agreedUnitPrice: "17000.00" })],
+    });
+    expect(randomUuid).toHaveBeenCalledTimes(uuidCount);
+    releaseRetry?.();
+    expect(await screen.findByRole("heading", { name: "Коммерческие предложения" })).toBeDefined();
+  });
   it("renders an empty offer register without a stale detail loader", async () => {
     installOfferEditorApi();
 
@@ -333,3 +490,23 @@ describe("offer editor route", () => {
     );
   });
 });
+
+function billingRequestDetail() {
+  return {
+    id: REQUEST_ID,
+    tenantId: TENANT_ID,
+    number: "BR-42",
+    type: "renewal",
+    status: "under_review",
+    description: "Renew",
+    desiredAt: null,
+    context: null,
+    responsibleSide: "markiro",
+    createdAt: OFFER_CREATED_AT,
+    updatedAt: OFFER_CREATED_AT,
+    allowedTransitions: [],
+    offerAction: null,
+    events: [],
+    links: [],
+  };
+}

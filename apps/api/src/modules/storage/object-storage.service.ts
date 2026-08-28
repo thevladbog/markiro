@@ -11,10 +11,15 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
 import type { OnModuleDestroy } from "@nestjs/common";
 import { createHash } from "node:crypto";
+import {
+  parseTenantBillingActObjectKey,
+  parseTenantBillingRequestAttachmentObjectKey,
+} from "@markiro/platform-contracts";
 import type { Env } from "../../env";
 
 type S3Boundary = Pick<S3Client, "send"> & { destroy?: () => void };
 type Presigner = typeof getSignedUrl;
+export type ObjectVerification = "verified" | "missing" | "mismatch";
 
 const MAX_PRIVATE_OBJECT_BYTES = 5 * 1024 * 1024;
 
@@ -108,21 +113,49 @@ export class ObjectStorageService implements OnModuleDestroy {
       }),
     );
 
-    const stored = await this.#client.send(
-      new HeadObjectCommand({ Bucket: this.#bucket, Key: key }),
-    );
-    const byteSize = stored.ContentLength;
-    const storedSha256 = stored.Metadata?.sha256;
-    if (byteSize !== body.byteLength || storedSha256 !== derivedSha256) {
+    const verification = await this.verifyObject(key, body.byteLength, derivedSha256);
+    if (verification !== "verified") {
       throw new Error("Object upload verification failed");
     }
 
-    return { byteSize, sha256: derivedSha256 };
+    return { byteSize: body.byteLength, sha256: derivedSha256 };
+  }
+
+  async verifyObject(
+    key: string,
+    expectedByteSize: number,
+    expectedSha256: string,
+  ): Promise<ObjectVerification> {
+    assertSafeKey(key);
+    assertSha256(expectedSha256);
+    try {
+      const stored = await this.#client.send(
+        new HeadObjectCommand({ Bucket: this.#bucket, Key: key }),
+      );
+      return stored.ContentLength === expectedByteSize && stored.Metadata?.sha256 === expectedSha256
+        ? "verified"
+        : "mismatch";
+    } catch (error) {
+      if (isMissingObjectError(error)) return "missing";
+      throw error;
+    }
   }
 
   async delete(key: string): Promise<void> {
     assertSafeKey(key);
     await this.#client.send(new DeleteObjectCommand({ Bucket: this.#bucket, Key: key }));
+  }
+
+  async deleteConfirmed(key: string): Promise<void> {
+    assertSafeKey(key);
+    await this.#client.send(new DeleteObjectCommand({ Bucket: this.#bucket, Key: key }));
+    try {
+      await this.#client.send(new HeadObjectCommand({ Bucket: this.#bucket, Key: key }));
+    } catch (error) {
+      if (isMissingObjectError(error)) return;
+      throw error;
+    }
+    throw new Error("Object deletion could not be confirmed");
   }
 
   async get(
@@ -256,7 +289,10 @@ function encodeRfc5987Filename(filename: string): string {
 
 function assertSafeKey(key: string): void {
   if (
-    (!key.startsWith("users/") && !key.startsWith("tenants/")) ||
+    (!key.startsWith("users/") &&
+      !key.startsWith("tenants/") &&
+      !parseTenantBillingActObjectKey(key) &&
+      !parseTenantBillingRequestAttachmentObjectKey(key)) ||
     key.includes("..") ||
     key.includes("\\") ||
     key.includes("//") ||

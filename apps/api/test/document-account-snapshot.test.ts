@@ -17,6 +17,7 @@ import {
   type PlatformPrincipal,
 } from "../src/platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
+import { createTestTenantBillingNotifications } from "./support/tenant-billing-notifications";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -37,8 +38,9 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
     twoFactorReady: true,
   };
   const audit = new PlatformAuditService();
-  const billing = new BillingService(connection.db, audit);
-  const offers = new PlatformOffersService(connection.db, audit);
+  const notifications = createTestTenantBillingNotifications(connection.db);
+  const billing = new BillingService(connection.db, audit, notifications);
+  const offers = new PlatformOffersService(connection.db, audit, notifications);
   let sellerAccountId = "";
 
   beforeAll(async () => {

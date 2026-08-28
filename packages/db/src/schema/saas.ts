@@ -47,7 +47,14 @@ export const SUBSCRIPTION_STATUSES = [
 ] as const;
 export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
 
-export const OFFER_STATUSES = ["draft", "published", "paid", "cancelled", "expired"] as const;
+export const OFFER_STATUSES = [
+  "draft",
+  "published",
+  "superseded",
+  "paid",
+  "cancelled",
+  "expired",
+] as const;
 export type OfferStatus = (typeof OFFER_STATUSES)[number];
 
 export const FULFILMENT_KINDS = ["subscription", "subscription_addon", "ordered_service"] as const;
@@ -358,6 +365,11 @@ export const commercialOfferDocuments = pgTable(
       table.revision,
       table.format,
     ),
+    index("commercial_offer_documents_tenant_created_id_idx").on(
+      table.tenantId,
+      table.createdAt,
+      table.id,
+    ),
     foreignKey({
       name: "commercial_offer_documents_tenant_offer_fk",
       columns: [table.tenantId, table.offerId],
@@ -563,6 +575,7 @@ export const subscriptionEvents = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    unique("subscription_events_tenant_id_uq").on(table.tenantId, table.id),
     index("subscription_events_tenant_effective_idx").on(table.tenantId, table.effectiveAt),
     foreignKey({
       name: "subscription_events_tenant_subscription_fk",

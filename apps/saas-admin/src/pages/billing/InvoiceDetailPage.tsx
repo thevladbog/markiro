@@ -21,7 +21,7 @@ const DOCUMENT_REFRESH_INTERVAL_MS = 2_000;
 
 function flowState(invoice: InvoiceDetail): FlowState {
   if (invoice.status === "draft") return "draft";
-  if (!invoice.payment) return "waiting_payment";
+  if (invoice.paymentSummary?.status !== "paid") return "waiting_payment";
   if (invoice.application.status === "applied") return "applied";
   if (invoice.application.status === "partial_failure") return "partial_failure";
   return "waiting_application";
@@ -68,7 +68,7 @@ export function InvoiceDetailPage() {
   const payment = useMutation({
     mutationFn: () => {
       paymentPayload.current ??= {
-        amount: detail.data!.total,
+        amount: detail.data!.paymentSummary!.remainingAmount,
         paidAt: new Date().toISOString(),
         bankReference,
         idempotencyKey: paymentKey,
@@ -410,7 +410,7 @@ export function InvoiceDetailPage() {
         </section>
       ) : null}
 
-      {invoice.status === "issued" ? (
+      {invoice.status === "issued" || invoice.status === "partially_paid" ? (
         <section className="invoice-action-panel" aria-labelledby="payment-title">
           <div>
             <span className="invoice-kicker">04 / PAYMENT</span>
@@ -444,7 +444,7 @@ export function InvoiceDetailPage() {
         </section>
       ) : null}
 
-      {invoice.payment ? (
+      {invoice.paymentSummary?.status === "paid" ? (
         <section className="invoice-action-panel" aria-labelledby="application-title">
           <div>
             <span className="invoice-kicker">05 / APPLICATION</span>

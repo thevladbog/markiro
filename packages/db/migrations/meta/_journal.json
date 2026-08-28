@@ -631,6 +631,69 @@
       "when": 1787913627140,
       "tag": "0089_chz_api_tokens_agent_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1787913627141,
+      "tag": "0090_tenant_billing_experience",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1787913627142,
+      "tag": "0091_invoice_payment_completion",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1787913627143,
+      "tag": "0092_tenant_billing_document_pagination_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1787913627144,
+      "tag": "0093_tenant_billing_action_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1787913627145,
+      "tag": "0094_tenant_billing_platform_workflow",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1787913627146,
+      "tag": "0095_tenant_billing_target_cardinality",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1787913627147,
+      "tag": "0096_tenant_billing_stale_family_repair",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1787913627148,
+      "tag": "0097_tenant_billing_notification_delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1787913627149,
+      "tag": "0098_tenant_billing_attachment_idempotency",
+      "breakpoints": true
     }
   ]
 }

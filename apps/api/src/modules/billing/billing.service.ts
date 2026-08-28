@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   BadRequestException,
   ConflictException,
@@ -5,16 +6,23 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import type {
-  InvoiceCreateServiceResultSource,
-  InvoiceServiceDetailSource,
-  InvoiceServiceRecordSource,
+import {
+  platformCommercialContracts,
+  type InvoiceCreateServiceResultSource,
+  type InvoiceServiceDetailSource,
+  type InvoiceServiceRecordSource,
 } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
+import {
+  acquireBillingWorkflowLocks,
+  canonicalBillingUuid,
+  postgresUniqueConstraint,
+  type BillingWorkflowResource,
+} from "../billing-workflow-locks";
 import {
   bankAccountLast4,
   bankAccountSnapshot,
@@ -22,6 +30,11 @@ import {
   resolveCommercialBillingDetails,
 } from "./commercial-snapshots";
 import type { CreateInvoiceDto } from "./dto";
+import { TenantBillingNotificationsService } from "../tenant-billing/tenant-billing-notifications.service";
+import {
+  beginPlatformBillingMutation,
+  commitPlatformBillingMutation,
+} from "../platform-billing-idempotency";
 
 const cents = (value: string): bigint => {
   const [whole, fraction = "00"] = value.split(".");
@@ -35,45 +48,174 @@ export class BillingService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly audit: PlatformAuditService,
+    private readonly notifications: TenantBillingNotificationsService,
   ) {}
 
   async create(
     principal: PlatformPrincipal,
     input: CreateInvoiceDto,
   ): Promise<InvoiceCreateServiceResultSource> {
-    const [tenant] = await this.db
-      .select()
-      .from(schema.organization)
-      .where(eq(schema.organization.id, input.tenantId))
-      .limit(1);
-    if (!tenant) throw new NotFoundException({ code: "tenant_not_found" });
+    const normalizedInput = platformCommercialContracts.invoices.create.body.parse(input);
     return this.db.transaction(async (tx) => {
+      const canonicalSourceRequestId =
+        "sourceRequestId" in normalizedInput
+          ? canonicalBillingUuid(normalizedInput.sourceRequestId)
+          : null;
+      const canonicalSourceOfferId =
+        "sourceOfferId" in normalizedInput
+          ? canonicalBillingUuid(normalizedInput.sourceOfferId)
+          : null;
+      const mutation = normalizedInput.idempotencyKey
+        ? await beginPlatformBillingMutation(tx, {
+            tenantId: normalizedInput.tenantId,
+            idempotencyKey: normalizedInput.idempotencyKey,
+            operation: "billing.invoice.create",
+            targetId: canonicalSourceRequestId ?? canonicalSourceOfferId ?? "create",
+            payload: invoiceCreatePayload(
+              normalizedInput,
+              canonicalSourceRequestId,
+              canonicalSourceOfferId,
+            ),
+            actorPlatformUserId: principal.userId,
+          })
+        : null;
+      if (mutation?.kind === "committed") return parseInvoiceCreateReplay(mutation.result);
+      if (mutation?.kind === "pending") mutationInProgress();
+      const resources: BillingWorkflowResource[] = [{ kind: "invoice_number", id: "allocator" }];
+      let sourceOfferFamilyId: string | null = null;
+      if (canonicalSourceRequestId) {
+        resources.push({ kind: "request", id: canonicalSourceRequestId });
+      }
+      if (canonicalSourceOfferId) {
+        sourceOfferFamilyId = await locateInvoiceSourceOffer(
+          tx,
+          normalizedInput.tenantId,
+          canonicalSourceOfferId,
+        );
+        resources.push(
+          { kind: "offer_family", id: sourceOfferFamilyId },
+          { kind: "offer", id: canonicalSourceOfferId },
+        );
+      }
+      await acquireBillingWorkflowLocks(tx, normalizedInput.tenantId, resources);
+      const [tenant] = await tx
+        .select({ id: schema.organization.id })
+        .from(schema.organization)
+        .where(eq(schema.organization.id, normalizedInput.tenantId))
+        .limit(1);
+      if (!tenant) throw new NotFoundException({ code: "tenant_not_found" });
+      const sourceRequestId = canonicalSourceRequestId
+        ? await lockInvoiceSourceRequest(tx, normalizedInput.tenantId, canonicalSourceRequestId)
+        : null;
+      let sourceOfferId: string | null = null;
+      if (canonicalSourceOfferId) {
+        if (!sourceOfferFamilyId) {
+          throw new Error("invoice source offer family discovery failed");
+        }
+        sourceOfferId = await lockAcceptedInvoiceSourceOffer(
+          tx,
+          normalizedInput.tenantId,
+          canonicalSourceOfferId,
+          sourceOfferFamilyId,
+        );
+      }
+      const normalizedInvoiceSuffix = sql<string>`coalesce(
+        nullif(ltrim(substring(${schema.invoices.number} from 5), '0'), ''),
+        '0'
+      )`;
       const [last] = await tx
         .select({ number: schema.invoices.number })
         .from(schema.invoices)
-        .orderBy(desc(schema.invoices.createdAt))
+        .where(sql`${schema.invoices.number} ~ '^INV-[0-9]+$'`)
+        .orderBy(
+          desc(sql`length(${normalizedInvoiceSuffix})`),
+          desc(sql`${normalizedInvoiceSuffix} collate "C"`),
+          desc(schema.invoices.number),
+        )
         .limit(1);
       const next = nextInvoiceNumber(last?.number);
-      const [invoice] = await tx
-        .insert(schema.invoices)
-        .values({
-          tenantId: input.tenantId,
-          number: next,
-          sellerBankAccountId: input.sellerBankAccountId ?? null,
-          dueDate: input.dueDate ? new Date(input.dueDate) : null,
-          applicationMode: input.applicationMode,
-          createdByPlatformUserId: principal.userId,
-          subtotal: "0.00",
-          vatTotal: "0.00",
-          total: "0.00",
-        })
-        .returning();
+      let invoice: typeof schema.invoices.$inferSelect | undefined;
+      try {
+        [invoice] = await tx
+          .insert(schema.invoices)
+          .values({
+            tenantId: normalizedInput.tenantId,
+            number: next,
+            sellerBankAccountId: normalizedInput.sellerBankAccountId ?? null,
+            dueDate: normalizedInput.dueDate ? new Date(normalizedInput.dueDate) : null,
+            applicationMode: normalizedInput.applicationMode,
+            sourceOfferId,
+            createdByPlatformUserId: principal.userId,
+            subtotal: "0.00",
+            vatTotal: "0.00",
+            total: "0.00",
+          })
+          .returning();
+      } catch (error) {
+        if (postgresUniqueConstraint(error) === "invoices_number_uq") {
+          throw new ConflictException({ code: "invoice_number_conflict" });
+        }
+        throw error;
+      }
       if (!invoice) throw new BadRequestException({ code: "invoice_create_failed" });
+      if (sourceRequestId) {
+        const [link] = await tx
+          .insert(schema.tenantBillingRequestLinks)
+          .values({
+            tenantId: normalizedInput.tenantId,
+            requestId: sourceRequestId,
+            invoiceId: invoice.id,
+          })
+          .returning();
+        if (!link) throw new Error("invoice request link insert failed");
+        const [event] = await tx
+          .insert(schema.tenantBillingRequestEvents)
+          .values({
+            tenantId: normalizedInput.tenantId,
+            requestId: sourceRequestId,
+            kind: "invoice_linked",
+            actorKind: "platform_user",
+            actorPlatformUserId: principal.userId,
+            metadata: { invoiceId: invoice.id, linkId: link.id },
+            idempotencyKey: normalizedInput.idempotencyKey ?? randomUUID(),
+          })
+          .returning({ id: schema.tenantBillingRequestEvents.id });
+        if (!event) throw new Error("invoice request link event insert failed");
+        const [request] = await tx
+          .select({ status: schema.tenantBillingRequests.status })
+          .from(schema.tenantBillingRequests)
+          .where(
+            and(
+              eq(schema.tenantBillingRequests.tenantId, normalizedInput.tenantId),
+              eq(schema.tenantBillingRequests.id, sourceRequestId),
+            ),
+          )
+          .limit(1);
+        if (!request) throw new ConflictException({ code: "billing_source_link_invalid" });
+        await this.audit.record(tx, {
+          actorPlatformUserId: principal.userId,
+          actorRole: principal.role,
+          action: "billing.request.invoice_linked",
+          outcome: "success",
+          tenantId: normalizedInput.tenantId,
+          targetType: "tenant_billing_request",
+          targetId: sourceRequestId,
+          reason: null,
+          before: { status: request.status },
+          after: {
+            status: request.status,
+            invoiceId: invoice.id,
+            linkId: link.id,
+            eventId: event.id,
+          },
+          requestId: null,
+        });
+      }
 
       let subtotal = 0n;
       let vatTotal = 0n;
       let total = 0n;
-      for (const [index, line] of input.lines.entries()) {
+      for (const [index, line] of normalizedInput.lines.entries()) {
         const catalog = line.catalogVersionId
           ? await tx
               .select()
@@ -115,7 +257,7 @@ export class BillingService {
         vatTotal += lineVat;
         total += lineTotal;
         await tx.insert(schema.invoiceLines).values({
-          tenantId: input.tenantId,
+          tenantId: normalizedInput.tenantId,
           invoiceId: invoice.id,
           position: index + 1,
           kind: line.kind,
@@ -152,7 +294,16 @@ export class BillingService {
         .where(eq(schema.invoices.id, invoice.id))
         .returning();
       if (!updated) throw new BadRequestException({ code: "invoice_create_failed" });
-      return { ...updated, lines: input.lines.length };
+      const result = { ...updated, sourceRequestId, lines: normalizedInput.lines.length };
+      if (mutation) {
+        await commitPlatformBillingMutation(
+          tx,
+          mutation.row.id,
+          result.id,
+          platformCommercialContracts.invoices.create.response.parse(result),
+        );
+      }
+      return result;
     });
   }
 
@@ -164,91 +315,124 @@ export class BillingService {
   }
 
   async get(id: string): Promise<InvoiceServiceDetailSource> {
-    const [invoice] = await this.db
-      .select()
-      .from(schema.invoices)
-      .where(eq(schema.invoices.id, id))
-      .limit(1);
-    if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
-    const lines = await this.db
-      .select()
-      .from(schema.invoiceLines)
-      .where(eq(schema.invoiceLines.invoiceId, id))
-      .orderBy(schema.invoiceLines.position);
-    const documents = await this.db
-      .select({
-        id: schema.invoiceDocuments.id,
-        revision: schema.invoiceDocuments.revision,
-        format: schema.invoiceDocuments.format,
-        status: schema.invoiceDocuments.status,
-        contentType: schema.invoiceDocuments.contentType,
-        byteSize: schema.invoiceDocuments.byteSize,
-        sha256: schema.invoiceDocuments.sha256,
-        errorCode: schema.invoiceDocuments.errorCode,
-        createdAt: schema.invoiceDocuments.createdAt,
-        updatedAt: schema.invoiceDocuments.updatedAt,
-      })
-      .from(schema.invoiceDocuments)
-      .where(eq(schema.invoiceDocuments.invoiceId, id))
-      .orderBy(desc(schema.invoiceDocuments.revision));
-    const [payment] = await this.db
-      .select()
-      .from(schema.billingPayments)
-      .where(
-        and(
-          eq(schema.billingPayments.tenantId, invoice.tenantId),
-          eq(schema.billingPayments.invoiceId, id),
-        ),
-      )
-      .limit(1);
-    const attempts = await this.db
-      .select()
-      .from(schema.invoiceApplicationEvents)
-      .where(
-        and(
-          eq(schema.invoiceApplicationEvents.tenantId, invoice.tenantId),
-          eq(schema.invoiceApplicationEvents.invoiceId, id),
-        ),
-      )
-      .orderBy(schema.invoiceApplicationEvents.createdAt, schema.invoiceApplicationEvents.attempt);
-    const latestAttempts = new Map<string, (typeof attempts)[number]>();
-    for (const attempt of attempts) {
-      const previous = latestAttempts.get(attempt.invoiceLineId);
-      if (!previous || attempt.attempt >= previous.attempt) {
-        latestAttempts.set(attempt.invoiceLineId, attempt);
-      }
-    }
-    const latestByLine = lines.flatMap((line) => {
-      const event = latestAttempts.get(line.id);
-      return event ? [event] : [];
-    });
-    const applicationStatus = !payment
-      ? "not_paid"
-      : latestByLine.some((event) => event.status === "failed")
-        ? "partial_failure"
-        : latestByLine.length < lines.length ||
-            latestByLine.some((event) => event.status === "pending")
-          ? "pending"
-          : "applied";
-    return {
-      ...invoice,
-      lines,
-      documents,
-      payment: payment ?? null,
-      application: {
-        status: applicationStatus,
-        latestByLine,
-        attempts,
+    return this.db.transaction(
+      async (tx) => {
+        const [invoice] = await tx
+          .select()
+          .from(schema.invoices)
+          .where(eq(schema.invoices.id, id))
+          .limit(1);
+        if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
+        const lines = await tx
+          .select()
+          .from(schema.invoiceLines)
+          .where(eq(schema.invoiceLines.invoiceId, id))
+          .orderBy(schema.invoiceLines.position);
+        const documents = await tx
+          .select({
+            id: schema.invoiceDocuments.id,
+            revision: schema.invoiceDocuments.revision,
+            format: schema.invoiceDocuments.format,
+            status: schema.invoiceDocuments.status,
+            contentType: schema.invoiceDocuments.contentType,
+            byteSize: schema.invoiceDocuments.byteSize,
+            sha256: schema.invoiceDocuments.sha256,
+            errorCode: schema.invoiceDocuments.errorCode,
+            createdAt: schema.invoiceDocuments.createdAt,
+            updatedAt: schema.invoiceDocuments.updatedAt,
+          })
+          .from(schema.invoiceDocuments)
+          .where(eq(schema.invoiceDocuments.invoiceId, id))
+          .orderBy(desc(schema.invoiceDocuments.revision));
+        const payments = await tx
+          .select()
+          .from(schema.billingPayments)
+          .where(
+            and(
+              eq(schema.billingPayments.tenantId, invoice.tenantId),
+              eq(schema.billingPayments.invoiceId, id),
+            ),
+          )
+          .orderBy(schema.billingPayments.paidAt, schema.billingPayments.id);
+        const attempts = await tx
+          .select()
+          .from(schema.invoiceApplicationEvents)
+          .where(
+            and(
+              eq(schema.invoiceApplicationEvents.tenantId, invoice.tenantId),
+              eq(schema.invoiceApplicationEvents.invoiceId, id),
+            ),
+          )
+          .orderBy(
+            schema.invoiceApplicationEvents.createdAt,
+            schema.invoiceApplicationEvents.attempt,
+          );
+        const latestAttempts = new Map<string, (typeof attempts)[number]>();
+        for (const attempt of attempts) {
+          const previous = latestAttempts.get(attempt.invoiceLineId);
+          if (!previous || attempt.attempt >= previous.attempt) {
+            latestAttempts.set(attempt.invoiceLineId, attempt);
+          }
+        }
+        const latestByLine = lines.flatMap((line) => {
+          const event = latestAttempts.get(line.id);
+          return event ? [event] : [];
+        });
+        const applicationStatus =
+          invoice.status !== "paid"
+            ? "not_paid"
+            : latestByLine.some((event) => event.status === "failed")
+              ? "partial_failure"
+              : latestByLine.length < lines.length ||
+                  latestByLine.some((event) => event.status === "pending")
+                ? "pending"
+                : "applied";
+        return {
+          ...invoice,
+          lines,
+          documents,
+          payments,
+          paymentSummary:
+            invoice.status === "draft" || invoice.status === "cancelled"
+              ? null
+              : invoicePaymentSummary(invoice.total, payments),
+          application: {
+            status: applicationStatus,
+            latestByLine,
+            attempts,
+          },
+        };
       },
-    };
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   }
 
   async issue(principal: PlatformPrincipal, id: string): Promise<InvoiceServiceRecordSource> {
+    const canonicalInvoiceId = canonicalBillingUuid(id);
     return this.db.transaction(async (tx) => {
+      const [located] = await tx
+        .select({ tenantId: schema.invoices.tenantId })
+        .from(schema.invoices)
+        .where(eq(schema.invoices.id, canonicalInvoiceId))
+        .limit(1);
+      if (!located) throw new NotFoundException({ code: "invoice_not_found" });
+      await acquireBillingWorkflowLocks(tx, located.tenantId, [
+        { kind: "invoice", id: canonicalInvoiceId },
+      ]);
+      const discoveredLinks = await tx
+        .select({ requestId: schema.tenantBillingRequestLinks.requestId })
+        .from(schema.tenantBillingRequestLinks)
+        .where(
+          and(
+            eq(schema.tenantBillingRequestLinks.tenantId, located.tenantId),
+            eq(schema.tenantBillingRequestLinks.invoiceId, canonicalInvoiceId),
+          ),
+        );
+      if (discoveredLinks.length > 1) throw new Error("invoice request link ambiguity");
       const [invoice] = await tx
         .select()
         .from(schema.invoices)
-        .where(eq(schema.invoices.id, id))
+        .where(eq(schema.invoices.id, canonicalInvoiceId))
         .for("update")
         .limit(1);
       if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
@@ -272,9 +456,82 @@ export class BillingService {
           sellerBankAccountSnapshot: bankAccountSnapshot(sellerAccount),
           buyerBankAccountSnapshot: buyerAccount ? bankAccountSnapshot(buyerAccount) : null,
         })
-        .where(and(eq(schema.invoices.id, id), eq(schema.invoices.status, "draft")))
+        .where(and(eq(schema.invoices.id, canonicalInvoiceId), eq(schema.invoices.status, "draft")))
         .returning();
       if (!updated) throw new ConflictException({ code: "invoice_not_draft" });
+      const sourceLinks = await tx
+        .select()
+        .from(schema.tenantBillingRequestLinks)
+        .where(
+          and(
+            eq(schema.tenantBillingRequestLinks.tenantId, invoice.tenantId),
+            eq(schema.tenantBillingRequestLinks.invoiceId, invoice.id),
+          ),
+        )
+        .for("update");
+      if (sourceLinks.length > 1) throw new Error("invoice request link ambiguity");
+      const sourceLink = sourceLinks[0];
+      let sourceRequestId: string | null = null;
+      if (sourceLink) {
+        const [request] = await tx
+          .select()
+          .from(schema.tenantBillingRequests)
+          .where(
+            and(
+              eq(schema.tenantBillingRequests.tenantId, invoice.tenantId),
+              eq(schema.tenantBillingRequests.id, sourceLink.requestId),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!request) throw new ConflictException({ code: "billing_source_link_invalid" });
+        sourceRequestId = request.id;
+        if (request.status === "offer_prepared") {
+          await tx
+            .update(schema.tenantBillingRequests)
+            .set({ status: "awaiting_payment", responsibleSide: "tenant", updatedAt: now })
+            .where(
+              and(
+                eq(schema.tenantBillingRequests.tenantId, request.tenantId),
+                eq(schema.tenantBillingRequests.id, request.id),
+                eq(schema.tenantBillingRequests.status, "offer_prepared"),
+              ),
+            );
+          const [statusEvent] = await tx
+            .insert(schema.tenantBillingRequestEvents)
+            .values({
+              tenantId: invoice.tenantId,
+              requestId: request.id,
+              kind: "status_changed",
+              fromStatus: "offer_prepared",
+              toStatus: "awaiting_payment",
+              actorKind: "platform_user",
+              actorPlatformUserId: principal.userId,
+              metadata: { invoiceId: invoice.id },
+              idempotencyKey: randomUUID(),
+            })
+            .returning({ id: schema.tenantBillingRequestEvents.id });
+          if (!statusEvent) throw new Error("invoice request status event insert failed");
+          await this.audit.record(tx, {
+            actorPlatformUserId: principal.userId,
+            actorRole: principal.role,
+            action: "billing.request.status_changed",
+            outcome: "success",
+            tenantId: invoice.tenantId,
+            targetType: "tenant_billing_request",
+            targetId: request.id,
+            reason: null,
+            before: { status: "offer_prepared", responsibleSide: request.responsibleSide },
+            after: {
+              status: "awaiting_payment",
+              responsibleSide: "tenant",
+              eventId: statusEvent.id,
+              invoiceId: invoice.id,
+            },
+            requestId: null,
+          });
+        }
+      }
       await this.audit.record(tx, {
         actorPlatformUserId: principal.userId,
         actorRole: principal.role,
@@ -282,7 +539,7 @@ export class BillingService {
         outcome: "success",
         tenantId: invoice.tenantId,
         targetType: "invoice",
-        targetId: id,
+        targetId: canonicalInvoiceId,
         reason: null,
         before: { status: invoice.status },
         after: {
@@ -295,29 +552,212 @@ export class BillingService {
         },
         requestId: null,
       });
-      return updated;
+      if (this.notifications.isDueSoon(updated.dueDate)) {
+        await this.notifications.enqueueInTransaction(tx, {
+          tenantId: updated.tenantId,
+          eventKind: "invoice_due_soon",
+          entityId: updated.id,
+          revision: 1,
+          subjectName: updated.number,
+        });
+      }
+      return { ...updated, sourceRequestId };
     });
   }
 
   async cancel(principal: PlatformPrincipal, id: string): Promise<InvoiceServiceRecordSource> {
-    const [invoice] = await this.db
-      .select()
-      .from(schema.invoices)
-      .where(eq(schema.invoices.id, id))
-      .limit(1);
-    if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
-    if (invoice.status === "paid") throw new ConflictException({ code: "invoice_paid" });
-    const [updated] = await this.db
-      .update(schema.invoices)
-      .set({ status: "cancelled", cancelledAt: new Date() })
-      .where(eq(schema.invoices.id, id))
-      .returning();
-    if (!updated) throw new ConflictException({ code: "invoice_cancel_failed" });
-    return updated;
+    const canonicalInvoiceId = canonicalBillingUuid(id);
+    return this.db.transaction(async (tx) => {
+      const [located] = await tx
+        .select({ tenantId: schema.invoices.tenantId })
+        .from(schema.invoices)
+        .where(eq(schema.invoices.id, canonicalInvoiceId))
+        .limit(1);
+      if (!located) throw new NotFoundException({ code: "invoice_not_found" });
+      await acquireBillingWorkflowLocks(tx, located.tenantId, [
+        { kind: "invoice", id: canonicalInvoiceId },
+      ]);
+      const [invoice] = await tx
+        .select()
+        .from(schema.invoices)
+        .where(eq(schema.invoices.id, canonicalInvoiceId))
+        .for("update")
+        .limit(1);
+      if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
+      if (invoice.status === "paid" || invoice.status === "partially_paid") {
+        throw new ConflictException({ code: "invoice_paid" });
+      }
+      const [updated] = await tx
+        .update(schema.invoices)
+        .set({ status: "cancelled", cancelledAt: new Date() })
+        .where(
+          and(
+            eq(schema.invoices.id, canonicalInvoiceId),
+            eq(schema.invoices.status, invoice.status),
+          ),
+        )
+        .returning();
+      if (!updated) throw new ConflictException({ code: "invoice_cancel_failed" });
+      return updated;
+    });
   }
 }
 
+function invoiceCreatePayload(
+  input: CreateInvoiceDto,
+  sourceRequestId: string | null,
+  sourceOfferId: string | null,
+) {
+  return {
+    tenantId: input.tenantId,
+    sourceRequestId,
+    sourceOfferId,
+    sellerBankAccountId: input.sellerBankAccountId ?? null,
+    dueDate: input.dueDate ? new Date(input.dueDate).toISOString() : null,
+    applicationMode: input.applicationMode,
+    lines: input.lines,
+  };
+}
+
+function parseInvoiceCreateReplay(value: unknown): InvoiceCreateServiceResultSource {
+  const invoice = platformCommercialContracts.invoices.create.response.parse(value);
+  return {
+    ...invoice,
+    issueDate: invoice.issueDate ? new Date(invoice.issueDate) : null,
+    dueDate: invoice.dueDate ? new Date(invoice.dueDate) : null,
+    issuedAt: invoice.issuedAt ? new Date(invoice.issuedAt) : null,
+    paidAt: invoice.paidAt ? new Date(invoice.paidAt) : null,
+    cancelledAt: invoice.cancelledAt ? new Date(invoice.cancelledAt) : null,
+    createdAt: new Date(invoice.createdAt),
+    updatedAt: new Date(invoice.updatedAt),
+  };
+}
+
+function mutationInProgress(): never {
+  throw new ConflictException({ code: "billing_mutation_in_progress" });
+}
+
+type InvoiceSourceExecutor = Pick<Db, "select">;
+
+async function lockInvoiceSourceRequest(
+  tx: InvoiceSourceExecutor,
+  tenantId: string,
+  requestId: string,
+): Promise<string> {
+  const [request] = await tx
+    .select({
+      id: schema.tenantBillingRequests.id,
+      tenantId: schema.tenantBillingRequests.tenantId,
+    })
+    .from(schema.tenantBillingRequests)
+    .where(eq(schema.tenantBillingRequests.id, requestId))
+    .for("update")
+    .limit(1);
+  if (!request) throw new NotFoundException({ code: "billing_request_not_found" });
+  if (request.tenantId !== tenantId) {
+    throw new ConflictException({ code: "billing_source_tenant_mismatch" });
+  }
+  return request.id;
+}
+
+async function lockAcceptedInvoiceSourceOffer(
+  tx: InvoiceSourceExecutor,
+  tenantId: string,
+  offerId: string,
+  familyId: string,
+): Promise<string> {
+  const family = await tx
+    .select()
+    .from(schema.commercialOffers)
+    .where(
+      and(
+        eq(schema.commercialOffers.tenantId, tenantId),
+        eq(schema.commercialOffers.familyId, familyId),
+      ),
+    )
+    .orderBy(desc(schema.commercialOffers.revision), desc(schema.commercialOffers.id))
+    .for("update");
+  const source = family.find((offer) => offer.id === offerId);
+  if (!source) throw new NotFoundException({ code: "offer_not_found" });
+  const currentGeneration = family.find((offer) => offer.status !== "draft");
+  if (!currentGeneration || currentGeneration.id !== source.id) {
+    throw new ConflictException({ code: "offer_version_stale" });
+  }
+  if (source.status !== "published") {
+    throw new ConflictException({ code: "offer_not_accepted" });
+  }
+  const [decision] = await tx
+    .select()
+    .from(schema.commercialOfferDecisions)
+    .where(
+      and(
+        eq(schema.commercialOfferDecisions.tenantId, tenantId),
+        eq(schema.commercialOfferDecisions.offerId, source.id),
+      ),
+    )
+    .orderBy(
+      desc(schema.commercialOfferDecisions.createdAt),
+      desc(schema.commercialOfferDecisions.id),
+    )
+    .for("update")
+    .limit(1);
+  if (decision?.decision !== "accepted") {
+    throw new ConflictException({ code: "offer_not_accepted" });
+  }
+  return source.id;
+}
+
+async function locateInvoiceSourceOffer(
+  tx: Pick<Db, "select">,
+  tenantId: string,
+  offerId: string,
+): Promise<string> {
+  const [located] = await tx
+    .select({
+      tenantId: schema.commercialOffers.tenantId,
+      familyId: schema.commercialOffers.familyId,
+    })
+    .from(schema.commercialOffers)
+    .where(eq(schema.commercialOffers.id, offerId))
+    .limit(1);
+  if (!located) throw new NotFoundException({ code: "offer_not_found" });
+  if (located.tenantId !== tenantId) {
+    throw new ConflictException({ code: "billing_source_tenant_mismatch" });
+  }
+  return located.familyId;
+}
+
+function invoicePaymentSummary(
+  total: string,
+  payments: Array<typeof schema.billingPayments.$inferSelect>,
+) {
+  const totalCents = cents(total);
+  const confirmed = payments.reduce((sum, payment) => sum + cents(payment.amount), 0n);
+  return {
+    confirmedAmount: money(confirmed),
+    remainingAmount: money(totalCents - confirmed),
+    status:
+      confirmed === 0n
+        ? ("issued" as const)
+        : confirmed === totalCents
+          ? ("paid" as const)
+          : ("partially_paid" as const),
+  };
+}
+
 function nextInvoiceNumber(last: string | undefined): string {
-  const numeric = last?.match(/(\d+)$/)?.[1];
-  return `INV-${String((numeric ? Number(numeric) : 0) + 1).padStart(6, "0")}`;
+  const suffix = last?.match(/^INV-([0-9]+)$/)?.[1] ?? "0";
+  const digits = (suffix.replace(/^0+/, "") || "0").split("");
+  let carry = 1;
+  for (let index = digits.length - 1; index >= 0 && carry === 1; index -= 1) {
+    const digit = digits[index];
+    if (digit === "9") {
+      digits[index] = "0";
+    } else {
+      digits[index] = String.fromCharCode((digit?.charCodeAt(0) ?? 48) + 1);
+      carry = 0;
+    }
+  }
+  if (carry === 1) digits.unshift("1");
+  return `INV-${digits.join("").padStart(6, "0")}`;
 }

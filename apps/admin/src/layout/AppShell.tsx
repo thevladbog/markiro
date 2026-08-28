@@ -7,6 +7,7 @@ import { Badge, Button, Sidebar, cn, type SidebarItem } from "@markiro/ui";
 
 import { useCan } from "../access/context.js";
 import { useAuthClient } from "../auth/client.js";
+import { useBillingAttention } from "../pages/billing/api.js";
 import { usePendingOrderCount } from "../pages/pickup/api.js";
 import { useAvatarUrl, useProfile } from "../pages/profile/api.js";
 import { Header } from "./Header.js";
@@ -114,6 +115,12 @@ export const NAV_ITEMS: ReadonlyArray<{
     capability: C.MEMBERS_MANAGE,
   },
   {
+    to: "/billing",
+    key: "nav.billing",
+    sectionKey: "shell.sections.organization",
+    capability: C.BILLING_READ,
+  },
+  {
     to: "/settings",
     key: "nav.settings",
     sectionKey: "shell.sections.organization",
@@ -141,9 +148,12 @@ export function AppShell() {
   const { data: session } = authClient.useSession();
   const canReadOperations = useCan(C.OPERATIONS_READ);
   const canReadIntegrations = useCan(C.INTEGRATIONS_READ);
+  const canReadBilling = useCan(C.BILLING_READ);
   const canManageSettings = useCan(C.TENANT_SETTINGS_MANAGE);
   const canManageMembers = useCan(C.MEMBERS_MANAGE);
   const pendingOrderCount = usePendingOrderCount(canReadOperations);
+  const billingAttention = useBillingAttention(canReadBilling);
+  const billingAttentionCount = billingAttention.data?.count ?? 0;
   const profile = useProfile();
   const avatar = useAvatarUrl(Boolean(profile.data?.hasAvatar));
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
@@ -156,6 +166,7 @@ export function AppShell() {
   const items: SidebarItem[] = NAV_ITEMS.filter(({ capability }) => {
     if (capability === C.OPERATIONS_READ) return canReadOperations;
     if (capability === C.INTEGRATIONS_READ) return canReadIntegrations;
+    if (capability === C.BILLING_READ) return canReadBilling;
     if (capability === C.TENANT_SETTINGS_MANAGE) return canManageSettings;
     if (capability === C.MEMBERS_MANAGE) return canManageMembers;
     return false;
@@ -164,10 +175,11 @@ export function AppShell() {
     labelKey: t(key),
     section: t(sectionKey),
     ...(to === "/pickup" && pendingOrderCount > 0 ? { badge: pendingOrderCount } : {}),
+    ...(to === "/billing" && billingAttentionCount > 0 ? { badge: billingAttentionCount } : {}),
   }));
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+    <div className="mk-app-shell" style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
       <Sidebar
         className="mk-app-sidebar"
         // The footer link below carries its own 10px padding on every side;
@@ -180,6 +192,11 @@ export function AppShell() {
           <NavLink
             to={item.to}
             end={item.to === "/"}
+            aria-label={
+              item.to === "/billing" && billingAttentionCount > 0
+                ? t("shell.billingAttention", { count: billingAttentionCount })
+                : undefined
+            }
             className={({ isActive }) =>
               cn(
                 "mk-sidebar__link",
@@ -205,7 +222,10 @@ export function AppShell() {
           />
         }
       />
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <div
+        className="mk-app-shell__content"
+        style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}
+      >
         <Header />
         <MobileNavigation
           items={items}

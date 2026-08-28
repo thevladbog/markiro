@@ -42,6 +42,16 @@ export function publishOffer(id: string) {
   });
 }
 
+export function reviseOffer(id: string, idempotencyKey: string) {
+  const validatedId = platformCommercialContracts.offers.revise.params.parse(id);
+  const body = platformCommercialContracts.offers.revise.body.parse({ idempotencyKey });
+  return platformApiFetch(`/offers/${validatedId}/revise`, {
+    responseSchema: platformCommercialContracts.offers.revise.response,
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export function payOffer(id: string, amount: string, bankReference: string, key: string) {
   const validatedId = platformCommercialContracts.offers.payment.params.parse(id);
   const validated = platformCommercialContracts.offers.payment.body.parse({

@@ -196,19 +196,25 @@ describe("platform commercial contracts", () => {
       {
         ...offerBase,
         id: "13111111-1111-4111-8111-111111111111",
+        status: "superseded",
+        ...publishedOfferMetadata,
+      },
+      {
+        ...offerBase,
+        id: "14111111-1111-4111-8111-111111111111",
         status: "paid",
         ...publishedOfferMetadata,
         paidAt: CREATED_AT,
       },
       {
         ...offerBase,
-        id: "14111111-1111-4111-8111-111111111111",
+        id: "15111111-1111-4111-8111-111111111111",
         status: "cancelled",
         ...publishedOfferMetadata,
       },
       {
         ...offerBase,
-        id: "15111111-1111-4111-8111-111111111111",
+        id: "16111111-1111-4111-8111-111111111111",
         status: "expired",
         ...publishedOfferMetadata,
       },
@@ -276,6 +282,11 @@ describe("platform commercial contracts", () => {
       ...publishedOfferMetadata,
       status: "published",
     } as const;
+    const superseded = {
+      ...offerBase,
+      ...publishedOfferMetadata,
+      status: "superseded",
+    } as const;
     const paid = {
       ...offerBase,
       ...publishedOfferMetadata,
@@ -290,7 +301,9 @@ describe("platform commercial contracts", () => {
     const expired = { ...offerBase, ...publishedOfferMetadata, status: "expired" } as const;
     const contract = platformCommercialContracts.offers.list.response;
 
-    expect(contract.parse([draft, published, paid, cancelled, expired])).toHaveLength(5);
+    expect(contract.parse([draft, published, superseded, paid, cancelled, expired])).toHaveLength(
+      6,
+    );
 
     const invalid = [
       ["draft number", { ...draft, number: "KP-2026-000001" }],
@@ -301,6 +314,10 @@ describe("platform commercial contracts", () => {
       ["published publishedAt", { ...published, publishedAt: null }],
       ["published publisher", { ...published, publishedByPlatformUserId: null }],
       ["published paidAt", { ...published, paidAt: CREATED_AT }],
+      ["superseded number", { ...superseded, number: null }],
+      ["superseded publishedAt", { ...superseded, publishedAt: null }],
+      ["superseded publisher", { ...superseded, publishedByPlatformUserId: null }],
+      ["superseded paidAt", { ...superseded, paidAt: CREATED_AT }],
       ["paid number", { ...paid, number: null }],
       ["paid publishedAt", { ...paid, publishedAt: null }],
       ["paid publisher", { ...paid, publishedByPlatformUserId: null }],
@@ -416,6 +433,12 @@ describe("platform commercial contracts", () => {
         },
         {
           ...invoiceBase,
+          id: "33111111-1111-4111-8111-111111111112",
+          status: "partially_paid",
+          ...issuedInvoiceMetadata,
+        },
+        {
+          ...invoiceBase,
           id: "33111111-1111-4111-8111-111111111111",
           status: "paid",
           ...issuedInvoiceMetadata,
@@ -433,6 +456,7 @@ describe("platform commercial contracts", () => {
     expect(list.items.map((invoice) => invoice.status)).toEqual([
       "draft",
       "issued",
+      "partially_paid",
       "paid",
       "cancelled",
     ]);
@@ -462,7 +486,12 @@ describe("platform commercial contracts", () => {
           updatedAt: CREATED_AT,
         },
       ],
-      payment: billingPayment,
+      payments: [billingPayment],
+      paymentSummary: {
+        confirmedAmount: "15000.00",
+        remainingAmount: "0.00",
+        status: "paid",
+      },
       application: {
         status: "applied",
         latestByLine: [applicationEvent],
@@ -598,7 +627,12 @@ describe("platform commercial contracts", () => {
         paidAt: CREATED_AT,
         lines: [invoiceLine],
         documents: [],
-        payment: null,
+        payments: [],
+        paymentSummary: {
+          confirmedAmount: "15000.00",
+          remainingAmount: "0.00",
+          status: "paid",
+        },
         application: {
           status: "not_paid",
           latestByLine: [],
@@ -606,6 +640,107 @@ describe("platform commercial contracts", () => {
         },
       }).success,
     ).toBe(false);
+  });
+
+  it("parses an exact partially-paid invoice detail with ordered payment relations", () => {
+    const partialPayment = { ...billingPayment, amount: "5000.00" };
+    const parsed = platformCommercialContracts.invoices.detail.response.parse({
+      ...invoiceBase,
+      ...issuedInvoiceMetadata,
+      status: "partially_paid",
+      lines: [invoiceLine],
+      documents: [],
+      payments: [partialPayment],
+      paymentSummary: {
+        confirmedAmount: "5000.00",
+        remainingAmount: "10000.00",
+        status: "partially_paid",
+      },
+      application: { status: "not_paid", latestByLine: [], attempts: [] },
+    });
+
+    expect(parsed.paymentSummary).toEqual({
+      confirmedAmount: "5000.00",
+      remainingAmount: "10000.00",
+      status: "partially_paid",
+    });
+    expect(parsed).not.toHaveProperty("payment");
+
+    expect(
+      platformCommercialContracts.invoices.detail.response.safeParse({
+        ...parsed,
+        paymentSummary: { ...parsed.paymentSummary, confirmedAmount: "4999.99" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects invoice details whose aggregate amounts contradict the lifecycle boundary", () => {
+    const relations = {
+      ...invoiceBase,
+      ...issuedInvoiceMetadata,
+      lines: [invoiceLine],
+      documents: [],
+    } as const;
+    const notPaid = { status: "not_paid", latestByLine: [], attempts: [] } as const;
+    const paidApplication = {
+      status: "pending",
+      latestByLine: [],
+      attempts: [],
+    } as const;
+    const fullyAllocatedPayment = { ...billingPayment, amount: "15000.00" };
+    const partialPayment = { ...billingPayment, amount: "5000.00" };
+    const invalid = [
+      {
+        name: "partially paid with zero remaining",
+        detail: {
+          ...relations,
+          status: "partially_paid",
+          payments: [fullyAllocatedPayment],
+          paymentSummary: {
+            confirmedAmount: "15000.00",
+            remainingAmount: "0.00",
+            status: "partially_paid",
+          },
+          application: notPaid,
+        },
+      },
+      {
+        name: "partially paid with zero confirmed",
+        detail: {
+          ...relations,
+          status: "partially_paid",
+          payments: [{ ...billingPayment, amount: "0.00" }],
+          paymentSummary: {
+            confirmedAmount: "0.00",
+            remainingAmount: "15000.00",
+            status: "partially_paid",
+          },
+          application: notPaid,
+        },
+      },
+      {
+        name: "paid with a remaining balance",
+        detail: {
+          ...relations,
+          status: "paid",
+          paidAt: CREATED_AT,
+          payments: [partialPayment],
+          paymentSummary: {
+            confirmedAmount: "5000.00",
+            remainingAmount: "10000.00",
+            status: "paid",
+          },
+          application: paidApplication,
+        },
+      },
+    ] as const;
+
+    for (const { name, detail } of invalid) {
+      expect(
+        platformCommercialContracts.invoices.detail.response.safeParse(detail).success,
+        name,
+      ).toBe(false);
+    }
   });
 
   it("parses only the application states possible for each invoice detail status", () => {
@@ -649,7 +784,12 @@ describe("platform commercial contracts", () => {
         status: "paid",
         paidAt: CREATED_AT,
         ...relations,
-        payment: billingPayment,
+        payments: [billingPayment],
+        paymentSummary: {
+          confirmedAmount: "15000.00",
+          remainingAmount: "0.00",
+          status: "paid",
+        },
         application,
       });
       expect(parsed.application.status).toBe(application.status);
@@ -678,7 +818,16 @@ describe("platform commercial contracts", () => {
     } as const;
 
     for (const { name, record } of unpaidRecords) {
-      const valid = { ...record, ...relations, payment: null, application: notPaidApplication };
+      const valid = {
+        ...record,
+        ...relations,
+        payments: [],
+        paymentSummary:
+          name === "issued"
+            ? { confirmedAmount: "0.00", remainingAmount: "15000.00", status: "issued" }
+            : null,
+        application: notPaidApplication,
+      };
       expect(
         platformCommercialContracts.invoices.detail.response.parse(valid).application.status,
         `${name} valid`,
@@ -686,9 +835,9 @@ describe("platform commercial contracts", () => {
       expect(
         platformCommercialContracts.invoices.detail.response.safeParse({
           ...valid,
-          payment: billingPayment,
+          payments: [billingPayment],
         }).success,
-        `${name} payment`,
+        `${name} payments`,
       ).toBe(false);
       expect(
         platformCommercialContracts.invoices.detail.response.safeParse({
@@ -705,15 +854,20 @@ describe("platform commercial contracts", () => {
       status: "paid",
       paidAt: CREATED_AT,
       ...relations,
-      payment: billingPayment,
+      payments: [billingPayment],
+      paymentSummary: {
+        confirmedAmount: "15000.00",
+        remainingAmount: "0.00",
+        status: "paid",
+      },
       application: paidApplications[0],
     } as const;
     expect(
       platformCommercialContracts.invoices.detail.response.safeParse({
         ...paid,
-        payment: null,
+        payments: [],
       }).success,
-      "paid payment",
+      "paid payments",
     ).toBe(false);
     expect(
       platformCommercialContracts.invoices.detail.response.safeParse({
@@ -833,9 +987,14 @@ describe("platform commercial contracts", () => {
       items: [billingPayment, importedPayment],
     });
     expect(list.items.map((payment) => payment.source)).toEqual(["manual", "bank_import"]);
-    expect(platformCommercialContracts.payments.manual.response.parse(billingPayment).source).toBe(
-      "manual",
-    );
+    expect(
+      platformCommercialContracts.payments.manual.response.parse({
+        ...billingPayment,
+        invoiceStatus: "paid",
+        confirmedAmount: "15000.00",
+        remainingAmount: "0.00",
+      }).source,
+    ).toBe("manual");
     expect(
       platformCommercialContracts.payments.import.response.parse({
         id: "64111111-1111-4111-8111-111111111111",
@@ -850,6 +1009,43 @@ describe("platform commercial contracts", () => {
         createdAt: CREATED_AT,
       }).status,
     ).toBe("ready");
+  });
+
+  it("rejects manual payment responses whose balance contradicts their invoice status", () => {
+    const contract = platformCommercialContracts.payments.manual.response;
+    const invalid = [
+      {
+        name: "partial response with zero remaining",
+        response: {
+          ...billingPayment,
+          invoiceStatus: "partially_paid",
+          confirmedAmount: "15000.00",
+          remainingAmount: "0.00",
+        },
+      },
+      {
+        name: "paid response with a remaining balance",
+        response: {
+          ...billingPayment,
+          invoiceStatus: "paid",
+          confirmedAmount: "14999.99",
+          remainingAmount: "0.01",
+        },
+      },
+      {
+        name: "partial response with zero confirmed",
+        response: {
+          ...billingPayment,
+          invoiceStatus: "partially_paid",
+          confirmedAmount: "0.00",
+          remainingAmount: "15000.00",
+        },
+      },
+    ] as const;
+
+    for (const { name, response } of invalid) {
+      expect(contract.safeParse(response).success, name).toBe(false);
+    }
   });
 
   it("exposes only masked payer account evidence in payment matches", () => {
@@ -978,6 +1174,359 @@ describe("platform commercial contracts", () => {
       platformCommercialContracts.invoices.create.body.safeParse({
         ...invoice,
         lines: [{ ...invoice.lines[0], activationPolicy: "immediately" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("strictly validates platform request mutations and invoice provenance identifiers", () => {
+    const idempotencyKey = "81111111-1111-4111-8111-111111111119";
+    const requestId = "82111111-1111-4111-8111-111111111119";
+
+    expect(
+      platformCommercialContracts.billingRequests.comment.body.parse({
+        message: "  Нужна спецификация  ",
+        idempotencyKey,
+      }),
+    ).toEqual({ message: "Нужна спецификация", idempotencyKey });
+    expect(
+      platformCommercialContracts.billingRequests.status.body.parse({
+        status: "clarification_required",
+        message: "Уточните период",
+        idempotencyKey,
+      }),
+    ).toMatchObject({ status: "clarification_required" });
+    expect(
+      platformCommercialContracts.billingRequests.link.body.parse({
+        type: "offer",
+        targetId: OFFER_ID,
+        idempotencyKey,
+      }),
+    ).toEqual({ type: "offer", targetId: OFFER_ID, idempotencyKey });
+
+    for (const candidate of [
+      { message: "ok", idempotencyKey, unexpected: true },
+      { message: "ok", idempotencyKey: "not-a-uuid" },
+    ]) {
+      expect(
+        platformCommercialContracts.billingRequests.comment.body.safeParse(candidate).success,
+      ).toBe(false);
+    }
+    expect(
+      platformCommercialContracts.billingRequests.status.body.safeParse({
+        status: "new",
+        idempotencyKey,
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.billingRequests.link.body.safeParse({
+        type: "invoice",
+        targetId: INVOICE_ID,
+        tenantId: TENANT_ID,
+        idempotencyKey,
+      }).success,
+      "link bodies cannot carry a client-owned tenant",
+    ).toBe(false);
+    expect(platformCommercialContracts.billingRequests.detail.params.parse(requestId)).toBe(
+      requestId,
+    );
+    expect(
+      platformCommercialContracts.billingRequests.list.query.parse({
+        tenantId: TENANT_ID,
+        status: "under_review",
+        type: "renewal",
+      }),
+    ).toEqual({ tenantId: TENANT_ID, status: "under_review", type: "renewal" });
+
+    const linked = platformCommercialContracts.invoices.create.body.parse({
+      tenantId: TENANT_ID,
+      idempotencyKey,
+      applicationMode: "manual",
+      lines: [
+        {
+          kind: "custom",
+          nameRu: "Работы",
+          nameEn: "Services",
+          quantity: 1,
+          unit: "шт.",
+          agreedUnitPrice: "100.00",
+          vatIncluded: true,
+        },
+      ],
+      sourceOfferId: OFFER_ID,
+      sourceRequestId: requestId,
+    });
+    expect(linked).toMatchObject({
+      idempotencyKey,
+      sourceOfferId: OFFER_ID,
+      sourceRequestId: requestId,
+    });
+    const sourceLess = {
+      tenantId: TENANT_ID,
+      applicationMode: linked.applicationMode,
+      lines: linked.lines,
+    };
+    for (const linkedWithoutIdempotency of [
+      { ...sourceLess, sourceOfferId: OFFER_ID },
+      { ...sourceLess, sourceRequestId: requestId },
+      { ...sourceLess, sourceOfferId: OFFER_ID, sourceRequestId: requestId },
+    ]) {
+      expect(
+        platformCommercialContracts.invoices.create.body.safeParse(linkedWithoutIdempotency)
+          .success,
+        "every linked invoice provenance shape must carry a durable retry key",
+      ).toBe(false);
+    }
+    expect(
+      platformCommercialContracts.invoices.create.body.safeParse({
+        ...linked,
+        sourceOfferId: "not-a-uuid",
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.invoices.create.body.safeParse({
+        ...linked,
+        sourceRequestId: "not-a-uuid",
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.invoices.create.body.parse({
+        ...sourceLess,
+        idempotencyKey,
+        sourceOfferId: OFFER_ID,
+      }),
+      "offer-only provenance remains supported",
+    ).toMatchObject({ sourceOfferId: OFFER_ID, idempotencyKey });
+    expect(
+      platformCommercialContracts.invoices.create.body.parse({
+        ...sourceLess,
+        idempotencyKey,
+        sourceRequestId: requestId,
+      }),
+      "request-only provenance remains supported",
+    ).toMatchObject({ sourceRequestId: requestId, idempotencyKey });
+  });
+
+  it("keeps truly source-less legacy invoice creation compatible without an idempotency key", () => {
+    const legacy = platformCommercialContracts.invoices.create.body.parse({
+      tenantId: TENANT_ID,
+      applicationMode: "manual",
+      lines: [
+        {
+          kind: "custom",
+          nameRu: "Разовые работы",
+          nameEn: "One-off work",
+          quantity: 1,
+          unit: "шт.",
+          agreedUnitPrice: "100.00",
+          vatIncluded: true,
+        },
+      ],
+    });
+
+    expect(legacy).toMatchObject({ tenantId: TENANT_ID, applicationMode: "manual" });
+    expect(legacy).not.toHaveProperty("idempotencyKey");
+    expect(legacy).not.toHaveProperty("sourceOfferId");
+    expect(legacy).not.toHaveProperty("sourceRequestId");
+  });
+
+  it("returns server-authoritative request transitions without accepting client transition policy", () => {
+    const requestId = "82111111-1111-4111-8111-111111111120";
+    const parsed = platformCommercialContracts.billingRequests.detail.response.parse({
+      id: requestId,
+      tenantId: TENANT_ID,
+      number: "BR-2026-001",
+      type: "renewal",
+      status: "under_review",
+      description: "Renew the subscription",
+      desiredAt: null,
+      context: null,
+      responsibleSide: "markiro",
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+      allowedTransitions: ["clarification_required", "offer_prepared", "in_progress", "cancelled"],
+      offerAction: {
+        offerId: OFFER_ID,
+        currentOfferId: OFFER_ID,
+        latestDecision: "changes_requested",
+        canRevise: true,
+        canCreateInvoice: false,
+      },
+      events: [],
+      links: [],
+    });
+
+    expect(parsed.allowedTransitions).toEqual([
+      "clarification_required",
+      "offer_prepared",
+      "in_progress",
+      "cancelled",
+    ]);
+    expect(parsed.offerAction).toMatchObject({ canRevise: true, canCreateInvoice: false });
+    expect(
+      platformCommercialContracts.billingRequests.status.body.safeParse({
+        status: "completed",
+        idempotencyKey: "81111111-1111-4111-8111-111111111119",
+        allowedTransitions: ["completed"],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires an explicit request-registry truncation signal", () => {
+    const item = {
+      id: "82111111-1111-4111-8111-111111111120",
+      tenantId: TENANT_ID,
+      number: "BR-2026-001",
+      type: "renewal",
+      status: "under_review",
+      description: "Renew the subscription",
+      desiredAt: null,
+      context: null,
+      responsibleSide: "markiro",
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+      allowedTransitions: ["offer_prepared"],
+      latestEvent: null,
+    };
+
+    const parsed = platformCommercialContracts.billingRequests.list.response.parse({
+      items: [item],
+      truncated: true,
+    });
+    expect(parsed.truncated).toBe(true);
+    expect(parsed.items).toEqual([expect.objectContaining({ id: item.id })]);
+    expect(
+      platformCommercialContracts.billingRequests.list.response.safeParse({ items: [item] })
+        .success,
+    ).toBe(false);
+  });
+
+  it("contracts an atomic request-bound offer creation without a client tenant id", () => {
+    const requestId = "82111111-1111-4111-8111-111111111120";
+    const idempotencyKey = "83111111-1111-4111-8111-111111111120";
+    const body = {
+      idempotencyKey,
+      expiresAt: "2026-09-30",
+      lines: [
+        {
+          kind: "service",
+          catalogVersionId: null,
+          nameRu: "Настройка",
+          nameEn: "Setup",
+          descriptionRu: null,
+          descriptionEn: null,
+          quantity: 1,
+          unit: "service",
+          agreedUnitPrice: "1000.00",
+          vatRateBps: 2000,
+          vatIncluded: true,
+          activationPolicy: null,
+        },
+      ],
+    };
+
+    expect(platformCommercialContracts.billingRequests.createOffer.body.parse(body)).toMatchObject({
+      idempotencyKey,
+      lines: [{ kind: "service" }],
+    });
+    expect(
+      platformCommercialContracts.billingRequests.createOffer.body.safeParse({
+        ...body,
+        tenantId: TENANT_ID,
+      }).success,
+    ).toBe(false);
+    expect(platformCommercialContracts.billingRequests.createOffer.params.parse(requestId)).toBe(
+      requestId,
+    );
+  });
+
+  it("strictly validates act dates, upload metadata, and idempotency bodies", () => {
+    const idempotencyKey = "83111111-1111-4111-8111-111111111119";
+    const requestId = "84111111-1111-4111-8111-111111111119";
+    const act = platformCommercialContracts.billingActs.create.body.parse({
+      tenantId: TENANT_ID,
+      requestId,
+      number: " ACT-2026-001 ",
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-31",
+      idempotencyKey,
+    });
+    expect(act.number).toBe("ACT-2026-001");
+    expect(
+      platformCommercialContracts.billingActs.create.body.safeParse({
+        ...act,
+        periodStart: "2026-09-01",
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.billingActs.create.body.safeParse({
+        ...act,
+        periodEnd: "2026-02-30",
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.billingActs.uploadMetadata.safeParse({
+        contentType: "application/pdf",
+        byteSize: 5 * 1024 * 1024,
+      }).success,
+    ).toBe(true);
+    expect(
+      platformCommercialContracts.billingActs.uploadMetadata.safeParse({
+        contentType: "text/plain",
+        byteSize: 10,
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.billingActs.issue.body.safeParse({
+        idempotencyKey,
+        contentType: "application/pdf",
+      }).success,
+    ).toBe(false);
+    expect(platformCommercialContracts.billingActs.cancel.body.parse({ idempotencyKey })).toEqual({
+      idempotencyKey,
+    });
+  });
+
+  it("parses exact platform request events and durable act document metadata", () => {
+    const requestId = "85111111-1111-4111-8111-111111111119";
+    const event = platformCommercialContracts.billingRequests.comment.response.parse({
+      id: "86111111-1111-4111-8111-111111111119",
+      tenantId: TENANT_ID,
+      requestId,
+      kind: "platform_comment",
+      fromStatus: null,
+      toStatus: null,
+      actorKind: "platform_user",
+      actorUserId: null,
+      actorPlatformUserId: PLATFORM_USER_ID,
+      message: "Нужна спецификация",
+      metadata: null,
+      createdAt: CREATED_AT,
+    });
+    expect(event.createdAt).toBe(ISO_CREATED_AT);
+    expect(
+      platformCommercialContracts.billingRequests.comment.response.safeParse({
+        ...event,
+        actorPlatformUserId: null,
+      }).success,
+    ).toBe(false);
+
+    const document = platformCommercialContracts.billingActs.document.parse({
+      id: DOCUMENT_ID,
+      revision: 1,
+      state: "ready",
+      contentType: "application/pdf",
+      byteSize: 1024,
+      sha256: "a".repeat(64),
+      uploadedByPlatformUserId: PLATFORM_USER_ID,
+      readyAt: CREATED_AT,
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+    });
+    expect(document.state).toBe("ready");
+    expect(
+      platformCommercialContracts.billingActs.document.safeParse({
+        ...document,
+        objectKey: `tenant-billing/${TENANT_ID}/acts/redacted/redacted.pdf`,
       }).success,
     ).toBe(false);
   });

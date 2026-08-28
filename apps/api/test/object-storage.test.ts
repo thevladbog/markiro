@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
+import {
+  tenantBillingActObjectKey,
+  tenantBillingRequestAttachmentObjectKey,
+} from "@markiro/platform-contracts";
 import { loadEnv } from "../src/env";
 import {
   createS3Client,
@@ -85,6 +89,67 @@ describe("ObjectStorageService", () => {
     ).rejects.toThrow();
   });
 
+  it("surfaces a HEAD timeout after the PUT may already have succeeded", async () => {
+    const timeout = new Error("HEAD timeout");
+    const send = vi.fn().mockResolvedValueOnce({}).mockRejectedValueOnce(timeout);
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(
+      storage.putVerified(
+        "tenants/t/shifts/s/export.csv",
+        Buffer.from("verified export"),
+        "text/csv",
+        "4161a5679ca94a7d7999801d153f926f797929158d4110b1cf909030c2d5deba",
+      ),
+    ).rejects.toBe(timeout);
+    expect(send.mock.calls.map((call) => call[0]?.constructor.name)).toEqual([
+      "PutObjectCommand",
+      "HeadObjectCommand",
+    ]);
+  });
+
+  it("reports verified, missing, and mismatched stored objects through the reconciliation seam", async () => {
+    const sha256 = "a".repeat(64);
+    const missing = Object.assign(new Error("missing"), { name: "NotFound" });
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ ContentLength: 10, Metadata: { sha256 } })
+      .mockRejectedValueOnce(missing)
+      .mockResolvedValueOnce({ ContentLength: 9, Metadata: { sha256 } });
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(storage.verifyObject("tenants/t/shifts/s/export.csv", 10, sha256)).resolves.toBe(
+      "verified",
+    );
+    await expect(storage.verifyObject("tenants/t/shifts/s/export.csv", 10, sha256)).resolves.toBe(
+      "missing",
+    );
+    await expect(storage.verifyObject("tenants/t/shifts/s/export.csv", 10, sha256)).resolves.toBe(
+      "mismatch",
+    );
+  });
+
+  it("confirms deletion with a read-after-delete instead of trusting the delete acknowledgement", async () => {
+    const missing = Object.assign(new Error("missing"), { name: "NotFound" });
+    const send = vi.fn().mockResolvedValueOnce({}).mockRejectedValueOnce(missing);
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(storage.deleteConfirmed("tenants/t/shifts/s/export.csv")).resolves.toBeUndefined();
+    expect(send.mock.calls.map((call) => call[0]?.constructor.name)).toEqual([
+      "DeleteObjectCommand",
+      "HeadObjectCommand",
+    ]);
+  });
+
+  it("rejects deletion when the object is still visible after the delete acknowledgement", async () => {
+    const send = vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce({ ContentLength: 1 });
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(storage.deleteConfirmed("tenants/t/shifts/s/export.csv")).rejects.toThrow(
+      "could not be confirmed",
+    );
+  });
+
   it("rejects a malformed checksum before uploading", async () => {
     const send = vi.fn();
     const storage = new ObjectStorageService(env, { send } as never);
@@ -126,6 +191,68 @@ describe("ObjectStorageService", () => {
     const command = presign.mock.calls[0]![1] as { input: Record<string, unknown> };
     expect(command.input).not.toHaveProperty("ResponseContentDisposition");
     expect(presign).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts only canonical tenant billing act paths", async () => {
+    const presign = vi.fn().mockResolvedValue("signed-read");
+    const storage = new ObjectStorageService(env, { send: vi.fn() } as never, presign);
+    const actId = "11111111-1111-4111-8111-111111111111";
+    const documentId = "22222222-2222-4222-8222-222222222222";
+    await expect(
+      storage.presignRead(`tenant-billing/acme_2026/acts/${actId}/${documentId}.pdf`, 300),
+    ).resolves.toBe("signed-read");
+    await expect(
+      storage.presignRead(`tenant-billing/factory.eu:primary/acts/${actId}/${documentId}.pdf`, 300),
+    ).resolves.toBe("signed-read");
+    await expect(
+      storage.presignRead(
+        tenantBillingActObjectKey("Производство / линия % A", actId, documentId),
+        300,
+      ),
+    ).resolves.toBe("signed-read");
+    for (const key of [
+      `tenant-billing/acme/../acts/${actId}/${documentId}.pdf`,
+      `tenant-billing/acme%2Fother/acts/${actId}/${documentId}.pdf`,
+      `tenant-billing/acme\n/acts/${actId}/${documentId}.pdf`,
+      `tenant-billing/acme/acts/${actId}/2222----2222-4222-8222-222222222222.pdf`,
+      `tenant-billing/acme/acts/${actId}/not-a-uuid.pdf`,
+    ]) {
+      await expect(storage.presignRead(key, 300)).rejects.toThrow("Unsafe object key");
+    }
+  });
+
+  it("accepts only canonical tenant billing request attachment paths", async () => {
+    const presign = vi.fn().mockResolvedValue("signed-read");
+    const storage = new ObjectStorageService(env, { send: vi.fn() } as never, presign);
+    const requestId = "11111111-1111-4111-8111-111111111111";
+    const attachmentId = "22222222-2222-4222-8222-222222222222";
+    const canonical = `tenant-billing/acme_2026/requests/${requestId}/${attachmentId}`;
+    await expect(storage.presignRead(canonical, 300)).resolves.toBe("signed-read");
+    await expect(
+      storage.presignRead(
+        tenantBillingRequestAttachmentObjectKey("factory.eu:primary", requestId, attachmentId),
+        300,
+      ),
+    ).resolves.toBe("signed-read");
+    await expect(
+      storage.presignRead(
+        tenantBillingRequestAttachmentObjectKey(
+          "Производство / линия % A",
+          requestId,
+          attachmentId,
+        ),
+        300,
+      ),
+    ).resolves.toBe("signed-read");
+    for (const key of [
+      `${canonical}.pdf`,
+      `tenant-billing/acme/../requests/${requestId}/${attachmentId}`,
+      `tenant-billing/acme%2Fother/requests/${requestId}/${attachmentId}`,
+      `tenant-billing/acme/requests/not-a-uuid/${attachmentId}`,
+      `tenant-billing/acme/requests/${requestId}/not-a-uuid`,
+    ]) {
+      await expect(storage.presignRead(key, 300)).rejects.toThrow("Unsafe object key");
+    }
   });
 
   it("returns a bounded private object body and its content type", async () => {

@@ -2,8 +2,9 @@ import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 
 import { Alert } from "@markiro/ui";
+import { CABINET_CAPABILITY } from "@markiro/domain";
 
-import { useAccess } from "../access/context.js";
+import { useAccess, useCan } from "../access/context.js";
 
 function daysRemaining(endsAt: string | null): number | null {
   if (!endsAt) return null;
@@ -13,6 +14,7 @@ function daysRemaining(endsAt: string | null): number | null {
 export function SubscriptionBanner() {
   const { t } = useTranslation();
   const access = useAccess();
+  const canReadBilling = useCan(CABINET_CAPABILITY.BILLING_READ);
   const subscription = access.subscription;
   if (!subscription || subscription.status === "unmanaged") return null;
   const days = daysRemaining(subscription.endsAt);
@@ -41,7 +43,11 @@ export function SubscriptionBanner() {
       style={{ margin: "16px 32px 0" }}
     >
       <span>{message}</span>{" "}
-      <Link to="/settings/subscription">{t("subscription.banner.link")}</Link>
+      {canReadBilling ? (
+        <Link to="/billing/subscription">{t("subscription.banner.link")}</Link>
+      ) : (
+        <span>{t("subscription.banner.noBillingAccess")}</span>
+      )}
     </Alert>
   );
 }
