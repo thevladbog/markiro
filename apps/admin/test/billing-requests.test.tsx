@@ -7,17 +7,22 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 
 import { AccessProvider } from "../src/access/context.js";
+import { ApiRequestError } from "../src/api/client.js";
 import i18n from "../src/i18n/index.js";
 import { CreateRequestPage } from "../src/pages/billing/CreateRequestPage.js";
 import { RequestDetailPage } from "../src/pages/billing/RequestDetailPage.js";
 import { RequestsPage } from "../src/pages/billing/RequestsPage.js";
 import { validCivilDate, validateBillingRequestForm } from "../src/pages/billing/requestForm.js";
-import { invalidateTenantBillingRequests } from "../src/pages/billing/api.js";
+import {
+  invalidateTenantBillingRequests,
+  type TenantBillingRequestAttachment,
+  type TenantBillingRequestDetail,
+} from "../src/pages/billing/api.js";
 
 const REQUEST_ID = "00000000-0000-4000-8000-000000000501";
 const KEY = "00000000-0000-4000-8000-000000000599";
 
-const request = {
+const request: TenantBillingRequestDetail = {
   id: REQUEST_ID,
   number: "BR-000042",
   type: "capacity_change",
@@ -31,6 +36,24 @@ const request = {
   events: [],
   attachments: [],
   links: [],
+};
+
+const firstAttachment: TenantBillingRequestAttachment = {
+  id: "00000000-0000-4000-8000-000000000611",
+  fileName: "first.pdf",
+  contentType: "application/pdf",
+  byteSize: 6,
+  sha256: "first-sha256",
+  createdAt: "2026-08-28T08:10:00.000Z",
+};
+
+const secondAttachment: TenantBillingRequestAttachment = {
+  id: "00000000-0000-4000-8000-000000000612",
+  fileName: "second.pdf",
+  contentType: "application/pdf",
+  byteSize: 6,
+  sha256: "second-sha256",
+  createdAt: "2026-08-28T08:11:00.000Z",
 };
 
 function json(body: unknown, status = 200): Response {
@@ -112,6 +135,35 @@ it("renders loading, error, empty, and exact status/type filter requests with cl
   );
 });
 
+it.each([
+  { failure: json({ code: "forbidden" }, 403), message: "Нет доступа к заявкам" },
+  { failure: json({ code: "not_found" }, 404), message: "Реестр заявок не найден" },
+])("renders $message without a dead list retry", async ({ failure, message }) => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => failure),
+  );
+  renderBilling(<RequestsPage />);
+  expect(await screen.findByText(message)).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Повторить" })).toBeNull();
+});
+
+it.each([new Error("offline"), new ApiRequestError(503, "unavailable", "unavailable")])(
+  "keeps list retry available for an ambiguous failure",
+  async (failure) => {
+    const fetch = vi
+      .fn()
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(json({ items: [] }));
+    vi.stubGlobal("fetch", fetch);
+    renderBilling(<RequestsPage />);
+    expect(await screen.findByText("Не удалось загрузить заявки")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(await screen.findByText("Заявок по выбранным фильтрам нет")).toBeDefined();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  },
+);
+
 it("shows all five server request types and validates description, desired date, and files", async () => {
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
@@ -129,7 +181,7 @@ it("shows all five server request types and validates description, desired date,
   fireEvent.change(screen.getByLabelText("Вложения"), {
     target: {
       files: [
-        new File(["plain"], "notes.txt", { type: "text/plain" }),
+        new File(["zip"], "archive.zip", { type: "application/zip" }),
         new File([new Uint8Array(5 * 1024 * 1024 + 1)], "large.pdf", {
           type: "application/pdf",
         }),
@@ -139,7 +191,7 @@ it("shows all five server request types and validates description, desired date,
   fireEvent.click(screen.getByRole("button", { name: "Создать заявку" }));
   expect(screen.getByText("Описание не должно превышать 4000 символов.")).toBeDefined();
   expect(validCivilDate("2026-02-30")).toBe(false);
-  expect(screen.getByText("notes.txt: разрешены PDF, JPEG и PNG.")).toBeDefined();
+  expect(screen.getByText("archive.zip: разрешены PDF, JPEG, PNG и TXT.")).toBeDefined();
   expect(screen.getByText("large.pdf: размер не должен превышать 5 МиБ.")).toBeDefined();
   expect(fetch).not.toHaveBeenCalled();
   expect(
@@ -153,10 +205,55 @@ it("shows all five server request types and validates description, desired date,
         new File(["pdf"], "a.pdf", { type: "application/pdf" }),
         new File(["jpg"], "a.jpg", { type: "image/jpeg" }),
         new File(["png"], "a.png", { type: "image/png" }),
+        new File(["plain"], "a.txt", { type: "text/plain" }),
       ],
     }).files,
   ).toEqual([]);
+  expect(screen.getByLabelText("Вложения").getAttribute("accept")).toBe(
+    "application/pdf,image/jpeg,image/png,text/plain",
+  );
 });
+
+it.each([
+  {
+    failure: json({ code: "forbidden" }, 403),
+    message: "Доступ к созданию заявок отозван. Вернитесь к списку заявок.",
+  },
+  {
+    failure: json({ code: "validation_failed" }, 400),
+    message: "Сервер отклонил данные заявки. Проверьте поля и отправьте снова.",
+  },
+  {
+    failure: json({ code: "idempotency_key_reused" }, 409),
+    message: "Ключ отправки уже использован для другой заявки. Отправьте форму заново.",
+  },
+])("classifies a terminal create response as $message", async ({ failure, message }) => {
+  vi.stubGlobal("crypto", { randomUUID: vi.fn(() => KEY) });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => failure),
+  );
+  renderBilling(<CreateRequestPage />, "/billing/requests/new");
+  fireEvent.change(screen.getByLabelText("Описание"), { target: { value: "Продлить" } });
+  fireEvent.click(screen.getByRole("button", { name: "Создать заявку" }));
+  expect(await screen.findByText(message)).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Повторить отправку" })).toBeNull();
+});
+
+it.each([new Error("offline"), new ApiRequestError(503, "unavailable", "unavailable")])(
+  "retains a live create retry only for an ambiguous response",
+  async (failure) => {
+    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => KEY) });
+    const fetch = vi.fn().mockRejectedValueOnce(failure).mockResolvedValueOnce(json(request));
+    vi.stubGlobal("fetch", fetch);
+    renderBilling(<CreateRequestPage />, "/billing/requests/new");
+    fireEvent.change(screen.getByLabelText("Описание"), { target: { value: "Продлить" } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать заявку" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Повторить отправку" }));
+    expect(await screen.findByRole("heading", { name: "Заявка BR-000042" })).toBeDefined();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  },
+);
 
 it("does not offer an ambiguous retry for a terminal create rejection", async () => {
   const uuid = vi
@@ -173,7 +270,7 @@ it("does not offer an ambiguous retry for a terminal create rejection", async ()
   fireEvent.change(screen.getByLabelText("Описание"), { target: { value: "Продлить" } });
   fireEvent.click(screen.getByRole("button", { name: "Создать заявку" }));
   expect(
-    await screen.findByText("Сервер отклонил заявку. Проверьте данные и отправьте снова."),
+    await screen.findByText("Сервер отклонил данные заявки. Проверьте поля и отправьте снова."),
   ).toBeDefined();
   expect(screen.queryByRole("button", { name: "Повторить отправку" })).toBeNull();
   expect(screen.getByLabelText("Описание")).toHaveProperty("value", "Продлить");
@@ -264,29 +361,46 @@ it("retains one immutable JSON payload and key across an ambiguous retry and loc
   expect(uuid).toHaveBeenCalledTimes(1);
 });
 
-it("creates once, uploads sequentially, navigates after settlement, and retries only failed files", async () => {
+it("merges complete upload rows, locks retry double clicks, and reconciles an active refetch", async () => {
   vi.stubGlobal("crypto", { randomUUID: vi.fn(() => KEY) });
   let firstUploadDone = false;
-  const calls: string[] = [];
-  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  let secondUploadCount = 0;
+  let resolveRetry!: (response: Response) => void;
+  const calls: Array<{ url: string; method: string }> = [];
+  const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = String(input);
-    calls.push(url);
-    if (url.endsWith("/api/billing/requests") && init?.method === "POST") return json(request);
+    const method = init?.method ?? "GET";
+    calls.push({ url, method });
+    if (url.endsWith("/api/billing/requests") && method === "POST") {
+      return Promise.resolve(json(request));
+    }
     if (url.endsWith(`/api/billing/requests/${REQUEST_ID}/attachments`)) {
       const name = (init?.body as FormData).get("file") as File;
       if (name.name === "first.pdf") {
         firstUploadDone = true;
-        return json({ id: "a1", fileName: name.name, contentType: name.type, byteSize: name.size });
+        return Promise.resolve(json(firstAttachment));
       }
       expect(firstUploadDone).toBe(true);
-      if (calls.filter((item) => item.endsWith("/attachments")).length === 2) {
-        return json({ code: "storage_unavailable" }, 503);
+      secondUploadCount += 1;
+      if (secondUploadCount === 1) {
+        return Promise.resolve(json({ code: "storage_unavailable" }, 503));
       }
-      return json({ id: "a2", fileName: name.name, contentType: name.type, byteSize: name.size });
+      return new Promise<Response>((resolve) => {
+        resolveRetry = resolve;
+      });
     }
-    if (url.endsWith(`/api/billing/requests/${REQUEST_ID}`)) return json(request);
-    throw new Error(`Unexpected ${url}`);
+    if (url.endsWith(`/api/billing/requests/${REQUEST_ID}`)) {
+      return Promise.resolve(
+        json({ ...request, attachments: [firstAttachment, secondAttachment] }),
+      );
+    }
+    if (url.endsWith(`/attachments/${secondAttachment.id}/download`)) {
+      return Promise.resolve(json({ url: "https://signed.example/second.pdf" }));
+    }
+    return Promise.reject(new Error(`Unexpected ${url}`));
   });
+  const open = vi.fn();
+  vi.stubGlobal("open", open);
   vi.stubGlobal("fetch", fetch);
   renderBilling(<CreateRequestPage />, "/billing/requests/new");
   fireEvent.change(screen.getByLabelText("Описание"), { target: { value: "Документы" } });
@@ -300,12 +414,80 @@ it("creates once, uploads sequentially, navigates after settlement, and retries 
   });
   fireEvent.click(screen.getByRole("button", { name: "Создать заявку" }));
   expect(await screen.findByRole("heading", { name: "Заявка BR-000042" })).toBeDefined();
-  expect(screen.getByText("first.pdf: загружен")).toBeDefined();
-  expect(screen.getByText("second.pdf: не загружен")).toBeDefined();
-  fireEvent.click(screen.getByRole("button", { name: "Повторить загрузку second.pdf" }));
-  expect(await screen.findByText("second.pdf: загружен")).toBeDefined();
+  expect(screen.getByRole("button", { name: "Скачать first.pdf" })).toBeDefined();
+  expect(screen.getByText("second.pdf: не загружен — можно повторить")).toBeDefined();
+  const retry = screen.getByRole("button", { name: "Повторить загрузку second.pdf" });
+  retry.click();
+  retry.click();
+  expect(secondUploadCount).toBe(2);
+  expect(await screen.findByText("second.pdf: загружается")).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Повторить загрузку second.pdf" })).toBeNull();
+  resolveRetry(json(secondAttachment));
+  const secondDownload = await screen.findByRole("button", { name: "Скачать second.pdf" });
+  await waitFor(() =>
+    expect(
+      calls.filter(
+        ({ url, method }) =>
+          url.endsWith(`/api/billing/requests/${REQUEST_ID}`) && method === "GET",
+      ),
+    ).toHaveLength(1),
+  );
+  expect(screen.queryByText(/second\.pdf: (загружается|не загружен)/)).toBeNull();
+  expect(screen.getAllByText("second.pdf")).toHaveLength(1);
+  fireEvent.click(secondDownload);
+  await waitFor(() =>
+    expect(open).toHaveBeenCalledWith(
+      "https://signed.example/second.pdf",
+      "_blank",
+      "noopener,noreferrer",
+    ),
+  );
   expect(
-    calls.filter((url) => url.endsWith("/api/billing/requests") && !url.includes(REQUEST_ID)),
+    calls.filter(({ url, method }) => url.endsWith("/api/billing/requests") && method === "POST"),
+  ).toHaveLength(1);
+});
+
+it("classifies initial upload network, 5xx, and 400 failures without recreating the request", async () => {
+  vi.stubGlobal("crypto", { randomUUID: vi.fn(() => KEY) });
+  const attachmentErrors = [
+    new Error("offline"),
+    json({ code: "unavailable" }, 503),
+    json({ code: "invalid_content" }, 400),
+  ];
+  let attachmentIndex = 0;
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/api/billing/requests") && init?.method === "POST") return json(request);
+    if (url.endsWith(`/api/billing/requests/${REQUEST_ID}/attachments`)) {
+      const result = attachmentErrors[attachmentIndex++];
+      if (result instanceof Error) throw result;
+      return result ?? json({ code: "unexpected" }, 500);
+    }
+    throw new Error(`Unexpected ${url}`);
+  });
+  vi.stubGlobal("fetch", fetch);
+  renderBilling(<CreateRequestPage />, "/billing/requests/new");
+  fireEvent.change(screen.getByLabelText("Описание"), { target: { value: "Документы" } });
+  fireEvent.change(screen.getByLabelText("Вложения"), {
+    target: {
+      files: [
+        new File(["one"], "network.txt", { type: "text/plain" }),
+        new File(["two"], "server.txt", { type: "text/plain" }),
+        new File(["three"], "invalid.txt", { type: "text/plain" }),
+      ],
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Создать заявку" }));
+  expect(await screen.findByText("network.txt: не загружен — можно повторить")).toBeDefined();
+  expect(screen.getByText("server.txt: не загружен — можно повторить")).toBeDefined();
+  expect(screen.getByText("invalid.txt: сервер отклонил файл")).toBeDefined();
+  expect(screen.getByRole("button", { name: "Повторить загрузку network.txt" })).toBeDefined();
+  expect(screen.getByRole("button", { name: "Повторить загрузку server.txt" })).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Повторить загрузку invalid.txt" })).toBeNull();
+  expect(
+    fetch.mock.calls.filter(
+      ([url, init]) => String(url).endsWith("/api/billing/requests") && init?.method === "POST",
+    ),
   ).toHaveLength(1);
 });
 

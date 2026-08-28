@@ -653,6 +653,8 @@
         "description": "Structured requests and their history without an external conversation.",
         "loading": "Loading requests",
         "loadError": "Could not load requests",
+        "forbidden": "You do not have access to requests",
+        "notFound": "Request registry not found",
         "empty": "No requests match the selected filters",
         "registry": "Request registry",
         "filters": {
@@ -708,10 +710,13 @@
             },
             "desiredAt": "Enter a real date.",
             "file": {
-              "type": "{{name}}: only PDF, JPEG, and PNG are allowed.",
+              "type": "{{name}}: only PDF, JPEG, PNG, and TXT are allowed.",
               "size": "{{name}}: the file must not exceed 5 MiB."
             },
             "retryable": "The request result could not be confirmed. Your data is saved; retry the same submission.",
+            "forbidden": "Your access to create requests was revoked. Return to the request list.",
+            "validation": "The server rejected the request data. Check the fields and submit again.",
+            "conflict": "This submission key was already used for another request. Submit the form again.",
             "terminal": "The server rejected the request. Check the data and submit it again."
           }
         },
@@ -744,8 +749,9 @@
           "downloadNamed": "Download {{name}}",
           "downloadError": "Could not download the attachment.",
           "uploadResult": {
-            "ready": "{{name}}: uploaded",
-            "failed": "{{name}}: not uploaded"
+            "uploading": "{{name}}: uploading",
+            "failed_retryable": "{{name}}: not uploaded — retry is available",
+            "failed_terminal": "{{name}}: the server rejected this file"
           },
           "retryUploadNamed": "Retry upload {{name}}",
           "history": "Request history",

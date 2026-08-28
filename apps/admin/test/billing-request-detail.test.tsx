@@ -17,6 +17,7 @@ import {
   replyToBillingRequest,
   type BillingRequestQuery,
   type TenantBillingRequestDetail,
+  uploadBillingRequestAttachment,
   useBillingRequest,
 } from "../src/pages/billing/api.js";
 import type * as BillingApi from "../src/pages/billing/api.js";
@@ -127,19 +128,29 @@ function requestQuery(
   };
 }
 
-function renderDetail(canReply = true) {
+function renderDetail(
+  canMutate = true,
+  attachmentUploads: Array<{ file: File; state: string }> = [],
+) {
   return render(
     <QueryClientProvider client={new QueryClient()}>
       <ThemeProvider defaultTheme="light">
         <AccessProvider
           value={{
-            roles: [canReply ? "owner" : "admin"],
-            capabilities: canReply
+            roles: [canMutate ? "owner" : "admin"],
+            capabilities: canMutate
               ? [CABINET_CAPABILITY.BILLING_READ, CABINET_CAPABILITY.BILLING_REQUEST]
               : [CABINET_CAPABILITY.BILLING_READ],
           }}
         >
-          <MemoryRouter initialEntries={[`/billing/requests/${ID}`]}>
+          <MemoryRouter
+            initialEntries={[
+              {
+                pathname: `/billing/requests/${ID}`,
+                state: { attachmentUploads },
+              },
+            ]}
+          >
             <Routes>
               <Route path="/billing/requests/:id" element={<RequestDetailPage />} />
             </Routes>
@@ -155,6 +166,76 @@ afterEach(async () => {
   vi.resetAllMocks();
   vi.unstubAllGlobals();
   await i18n.changeLanguage("ru");
+});
+
+it("keeps a retryable attachment failure textual but non-actionable after capability revocation", () => {
+  vi.mocked(useBillingRequest).mockReturnValue(requestQuery());
+  renderDetail(false, [
+    {
+      file: new File(["plain"], "revoked.txt", { type: "text/plain" }),
+      state: "failed_retryable",
+    },
+  ]);
+  expect(screen.getByText("revoked.txt: не загружен — можно повторить")).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Повторить загрузку revoked.txt" })).toBeNull();
+  expect(uploadBillingRequestAttachment).not.toHaveBeenCalled();
+});
+
+it("uses a synchronous single-flight lock and restores retry after a network failure", async () => {
+  vi.mocked(useBillingRequest).mockReturnValue(requestQuery());
+  let reject!: (reason: unknown) => void;
+  vi.mocked(uploadBillingRequestAttachment).mockImplementationOnce(
+    () =>
+      new Promise((_, fail) => {
+        reject = fail;
+      }),
+  );
+  renderDetail(true, [
+    {
+      file: new File(["plain"], "network.txt", { type: "text/plain" }),
+      state: "failed_retryable",
+    },
+  ]);
+  const retry = screen.getByRole("button", { name: "Повторить загрузку network.txt" });
+  retry.click();
+  retry.click();
+  expect(uploadBillingRequestAttachment).toHaveBeenCalledTimes(1);
+  expect(await screen.findByText("network.txt: загружается")).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Повторить загрузку network.txt" })).toBeNull();
+  reject(new Error("offline"));
+  expect(
+    await screen.findByRole("button", { name: "Повторить загрузку network.txt" }),
+  ).toBeDefined();
+});
+
+it.each([
+  {
+    failure: new ApiRequestError(503, "unavailable", "unavailable"),
+    message: "server.txt: не загружен — можно повторить",
+    retry: true,
+  },
+  {
+    failure: new ApiRequestError(400, "invalid", "invalid_content"),
+    message: "server.txt: сервер отклонил файл",
+    retry: false,
+  },
+])("classifies retry upload failure as $message", async ({ failure, message, retry }) => {
+  vi.mocked(useBillingRequest).mockReturnValue(requestQuery());
+  vi.mocked(uploadBillingRequestAttachment).mockRejectedValueOnce(failure);
+  renderDetail(true, [
+    {
+      file: new File(["plain"], "server.txt", { type: "text/plain" }),
+      state: "failed_retryable",
+    },
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: "Повторить загрузку server.txt" }));
+  expect(await screen.findByText(message)).toBeDefined();
+  if (retry) {
+    expect(screen.getByRole("button", { name: "Повторить загрузку server.txt" })).toBeDefined();
+  } else {
+    expect(screen.queryByRole("button", { name: "Повторить загрузку server.txt" })).toBeNull();
+  }
+  expect(uploadBillingRequestAttachment).toHaveBeenCalledTimes(1);
 });
 
 it("renders exact request fields, links, attachment states, and chronological non-chat events", () => {

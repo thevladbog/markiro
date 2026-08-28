@@ -1,6 +1,6 @@
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 
-import { apiFetch } from "../../api/client.js";
+import { ApiRequestError, apiFetch } from "../../api/client.js";
 
 export type BillingAccess = "managed" | "read_only" | "unmanaged";
 export type BillingLimitKey = "lines" | "stations" | "kiosks" | "cabinetUsers";
@@ -247,6 +247,34 @@ export function uploadBillingRequestAttachment(requestId: string, file: File) {
     method: "POST",
     body,
   });
+}
+
+export function isRetryableApiError(cause: unknown): boolean {
+  return !(cause instanceof ApiRequestError) || cause.status >= 500;
+}
+
+export function mergeBillingRequestAttachment(
+  queryClient: QueryClient,
+  requestId: string,
+  attachment: TenantBillingRequestAttachment,
+): void {
+  queryClient.setQueryData<TenantBillingRequestDetail>(
+    tenantBillingKeys.request(requestId),
+    (current) =>
+      current
+        ? {
+            ...current,
+            attachments: [
+              ...current.attachments.filter((item) => item.id !== attachment.id),
+              attachment,
+            ].sort(
+              (left, right) =>
+                Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+                left.id.localeCompare(right.id),
+            ),
+          }
+        : current,
+  );
 }
 
 export function downloadRequestAttachment(requestId: string, attachmentId: string) {

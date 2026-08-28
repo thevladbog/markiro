@@ -29,7 +29,12 @@ export interface BillingRequestContext {
 }
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
-const ALLOWED_ATTACHMENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+const ALLOWED_ATTACHMENT_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "text/plain",
+]);
 const LIMIT_CONTEXT_IDS = new Set(["lines", "stations", "kiosks", "cabinetUsers"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

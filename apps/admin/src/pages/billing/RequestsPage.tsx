@@ -4,6 +4,7 @@ import { Link } from "react-router";
 
 import { Button, EmptyState, Select, Spinner, Table } from "@markiro/ui";
 
+import { ApiRequestError } from "../../api/client.js";
 import { BillingStatusChip } from "./BillingSections.js";
 import {
   type BillingRequestFilters,
@@ -96,10 +97,22 @@ export function RequestsPage() {
   const query = useBillingRequests(filters);
   if (query.isPending) return <Spinner label={t("pages.billing.requests.loading")} />;
   if (query.isError) {
+    const status = query.error instanceof ApiRequestError ? query.error.status : 0;
+    const terminal = status === 403 || status === 404;
     return (
       <EmptyState
-        title={t("pages.billing.requests.loadError")}
-        action={<Button onClick={() => void query.refetch()}>{t("pages.billing.retry")}</Button>}
+        title={
+          status === 403
+            ? t("pages.billing.requests.forbidden")
+            : status === 404
+              ? t("pages.billing.requests.notFound")
+              : t("pages.billing.requests.loadError")
+        }
+        action={
+          terminal ? undefined : (
+            <Button onClick={() => void query.refetch()}>{t("pages.billing.retry")}</Button>
+          )
+        }
       />
     );
   }

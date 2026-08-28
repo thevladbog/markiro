@@ -9,7 +9,10 @@ import { ApiRequestError } from "../../api/client.js";
 import {
   createBillingRequest,
   invalidateTenantBillingRequests,
+  isRetryableApiError,
+  mergeBillingRequestAttachment,
   tenantBillingKeys,
+  type TenantBillingRequestDetail,
   uploadBillingRequestAttachment,
 } from "./api.js";
 import {
@@ -25,16 +28,23 @@ import {
 
 export interface AttachmentUploadResult {
   file: File;
-  state: "ready" | "failed";
+  state: "uploading" | "failed_retryable" | "failed_terminal";
 }
+
+type CreateRequestError = "retryable" | "forbidden" | "validation" | "conflict" | "terminal";
 
 interface CreateAttempt {
   payload: Parameters<typeof createBillingRequest>[0];
   key: string;
 }
 
-function retryable(cause: unknown): boolean {
-  return !(cause instanceof ApiRequestError) || cause.status >= 500;
+function createError(cause: unknown): CreateRequestError {
+  if (isRetryableApiError(cause)) return "retryable";
+  if (!(cause instanceof ApiRequestError)) return "terminal";
+  if (cause.status === 403) return "forbidden";
+  if (cause.status === 400) return "validation";
+  if (cause.status === 409) return "conflict";
+  return "terminal";
 }
 
 export function CreateRequestPage() {
@@ -54,7 +64,7 @@ export function CreateRequestPage() {
     files: [],
   });
   const [errors, setErrors] = useState<BillingRequestFormErrors>({ files: [] });
-  const [actionError, setActionError] = useState<"retryable" | "terminal" | null>(null);
+  const [actionError, setActionError] = useState<CreateRequestError | null>(null);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
   const attempt = useRef<CreateAttempt | null>(null);
@@ -97,31 +107,38 @@ export function CreateRequestPage() {
         try {
           created = await createBillingRequest(next.payload, next.key);
         } catch (cause) {
-          if (retryable(cause)) setActionError("retryable");
-          else {
+          const kind = createError(cause);
+          setActionError(kind);
+          if (kind !== "retryable") {
             attempt.current = null;
-            setActionError("terminal");
           }
           return;
         }
         attempt.current = null;
+        client.setQueryData(tenantBillingKeys.request(created.id), created);
         const attachmentUploads: AttachmentUploadResult[] = [];
         for (const file of values.files) {
           setUploading(file.name);
           try {
-            await uploadBillingRequestAttachment(created.id, file);
-            attachmentUploads.push({ file, state: "ready" });
-          } catch {
-            attachmentUploads.push({ file, state: "failed" });
+            const attachment = await uploadBillingRequestAttachment(created.id, file);
+            mergeBillingRequestAttachment(client, created.id, attachment);
+          } catch (cause) {
+            attachmentUploads.push({
+              file,
+              state: isRetryableApiError(cause) ? "failed_retryable" : "failed_terminal",
+            });
           }
         }
         setUploading(null);
+        const snapshot =
+          client.getQueryData<TenantBillingRequestDetail>(tenantBillingKeys.request(created.id)) ??
+          created;
         try {
           await invalidateTenantBillingRequests(client, created.id);
         } catch {
           // The request already exists. Normal query refresh remains available on detail.
         }
-        client.setQueryData(tenantBillingKeys.request(created.id), created);
+        client.setQueryData(tenantBillingKeys.request(created.id), snapshot);
         void navigate(`/billing/requests/${created.id}`, { state: { attachmentUploads } });
       } finally {
         lock.current = false;
@@ -213,7 +230,7 @@ export function CreateRequestPage() {
             label={t("pages.billing.requests.create.files")}
             type="file"
             multiple
-            accept="application/pdf,image/jpeg,image/png"
+            accept="application/pdf,image/jpeg,image/png,text/plain"
             disabled={busy}
             onChange={(event) => update({ ...values, files: Array.from(event.target.files ?? []) })}
           />

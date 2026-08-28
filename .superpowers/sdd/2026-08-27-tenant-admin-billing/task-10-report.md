@@ -13,7 +13,7 @@ form model `{ type, description, desiredAt, contextType, contextId, files }`.
 It trims and validates descriptions, validates optional civil dates before
 serializing them as API datetimes, rejects invalid URL context rather than
 leaking it into the payload, and honestly preserves Task 8 capacity context.
-Client attachment checks accept PDF, JPEG, and PNG up to 5 MiB; server errors
+Client attachment checks accept PDF, JPEG, PNG, and TXT up to 5 MiB; server errors
 remain authoritative.
 
 Creation is deterministic and two-phase. One immutable JSON payload and UUID
@@ -104,3 +104,57 @@ the automated DOM tests do not claim visual or external-system confirmation.
 
 The scoped commit SHA is reported in the task handoff because a commit cannot
 contain its own final SHA.
+
+## Fix Round 1 / 5
+
+### Reviewer findings resolved
+
+- Client validation and the file input now match Task 5 exactly: PDF, PNG,
+  JPEG, and UTF-8 plain-text candidates are accepted up to the exact 5 MiB
+  boundary. Content inspection and final authority remain server-side.
+- Every local upload row uses an explicit `uploading`, `failed_retryable`, or
+  `failed_terminal` state. Network and 5xx failures retain a retry; all known
+  4xx failures, including content rejection, are terminal. A synchronous
+  per-file lock prevents a rapid double click from issuing a duplicate POST,
+  and retry controls are absent while uploading or after a terminal failure.
+- Attachment retry controls require the actor's current `BILLING_REQUEST`
+  capability. A route-state failure remains readable after capability
+  revocation but exposes no mutation control; the handler also checks the
+  capability before calling the API. Server authorization remains authoritative.
+- Both initial uploads and retries retain the complete Task 5 attachment DTO.
+  Successful rows are de-duplicated by server id into the exact detail cache,
+  transient rows are removed, and an active authoritative refetch reconciles
+  without duplicate display. The returned row is immediately downloadable
+  through its own signed-URL lookup. No server attachment state or storage key
+  was invented.
+- Request-list errors distinguish non-retryable 403 and 404 responses from
+  retryable network/5xx failures. Request creation distinguishes revoked 403,
+  validation 400, idempotency/conflict 409, other terminal 4xx, and ambiguous
+  network/5xx results. Only the ambiguous branch retains the immutable
+  payload/key and a live retry action.
+
+### RED / GREEN
+
+- **RED:** the expanded two-file request run executed 29 tests: **12 failed and
+  17 existing tests passed**. The failures were the missing TXT contract,
+  list/create status classification, local upload state/capability handling,
+  per-file synchronous lock, complete attachment reconciliation, and immediate
+  signed download.
+- **GREEN:** focused Task 10 plus i18n now passes **3 files / 33 tests**.
+- **Broader billing:** overview, subscription, invoice, document, offer, Task 9
+  request-boundary, Task 10 request, detail, and i18n suites pass **9 files / 76
+  tests**. The separate routing file still cannot collect because Vite denies
+  the inherited parent-checkout IBM Plex Mono WOFF path before test execution.
+
+### Fix-round verification
+
+- PASS — current-worktree admin TypeScript no-emit.
+- PASS — full admin ESLint with 0 errors; the same 5 unrelated hook-dependency
+  warnings remain in boxes/conflicts.
+- PASS — admin production build; the existing large-chunk advisory remains.
+- PASS — scoped Prettier and `git diff --check` after final review.
+- Temporary TypeScript and Vite alias configs were removed. Existing untracked
+  workspace `node_modules` symlinks were preserved and remain unstaged.
+
+No browser, responsive screenshot, live API, or object-storage verification was
+performed; Task 13 remains the browser and live-storage gate.

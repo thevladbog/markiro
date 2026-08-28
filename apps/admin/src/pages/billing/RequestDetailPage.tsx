@@ -14,6 +14,8 @@ import type { AttachmentUploadResult } from "./CreateRequestPage.js";
 import {
   downloadRequestAttachment,
   invalidateTenantBillingRequests,
+  isRetryableApiError,
+  mergeBillingRequestAttachment,
   replyToBillingRequest,
   type TenantBillingRequestEvent,
   type TenantBillingRequestLink,
@@ -25,6 +27,24 @@ import { formatBillingDate, formatBillingDateTime } from "./format.js";
 interface ReplyAttempt {
   body: string;
   key: string;
+}
+
+function isAttachmentUploadState(value: unknown): value is AttachmentUploadResult["state"] {
+  return value === "uploading" || value === "failed_retryable" || value === "failed_terminal";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function attachmentUploadsFromState(state: unknown): AttachmentUploadResult[] {
+  if (!state || typeof state !== "object" || !("attachmentUploads" in state)) return [];
+  const uploads = state.attachmentUploads;
+  if (!Array.isArray(uploads)) return [];
+  return uploads.filter(
+    (item): item is AttachmentUploadResult =>
+      isRecord(item) && item.file instanceof File && isAttachmentUploadState(item.state),
+  );
 }
 
 function eventBody(event: TenantBillingRequestEvent, t: TFunction) {
@@ -77,10 +97,10 @@ export function RequestDetailPage() {
   const client = useQueryClient();
   const location = useLocation();
   const query = useBillingRequest(id);
-  const canReply = useCan(CABINET_CAPABILITY.BILLING_REQUEST);
-  const initialUploads = (location.state as { attachmentUploads?: AttachmentUploadResult[] } | null)
-    ?.attachmentUploads;
-  const [uploads, setUploads] = useState<AttachmentUploadResult[]>(initialUploads ?? []);
+  const canMutate = useCan(CABINET_CAPABILITY.BILLING_REQUEST);
+  const [uploads, setUploads] = useState<AttachmentUploadResult[]>(() =>
+    attachmentUploadsFromState(location.state),
+  );
   const [downloadBusy, setDownloadBusy] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState(false);
   const [reply, setReply] = useState("");
@@ -90,6 +110,7 @@ export function RequestDetailPage() {
   const [replyBusy, setReplyBusy] = useState(false);
   const attempt = useRef<ReplyAttempt | null>(null);
   const replyLock = useRef(false);
+  const uploadLocks = useRef(new Set<File>());
 
   if (query.isPending) return <Spinner label={t("pages.billing.requests.detail.loading")} />;
   if (query.isError) {
@@ -131,22 +152,45 @@ export function RequestDetailPage() {
   const retryUpload = (index: number) =>
     void (async () => {
       const item = uploads[index];
-      if (!item || item.state !== "failed") return;
+      if (
+        !canMutate ||
+        !item ||
+        item.state !== "failed_retryable" ||
+        uploadLocks.current.has(item.file)
+      ) {
+        return;
+      }
+      uploadLocks.current.add(item.file);
       setUploads((current) =>
         current.map((upload, currentIndex) =>
-          currentIndex === index ? { ...upload, state: "failed" } : upload,
+          currentIndex === index ? { ...upload, state: "uploading" } : upload,
         ),
       );
       try {
-        await uploadBillingRequestAttachment(request.id, item.file);
-        setUploads((current) =>
-          current.map((upload, currentIndex) =>
-            currentIndex === index ? { ...upload, state: "ready" } : upload,
-          ),
-        );
-        await invalidateTenantBillingRequests(client, request.id);
-      } catch {
-        // Keep the exact file and request identity available for another retry.
+        try {
+          const attachment = await uploadBillingRequestAttachment(request.id, item.file);
+          mergeBillingRequestAttachment(client, request.id, attachment);
+          setUploads((current) => current.filter((upload) => upload.file !== item.file));
+        } catch (cause) {
+          setUploads((current) =>
+            current.map((upload) =>
+              upload.file === item.file
+                ? {
+                    ...upload,
+                    state: isRetryableApiError(cause) ? "failed_retryable" : "failed_terminal",
+                  }
+                : upload,
+            ),
+          );
+          return;
+        }
+        try {
+          await invalidateTenantBillingRequests(client, request.id);
+        } catch {
+          // The complete returned row is already reconciled into the exact detail cache.
+        }
+      } finally {
+        uploadLocks.current.delete(item.file);
       }
     })();
 
@@ -290,7 +334,7 @@ export function RequestDetailPage() {
                     name: upload.file.name,
                   })}
                 </span>
-                {upload.state === "failed" ? (
+                {canMutate && upload.state === "failed_retryable" ? (
                   <Button
                     size="compact"
                     variant="secondary"
@@ -326,7 +370,7 @@ export function RequestDetailPage() {
           ))}
         </ol>
       </Card>
-      {canReply && request.status === "clarification_required" ? (
+      {canMutate && request.status === "clarification_required" ? (
         <Card title={t("pages.billing.requests.detail.replyTitle")} titleAs="h3">
           {replyError ? (
             <Alert tone="error">
