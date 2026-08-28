@@ -66,6 +66,13 @@ pub struct Runtime {
     secrets: Arc<dyn SecretStore>,
     app_version: String,
     journal: Mutex<Journal>,
+    /// Built once and reused for every True API round trip. `Client::new()`
+    /// panics if the TLS backend or resolver cannot initialise, which would
+    /// abort the agent task with no journal entry and no UI signal; building
+    /// it here, with the fallible builder form, keeps that failure inside
+    /// `SignerError` and lets the client be reused across polls instead of
+    /// reconnecting every task.
+    http: reqwest::Client,
 }
 
 impl Runtime {
@@ -74,14 +81,18 @@ impl Runtime {
         signer: Arc<dyn Signer>,
         secrets: Arc<dyn SecretStore>,
         app_version: String,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, SignerError> {
+        let http = reqwest::Client::builder()
+            .build()
+            .map_err(|e| SignerError::Network(e.to_string()))?;
+        Ok(Self {
             config_dir,
             signer,
             secrets,
             app_version,
             journal: Mutex::new(Journal::default()),
-        }
+            http,
+        })
     }
 
     pub fn config(&self) -> Result<AgentConfig, SignerError> {
@@ -180,8 +191,16 @@ impl Runtime {
                     // The blob belongs to another user or profile: pairing again
                     // is the only recovery.
                     self.note("Stored credential is unreadable", Some(&error.to_string()));
-                    let _ = self.unpair();
+                    if let Err(unpair_error) = self.unpair() {
+                        // `unpair` failing (read-only profile, full disk) means
+                        // `is_paired()` still reports true, so without the
+                        // backoff below this branch would busy-spin, firing
+                        // `on_change` at full speed.
+                        self.note("Could not clear the local credential", Some(&unpair_error.to_string()));
+                    }
                     on_change(self.status());
+                    tokio::time::sleep(backoff_for(failures)).await;
+                    failures = failures.saturating_add(1);
                     continue;
                 }
             };
@@ -207,8 +226,17 @@ impl Runtime {
                 }
                 Err(SignerError::Revoked) => {
                     self.note("The cabinet revoked this agent", None);
-                    let _ = self.unpair();
+                    if let Err(unpair_error) = self.unpair() {
+                        // Same busy-spin hazard as above: if the write fails,
+                        // `is_paired()` stays true and, with no throttle here,
+                        // the loop would hammer the cloud with 401s (the auth
+                        // guard rejects before the long-poll hold, so polling
+                        // itself provides no natural delay).
+                        self.note("Could not clear the local credential", Some(&unpair_error.to_string()));
+                    }
                     on_change(self.status());
+                    tokio::time::sleep(backoff_for(failures)).await;
+                    failures = failures.saturating_add(1);
                 }
                 Err(error) => {
                     self.note("Poll failed", Some(&error.to_string()));
@@ -242,14 +270,44 @@ impl Runtime {
                 SignerErrorCode::CryptoCertNotFound,
                 "no certificate has been selected in the agent",
             );
-            let _ = client.fail(secret, &task.id, &body).await;
+            if let Err(error) = client.fail(secret, &task.id, &body).await {
+                self.note_report_failure("Could not report the missing certificate", &error);
+            }
             self.note("No certificate selected", None);
             return;
         };
 
-        let http = reqwest::Client::new();
+        // Look up the certificate's report metadata *before* the (comparatively
+        // slow) True API round trip below, and never swallow a failure here:
+        // these fields are `skip_serializing_if = "Option::is_none"` and the
+        // cloud writes them unconditionally on every report, so silently
+        // sending `None` would null out the operator-facing certificate
+        // metadata in the cabinet on the success path -- exactly where the
+        // certificate has just demonstrably worked. If enumeration fails or
+        // the selected thumbprint is gone, journal it and keep going with
+        // whatever was found; the sign itself does not depend on this lookup.
+        let certificate = match self.signer.list_certificates() {
+            Ok(certs) => {
+                let found = certs.into_iter().find(|c| c.thumbprint == thumbprint);
+                if found.is_none() {
+                    self.note(
+                        "Selected certificate is missing from the certificate list",
+                        Some(&thumbprint),
+                    );
+                }
+                found
+            }
+            Err(error) => {
+                self.note(
+                    "Could not enumerate certificates for report metadata",
+                    Some(&error.to_string()),
+                );
+                None
+            }
+        };
+
         let outcome = obtain_token(
-            &http,
+            &self.http,
             &task.payload.true_api_base_url,
             task.payload.inn.as_deref(),
             &thumbprint,
@@ -259,13 +317,6 @@ impl Runtime {
 
         match outcome {
             Ok(token) => {
-                let certificate = self
-                    .signer
-                    .list_certificates()
-                    .ok()
-                    .and_then(|certs| certs.into_iter().find(|c| c.thumbprint == thumbprint));
-                // Send every cert field on every report: the cloud writes them
-                // unconditionally, so omitting one nulls a stored value.
                 let body = TaskComplete {
                     token: token.token,
                     expires_at: token.expires_at.clone(),
@@ -274,27 +325,68 @@ impl Runtime {
                     cert_inn: certificate.as_ref().and_then(|c| c.inn.clone()),
                     cert_not_after: certificate.as_ref().map(|c| c.not_after.clone()),
                 };
-                match client.complete(secret, &task.id, &body).await {
+
+                // The PIN prompt, container access and True API round trip have
+                // already succeeded by this point; a single transient failure
+                // here must not throw that work away and leave the cloud
+                // sitting on the claim for its full 30-minute deadline, so
+                // retry a bounded number of times before giving up.
+                const COMPLETE_ATTEMPTS: u32 = 3;
+                let mut attempt = 0u32;
+                let result = loop {
+                    let outcome = client.complete(secret, &task.id, &body).await;
+                    attempt += 1;
+                    let done = matches!(outcome, Ok(()) | Err(SignerError::Revoked))
+                        || attempt >= COMPLETE_ATTEMPTS;
+                    if done {
+                        break outcome;
+                    }
+                    tokio::time::sleep(backoff_for(attempt - 1)).await;
+                };
+
+                match result {
                     Ok(()) => {
                         self.note("True API token delivered", None);
                         let mut status = self.status();
                         status.last_token_expires_at = Some(token.expires_at);
                         on_change(status);
                     }
-                    Err(error) => self.note("Could not report the token", Some(&error.to_string())),
+                    Err(error) => {
+                        self.note_report_failure("Could not report the token", &error);
+                        let mut status = self.status();
+                        status.phase = AgentPhase::Degraded;
+                        status.last_error = Some(error.to_string());
+                        on_change(status);
+                    }
                 }
             }
             Err(error) => {
                 self.note("Signing failed", Some(&error.to_string()));
                 if let Some(code) = classify(&error) {
                     let body = TaskFail::new(code, error.to_string());
-                    let _ = client.fail(secret, &task.id, &body).await;
+                    if let Err(fail_error) = client.fail(secret, &task.id, &body).await {
+                        self.note_report_failure("Could not report the failure", &fail_error);
+                    }
                 }
                 let mut status = self.status();
                 status.phase = AgentPhase::Degraded;
                 status.last_error = Some(error.to_string());
                 on_change(status);
             }
+        }
+    }
+
+    /// Journals a failed report call (`complete`/`fail`), distinguishing a
+    /// revocation from any other failure: a 401 here means the cabinet revoked
+    /// this agent mid-task, which is a materially different situation from a
+    /// generic report failure and was previously indistinguishable in the
+    /// journal (or, for `fail`, produced no entry at all). The actual unpair
+    /// still happens on the next poll -- this only makes the entry legible.
+    fn note_report_failure(&self, message: &str, error: &SignerError) {
+        if matches!(error, SignerError::Revoked) {
+            self.note(&format!("{message}: the cabinet revoked this agent"), None);
+        } else {
+            self.note(message, Some(&error.to_string()));
         }
     }
 }

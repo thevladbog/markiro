@@ -25,18 +25,39 @@ impl JournalEntry {
 
 /// Replaces JWT-shaped and long base64-ish runs, which is what a leaked token
 /// or agent secret would look like in an error string.
+///
+/// Scans for qualifying runs *within* the string rather than splitting on
+/// whitespace: the only untrusted text that reaches the journal is
+/// `error.to_string()`, and `SignerError::TrueApi` embeds up to 1000 chars of
+/// the raw True API JSON response body, where a token sits between
+/// punctuation -- e.g. `{"token":"eyJhbGciOiJIUzI1NiJ9.abc.def"}` -- not
+/// between spaces. Any character that cannot appear in a base64url/JWT token
+/// (including `{}"',:;()[]` and whitespace) ends the current run.
 fn redact(detail: &str) -> String {
-    let mut out = String::with_capacity(detail.len());
-    for word in detail.split_whitespace() {
-        let looks_secret = word.len() >= 24
-            && word
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+' | '/' | '='));
-        if !out.is_empty() {
-            out.push(' ');
+    const MIN_LEN: usize = 24;
+
+    fn flush(run: &mut String, out: &mut String) {
+        if run.len() >= MIN_LEN {
+            out.push_str("[redacted]");
+        } else {
+            out.push_str(run);
         }
-        out.push_str(if looks_secret { "[redacted]" } else { word });
+        run.clear();
     }
+
+    let mut out = String::with_capacity(detail.len());
+    let mut run = String::new();
+    for c in detail.chars() {
+        let is_token_char =
+            c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+' | '/' | '=');
+        if is_token_char {
+            run.push(c);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut run, &mut out);
     out
 }
 
@@ -78,6 +99,24 @@ mod tests {
         let entry = JournalEntry::new("token refreshed", Some("Bearer eyJhbGciOiJIUzI1NiJ9.abc.def"));
         assert!(!entry.detail.as_deref().unwrap_or_default().contains("eyJ"));
         assert!(entry.detail.as_deref().unwrap_or_default().contains("[redacted]"));
+    }
+
+    #[test]
+    fn redacts_a_token_embedded_in_a_raw_true_api_json_body() {
+        // This is the shape `SignerError::TrueApi` actually produces: the raw
+        // response body, punctuation and all -- not whitespace-delimited
+        // words. A prior version only split on whitespace and let this
+        // through verbatim.
+        let entry = JournalEntry::new(
+            "True API rejected the request",
+            Some(r#"{"token":"eyJhbGciOiJIUzI1NiJ9.abc.def","status":"ok"}"#),
+        );
+        let detail = entry.detail.as_deref().unwrap_or_default();
+        assert!(!detail.contains("eyJhbGciOiJIUzI1NiJ9.abc.def"));
+        assert!(detail.contains("[redacted]"));
+        // Surrounding structure and short fields survive untouched.
+        assert!(detail.contains(r#""token":"#));
+        assert!(detail.contains(r#""status":"ok""#));
     }
 
     #[test]
