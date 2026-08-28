@@ -72,6 +72,22 @@ const subscription = {
   ],
 } as const;
 
+/** Task 4's future-only read model is read-only and has no current subscription. */
+const scheduledOnlySubscription = {
+  ...subscription,
+  subscription: null,
+  scheduledSubscription: {
+    id: "00000000-0000-4000-8000-000000000008",
+    planVersionId: "00000000-0000-4000-8000-000000000009",
+    status: "scheduled",
+    startsAt: "2026-08-28T12:00:00.000Z",
+    endsAt: "2026-09-28T12:00:00.000Z",
+    planName: "Будущий тариф",
+    billingPeriod: "month",
+    price: "1000.00",
+  },
+} as const;
+
 function renderSubscription() {
   return render(
     <ThemeProvider defaultTheme="light">
@@ -142,4 +158,21 @@ it("renders subscription loading, failure, and unmanaged empty states", () => {
   } as never);
   renderSubscription();
   expect(screen.getByText("Подписка не назначена")).toBeDefined();
+});
+
+it("renders the Task 4 scheduled-only projection instead of treating it as unmanaged", () => {
+  vi.mocked(useBillingSubscription).mockReturnValue({
+    data: scheduledOnlySubscription,
+    isPending: false,
+    isError: false,
+  } as never);
+
+  renderSubscription();
+
+  expect(screen.getByRole("heading", { name: "Следующее изменение", level: 2 })).toBeDefined();
+  expect(screen.getByText("Будущий тариф")).toBeDefined();
+  expect(screen.getByText("Запланирована")).toBeDefined();
+  expect(screen.getByText("Только чтение")).toBeDefined();
+  expect(screen.queryByRole("heading", { name: "Текущая подписка", level: 2 })).toBeNull();
+  expect(screen.queryByText("Подписка не назначена")).toBeNull();
 });

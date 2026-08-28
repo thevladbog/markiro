@@ -71,3 +71,43 @@ routes and component tests were migrated.
 ## Commit
 
 `feat(admin): show tenant subscription and billing overview`
+
+## Fix Round 1 / 5
+
+### Findings resolved
+
+- A Task 4 future-only projection has `access: "read_only"`,
+  `subscription: null`, and a `scheduledSubscription`. The pages now use only
+  `access === "unmanaged"` for the unmanaged state. Overview labels this as a
+  scheduled subscription; detail omits the nonexistent current card and shows
+  the scheduled snapshot with its server-provided status, dates, period, and
+  price. No current plan or entitlement state is synthesized by the client.
+- Overview restores the compact desktop hierarchy: a two-card top grid for the
+  subscription and actionable offer, a full-width limit card containing four
+  columns at wide widths, and a second two-card row for operations and the
+  active request. Limits collapse to two columns at 960px and one at 640px.
+
+### RED / GREEN
+
+- **RED:** new scheduled-only component fixtures rendered the unmanaged empty
+  state, and DOM assertions found no overview top/lower grid or full-width
+  four-limit panel.
+- **GREEN:** focused billing overview/subscription/i18n Vitest passed **3 files
+  / 13 tests**. The future-only fixtures use the Task 4 contract shape,
+  including read-only access, null current subscription, scheduled status, and
+  the `2026-08-28T12:00:00.000Z` start boundary.
+
+### Verification and limits
+
+- PASS — focused Vitest plus i18n: 3 files / 13 tests.
+- PASS — TypeScript check, ESLint with 0 errors (the same 5 unrelated warnings),
+  production build with its existing chunk advisory, scoped Prettier, and diff
+  check. Typecheck/lint/build used the temporary worktree-domain link and
+  restored the original shared dependency link.
+- The previously documented routing-test Vite font-path denial and all browser,
+  responsive screenshot, live API, and external workflow limits remain. Task 13
+  is still the browser/visual gate.
+
+### Fix commit
+
+`fix(admin): render scheduled-only billing subscriptions`

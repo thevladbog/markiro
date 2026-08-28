@@ -455,6 +455,7 @@
         "unmanagedTitle": "Подписка не назначена",
         "unmanagedHint": "Обратитесь к администратору сервиса, чтобы подключить тариф.",
         "currentSubscription": "Текущая подписка",
+        "scheduledOnlySubscription": "Запланированная подписка",
         "currentOffer": "Текущее предложение",
         "offerWithoutNumber": "Коммерческое предложение",
         "openOffer": "Открыть предложение",

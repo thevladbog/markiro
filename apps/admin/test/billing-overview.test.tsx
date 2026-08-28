@@ -69,6 +69,25 @@ const overview = {
   attentionCount: 2,
 } as const;
 
+/** Matches Task 4's future-only projection: read-only access and no current subscription. */
+const scheduledOnlyOverview = {
+  ...overview,
+  access: "read_only",
+  subscription: null,
+  scheduledSubscription: {
+    id: "00000000-0000-4000-8000-000000000008",
+    planVersionId: "00000000-0000-4000-8000-000000000009",
+    status: "scheduled",
+    startsAt: "2026-08-28T12:00:00.000Z",
+    endsAt: "2026-09-28T12:00:00.000Z",
+    planName: "Будущий тариф",
+    billingPeriod: "month",
+    price: "1000.00",
+  },
+  actionableOffer: null,
+  activeRequest: null,
+} as const;
+
 function renderOverview() {
   return render(
     <ThemeProvider defaultTheme="light">
@@ -110,6 +129,13 @@ it("shows the current subscription, actionable offer, recent operations, and act
   expect(screen.getByRole("link", { name: "Открыть заявку" }).getAttribute("href")).toBe(
     "/billing/requests/00000000-0000-4000-8000-000000000004",
   );
+  const overviewRoot = screen.getByLabelText("Обзор");
+  expect(overviewRoot.querySelector(".mk-billing-overview__top")).not.toBeNull();
+  expect(overviewRoot.querySelectorAll(".mk-billing-overview__top .mk-card")).toHaveLength(2);
+  expect(
+    overviewRoot.querySelectorAll(".mk-billing-overview__limits .mk-billing-limit-card"),
+  ).toHaveLength(4);
+  expect(overviewRoot.querySelector(".mk-billing-overview__lower")).not.toBeNull();
 });
 
 it("labels approaching and reached limits and pre-fills a contextual capacity request", () => {
@@ -162,6 +188,23 @@ it("explains that an unmanaged tenant has no current subscription", () => {
 
   renderOverview();
   expect(screen.getByText("Подписка не назначена")).toBeDefined();
+});
+
+it("shows the Task 4 scheduled-only read-only projection without inventing a current plan", () => {
+  vi.mocked(useBillingOverview).mockReturnValue({
+    data: scheduledOnlyOverview,
+    isPending: false,
+    isError: false,
+  } as never);
+
+  renderOverview();
+
+  expect(screen.getByRole("heading", { name: "Запланированная подписка", level: 2 })).toBeDefined();
+  expect(screen.getByText("Будущий тариф")).toBeDefined();
+  expect(screen.getByText("Запланирована")).toBeDefined();
+  expect(screen.getByText("Только чтение")).toBeDefined();
+  expect(screen.queryByRole("heading", { name: "Текущая подписка", level: 2 })).toBeNull();
+  expect(document.querySelector(".mk-billing-money")?.textContent).toContain("1");
 });
 
 it("keeps invalid money and date input explicit at the billing formatting boundary", () => {

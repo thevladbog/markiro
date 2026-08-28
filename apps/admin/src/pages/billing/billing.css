@@ -119,6 +119,13 @@
   gap: var(--sp-4);
 }
 
+.mk-billing-overview__top,
+.mk-billing-overview__lower {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
 .mk-billing-state {
   display: flex;
   min-height: 160px;
@@ -202,7 +209,7 @@
 }
 
 .mk-billing-limit-list {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .mk-billing-limit-card {
@@ -290,6 +297,12 @@
   gap: var(--sp-4);
 }
 
+@media (max-width: 960px) {
+  .mk-billing-limit-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 640px) {
   .mk-billing-page .mk-page-header {
     align-items: flex-start;
@@ -302,6 +315,11 @@
   }
 
   .mk-billing-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mk-billing-overview__top,
+  .mk-billing-overview__lower {
     grid-template-columns: minmax(0, 1fr);
   }
 

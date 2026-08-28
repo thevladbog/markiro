@@ -455,6 +455,7 @@
         "unmanagedTitle": "No subscription assigned",
         "unmanagedHint": "Contact the service administrator to connect a plan.",
         "currentSubscription": "Current subscription",
+        "scheduledOnlySubscription": "Scheduled subscription",
         "currentOffer": "Current offer",
         "offerWithoutNumber": "Commercial offer",
         "openOffer": "Open offer",

@@ -20,7 +20,7 @@ export function BillingSubscriptionPage() {
         onRetry={() => void query.refetch()}
       />
     );
-  if (query.data.access === "unmanaged" || !query.data.subscription) {
+  if (query.data.access === "unmanaged") {
     return (
       <EmptyState
         title={t("pages.billing.subscription.unmanagedTitle")}
@@ -31,9 +31,11 @@ export function BillingSubscriptionPage() {
 
   return (
     <section className="mk-billing-subscription" aria-label={t("pages.billing.tabs.subscription")}>
-      <Card title={t("pages.billing.subscription.current")} titleAs="h2">
-        <SubscriptionSummary subscription={query.data.subscription} access={query.data.access} />
-      </Card>
+      {query.data.subscription ? (
+        <Card title={t("pages.billing.subscription.current")} titleAs="h2">
+          <SubscriptionSummary subscription={query.data.subscription} access={query.data.access} />
+        </Card>
+      ) : null}
 
       {query.data.scheduledSubscription ? (
         <Card title={t("pages.billing.subscription.scheduled")} titleAs="h2">
