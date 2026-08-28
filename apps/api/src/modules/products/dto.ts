@@ -144,6 +144,7 @@ export const productOpenApiSchema: SchemaObject = {
     "boxCapacity",
     "palletCapacity",
     "status",
+    "archived",
     "defaultCounterpartyId",
     "unitPrice",
     "egaisCode",
@@ -164,6 +165,11 @@ export const productOpenApiSchema: SchemaObject = {
     boxCapacity: { type: "integer", minimum: 1, nullable: true },
     palletCapacity: { type: "integer", minimum: 1, nullable: true },
     status: { type: "string", enum: [...PRODUCT_STATUSES] },
+    archived: {
+      type: "boolean",
+      description:
+        'Operator-set "do not use" flag; archived products are hidden from selection surfaces except inventory.',
+    },
     defaultCounterpartyId: { ...uuidSchema, nullable: true },
     unitPrice: { type: "string", pattern: "^\\d+(\\.\\d{1,2})?$", nullable: true },
     egaisCode: { type: "string", nullable: true },
