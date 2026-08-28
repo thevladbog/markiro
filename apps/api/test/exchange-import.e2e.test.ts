@@ -3,7 +3,7 @@ import express from "express";
 import request from "supertest";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import { schema, type Db } from "@markiro/db";
 import { and, eq, like } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
@@ -16,6 +16,7 @@ import { IMPORT_BATCH_SIZE } from "../src/modules/exchange/exchange.controller";
 import { ExchangeSessionService } from "../src/modules/exchange/exchange-session.service";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
+import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 
 /** A minimal `<Каталог><Товары><Товар>` document -- one item, one name. */
 function catalogXmlFor(guid: string, name: string): string {
@@ -55,6 +56,73 @@ function offersXmlFor(guid: string, price: string): string {
 </КоммерческаяИнформация>`;
 }
 
+/** 1x1 PNG. Если normalizeBoundedImage отвергнет 1x1 (invalid_dimensions) — заменить на 8x8. */
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+function catalogWithBarcodeXml(
+  guid: string,
+  name: string,
+  barcode: string,
+  image?: string,
+): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<КоммерческаяИнформация ВерсияСхемы="2.05">
+ <Каталог><Товары>
+  <Товар>
+   <Ид>${guid}</Ид>
+   <Наименование>${name}</Наименование>
+   <Штрихкод>${barcode}</Штрихкод>
+   ${image === undefined ? "" : `<Картинка>${image}</Картинка>`}
+  </Товар>
+ </Товары></Каталог>
+</КоммерческаяИнформация>`;
+}
+
+/**
+ * Same one `<Товар>` as `catalogWithBarcodeXml`, plus a `<ПакетПредложений>`
+ * offer for the SAME `<Ид>` in the SAME file -- needed to exercise "link now,
+ * price this same round" (`apply.ts`'s `priceTargetByRef` folds this round's
+ * own new GTIN links in before offers are matched against it; that only
+ * happens when items and offers arrive in the same `parseCommerceMl` call,
+ * i.e. the same physical file).
+ */
+function catalogWithBarcodeAndOfferXml(
+  guid: string,
+  name: string,
+  barcode: string,
+  price: string,
+  image?: string,
+): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<КоммерческаяИнформация ВерсияСхемы="2.05">
+ <Каталог><Товары>
+  <Товар>
+   <Ид>${guid}</Ид>
+   <Наименование>${name}</Наименование>
+   <Штрихкод>${barcode}</Штрихкод>
+   ${image === undefined ? "" : `<Картинка>${image}</Картинка>`}
+  </Товар>
+ </Товары></Каталог>
+ <ПакетПредложений>
+  <Предложения>
+   <Предложение>
+    <Ид>${guid}</Ид>
+    <Цены>
+     <Цена>
+      <Представление>Розничная</Представление>
+      <ЦенаЗаЕдиницу>${price}</ЦенаЗаЕдиницу>
+      <Валюта>руб</Валюта>
+     </Цена>
+    </Цены>
+   </Предложение>
+  </Предложения>
+ </ПакетПредложений>
+</КоммерческаяИнформация>`;
+}
+
 describe("mode=import", () => {
   let app: INestApplication | undefined;
   let agent: ReturnType<typeof request.agent>;
@@ -63,6 +131,26 @@ describe("mode=import", () => {
   let secret: string;
   let productId: string;
   let tenantId: string;
+  const storedObjects = new Map<string, Buffer>();
+  // Task 6's photo scenarios only assert DB state (product_images/
+  // media_assets rows), never storage.put's own call args -- so a bare
+  // in-memory fake, the same pattern products.e2e.test.ts already uses to
+  // override this Global()-scoped provider, is enough to keep this file
+  // independent of a real S3/MinIO endpoint.
+  const storage = {
+    ensureBucket: vi.fn().mockResolvedValue(undefined),
+    put: vi.fn(async (key: string, body: Buffer) => {
+      storedObjects.set(key, body);
+    }),
+    delete: vi.fn(async (key: string) => {
+      storedObjects.delete(key);
+    }),
+    get: vi.fn(async (key: string) => ({
+      body: storedObjects.get(key) ?? Buffer.alloc(0),
+      contentType: "image/webp",
+    })),
+    presignRead: vi.fn(async (key: string) => `https://signed.invalid/${encodeURIComponent(key)}`),
+  };
 
   beforeAll(async () => {
     const env = loadEnv({ ...process.env, SUBSCRIPTION_ENFORCEMENT_MODE: "managed_only" });
@@ -70,7 +158,10 @@ describe("mode=import", () => {
     db = setup.db;
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL, env })],
-    }).compile();
+    })
+      .overrideProvider(ObjectStorageService)
+      .useValue(storage)
+      .compile();
     app = ref.createNestApplication({ bodyParser: false });
     const server = app.getHttpAdapter().getInstance();
     mountAuth(server, setup.auth);
@@ -112,25 +203,59 @@ describe("mode=import", () => {
     await app?.close();
   });
 
-  /** Repeats the checkauth exchange and turns its two body lines into a `Cookie` header value. */
-  async function checkauth(): Promise<{ cookie: string; value: string }> {
+  /** Repeats the checkauth exchange for arbitrary credentials and turns its two body lines into a `Cookie` header value. */
+  async function checkauthAs(
+    loginValue: string,
+    secretValue: string,
+  ): Promise<{ cookie: string; value: string }> {
     const res = await request(app!.getHttpServer())
       .get("/1c_exchange?type=catalog&mode=checkauth")
-      .auth(login, secret)
+      .auth(loginValue, secretValue)
       .expect(200);
     const [, name, value] = res.text.split("\n");
     return { cookie: `${name}=${value}`, value: value! };
   }
 
+  /** Repeats the checkauth exchange for THIS suite's shared tenant (see `beforeAll`). */
+  async function checkauth(): Promise<{ cookie: string; value: string }> {
+    return checkauthAs(login, secret);
+  }
+
+  /**
+   * Spins up a brand-new tenant with its own CommerceML credentials, exactly
+   * like `beforeAll` does for the suite's shared one -- Task 6's scenarios
+   * each need their own isolated GTIN/candidate space, per the brief ("свой
+   * тенант через существующий сетап").
+   */
+  async function setupTenant(): Promise<{
+    agent: ReturnType<typeof request.agent>;
+    tenantId: string;
+    login: string;
+    secret: string;
+  }> {
+    const freshAgent = request.agent(app!.getHttpServer());
+    const freshTenantId = await signUpAndActivate(freshAgent);
+    const issued = await freshAgent
+      .post("/integrations/commerceml/credentials")
+      .send({})
+      .expect(201);
+    return {
+      agent: freshAgent,
+      tenantId: freshTenantId,
+      login: issued.body.login,
+      secret: issued.body.secret,
+    };
+  }
+
   async function uploadFile(
     auth: { cookie: string },
     filename: string,
-    xml: string,
+    body: string | Buffer,
   ): Promise<void> {
     await request(app!.getHttpServer())
-      .post(`/1c_exchange?type=catalog&mode=file&filename=${filename}`)
+      .post(`/1c_exchange?type=catalog&mode=file&filename=${encodeURIComponent(filename)}`)
       .set("Cookie", auth.cookie)
-      .send(Buffer.from(xml, "utf8"))
+      .send(typeof body === "string" ? Buffer.from(body, "utf8") : body)
       .expect(200);
   }
 
@@ -623,5 +748,244 @@ ${guids.map((guid) => `  <Товар><Ид>${guid}</Ид><Наименовани
       .from(schema.products)
       .where(eq(schema.products.id, productId));
     expect(afterBroken).toEqual(after);
+  });
+
+  // Task 6: worklist link/price/image/candidate wiring and the journal
+  // events `decideApplication`'s GTIN plan (Task 2) drives. Each scenario
+  // gets its own tenant (`setupTenant`) -- GTIN matching and candidate rows
+  // are per-tenant, and these five deliberately share no state with the
+  // suite's own tenant/product above or with each other.
+  describe("автосвязь по GTIN, фото и журнал (Task 6)", () => {
+    it("автосвязь по GTIN и цена одним раундом", async () => {
+      const tenant = await setupTenant();
+      const linkedProductId = randomUUID();
+      await db.insert(schema.products).values({
+        id: linkedProductId,
+        tenantId: tenant.tenantId,
+        gtin14: "04680089900253",
+        name: "Товар для автосвязи",
+        unitPrice: "100.00",
+        externalRef: null,
+      });
+
+      const auth = await checkauthAs(tenant.login, tenant.secret);
+      await uploadFile(
+        auth,
+        "auto-link.xml",
+        catalogWithBarcodeAndOfferXml("guid-auto-1", "Новый товар", "4680089900253", "9200.00"),
+      );
+      const res = await request(app!.getHttpServer())
+        .get("/1c_exchange?type=catalog&mode=import&filename=auto-link.xml")
+        .set("Cookie", auth.cookie)
+        .expect(200);
+      expect(res.text.trim()).toBe("success");
+
+      const [product] = await db
+        .select({ externalRef: schema.products.externalRef, unitPrice: schema.products.unitPrice })
+        .from(schema.products)
+        .where(eq(schema.products.id, linkedProductId));
+      expect(product!.externalRef).toBe("guid-auto-1");
+      expect(product!.unitPrice).toBe("9200.00");
+
+      const candidates = await db
+        .select()
+        .from(schema.integrationCandidates)
+        .where(eq(schema.integrationCandidates.tenantId, tenant.tenantId));
+      expect(candidates).toHaveLength(0);
+
+      const events = await db
+        .select()
+        .from(schema.integrationEvents)
+        .where(eq(schema.integrationEvents.tenantId, tenant.tenantId));
+      const linkEvent = events.find((e) => e.message.includes("связан автоматически по GTIN"));
+      expect(linkEvent).toMatchObject({ outcome: "ok", grain: "item" });
+    });
+
+    it("конфликт GTIN: карточка уже связана с другим Ид", async () => {
+      const tenant = await setupTenant();
+      const conflictedProductId = randomUUID();
+      await db.insert(schema.products).values({
+        id: conflictedProductId,
+        tenantId: tenant.tenantId,
+        gtin14: "04680089900253",
+        name: "Товар с конфликтом",
+        unitPrice: "100.00",
+        externalRef: "другой-guid",
+      });
+
+      const auth = await checkauthAs(tenant.login, tenant.secret);
+      await uploadFile(
+        auth,
+        "conflict.xml",
+        catalogWithBarcodeXml("guid-conflict-1", "Претендент", "4680089900253"),
+      );
+      await request(app!.getHttpServer())
+        .get("/1c_exchange?type=catalog&mode=import&filename=conflict.xml")
+        .set("Cookie", auth.cookie)
+        .expect(200);
+
+      const [product] = await db
+        .select({ externalRef: schema.products.externalRef })
+        .from(schema.products)
+        .where(eq(schema.products.id, conflictedProductId));
+      expect(product!.externalRef).toBe("другой-guid");
+
+      const [candidate] = await db
+        .select()
+        .from(schema.integrationCandidates)
+        .where(
+          and(
+            eq(schema.integrationCandidates.tenantId, tenant.tenantId),
+            eq(schema.integrationCandidates.externalRef, "guid-conflict-1"),
+          ),
+        );
+      expect(candidate?.gtin).toBe("04680089900253");
+
+      const events = await db
+        .select()
+        .from(schema.integrationEvents)
+        .where(eq(schema.integrationEvents.tenantId, tenant.tenantId));
+      const conflictEvent = events.find((e) => e.message.includes("конфликт GTIN"));
+      expect(conflictEvent).toMatchObject({ outcome: "warn", grain: "item" });
+    });
+
+    it("нет карточки с таким GTIN — позиция уходит в кандидаты со своим gtin", async () => {
+      const tenant = await setupTenant();
+      const auth = await checkauthAs(tenant.login, tenant.secret);
+      await uploadFile(
+        auth,
+        "candidate-gtin.xml",
+        catalogWithBarcodeXml("guid-cand-gtin-1", "Новинка со штрихкодом", "4680089900253"),
+      );
+      await request(app!.getHttpServer())
+        .get("/1c_exchange?type=catalog&mode=import&filename=candidate-gtin.xml")
+        .set("Cookie", auth.cookie)
+        .expect(200);
+
+      const [candidate] = await db
+        .select()
+        .from(schema.integrationCandidates)
+        .where(
+          and(
+            eq(schema.integrationCandidates.tenantId, tenant.tenantId),
+            eq(schema.integrationCandidates.externalRef, "guid-cand-gtin-1"),
+          ),
+        );
+      expect(candidate).toBeDefined();
+      expect(candidate!.gtin).toBe("04680089900253");
+    });
+
+    it("фото из файла сеанса применяется и дедуплицируется на повторном import", async () => {
+      const tenant = await setupTenant();
+      const photoProductId = randomUUID();
+      await db.insert(schema.products).values({
+        id: photoProductId,
+        tenantId: tenant.tenantId,
+        gtin14: "04680089900260",
+        name: "Товар с фото",
+        unitPrice: "10.00",
+        externalRef: "guid-photo-1",
+      });
+
+      const auth = await checkauthAs(tenant.login, tenant.secret);
+      // Файл сеанса -- отдельный mode=file, до каталога, который на него сошлётся.
+      await uploadFile(auth, "import_files/1.png", TINY_PNG);
+      await uploadFile(
+        auth,
+        "photo.xml",
+        catalogWithBarcodeXml(
+          "guid-photo-1",
+          "Товар с фото",
+          "0000000000000", // товар уже связан по Ид -- штрихкод тут ни на что не влияет
+          "import_files/1.png",
+        ),
+      );
+
+      const first = await request(app!.getHttpServer())
+        .get("/1c_exchange?type=catalog&mode=import&filename=photo.xml")
+        .set("Cookie", auth.cookie)
+        .expect(200);
+      expect(first.text.trim()).toBe("success");
+
+      const [imageRow] = await db
+        .select({ status: schema.mediaAssets.status })
+        .from(schema.productImages)
+        .innerJoin(schema.mediaAssets, eq(schema.mediaAssets.id, schema.productImages.assetId))
+        .where(
+          and(
+            eq(schema.productImages.tenantId, tenant.tenantId),
+            eq(schema.productImages.productId, photoProductId),
+          ),
+        );
+      expect(imageRow).toMatchObject({ status: "active" });
+
+      const assetsAfterFirst = await db
+        .select({ id: schema.mediaAssets.id })
+        .from(schema.mediaAssets)
+        .where(eq(schema.mediaAssets.ownerTenantId, tenant.tenantId));
+
+      // Тот же файл, тот же import -- 1С резонно может повторить его.
+      // Обработанные байты не изменились -- ждём "unchanged" (Task 5), а не
+      // второй asset.
+      const second = await request(app!.getHttpServer())
+        .get("/1c_exchange?type=catalog&mode=import&filename=photo.xml")
+        .set("Cookie", auth.cookie)
+        .expect(200);
+      expect(second.text.trim()).toBe("success");
+
+      const assetsAfterSecond = await db
+        .select({ id: schema.mediaAssets.id })
+        .from(schema.mediaAssets)
+        .where(eq(schema.mediaAssets.ownerTenantId, tenant.tenantId));
+      expect(assetsAfterSecond).toHaveLength(assetsAfterFirst.length);
+    });
+
+    it("битое фото не валит раунд — предупреждение в журнале, цена и связь применяются", async () => {
+      const tenant = await setupTenant();
+      const brokenPhotoProductId = randomUUID();
+      await db.insert(schema.products).values({
+        id: brokenPhotoProductId,
+        tenantId: tenant.tenantId,
+        gtin14: "04680089900253",
+        name: "Товар с битым фото",
+        unitPrice: "100.00",
+        externalRef: null,
+      });
+
+      const auth = await checkauthAs(tenant.login, tenant.secret);
+      // `import_files/missing.png` НИКОГДА не загружался этим сеансом.
+      await uploadFile(
+        auth,
+        "broken-photo.xml",
+        catalogWithBarcodeAndOfferXml(
+          "guid-broken-photo-1",
+          "Товар",
+          "4680089900253",
+          "777.00",
+          "import_files/missing.png",
+        ),
+      );
+
+      const res = await request(app!.getHttpServer())
+        .get("/1c_exchange?type=catalog&mode=import&filename=broken-photo.xml")
+        .set("Cookie", auth.cookie)
+        .expect(200);
+      expect(res.text.trim()).toBe("success");
+
+      const [product] = await db
+        .select({ externalRef: schema.products.externalRef, unitPrice: schema.products.unitPrice })
+        .from(schema.products)
+        .where(eq(schema.products.id, brokenPhotoProductId));
+      expect(product!.externalRef).toBe("guid-broken-photo-1");
+      expect(product!.unitPrice).toBe("777.00");
+
+      const events = await db
+        .select()
+        .from(schema.integrationEvents)
+        .where(eq(schema.integrationEvents.tenantId, tenant.tenantId));
+      const warnEvent = events.find((e) => e.message.includes("фото не применено"));
+      expect(warnEvent).toMatchObject({ outcome: "warn", grain: "item" });
+      expect(warnEvent!.message).toMatch(/не найден в сеансе/);
+    });
   });
 });

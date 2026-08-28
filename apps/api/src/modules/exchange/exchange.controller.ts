@@ -23,10 +23,12 @@ import {
   type ApplyExternalStatusResult,
 } from "../pickup-orders/pickup-orders.service";
 import { decideApplication, type CatalogProduct } from "./commerceml/apply";
+import { downloadImage } from "./commerceml/image-download";
 import { parseCommerceMl } from "./commerceml/parse";
 import { parseOrderStatusDocuments, resolveMappedStatus } from "./commerceml/order-status";
 import { buildOrdersDocument, planExport } from "./commerceml/order-export";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
+import { ProductsService } from "../products/products.service";
 import {
   assertUnderCheckauthLimit,
   checkauthWindowStart,
@@ -67,29 +69,41 @@ export const EXPORT_BATCH_SIZE = 200;
 
 /** One row of the plan this controller actually writes, in a fixed, stable order (see `handleImport`). */
 type ImportWorkItem =
+  | { kind: "link"; productId: string; externalRef: string; gtin: string }
   | { kind: "price"; productId: string; unitPrice: string }
+  | { kind: "image"; productId: string; source: string }
   | {
       kind: "candidate";
       externalRef: string;
       name: string;
       article: string | null;
       unit: string | null;
+      gtin: string | null;
     };
 
 /**
  * Fingerprints a `mode=import` worklist -- its length plus a hash of its
- * ordered keys (`productId` for a price row, `externalRef` for a candidate
- * row) -- so a stored cursor (Fix 2, `ExchangeSessionService.ImportCursor`)
- * can tell whether a later round's freshly rebuilt worklist is still the
- * SAME list its `offset` was measured against. Length alone would miss a
- * swap (one row replaced by another of the same overall count); hashing the
- * keys in order catches that too, at the cost of one cheap hash per round --
- * worklist itself is already rebuilt every round regardless.
+ * ordered keys (`productId` for a link/price/image row, `externalRef` for a
+ * candidate row) -- so a stored cursor (Fix 2, `ExchangeSessionService.
+ * ImportCursor`) can tell whether a later round's freshly rebuilt worklist is
+ * still the SAME list its `offset` was measured against. Length alone would
+ * miss a swap (one row replaced by another of the same overall count);
+ * hashing the keys in order catches that too, at the cost of one cheap hash
+ * per round -- worklist itself is already rebuilt every round regardless.
  */
 function fingerprintOf(worklist: ImportWorkItem[]): string {
-  const keys = worklist.map((item) =>
-    item.kind === "price" ? `p:${item.productId}` : `c:${item.externalRef}`,
-  );
+  const keys = worklist.map((item) => {
+    switch (item.kind) {
+      case "link":
+        return `l:${item.productId}`;
+      case "price":
+        return `p:${item.productId}`;
+      case "image":
+        return `i:${item.productId}`;
+      case "candidate":
+        return `c:${item.externalRef}`;
+    }
+  });
   const hash = createHash("sha256").update(keys.join(" ")).digest("hex");
   return `${worklist.length}:${hash}`;
 }
@@ -258,6 +272,7 @@ export class ExchangeController {
     private readonly journal: JournalService,
     private readonly pickupOrders: PickupOrdersService,
     private readonly entitlements: EntitlementsService,
+    private readonly products: ProductsService,
   ) {}
 
   @Get("1c_exchange")
@@ -638,7 +653,7 @@ export class ExchangeController {
       return;
     }
 
-    const productRows = await this.db
+    const productRows: CatalogProduct[] = await this.db
       .select({
         id: schema.products.id,
         gtin14: schema.products.gtin14,
@@ -646,11 +661,6 @@ export class ExchangeController {
       })
       .from(schema.products)
       .where(eq(schema.products.tenantId, session.tenantId));
-    const products: CatalogProduct[] = productRows.map((row) => ({
-      id: row.id,
-      gtin14: row.gtin14,
-      externalRef: row.externalRef,
-    }));
 
     const [channelRow] = await this.db
       .select({ settings: schema.integrationChannels.settings })
@@ -664,7 +674,7 @@ export class ExchangeController {
     const configuredPriceType = (channelRow?.settings as { priceType?: string } | undefined)
       ?.priceType;
 
-    const plan = decideApplication({ products, items, offers, configuredPriceType });
+    const plan = decideApplication({ products: productRows, items, offers, configuredPriceType });
 
     // Offers decideApplication had nothing to do with at all: no known link
     // to price, and offers carry no name/article/unit, so unlike catalog
@@ -673,32 +683,28 @@ export class ExchangeController {
     // item may simply not have arrived (or been linked) yet -- but it must
     // not vanish without a trace either, per this task's brief.
     //
-    // Adapted minimally for the `products`/`CatalogProduct` shape (Task 2):
-    // `knownRefs` is still exactly "products already linked to a 1С <Ид>" --
-    // it does not yet account for `plan.links` (this round's own new GTIN
-    // links), which is Task 6's job alongside the worklist/journal wiring.
-    const knownRefs = new Set(
-      products.flatMap((product) => (product.externalRef !== null ? [product.externalRef] : [])),
-    );
+    // «Без связанного товара» теперь означает: ни давней связи, ни автосвязи
+    // ЭТОГО раунда -- иначе только что связанное предложение попадало бы в
+    // warn ниже (Task 6: this round's own new GTIN links now count too).
+    const matchedRefs = new Set([
+      ...productRows.filter((p) => p.externalRef !== null).map((p) => p.externalRef!),
+      ...plan.links.map((link) => link.externalRef),
+    ]);
     const unmatchedOfferRefs = [
-      ...new Set(
-        offers.filter((offer) => !knownRefs.has(offer.externalRef)).map((o) => o.externalRef),
-      ),
+      ...new Set(offers.filter((o) => !matchedRefs.has(o.externalRef)).map((o) => o.externalRef)),
     ];
 
     const worklist: ImportWorkItem[] = [
-      ...plan.priceUpdates.map((update): ImportWorkItem => ({
+      // Связь раньше цены, цена раньше фото (фото -- самый тяжёлый шаг),
+      // кандидаты последними.
+      ...plan.links.map((link): ImportWorkItem => ({ kind: "link", ...link })),
+      ...plan.priceUpdates.map((u): ImportWorkItem => ({
         kind: "price",
-        productId: update.productId,
-        unitPrice: update.unitPrice,
+        productId: u.productId,
+        unitPrice: u.unitPrice,
       })),
-      ...plan.candidates.map((item): ImportWorkItem => ({
-        kind: "candidate",
-        externalRef: item.externalRef,
-        name: item.name,
-        article: item.article,
-        unit: item.unit,
-      })),
+      ...plan.images.map((img): ImportWorkItem => ({ kind: "image", ...img })),
+      ...plan.candidates.map((c): ImportWorkItem => ({ kind: "candidate", ...c })),
     ];
 
     // Fix 2: `worklist` above was just rebuilt from scratch -- a fresh
@@ -765,6 +771,54 @@ export class ExchangeController {
           details: { count: unmatchedOfferRefs.length, sample: unmatchedOfferRefs.slice(0, 20) },
         });
       }
+      for (const link of plan.links) {
+        await this.journal.append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "in",
+          outcome: "ok",
+          grain: "item",
+          message: `связан автоматически по GTIN: ${link.externalRef}`,
+          details: { externalRef: link.externalRef, productId: link.productId, gtin: link.gtin },
+        });
+      }
+      for (const conflict of plan.gtinConflicts) {
+        await this.journal.append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "in",
+          outcome: "warn",
+          grain: "item",
+          message: `конфликт GTIN: карточка уже связана с другим Ид: ${conflict.externalRef}`,
+          details: { ...conflict },
+        });
+      }
+      for (const ambiguity of plan.gtinAmbiguities) {
+        await this.journal.append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "in",
+          outcome: "warn",
+          grain: "item",
+          message: `GTIN у нескольких позиций файла — автосвязь не выполнена: ${ambiguity.gtin}`,
+          details: { ...ambiguity },
+        });
+      }
+      if (plan.invalidBarcodes > 0) {
+        await this.journal.append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "in",
+          outcome: "warn",
+          grain: "session",
+          message: `штрихкодов отброшено (не GTIN): ${plan.invalidBarcodes}`,
+          details: { count: plan.invalidBarcodes },
+        });
+      }
     }
 
     const end = Math.min(offset + IMPORT_BATCH_SIZE, worklist.length);
@@ -807,8 +861,12 @@ export class ExchangeController {
       details: {
         filename,
         updated: plan.priceUpdates.length,
+        linked: plan.links.length,
+        images: plan.images.length,
         candidates: plan.candidates.length,
         skipped: plan.skipped.length,
+        gtinConflicts: plan.gtinConflicts.length,
+        invalidBarcodes: plan.invalidBarcodes,
         unmatchedOffers: unmatchedOfferRefs.length,
       },
     });
@@ -1059,14 +1117,32 @@ export class ExchangeController {
   /**
    * Writes exactly one planned row. The one rule this whole route exists to
    * hold literally: a price update touches `products.unit_price` and
-   * NOTHING else on the row -- name, GTIN, ЕГАИС code, label template and
-   * kiosk listing are never part of this `set()`, no matter what the
-   * incoming catalog said about them.
+   * NOTHING else on the row; a link touches only `external_ref`; an image
+   * touches only the product's photo -- name, GTIN, ЕГАИС code, label
+   * template and kiosk listing are never part of any of these writes, no
+   * matter what the incoming catalog said about them.
    */
   private async applyWorkItem(
     session: ResolvedExchangeSession,
     work: ImportWorkItem,
   ): Promise<void> {
+    if (work.kind === "link") {
+      // isNull-гард: админ мог связать карточку руками между раундами; тихо
+      // не перезаписываем -- следующий обмен увидит её связанной и
+      // пересчитает план.
+      await this.db
+        .update(schema.products)
+        .set({ externalRef: work.externalRef })
+        .where(
+          and(
+            eq(schema.products.tenantId, session.tenantId),
+            eq(schema.products.id, work.productId),
+            isNull(schema.products.externalRef),
+          ),
+        );
+      return;
+    }
+
     if (work.kind === "price") {
       await this.db
         .update(schema.products)
@@ -1080,6 +1156,11 @@ export class ExchangeController {
       return;
     }
 
+    if (work.kind === "image") {
+      await this.applyImageWorkItem(session, work);
+      return;
+    }
+
     const now = new Date();
     await this.db
       .insert(schema.integrationCandidates)
@@ -1090,6 +1171,7 @@ export class ExchangeController {
         name: work.name,
         article: work.article,
         unit: work.unit,
+        gtin: work.gtin,
         lastSeenAt: now,
       })
       .onConflictDoUpdate({
@@ -1098,8 +1180,53 @@ export class ExchangeController {
           schema.integrationCandidates.channelType,
           schema.integrationCandidates.externalRef,
         ],
-        set: { name: work.name, article: work.article, unit: work.unit, lastSeenAt: now },
+        set: {
+          name: work.name,
+          article: work.article,
+          unit: work.unit,
+          gtin: work.gtin,
+          lastSeenAt: now,
+        },
       });
+  }
+
+  /**
+   * Одно фото: достаём байты (файл сеанса или https-URL), прогоняем через
+   * общий media-пайплайн. ЛЮБАЯ ошибка -- warn по позиции, не падение раунда
+   * (спека §6): фото -- украшение карточки, а не учётный факт; принятое
+   * ограничение -- транзиентная ошибка БД внутри applyExchangeImage тоже
+   * попадёт в warn и не будет повторена до следующего обмена.
+   */
+  private async applyImageWorkItem(
+    session: ResolvedExchangeSession,
+    work: { productId: string; source: string },
+  ): Promise<void> {
+    try {
+      let source: Buffer;
+      if (/^https?:\/\//i.test(work.source)) {
+        source = await downloadImage(work.source); // http:// отвергнет сам (not_https)
+      } else {
+        source = await this.sessions.assemble(session.id, work.source);
+        if (source.byteLength === 0) {
+          // assemble возвращает пустой Buffer, когда файла в сеансе нет --
+          // назвать причину честно, а не «invalid image» из sharp.
+          throw new Error(`файл картинки «${work.source}» не найден в сеансе`);
+        }
+      }
+      await this.products.applyExchangeImage(session.tenantId, work.productId, source);
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      await this.journal.append({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        sessionId: session.id,
+        direction: "in",
+        outcome: "warn",
+        grain: "item",
+        message: `фото не применено: ${detail}`,
+        details: { productId: work.productId, source: work.source },
+      });
+    }
   }
 
   /**
