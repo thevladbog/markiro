@@ -16,7 +16,9 @@ describe("Pairing", () => {
     const onPair = vi.fn();
     render(<Pairing onPair={onPair} hostname="BUH-PC" />);
     await userEvent.type(screen.getByLabelText(/код привязки|pairing code/i), "0123");
-    expect(screen.getByRole("button", { name: /привязать|pair/i })).toBeDisabled();
+    // No jest-dom matcher in this project's setup (see WorkstationSetup's own
+    // tests), so assert the DOM attribute directly.
+    expect((screen.getByRole("button", { name: /привязать|pair/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("surfaces a rejected code without guessing why", async () => {
@@ -24,6 +26,8 @@ describe("Pairing", () => {
     render(<Pairing onPair={onPair} hostname="BUH-PC" />);
     await userEvent.type(screen.getByLabelText(/код привязки|pairing code/i), "00000000");
     await userEvent.click(screen.getByRole("button", { name: /привязать|pair/i }));
-    expect(await screen.findByText(/недействителен|not valid/i)).toBeInTheDocument();
+    // findByText already throws if the element is absent, so the assertion
+    // on the returned element adds no meaning here.
+    await screen.findByText(/недействителен|not valid/i);
   });
 });
