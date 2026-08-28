@@ -186,6 +186,16 @@ export class IntegrationsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE, CABINET_CAPABILITY.CREDENTIALS_MANAGE)
+  @ApiOperation({
+    summary: "Delete an integration channel",
+    description:
+      "Fully disables the channel: removes its configuration, exchange credentials, upload " +
+      "sessions, and journal in one transaction. Only channels that authenticate with " +
+      "exchange credentials (1C CommerceML) can be deleted this way.",
+  })
+  @ApiParam({ name: "type", enum: INTEGRATION_CHANNEL_TYPES })
+  @ApiResponse({ status: 204, description: "The channel and all its exchange data were removed." })
+  @ApiHttpErrors(401, 403, 404, 409)
   async deleteChannel(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
