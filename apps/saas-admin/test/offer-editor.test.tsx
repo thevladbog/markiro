@@ -16,6 +16,7 @@ import {
 } from "./render.js";
 
 const OFFER_ID = "91111111-1111-4111-8111-111111111111";
+const REQUEST_ID = "81111111-1111-4111-8111-111111111111";
 const OFFER_CREATED_AT = "2026-08-21T10:00:00.000Z";
 
 function offerRecord(overrides: Record<string, unknown> = {}) {
@@ -52,6 +53,7 @@ function installOfferEditorApi({
   tenantItems = [TENANT_LIST_ITEM],
   me = ACCOUNTANT_ME,
   offers = [],
+  requestDetail = null,
 }: {
   createStatus?: number;
   retireOnRefresh?: boolean;
@@ -59,6 +61,7 @@ function installOfferEditorApi({
   tenantItems?: Array<Record<string, unknown>>;
   me?: Record<string, unknown>;
   offers?: Array<Record<string, unknown>>;
+  requestDetail?: Record<string, unknown> | null;
 } = {}) {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
   let catalogFetches = 0;
@@ -84,6 +87,13 @@ function installOfferEditorApi({
       }
       if (url.endsWith(`/api/platform/tenants/${TENANT_ID}`) && method === "GET") {
         return jsonResponse(200, TENANT_DETAIL);
+      }
+      if (
+        url.endsWith(`/api/platform/billing/requests/${REQUEST_ID}`) &&
+        method === "GET" &&
+        requestDetail
+      ) {
+        return jsonResponse(200, requestDetail);
       }
       if (url.endsWith("/api/platform/catalog/items") && method === "GET") {
         catalogFetches += 1;
@@ -139,6 +149,23 @@ function installOfferEditorApi({
           }),
         );
       }
+      if (url.endsWith(`/api/platform/billing/requests/${REQUEST_ID}/offer`) && method === "POST") {
+        const body = JSON.parse(String(init.body)) as { lines: Array<Record<string, unknown>> };
+        calls.push({ method, path: url, body });
+        return jsonResponse(201, {
+          requestId: REQUEST_ID,
+          tenantId: TENANT_ID,
+          offerId: OFFER_ID,
+          link: {
+            id: "b1111111-1111-4111-8111-111111111111",
+            tenantId: TENANT_ID,
+            requestId: REQUEST_ID,
+            type: "offer",
+            targetId: OFFER_ID,
+            createdAt: OFFER_CREATED_AT,
+          },
+        });
+      }
       throw new Error(`Unexpected request: ${method} ${url}`);
     }),
   );
@@ -156,6 +183,24 @@ async function addPosition(
 }
 
 describe("offer editor route", () => {
+  it("creates a request-bound offer atomically with a locked server tenant", async () => {
+    const api = installOfferEditorApi({ requestDetail: billingRequestDetail() });
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/billing-requests/${REQUEST_ID}/offers/new` });
+
+    expect(await screen.findByText(`Тенант заявки · ${TENANT_ID}`)).toBeDefined();
+    expect(screen.queryByRole("combobox", { name: "Тенант" })).toBeNull();
+    await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
+    await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
+
+    const call = api.calls()[0];
+    expect(call?.path).toBe(`/api/platform/billing/requests/${REQUEST_ID}/offer`);
+    expect(call?.body).not.toHaveProperty("tenantId");
+    expect(call?.body).toHaveProperty("idempotencyKey");
+    expect(
+      await screen.findByRole("heading", { name: "Коммерческие предложения" }),
+    ).toBeDefined();
+  });
   it("renders an empty offer register without a stale detail loader", async () => {
     installOfferEditorApi();
 
@@ -333,3 +378,23 @@ describe("offer editor route", () => {
     );
   });
 });
+
+function billingRequestDetail() {
+  return {
+    id: REQUEST_ID,
+    tenantId: TENANT_ID,
+    number: "BR-42",
+    type: "renewal",
+    status: "under_review",
+    description: "Renew",
+    desiredAt: null,
+    context: null,
+    responsibleSide: "markiro",
+    createdAt: OFFER_CREATED_AT,
+    updatedAt: OFFER_CREATED_AT,
+    allowedTransitions: [],
+    offerAction: null,
+    events: [],
+    links: [],
+  };
+}

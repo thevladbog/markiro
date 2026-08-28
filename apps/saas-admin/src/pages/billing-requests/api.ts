@@ -3,6 +3,7 @@ import {
   type PlatformBillingRequestCommentDto,
   type PlatformBillingRequestLinkDto,
   type PlatformBillingRequestListQueryDto,
+  type PlatformBillingRequestOfferCreateDto,
   type PlatformBillingRequestStatusMutationDto,
 } from "@markiro/platform-contracts";
 
@@ -33,6 +34,16 @@ export function getBillingRequest(id: string) {
   const requestId = platformCommercialContracts.billingRequests.detail.params.parse(id);
   return platformApiFetch(`/billing/requests/${requestId}`, {
     responseSchema: platformCommercialContracts.billingRequests.detail.response,
+  });
+}
+
+export function createBillingRequestOffer(id: string, input: PlatformBillingRequestOfferCreateDto) {
+  const requestId = platformCommercialContracts.billingRequests.createOffer.params.parse(id);
+  const body = platformCommercialContracts.billingRequests.createOffer.body.parse(input);
+  return platformApiFetch(`/billing/requests/${requestId}/offer`, {
+    responseSchema: platformCommercialContracts.billingRequests.createOffer.response,
+    method: "POST",
+    body: JSON.stringify(body),
   });
 }
 

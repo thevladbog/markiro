@@ -389,6 +389,11 @@ export const offerCreateSchema = z
   })
   .strict();
 
+export const platformBillingRequestOfferCreateSchema = offerCreateSchema
+  .omit({ tenantId: true })
+  .extend({ idempotencyKey: platformUuidSchema })
+  .strict();
+
 export const offerPaymentSchema = z
   .object({
     amount: platformMoneySchema,
@@ -1724,6 +1729,18 @@ export const platformCommercialContracts = {
       response: z.object({ items: z.array(platformBillingRequestListItemSchema) }).strict(),
     },
     detail: { params: platformUuidSchema, response: platformBillingRequestDetailSchema },
+    createOffer: {
+      params: platformUuidSchema,
+      body: platformBillingRequestOfferCreateSchema,
+      response: z
+        .object({
+          requestId: platformUuidSchema,
+          tenantId: platformTenantIdSchema,
+          offerId: platformUuidSchema,
+          link: platformBillingRequestLinkResponseSchema,
+        })
+        .strict(),
+    },
     comment: {
       params: platformUuidSchema,
       body: platformBillingRequestCommentSchema,
@@ -1845,6 +1862,9 @@ export type PlatformBillingRequestListQueryDto = z.output<
   typeof platformBillingRequestListQuerySchema
 >;
 export type PlatformBillingRequestCommentDto = z.output<typeof platformBillingRequestCommentSchema>;
+export type PlatformBillingRequestOfferCreateDto = z.output<
+  typeof platformBillingRequestOfferCreateSchema
+>;
 export type PlatformBillingRequestStatusMutationDto = z.output<
   typeof platformBillingRequestStatusMutationSchema
 >;

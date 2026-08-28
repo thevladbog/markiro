@@ -138,6 +138,7 @@ export const appRoutes = createRoutesFromElements(
         <Route path="/catalog" element={<CatalogPage />} />
         <Route path="/offers" element={<OffersPage />} />
         <Route path="/offers/new" element={<CreateOfferPage />} />
+        <Route path="/billing-requests/:requestId/offers/new" element={<CreateOfferPage />} />
         <Route path="/invoices" element={<BillingPage />} />
         <Route path="/invoices/new" element={<CreateInvoicePage />} />
         <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />

@@ -13,10 +13,12 @@ import {
   platformBillingRequestIdSchema,
   platformBillingRequestLinkSchema,
   platformBillingRequestListQuerySchema,
+  platformBillingRequestOfferCreateSchema,
   platformBillingRequestStatusSchema,
   type PlatformBillingRequestCommentDto,
   type PlatformBillingRequestLinkDto,
   type PlatformBillingRequestListQueryDto,
+  type PlatformBillingRequestOfferCreateDto,
   type PlatformBillingRequestStatusMutationDto,
 } from "./dto";
 import { PlatformBillingRequestsService } from "./platform-billing-requests.service";
@@ -52,6 +54,24 @@ export class PlatformBillingRequestsController {
     return parsePlatformResponse(
       platformCommercialContracts.billingRequests.detail.response,
       await this.requests.detail(req.platformPrincipal!, id),
+    );
+  }
+
+  @Post(":id/offer")
+  @PlatformApiProtectedCreated({
+    body: platformCommercialContracts.billingRequests.createOffer.body,
+    response: platformCommercialContracts.billingRequests.createOffer.response,
+  })
+  @RequirePlatformCapabilities("billing.write")
+  async createOffer(
+    @Req() req: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(platformBillingRequestIdSchema)) id: string,
+    @Body(new ZodValidationPipe(platformBillingRequestOfferCreateSchema))
+    body: PlatformBillingRequestOfferCreateDto,
+  ) {
+    return parsePlatformResponse(
+      platformCommercialContracts.billingRequests.createOffer.response,
+      await this.requests.createOffer(req.platformPrincipal!, id, body),
     );
   }
 

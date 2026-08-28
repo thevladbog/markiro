@@ -276,12 +276,25 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
   const request = detail.data;
   if (!request) return null;
   const offerAction = request.offerAction;
+  const retainedAction = commentAttempt
+    ? "comment"
+    : transitionAttempt
+      ? "transition"
+      : linkAttempt
+        ? "link"
+        : reviseAttempt
+          ? "revise"
+          : null;
+  const actionPending =
+    commentMutation.isPending || transition.isPending || link.isPending || revise.isPending;
   const submitComment = () => {
+    if (retainedAction && retainedAction !== "comment") return;
     const attempt = commentAttempt ?? { message: comment, idempotencyKey: crypto.randomUUID() };
     setCommentAttempt(attempt);
     commentMutation.mutate(attempt);
   };
   const submitTransition = (status: PlatformBillingRequestStatusMutationDto["status"]) => {
+    if (retainedAction && retainedAction !== "transition") return;
     const attempt =
       transitionAttempt?.status === status
         ? transitionAttempt
@@ -290,6 +303,7 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
     transition.mutate(attempt);
   };
   const submitLink = () => {
+    if (retainedAction && retainedAction !== "link") return;
     const attempt = linkAttempt ?? {
       type: linkType,
       targetId,
@@ -299,6 +313,7 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
     link.mutate(attempt);
   };
   const submitRevision = (offerId: string) => {
+    if (retainedAction && retainedAction !== "revise") return;
     const attempt = reviseAttempt ?? { offerId, idempotencyKey: crypto.randomUUID() };
     setReviseAttempt(attempt);
     revise.mutate(attempt);
@@ -343,19 +358,17 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
         </ul>
         {writable ? (
           <div className="billing-request-actions">
-            <Link
-              to={`/offers/new?tenantId=${encodeURIComponent(request.tenantId)}`}
-              state={{ sourceRequestId: request.id }}
-            >
-              {t("billingRequests.createOffer")}
-            </Link>
-            {offerAction?.canCreateInvoice ? (
+            {!retainedAction ? (
+              <Link to={`/billing-requests/${request.id}/offers/new`}>
+                {t("billingRequests.createOffer")}
+              </Link>
+            ) : null}
+            {offerAction?.canCreateInvoice && !retainedAction ? (
               <Link
                 to="/invoices/new"
                 state={{
                   sourceOfferId: offerAction.offerId,
                   sourceRequestId: request.id,
-                  sourceAccepted: true,
                 }}
               >
                 {t("billingRequests.createInvoice")}
@@ -363,18 +376,24 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
             ) : null}
             {offerAction?.canRevise ? (
               <Button
-                disabled={revise.isPending || (revise.isError && !retryable(revise.error))}
+                disabled={
+                  actionPending ||
+                  (retainedAction !== null && retainedAction !== "revise") ||
+                  (revise.isError && !retryable(revise.error))
+                }
                 loading={revise.isPending}
                 onClick={() => submitRevision(offerAction.offerId)}
               >
                 {t("billingRequests.reviseOffer")}
               </Button>
             ) : null}
-            <Link
-              to={`/billing-acts/new?tenantId=${encodeURIComponent(request.tenantId)}&requestId=${request.id}`}
-            >
-              {t("billingRequests.issueAct")}
-            </Link>
+            {!retainedAction ? (
+              <Link
+                to={`/billing-acts/new?tenantId=${encodeURIComponent(request.tenantId)}&requestId=${request.id}`}
+              >
+                {t("billingRequests.issueAct")}
+              </Link>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -406,7 +425,10 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
                 key={status}
                 variant="secondary"
                 disabled={
-                  transition.isPending || (transition.isError && !retryable(transition.error))
+                  actionPending ||
+                  (retainedAction !== null &&
+                    (retainedAction !== "transition" || transitionAttempt?.status !== status)) ||
+                  (transition.isError && !retryable(transition.error))
                 }
                 onClick={() => submitTransition(status)}
               >
@@ -417,6 +439,7 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
           <Input
             label={t("billingRequests.comment")}
             value={comment}
+            disabled={retainedAction !== null}
             onChange={(event) => {
               setComment(event.target.value);
               setCommentAttempt(null);
@@ -426,7 +449,8 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
           <Button
             disabled={
               !comment.trim() ||
-              commentMutation.isPending ||
+              actionPending ||
+              (retainedAction !== null && retainedAction !== "comment") ||
               (commentMutation.isError && !retryable(commentMutation.error))
             }
             loading={commentMutation.isPending}
@@ -441,6 +465,7 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
               <span>{t("billingRequests.links.type")}</span>
               <select
                 value={linkType}
+                disabled={retainedAction !== null}
                 onChange={(event) => {
                   const type = linkTypes.find((candidate) => candidate === event.target.value);
                   if (type) {
@@ -460,6 +485,7 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
             <Input
               label={t("billingRequests.links.target")}
               value={targetId}
+              disabled={retainedAction !== null}
               onChange={(event) => {
                 setTargetId(event.target.value);
                 setLinkAttempt(null);
@@ -468,7 +494,12 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
             />
             <Button
               variant="secondary"
-              disabled={!targetId || link.isPending || (link.isError && !retryable(link.error))}
+              disabled={
+                !targetId ||
+                actionPending ||
+                (retainedAction !== null && retainedAction !== "link") ||
+                (link.isError && !retryable(link.error))
+              }
               onClick={submitLink}
             >
               {link.isError && retryable(link.error)

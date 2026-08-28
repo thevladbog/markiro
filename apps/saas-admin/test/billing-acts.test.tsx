@@ -131,13 +131,70 @@ describe("platform billing act issue", () => {
       new File(["%PDF"], "act.pdf", { type: "application/pdf" }),
     );
     await user.click(screen.getByRole("button", { name: "Выпустить акт" }));
-    await user.click(await screen.findByRole("button", { name: "Повторить выпуск" }));
+    await user.click(await screen.findByRole("button", { name: "Продолжить выпуск черновика" }));
 
     expect(await screen.findByText("Акт выпущен")).toBeDefined();
     expect(createBodies).toHaveLength(1);
     expect(issueBodies).toHaveLength(2);
     expect(issueBodies[0]?.get("idempotencyKey")).toBe(issueBodies[1]?.get("idempotencyKey"));
   });
+
+  it.each(["billing_act_service_not_completed", "billing_act_period_not_closed"])(
+    "retains a terminally rejected draft for %s and resumes without another create",
+    async (terminalCode) => {
+      let createCount = 0;
+      let issueCount = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+          if (url.endsWith("/api/platform/billing/acts")) {
+            createCount += 1;
+            return jsonResponse(201, act("draft", null));
+          }
+          if (url.endsWith(`/api/platform/billing/acts/${ACT_ID}/issue`)) {
+            issueCount += 1;
+            if (issueCount === 1) {
+              return jsonResponse(409, { code: terminalCode });
+            }
+            return jsonResponse(201, act("issued", readyDocument()));
+          }
+          throw new Error(`Unexpected request: ${url}`);
+        }),
+      );
+      const user = userEvent.setup();
+      const rendered = renderSaasApp({
+        initialEntry: `/billing-acts/new?tenantId=${TENANT_ID}&requestId=${REQUEST_ID}`,
+      });
+      const invalidate = vi.spyOn(rendered.queryClient, "invalidateQueries");
+
+      const number = await screen.findByLabelText("Номер акта");
+      await user.type(number, "ACT-42");
+      await user.type(screen.getByLabelText("Начало периода"), "2026-08-01");
+      await user.type(screen.getByLabelText("Конец периода"), "2026-08-31");
+      await user.upload(
+        screen.getByLabelText("PDF акта"),
+        new File(["%PDF"], "act.pdf", { type: "application/pdf" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Выпустить акт" }));
+
+      expect(await screen.findByText("Черновик акта сохранён")).toBeDefined();
+      expect(number).toHaveProperty("disabled", true);
+      await user.type(number, "-changed");
+      expect(number).toHaveProperty("value", "ACT-42");
+      expect(createCount).toBe(1);
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["platform", "billing", "acts"] });
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: ["platform", "billing", "requests", REQUEST_ID],
+      });
+
+      await user.click(screen.getByRole("button", { name: "Продолжить выпуск черновика" }));
+      expect(await screen.findByText("Акт выпущен")).toBeDefined();
+      expect(createCount).toBe(1);
+      expect(issueCount).toBe(2);
+    },
+  );
 });
 
 function readyDocument() {

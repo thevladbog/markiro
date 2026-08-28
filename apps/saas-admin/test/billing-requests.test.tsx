@@ -155,6 +155,9 @@ describe("platform billing request operations", () => {
     expect(screen.getByRole("link", { name: "Создать счёт" }).getAttribute("href")).toBe(
       "/invoices/new",
     );
+    expect(screen.getByRole("link", { name: "Создать предложение" }).getAttribute("href")).toBe(
+      `/billing-requests/${REQUEST_ID}/offers/new`,
+    );
     expect(screen.queryByRole("button", { name: "Создать новую версию" })).toBeNull();
 
     await user.type(screen.getByLabelText("Комментарий Маркиро"), "Нужна спецификация");
@@ -219,5 +222,52 @@ describe("platform billing request operations", () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ["platform", "billing", "requests", REQUEST_ID],
     });
+  });
+
+  it("freezes every alternate mutation while an ambiguous attempt is retained", async () => {
+    const detailBody = {
+      ...request,
+      allowedTransitions: ["in_progress"],
+      offerAction: {
+        offerId: OFFER_ID,
+        currentOfferId: OFFER_ID,
+        latestDecision: "changes_requested",
+        canRevise: true,
+        canCreateInvoice: false,
+      },
+      events: [event],
+      links: [],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+        if (url.endsWith(`/api/platform/billing/requests/${REQUEST_ID}`) && method === "GET") {
+          return jsonResponse(200, detailBody);
+        }
+        if (url.endsWith(`/api/platform/billing/requests/${REQUEST_ID}/comments`)) {
+          return jsonResponse(503, { code: "temporary" });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/billing-requests/${REQUEST_ID}` });
+
+    await user.type(await screen.findByLabelText("Комментарий Маркиро"), "Frozen");
+    await user.click(screen.getByRole("button", { name: "Добавить комментарий" }));
+    expect(await screen.findByRole("button", { name: "Повторить тот же запрос" })).toBeDefined();
+
+    expect(screen.getByLabelText("Комментарий Маркиро")).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "В работе" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Создать новую версию" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(screen.getByLabelText("ID объекта")).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("link", { name: "Создать предложение" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Выпустить акт" })).toBeNull();
   });
 });

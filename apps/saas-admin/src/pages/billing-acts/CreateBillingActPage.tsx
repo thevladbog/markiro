@@ -7,9 +7,9 @@ import { platformCommercialContracts, type BillingActCreateDto } from "@markiro/
 
 import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
-import { createBillingAct, issueBillingAct } from "./api.js";
+import { createBillingAct, getBillingAct, issueBillingAct } from "./api.js";
 
-type Progress = "idle" | "creating" | "uploading" | "issued";
+type Progress = "idle" | "creating" | "uploading" | "draft" | "issued";
 
 interface IssueAttempt {
   create: BillingActCreateDto;
@@ -43,50 +43,97 @@ function BillingActForm() {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress>("idle");
   const attemptRef = useRef<IssueAttempt | null>(null);
+  const [attempt, setAttempt] = useState<IssueAttempt | null>(null);
   const [tenantId, setTenantId] = useState(search.get("tenantId") ?? "");
   const [requestId, setRequestId] = useState(search.get("requestId") ?? "");
   const [invoiceId, setInvoiceId] = useState(search.get("invoiceId") ?? "");
   const [orderedServiceId, setOrderedServiceId] = useState(search.get("orderedServiceId") ?? "");
+  const invalidateActFamilies = async (current: IssueAttempt) => {
+    await Promise.all([
+      client.invalidateQueries({ queryKey: ["platform", "billing", "acts"] }),
+      current.actId
+        ? client.invalidateQueries({
+            queryKey: ["platform", "billing", "acts", current.actId],
+          })
+        : Promise.resolve(),
+      current.actId
+        ? client.invalidateQueries({
+            queryKey: ["platform", "billing", "acts", current.actId, "document"],
+          })
+        : Promise.resolve(),
+      current.create.requestId
+        ? client.invalidateQueries({
+            queryKey: ["platform", "billing", "requests", current.create.requestId],
+          })
+        : Promise.resolve(),
+    ]);
+  };
   const issue = useMutation({
-    mutationFn: async (attempt: IssueAttempt) => {
-      let actId = attempt.actId;
+    mutationFn: async (current: IssueAttempt) => {
+      let issuedAttempt = current;
+      let actId = current.actId;
       if (!actId) {
         setProgress("creating");
-        const created = await createBillingAct(attempt.create);
+        const created = await createBillingAct(current.create);
         actId = created.id;
-        attempt.actId = created.id;
+        issuedAttempt = { ...current, actId: created.id };
+        attemptRef.current = issuedAttempt;
+        setAttempt(issuedAttempt);
+        setProgress("draft");
+        await invalidateActFamilies(issuedAttempt);
       }
       setProgress("uploading");
-      return issueBillingAct(actId, attempt.issueKey, attempt.file);
+      return issueBillingAct(actId, issuedAttempt.issueKey, issuedAttempt.file);
     },
     onSuccess: async (act) => {
       if (act.status !== "issued" || act.issuedAt === null || act.document?.state !== "ready") {
-        setProgress("idle");
+        setProgress("draft");
         return;
       }
-      const issuedRequestId = attemptRef.current?.create.requestId;
+      const issuedAttempt = attemptRef.current;
       attemptRef.current = null;
+      setAttempt(null);
       setProgress("issued");
-      await Promise.all([
-        client.invalidateQueries({ queryKey: ["platform", "billing", "acts"] }),
-        issuedRequestId
-          ? client.invalidateQueries({
-              queryKey: ["platform", "billing", "requests", issuedRequestId],
-            })
-          : Promise.resolve(),
-      ]);
+      if (issuedAttempt) await invalidateActFamilies(issuedAttempt);
     },
     onError: (error) => {
+      const retained = attemptRef.current;
+      if (retained?.actId) {
+        setAttempt(retained);
+        setProgress("draft");
+        return;
+      }
       setProgress("idle");
-      if (!retryable(error)) attemptRef.current = null;
+      if (!retryable(error)) {
+        attemptRef.current = null;
+        setAttempt(null);
+      }
+    },
+  });
+  const reconcile = useMutation({
+    mutationFn: (actId: string) => getBillingAct(actId),
+    onSuccess: async (act) => {
+      const retained = attemptRef.current;
+      if (!retained) return;
+      if (act.status === "issued" && act.issuedAt !== null && act.document?.state === "ready") {
+        attemptRef.current = null;
+        setAttempt(null);
+        setProgress("issued");
+      } else {
+        setProgress("draft");
+      }
+      await invalidateActFamilies(retained);
     },
   });
   const resetAttempt = () => {
+    if (attemptRef.current) return;
     attemptRef.current = null;
+    setAttempt(null);
     issue.reset();
     setValidationError(null);
   };
   const chooseFile = (next: File | undefined) => {
+    if (attemptRef.current) return;
     resetAttempt();
     setValidationError(null);
     setFile(null);
@@ -136,8 +183,10 @@ function BillingActForm() {
       actId: null,
     };
     attemptRef.current = attempt;
+    setAttempt(attempt);
     issue.mutate(attempt);
   };
+  const frozen = attempt !== null;
   return (
     <section className="catalog-page billing-act-page">
       <SectionHeader
@@ -163,6 +212,7 @@ function BillingActForm() {
         <Input
           label={t("billingActs.fields.number")}
           value={number}
+          disabled={frozen}
           onChange={(event) => {
             setNumber(event.target.value);
             resetAttempt();
@@ -172,6 +222,7 @@ function BillingActForm() {
           label={t("billingActs.fields.periodStart")}
           type="date"
           value={periodStart}
+          disabled={frozen}
           onChange={(event) => {
             setPeriodStart(event.target.value);
             resetAttempt();
@@ -181,6 +232,7 @@ function BillingActForm() {
           label={t("billingActs.fields.periodEnd")}
           type="date"
           value={periodEnd}
+          disabled={frozen}
           onChange={(event) => {
             setPeriodEnd(event.target.value);
             resetAttempt();
@@ -189,6 +241,7 @@ function BillingActForm() {
         <Input
           label={t("billingActs.fields.tenant")}
           value={tenantId}
+          disabled={frozen}
           onChange={(event) => {
             setTenantId(event.target.value);
             resetAttempt();
@@ -197,6 +250,7 @@ function BillingActForm() {
         <Input
           label={t("billingActs.fields.request")}
           value={requestId}
+          disabled={frozen}
           onChange={(event) => {
             setRequestId(event.target.value);
             resetAttempt();
@@ -205,6 +259,7 @@ function BillingActForm() {
         <Input
           label={t("billingActs.fields.invoice")}
           value={invoiceId}
+          disabled={frozen}
           onChange={(event) => {
             setInvoiceId(event.target.value);
             resetAttempt();
@@ -213,6 +268,7 @@ function BillingActForm() {
         <Input
           label={t("billingActs.fields.service")}
           value={orderedServiceId}
+          disabled={frozen}
           onChange={(event) => {
             setOrderedServiceId(event.target.value);
             resetAttempt();
@@ -224,6 +280,7 @@ function BillingActForm() {
             id="billing-act-pdf"
             type="file"
             accept="application/pdf,.pdf"
+            disabled={frozen}
             aria-describedby="billing-act-pdf-hint"
             onChange={(event) => chooseFile(event.target.files?.[0])}
           />
@@ -241,16 +298,30 @@ function BillingActForm() {
         {progress === "uploading" ? (
           <p role="status">{t("billingActs.progress.uploading")}</p>
         ) : null}
+        {attempt?.actId ? <Alert tone="info">{t("billingActs.progress.draftSaved")}</Alert> : null}
         {progress === "issued" ? <Alert tone="ok">{t("billingActs.progress.issued")}</Alert> : null}
+        {attempt?.actId ? (
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={issue.isPending || reconcile.isPending}
+            loading={reconcile.isPending}
+            onClick={() => {
+              if (attempt.actId) reconcile.mutate(attempt.actId);
+            }}
+          >
+            {t("billingActs.reconcile")}
+          </Button>
+        ) : null}
         <Button
           type="submit"
-          disabled={
-            issue.isPending || progress === "issued" || (issue.isError && !retryable(issue.error))
-          }
+          disabled={issue.isPending || progress === "issued"}
           loading={issue.isPending}
         >
-          {issue.isError && retryable(issue.error)
-            ? t("billingActs.retry")
+          {issue.isError
+            ? attempt?.actId
+              ? t("billingActs.resume")
+              : t("billingActs.retry")
             : t("billingActs.submit")}
         </Button>
       </form>

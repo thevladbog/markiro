@@ -281,6 +281,13 @@ export const CURRENT_SAAS_ROUTES = [
   ),
   route(
     "post",
+    "/platform/billing/requests/{id}/offer",
+    "201",
+    platformCommercialContracts.billingRequests.createOffer.response,
+    { body: platformCommercialContracts.billingRequests.createOffer.body },
+  ),
+  route(
+    "post",
     "/platform/billing/requests/{id}/comments",
     "201",
     platformCommercialContracts.billingRequests.comment.response,

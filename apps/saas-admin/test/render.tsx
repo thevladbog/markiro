@@ -95,7 +95,7 @@ export function renderSaasApp({
   client = fakeAuthClient(state),
   extra,
 }: {
-  initialEntry?: string;
+  initialEntry?: string | { pathname: string; state?: unknown };
   state?: MutableAuthState;
   client?: AuthClientLike;
   extra?: ReactNode;

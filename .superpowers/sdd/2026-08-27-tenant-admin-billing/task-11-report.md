@@ -2,129 +2,114 @@
 
 ## Result
 
-`apps/saas-admin` now has the internal Markiro operator counterpart for tenant
-billing requests. The request registry serializes the Task 6 tenant, status,
-and type filters, renders server status, responsible side, latest event, and a
-linked-object detail history, and exposes only the transitions returned by the
-server. `billing.read` guards inspection; every comment, transition, link,
-offer, invoice, revision, and act control additionally requires
-`billing.write`. A revoked or 403 request becomes the existing non-actionable
-forbidden surface, while the API remains authoritative.
+`apps/saas-admin` provides the internal Markiro operator counterpart for tenant billing requests.
+`billing.read` protects the registry and detail; every comment, transition, link, offer, invoice,
+revision, and act action requires `billing.write`. The list serializes the exact Task 6 filters.
+Detail renders server status, responsible side, event and linked-object history, and only the
+transitions returned by the API. A revoked or 403 authority becomes the existing non-actionable
+forbidden surface.
 
-All synchronous actions lock while pending. Comment, status, link, revision,
-and act issue attempts retain their immutable logical payload and UUID across
-ambiguous network/5xx retries. Terminal 4xx/409 outcomes do not offer the same
-retry and refetch the affected request authority. Successful mutations
-invalidate the request family and exact detail rather than broad unrelated
-queries.
+Request mutations retain one immutable `{ action, payload, idempotencyKey }` after an ambiguous
+network/5xx result. While retained, all fields and alternate actions are frozen; only the exact
+attempt can be retried. Terminal 4xx/409 results clear it and refetch server authority. Pending
+actions lock synchronously against double clicks, and successful mutations invalidate the request
+list family and exact detail.
 
-The operator can create a tenant-prefilled offer from a request. The created
-offer is linked back through the Task 6 request-link endpoint; an ambiguous link
-retry reuses the returned offer id and exact idempotency key rather than
-creating a second offer. Revision visibility comes exclusively from the new
-server projection. A latest `changes_requested` decision on the current
-published revision exposes `Create new version`, calls the revise endpoint,
-and navigates to the returned new draft; the superseded offer is never edited
-or republished in place.
+Request-bound offer creation is now one server transaction:
+`POST /platform/billing/requests/:id/offer`. The route body has no `tenantId`; the service locks the
+request, derives its tenant, creates the draft and lines, links the draft, writes one request event
+and one exact audit event, and commits one replayable result. A conflict rolls the whole transaction
+back, so no orphan offer remains. The SaaS route reads `requestId` from the route, loads the request,
+renders its tenant read-only, posts once, and navigates to the returned draft. Direct offer creation
+is unchanged.
 
-Invoice creation from a request is visible only for the server-projected
-accepted current offer. `sourceOfferId` and `sourceRequestId` now survive
-`DocumentDraft`, `sourceOfferDraft`, editing/validation, and
-`toInvoiceCreateInput`. Navigation without the accepted source marker is
-rejected before the offer query runs. Direct invoice creation remains
-source-free. Request provenance stays a Task 2 relationship and does not assume
-a physical invoice column.
+The request offer projection now follows the current family revision and reads the latest structured
+decision for that revision. A real lifecycle test covers original `changes_requested` → revise →
+publish current → accept current and proves `offerAction` points to the new revision with
+`canCreateInvoice: true`. Revision controls remain server-authoritative.
 
-The act route collects number, civil period, tenant, request, invoice, and
-ordered-service links plus exactly one PDF. The client rejects non-PDF, empty,
-and over-5-MiB files before POST. Creation and issue are separate progress
-phases; after a draft id is returned, retries reuse that id and the exact issue
-key, so they cannot recreate the act. The UI shows issued only when the API
-returns `status: issued`, `issuedAt`, and ready document metadata. It never
-renders private storage keys or signed object details.
+Invoice creation from a request no longer trusts router state as acceptance authority. The
+destination always refetches request detail on mount and waits for that response before loading the
+offer or rendering the live composer. It requires matching `offerId`, `currentOfferId`,
+`sourceOfferId`, `sourceRequestId`, and `canCreateInvoice`. Stale, crafted, or mismatched state is
+non-actionable; request 403 invalidates principal authority and renders forbidden. Both source ids
+survive draft prefill, edits, validation, and `toInvoiceCreateInput`; direct source-free invoice
+creation is unchanged. Provenance remains a Task 2 relation, not a physical invoice column.
 
-The pages use the existing SaaS-admin operational components, tokens, table,
-forms, focus treatment, compact layout, and responsive breakpoints. All visible
-and accessibility copy exists in RU and EN. No tenant cabinet shell was copied.
+Act issue is an explicit two-phase state machine. Once create returns, the client persists the act
+id and exact create/file/issue identity independently of issue outcome, freezes all fields and the
+PDF, and never creates the draft again. Network/5xx and terminal service/period conflicts keep a
+resumable exact issue attempt. The operator can resume or reconcile the saved draft; no deletion is
+implied because the API has no such operation. Act list, exact act/document, and request families
+are invalidated immediately after draft creation, including issue failure. Issued appears only from
+issued API metadata. Only one non-empty PDF up to 5 MiB is accepted; private storage details are not
+rendered.
+
+All new visible and accessibility copy is present in RU and EN. Existing SaaS-admin components and
+tokens are reused; no tenant cabinet shell or new visual token layer was introduced.
 
 ## Contract-gap ruling
 
-Task 6 contained the authoritative request transition table and offer workflow,
-but its response DTO did not project either decision to clients. Mirroring that
-policy in Task 11 would have violated the approved server-authority rule. The
-small coherent correction therefore adds typed `allowedTransitions` to request
-list/detail and typed `offerAction` to detail. The service computes both from
-the existing transition table, tenant-scoped offer family, current published
-generation, latest structured tenant decision, and existing-draft state.
-
-The list query also exposes the already supported request type as an exact typed
-filter. Contract, service, and OpenAPI coverage accompany the correction; no
-database or privacy model changed.
+Task 6 owned the authoritative workflow but originally did not project `allowedTransitions` or
+structured current-offer actionability. Task 11 added typed server projections instead of mirroring
+workflow in the client. Review exposed a second gap: generic offer-create plus request-link could not
+make a request-bound draft atomic or prevent client tenant trust. The smallest coherent correction
+adds the strict request-owned endpoint and factors the existing offer-draft insert into a
+transaction-aware helper shared by direct and request-bound creation. No schema, migration, invoice
+provenance column, or privacy model changed.
 
 ## RED / GREEN
 
-- **RED:** the new SaaS-admin suites failed collection/render because the
-  request and act pages did not exist. The source-provenance test then showed
-  both source ids being dropped. Contract RED rejected the unknown
-  `allowedTransitions`, followed by a second focused RED rejecting unknown
-  `offerAction`.
-- **GREEN:** focused SaaS-admin workflow plus composer regression passes **4
-  files / 21 tests**. It covers read denial, exact filters, detail and
-  server-returned transitions, accepted-only invoice action, immutable comment
-  retry/double-click/invalidation, RU and EN, exact source preservation, direct
-  invoice behavior, PDF/size validation, two-phase issue metadata, and issue
-  retry without duplicate act creation.
-- **GREEN:** platform commercial contract passes **1 file / 20 tests**.
-- **GREEN:** API OpenAPI contract passes **1 file / 4 tests**, including its real
-  Multer overflow case.
-- **SKIP:** the request service file contains **69 database-backed tests**,
-  including the new transition and offer-action projections, but the whole file
-  skipped because this worktree had no isolated `DATABASE_URL`. No shared
-  database was used or modified.
+- **RED:** commercial contracts failed **1 of 21** because `billingRequests.createOffer` did not
+  exist.
+- **RED:** clean SaaS focused run passed **19 of 27** and failed the eight new authority/state cases:
+  atomic request route, whole-surface mutation freeze, invoice authority/403, terminal act resume,
+  and an existing provenance fixture that still entered through an unauthoritative offer action.
+- **GREEN:** focused SaaS workflows pass **4 files / 28 tests**.
+- **GREEN:** complete SaaS suite passes **25 files / 223 tests**. It emits two pre-existing React
+  `act(...)` warnings in catalog tests.
+- **GREEN:** platform contracts pass **9 files / 68 tests**.
+- **GREEN:** isolated Postgres request service passes **1 file / 72 tests**. It creates a UUID-named
+  scratch database, applies migrations, runs lifecycle/concurrency/rollback/audit proof, and drops
+  the database.
+- **GREEN:** API OpenAPI passes **1 file / 4 tests** and guarded route inventory passes **1 file / 4
+  tests**.
 
 ## Changed areas
 
-- `apps/saas-admin/src/pages/billing-requests` — typed API, exact filters,
-  registry/detail, server actions, retries, and scoped invalidation.
-- `apps/saas-admin/src/pages/billing-acts` — typed create/issue API and private
-  PDF issue workflow.
-- offer and invoice pages plus document draft conversion — request linking,
-  server-owned revision entry, and exact invoice source preservation.
-- SaaS-admin routes, rail navigation, API FormData handling, operational CSS,
-  and RU/EN dictionaries.
-- platform commercial contracts and request service — minimal server-owned
-  transition and offer-action projections plus type filtering.
-- focused SaaS-admin, contract, service, and OpenAPI tests.
+- `packages/platform-contracts` — strict tenant-less atomic offer action and typed response.
+- `apps/api/src/modules/platform-billing-requests` — current-revision projection and atomic
+  request-bound offer transaction/controller.
+- `apps/api/src/modules/platform-offers` — transaction-aware draft insertion shared with direct
+  offer creation.
+- request, invoice, offer, act, composer, routing, and RU/EN SaaS files — whole-surface retry freeze,
+  locked request tenant, destination authority, exact provenance, and resumable act issue.
+- focused contract, OpenAPI, real DB service, and SaaS tests.
 
 ## Verification
 
-- PASS — focused SaaS-admin Vitest: **4 files / 21 tests**.
-- PASS — SaaS-admin source and test TypeScript no-emit.
-- PASS — full SaaS-admin ESLint.
-- PASS — SaaS-admin production Vite build; the existing >500-kB chunk advisory
-  remains.
-- PASS — platform-contracts focused Vitest: **1 file / 20 tests**.
-- PASS — platform-contracts TypeScript no-emit and build.
-- PASS — API OpenAPI Vitest: **1 file / 4 tests**. Its local ephemeral listener
-  required the approved localhost test permission after the sandbox returned
-  `EPERM`.
-- PASS — API TypeScript no-emit, Nest build, and scoped ESLint after temporarily
-  aliasing current-worktree contract/domain/db builds.
-- PASS — RU/EN key parity, scoped Prettier, and `git diff --check`.
+- PASS — SaaS focused Vitest: **4 files / 28 tests**.
+- PASS — full SaaS Vitest with temporary alias directory excluded: **25 files / 223 tests**.
+- PASS — SaaS source/test TypeScript no-emit, full ESLint, and production Vite build. The existing
+  >500-kB chunk advisory remains.
+- PASS — platform-contracts Vitest **9 files / 68 tests**, typecheck, ESLint, and build.
+- PASS — isolated Postgres API service **1 file / 72 tests**, no skips.
+- PASS — API OpenAPI **4/4** and guarded route inventory **4/4**. Loopback/database access used the
+  approved local permission; inventory used localhost-only values for two missing optional `.env`
+  URLs.
+- PASS — API TypeScript no-emit, full ESLint, and Nest build with temporary current-worktree aliases.
+- PASS — scoped Prettier, `git diff --check`, and final staged-diff review.
 
-An attempted unbounded SaaS-admin run was stopped because Vitest traversed the
-temporary `node_modules.shared` dependency alias as test source; focused tests
-and the package gates above are the valid evidence. All temporary dependency
-aliases were restored before commit, and no registry or lockfile changed.
+One unbounded SaaS Vitest attempt traversed `node_modules.shared`, so it was discarded as alias
+noise. The valid full run explicitly excluded that temporary directory. All aliases were restored
+before commit; no registry, manifest, or lockfile changed.
 
 ## Limits
 
-No live browser, responsive screenshot, live API/database, or object-storage
-workflow was run. Those remain the Task 13 browser and live-storage gate; DOM,
-contract, type, lint, and build results do not claim visual or external-system
-confirmation.
+No live browser, responsive screenshot, live object-storage flow, or external deployment was run.
+Those remain Task 13 gates; DOM, contract, database, type, lint, and build evidence does not claim
+visual or live-storage confirmation.
 
 ## Commit
 
-The scoped commit SHA is reported in the task handoff because a commit cannot
-contain its own final SHA.
+The scoped fix commit SHA is reported in the handoff because a commit cannot contain its own SHA.

@@ -1311,6 +1311,45 @@ describe("platform commercial contracts", () => {
     ).toBe(false);
   });
 
+  it("contracts an atomic request-bound offer creation without a client tenant id", () => {
+    const requestId = "82111111-1111-4111-8111-111111111120";
+    const idempotencyKey = "83111111-1111-4111-8111-111111111120";
+    const body = {
+      idempotencyKey,
+      expiresAt: "2026-09-30",
+      lines: [
+        {
+          kind: "service",
+          catalogVersionId: null,
+          nameRu: "Настройка",
+          nameEn: "Setup",
+          descriptionRu: null,
+          descriptionEn: null,
+          quantity: 1,
+          unit: "service",
+          agreedUnitPrice: "1000.00",
+          vatRateBps: 2000,
+          vatIncluded: true,
+          activationPolicy: null,
+        },
+      ],
+    };
+
+    expect(platformCommercialContracts.billingRequests.createOffer.body.parse(body)).toMatchObject({
+      idempotencyKey,
+      lines: [{ kind: "service" }],
+    });
+    expect(
+      platformCommercialContracts.billingRequests.createOffer.body.safeParse({
+        ...body,
+        tenantId: TENANT_ID,
+      }).success,
+    ).toBe(false);
+    expect(platformCommercialContracts.billingRequests.createOffer.params.parse(requestId)).toBe(
+      requestId,
+    );
+  });
+
   it("strictly validates act dates, upload metadata, and idempotency bodies", () => {
     const idempotencyKey = "83111111-1111-4111-8111-111111111119";
     const requestId = "84111111-1111-4111-8111-111111111119";

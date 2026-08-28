@@ -1,6 +1,6 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, SectionHeader, Spinner } from "@markiro/ui";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router";
 import { z } from "zod";
@@ -21,6 +21,7 @@ import { createInvoice } from "./api.js";
 import { getOffer } from "../offers/api.js";
 import { sourceOfferDraft } from "./sourceOfferDraft.js";
 import { listOperatorBankAccounts } from "../settings/api.js";
+import { getBillingRequest } from "../billing-requests/api.js";
 
 export { sourceOfferDraft } from "./sourceOfferDraft.js";
 
@@ -46,24 +47,51 @@ function InvoiceEditor() {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
+  const client = useQueryClient();
   const [search] = useSearchParams();
   const requestedTenant = tenantIdSchema.safeParse(search.get("tenantId")).data;
   const rawSourceOfferId = (location.state as { sourceOfferId?: unknown } | null)?.sourceOfferId;
   const rawSourceRequestId = (location.state as { sourceRequestId?: unknown } | null)
     ?.sourceRequestId;
-  const sourceAccepted =
-    (location.state as { sourceAccepted?: unknown } | null)?.sourceAccepted === true;
   const createdInvoiceId = useRef<string | null>(null);
   const sourceOfferId = z.uuid().safeParse(rawSourceOfferId).data;
   const sourceRequestId = z.uuid().safeParse(rawSourceRequestId).data;
+  const hasSourceNavigation = rawSourceOfferId !== undefined || rawSourceRequestId !== undefined;
   const invalidSourceNavigation =
-    rawSourceOfferId !== undefined &&
-    (sourceOfferId === undefined || sourceRequestId === undefined || !sourceAccepted);
+    hasSourceNavigation && (sourceOfferId === undefined || sourceRequestId === undefined);
+  const requestAuthority = useQuery({
+    queryKey: ["platform", "billing", "requests", sourceRequestId],
+    queryFn: () => getBillingRequest(sourceRequestId!),
+    enabled: sourceOfferId !== undefined && sourceRequestId !== undefined,
+    refetchOnMount: "always",
+  });
+  const authorityValid =
+    requestAuthority.isFetchedAfterMount &&
+    !requestAuthority.isFetching &&
+    requestAuthority.data?.offerAction?.canCreateInvoice === true &&
+    requestAuthority.data.offerAction.offerId === sourceOfferId &&
+    requestAuthority.data.offerAction.currentOfferId === sourceOfferId;
+  const staleSourceNavigation =
+    sourceOfferId !== undefined &&
+    sourceRequestId !== undefined &&
+    requestAuthority.isFetchedAfterMount &&
+    !requestAuthority.isFetching &&
+    requestAuthority.isSuccess
+      ? !authorityValid
+      : false;
   const sourceOffer = useQuery({
     queryKey: ["platform", "offers", sourceOfferId],
     queryFn: () => getOffer(sourceOfferId!),
-    enabled: sourceOfferId !== undefined && !invalidSourceNavigation,
+    enabled: sourceOfferId !== undefined && authorityValid,
   });
+  useEffect(() => {
+    if (
+      requestAuthority.error instanceof ApiRequestError &&
+      requestAuthority.error.status === 403
+    ) {
+      void client.invalidateQueries({ queryKey: ["platform", "me"] });
+    }
+  }, [client, requestAuthority.error]);
   const tenants = useQuery({
     queryKey: ["platform", "tenants", "document-picker"],
     queryFn: () => listTenants({ page: 1, limit: 100 }),
@@ -120,7 +148,10 @@ function InvoiceEditor() {
     tenants.isPending ||
     catalog.isPending ||
     sellerAccounts.isPending ||
-    (sourceOfferId !== undefined && !invalidSourceNavigation && sourceOffer.isPending) ||
+    (sourceOfferId !== undefined &&
+      sourceRequestId !== undefined &&
+      (requestAuthority.isPending || requestAuthority.isFetching)) ||
+    (authorityValid && sourceOffer.isPending) ||
     (needsTenantPrefetch && prefetchedTenant.isPending)
   ) {
     return (
@@ -134,7 +165,7 @@ function InvoiceEditor() {
       </section>
     );
   }
-  if (invalidSourceNavigation) {
+  if (invalidSourceNavigation || staleSourceNavigation) {
     return (
       <section className="catalog-page">
         <SectionHeader
@@ -142,7 +173,15 @@ function InvoiceEditor() {
           title={t("billing.newTitle")}
           description={t("billing.newDescription")}
         />
-        <Alert tone="error">{t("billing.sourceNotAccepted")}</Alert>
+        <Alert tone="error">{t("billing.sourceUnavailable")}</Alert>
+      </section>
+    );
+  }
+  if (requestAuthority.error instanceof ApiRequestError && requestAuthority.error.status === 403) {
+    return (
+      <section className="catalog-page">
+        <h1>{t("billingRequests.forbiddenTitle")}</h1>
+        <Alert tone="error">{t("billingRequests.forbiddenBody")}</Alert>
       </section>
     );
   }
@@ -150,7 +189,8 @@ function InvoiceEditor() {
     tenants.error ||
     sellerAccounts.error ||
     (catalog.error && !catalog.data) ||
-    (sourceOfferId !== undefined && sourceOffer.error) ||
+    (sourceRequestId !== undefined && requestAuthority.error) ||
+    (authorityValid && sourceOffer.error) ||
     (needsTenantPrefetch && prefetchedTenant.error)
   ) {
     return (

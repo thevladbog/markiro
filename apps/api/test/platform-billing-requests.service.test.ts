@@ -8,6 +8,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { BillingService } from "../src/modules/billing/billing.service";
 import { PlatformBillingRequestsService } from "../src/modules/platform-billing-requests/platform-billing-requests.service";
+import { PlatformOffersService } from "../src/modules/platform-offers/platform-offers.service";
+import { TenantBillingOffersService } from "../src/modules/tenant-billing/tenant-billing-offers.service";
 import {
   platformCapabilitiesForRole,
   type PlatformPrincipal,
@@ -85,6 +87,8 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
   let tenantUser = "";
   let requests: PlatformBillingRequestsService;
   let billing: BillingService;
+  let offers: PlatformOffersService;
+  let tenantOffers: TenantBillingOffersService;
 
   beforeAll(async () => {
     await maintenance.pool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
@@ -128,6 +132,8 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     });
     requests = new PlatformBillingRequestsService(connection.db, audit);
     billing = new BillingService(connection.db, audit);
+    offers = new PlatformOffersService(connection.db, audit);
+    tenantOffers = new TenantBillingOffersService(connection.db);
   }, 120_000);
 
   afterAll(async () => {
@@ -304,6 +310,136 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
         canCreateInvoice: false,
       },
     });
+  });
+
+  it("follows the current family revision and its current tenant decision", async () => {
+    const request = await insertRequest(connection.db, tenantA, tenantUser, "offer_prepared");
+    const [original] = await connection.db
+      .insert(schema.commercialOffers)
+      .values({
+        tenantId: tenantA,
+        revision: 1,
+        status: "published",
+        number: `KP-LIFECYCLE-${randomUUID()}`,
+        publishedAt: new Date(),
+        createdByPlatformUserId: actorId,
+      })
+      .returning();
+    if (!original) throw new Error("lifecycle offer fixture insert failed");
+    await requests.link(actor, request.id, {
+      type: "offer",
+      targetId: original.id,
+      idempotencyKey: randomUUID(),
+    });
+    await tenantOffers.requestChanges(tenantA, tenantUser, original.id, {
+      message: "Please update",
+      idempotencyKey: randomUUID(),
+    });
+    const revision = await offers.revise(actor, original.id, { idempotencyKey: randomUUID() });
+    await offers.publish(actor, revision.id);
+    await tenantOffers.accept(tenantA, tenantUser, revision.id, randomUUID());
+
+    await expect(requests.detail(actor, request.id)).resolves.toMatchObject({
+      offerAction: {
+        offerId: revision.id,
+        currentOfferId: revision.id,
+        latestDecision: "accepted",
+        canRevise: false,
+        canCreateInvoice: true,
+      },
+    });
+  });
+
+  it("creates and links one tenant-authoritative draft atomically on exact replay", async () => {
+    const request = await insertRequest(connection.db, tenantA, tenantUser, "under_review");
+    const input = requestOfferInput(randomUUID());
+
+    const [left, right] = await Promise.all([
+      requests.createOffer(actor, request.id, input),
+      requests.createOffer(actor, request.id, input),
+    ]);
+
+    expect(right).toEqual(left);
+    expect(left).toMatchObject({
+      requestId: request.id,
+      tenantId: tenantA,
+      link: { requestId: request.id, tenantId: tenantA, type: "offer" },
+    });
+    expect(left.link.targetId).toBe(left.offerId);
+    const [offer] = await connection.db
+      .select()
+      .from(schema.commercialOffers)
+      .where(eq(schema.commercialOffers.id, left.offerId));
+    expect(offer).toMatchObject({ tenantId: tenantA, status: "draft" });
+    expect(
+      await connection.db
+        .select()
+        .from(schema.tenantBillingRequestLinks)
+        .where(eq(schema.tenantBillingRequestLinks.offerId, left.offerId)),
+    ).toHaveLength(1);
+    const events = await connection.db
+      .select()
+      .from(schema.tenantBillingRequestEvents)
+      .where(eq(schema.tenantBillingRequestEvents.idempotencyKey, input.idempotencyKey));
+    expect(events).toEqual([
+      expect.objectContaining({
+        tenantId: tenantA,
+        requestId: request.id,
+        kind: "offer_linked",
+        actorKind: "platform_user",
+        actorPlatformUserId: actorId,
+        metadata: { type: "offer", targetId: left.offerId, linkId: left.link.id },
+      }),
+    ]);
+    const audits = await connection.db
+      .select()
+      .from(schema.platformAuditEvents)
+      .where(
+        and(
+          eq(schema.platformAuditEvents.targetId, request.id),
+          eq(schema.platformAuditEvents.action, "billing.request.offer_created"),
+        ),
+      );
+    expect(audits).toEqual([
+      expect.objectContaining({
+        actorPlatformUserId: actorId,
+        actorRole: "accountant",
+        outcome: "success",
+        tenantId: tenantA,
+        targetType: "tenant_billing_request",
+        targetId: request.id,
+        before: { status: "under_review" },
+        after: { offerId: left.offerId, linkId: left.link.id, eventId: events[0]?.id },
+      }),
+    ]);
+  });
+
+  it("rolls back the request-bound offer when a link event conflicts", async () => {
+    const request = await insertRequest(connection.db, tenantA, tenantUser, "under_review");
+    const idempotencyKey = randomUUID();
+    await connection.db.insert(schema.tenantBillingRequestEvents).values({
+      tenantId: tenantA,
+      requestId: request.id,
+      kind: "platform_comment",
+      actorKind: "platform_user",
+      actorPlatformUserId: actorId,
+      message: "occupy event key",
+      idempotencyKey,
+    });
+    const before = await connection.db
+      .select({ id: schema.commercialOffers.id })
+      .from(schema.commercialOffers)
+      .where(eq(schema.commercialOffers.tenantId, tenantA));
+
+    await expect(
+      requests.createOffer(actor, request.id, requestOfferInput(idempotencyKey)),
+    ).rejects.toMatchObject({ response: { code: "idempotency_key_reused" }, status: 409 });
+
+    const after = await connection.db
+      .select({ id: schema.commercialOffers.id })
+      .from(schema.commercialOffers)
+      .where(eq(schema.commercialOffers.tenantId, tenantA));
+    expect(after).toEqual(before);
   });
 
   it.each(forbiddenTransitions)(
@@ -767,6 +903,29 @@ function invoiceInput(tenantId: string): CreateInvoiceDto {
         agreedUnitPrice: "100.00",
         vatRateBps: null,
         vatIncluded: false,
+        activationPolicy: null,
+      },
+    ],
+  };
+}
+
+function requestOfferInput(idempotencyKey: string) {
+  return {
+    idempotencyKey,
+    expiresAt: "2026-09-30",
+    lines: [
+      {
+        kind: "service" as const,
+        catalogVersionId: null,
+        nameRu: "Настройка",
+        nameEn: "Setup",
+        descriptionRu: null,
+        descriptionEn: null,
+        quantity: 1,
+        unit: "service",
+        agreedUnitPrice: "1000.00",
+        vatRateBps: 2000,
+        vatIncluded: true,
         activationPolicy: null,
       },
     ],

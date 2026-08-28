@@ -372,6 +372,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "PlatformBillingRequestsController.comment": platform(
     "platform billing request comments are guarded by platform billing capabilities",
   ),
+  "PlatformBillingRequestsController.createOffer": platform(
+    "request-bound platform offer creation is guarded by platform billing capabilities",
+  ),
   "PlatformBillingRequestsController.link": platform(
     "platform billing request links are guarded by platform billing capabilities",
   ),

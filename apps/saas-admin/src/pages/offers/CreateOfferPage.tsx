@@ -2,8 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, SectionHeader, Spinner } from "@markiro/ui";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router";
-import { z } from "zod";
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 
 import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
@@ -20,7 +19,7 @@ import {
 import { createOffer } from "./api.js";
 import { OfferTermsEditor } from "./OfferTermsEditor.js";
 import { listOperatorBankAccounts } from "../settings/api.js";
-import { linkBillingRequest } from "../billing-requests/api.js";
+import { createBillingRequestOffer, getBillingRequest } from "../billing-requests/api.js";
 
 function toTenantListItem(detail: TenantDetail): TenantListItem {
   return {
@@ -42,44 +41,21 @@ export function CreateOfferPage() {
 
 function OfferEditor() {
   const { t } = useTranslation();
-  const location = useLocation();
   const navigate = useNavigate();
   const client = useQueryClient();
+  const { requestId } = useParams();
   const [search] = useSearchParams();
   const [termsMarkdown, setTermsMarkdown] = useState<string | null>(null);
-  const pendingLink = useRef<{ offerId: string; idempotencyKey: string } | null>(null);
-  const sourceRequestId = z
-    .uuid()
-    .safeParse((location.state as { sourceRequestId?: unknown } | null)?.sourceRequestId).data;
-  const selectedTenantId = tenantIdSchema.safeParse(search.get("tenantId")).data;
-  const refreshSourceRequest = async () => {
-    if (!sourceRequestId) return;
-    await Promise.all([
-      client.invalidateQueries({ queryKey: ["platform", "billing", "requests"] }),
-      client.invalidateQueries({
-        queryKey: ["platform", "billing", "requests", sourceRequestId],
-      }),
-    ]);
-  };
-  const linkSourceOffer = async (attempt: { offerId: string; idempotencyKey: string }) => {
-    if (!sourceRequestId) return;
-    try {
-      await linkBillingRequest(sourceRequestId, {
-        type: "offer",
-        targetId: attempt.offerId,
-        idempotencyKey: attempt.idempotencyKey,
-      });
-      pendingLink.current = null;
-      await refreshSourceRequest();
-    } catch (error) {
-      if (!(error instanceof ApiRequestError) || error.status === null || error.status >= 500) {
-        throw error;
-      }
-      pendingLink.current = null;
-      await refreshSourceRequest();
-      throw error;
-    }
-  };
+  const request = useQuery({
+    queryKey: ["platform", "billing", "requests", requestId],
+    queryFn: () => getBillingRequest(requestId!),
+    enabled: requestId !== undefined,
+  });
+  const requestAttempt = useRef<{
+    input: Parameters<typeof createBillingRequestOffer>[1];
+  } | null>(null);
+  const selectedTenantId =
+    request.data?.tenantId ?? tenantIdSchema.safeParse(search.get("tenantId")).data;
   const tenants = useQuery({
     queryKey: ["platform", "tenants", "document-picker"],
     queryFn: () => listTenants({ page: 1, limit: 100 }),
@@ -119,24 +95,50 @@ function OfferEditor() {
       ) {
         throw new ApiRequestError(409, "Catalog version unavailable", "catalog_version_stale");
       }
-      if (pendingLink.current && sourceRequestId) {
-        const linkedOffer = pendingLink.current.offerId;
-        await linkSourceOffer(pendingLink.current);
-        return linkedOffer;
-      }
       const input = toOfferCreateInput(draft);
-      const offer = await createOffer(termsMarkdown ? { ...input, termsMarkdown } : input);
-      if (sourceRequestId) {
-        const linkAttempt = { offerId: offer.id, idempotencyKey: crypto.randomUUID() };
-        pendingLink.current = linkAttempt;
-        await linkSourceOffer(linkAttempt);
+      if (requestId) {
+        const retained = requestAttempt.current;
+        const requestInput =
+          retained?.input ??
+          (() => {
+            const offerInput = {
+              lines: input.lines,
+              ...(input.sellerBankAccountId !== undefined
+                ? { sellerBankAccountId: input.sellerBankAccountId }
+                : {}),
+              ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
+              ...(input.termsMarkdown !== undefined ? { termsMarkdown: input.termsMarkdown } : {}),
+            };
+            return {
+              ...offerInput,
+              ...(termsMarkdown ? { termsMarkdown } : {}),
+              idempotencyKey: crypto.randomUUID(),
+            };
+          })();
+        requestAttempt.current = { input: requestInput };
+        try {
+          const result = await createBillingRequestOffer(requestId, requestInput);
+          requestAttempt.current = null;
+          await Promise.all([
+            client.invalidateQueries({ queryKey: ["platform", "billing", "requests"] }),
+            client.invalidateQueries({
+              queryKey: ["platform", "billing", "requests", requestId],
+            }),
+          ]);
+          return result.offerId;
+        } catch (error) {
+          if (!retryable(error)) requestAttempt.current = null;
+          throw error;
+        }
       }
+      const offer = await createOffer(termsMarkdown ? { ...input, termsMarkdown } : input);
       return offer.id;
     },
   });
 
   if (
     tenants.isPending ||
+    (requestId !== undefined && request.isPending) ||
     catalog.isPending ||
     sellerAccounts.isPending ||
     (needsTenantPrefetch && prefetchedTenant.isPending)
@@ -152,8 +154,17 @@ function OfferEditor() {
       </section>
     );
   }
+  if (request.error instanceof ApiRequestError && request.error.status === 403) {
+    return (
+      <section className="catalog-page">
+        <h1>{t("billingRequests.forbiddenTitle")}</h1>
+        <Alert tone="error">{t("billingRequests.forbiddenBody")}</Alert>
+      </section>
+    );
+  }
   if (
     tenants.error ||
+    (requestId !== undefined && request.error) ||
     sellerAccounts.error ||
     (catalog.error && !catalog.data) ||
     (needsTenantPrefetch && prefetchedTenant.error)
@@ -199,6 +210,7 @@ function OfferEditor() {
         sellerAccounts={sellerAccounts.data ?? []}
         loadingSellerAccounts={sellerAccounts.isPending}
         loadingSources={false}
+        {...(requestId && selectedTenantId ? { lockedTenantId: selectedTenantId } : {})}
         submitting={create.isPending}
         {...(create.error
           ? {
@@ -212,9 +224,17 @@ function OfferEditor() {
         onSubmit={async (draft) => {
           await create.mutateAsync(draft);
         }}
-        onSuccess={() => void navigate("/offers", { state: { createdDocument: "offer" } })}
+        onSuccess={() => {
+          const offerId = create.data;
+          if (requestId && offerId) void navigate(`/offers?selected=${offerId}`);
+          else void navigate("/offers", { state: { createdDocument: "offer" } });
+        }}
         onCancel={() => void navigate("/offers")}
       />
     </div>
   );
+}
+
+function retryable(error: unknown): boolean {
+  return error instanceof ApiRequestError && (error.status === null || error.status >= 500);
 }

@@ -8,6 +8,7 @@ import {
   type PlatformBillingRequestLink,
   type PlatformBillingRequestLinkDto,
   type PlatformBillingRequestListQueryDto,
+  type PlatformBillingRequestOfferCreateDto,
   type PlatformBillingRequestStatusMutationDto,
 } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
@@ -22,6 +23,7 @@ import {
   beginPlatformBillingMutation,
   commitPlatformBillingMutation,
 } from "../platform-billing-idempotency";
+import { createOfferDraft } from "../platform-offers/platform-offer-draft";
 
 type RequestStatus = typeof schema.tenantBillingRequests.$inferSelect.status;
 type LinkType = PlatformBillingRequestLinkDto["type"];
@@ -307,6 +309,94 @@ export class PlatformBillingRequestsService {
     });
   }
 
+  async createOffer(
+    actor: PlatformPrincipal,
+    requestId: string,
+    input: PlatformBillingRequestOfferCreateDto,
+  ) {
+    const canonicalRequestId = canonicalBillingUuid(requestId);
+    const located = await this.locate(canonicalRequestId);
+    const { idempotencyKey, ...offerInput } = input;
+    return this.db.transaction(async (tx) => {
+      const mutation = await beginPlatformBillingMutation(tx, {
+        tenantId: located.tenantId,
+        idempotencyKey,
+        operation: "billing.request.offer.create",
+        targetId: canonicalRequestId,
+        payload: offerInput,
+        actorPlatformUserId: actor.userId,
+      });
+      if (mutation.kind === "committed") {
+        return platformCommercialContracts.billingRequests.createOffer.response.parse(
+          mutation.result,
+        );
+      }
+      if (mutation.kind === "pending") mutationInProgress();
+      await acquireBillingWorkflowLocks(tx, located.tenantId, [
+        { kind: "request", id: canonicalRequestId },
+      ]);
+      const request = await lockRequest(tx, located.tenantId, canonicalRequestId);
+      const offerId = await createOfferDraft(tx, actor.userId, {
+        ...offerInput,
+        tenantId: request.tenantId,
+      });
+      // Keep the request event key authoritative. A collision here proves that the
+      // offer and its lines are rolled back with the rest of this transaction.
+      await rejectExistingEventKey(tx, request.tenantId, idempotencyKey);
+      let link: typeof schema.tenantBillingRequestLinks.$inferSelect | undefined;
+      try {
+        [link] = await tx
+          .insert(schema.tenantBillingRequestLinks)
+          .values({
+            tenantId: request.tenantId,
+            requestId: request.id,
+            offerId,
+          })
+          .returning();
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          throw new ConflictException({ code: "billing_target_already_linked" });
+        }
+        throw error;
+      }
+      if (!link) throw new Error("platform billing request offer link insert failed");
+      const [event] = await tx
+        .insert(schema.tenantBillingRequestEvents)
+        .values({
+          tenantId: request.tenantId,
+          requestId: request.id,
+          kind: "offer_linked",
+          actorKind: "platform_user",
+          actorPlatformUserId: actor.userId,
+          metadata: { type: "offer", targetId: offerId, linkId: link.id },
+          idempotencyKey,
+        })
+        .returning();
+      if (!event) throw new Error("platform billing request offer event insert failed");
+      const result = {
+        requestId: request.id,
+        tenantId: request.tenantId,
+        offerId,
+        link: linkSource(link, "offer", offerId),
+      };
+      await this.audit.record(tx, {
+        actorPlatformUserId: actor.userId,
+        actorRole: actor.role,
+        action: "billing.request.offer_created",
+        outcome: "success",
+        tenantId: request.tenantId,
+        targetType: "tenant_billing_request",
+        targetId: request.id,
+        reason: null,
+        before: { status: request.status },
+        after: { offerId, linkId: link.id, eventId: event.id },
+        requestId: null,
+      });
+      await commitPlatformBillingMutation(tx, mutation.row.id, offerId, result);
+      return result;
+    });
+  }
+
   private async locate(requestId: string) {
     const [request] = await this.db
       .select({ tenantId: schema.tenantBillingRequests.tenantId })
@@ -399,7 +489,7 @@ async function resolveRequestOfferAction(
     .where(
       and(
         eq(schema.commercialOfferDecisions.tenantId, tenantId),
-        eq(schema.commercialOfferDecisions.offerId, offerId),
+        eq(schema.commercialOfferDecisions.offerId, current.id),
       ),
     )
     .orderBy(
@@ -408,16 +498,16 @@ async function resolveRequestOfferAction(
     )
     .limit(1);
   const latestDecision = decision?.decision ?? null;
-  const linkedIsCurrent = current.id === offerId && current.status === "published";
+  const currentIsPublished = current.status === "published";
   return {
-    offerId,
+    offerId: current.id,
     currentOfferId: current.id,
     latestDecision,
     canRevise:
-      linkedIsCurrent &&
+      currentIsPublished &&
       latestDecision === "changes_requested" &&
       !family.some((offer) => offer.status === "draft"),
-    canCreateInvoice: linkedIsCurrent && latestDecision === "accepted",
+    canCreateInvoice: currentIsPublished && latestDecision === "accepted",
   };
 }
 
