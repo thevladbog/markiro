@@ -11,6 +11,7 @@ import { loadEnv } from "../src/env";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { DB } from "../src/auth/auth.module";
 import { JournalService } from "../src/modules/integrations/journal.service";
+import { ChzCryptoService } from "../src/modules/signer-agents/chz-crypto.service";
 import { SignerSchedulerService } from "../src/modules/signer-agents/signer-scheduler.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
@@ -40,7 +41,11 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
     await app.init();
     await listenOnLoopback(app);
     db = ref.get(DB);
-    svc = new SignerSchedulerService(db, new JournalService(db));
+    svc = new SignerSchedulerService(
+      db,
+      new JournalService(db),
+      new ChzCryptoService(env.CHZ_TOKEN_ENCRYPTION_KEY),
+    );
   });
 
   afterAll(async () => {
@@ -250,5 +255,22 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
     await svc.run(now);
     expect(await errorEvents(tenantId)).toHaveLength(0);
     expect(await pendingTasks(tenantId)).toHaveLength(1);
+  });
+
+  // Final review, Finding A: without the key, an agent's real КЭП login
+  // would only reach a 503 once it tries to report back
+  // (SignerTasksService.complete), so an unconfigured key must stop the
+  // scheduler from ever sending an agent through that login to begin with --
+  // this must be a hard "no enqueue", not a slow-motion failure loop.
+  it("does not enqueue when the encryption key is not configured", async () => {
+    const unconfigured = new SignerSchedulerService(
+      db,
+      new JournalService(db),
+      new ChzCryptoService(undefined),
+    );
+    const tenantId = await freshTenant();
+    await insertAgent(tenantId);
+    await unconfigured.run(new Date());
+    expect(await pendingTasks(tenantId)).toHaveLength(0);
   });
 });

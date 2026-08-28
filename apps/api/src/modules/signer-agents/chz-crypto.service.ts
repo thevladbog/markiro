@@ -20,6 +20,11 @@ export class ChzCryptoService {
     }
   }
 
+  /** Whether `CHZ_TOKEN_ENCRYPTION_KEY` was configured at boot. */
+  isConfigured(): boolean {
+    return this.key !== undefined;
+  }
+
   private requireKey(): Buffer {
     if (!this.key) {
       throw new Error(

@@ -151,8 +151,8 @@ export class SignerAgentsService {
     // agent UPDATE and token DELETE must be atomic — otherwise a failure between
     // them leaves the agent revoked but the tenant's True API token alive, with no
     // way to retry (the UPDATE's WHERE status='active' no longer matches).
-    const agent = await this.db.transaction(async (tx) => {
-      const [agent] = await tx
+    const revoked = await this.db.transaction(async (tx) => {
+      const [revoked] = await tx
         .update(schema.chzSignerAgents)
         .set({ status: "revoked", revokedAt: new Date() })
         .where(
@@ -163,9 +163,9 @@ export class SignerAgentsService {
           ),
         )
         .returning({ id: schema.chzSignerAgents.id, name: schema.chzSignerAgents.name });
-      if (!agent) throw new NotFoundException();
+      if (!revoked) throw new NotFoundException();
       await tx.delete(schema.chzApiTokens).where(eq(schema.chzApiTokens.tenantId, tenantId));
-      return agent;
+      return revoked;
     });
     // Post-commit side effect: the revoke has already been committed, so a journal
     // failure here must never throw and must never turn into a 500.
@@ -177,7 +177,7 @@ export class SignerAgentsService {
         direction: "local",
         outcome: "warn",
         grain: "session",
-        message: `Signer agent revoked: ${agent.name}`,
+        message: `Signer agent revoked: ${revoked.name}`,
       })
       .catch((e) => this.logger.warn(`signer agent revoke journal append failed: ${e}`));
   }

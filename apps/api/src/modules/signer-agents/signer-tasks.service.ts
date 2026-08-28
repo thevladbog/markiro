@@ -1,4 +1,10 @@
-import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+} from "@nestjs/common";
 import { and, eq, sql } from "drizzle-orm";
 import {
   chzTrueApiAuthPayloadSchema,
@@ -10,7 +16,7 @@ import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { JournalService } from "../integrations/journal.service";
 import { CHZ_CHANNEL_TYPE } from "./chz-constants";
-import { ChzCryptoService } from "./chz-crypto.service";
+import { ChzCryptoService, type EncryptedChzToken } from "./chz-crypto.service";
 
 const CLAIM_POLL_INTERVAL_MS = 2_000;
 
@@ -88,7 +94,17 @@ export class SignerTasksService {
     taskId: string,
     body: ChzSignerTaskComplete,
   ): Promise<void> {
-    const encrypted = this.crypto.encrypt(tenantId, body.token);
+    // `ChzCryptoService.encrypt` throws a plain `Error` when
+    // `CHZ_TOKEN_ENCRYPTION_KEY` isn't configured -- left unmapped that was a
+    // generic 500 here, which the agent retries into an eventual task expiry
+    // and re-enqueue (final review, Finding A). Map it to a 503 instead so
+    // the failure is legible and the agent can back off.
+    let encrypted: EncryptedChzToken;
+    try {
+      encrypted = this.crypto.encrypt(tenantId, body.token);
+    } catch {
+      throw new ServiceUnavailableException("CHZ token encryption key is not configured");
+    }
     const obtainedAt = new Date();
     const expiresAt = new Date(body.expiresAt);
     await this.db.transaction(async (tx) => {

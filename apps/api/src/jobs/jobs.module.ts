@@ -25,6 +25,7 @@ import { MailRetentionService } from "../modules/mail/mail-retention.service";
 import { ShiftExportRunnerService } from "../modules/shift-exports/shift-export-runner.service";
 import { ShiftExportSourceService } from "../modules/shift-exports/shift-export-source.service";
 import { SignerSchedulerService } from "../modules/signer-agents/signer-scheduler.service";
+import { ChzCryptoService } from "../modules/signer-agents/chz-crypto.service";
 import {
   INVENTORY_DOCUMENT_GENERATOR_REGISTRY,
   InventoryDocumentRunnerService,
@@ -555,6 +556,15 @@ export class JobsModule {
           useValue: productionInventoryDocumentGeneratorRegistry,
         },
         InventoryDocumentRunnerService,
+        {
+          // Same construction as `SignerAgentsModule.forRoot`: `SignerSchedulerService`
+          // (this module) needs its own `ChzCryptoService` instance to check whether
+          // `CHZ_TOKEN_ENCRYPTION_KEY` is configured before enqueueing refresh tasks
+          // (final review, Finding A) -- `SignerAgentsModule`'s export isn't reachable
+          // here without a circular import between it and `JobsModule`.
+          provide: ChzCryptoService,
+          useFactory: () => new ChzCryptoService(env.CHZ_TOKEN_ENCRYPTION_KEY),
+        },
         SignerSchedulerService,
       ],
       exports: [PgBossService, INVENTORY_DOCUMENT_GENERATOR_REGISTRY],

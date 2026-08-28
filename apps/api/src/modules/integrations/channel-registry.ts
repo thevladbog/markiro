@@ -94,9 +94,12 @@ const commercemlSettings = z
   .strict();
 
 // `.passthrough()` stays: unlike `commercemlSettings` above, this schema
-// declares no fields AT ALL on purpose -- these three channels have no
-// settings contract yet, and accepting (not rejecting) an arbitrary shape
-// here is the deliberate, already-tested placeholder for that
+// declares no fields AT ALL on purpose -- `public_api` and `gis_mt_files`
+// (the two channels below still using it -- `chestny_znak` moved to
+// `chzSignerSettingsSchema` once the signer-agent scheduler needed to parse
+// its settings) have no settings contract yet, and accepting (not rejecting)
+// an arbitrary shape here is the deliberate, already-tested placeholder for
+// that
 // (`channel-registry.test.ts`'s "схема другого канала принимает произвольные
 // поля"). Item 8's regression was a NAMED field silently swallowing a typo of
 // itself (`commercemlSettings`, above); it was never about a channel that
