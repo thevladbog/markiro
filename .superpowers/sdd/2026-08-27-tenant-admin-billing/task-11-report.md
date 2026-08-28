@@ -69,6 +69,13 @@ attempt. The read-only forbidden view keeps navigation/unload guarded; when serv
 restores `billing.write`, the same draft can be resumed or reconciled without a second create POST
 or a new UUID.
 
+Retained offer and act identities now use the shared navigation guard's non-discardable operation
+state rather than its ordinary dirty-document state. Sidebar, in-app back links, and browser unload
+remain blocked without exposing the generic discard action, so an operator cannot unmount and lose
+the only retained idempotency key, act id, or PDF. Exact retry and authoritative reconciliation keep
+the same operation identity; successful retry or reconciliation releases navigation. Ordinary
+unsaved forms continue to use the existing discard confirmation contract.
+
 Every act create, issue, and reconcile outcome invalidates the whole request registry family as
 well as exact request/act/document keys, so registry `latestEvent` cannot stay stale. Reconciliation
 to an issued act with a ready PDF resets the earlier ambiguous issue error before showing success;
@@ -127,6 +134,12 @@ provenance column, or privacy model changed.
   234 tests**, contracts pass **9 files / 69 tests**, and isolated Postgres service passes **1 file /
   73 tests**. The DB proof asserts 101 → 100 with `truncated: true`, exact 100 with
   `truncated: false`, two materialized latest-event rows, exact tie-break, and no foreign event.
+- **Fix round 4 RED:** the retained-operation regression run passed **20 of 22** tests and failed the
+  offer and act cases because both route attempts opened the generic discard dialog with an active
+  `Отменить изменения` action.
+- **Fix round 4 GREEN:** retained-operation tests pass **2 files / 22 tests**; the broader offer,
+  act, request, and ordinary document-guard run passes **4 files / 39 tests**; complete SaaS passes
+  **25 files / 234 tests**.
 
 ## Changed areas
 
@@ -143,8 +156,8 @@ provenance column, or privacy model changed.
 
 ## Verification
 
-- PASS — latest fix-round SaaS focused Vitest: **3 files / 30 tests**.
-- PASS — full SaaS Vitest with temporary alias directory excluded: **25 files / 234 tests**.
+- PASS — latest fix-round SaaS focused Vitest: **4 files / 39 tests**.
+- PASS — full SaaS Vitest: **25 files / 234 tests**.
 - PASS — SaaS source/test TypeScript no-emit, full ESLint, and production Vite build. The existing
   > 500-kB chunk advisory remains.
 - PASS — platform-contracts Vitest **9 files / 69 tests**, typecheck, ESLint, and build.

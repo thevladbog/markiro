@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -198,7 +198,7 @@ describe("platform billing act issue", () => {
     },
   );
 
-  it("preserves one created act through principal downgrade, guarded navigation, and restoration", async () => {
+  it("makes a retained act non-discardable through downgrade, retry, and success", async () => {
     let principal: typeof PLATFORM_ADMIN_ME | typeof SUPPORT_ME = PLATFORM_ADMIN_ME;
     let createCount = 0;
     let issueCount = 0;
@@ -243,14 +243,11 @@ describe("platform billing act issue", () => {
     const uuidCount = randomUuid.mock.calls.length;
 
     await user.click(screen.getByRole("link", { name: "Вернуться к заявке" }));
-    expect(
-      within(screen.getByRole("alertdialog")).getByText("Есть несохранённые изменения"),
-    ).toBeDefined();
-    await user.click(
-      within(screen.getByRole("alertdialog")).getByRole("button", {
-        name: "Продолжить редактирование",
-      }),
-    );
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Отменить изменения" })).toBeNull();
+    expect(await screen.findByText("Операция выполняется. Дождитесь её завершения.")).toBeDefined();
+    expect(screen.getByText(ACT_ID)).toBeDefined();
+    expect(screen.getByText("ACT-42")).toBeDefined();
     const unload = new Event("beforeunload", { cancelable: true });
     fireEvent(window, unload);
     expect(unload.defaultPrevented).toBe(true);

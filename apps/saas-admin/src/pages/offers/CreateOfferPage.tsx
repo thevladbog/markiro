@@ -196,7 +196,7 @@ function OfferEditor({ forbidden, onForbidden }: { forbidden: boolean; onForbidd
       }
     },
   });
-  const retryNavigation = useNavigationGuard(requestAttempt !== null, create.isPending);
+  const retryNavigation = useNavigationGuard(false, requestAttempt !== null || create.isPending);
 
   if (forbidden) {
     return (

@@ -226,7 +226,7 @@ function BillingActForm({ writable }: { writable: boolean }) {
     issue.mutate(attempt);
   };
   const frozen = attempt !== null;
-  useNavigationGuard(frozen, issue.isPending || reconcile.isPending);
+  useNavigationGuard(false, frozen || issue.isPending || reconcile.isPending);
   if (forbidden || !writable) {
     return (
       <section className="catalog-page">

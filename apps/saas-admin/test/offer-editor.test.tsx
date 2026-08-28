@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -265,7 +265,7 @@ describe("offer editor route", () => {
     expect(randomUuid).toHaveBeenCalledTimes(uuidCount);
   });
 
-  it("freezes an ambiguous request offer and retries the exact payload and key once", async () => {
+  it("makes an ambiguous request offer non-discardable and retries the exact identity", async () => {
     let releaseRetry: (() => void) | undefined;
     const requestOfferGate = new Promise<void>((resolve) => {
       releaseRetry = resolve;
@@ -291,14 +291,9 @@ describe("offer editor route", () => {
     expect(screen.queryByRole("combobox", { name: "Добавить позицию" })).toBeNull();
     await user.type(price, "19000.00");
     await user.click(screen.getByRole("link", { name: "Каталог" }));
-    expect(
-      within(screen.getByRole("alertdialog")).getByText("Есть несохранённые изменения"),
-    ).toBeDefined();
-    await user.click(
-      within(screen.getByRole("alertdialog")).getByRole("button", {
-        name: "Продолжить редактирование",
-      }),
-    );
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Отменить изменения" })).toBeNull();
+    expect(await screen.findByText("Операция выполняется. Дождитесь её завершения.")).toBeDefined();
     expect(screen.getByRole("button", { name: "Повторить точно эту попытку" })).toBeDefined();
     const unload = new Event("beforeunload", { cancelable: true });
     fireEvent(window, unload);
