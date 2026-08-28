@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { and, eq, lte, or, sql } from "drizzle-orm";
 import { strToU8, zipSync, type Zippable } from "fflate";
 
@@ -192,6 +192,7 @@ export const INVENTORY_DOCUMENT_SAFE_ERROR_CODES = [
   "INVENTORY_RESULT_NOT_CLOSED",
   "STALE_RESULT_REVISION",
   "VERIFIED_PRODUCTION_DATE_MISSING",
+  "INVALID_ORGANIZATION_INN",
   "GENERATION_FAILED",
   "STORAGE_FAILED",
   "QUEUE_FAILED",
@@ -200,6 +201,8 @@ type InventoryDocumentSafeErrorCode = (typeof INVENTORY_DOCUMENT_SAFE_ERROR_CODE
 
 @Injectable()
 export class InventoryDocumentRunnerService {
+  private readonly logger = new Logger(InventoryDocumentRunnerService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly source: InventoryResultSourceService,
@@ -282,6 +285,10 @@ export class InventoryDocumentRunnerService {
       publicationAttempted = true;
       await this.publishReady(claimed, uploaded);
     } catch (error) {
+      this.logger.warn(
+        `inventory document run ${claimed.id} generation failed`,
+        error instanceof Error ? (error.stack ?? error.message) : String(error),
+      );
       if (publicationAttempted) {
         try {
           if (await this.hasCommittedPublication(claimed)) return;
@@ -513,9 +520,13 @@ function safeDocumentErrorCode(error: unknown): InventoryDocumentSafeErrorCode |
     }
   }
   if (error instanceof InventoryDocumentGenerationError) {
-    return error.code === "VERIFIED_PRODUCTION_DATE_MISSING"
-      ? "VERIFIED_PRODUCTION_DATE_MISSING"
-      : "GENERATION_FAILED";
+    switch (error.code) {
+      case "VERIFIED_PRODUCTION_DATE_MISSING":
+      case "INVALID_ORGANIZATION_INN":
+        return error.code;
+      default:
+        return "GENERATION_FAILED";
+    }
   }
   return null;
 }
