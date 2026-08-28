@@ -1,8 +1,8 @@
+/* Width and vertical rhythm come from `.mk-admin-page` (the shell's full-width
+   content rail), exactly like every other admin route. Do not re-cap the width
+   here -- that produced a second, narrower rail on wide screens. */
 .mk-inventory-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  max-width: 1200px;
+  min-width: 0;
 }
 
 .mk-inventory-close-panel,
@@ -210,9 +210,6 @@
   color: var(--fg-on-inverse);
 }
 
-.mk-inventory-workspace {
-  max-width: 860px;
-}
 .mk-inventory-form {
   display: grid;
   gap: 18px;
@@ -481,7 +478,6 @@
 
 .mk-inventory-correction-form {
   display: grid;
-  max-width: 720px;
   gap: 16px;
 }
 

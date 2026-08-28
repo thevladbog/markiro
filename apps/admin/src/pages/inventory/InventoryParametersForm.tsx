@@ -99,75 +99,73 @@ export function InventoryParametersForm({
   if (loadError) return <Alert tone="error">{t("pages.inventory.create.dependenciesError")}</Alert>;
 
   return (
-    <div className="mk-inventory-workspace">
-      <Card title={t("pages.inventory.create.cardTitle")} titleAs="h2">
-        <div className="mk-inventory-form">
-          <Combobox
-            label={t("pages.inventory.create.product")}
-            options={productOptions}
-            value={productId}
-            onValueChange={setProductId}
-            placeholder={t("pages.inventory.create.productPlaceholder")}
-            searchPlaceholder={t("pages.inventory.create.productSearch")}
-            emptyText={t("pages.inventory.create.productEmpty")}
-            loadingText={t("common.loading")}
-          />
-          <RadioGroup
-            label={t("pages.inventory.create.mode")}
-            value={mode}
-            onValueChange={(value) => setMode(value as InventoryMode)}
-            options={[
-              { value: "check", label: t("pages.inventory.mode.check") },
-              { value: "repack", label: t("pages.inventory.mode.repack") },
-            ]}
-          />
+    <Card title={t("pages.inventory.create.cardTitle")} titleAs="h2">
+      <div className="mk-inventory-form">
+        <Combobox
+          label={t("pages.inventory.create.product")}
+          options={productOptions}
+          value={productId}
+          onValueChange={setProductId}
+          placeholder={t("pages.inventory.create.productPlaceholder")}
+          searchPlaceholder={t("pages.inventory.create.productSearch")}
+          emptyText={t("pages.inventory.create.productEmpty")}
+          loadingText={t("common.loading")}
+        />
+        <RadioGroup
+          label={t("pages.inventory.create.mode")}
+          value={mode}
+          onValueChange={(value) => setMode(value as InventoryMode)}
+          options={[
+            { value: "check", label: t("pages.inventory.mode.check") },
+            { value: "repack", label: t("pages.inventory.mode.repack") },
+          ]}
+        />
+        <Select
+          label={t("pages.inventory.create.line")}
+          value={lineId}
+          onValueChange={setLineId}
+          options={(lines.data ?? []).map((line) => ({ value: line.id, label: line.name }))}
+          placeholder={t("pages.inventory.create.linePlaceholder")}
+        />
+        {mode === "repack" ? (
           <Select
-            label={t("pages.inventory.create.line")}
-            value={lineId}
-            onValueChange={setLineId}
-            options={(lines.data ?? []).map((line) => ({ value: line.id, label: line.name }))}
-            placeholder={t("pages.inventory.create.linePlaceholder")}
+            label={t("pages.inventory.create.template")}
+            value={templateId}
+            onValueChange={setTemplateId}
+            options={(templates.data ?? []).map((template) => ({
+              value: template.id,
+              label: template.name,
+            }))}
+            placeholder={t("pages.inventory.create.templatePlaceholder")}
           />
-          {mode === "repack" ? (
-            <Select
-              label={t("pages.inventory.create.template")}
-              value={templateId}
-              onValueChange={setTemplateId}
-              options={(templates.data ?? []).map((template) => ({
-                value: template.id,
-                label: template.name,
-              }))}
-              placeholder={t("pages.inventory.create.templatePlaceholder")}
-            />
-          ) : null}
-          <div className="mk-inventory-form__dates">
-            <DatePicker
-              label={t("pages.inventory.create.dateFrom")}
-              value={from}
-              onValueChange={(value) => setFrom(value ?? "")}
-              locale={i18n.language}
-            />
-            <DatePicker
-              label={t("pages.inventory.create.dateTo")}
-              value={to}
-              onValueChange={(value) => setTo(value ?? "")}
-              locale={i18n.language}
-            />
-          </div>
-          <p className="mk-inventory-note">{t("pages.inventory.create.inclusive")}</p>
-          {validationError || requestError ? (
-            <Alert tone="error">{validationError ?? requestError}</Alert>
-          ) : null}
-          <div className="mk-inventory-actions">
-            <Button variant="secondary" type="button" onClick={onCancel}>
-              {cancelLabel}
-            </Button>
-            <Button type="button" loading={pending} onClick={submit}>
-              {submitLabel}
-            </Button>
-          </div>
+        ) : null}
+        <div className="mk-inventory-form__dates">
+          <DatePicker
+            label={t("pages.inventory.create.dateFrom")}
+            value={from}
+            onValueChange={(value) => setFrom(value ?? "")}
+            locale={i18n.language}
+          />
+          <DatePicker
+            label={t("pages.inventory.create.dateTo")}
+            value={to}
+            onValueChange={(value) => setTo(value ?? "")}
+            locale={i18n.language}
+          />
         </div>
-      </Card>
-    </div>
+        <p className="mk-inventory-note">{t("pages.inventory.create.inclusive")}</p>
+        {validationError || requestError ? (
+          <Alert tone="error">{validationError ?? requestError}</Alert>
+        ) : null}
+        <div className="mk-inventory-actions">
+          <Button variant="secondary" type="button" onClick={onCancel}>
+            {cancelLabel}
+          </Button>
+          <Button type="button" loading={pending} onClick={submit}>
+            {submitLabel}
+          </Button>
+        </div>
+      </div>
+    </Card>
   );
 }
