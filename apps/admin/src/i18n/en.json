@@ -2286,6 +2286,39 @@
             "actions": "Actions"
           }
         },
+        "signer": {
+          "title": "Signer agent",
+          "tokenLabel": "True API token:",
+          "token": {
+            "none": "no token",
+            "active": "active",
+            "expiring": "expiring",
+            "expired": "expired"
+          },
+          "tokenExpires": "valid until {{at}}",
+          "issueCode": "Get pairing code",
+          "issueError": "Could not get a pairing code",
+          "codeExpires": "valid until {{at}}",
+          "emptyTitle": "No agents connected yet",
+          "emptyHint": "Install the \"Markiro Signer\" app on the computer holding the qualified certificate and enter the pairing code.",
+          "columns": {
+            "name": "Computer",
+            "status": "Status",
+            "cert": "Certificate",
+            "lastSeen": "Last seen"
+          },
+          "status": {
+            "active": "active",
+            "revoked": "revoked"
+          },
+          "revoke": "Revoke",
+          "revokeConfirmTitle": "Revoke this agent?",
+          "revokeConfirmBody": "The computer will lose access to signing and to the True API token. It can be reconnected later with a new pairing code.",
+          "revokeSuccess": "Agent revoked",
+          "revokeError": "Could not revoke the agent",
+          "cancel": "Cancel",
+          "loadError": "Could not load the agent list"
+        },
         "danger": {
           "title": "Delete integration",
           "body": "Disconnect the exchange if you are switching to another system. Settings, exchange credentials, the journal and the unmatched queue will be deleted.",

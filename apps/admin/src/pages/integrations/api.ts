@@ -449,3 +449,83 @@ export function useRevokeApiKey(): UseMutationResult<void, Error, string> {
     },
   });
 }
+
+/**
+ * Mirrors `apps/api/src/modules/signer-agents/dto.ts`'s `SignerAgentSummaryDto`
+ * -- one paired "Markiro Подписант" agent (a desktop machine holding a КЭП
+ * certificate for the `chestny_znak` channel). Task 8 (this file's own
+ * `SignerAgentsPanel`).
+ */
+export type SignerAgentStatus = "active" | "revoked";
+
+export interface SignerAgent {
+  id: string;
+  name: string;
+  appVersion: string | null;
+  status: SignerAgentStatus;
+  certThumbprint: string | null;
+  certSubject: string | null;
+  certInn: string | null;
+  certNotAfter: string | null;
+  lastSeenAt: string | null;
+  createdAt: string;
+}
+
+/** Mirrors `SignerTokenStatusDto` -- the tenant's current True API token, obtained by whichever agent last authenticated. */
+export interface SignerTokenStatus {
+  status: "none" | "active" | "expiring" | "expired";
+  obtainedAt: string | null;
+  expiresAt: string | null;
+  certThumbprint: string | null;
+}
+
+/** Mirrors `SignerAgentsOverviewDto` -- the full `GET /signer-agents` response. */
+export interface SignerAgentsOverview {
+  agents: SignerAgent[];
+  token: SignerTokenStatus;
+}
+
+/** Cache key for the signer agents overview -- flat under `/signer-agents`, not nested under `["integrations", "chestny_znak"]`, matching the endpoint's own flat mount (see `SignerAgentsController`'s `@Controller("signer-agents")`, no `/integrations` prefix). */
+export const signerAgentsQueryKey = ["integrations", "chestny_znak", "agents"] as const;
+
+/** `GET /signer-agents` -- feeds `SignerAgentsPanel`. */
+export function useSignerAgents(): UseQueryResult<SignerAgentsOverview> {
+  return useQuery({
+    queryKey: signerAgentsQueryKey,
+    queryFn: () => apiFetch<SignerAgentsOverview>("/signer-agents"),
+  });
+}
+
+/** Mirrors `IssueSignerPairingCodeResultDto`. Returned exactly once, by `issueSignerPairingCode` below. */
+export interface SignerPairingCodeResult {
+  code: string;
+  expiresAt: string;
+}
+
+/**
+ * `POST /signer-agents/pairing-code` -- mints a fresh one-time pairing code
+ * for the "Markiro Подписант" desktop agent to consume. Deliberately NOT a
+ * `useMutation`, for the same reason `useIssueCredentials` above isn't (see
+ * that doc comment for the full explanation): the plaintext code would
+ * otherwise sit in the `MutationCache` for up to five minutes after the
+ * panel unmounts. A plain async wrapper creates no such cache entry -- the
+ * code exists only in whatever the caller (`SignerAgentsPanel`'s own state)
+ * does with the returned value.
+ */
+export function issueSignerPairingCode(): Promise<SignerPairingCodeResult> {
+  return apiFetch<SignerPairingCodeResult>("/signer-agents/pairing-code", {
+    method: "POST",
+  });
+}
+
+/** `POST /signer-agents/:id/revoke` -- revokes a paired agent (204, no body). Invalidates the overview so the revoked status and the newly-hidden revoke button both show up without a manual refetch. */
+export function useRevokeSignerAgent(): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (agentId: string) =>
+      apiFetch<void>(`/signer-agents/${agentId}/revoke`, { method: "POST" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: signerAgentsQueryKey });
+    },
+  });
+}
