@@ -327,7 +327,12 @@ pub(crate) fn classify_hresult(code: u32) -> SignerError {
         // PIN, but the required action is the same: retry and answer it. Map
         // these here too rather than letting them fall into the catch-all,
         // which would tell the admin to check the token for no reason.
-        0x8009_000B | 0x8010_006B | 0x8010_006E | 1223 | 0x8009_0022 => SignerError::PinRequired,
+        // `1223` is the bare Win32 form reported by `GetLastError`; a COM call
+        // wraps the same cancellation as HRESULT_FROM_WIN32(1223), so the
+        // CAdESCOM backend needs `0x8007_04C7` to land here too.
+        0x8009_000B | 0x8010_006B | 0x8010_006E | 1223 | 0x8007_04C7 | 0x8009_0022 => {
+            SignerError::PinRequired
+        }
         // CRYPT_E_NOT_FOUND
         0x8009_2004 => SignerError::CertNotFound(format!("0x{code:08X}")),
         // NTE_PROVIDER_DLL_FAIL / NTE_PROV_TYPE_NOT_DEF
