@@ -284,8 +284,11 @@ describe("DashboardPage", () => {
     fireEvent.click(thirtyDays);
 
     expect(screen.getByRole("status", { name: "Обновление данных" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "30 дней" }).getAttribute("aria-pressed")).toBe(
+    expect(screen.getByRole("button", { name: "7 дней" }).getAttribute("aria-pressed")).toBe(
       "true",
+    );
+    expect(screen.getByRole("button", { name: "30 дней" }).getAttribute("aria-pressed")).toBe(
+      "false",
     );
     expect(screen.getByRole("button", { name: "Выпуск" }).getAttribute("aria-pressed")).toBe(
       "true",

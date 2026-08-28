@@ -31,8 +31,8 @@
 ### Persistence and organization settings
 
 - `packages/db/src/schema/org-profile.ts`: authoritative `org_profiles.time_zone` column.
-- `packages/db/migrations/0085_tenant_operational_timezone.sql`: existing-tenant backfill and non-null default.
-- `packages/db/migrations/meta/0085_snapshot.json`: generated Drizzle schema snapshot.
+- `packages/db/migrations/0087_good_infant_terrible.sql`: existing-tenant backfill and non-null default.
+- `packages/db/migrations/meta/0087_snapshot.json`: generated Drizzle schema snapshot.
 - `packages/db/migrations/meta/_journal.json`: generated migration journal entry.
 - `packages/db/test/tenant-operational-timezone-migration.test.ts`: migration contract.
 - `packages/db/test/schema.test.ts`: Drizzle column/default contract.
@@ -68,8 +68,8 @@
 **Files:**
 
 - Modify: `packages/db/src/schema/org-profile.ts`
-- Create: `packages/db/migrations/0085_tenant_operational_timezone.sql`
-- Create: `packages/db/migrations/meta/0085_snapshot.json`
+- Create: `packages/db/migrations/0087_good_infant_terrible.sql`
+- Create: `packages/db/migrations/meta/0087_snapshot.json`
 - Modify: `packages/db/migrations/meta/_journal.json`
 - Create: `packages/db/test/tenant-operational-timezone-migration.test.ts`
 - Modify: `packages/db/test/schema.test.ts`
@@ -124,7 +124,7 @@ Generate, rather than hand-editing Drizzle metadata:
 pnpm --filter @markiro/db db:generate --name tenant_operational_timezone
 ```
 
-Inspect `0085_tenant_operational_timezone.sql`, the snapshot, and journal. The SQL must use the non-null default in the same statement so existing tenants receive an explicit value without a nullable intermediate state.
+Inspect `0087_good_infant_terrible.sql`, the snapshot, and journal. The SQL must use the non-null default in the same statement so existing tenants receive an explicit value without a nullable intermediate state.
 
 - [x] **Step 4: Run DB verification**
 
@@ -141,7 +141,7 @@ Expected: all commands PASS.
 - [x] **Step 5: Commit the persistence slice**
 
 ```bash
-git add packages/db/src/schema/org-profile.ts packages/db/migrations/0085_tenant_operational_timezone.sql packages/db/migrations/meta/0085_snapshot.json packages/db/migrations/meta/_journal.json packages/db/test/schema.test.ts packages/db/test/tenant-operational-timezone-migration.test.ts
+git add packages/db/src/schema/org-profile.ts packages/db/migrations/0087_good_infant_terrible.sql packages/db/migrations/meta/0087_snapshot.json packages/db/migrations/meta/_journal.json packages/db/test/schema.test.ts packages/db/test/tenant-operational-timezone-migration.test.ts
 git commit -m "feat(db): store tenant operational timezone"
 ```
 
@@ -414,7 +414,8 @@ expect(facts.today.aggregationClosedBoxes).toBe(1);
 expect(facts.today.aggregationContainedUnits).toBe(2);
 expect(facts.setup.activeShiftCount).toBe(1);
 expect(facts.unreviewedConflictCount).toBe(1);
-expect(facts.lateDataShiftCount).toBe(1);
+expect(facts.todayLateDataShiftCount).toBe(1);
+expect(facts.selectedWindowLateDataShiftCount).toBe(1);
 expect(facts.activeShifts[0]?.output).toEqual({ mode: "validation", acceptedUnits: 2 });
 ```
 
@@ -457,7 +458,8 @@ export interface DashboardOverviewFacts {
   buckets: DashboardBucketDto[];
   activeShifts: DashboardActiveShiftDto[];
   unreviewedConflictCount: number;
-  lateDataShiftCount: number;
+  todayLateDataShiftCount: number;
+  selectedWindowLateDataShiftCount: number;
   missingDurationModes: Array<"validation" | "aggregation">;
 }
 ```

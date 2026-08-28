@@ -25,14 +25,21 @@ import type {
   SsccCounterDto,
 } from "./dto";
 
+export type OrgProfileDatabase = Pick<
+  Db,
+  "select" | "insert" | "transaction" | "update" | "delete"
+>;
+export type OrgProfileStorage = Pick<ObjectStorageService, "put" | "get" | "delete">;
+export type OrgProfileSscc = Pick<SsccService, "counterState" | "seedCounter">;
+
 @Injectable()
 export class OrgProfileService {
   private readonly logger = new Logger(OrgProfileService.name);
 
   constructor(
-    @Inject(DB) private readonly db: Db,
-    private readonly storage: ObjectStorageService,
-    private readonly sscc: SsccService,
+    @Inject(DB) private readonly db: OrgProfileDatabase,
+    @Inject(ObjectStorageService) private readonly storage: OrgProfileStorage,
+    @Inject(SsccService) private readonly sscc: OrgProfileSscc,
   ) {}
 
   /** Returns the tenant's profile, or the empty defaults if no row exists yet. */

@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Req, UseGuards } from "@nestjs/common";
+import { Controller, Get, Inject, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
@@ -17,13 +17,17 @@ import {
 } from "./dto";
 import { DashboardService } from "./dashboard.service";
 
+type DashboardRequest = Pick<RequestWithTenant, "tenantId"> & { tenantId: string };
+
 @ApiTags("dashboard")
 @Controller("dashboard")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
 @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
 export class DashboardController {
-  constructor(private readonly dashboard: DashboardService) {}
+  constructor(
+    @Inject(DashboardService) private readonly dashboard: Pick<DashboardService, "overview">,
+  ) {}
 
   @Get("overview")
   @ApiOperation({ summary: "Read the tenant production dashboard overview" })
@@ -34,9 +38,9 @@ export class DashboardController {
   })
   @ApiOkResponse({ schema: dashboardOverviewOpenApiSchema })
   overview(
-    @Req() req: RequestWithTenant,
+    @Req() req: DashboardRequest,
     @Query(new ZodValidationPipe(dashboardOverviewQuerySchema)) query: DashboardOverviewQueryDto,
   ): Promise<DashboardOverviewDto> {
-    return this.dashboard.overview(req.tenantId!, query.period);
+    return this.dashboard.overview(req.tenantId, query.period);
   }
 }

@@ -94,7 +94,7 @@ export function DashboardPage() {
       ) : (
         <OperationalDashboard
           overview={overview}
-          period={period}
+          period={overview.dynamics.period}
           onPeriodChange={setPeriod}
           canWrite={canWrite}
           refreshing={overviewQuery.isFetching}
