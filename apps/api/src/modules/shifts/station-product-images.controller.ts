@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Req, Res, UseGuards } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { ApiOperation, ApiParam, ApiResponse, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
+import { ApiHttpErrors, ApiStationAuth } from "../../lib/openapi";
 import { StationOnlyGuard } from "../../tenancy/station-only.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ObjectStorageService } from "../storage/object-storage.service";
@@ -13,6 +14,7 @@ import { AllowSubscriptionReadOnly } from "../../subscriptions/subscription-acce
 @Controller("station")
 @UseGuards(TenantGuard, StationOnlyGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
+@ApiStationAuth()
 export class StationProductImagesController {
   constructor(
     private readonly productsService: ProductsService,
@@ -20,6 +22,19 @@ export class StationProductImagesController {
   ) {}
 
   @Get("products/:id/image/:checksum")
+  @ApiOperation({
+    summary: "Read a product image",
+    description:
+      "Streams the content-addressed WebP through the API origin so device CSPs restricted to `self` can render it.",
+  })
+  @ApiParam({ name: "id", format: "uuid" })
+  @ApiParam({ name: "checksum", description: "Content checksum of the current product image." })
+  @ApiResponse({
+    status: 200,
+    description: "The product image bytes.",
+    content: { "image/webp": { schema: { type: "string", format: "binary" } } },
+  })
+  @ApiHttpErrors(401, 403, 404, 429)
   async readProductImage(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,

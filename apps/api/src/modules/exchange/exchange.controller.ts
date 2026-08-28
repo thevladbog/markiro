@@ -11,7 +11,15 @@ import {
   Res,
   UseFilters,
 } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import {
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiProduces,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from "@nestjs/swagger";
 import { schema, type Db } from "@markiro/db";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Response } from "express";
@@ -335,6 +343,55 @@ export class ExchangeController {
   ) {}
 
   @Get("1c_exchange")
+  @ApiOperation({
+    summary: "1C CommerceML exchange (GET)",
+    description:
+      "Transport for 1C's «Обмен с сайтом» protocol; the `mode` query parameter selects the " +
+      "step. `mode=checkauth` authenticates with HTTP Basic credentials (issued via " +
+      "`POST /integrations/commerceml/credentials`) and answers three lines — `success`, the " +
+      "session cookie's name, and its value; every later call authenticates with that cookie, " +
+      "not with any of this API's usual schemes. `mode=init` reports transfer settings " +
+      "(`zip=no`, `file_limit=<bytes>`). `mode=import` assembles and applies a file previously " +
+      "uploaded via POST `mode=file` (catalog/offers, or order statuses when `type=sale`), " +
+      "answering `progress` until every batch is applied. `mode=query` returns the pending " +
+      "pickup orders as a CommerceML XML document, and `mode=success` confirms the offered " +
+      "batch. `checkauth` attempts are rate limited per source address " +
+      "(`failure\\ntoo many attempts`).",
+  })
+  @ApiQuery({
+    name: "mode",
+    required: true,
+    schema: { type: "string", enum: ["checkauth", "init", "import", "query", "success"] },
+    description: "Protocol step; any other value answers `failure\\nunknown mode`.",
+  })
+  @ApiQuery({
+    name: "type",
+    required: false,
+    schema: { type: "string" },
+    description:
+      "Exchange direction as named by 1C (e.g. `catalog`, `sale`). `mode=import` with " +
+      "`type=sale` applies order statuses instead of the catalog.",
+  })
+  @ApiQuery({
+    name: "filename",
+    required: false,
+    schema: { type: "string" },
+    description: "Uploaded file whose assembled chunks `mode=import` parses and applies.",
+  })
+  @ApiProduces("text/plain", "application/xml")
+  @ApiResponse({
+    status: 200,
+    description:
+      "Always 200, even on failure — 1C parses the body, not the status code. `checkauth` " +
+      "answers `success`, cookie name, and cookie value on three lines; `init` answers " +
+      "`zip=no` and `file_limit=<bytes>`; `import` answers `progress` or `success`; " +
+      "`query` answers the CommerceML orders document as `application/xml`; every failure " +
+      "is `failure\\n<message>`.",
+    content: {
+      "text/plain": { schema: { type: "string" } },
+      "application/xml": { schema: { type: "string" } },
+    },
+  })
   async get(
     @Query() query: Record<string, unknown>,
     @Req() req: ExchangeRequest,
@@ -424,6 +481,42 @@ export class ExchangeController {
   }
 
   @Post("1c_exchange")
+  @ApiOperation({
+    summary: "1C CommerceML exchange (POST)",
+    description:
+      "The upload direction of the exchange, authenticated by the session cookie `mode=checkauth` " +
+      "issued (see GET). `mode=file` appends the raw request body as a chunk of `filename`; the " +
+      "body is read as opaque bytes whatever the Content-Type says (a missing Content-Type is " +
+      "treated as `application/octet-stream`), and a chunk over the advertised `file_limit` " +
+      "answers `failure\\nchunk too large` — still with status 200. `mode=success` confirms the " +
+      "order batch offered by GET `mode=query`.",
+  })
+  @ApiQuery({
+    name: "mode",
+    required: true,
+    schema: { type: "string", enum: ["file", "success"] },
+    description: "Protocol step; any other value answers `failure\\nunknown mode`.",
+  })
+  @ApiQuery({
+    name: "filename",
+    required: false,
+    schema: { type: "string" },
+    description: "Target file for `mode=file`; a chunk without it answers a failure line.",
+  })
+  @ApiConsumes("application/octet-stream")
+  @ApiBody({
+    required: false,
+    description: "Raw file chunk for `mode=file`, appended to `filename`'s upload.",
+    schema: { type: "string", format: "binary" },
+  })
+  @ApiProduces("text/plain")
+  @ApiResponse({
+    status: 200,
+    description:
+      "Always 200, even on failure — 1C parses the body, not the status code. A stored chunk " +
+      "and a confirmed batch both answer `success`; every failure is `failure\\n<message>`.",
+    content: { "text/plain": { schema: { type: "string" } } },
+  })
   async post(
     @Query() query: Record<string, unknown>,
     @Req() req: ExchangeRequest,

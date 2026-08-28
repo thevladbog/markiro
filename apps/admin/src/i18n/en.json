@@ -337,6 +337,7 @@
         "requiredError": "Complete all required fields.",
         "dateError": "The end date cannot be earlier than the start date.",
         "dependenciesError": "Could not load products, lines, or templates.",
+        "archivedProductHint": "not in use",
         "next": "Continue to exports"
       },
       "detail": {
@@ -358,8 +359,9 @@
         "description": "Provide one result for each of the six statuses. A valid zero-row export counts as successful.",
         "ready": "Ready",
         "missing": "Missing",
-        "chooseFile": "Choose file",
-        "fileLabel": "{{status}} file",
+        "chooseFile": "Drop a file or click",
+        "uploading": "Uploading…",
+        "fileLabel": "Choose file for {{status}}",
         "selectFile": "Select {{status}} upload",
         "noAttempts": "No uploads yet",
         "useFile": "Use {{file}}",
@@ -396,7 +398,6 @@
         "start": "Start inventory"
       },
       "live": {
-        "title": "Inventory {{number}}",
         "loading": "Loading inventory progress",
         "loadError": "Could not load inventory progress",
         "corrections": "Corrections",
@@ -762,11 +763,13 @@
       "statusFilter": {
         "all": "All statuses",
         "draft": "Draft",
-        "active": "Active"
+        "active": "Active",
+        "archived": "Not in use"
       },
       "status": {
         "draft": "Draft",
-        "active": "Active"
+        "active": "Active",
+        "archived": "Not in use"
       },
       "deleteConfirmTitle": "Delete product?",
       "deleteConfirmBody": "Product \"{{name}}\" will be permanently deleted.",
@@ -812,6 +815,7 @@
           "image": "Product photo"
         },
         "imageLabel": "Product photo",
+        "dropLabel": "Drop a file or click",
         "imageAlt": "Product photo",
         "imageEmpty": "No photo added",
         "imageHint": "JPEG, PNG, or WebP up to 5 MB",
@@ -819,6 +823,8 @@
         "imageRemoveSuccess": "Photo removed",
         "imageError": "Could not change the photo. The current photo was preserved.",
         "draftBanner": "Draft — fill in the group and capacities to run shifts",
+        "archivedLabel": "Do not use",
+        "archivedHint": "The product cannot be selected on kiosks, in shifts, or in integrations. It stays available for inventory and in history.",
         "gtinOwnerHint": "GTIN owner — {{name}}",
         "applyCounterparty": "Apply counterparty",
         "gtinOwnerUnknown": "GTIN owner could not be determined — double check the code before saving.",
@@ -1144,6 +1150,7 @@
         "productSearchPlaceholder": "Search products",
         "productEmpty": "No products found",
         "draftHint": "draft -- unavailable",
+        "archivedHint": "not in use",
         "modeLabel": "Mode",
         "modeValidation": "Validation",
         "modeAggregation": "Aggregation",
@@ -1702,6 +1709,7 @@
         "addLinesPlaceholder": "Paste or scan SSCCs — one per line",
         "addLines": "Add lines",
         "importAction": "Import from file",
+        "dropLabel": "Drop a file or click",
         "addLinesError": "Could not add the lines. Please try again.",
         "importError": "Could not import the file. Please try again.",
         "linesTitle": "Boxes",
@@ -2278,6 +2286,17 @@
             "neverUsed": "Never used",
             "actions": "Actions"
           }
+        },
+        "danger": {
+          "title": "Delete integration",
+          "body": "Disconnect the exchange if you are switching to another system. Settings, exchange credentials, the journal and the unmatched queue will be deleted.",
+          "deleteAction": "Delete integration",
+          "confirmTitle": "Delete the integration?",
+          "confirmBody": "Exchange credentials will be revoked and 1C will lose access immediately. Settings, the journal and the unmatched queue will be deleted permanently. Product links to external items will be kept.",
+          "confirmAction": "Delete",
+          "cancelAction": "Cancel",
+          "success": "Integration deleted",
+          "error": "Failed to delete the integration"
         }
       }
     },
@@ -2321,6 +2340,8 @@
         "previewAlt": "Organisation logo",
         "fallbackLabel": "Default Markiro logo",
         "uploadLabel": "Upload logo",
+        "dropLabel": "Drop a file or click",
+        "hint": "JPEG, PNG, or WebP",
         "removeAction": "Remove logo",
         "invalidType": "Choose one JPEG, PNG, or WebP file.",
         "uploadError": "Could not upload the logo",

@@ -725,6 +725,24 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     expect(res.body.message).toEqual(expect.stringContaining("Product card is incomplete"));
   });
 
+  it("POST /shifts rejects an archived product with 422", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+
+    // Complete card (active), but operator-flagged "do not use".
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Snacks",
+      boxCapacity: 10,
+      palletCapacity: 20,
+      archived: true,
+    });
+
+    const res = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(422);
+
+    expect(res.body.message).toEqual(expect.stringContaining("not in use"));
+  });
+
   it("POST /shifts: aggregation mode without an effective boxCapacity is rejected with 400", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);

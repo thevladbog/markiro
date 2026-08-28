@@ -93,7 +93,6 @@
 .mk-account-page__back:focus-visible,
 .mk-account-org:focus-visible,
 .mk-account-action:focus-visible,
-.mk-account-upload:focus-within,
 .mk-account-link:focus-visible {
   outline: var(--focus-ring-w) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
@@ -441,13 +440,15 @@
   font: var(--text-body-sm);
 }
 
-.mk-account-link,
-.mk-account-upload {
+.mk-account-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: var(--control-md);
+  padding: 0 18px;
   border-radius: var(--r-round);
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
   font: 600 13px/1 var(--font-ui);
   text-decoration: none;
   cursor: pointer;
@@ -457,20 +458,12 @@
     transform 560ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-.mk-account-link {
-  padding: 0 18px;
-  background: var(--surface-inverse);
-  color: var(--fg-on-inverse);
-}
-
-.mk-account-link:hover,
-.mk-account-upload:hover {
+.mk-account-link:hover {
   transform: translateY(-1px);
   text-decoration: none;
 }
 
-.mk-account-link:active,
-.mk-account-upload:active {
+.mk-account-link:active {
   transform: scale(0.98);
 }
 
@@ -523,29 +516,6 @@
   flex-direction: column;
   gap: var(--sp-2);
   margin-top: var(--sp-4);
-}
-
-.mk-account-file-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-.mk-account-upload {
-  width: 100%;
-  padding: 0 16px;
-  border: 1px solid var(--line-strong);
-  background: var(--surface-card);
-  color: var(--fg-1);
-}
-
-.mk-account-upload[data-disabled="true"] {
-  cursor: wait;
-  opacity: 0.5;
 }
 
 .mk-account-fields {

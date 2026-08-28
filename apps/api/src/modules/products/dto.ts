@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import type { SchemaObject } from "@nestjs/swagger";
+
 const PRODUCT_STATUSES = ["draft", "active"] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
 
@@ -25,6 +27,7 @@ export const createProductSchema = z.object({
   egaisCode: z.string().trim().min(1).max(64).nullable().optional(),
   shelfLifeDays: z.number().int().min(1).max(3650).nullable().optional(),
   externalRef: z.string().trim().min(1).max(200).nullable().optional(),
+  archived: z.boolean().optional(),
 });
 export type CreateProductDto = z.infer<typeof createProductSchema>;
 
@@ -45,13 +48,21 @@ export const updateProductSchema = z.object({
   egaisCode: z.string().trim().min(1).max(64).nullable().optional(),
   shelfLifeDays: z.number().int().min(1).max(3650).nullable().optional(),
   externalRef: z.string().trim().min(1).max(200).nullable().optional(),
+  archived: z.boolean().optional(),
 });
 export type UpdateProductDto = z.infer<typeof updateProductSchema>;
 
-/** GET /products query schema. */
+/**
+ * GET /products query schema. `archived` defaults to `"false"` in the service:
+ * without an explicit opt-in every selection surface (shift form, kiosk
+ * allowlist, station GTIN resolution, 1С link modal) hides archived products.
+ * `"all"` is the opt-in for the catalog page, the inventory form, and other
+ * history-aware readers; `"true"` powers the catalog's "not in use" filter.
+ */
 export const listProductsQuerySchema = z.object({
   search: z.string().min(1).optional(),
   status: z.enum(PRODUCT_STATUSES).optional(),
+  archived: z.enum(["true", "false", "all"]).optional(),
 });
 export type ListProductsQueryDto = z.infer<typeof listProductsQuerySchema>;
 
@@ -80,6 +91,8 @@ export interface ProductDto {
   boxCapacity: number | null;
   palletCapacity: number | null;
   status: ProductStatus;
+  /** Operator-set "do not use" flag; archived products are hidden from selection surfaces except inventory. */
+  archived: boolean;
   defaultCounterpartyId: string | null;
   unitPrice: string | null;
   egaisCode: string | null;
@@ -104,3 +117,87 @@ export interface GtinCheckResponseDto {
   counterpartyId?: string;
   counterpartyName?: string;
 }
+
+const uuidSchema = { type: "string", format: "uuid" } as const;
+const dateTimeSchema = { type: "string", format: "date-time" } as const;
+
+export const productImageOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["checksum", "contentType", "byteSize", "width", "height"],
+  properties: {
+    checksum: { type: "string" },
+    contentType: { type: "string", enum: ["image/webp"] },
+    byteSize: { type: "integer", minimum: 0 },
+    width: { type: "integer", minimum: 1 },
+    height: { type: "integer", minimum: 1 },
+  },
+};
+
+export const productOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: [
+    "id",
+    "gtin14",
+    "name",
+    "printName",
+    "productGroup",
+    "boxCapacity",
+    "palletCapacity",
+    "status",
+    "archived",
+    "defaultCounterpartyId",
+    "unitPrice",
+    "egaisCode",
+    "shelfLifeDays",
+    "externalRef",
+    "createdAt",
+  ],
+  properties: {
+    id: uuidSchema,
+    gtin14: { type: "string", pattern: "^[0-9]{14}$" },
+    name: { type: "string" },
+    printName: {
+      type: "string",
+      nullable: true,
+      description: "Short operator-facing name for the station shift card; null = use `name`.",
+    },
+    productGroup: { type: "string", nullable: true },
+    boxCapacity: { type: "integer", minimum: 1, nullable: true },
+    palletCapacity: { type: "integer", minimum: 1, nullable: true },
+    status: { type: "string", enum: [...PRODUCT_STATUSES] },
+    archived: {
+      type: "boolean",
+      description:
+        'Operator-set "do not use" flag; archived products are hidden from selection surfaces except inventory.',
+    },
+    defaultCounterpartyId: { ...uuidSchema, nullable: true },
+    unitPrice: { type: "string", pattern: "^\\d+(\\.\\d{1,2})?$", nullable: true },
+    egaisCode: { type: "string", nullable: true },
+    shelfLifeDays: { type: "integer", minimum: 1, maximum: 3650, nullable: true },
+    externalRef: { type: "string", nullable: true },
+    createdAt: dateTimeSchema,
+    image: {
+      ...productImageOpenApiSchema,
+      nullable: true,
+      description:
+        "Optional only for rolling compatibility; current server mappings always emit it.",
+    },
+  },
+};
+
+export const listProductsOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["items"],
+  properties: { items: { type: "array", items: productOpenApiSchema } },
+};
+
+export const gtinCheckResponseOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["gtin14", "owner"],
+  properties: {
+    gtin14: { type: "string", pattern: "^[0-9]{14}$" },
+    owner: { type: "string", enum: ["own", "counterparty", "unknown"] },
+    counterpartyId: { ...uuidSchema, description: 'Present only when owner is "counterparty".' },
+    counterpartyName: { type: "string", description: 'Present only when owner is "counterparty".' },
+  },
+};

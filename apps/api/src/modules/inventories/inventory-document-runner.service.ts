@@ -124,14 +124,17 @@ const generatorKey = (id: string, version: number): string => `${id}@${version}`
 export const productionInventoryDocumentGeneratorRegistry = new InventoryDocumentGeneratorRegistry([
   {
     descriptor: getRegisteredInventoryDocumentFormat("inventory_xml_gismt_aggregation", 1),
+    allowsZeroByteArtifact: true,
     generate: generateInventoryAggregationXml,
   },
   {
     descriptor: getRegisteredInventoryDocumentFormat("inventory_xml_gismt_aggregation", 2),
+    allowsZeroByteArtifact: true,
     generate: generateInventoryAggregationXmlV2,
   },
   {
     descriptor: getRegisteredInventoryDocumentFormat("inventory_xml_gismt_disaggregation", 1),
+    allowsZeroByteArtifact: true,
     generate: generateInventoryDisaggregationXml,
   },
   {
@@ -550,7 +553,8 @@ function validateGeneratedParts(
       (part.bytes.byteLength === 0 &&
         !(
           generator.allowsZeroByteArtifact === true &&
-          part.mimeType === "text/plain; charset=utf-8" &&
+          (part.mimeType === "text/plain; charset=utf-8" ||
+            part.mimeType === "application/xml; charset=utf-8") &&
           part.rowCount === 0 &&
           part.codeCount === 0 &&
           part.boxCount === 0

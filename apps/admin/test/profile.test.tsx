@@ -15,6 +15,7 @@ function response(status: number, body?: unknown): Response {
     status,
     statusText: status === 503 ? "Service Unavailable" : "",
     json: async () => body,
+    text: async () => (body === undefined ? "" : JSON.stringify(body)),
   } as Response;
 }
 
@@ -178,7 +179,8 @@ describe("ProfilePage", () => {
     const firstName = await screen.findByLabelText("Имя");
     fireEvent.change(firstName, { target: { value: "Анна-Мария" } });
     const file = new File(["avatar"], "avatar.png", { type: "image/png" });
-    fireEvent.change(screen.getByLabelText("Загрузить фото"), { target: { files: [file] } });
+    expect(screen.getByRole("button", { name: "Загрузить фото" })).toBeDefined();
+    fireEvent.change(screen.getByTestId("file-drop-input"), { target: { files: [file] } });
 
     await waitFor(() => expect(uploadCalls).toBe(1));
     expect(await screen.findByText("object_storage_unavailable")).toBeDefined();

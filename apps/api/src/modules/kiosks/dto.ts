@@ -1,3 +1,4 @@
+import type { SchemaObject } from "@nestjs/swagger";
 import { z } from "zod";
 
 export const createKioskSchema = z.object({
@@ -51,3 +52,42 @@ export interface EnrollKioskResponseDto {
 // module; `PairingService` (../kiosk/pairing.service.ts) stays the single
 // source of truth for the shape.
 export type { IssuePairingCodeResultDto } from "../kiosk/pairing.service";
+
+// --- OpenAPI response schemas (hand-written: the response DTOs above are ---
+// --- interfaces, not zod schemas; see inventories/dto.ts for the pattern) ---
+
+export const kioskOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: [
+    "id",
+    "name",
+    "location",
+    "dayLimitPerEmployee",
+    "showPrices",
+    "printEmployeeQrOnSlip",
+    "status",
+    "lastSeenAt",
+    "enrolled",
+    "productIds",
+    "createdAt",
+  ],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    name: { type: "string" },
+    location: { type: "string", nullable: true },
+    dayLimitPerEmployee: { type: "integer", minimum: 1 },
+    showPrices: { type: "boolean" },
+    printEmployeeQrOnSlip: { type: "boolean" },
+    status: { type: "string", enum: ["active", "archived"] },
+    lastSeenAt: { type: "string", format: "date-time", nullable: true },
+    enrolled: { type: "boolean", description: "True while a device credential is active." },
+    productIds: { type: "array", items: { type: "string", format: "uuid" } },
+    createdAt: { type: "string", format: "date-time" },
+  },
+};
+
+export const listKiosksOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["items"],
+  properties: { items: { type: "array", items: kioskOpenApiSchema } },
+};

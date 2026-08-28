@@ -39,7 +39,12 @@ afterEach(() => {
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
 function jsonResponse(status: number, body: unknown): Response {
-  return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+    text: async () => (body === undefined ? "" : JSON.stringify(body)),
+  } as Response;
 }
 
 const REJECTION = {

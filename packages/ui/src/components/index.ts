@@ -4,6 +4,9 @@ export type { ButtonProps, ButtonSize, ButtonVariant } from "./Button.js";
 export { Input } from "./Input.js";
 export type { InputProps, InputSize } from "./Input.js";
 
+export { FileDropZone, fileMatchesAccept } from "./FileDropZone.js";
+export type { FileDropZoneProps } from "./FileDropZone.js";
+
 export { Textarea } from "./Textarea.js";
 export type { TextareaProps } from "./Textarea.js";
 

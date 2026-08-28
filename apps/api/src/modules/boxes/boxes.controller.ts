@@ -1,12 +1,20 @@
 import { Controller, Get, Query, Req, UseGuards } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { ApiOkResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { SecurityAuditService } from "../../authorization/security-audit.service";
+import {
+  ApiCabinetAuth,
+  ApiHttpErrors,
+  ApiZodQuery,
+  ApiZodValidationError,
+} from "../../lib/openapi";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
+  boxSellCodesOpenApiSchema,
+  listBoxesOpenApiSchema,
   listBoxesQuerySchema,
   sellCodesQuerySchema,
   type BoxSellCodesDto,
@@ -29,6 +37,7 @@ import { BoxesService } from "./boxes.service";
 @Controller("boxes")
 @UseGuards(TenantGuard, AuthorizationGuard)
 @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+@ApiCabinetAuth()
 export class BoxesController {
   constructor(
     private readonly boxesService: BoxesService,
@@ -36,6 +45,14 @@ export class BoxesController {
   ) {}
 
   @Get()
+  @ApiOperation({
+    summary: "List boxes for a shift",
+    description: "Ordered by closedAt descending with still-open boxes first.",
+  })
+  @ApiZodQuery(listBoxesQuerySchema)
+  @ApiOkResponse({ schema: listBoxesOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   async listBoxes(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(listBoxesQuerySchema)) query: ListBoxesQueryDto,
@@ -48,6 +65,15 @@ export class BoxesController {
    * so each successful call is audit-logged (who viewed which box's codes).
    */
   @Get("sell-codes")
+  @ApiOperation({
+    summary: "Get a closed box's sellable codes",
+    description:
+      "Sell-at-register: the only cabinet read that returns raw KM payloads, so each successful call is audit-logged. The scanned SSCC is normalized (AIM prefix, printed (00), bare 00 AI). Rejected (409) when the box is not closed, disassembled, or empty.",
+  })
+  @ApiZodQuery(sellCodesQuerySchema)
+  @ApiOkResponse({ schema: boxSellCodesOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
   async getSellCodes(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(sellCodesQuerySchema)) query: SellCodesQueryDto,

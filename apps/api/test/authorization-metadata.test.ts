@@ -260,6 +260,9 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
       update: integrationsWritePolicy,
       journal: integrationsReadPolicy,
       issueCredentials: integrationCredentialsPolicy,
+      // Удаление стирает credentialLogin/credentialHash, то есть отзывает
+      // учётные данные обмена -- та же пара capability, что у их выпуска.
+      deleteChannel: integrationCredentialsPolicy,
       listCandidates: integrationsReadPolicy,
       linkCandidate: integrationsWritePolicy,
       hideCandidate: integrationsWritePolicy,

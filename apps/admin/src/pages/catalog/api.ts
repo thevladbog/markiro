@@ -41,6 +41,12 @@ export interface ProductDto {
    */
   externalRef: string | null;
   status: ProductStatus;
+  /**
+   * Operator-set "do not use" flag, orthogonal to the computed `status`:
+   * archived products stay for history but are hidden from every selection
+   * surface except inventory (see `ListProductsParams.archived`).
+   */
+  archived: boolean;
   defaultCounterpartyId: string | null;
   createdAt: string;
   image?: ProductImageDescriptor | null;
@@ -62,6 +68,7 @@ export interface CreateProductInput {
   egaisCode?: string | null;
   shelfLifeDays?: number | null;
   defaultCounterpartyId?: string | null;
+  archived?: boolean;
 }
 
 export type UpdateProductInput = Partial<CreateProductInput>;
@@ -69,6 +76,12 @@ export type UpdateProductInput = Partial<CreateProductInput>;
 export interface ListProductsParams {
   search?: string;
   status?: ProductStatus;
+  /**
+   * Server default is `"false"` (archived hidden) so selection surfaces are
+   * safe without opting in. `"all"` is for history-aware readers (catalog,
+   * inventory form, code search); `"true"` is the catalog's archive filter.
+   */
+  archived?: "true" | "false" | "all";
 }
 
 export type GtinOwner = "own" | "counterparty" | "unknown";
@@ -96,6 +109,7 @@ function buildListPath(params: ListProductsParams): string {
   const query = new URLSearchParams();
   if (params.search) query.set("search", params.search);
   if (params.status) query.set("status", params.status);
+  if (params.archived) query.set("archived", params.archived);
   const qs = query.toString();
   return qs ? `/products?${qs}` : "/products";
 }

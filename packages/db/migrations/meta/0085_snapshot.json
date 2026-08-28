@@ -1,5 +1,5 @@
 {
-  "id": "5836fe2f-5ae5-4311-b889-b1cf136bb821",
+  "id": "05346cff-6eae-4579-a146-7702bfd94699",
   "prevId": "ae886c5f-0fe9-4a7e-8f1f-8f4000458af3",
   "version": "7",
   "dialect": "postgresql",
@@ -2039,6 +2039,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'draft'"
+        },
+        "archived": {
+          "name": "archived",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "default_counterparty_id": {
           "name": "default_counterparty_id",
@@ -5999,12 +6006,6 @@
         },
         "unit": {
           "name": "unit",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "gtin": {
-          "name": "gtin",
           "type": "text",
           "primaryKey": false,
           "notNull": false

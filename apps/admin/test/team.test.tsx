@@ -102,6 +102,7 @@ function response(status: number, body?: unknown): Response {
     status,
     statusText: status === 409 ? "Conflict" : "",
     json: async () => body,
+    text: async () => (body === undefined ? "" : JSON.stringify(body)),
   } as Response;
 }
 

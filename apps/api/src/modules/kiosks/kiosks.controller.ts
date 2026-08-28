@@ -12,16 +12,24 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { ApiOperation, ApiParam, ApiResponse, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { SecurityAuditService } from "../../authorization/security-audit.service";
+import {
+  ApiCabinetAuth,
+  ApiHttpErrors,
+  ApiZodBody,
+  ApiZodValidationError,
+} from "../../lib/openapi";
 import { PairingService } from "../kiosk/pairing.service";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   createKioskSchema,
+  kioskOpenApiSchema,
+  listKiosksOpenApiSchema,
   setKioskProductsSchema,
   updateKioskSchema,
   type CreateKioskDto,
@@ -47,6 +55,7 @@ import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access
 // never needs this module, so no device key — station or kiosk — should reach
 // it (see docs/device-key-surface.md).
 @ApiTags("kiosks")
+@ApiCabinetAuth()
 @Controller("kiosks")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
@@ -58,12 +67,20 @@ export class KiosksController {
   ) {}
 
   @Get()
+  @ApiOperation({ summary: "List kiosks" })
+  @ApiResponse({ status: 200, schema: listKiosksOpenApiSchema })
+  @ApiHttpErrors(401, 403)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async listKiosks(@Req() req: RequestWithTenant): Promise<ListKiosksResponseDto> {
     return this.kiosksService.listKiosks(req.tenantId!);
   }
 
   @Post()
+  @ApiOperation({ summary: "Create a kiosk" })
+  @ApiZodBody(createKioskSchema)
+  @ApiResponse({ status: 201, schema: kioskOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 409)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
   async createKiosk(
@@ -81,6 +98,16 @@ export class KiosksController {
   }
 
   @Patch(":id")
+  @ApiOperation({
+    summary: "Update a kiosk",
+    description:
+      "`status` archives or reactivates the kiosk; a real status transition also revokes the device credential and retires live pairing codes.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(updateKioskSchema)
+  @ApiResponse({ status: 200, schema: kioskOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
   async updateKiosk(
@@ -106,6 +133,13 @@ export class KiosksController {
 
   @Delete(":id")
   @HttpCode(204)
+  @ApiOperation({
+    summary: "Archive a kiosk",
+    description: "Also revokes the device credential and retires live pairing codes.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiResponse({ status: 204, description: "The kiosk was archived." })
+  @ApiHttpErrors(401, 403, 404)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @AllowSubscriptionReadOnly("security")
   async archiveKiosk(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
@@ -121,6 +155,14 @@ export class KiosksController {
   /** Explicitly remove the active device credential while retaining the kiosk record. */
   @Post(":id/unbind")
   @HttpCode(204)
+  @ApiOperation({
+    summary: "Unbind the kiosk device credential",
+    description:
+      "Removes the active device credential while retaining the kiosk record and its pickup history. On an archived kiosk this is the explicit reactivate-and-unbind recovery path.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiResponse({ status: 204, description: "The device credential was removed." })
+  @ApiHttpErrors(401, 403, 404, 409)
   @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
   @AllowSubscriptionReadOnly("security")
   async unbindKiosk(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
@@ -135,6 +177,12 @@ export class KiosksController {
 
   @Put(":id/products")
   @HttpCode(200)
+  @ApiOperation({ summary: "Set the kiosk product allowlist" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(setKioskProductsSchema)
+  @ApiResponse({ status: 200, schema: kioskOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
   async setProducts(
@@ -148,7 +196,13 @@ export class KiosksController {
   @Post(":id/enroll")
   @HttpCode(200)
   @Header("Cache-Control", "no-store")
+  @ApiOperation({
+    summary: "Issue a legacy kiosk enrollment token",
+    description: "One-time token reveal; replaces any previously issued device credential.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiLegacyKioskEnrollSecretResponse()
+  @ApiHttpErrors(401, 403, 404)
   @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
   @RequireSubscriptionWrite()
   async enroll(
@@ -168,7 +222,14 @@ export class KiosksController {
   /** Credential-only: a stolen device must not be able to mint pairing codes. */
   @Post(":id/pairing-code")
   @Header("Cache-Control", "no-store")
+  @ApiOperation({
+    summary: "Issue a kiosk pairing code",
+    description:
+      "Single-use 8-digit code for POST /kiosk/pair, revealed exactly once. Issuing a new code retires any code still live for the kiosk.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiPairingCodeSecretResponse()
+  @ApiHttpErrors(401, 403, 404)
   @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
   @RequireSubscriptionWrite()
   async issuePairingCode(

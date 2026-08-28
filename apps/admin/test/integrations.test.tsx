@@ -41,6 +41,7 @@ function stubChannels(channels: unknown[]): void {
       ok: true,
       status: 200,
       json: async () => ({ channels }),
+      text: async () => JSON.stringify({ channels }),
     })),
   );
 }

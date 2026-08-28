@@ -100,6 +100,8 @@ function CreateProductPanel() {
             shelfLifeDays:
               createdProduct.shelfLifeDays === null ? "" : String(createdProduct.shelfLifeDays),
             defaultCounterpartyId: createdProduct.defaultCounterpartyId ?? "",
+            // `?? false` guards a rolling deploy where the API predates the field.
+            archived: createdProduct.archived ?? false,
           }
         : undefined,
     [createdProduct],
@@ -186,11 +188,14 @@ function EditProductPanel() {
             egaisCode: product.egaisCode ?? "",
             shelfLifeDays: product.shelfLifeDays === null ? "" : String(product.shelfLifeDays),
             defaultCounterpartyId: product.defaultCounterpartyId ?? "",
+            // `?? false` guards a rolling deploy where the API predates the field.
+            archived: product.archived ?? false,
           }
         : undefined,
     // Exclude the product object itself: an external-link-only refetch must not reset dirty fields.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
+      product?.archived,
       product?.boxCapacity,
       product?.defaultCounterpartyId,
       product?.egaisCode,

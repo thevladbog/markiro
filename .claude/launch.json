@@ -44,6 +44,15 @@
       "port": 5273
     },
     {
+      "name": "api-shots",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "set -a; . ./.env.example; [ -f ./.env ] && . ./.env; set +a; export DATABASE_URL=postgres://markiro:markiro@localhost:5432/markiro_admin_shots NODE_ENV=test; pnpm --filter @markiro/api dev"
+      ],
+      "port": 3000
+    },
+    {
       "name": "screenshots",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8735", "--directory", "screenshots"],

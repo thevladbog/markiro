@@ -1,7 +1,31 @@
-import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
+import {
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+  type SchemaObject,
+} from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { z } from "zod";
+import {
+  ApiCabinetAuth,
+  ApiHttpErrors,
+  ApiZodBody,
+  ApiZodValidationError,
+} from "../../lib/openapi";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { SecurityAuditService } from "../../authorization/security-audit.service";
@@ -20,6 +44,39 @@ const createApiKeySchema = z.object({
 });
 type CreateApiKeyDto = z.infer<typeof createApiKeySchema>;
 
+const apiKeySummaryListOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["keys"],
+  properties: {
+    keys: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "name", "kind", "createdAt", "lastRequest"],
+        properties: {
+          id: { type: "string" },
+          name: { type: "string", nullable: true },
+          kind: { type: "string", enum: ["public"] },
+          createdAt: { type: "string", format: "date-time" },
+          lastRequest: { type: "string", format: "date-time", nullable: true },
+        },
+      },
+    },
+  },
+};
+
+const apiKeyIssuedOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "key"],
+  properties: {
+    id: { type: "string" },
+    key: { type: "string", description: "One-time plaintext key reveal; never returned again." },
+  },
+};
+
 /**
  * Публичный API ключ — канал `public_api` без расписания (бриф Task 11):
  * его "настройки" это список ключей, а "журнал" это выпуск и отзыв.
@@ -34,6 +91,7 @@ type CreateApiKeyDto = z.infer<typeof createApiKeySchema>;
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
 @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
+@ApiCabinetAuth()
 export class ApiKeysController {
   constructor(
     private readonly service: ApiKeysService,
@@ -41,6 +99,9 @@ export class ApiKeysController {
   ) {}
 
   @Get()
+  @ApiOperation({ summary: "List public API keys" })
+  @ApiOkResponse({ schema: apiKeySummaryListOpenApiSchema })
+  @ApiHttpErrors(401, 403)
   async list(@Req() req: RequestWithTenant): Promise<{ keys: ApiKeySummaryDto[] }> {
     return this.service.list(req.tenantId!);
   }
@@ -49,6 +110,14 @@ export class ApiKeysController {
   // никогда не несёт (docs/device-key-surface.md).
   @Post()
   @RequireFeature("publicApi")
+  @ApiOperation({
+    summary: "Issue a public API key",
+    description: "The plaintext key is revealed exactly once, in this response.",
+  })
+  @ApiZodBody(createApiKeySchema)
+  @ApiCreatedResponse({ schema: apiKeyIssuedOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   async create(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createApiKeySchema)) body: CreateApiKeyDto,
@@ -65,7 +134,12 @@ export class ApiKeysController {
   }
 
   @Delete(":id")
+  @HttpCode(204)
   @AllowSubscriptionReadOnly("security")
+  @ApiOperation({ summary: "Revoke a public API key" })
+  @ApiParam({ name: "id", description: "Better Auth api-key id." })
+  @ApiResponse({ status: 204, description: "The key was revoked." })
+  @ApiHttpErrors(401, 403, 404)
   async revoke(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     await this.service.revoke(req.tenantId!, id);
     this.audit.credentialMutation({

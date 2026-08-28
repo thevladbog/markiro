@@ -47,7 +47,7 @@ import "./catalog.css";
  */
 const CANDIDATES_CHANNEL_TYPE = "commerceml";
 
-type StatusFilter = "all" | ProductStatus;
+type StatusFilter = "all" | ProductStatus | "archived";
 
 function ProductThumbnail({ product }: { product: ProductDto }) {
   const [failed, setFailed] = useState(false);
@@ -261,7 +261,13 @@ export function CatalogPage() {
     refetch: refetchProducts,
   } = useProducts({
     ...(debouncedSearch ? { search: debouncedSearch } : {}),
-    ...(statusFilter !== "all" ? { status: statusFilter } : {}),
+    // "all" opts into archived rows (the server hides them by default);
+    // "archived" asks for archived rows only; draft/active keep the default.
+    ...(statusFilter === "all"
+      ? { archived: "all" as const }
+      : statusFilter === "archived"
+        ? { archived: "true" as const }
+        : { status: statusFilter }),
   });
   const {
     data: counterpartiesData,
@@ -286,6 +292,7 @@ export function CatalogPage() {
     { value: "all", label: t("pages.catalog.statusFilter.all") },
     { value: "draft", label: t("pages.catalog.statusFilter.draft") },
     { value: "active", label: t("pages.catalog.statusFilter.active") },
+    { value: "archived", label: t("pages.catalog.statusFilter.archived") },
   ];
 
   const pageSizeOptions: SelectOption<`${PageSize}`>[] = PAGE_SIZE_OPTIONS.map((size) => ({
@@ -317,12 +324,15 @@ export function CatalogPage() {
       {
         key: "status",
         title: t("pages.catalog.table.status"),
-        render: (row) => (
-          <StatusChip
-            status={row.status === "active" ? "ok" : "warn"}
-            label={t(`pages.catalog.status.${row.status}`)}
-          />
-        ),
+        render: (row) =>
+          row.archived ? (
+            <StatusChip status="neutral" label={t("pages.catalog.status.archived")} />
+          ) : (
+            <StatusChip
+              status={row.status === "active" ? "ok" : "warn"}
+              label={t(`pages.catalog.status.${row.status}`)}
+            />
+          ),
       },
       {
         key: "actions",

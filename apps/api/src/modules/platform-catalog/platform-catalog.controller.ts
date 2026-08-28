@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, Patch, Post, Req } from "@nestjs/common";
+import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { platformCatalogContracts } from "@markiro/platform-contracts";
 import { parsePlatformResponse } from "../../platform-http/platform-response";
 import {
@@ -21,11 +22,13 @@ import {
 } from "./dto";
 import { PlatformCatalogService } from "./platform-catalog.service";
 
+@ApiTags("platform-catalog")
 @Controller("platform/catalog")
 export class PlatformCatalogController {
   constructor(private readonly catalog: PlatformCatalogService) {}
 
   @Get("items")
+  @ApiOperation({ summary: "List catalog items" })
   @PlatformApiProtectedOk({ response: platformCatalogContracts.list.response })
   @RequirePlatformCapabilities("catalog.read")
   async list(@Req() request: RequestWithPlatformPrincipal) {
@@ -36,6 +39,7 @@ export class PlatformCatalogController {
   }
 
   @Get("items/:id/versions")
+  @ApiOperation({ summary: "List catalog item versions" })
   @PlatformApiProtectedOk({ response: platformCatalogContracts.listVersions.response })
   @RequirePlatformCapabilities("catalog.read")
   async listVersions(
@@ -49,6 +53,7 @@ export class PlatformCatalogController {
   }
 
   @Get("items/:id/versions/:versionId")
+  @ApiOperation({ summary: "Get a catalog item version" })
   @PlatformApiProtectedOk({ response: platformCatalogContracts.getVersion.response })
   @RequirePlatformCapabilities("catalog.read")
   async getVersion(
@@ -63,6 +68,7 @@ export class PlatformCatalogController {
   }
 
   @Post("items/:id/versions")
+  @ApiOperation({ summary: "Create a catalog item version" })
   @PlatformApiProtectedCreated({
     body: platformCatalogContracts.createVersion.body,
     response: platformCatalogContracts.createVersion.response,
@@ -80,6 +86,7 @@ export class PlatformCatalogController {
   }
 
   @Patch("items/:id/versions/:versionId")
+  @ApiOperation({ summary: "Update a catalog item version" })
   @PlatformApiProtectedOk({
     body: platformCatalogContracts.updateVersion.body,
     response: platformCatalogContracts.updateVersion.response,
@@ -99,6 +106,7 @@ export class PlatformCatalogController {
 
   @Post("items/:id/versions/:versionId/publish")
   @HttpCode(200)
+  @ApiOperation({ summary: "Publish a catalog item version" })
   @PlatformApiProtectedOk({ response: platformCatalogContracts.publishVersion.response })
   @RequirePlatformCapabilities("catalog.write")
   async publish(
@@ -114,6 +122,7 @@ export class PlatformCatalogController {
 
   @Post("items/:id/versions/:versionId/retire")
   @HttpCode(200)
+  @ApiOperation({ summary: "Retire a catalog item version" })
   @PlatformApiProtectedOk({ response: platformCatalogContracts.retireVersion.response })
   @RequirePlatformCapabilities("catalog.write")
   async retire(
@@ -129,6 +138,7 @@ export class PlatformCatalogController {
 
   @Post("items/:id/archive")
   @HttpCode(200)
+  @ApiOperation({ summary: "Archive a catalog item" })
   @PlatformApiProtectedOk({ response: platformCatalogContracts.archiveItem.response })
   @RequirePlatformCapabilities("catalog.write")
   async archive(
@@ -142,11 +152,13 @@ export class PlatformCatalogController {
   }
 }
 
+@ApiTags("platform-catalog")
 @Controller("platform/settings")
 export class PlatformSettingsController {
   constructor(private readonly catalog: PlatformCatalogService) {}
 
   @Get("demo-plan")
+  @ApiOperation({ summary: "Get the default demo plan" })
   @PlatformApiProtectedOk({ response: platformCatalogContracts.getDefaultDemo.response })
   @RequirePlatformCapabilities("catalog.read")
   async getDefaultDemo(@Req() request: RequestWithPlatformPrincipal) {
@@ -157,6 +169,10 @@ export class PlatformSettingsController {
   }
 
   @Patch("demo-plan")
+  @ApiOperation({
+    summary: "Set the default demo plan",
+    description: "Selects the catalog plan version assigned to newly provisioned demo tenants.",
+  })
   @PlatformApiProtectedOk({
     body: platformCatalogContracts.setDefaultDemo.body,
     response: platformCatalogContracts.setDefaultDemo.response,

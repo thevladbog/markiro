@@ -226,7 +226,7 @@ afterEach(async () => {
 
 it("renders approved live evidence with stale participants and local pending work distinguished", async () => {
   renderLive();
-  expect(await screen.findByRole("heading", { name: "Инвентаризация ИНВ-00042" })).toBeDefined();
+  expect(await screen.findByRole("heading", { level: 1, name: "ИНВ-00042" })).toBeDefined();
   expect(screen.getByText("312")).toBeDefined();
   expect(screen.getByText("3 804")).toBeDefined();
   expect(screen.getAllByText("Станция упаковки № 1").length).toBeGreaterThan(0);
@@ -242,7 +242,7 @@ it("polls at the bounded interval while running and stops after the server repor
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const closed = { ...progress, status: "closed" };
   const live = renderLive([progress, closed]);
-  expect(await screen.findByRole("heading", { name: "Инвентаризация ИНВ-00042" })).toBeDefined();
+  expect(await screen.findByRole("heading", { level: 1, name: "ИНВ-00042" })).toBeDefined();
   expect(live.getProgressRequestCount()).toBe(1);
   await vi.advanceTimersByTimeAsync(5_000);
   await waitFor(() => expect(live.getProgressRequestCount()).toBe(2));
@@ -255,4 +255,36 @@ it("fails closed when the live endpoint adds an unknown response field", async (
   expect((await screen.findByRole("alert")).textContent).toContain(
     "Не удалось загрузить ход инвентаризации",
   );
+});
+
+it("keeps metric cards colored even when their counts are zero", async () => {
+  const zeroed = {
+    ...progress,
+    verifiedCount: 0,
+    missingCount: 0,
+    ineligibleCount: 0,
+    unknownCount: 0,
+    dateMismatchCount: 0,
+  };
+  renderLive([zeroed]);
+  expect(await screen.findByRole("heading", { level: 1, name: "ИНВ-00042" })).toBeDefined();
+
+  const verified = screen.getByText("Проверено").closest(".mk-inventory-live-metric")!;
+  expect(verified.className).toContain("mk-inventory-live-metric--ok");
+  const missing = screen.getByText("Не найдено").closest(".mk-inventory-live-metric")!;
+  expect(missing.className).toContain("mk-inventory-live-metric--warn");
+  const discrepancies = screen.getByText("Расхождения").closest(".mk-inventory-live-metric")!;
+  expect(discrepancies.className).toContain("mk-inventory-live-metric--error");
+});
+
+it("colors non-zero metrics with the expected tone", async () => {
+  renderLive();
+  expect(await screen.findByRole("heading", { level: 1, name: "ИНВ-00042" })).toBeDefined();
+
+  const verified = screen.getByText("Проверено").closest(".mk-inventory-live-metric")!;
+  expect(verified.className).toContain("mk-inventory-live-metric--ok");
+  const missing = screen.getByText("Не найдено").closest(".mk-inventory-live-metric")!;
+  expect(missing.className).toContain("mk-inventory-live-metric--warn");
+  const discrepancies = screen.getByText("Расхождения").closest(".mk-inventory-live-metric")!;
+  expect(discrepancies.className).toContain("mk-inventory-live-metric--error");
 });
