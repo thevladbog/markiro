@@ -204,10 +204,24 @@ describe.skipIf(!ready)("signer agent task queue", () => {
       .select({ status: schema.chzSignerTasks.status })
       .from(schema.chzSignerTasks)
       .where(eq(schema.chzSignerTasks.id, taskId));
-    expect(row!.status).toBe("pending");
+    expect(row).toBeDefined();
+    expect(row?.status).toBe("pending");
     await db
       .update(schema.chzSignerTasks)
       .set({ status: "expired" })
       .where(eq(schema.chzSignerTasks.id, taskId));
+  });
+
+  it("rejects a malformed task id with 400 rather than a database error", async () => {
+    const { secret } = await pairAgent();
+    await request(app!.getHttpServer())
+      .post("/signer-agent/tasks/not-a-uuid/complete")
+      .set("x-signer-token", secret)
+      .send({
+        token: "example-token",
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        certThumbprint: "AB12",
+      })
+      .expect(400);
   });
 });

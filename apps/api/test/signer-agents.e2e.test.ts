@@ -104,4 +104,8 @@ describe.skipIf(!ready)("signer agents pairing", () => {
     );
     expect(stillActive.status).toBe("active");
   });
+
+  it("rejects a malformed agent id with 400 rather than a database error", async () => {
+    await agent.post("/signer-agents/not-a-uuid/revoke").expect(400);
+  });
 });
