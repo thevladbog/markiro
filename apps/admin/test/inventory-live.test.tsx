@@ -33,7 +33,7 @@ const ACCESS: AccessDocument = {
 
 const detail = {
   id: INVENTORY_ID,
-  number: "ИНВ-00042",
+  number: "IVN-26-0042",
   status: "running",
   mode: "check",
   productId: "22222222-2222-4222-8222-222222222222",
@@ -226,7 +226,7 @@ afterEach(async () => {
 
 it("renders approved live evidence with stale participants and local pending work distinguished", async () => {
   renderLive();
-  expect(await screen.findByRole("heading", { level: 1, name: "ИНВ-00042" })).toBeDefined();
+  expect(await screen.findByRole("heading", { level: 1, name: "IVN-26-0042" })).toBeDefined();
   expect(screen.getByText("312")).toBeDefined();
   expect(screen.getByText("3 804")).toBeDefined();
   expect(screen.getAllByText("Станция упаковки № 1").length).toBeGreaterThan(0);
@@ -242,7 +242,7 @@ it("polls at the bounded interval while running and stops after the server repor
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const closed = { ...progress, status: "closed" };
   const live = renderLive([progress, closed]);
-  expect(await screen.findByRole("heading", { level: 1, name: "ИНВ-00042" })).toBeDefined();
+  expect(await screen.findByRole("heading", { level: 1, name: "IVN-26-0042" })).toBeDefined();
   expect(live.getProgressRequestCount()).toBe(1);
   await vi.advanceTimersByTimeAsync(5_000);
   await waitFor(() => expect(live.getProgressRequestCount()).toBe(2));
@@ -267,7 +267,7 @@ it("keeps metric cards colored even when their counts are zero", async () => {
     dateMismatchCount: 0,
   };
   renderLive([zeroed]);
-  expect(await screen.findByRole("heading", { level: 1, name: "ИНВ-00042" })).toBeDefined();
+  expect(await screen.findByRole("heading", { level: 1, name: "IVN-26-0042" })).toBeDefined();
 
   const verified = screen.getByText("Проверено").closest(".mk-inventory-live-metric")!;
   expect(verified.className).toContain("mk-inventory-live-metric--ok");
@@ -279,7 +279,7 @@ it("keeps metric cards colored even when their counts are zero", async () => {
 
 it("colors non-zero metrics with the expected tone", async () => {
   renderLive();
-  expect(await screen.findByRole("heading", { level: 1, name: "ИНВ-00042" })).toBeDefined();
+  expect(await screen.findByRole("heading", { level: 1, name: "IVN-26-0042" })).toBeDefined();
 
   const verified = screen.getByText("Проверено").closest(".mk-inventory-live-metric")!;
   expect(verified.className).toContain("mk-inventory-live-metric--ok");

@@ -37,7 +37,7 @@ const READ_ACCESS: AccessDocument = {
 
 const detail = {
   id: INVENTORY_ID,
-  number: "ИНВ-00042",
+  number: "IVN-26-0042",
   status: "running",
   mode: "check",
   productId: "22222222-2222-4222-8222-222222222222",
@@ -208,7 +208,7 @@ afterEach(async () => {
 
 it("requires a reason and posts the selected scan with revision and a bounded idempotency key", async () => {
   const { writes } = renderCorrections();
-  expect(await screen.findByRole("heading", { name: "Исправления · ИНВ-00042" })).toBeDefined();
+  expect(await screen.findByRole("heading", { name: "Исправления · IVN-26-0042" })).toBeDefined();
   fireEvent.click(screen.getByRole("button", { name: "Выбрать …00000042 / …4831" }));
   const submit = screen.getByRole("button", { name: "Отменить скан" });
   expect((submit as HTMLButtonElement).disabled).toBe(true);

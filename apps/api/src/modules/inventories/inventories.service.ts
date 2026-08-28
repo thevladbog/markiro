@@ -33,6 +33,7 @@ import type {
   InventorySnapshotInputSelectionDto,
   UpdateInventoryDto,
 } from "./dto";
+import { formatInventoryNumber } from "./inventory-number";
 import { InventorySnapshotService } from "./inventory-snapshot.service";
 import type { InventoryTaskFormData } from "./inventory-task-form";
 import { parseStationInventoryManifest } from "./station-inventory.dto";
@@ -341,9 +342,14 @@ export class InventoriesService {
         ...input,
         boxLabelTemplateId: input.boxLabelTemplateId ?? null,
       });
+      // The sequence continues across both formats: inventories created before
+      // the switch to `IVN-YY-NNNN` keep their legacy `ИНВ-NNNNN` number, but
+      // still count towards the tenant's next sequence value.
       const [sequence] = await tx
         .select({
           last: sql<number>`coalesce(max(case
+            when ${schema.inventories.number} ~ '^IVN-[0-9]{2}-[0-9]+$'
+            then split_part(${schema.inventories.number}, '-', 3)::integer
             when ${schema.inventories.number} ~ '^ИНВ-[0-9]+$'
             then substring(${schema.inventories.number} from 5)::integer
             else null
@@ -352,7 +358,7 @@ export class InventoriesService {
         .from(schema.inventories)
         .where(eq(schema.inventories.tenantId, tenantId));
       const next = Number(sequence?.last ?? 0) + 1;
-      const number = `ИНВ-${String(next).padStart(5, "0")}`;
+      const number = formatInventoryNumber(next, new Date());
 
       await tx.insert(schema.inventories).values({
         id: inventoryId,

@@ -48,7 +48,7 @@ const READ_ACCESS: AccessDocument = {
 
 const BASE_INVENTORY = {
   id: ID.inventory,
-  number: "ИНВ-00042",
+  number: "IVN-26-0042",
   status: "preparing",
   mode: "repack",
   productId: ID.product,
@@ -656,7 +656,7 @@ it("fails closed when the inventory API returns unknown fields", async () => {
   expect((await screen.findByRole("alert")).textContent).toContain(
     "Не удалось загрузить инвентаризации",
   );
-  expect(screen.queryByText("ИНВ-00042")).toBeNull();
+  expect(screen.queryByText("IVN-26-0042")).toBeNull();
 });
 
 it("fails closed when the inventory API returns an impossible civil date", async () => {
@@ -673,7 +673,7 @@ it("fails closed when the inventory API returns an impossible civil date", async
   expect((await screen.findByRole("alert")).textContent).toContain(
     "Не удалось загрузить инвентаризации",
   );
-  expect(screen.queryByText("ИНВ-00042")).toBeNull();
+  expect(screen.queryByText("IVN-26-0042")).toBeNull();
 });
 
 it.each([
@@ -717,5 +717,5 @@ it.each([
   expect((await screen.findByRole("alert")).textContent).toContain(
     "Не удалось загрузить инвентаризации",
   );
-  expect(screen.queryByText("ИНВ-00042")).toBeNull();
+  expect(screen.queryByText("IVN-26-0042")).toBeNull();
 });
