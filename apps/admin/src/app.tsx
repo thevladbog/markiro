@@ -62,12 +62,11 @@ import { RejectionsPage } from "./pages/pickup/Rejections.js";
 import { PickupPage } from "./pages/pickup/index.js";
 import { ProfilePage } from "./pages/profile/ProfilePage.js";
 import { SettingsPage } from "./pages/settings/index.js";
-import { SubscriptionPage } from "./pages/settings/SubscriptionPage.js";
 import { ShiftsPage } from "./pages/shifts/index.js";
 import { ShiftPanelRoute } from "./pages/shifts/ShiftPanelRoute.js";
 import { ShellPage } from "./pages/Shell.js";
 import { TeamPage } from "./pages/team/TeamPage.js";
-import { InvoiceDetailPage, InvoicesPage } from "./pages/billing/InvoicesPage.js";
+import { BillingLayout, BillingRoutePlaceholder } from "./pages/billing/BillingLayout.js";
 
 /**
  * The data router is used even though route data is fetched through React
@@ -416,8 +415,8 @@ function appRouteElements() {
         <Route
           path="settings/subscription"
           element={
-            <RequireCapability capability={C.TENANT_SETTINGS_MANAGE}>
-              <SubscriptionPage />
+            <RequireCapability capability={C.BILLING_READ}>
+              <Navigate to="/billing/subscription" replace />
             </RequireCapability>
           }
         />
@@ -429,8 +428,31 @@ function appRouteElements() {
             </RequireCapability>
           }
         />
-        <Route path="billing/invoices" element={<InvoicesPage />} />
-        <Route path="billing/invoices/:id" element={<InvoiceDetailPage />} />
+        <Route
+          path="billing"
+          element={
+            <RequireCapability capability={C.BILLING_READ}>
+              <BillingLayout />
+            </RequireCapability>
+          }
+        >
+          <Route index element={<BillingRoutePlaceholder />} />
+          <Route path="subscription" element={<BillingRoutePlaceholder />} />
+          <Route path="invoices" element={<BillingRoutePlaceholder />} />
+          <Route path="invoices/:id" element={<BillingRoutePlaceholder />} />
+          <Route path="documents" element={<BillingRoutePlaceholder />} />
+          <Route path="offers/:id" element={<BillingRoutePlaceholder />} />
+          <Route path="requests" element={<BillingRoutePlaceholder />} />
+          <Route
+            path="requests/new"
+            element={
+              <RequireCapability capability={C.BILLING_REQUEST}>
+                <BillingRoutePlaceholder />
+              </RequireCapability>
+            }
+          />
+          <Route path="requests/:id" element={<BillingRoutePlaceholder />} />
+        </Route>
       </Route>
     </>
   );

@@ -108,6 +108,12 @@ export const NAV_ITEMS: ReadonlyArray<{
     capability: C.MEMBERS_MANAGE,
   },
   {
+    to: "/billing",
+    key: "nav.billing",
+    sectionKey: "shell.sections.organization",
+    capability: C.BILLING_READ,
+  },
+  {
     to: "/settings",
     key: "nav.settings",
     sectionKey: "shell.sections.organization",
@@ -135,6 +141,7 @@ export function AppShell() {
   const { data: session } = authClient.useSession();
   const canReadOperations = useCan(C.OPERATIONS_READ);
   const canReadIntegrations = useCan(C.INTEGRATIONS_READ);
+  const canReadBilling = useCan(C.BILLING_READ);
   const canManageSettings = useCan(C.TENANT_SETTINGS_MANAGE);
   const canManageMembers = useCan(C.MEMBERS_MANAGE);
   const pendingOrderCount = usePendingOrderCount(canReadOperations);
@@ -149,6 +156,7 @@ export function AppShell() {
   const items: SidebarItem[] = NAV_ITEMS.filter(({ capability }) => {
     if (capability === C.OPERATIONS_READ) return canReadOperations;
     if (capability === C.INTEGRATIONS_READ) return canReadIntegrations;
+    if (capability === C.BILLING_READ) return canReadBilling;
     if (capability === C.TENANT_SETTINGS_MANAGE) return canManageSettings;
     if (capability === C.MEMBERS_MANAGE) return canManageMembers;
     return false;

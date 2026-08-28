@@ -40,8 +40,7 @@ export function SubscriptionBanner() {
       // horizontal inset matching the pages' own 32px gutters.
       style={{ margin: "16px 32px 0" }}
     >
-      <span>{message}</span>{" "}
-      <Link to="/settings/subscription">{t("subscription.banner.link")}</Link>
+      <span>{message}</span> <Link to="/billing/subscription">{t("subscription.banner.link")}</Link>
     </Alert>
   );
 }

@@ -230,6 +230,7 @@
     "devices": "Устройства",
     "integrations": "Интеграции",
     "team": "Доступ в кабинет",
+    "billing": "Биллинг",
     "settings": "Настройки"
   },
   "shell": {
@@ -429,6 +430,20 @@
       },
       "viewAll": "Все смены",
       "notSpecified": "Не указано"
+    },
+    "billing": {
+      "title": "Биллинг",
+      "description": "Подписка, расчёты, документы и обращения в Markiro",
+      "createRequest": "Создать заявку",
+      "loading": "Загрузка раздела биллинга",
+      "tabs": {
+        "label": "Разделы биллинга",
+        "overview": "Обзор",
+        "subscription": "Подписка и лимиты",
+        "invoices": "Счета и оплаты",
+        "documents": "Документы",
+        "requests": "Заявки"
+      }
     },
     "catalog": {
       "title": "Каталог продукции",

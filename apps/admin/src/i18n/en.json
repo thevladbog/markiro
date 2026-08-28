@@ -230,6 +230,7 @@
     "devices": "Devices",
     "integrations": "Integrations",
     "team": "Cabinet access",
+    "billing": "Billing",
     "settings": "Settings"
   },
   "shell": {
@@ -429,6 +430,20 @@
       },
       "viewAll": "All shifts",
       "notSpecified": "Not specified"
+    },
+    "billing": {
+      "title": "Billing",
+      "description": "Subscription, billing, documents, and requests in Markiro",
+      "createRequest": "Create request",
+      "loading": "Loading billing section",
+      "tabs": {
+        "label": "Billing sections",
+        "overview": "Overview",
+        "subscription": "Subscription and limits",
+        "invoices": "Invoices and payments",
+        "documents": "Documents",
+        "requests": "Requests"
+      }
     },
     "catalog": {
       "title": "Product catalog",

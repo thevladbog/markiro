@@ -1,0 +1,86 @@
+# Task 7 Report: Tenant Admin Billing Shell and Routing
+
+## Result
+
+Added the tenant-cabinet billing shell at `/billing`. It is discoverable and
+readable only with `BILLING_READ`; its create-request action and direct
+`/billing/requests/new` route additionally require `BILLING_REQUEST`.
+
+The shell supplies the compact approved hierarchy: page heading, one primary
+request action, five semantic tabs, and an outlet. Neutral route placeholders
+keep the child-route contract ready for Tasks 8–10 without fabricating billing
+state or fetching data before their typed query pages land.
+
+The saved `/settings/subscription` route and subscription banner now point to
+the canonical `/billing/subscription` tab.
+
+## RED / GREEN
+
+- **RED:** The new routing test initially could not compile because
+  `BillingLayout` and the guarded billing route tree did not exist. The
+  prescribed `pnpm` wrapper was also unavailable locally because its configured
+  `@pnpm/exe@11.22.0` registry version could not be fetched.
+- **GREEN:** `billing-routing.test.tsx` passes 7 assertions covering owner and
+  admin discovery/action, manager and member non-discovery, the direct manager
+  denial, the member capability boundary, `aria-current` tab semantics, and the
+  legacy redirect. The banner and i18n regressions pass with it.
+
+## Changed files
+
+- `apps/admin/src/layout/AppShell.tsx` — billing sidebar item after cabinet
+  access, filtered through `BILLING_READ`.
+- `apps/admin/src/app.tsx` — canonical guarded child route tree and legacy
+  subscription redirect.
+- `apps/admin/src/pages/billing/BillingLayout.tsx` — shared header, capability
+  gated CTA, semantic tabs, outlet, and neutral placeholder.
+- `apps/admin/src/pages/billing/billing.css` — compact, token-backed layout;
+  12px placeholder/card radius; narrow-width tab and card-grid stacking; focus
+  styles.
+- `apps/admin/src/subscription/SubscriptionBanner.tsx` and its test — canonical
+  subscription link.
+- `apps/admin/src/i18n/ru.json`, `apps/admin/src/i18n/en.json` — complete
+  billing navigation and shell copy.
+- `apps/admin/test/billing-routing.test.tsx` — route and capability coverage.
+
+## Design decisions
+
+- Reconciled the approved rendered reference with the current tenant admin:
+  dense `AdminPage` composition, compact tabs, bordered placeholder surface,
+  dark primary action, and no motion, gradients, glass effects, or new token
+  layer.
+- The token inventory contains `--surface-card`, not `--surface-1`; the shell
+  therefore uses the existing former token with `--line`, `--fg-1`, `--fg-3`,
+  `--accent`, and `--focus-ring` rather than adding an alias.
+- The supplied Pen file contains only an empty frame, so the approved rendered
+  reference and experience specification provided the usable visual source.
+
+## Checks
+
+- PASS — focused Vitest: `billing-routing`, `subscription-banner`, and i18n:
+  3 files, 12 tests.
+- PASS — `@markiro/admin` TypeScript no-emit check.
+- PASS — `@markiro/admin` production build. Vite retained its existing
+  large-chunk advisory only.
+- PASS — ESLint for `apps/admin`: no errors; 5 pre-existing hook-dependency
+  warnings in `boxes/index.tsx` and `conflicts/index.tsx`.
+- PASS — Prettier check for scoped files and `git diff --check`.
+
+The local worktree's untracked workspace symlinks resolve shared package output
+from the parent checkout, which predates Task 1's new billing capabilities.
+For checks, the `domain` and `ui` symlinks were temporarily pointed at this
+worktree's already-built packages, then restored exactly; no dependency links
+or generated artifacts are part of the change.
+
+## Limits
+
+No live browser, responsive visual screenshot, or API/server authorization run
+was performed. Automated tests prove the client capability boundary; server
+enforcement is supplied by the earlier billing API work and still requires its
+own integration environment. Tasks 8–10 must replace the neutral placeholders
+with their data-aware overview, subscription, invoice/document/offer, and
+request pages.
+
+## Commit
+
+The final commit SHA is reported in the task handoff. A commit cannot contain
+its own content-derived SHA without changing that SHA.

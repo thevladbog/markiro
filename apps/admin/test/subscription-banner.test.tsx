@@ -35,6 +35,6 @@ it("shows trial days and links to subscription limits", () => {
   );
   expect(screen.getByRole("alert").textContent).toContain("Демо закончится через 3 дн.");
   expect(screen.getByRole("link", { name: "Посмотреть лимиты" }).getAttribute("href")).toBe(
-    "/settings/subscription",
+    "/billing/subscription",
   );
 });
