@@ -223,6 +223,7 @@ function renderProductCard({
             unitPrice: "",
             egaisCode: "",
             defaultCounterpartyId: "",
+            archived: false,
           }}
           counterparties={[]}
           onSubmit={() => {}}

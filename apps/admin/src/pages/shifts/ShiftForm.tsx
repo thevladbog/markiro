@@ -278,11 +278,12 @@ export function ShiftForm({
 
   const productOptions: ComboboxOption[] = products.map((product) => ({
     value: product.id,
-    label:
-      product.status === "draft"
+    label: product.archived
+      ? `${product.name} (${t("pages.shifts.form.archivedHint")})`
+      : product.status === "draft"
         ? `${product.name} (${t("pages.shifts.form.draftHint")})`
         : product.name,
-    disabled: product.status === "draft",
+    disabled: product.archived || product.status === "draft",
   }));
 
   const lineOptions: SelectOption[] = [

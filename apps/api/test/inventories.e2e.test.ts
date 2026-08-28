@@ -739,6 +739,16 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       .post("/inventories")
       .send(createBody(draftProductId, lineId))
       .expect(422, { code: "INVENTORY_PRODUCT_INACTIVE" });
+    // Inventory is the one selection surface where an archived ("do not use")
+    // product stays selectable: counting leftover stock of a product pulled
+    // from production is the flag's core scenario. Only card completeness
+    // (draft) blocks an inventory, the archive flag must not.
+    const archivedProductId = await seedProduct(tenantId, {
+      gtin14: "04680089900406",
+      name: "Retired product",
+      archived: true,
+    });
+    await agent.post("/inventories").send(createBody(archivedProductId, lineId)).expect(201);
     await agent
       .post("/inventories")
       .send(createBody(activeProductId, randomUUID()))

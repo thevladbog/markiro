@@ -609,6 +609,9 @@ export class PickupOrdersService {
         and(
           eq(schema.products.tenantId, schema.kioskProducts.tenantId),
           eq(schema.products.id, schema.kioskProducts.productId),
+          // An assignment may predate archiving; the join (not the allowlist
+          // table) is where an archived product drops off the kiosk.
+          eq(schema.products.archived, false),
         ),
       )
       .leftJoin(
@@ -1904,6 +1907,10 @@ export class PickupOrdersService {
         and(
           eq(schema.products.tenantId, schema.kioskProducts.tenantId),
           eq(schema.products.id, schema.kioskProducts.productId),
+          // Mirrors the bootstrap join above: scanned codes of an archived
+          // product must stop being admitted into orders, not just vanish
+          // from the product list.
+          eq(schema.products.archived, false),
         ),
       )
       .where(

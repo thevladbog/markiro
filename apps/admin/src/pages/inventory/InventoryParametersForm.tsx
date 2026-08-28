@@ -35,7 +35,10 @@ export function InventoryParametersForm({
   onSubmit: (value: CreateInventoryInput) => void;
 }) {
   const { t, i18n } = useTranslation();
-  const products = useProducts();
+  // Inventory is the one selection surface where archived ("do not use")
+  // products stay selectable: counting leftover stock of a product pulled
+  // from production is the flag's core scenario.
+  const products = useProducts({ archived: "all" });
   const lines = useLines();
   const templates = useLabelTemplates();
   const planning = useShiftPlanningConfig();
@@ -61,10 +64,12 @@ export function InventoryParametersForm({
       (products.data ?? []).map((product) => ({
         value: product.id,
         label: product.name,
-        description: `GTIN ${product.gtin14}`,
+        description: product.archived
+          ? `GTIN ${product.gtin14} · ${t("pages.inventory.create.archivedProductHint")}`
+          : `GTIN ${product.gtin14}`,
         disabled: product.status !== "active",
       })),
-    [products.data],
+    [products.data, t],
   );
   const loading =
     products.isPending || lines.isPending || templates.isPending || planning.isPending;
