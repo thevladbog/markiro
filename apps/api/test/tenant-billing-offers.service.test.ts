@@ -1,14 +1,73 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema, type Db } from "@markiro/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, type SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { TenantBillingOffersService } from "../src/modules/tenant-billing/tenant-billing-offers.service";
+import { acquireBillingWorkflowLocks } from "../src/modules/billing-workflow-locks";
 import { createOrganization } from "./support/subscription-fixtures";
 
 const ready = Boolean(process.env.DATABASE_URL);
+
+describe("tenant offer decision idempotency lock protocol", () => {
+  it("uses the tenant two-int namespace before a collision-injected workflow lock", async () => {
+    const dialect = new PgDialect();
+    const rendered: Array<{ sql: string; params: unknown[] }> = [];
+    const offerId = "10000000-0000-4000-8000-000000000042";
+    const idempotencyKey = "00000000-0000-4000-8000-000000000042";
+    const decisionId = "20000000-0000-4000-8000-000000000042";
+    let selectCount = 0;
+    const tx = {
+      execute: vi.fn(async (statement: SQL) => {
+        const query = dialect.sqlToQuery(statement);
+        rendered.push(query);
+        return query.sql.includes("from unnest") ? { rows: [{ identity: "42" }] } : { rows: [] };
+      }),
+      select: vi.fn(() => {
+        selectCount += 1;
+        return resolvedQuery(
+          selectCount === 1
+            ? [{ familyId: "30000000-0000-4000-8000-000000000042" }]
+            : selectCount === 2
+              ? [{ offerId, decision: "accepted", message: null, decisionId }]
+              : [
+                  {
+                    id: decisionId,
+                    offerId,
+                    decision: "accepted",
+                    message: null,
+                    createdAt: new Date("2026-08-28T00:00:00.000Z"),
+                  },
+                ],
+        );
+      }),
+    };
+    const db = {
+      transaction: vi.fn(async (run: (executor: typeof tx) => Promise<unknown>) => run(tx)),
+    } as unknown as Db;
+
+    await expect(
+      new TenantBillingOffersService(db).accept("tenant-a", "user-a", offerId, idempotencyKey),
+    ).resolves.toMatchObject({ id: decisionId, offerId, decision: "accepted" });
+    await acquireBillingWorkflowLocks(tx as unknown as Db, "tenant-a", [
+      { kind: "offer", id: offerId },
+    ]);
+
+    expect(rendered).toHaveLength(3);
+    expect(rendered[0]).toMatchObject({
+      sql: "select pg_advisory_xact_lock($1::integer, hashtext($2))",
+      params: [0x42494c54, `tenant-offer-idempotency:tenant-a:${idempotencyKey}`],
+    });
+    expect(rendered[1]).toMatchObject({ sql: expect.stringContaining("from unnest") });
+    expect(rendered[2]).toMatchObject({
+      sql: "select pg_advisory_xact_lock($1::bigint)",
+      params: ["42"],
+    });
+  });
+});
 
 describe.skipIf(!ready)("tenant billing offer decisions isolated Postgres service", () => {
   const databaseName = `markiro_tenant_billing_offers_${randomUUID().replaceAll("-", "_")}`;
@@ -317,3 +376,13 @@ describe.skipIf(!ready)("tenant billing offer decisions isolated Postgres servic
     expect(replay).toEqual(first);
   });
 });
+
+function resolvedQuery<T>(rows: T[]) {
+  const promise = Promise.resolve(rows);
+  const query = {
+    from: vi.fn(() => query),
+    where: vi.fn(() => query),
+    limit: vi.fn(() => promise),
+  };
+  return query;
+}

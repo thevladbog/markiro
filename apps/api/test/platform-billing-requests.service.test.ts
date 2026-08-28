@@ -567,6 +567,100 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     }
   });
 
+  it("allocates after arbitrary-length numeric suffixes and ignores malformed invoice numbers", async () => {
+    const fixtureNumbers = [
+      "INV-9223372036854775808",
+      "INV-00009223372036854775809",
+      "INV-999999999999999999999999999999x",
+      "MANUAL-999999999999999999999999999999999999",
+      "INV-9223372036854775810",
+      "INV-999999999999999999999999999999",
+      "INV-1000000000000000000000000000000",
+    ];
+    await connection.db.insert(schema.invoices).values(
+      fixtureNumbers.slice(0, 4).map((number) => ({
+        tenantId: tenantA,
+        number,
+        createdByPlatformUserId: actorId,
+      })),
+    );
+
+    try {
+      await expect(billing.create(actor, invoiceInput(tenantA))).resolves.toMatchObject({
+        number: "INV-9223372036854775810",
+      });
+
+      await connection.db.insert(schema.invoices).values({
+        tenantId: tenantB,
+        number: "INV-999999999999999999999999999999",
+        createdByPlatformUserId: actorId,
+      });
+      await expect(billing.create(actor, invoiceInput(tenantB))).resolves.toMatchObject({
+        number: "INV-1000000000000000000000000000000",
+      });
+    } finally {
+      await connection.pool.query(
+        `DELETE FROM invoice_lines
+         WHERE invoice_id IN (SELECT id FROM invoices WHERE number = ANY($1::text[]))`,
+        [fixtureNumbers],
+      );
+      await connection.pool.query(`DELETE FROM invoices WHERE number = ANY($1::text[])`, [
+        fixtureNumbers,
+      ]);
+    }
+  });
+
+  it("does not relabel an unrelated invoice unique violation as a number conflict", async () => {
+    await connection.pool.query(`
+      CREATE FUNCTION task6_invoice_unrelated_unique() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN
+        RAISE EXCEPTION USING
+          ERRCODE = '23505',
+          CONSTRAINT = 'invoices_tenant_id_uq',
+          MESSAGE = 'synthetic unrelated invoice unique violation';
+      END $$;
+      CREATE TRIGGER task6_invoice_unrelated_unique
+      BEFORE INSERT ON invoices FOR EACH ROW EXECUTE FUNCTION task6_invoice_unrelated_unique();
+    `);
+    try {
+      const failure = await billing
+        .create(actor, invoiceInput(tenantA))
+        .catch((error: unknown) => error);
+      expect(failure).not.toMatchObject({ response: { code: "invoice_number_conflict" } });
+      expect(postgresConstraint(failure)).toBe("invoices_tenant_id_uq");
+    } finally {
+      await connection.pool.query(`
+        DROP TRIGGER task6_invoice_unrelated_unique ON invoices;
+        DROP FUNCTION task6_invoice_unrelated_unique();
+      `);
+    }
+  });
+
+  it("maps the exact invoice number unique constraint to the domain conflict", async () => {
+    await connection.pool.query(`
+      CREATE FUNCTION task6_invoice_number_unique() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN
+        RAISE EXCEPTION USING
+          ERRCODE = '23505',
+          CONSTRAINT = 'invoices_number_uq',
+          MESSAGE = 'synthetic invoice number unique violation';
+      END $$;
+      CREATE TRIGGER task6_invoice_number_unique
+      BEFORE INSERT ON invoices FOR EACH ROW EXECUTE FUNCTION task6_invoice_number_unique();
+    `);
+    try {
+      await expect(billing.create(actor, invoiceInput(tenantA))).rejects.toMatchObject({
+        response: { code: "invoice_number_conflict" },
+        status: 409,
+      });
+    } finally {
+      await connection.pool.query(`
+        DROP TRIGGER task6_invoice_number_unique ON invoices;
+        DROP FUNCTION task6_invoice_number_unique();
+      `);
+    }
+  });
+
   it("serializes explicit invoice linking against issue without a deadlock or duplicate history", async () => {
     const request = await insertRequest(connection.db, tenantA, tenantUser, "offer_prepared");
     const invoice = await billing.create(actor, invoiceInput(tenantA));
@@ -683,6 +777,19 @@ function responsibleSide(
   }
   if (["completed", "cancelled"].includes(status)) return "none" as const;
   return "markiro" as const;
+}
+
+function postgresConstraint(error: unknown): string | null {
+  let current = error;
+  const visited = new Set<unknown>();
+  while (current && typeof current === "object" && !visited.has(current)) {
+    visited.add(current);
+    const code = Reflect.get(current, "code");
+    const constraint = Reflect.get(current, "constraint");
+    if (code === "23505" && typeof constraint === "string") return constraint;
+    current = Reflect.get(current, "cause");
+  }
+  return null;
 }
 
 async function countRequestEvents(db: Db, requestId: string) {

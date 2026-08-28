@@ -19,6 +19,7 @@ import { PlatformAuditService } from "../../platform-auth/platform-audit.service
 import {
   acquireBillingWorkflowLocks,
   canonicalBillingUuid,
+  postgresUniqueConstraint,
   type BillingWorkflowResource,
 } from "../billing-workflow-locks";
 import {
@@ -92,11 +93,19 @@ export class BillingService {
           sourceOfferFamilyId,
         );
       }
+      const normalizedInvoiceSuffix = sql<string>`coalesce(
+        nullif(ltrim(substring(${schema.invoices.number} from 5), '0'), ''),
+        '0'
+      )`;
       const [last] = await tx
         .select({ number: schema.invoices.number })
         .from(schema.invoices)
         .where(sql`${schema.invoices.number} ~ '^INV-[0-9]+$'`)
-        .orderBy(desc(sql`substring(${schema.invoices.number} from 5)::bigint`))
+        .orderBy(
+          desc(sql`length(${normalizedInvoiceSuffix})`),
+          desc(sql`${normalizedInvoiceSuffix} collate "C"`),
+          desc(schema.invoices.number),
+        )
         .limit(1);
       const next = nextInvoiceNumber(last?.number);
       let invoice: typeof schema.invoices.$inferSelect | undefined;
@@ -117,7 +126,7 @@ export class BillingService {
           })
           .returning();
       } catch (error) {
-        if (isUniqueViolation(error)) {
+        if (postgresUniqueConstraint(error) === "invoices_number_uq") {
           throw new ConflictException({ code: "invoice_number_conflict" });
         }
         throw error;
@@ -658,13 +667,19 @@ function invoicePaymentSummary(
   };
 }
 
-function isUniqueViolation(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const value = error as { code?: unknown; cause?: { code?: unknown } };
-  return value.code === "23505" || value.cause?.code === "23505";
-}
-
 function nextInvoiceNumber(last: string | undefined): string {
-  const numeric = last?.match(/(\d+)$/)?.[1];
-  return `INV-${((numeric ? BigInt(numeric) : 0n) + 1n).toString().padStart(6, "0")}`;
+  const suffix = last?.match(/^INV-([0-9]+)$/)?.[1] ?? "0";
+  const digits = (suffix.replace(/^0+/, "") || "0").split("");
+  let carry = 1;
+  for (let index = digits.length - 1; index >= 0 && carry === 1; index -= 1) {
+    const digit = digits[index];
+    if (digit === "9") {
+      digits[index] = "0";
+    } else {
+      digits[index] = String.fromCharCode((digit?.charCodeAt(0) ?? 48) + 1);
+      carry = 0;
+    }
+  }
+  if (carry === 1) digits.unshift("1");
+  return `INV-${digits.join("").padStart(6, "0")}`;
 }

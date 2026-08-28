@@ -478,3 +478,109 @@ diff review passed.
   UUID-named scratch database; storage checks used controlled production service boundaries. No
   browser, deployment, mail, Windows, printer, scanner, 1C, DNS, or hardware validation was in
   scope.
+
+## Fix Round 3
+
+### Status and commit
+
+All remaining Important and Minor findings were addressed on top of
+`b3e3fbc57fe39dbfe62ff390550e86c7bdf8f25e`. The enclosing follow-up commit is
+`fix(api): harden invoice allocation and lock namespaces`; its SHA is reported in the handoff
+because a commit cannot contain its own content-derived hash. No schema change or migration was
+needed, and migration 0072 was not changed.
+
+### Behavior corrected
+
+- Automatic invoice allocation no longer casts an `INV-*` suffix to PostgreSQL `bigint`. It keeps
+  only exact `^INV-[0-9]+$` values, normalizes leading zeroes for comparison, orders by significant
+  digit length and then bytewise lexical value, and increments the selected decimal as a string.
+  The `INV-` prefix and six-digit minimum remain intact, while suffixes above int64 and arbitrary
+  carry length cannot leak PostgreSQL `22003` or JavaScript numeric overflow.
+- Invoice creation maps only `invoices_number_uq` to `invoice_number_conflict`, and act creation
+  maps only `billing_acts_number_uq` to `billing_act_number_exists`. A shared cycle-safe cause-chain
+  reader retains the established exact offer/payment mappings without treating unrelated `23505`
+  failures as number conflicts.
+- Platform mutation and tenant offer-decision idempotency locks now use separate two-integer
+  PostgreSQL advisory namespaces. Both are acquired before workflow resource locks, whose sorted,
+  deduplicated identities remain bigint advisory locks. PostgreSQL's disjoint two-int/bigint key
+  spaces prevent a deliberately colliding 64-bit workflow identity from inverting physical lock
+  order.
+
+### TDD evidence
+
+#### RED
+
+- `billing-workflow-locks.test.ts` and `tenant-billing-offers.service.test.ts` both observed the old
+  single-bigint `hashtextextended` idempotency lock instead of distinct two-int namespaces.
+- The isolated `platform-billing-requests.service.test.ts` failed two new checks: a valid
+  `INV-9223372036854775808` suffix leaked PostgreSQL `22003`, and a synthetic unrelated invoice
+  `23505` was mislabeled `invoice_number_conflict`.
+- The isolated `billing-acts.service.test.ts` showed an unrelated act `23505` was mislabeled
+  `billing_act_number_exists`.
+
+#### GREEN
+
+The final focused scratch-Postgres regression passed **4 files / 93 tests**:
+
+```text
+platform-billing-requests.service.test.ts
+billing-acts.service.test.ts
+billing-workflow-locks.test.ts
+tenant-billing-offers.service.test.ts
+```
+
+It proves allocation after int64, leading-zero normalization, malformed-number exclusion, a
+30-digit all-nine carry, concurrent cross-tenant allocation, exact positive and negative invoice/
+act constraint mapping, and disjoint platform/tenant idempotency namespaces before an injected
+bigint workflow collision.
+
+The final adjacent API regression passed **19 files / 211 tests**, with no skips:
+
+```text
+platform-billing-requests.service.test.ts
+billing-acts.service.test.ts
+platform-offers.service.test.ts
+tenant-billing-offers.service.test.ts
+platform-contract-openapi.test.ts
+subscription-route-inventory.test.ts
+billing-invoices.test.ts
+billing-offer-snapshot.test.ts
+document-account-snapshot.test.ts
+billing-payments.service.test.ts
+billing-application-flow.test.ts
+tenant-billing-read.service.test.ts
+tenant-billing-read.integration.test.ts
+tenant-billing-read.authorization.test.ts
+tenant-billing-requests.service.test.ts
+tenant-billing-actions.e2e.test.ts
+object-storage.test.ts
+billing-workflow-locks.test.ts
+platform-offer-stale-family-upgrade.test.ts
+```
+
+The DB migration/schema regression passed **7 files / 26 tests** and the platform contract
+commercial/primitive regression passed **2 files / 32 tests**, both without skips. DB source/test,
+contract source/test, and API source/test TypeScript checks passed. DB and contract emitted builds
+and the Nest API build with output isolated under `/private/tmp` passed. Scoped API/DB/contracts
+ESLint and Prettier passed. Drizzle reported exactly `No schema changes, nothing to migrate`.
+
+### Files and scope
+
+- Updated the shared billing workflow lock/error helper, platform mutation idempotency helper,
+  tenant offer-decision service, invoice service, act service, and platform offer service.
+- Extended the four focused service/lock tests listed above. No contract, schema, snapshot,
+  journal, or migration file changed.
+
+### Deviations, limits, and risks
+
+- Workspace dependency symlinks resolve package imports through the parent checkout, whose
+  compiled DB/contracts artifacts do not contain this task. The direct API typecheck/lint therefore
+  produced stale-artifact errors; the final gates used temporary worktree-source mappings, exactly
+  like the passing Vitest configuration. No dependency, lockfile, or install-policy change was
+  made, and all temporary configs were removed before staging.
+- Full unrelated monorepo suites were not run. The complete affected API, DB, contracts,
+  migration, OpenAPI, route, storage/security, typecheck, lint, build, format, no-diff, and diff
+  gates above were run.
+- No shared database or live object storage was used. Every database test created and dropped a
+  UUID-named scratch database. No browser, deployment, mail, Windows, printer, scanner, 1C, DNS,
+  or hardware validation was in scope.

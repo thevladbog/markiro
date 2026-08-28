@@ -23,6 +23,7 @@ import {
   acquireBillingWorkflowLocks,
   canonicalBillingResourceId,
   canonicalBillingUuid,
+  postgresUniqueConstraint,
   type BillingWorkflowResource,
 } from "../billing-workflow-locks";
 import {
@@ -148,7 +149,7 @@ export class BillingActsService {
           })
           .returning();
       } catch (error) {
-        if (isUniqueViolation(error)) {
+        if (postgresUniqueConstraint(error) === "billing_acts_number_uq") {
           throw new ConflictException({ code: "billing_act_number_exists" });
         }
         throw error;
@@ -976,12 +977,6 @@ function businessDate(at: Date): string {
   }).formatToParts(at);
   const value = new Map(parts.map((part) => [part.type, part.value]));
   return `${value.get("year")}-${value.get("month")}-${value.get("day")}`;
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const value = error as { code?: unknown; cause?: { code?: unknown } };
-  return value.code === "23505" || value.cause?.code === "23505";
 }
 
 function parseActReplay(value: unknown): BillingAct {

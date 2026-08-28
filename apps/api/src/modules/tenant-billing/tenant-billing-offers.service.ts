@@ -1,8 +1,9 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import {
+  acquireBillingIdempotencyLock,
   acquireBillingWorkflowLocks,
   canonicalBillingUuid,
   type BillingWorkflowResource,
@@ -41,8 +42,10 @@ export class TenantBillingOffersService {
     const canonicalOfferId = canonicalBillingUuid(offerId);
     const canonicalIdempotencyKey = canonicalBillingUuid(idempotencyKey);
     return this.db.transaction(async (tx) => {
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-offer-idempotency:${tenantId}:${canonicalIdempotencyKey}`}, 0))`,
+      await acquireBillingIdempotencyLock(
+        tx,
+        "tenant_offer_decision",
+        `tenant-offer-idempotency:${tenantId}:${canonicalIdempotencyKey}`,
       );
       const [discovered] = await tx
         .select({ familyId: schema.commercialOffers.familyId })

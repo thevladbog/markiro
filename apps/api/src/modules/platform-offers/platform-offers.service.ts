@@ -29,6 +29,7 @@ import {
   acquireBillingWorkflowLocks,
   canonicalBillingResourceId,
   canonicalBillingUuid,
+  postgresUniqueConstraint,
 } from "../billing-workflow-locks";
 import { calculateOfferTotals } from "./offer-totals";
 import { normalizeOfferTerms } from "./offer-terms";
@@ -244,7 +245,7 @@ export class PlatformOffersService {
           )
           .returning();
       } catch (error) {
-        if (uniqueConstraint(error) === "commercial_offers_number_uq") {
+        if (postgresUniqueConstraint(error) === "commercial_offers_number_uq") {
           throw new ConflictException({ code: "offer_number_conflict" });
         }
         throw error;
@@ -581,7 +582,7 @@ export class PlatformOffersService {
           })
           .returning();
       } catch (error) {
-        const constraint = uniqueConstraint(error);
+        const constraint = postgresUniqueConstraint(error);
         if (constraint === "payments_idempotency_key_uq") {
           throw new ConflictException({ code: "idempotency_key_reused" });
         }
@@ -771,16 +772,4 @@ async function lockCommercialOfferFamily(
     )
     .orderBy(desc(schema.commercialOffers.revision), desc(schema.commercialOffers.id))
     .for("update");
-}
-
-function uniqueConstraint(error: unknown): string | null {
-  if (!error || typeof error !== "object") return null;
-  const value = error as {
-    code?: unknown;
-    constraint?: unknown;
-    cause?: { code?: unknown; constraint?: unknown };
-  };
-  const source =
-    value.code === "23505" ? value : value.cause?.code === "23505" ? value.cause : null;
-  return source && typeof source.constraint === "string" ? source.constraint : null;
 }

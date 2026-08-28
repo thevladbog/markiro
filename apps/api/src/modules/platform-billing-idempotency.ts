@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
 import { ConflictException } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { platformUuidSchema } from "@markiro/platform-contracts";
-import { canonicalBillingResourceId } from "./billing-workflow-locks";
+import {
+  acquireBillingIdempotencyLock,
+  canonicalBillingResourceId,
+} from "./billing-workflow-locks";
 
 type BillingMutationExecutor = Pick<Db, "execute" | "select" | "insert" | "update">;
 type BillingMutationRow = typeof schema.platformBillingMutationIdempotency.$inferSelect;
@@ -28,8 +31,10 @@ export async function beginPlatformBillingMutation(
 ): Promise<PlatformBillingMutationStart> {
   const idempotencyKey = platformUuidSchema.parse(spec.idempotencyKey);
   const targetId = canonicalBillingResourceId(spec.targetId);
-  await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${`platform-billing:${spec.tenantId}:${idempotencyKey}`}, 0))`,
+  await acquireBillingIdempotencyLock(
+    tx,
+    "platform_mutation",
+    `platform-billing:${spec.tenantId}:${idempotencyKey}`,
   );
   const payloadHash = platformBillingPayloadHash(spec.payload);
   const [existing] = await tx

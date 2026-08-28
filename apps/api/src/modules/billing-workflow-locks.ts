@@ -4,6 +4,8 @@ import { platformUuidSchema } from "@markiro/platform-contracts";
 
 type WorkflowLockExecutor = Pick<Db, "execute">;
 
+export type BillingIdempotencyLockKind = "platform_mutation" | "tenant_offer_decision";
+
 export interface BillingWorkflowResource {
   kind:
     | "act"
@@ -41,6 +43,11 @@ const GLOBAL_RESOURCE_KINDS = new Set<BillingWorkflowResource["kind"]>([
   "payment_key",
 ]);
 
+const IDEMPOTENCY_LOCK_NAMESPACES: Record<BillingIdempotencyLockKind, number> = {
+  platform_mutation: 0x42494c50,
+  tenant_offer_decision: 0x42494c54,
+};
+
 export function canonicalBillingUuid(value: string): string {
   return platformUuidSchema.parse(value);
 }
@@ -48,6 +55,21 @@ export function canonicalBillingUuid(value: string): string {
 export function canonicalBillingResourceId(value: string): string {
   const uuid = platformUuidSchema.safeParse(value);
   return uuid.success ? uuid.data : value;
+}
+
+/**
+ * Acquire this before any billing workflow resource locks. PostgreSQL keeps
+ * two-int advisory locks in a key space disjoint from bigint advisory locks,
+ * so an injected 64-bit workflow hash collision cannot invert this order.
+ */
+export async function acquireBillingIdempotencyLock(
+  tx: WorkflowLockExecutor,
+  kind: BillingIdempotencyLockKind,
+  resource: string,
+): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(${IDEMPOTENCY_LOCK_NAMESPACES[kind]}::integer, hashtext(${resource}))`,
+  );
 }
 
 export async function acquireBillingWorkflowLocks(
@@ -89,4 +111,18 @@ export function billingWorkflowResourceKeys(
 
 export function sortAndDedupeBillingLockIdentities(identities: readonly bigint[]): bigint[] {
   return [...new Set(identities)].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
+export function postgresUniqueConstraint(error: unknown): string | null {
+  let current: unknown = error;
+  const visited = new Set<object>();
+  while (current && typeof current === "object" && !visited.has(current)) {
+    visited.add(current);
+    const record = current as Record<string, unknown>;
+    if (record.code === "23505" && typeof record.constraint === "string") {
+      return record.constraint;
+    }
+    current = record.cause;
+  }
+  return null;
 }

@@ -201,6 +201,71 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
     }
   });
 
+  it("does not relabel an unrelated act unique violation as a number conflict", async () => {
+    await connection.pool.query(`
+      CREATE FUNCTION task6_act_unrelated_unique() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN
+        RAISE EXCEPTION USING
+          ERRCODE = '23505',
+          CONSTRAINT = 'billing_acts_tenant_id_uq',
+          MESSAGE = 'synthetic unrelated act unique violation';
+      END $$;
+      CREATE TRIGGER task6_act_unrelated_unique
+      BEFORE INSERT ON billing_acts FOR EACH ROW EXECUTE FUNCTION task6_act_unrelated_unique();
+    `);
+    try {
+      const failure = await acts
+        .create(actor, {
+          tenantId: tenantA,
+          number: `ACT-UNRELATED-${randomUUID()}`,
+          periodStart: "2026-08-01",
+          periodEnd: "2026-08-27",
+          idempotencyKey: randomUUID(),
+        })
+        .catch((error: unknown) => error);
+      expect(failure).not.toMatchObject({ response: { code: "billing_act_number_exists" } });
+      expect(postgresConstraint(failure)).toBe("billing_acts_tenant_id_uq");
+    } finally {
+      await connection.pool.query(`
+        DROP TRIGGER task6_act_unrelated_unique ON billing_acts;
+        DROP FUNCTION task6_act_unrelated_unique();
+      `);
+    }
+  });
+
+  it("maps the exact act number unique constraint to the domain conflict", async () => {
+    await connection.pool.query(`
+      CREATE FUNCTION task6_act_number_unique() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN
+        RAISE EXCEPTION USING
+          ERRCODE = '23505',
+          CONSTRAINT = 'billing_acts_number_uq',
+          MESSAGE = 'synthetic act number unique violation';
+      END $$;
+      CREATE TRIGGER task6_act_number_unique
+      BEFORE INSERT ON billing_acts FOR EACH ROW EXECUTE FUNCTION task6_act_number_unique();
+    `);
+    try {
+      await expect(
+        acts.create(actor, {
+          tenantId: tenantA,
+          number: `ACT-NUMBER-${randomUUID()}`,
+          periodStart: "2026-08-01",
+          periodEnd: "2026-08-27",
+          idempotencyKey: randomUUID(),
+        }),
+      ).rejects.toMatchObject({
+        response: { code: "billing_act_number_exists" },
+        status: 409,
+      });
+    } finally {
+      await connection.pool.query(`
+        DROP TRIGGER task6_act_number_unique ON billing_acts;
+        DROP FUNCTION task6_act_number_unique();
+      `);
+    }
+  });
+
   it("persists a canonical pending intent before PUT, recovers ambiguity, and issues only once", async () => {
     const act = await acts.create(actor, {
       tenantId: tenantA,
@@ -673,6 +738,19 @@ function jsonStringField(value: unknown, key: string): string | undefined {
   if (!value || typeof value !== "object") return undefined;
   const field = Reflect.get(value, key);
   return typeof field === "string" ? field : undefined;
+}
+
+function postgresConstraint(error: unknown): string | null {
+  let current = error;
+  const visited = new Set<unknown>();
+  while (current && typeof current === "object" && !visited.has(current)) {
+    visited.add(current);
+    const code = Reflect.get(current, "code");
+    const constraint = Reflect.get(current, "constraint");
+    if (code === "23505" && typeof constraint === "string") return constraint;
+    current = Reflect.get(current, "cause");
+  }
+  return null;
 }
 
 async function insertOrderedService(
