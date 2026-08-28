@@ -300,7 +300,7 @@ export class TenantBillingReadService {
       )
       .limit(1);
     if (!offer) throw new NotFoundException({ code: "offer_not_found" });
-    const [lines, documents, links] = await Promise.all([
+    const [lines, documents, links, decisions, family] = await Promise.all([
       this.db
         .select()
         .from(schema.commercialOfferLines)
@@ -330,19 +330,63 @@ export class TenantBillingReadService {
             eq(schema.tenantBillingRequestLinks.offerId, id),
           ),
         ),
+      this.db
+        .select({
+          decision: schema.commercialOfferDecisions.decision,
+          message: schema.commercialOfferDecisions.message,
+          createdAt: schema.commercialOfferDecisions.createdAt,
+        })
+        .from(schema.commercialOfferDecisions)
+        .where(
+          and(
+            eq(schema.commercialOfferDecisions.tenantId, tenantId),
+            eq(schema.commercialOfferDecisions.offerId, id),
+          ),
+        )
+        .orderBy(
+          desc(schema.commercialOfferDecisions.createdAt),
+          desc(schema.commercialOfferDecisions.id),
+        )
+        .limit(1),
+      this.db
+        .select({
+          revision: schema.commercialOffers.revision,
+          status: schema.commercialOffers.status,
+        })
+        .from(schema.commercialOffers)
+        .where(
+          and(
+            eq(schema.commercialOffers.tenantId, tenantId),
+            eq(schema.commercialOffers.familyId, offer.familyId),
+          ),
+        ),
     ]);
     if (links.length > 1) {
       throw new ConflictException({ code: "offer_request_link_ambiguous" });
     }
+    const status = await this.offerPresentationStatus(tenantId, offer, this.now());
+    const latestDecision = decisions[0] ?? null;
+    const isCurrent = !family.some(
+      (candidate) => candidate.status === "published" && candidate.revision > offer.revision,
+    );
     return {
       id: offer.id,
       number: offer.number,
-      status: await this.offerPresentationStatus(tenantId, offer, this.now()),
+      status,
       total: offer.total,
       expiresAt: iso(offer.expiresAt),
       publishedAt: iso(offer.publishedAt),
       paidAt: iso(offer.paidAt),
       termsMarkdown: offer.termsMarkdown,
+      isCurrent,
+      actionable: isCurrent && status === "published" && latestDecision === null,
+      latestDecision: latestDecision
+        ? {
+            decision: latestDecision.decision,
+            message: latestDecision.message,
+            createdAt: iso(latestDecision.createdAt)!,
+          }
+        : null,
       lines: lines.map((line) => ({
         id: line.id,
         position: line.position,

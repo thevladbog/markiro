@@ -5,6 +5,7 @@
 - Added tenant invoice filters (`status`, `from`, `to`), authoritative invoice/payment presentation, confirmed-payment history, and ready-only invoice downloads.
 - Added offer/act document registry with type and period API filters, safe local status selection, ready-only signed-URL downloads, and explicit pending/failed/download-error states.
 - Added commercial-offer detail with read-only expired/superseded states, capability-gated acceptance/change actions, confirmation, bounded change text, retry-stable idempotency keys, and request-history return navigation.
+- Review follow-up: offer detail now receives server-owned `isCurrent`, `actionable`, and latest decision projection; decision retries retain one immutable payload/key and success invalidates the tenant-billing query family before returning to the implemented documents route.
 
 ## Verification
 

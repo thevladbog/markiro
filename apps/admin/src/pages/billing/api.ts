@@ -268,6 +268,13 @@ export interface TenantOffer {
   publishedAt: string | null;
   paidAt: string | null;
   termsMarkdown: string | null;
+  isCurrent: boolean;
+  actionable: boolean;
+  latestDecision: {
+    decision: "accepted" | "changes_requested";
+    message: string | null;
+    createdAt: string;
+  } | null;
   lines: Array<{
     id: string;
     position: number;

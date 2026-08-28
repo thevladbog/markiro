@@ -1,43 +1,33 @@
 import { useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router";
-
-import {
-  Alert,
-  Button,
-  Card,
-  ConfirmDialog,
-  EmptyState,
-  Spinner,
-  Table,
-  Textarea,
-} from "@markiro/ui";
-import type { CabinetCapability } from "@markiro/domain";
+import { Alert, Button, Card, ConfirmDialog, EmptyState, Spinner, Textarea } from "@markiro/ui";
+import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { useCan } from "../../access/context.js";
-import { formatBillingDate, formatMoney } from "./format.js";
+import { ApiRequestError } from "../../api/client.js";
 import {
   acceptOffer,
   downloadOfferDocument,
+  invalidateTenantBilling,
   requestOfferChanges,
   type OfferDecision,
   useOffer,
 } from "./api.js";
 
-// Kept as the domain capability value so the tenant action boundary remains
-// explicit even when this worktree's linked declaration build is stale.
-const BILLING_REQUEST_CAPABILITY: CabinetCapability = "billing.request";
+type Attempt = { decision: OfferDecision["decision"]; message: string; key: string };
 
-function offerStatusLabel(status: string): string {
+function statusLabel(status: string, decision: OfferDecision["decision"] | undefined) {
+  if (decision === "accepted") return "Принято";
+  if (decision === "changes_requested") return "Изменения запрошены";
   return (
     {
-      draft: "Черновик",
       published: "Действует",
-      superseded: "Заменено новой версией",
-      paid: "Принято и оплачено",
-      cancelled: "Отменено",
       expired: "Срок действия истёк",
-      accepted: "Принято",
-      changes_requested: "Изменения запрошены",
+      superseded: "Заменено новой версией",
+      paid: "Оплачено",
+      cancelled: "Отменено",
+      draft: "Черновик",
     }[status] ?? status
   );
 }
@@ -45,85 +35,89 @@ function offerStatusLabel(status: string): string {
 export function OfferDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  const canRequest = useCan(BILLING_REQUEST_CAPABILITY);
-  const { data: offer, isPending, isError } = useOffer(id);
-  const keys = useRef<Partial<Record<OfferDecision["decision"], string>>>({});
-  const [confirmAccept, setConfirmAccept] = useState(false);
+  const client = useQueryClient();
+  const canRequest = useCan(CABINET_CAPABILITY.BILLING_REQUEST);
+  const query = useOffer(id);
+  const attempt = useRef<Attempt | null>(null);
+  const [acceptOpen, setAcceptOpen] = useState(false);
   const [changeOpen, setChangeOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState<OfferDecision["decision"] | null>(null);
-  const [completed, setCompleted] = useState<OfferDecision["decision"] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const [downloadBusy, setDownloadBusy] = useState<string | null>(null);
+  const offer = query.data;
 
-  const returnToHistory = () =>
-    navigate(offer?.request ? `/billing/requests/${offer.request.id}` : "/billing/documents");
   const submit = (decision: OfferDecision["decision"], retry = false) =>
     void (async () => {
       if (!offer || pending) return;
-      const trimmed = message.trim();
-      if (decision === "changes_requested" && (trimmed.length < 1 || trimmed.length > 2000)) {
+      const next = retry
+        ? attempt.current
+        : { decision, message: message.trim(), key: crypto.randomUUID() };
+      if (!next || next.decision !== decision) return;
+      if (
+        decision === "changes_requested" &&
+        (next.message.length < 1 || next.message.length > 2000)
+      ) {
         setError("Опишите изменения: от 1 до 2000 символов.");
         return;
       }
-      const idempotencyKey = keys.current[decision] ?? crypto.randomUUID();
-      keys.current[decision] = idempotencyKey;
+      if (!retry) attempt.current = next;
       setPending(decision);
       setError(null);
       try {
-        const result =
-          decision === "accepted"
-            ? await acceptOffer(offer.id, idempotencyKey)
-            : await requestOfferChanges(offer.id, trimmed, idempotencyKey);
-        delete keys.current[decision];
-        setCompleted(result.decision);
-        setConfirmAccept(false);
+        if (decision === "accepted") await acceptOffer(offer.id, next.key);
+        else await requestOfferChanges(offer.id, next.message, next.key);
+        await invalidateTenantBilling(client);
+        attempt.current = null;
+        setAcceptOpen(false);
         setChangeOpen(false);
-        if (!retry) void returnToHistory();
+        navigate("/billing/documents");
       } catch {
         setError("Не удалось отправить решение. Введённые данные сохранены; повторите попытку.");
       } finally {
         setPending(null);
       }
     })();
+
+  if (query.isPending) return <Spinner label="Загрузка предложения" />;
+  if (query.isError) {
+    const status = query.error instanceof ApiRequestError ? query.error.status : 0;
+    return (
+      <EmptyState
+        title={
+          status === 404
+            ? "Предложение не найдено"
+            : status === 403
+              ? "Нет доступа к предложению"
+              : "Не удалось загрузить предложение"
+        }
+      />
+    );
+  }
+  if (!offer) return <EmptyState title="Предложение не найдено" />;
   const retry = () => {
-    if (pending || !error) return;
-    void submit(keys.current.accepted ? "accepted" : "changes_requested", true);
+    if (attempt.current && !pending) submit(attempt.current.decision, true);
   };
   const download = (documentId: string) =>
     void (async () => {
-      if (!offer) return;
-      setDownloadBusy(documentId);
-      setDownloadError(null);
       try {
+        setDownloadError(null);
         const result = await downloadOfferDocument(offer.id, documentId);
         window.open(result.url, "_blank", "noopener,noreferrer");
       } catch {
         setDownloadError("Не удалось скачать документ. Повторите попытку позже.");
-      } finally {
-        setDownloadBusy(null);
       }
     })();
-
-  if (isPending) return <Spinner label="Загрузка предложения" />;
-  if (isError || !offer) return <EmptyState title="Предложение не найдено" />;
-  const actionable = offer.status === "published" && completed === null;
   return (
     <section aria-labelledby="billing-offer-heading" className="mk-billing-offer-detail">
-      <div className="mk-billing-section-intro">
-        <div>
-          <h2 className="mk-billing-section-heading" id="billing-offer-heading">
-            Предложение {offer.number ?? "без номера"}
-          </h2>
-          <p>{offerStatusLabel(completed ?? offer.status)}</p>
-        </div>
-        {offer.request ? (
-          <Button variant="secondary" onClick={() => void returnToHistory()}>
-            Открыть заявку {offer.request.number}
-          </Button>
-        ) : null}
-      </div>
+      <h2 className="mk-billing-section-heading" id="billing-offer-heading">
+        Предложение {offer.number ?? "без номера"}
+      </h2>
+      <Card title="Условия" titleAs="h3">
+        <p>{statusLabel(offer.status, offer.latestDecision?.decision)}</p>
+        <p className="mk-billing-money">{offer.total} RUB</p>
+        {offer.latestDecision?.message ? <p>{offer.latestDecision.message}</p> : null}
+      </Card>
       {error ? (
         <Alert tone="error">
           {error}{" "}
@@ -132,55 +126,12 @@ export function OfferDetailPage() {
           </Button>
         </Alert>
       ) : null}
-      <Card title="Условия" titleAs="h3">
-        <dl className="mk-billing-definition-list">
-          <div>
-            <dt>Статус</dt>
-            <dd>{offerStatusLabel(completed ?? offer.status)}</dd>
-          </div>
-          <div>
-            <dt>Действует до</dt>
-            <dd>{formatBillingDate(offer.expiresAt, "ru-RU")}</dd>
-          </div>
-          <div>
-            <dt>Опубликовано</dt>
-            <dd>{formatBillingDate(offer.publishedAt, "ru-RU")}</dd>
-          </div>
-          <div>
-            <dt>Сумма</dt>
-            <dd className="mk-billing-money">{formatMoney(offer.total, "RUB", "ru-RU")}</dd>
-          </div>
-        </dl>
-        {offer.termsMarkdown ? (
-          <p className="mk-billing-offer-terms">{offer.termsMarkdown}</p>
-        ) : null}
-      </Card>
-      <Card title="Позиции" titleAs="h3">
-        <div className="mk-billing-table-wrap">
-          <Table
-            scrollLabel="Позиции предложения"
-            columns={[
-              { key: "position", title: "№", mono: true },
-              { key: "nameRu", title: "Позиция", wrap: true },
-              { key: "quantity", title: "Количество", mono: true },
-              {
-                key: "lineTotal",
-                title: "Сумма",
-                mono: true,
-                align: "right",
-                render: (row) => formatMoney(row.lineTotal, "RUB", "ru-RU"),
-              },
-            ]}
-            rows={offer.lines}
-          />
-        </div>
-      </Card>
+      {downloadError ? <Alert tone="error">{downloadError}</Alert> : null}
       <Card title="Документы" titleAs="h3">
-        {downloadError ? <Alert tone="error">{downloadError}</Alert> : null}
         {offer.documents.map((document) => (
           <div className="mk-billing-invoice-document" key={document.id}>
             <span>
-              {document.format.toUpperCase()} · ревизия {document.revision} ·{" "}
+              {document.format.toUpperCase()} ·{" "}
               {document.status === "ready"
                 ? "Готов"
                 : document.status === "pending"
@@ -188,34 +139,25 @@ export function OfferDetailPage() {
                   : "Не удалось подготовить"}
             </span>
             {document.status === "ready" ? (
-              <Button
-                disabled={downloadBusy === document.id}
-                loading={downloadBusy === document.id}
-                onClick={() => download(document.id)}
-              >
-                Скачать
-              </Button>
+              <Button onClick={() => download(document.id)}>Скачать</Button>
             ) : null}
           </div>
         ))}
       </Card>
-      {canRequest && actionable ? (
+      {canRequest && offer.actionable ? (
         <Card title="Ваше решение" titleAs="h3">
-          <div className="mk-billing-offer-actions">
-            <Button disabled={pending !== null} onClick={() => setConfirmAccept(true)}>
-              Принять
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={pending !== null}
-              onClick={() => setChangeOpen((open) => !open)}
-            >
-              Запросить изменения
-            </Button>
-          </div>
+          <Button disabled={pending !== null} onClick={() => setAcceptOpen(true)}>
+            Принять
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={pending !== null}
+            onClick={() => setChangeOpen(true)}
+          >
+            Запросить изменения
+          </Button>
           {changeOpen ? (
             <form
-              className="mk-billing-change-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 submit("changes_requested");
@@ -225,15 +167,12 @@ export function OfferDetailPage() {
                 label="Что нужно изменить"
                 value={message}
                 maxLength={2000}
-                onChange={(event) => setMessage(event.target.value)}
-                aria-describedby="offer-change-help"
+                onChange={(event) => {
+                  setMessage(event.target.value);
+                  attempt.current = null;
+                }}
               />
-              <p id="offer-change-help">От 1 до 2000 символов.</p>
-              <Button
-                type="submit"
-                disabled={pending !== null}
-                loading={pending === "changes_requested"}
-              >
+              <Button type="submit" disabled={pending !== null}>
                 Отправить запрос
               </Button>
             </form>
@@ -241,14 +180,14 @@ export function OfferDetailPage() {
         </Card>
       ) : null}
       <ConfirmDialog
-        open={confirmAccept}
+        open={acceptOpen}
         title="Принять предложение?"
-        description="Markiro получит подтверждение. Отменить это действие в кабинете нельзя."
+        description="Markiro получит подтверждение."
         confirmLabel="Подтвердить принятие"
         cancelLabel="Отмена"
         busy={pending === "accepted"}
         onConfirm={() => submit("accepted")}
-        onCancel={() => setConfirmAccept(false)}
+        onCancel={() => setAcceptOpen(false)}
       />
     </section>
   );

@@ -153,6 +153,15 @@ export const tenantOfferDetailSchema = z.strictObject({
   publishedAt: billingDateSchema.nullable(),
   paidAt: billingDateSchema.nullable(),
   termsMarkdown: z.string().nullable(),
+  isCurrent: z.boolean(),
+  actionable: z.boolean(),
+  latestDecision: z
+    .strictObject({
+      decision: z.enum(["accepted", "changes_requested"]),
+      message: z.string().nullable(),
+      createdAt: billingDateSchema,
+    })
+    .nullable(),
   lines: z.array(
     z.strictObject({
       id: billingUuidSchema,

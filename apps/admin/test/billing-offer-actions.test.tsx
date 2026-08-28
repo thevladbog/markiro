@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -44,11 +45,14 @@ const offer = {
   lines: [],
   documents: [],
   request: { id: "00000000-0000-4000-8000-000000000131", number: "З-42", status: "offer_prepared" },
+  isCurrent: true,
+  actionable: true,
+  latestDecision: null,
 };
 
 function renderOffer(canRequest = true) {
   return render(
-    <ThemeProvider defaultTheme="light">
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><ThemeProvider defaultTheme="light">
       <MemoryRouter initialEntries={[`/billing/offers/${offer.id}`]}>
         <AccessProvider
           value={{
@@ -61,7 +65,7 @@ function renderOffer(canRequest = true) {
           <OfferDetailPage />
         </AccessProvider>
       </MemoryRouter>
-    </ThemeProvider>,
+    </ThemeProvider></QueryClientProvider>,
   );
 }
 
@@ -70,19 +74,41 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-it.each(["expired", "superseded", "accepted", "changes_requested"])(
-  "renders %s offer as read-only",
-  (status) => {
-    vi.mocked(useOffer).mockReturnValue({
-      data: { ...offer, status },
-      isPending: false,
-      isError: false,
-    } as never);
-    renderOffer();
-    expect(screen.queryByRole("button", { name: "Принять" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Запросить изменения" })).toBeNull();
-  },
-);
+it.each(["expired", "superseded"])("renders %s offer as read-only", (status) => {
+  vi.mocked(useOffer).mockReturnValue({
+    data: {
+      ...offer,
+      status,
+      actionable: false,
+      isCurrent: status !== "superseded",
+      latestDecision: null,
+    },
+    isPending: false,
+    isError: false,
+  } as never);
+  renderOffer();
+  expect(screen.queryByRole("button", { name: "Принять" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Запросить изменения" })).toBeNull();
+});
+
+it("uses the server-owned latest decision and actionable state after reload", () => {
+  vi.mocked(useOffer).mockReturnValue({
+    data: {
+      ...offer,
+      actionable: false,
+      latestDecision: {
+        decision: "accepted",
+        message: null,
+        createdAt: "2026-08-01T00:00:00.000Z",
+      },
+    },
+    isPending: false,
+    isError: false,
+  } as never);
+  renderOffer();
+  expect(screen.getByText("Принято")).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Принять" })).toBeNull();
+});
 
 it("requires confirmation, locks acceptance immediately, and retains one retry key", async () => {
   vi.mocked(useOffer).mockReturnValue({ data: offer, isPending: false, isError: false } as never);

@@ -446,13 +446,7 @@
   }
 }
 
-/* Matches the established mobile sell-screen treatment: the fixed 224px
-   application rail cannot coexist with a 320px billing workspace. */
 @media (max-width: 767px) {
-  body:has(.mk-billing-page) .mk-app-sidebar {
-    display: none !important;
-  }
-
   .mk-billing-tabs {
     flex-wrap: nowrap;
     overflow-x: auto;
