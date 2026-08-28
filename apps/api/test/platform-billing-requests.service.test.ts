@@ -7,15 +7,21 @@ import { createDb, schema, type Db } from "@markiro/db";
 import type { CreateInvoiceDto } from "@markiro/platform-contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { BillingActsService } from "../src/modules/billing-acts/billing-acts.service";
+import { BillingPaymentsService } from "../src/modules/billing-payments/billing-payments.service";
+import { BillingApplicationService } from "../src/modules/billing/billing-application.service";
 import { BillingService } from "../src/modules/billing/billing.service";
 import { PlatformBillingRequestsService } from "../src/modules/platform-billing-requests/platform-billing-requests.service";
 import { PlatformOffersService } from "../src/modules/platform-offers/platform-offers.service";
+import type { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import { TenantBillingOffersService } from "../src/modules/tenant-billing/tenant-billing-offers.service";
+import { TenantBillingRequestsService } from "../src/modules/tenant-billing/tenant-billing-requests.service";
 import {
   platformCapabilitiesForRole,
   type PlatformPrincipal,
 } from "../src/platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
+import { SubscriptionLifecycleService } from "../src/subscriptions/subscription-lifecycle.service";
 import { createOrganization } from "./support/subscription-fixtures";
 import {
   createTestTenantBillingNotifications,
@@ -92,8 +98,11 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
   let tenantUser = "";
   let requests: PlatformBillingRequestsService;
   let billing: BillingService;
+  let acts: BillingActsService;
+  let payments: BillingPaymentsService;
   let offers: PlatformOffersService;
   let tenantOffers: TenantBillingOffersService;
+  let tenantRequests: TenantBillingRequestsService;
 
   beforeAll(async () => {
     await maintenance.pool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
@@ -145,8 +154,21 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     const notifications = createTestTenantBillingNotifications(connection.db);
     requests = new PlatformBillingRequestsService(connection.db, audit, notifications);
     billing = new BillingService(connection.db, audit, notifications);
+    const lifecycle = new SubscriptionLifecycleService(connection.db, audit);
+    const application = new BillingApplicationService(connection.db, lifecycle, audit);
+    payments = new BillingPaymentsService(connection.db, application, audit);
     offers = new PlatformOffersService(connection.db, audit, notifications);
     tenantOffers = new TenantBillingOffersService(connection.db);
+    const storage = {
+      putVerified: async (_key: string, body: Buffer, _contentType: string, sha256: string) => ({
+        byteSize: body.byteLength,
+        sha256,
+      }),
+      verifyObject: async (): Promise<"verified" | "missing" | "mismatch"> => "verified",
+      deleteConfirmed: async () => undefined,
+    } as unknown as ObjectStorageService;
+    acts = new BillingActsService(connection.db, storage, audit, notifications);
+    tenantRequests = new TenantBillingRequestsService(connection.db, storage);
   }, 120_000);
 
   afterAll(async () => {
@@ -605,6 +627,199 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
         after: { offerId: left.offerId, linkId: left.link.id, eventId: events[0]?.id },
       }),
     ]);
+  });
+
+  it("runs the complete tenant-owner billing journey once across retries and tenant boundaries", async () => {
+    const createKey = randomUUID();
+    const createInput = {
+      type: "capacity_change" as const,
+      description: "  Add two production lines  ",
+      context: { type: "limit", id: "lines" },
+      idempotencyKey: createKey,
+    };
+    const created = await tenantRequests.create(tenantA, tenantUser, createInput);
+    await expect(tenantRequests.create(tenantA, tenantUser, createInput)).resolves.toEqual(created);
+    await expect(tenantRequests.detail(tenantB, created.id)).rejects.toMatchObject({
+      response: { code: "billing_request_not_found" },
+      status: 404,
+    });
+
+    await requests.changeStatus(actor, created.id, {
+      status: "under_review",
+      message: "Review started",
+      idempotencyKey: randomUUID(),
+    });
+    await requests.changeStatus(actor, created.id, {
+      status: "clarification_required",
+      message: "Confirm that both lines are new",
+      idempotencyKey: randomUUID(),
+    });
+    const replyKey = randomUUID();
+    const replyInput = { message: "  Both lines are new  ", idempotencyKey: replyKey };
+    const reply = await tenantRequests.reply(tenantA, tenantUser, created.id, replyInput);
+    await expect(
+      tenantRequests.reply(tenantA, tenantUser, created.id, replyInput),
+    ).resolves.toEqual(reply);
+    await expect(
+      tenantRequests.reply(tenantA, tenantUser, created.id, {
+        message: "One line is new",
+        idempotencyKey: replyKey,
+      }),
+    ).rejects.toMatchObject({ response: { code: "idempotency_key_reused" }, status: 409 });
+    await requests.changeStatus(actor, created.id, {
+      status: "under_review",
+      message: "Clarification received",
+      idempotencyKey: randomUUID(),
+    });
+
+    const offerKey = randomUUID();
+    const offerInput = requestOfferInput(offerKey);
+    const firstOffer = await requests.createOffer(actor, created.id, offerInput);
+    await expect(requests.createOffer(actor, created.id, offerInput)).resolves.toEqual(firstOffer);
+    await offers.publish(actor, firstOffer.offerId);
+    await requests.changeStatus(actor, created.id, {
+      status: "offer_prepared",
+      message: "Offer published",
+      idempotencyKey: randomUUID(),
+    });
+
+    const changesKey = randomUUID();
+    const changesInput = {
+      message: "  Split delivery into two stages  ",
+      idempotencyKey: changesKey,
+    };
+    const changes = await tenantOffers.requestChanges(
+      tenantA,
+      tenantUser,
+      firstOffer.offerId,
+      changesInput,
+    );
+    await expect(
+      tenantOffers.requestChanges(tenantA, tenantUser, firstOffer.offerId, changesInput),
+    ).resolves.toEqual(changes);
+    const revised = await offers.revise(actor, firstOffer.offerId, {
+      idempotencyKey: randomUUID(),
+    });
+    await offers.publish(actor, revised.id);
+    await expect(
+      tenantOffers.accept(tenantA, tenantUser, firstOffer.offerId, randomUUID()),
+    ).rejects.toMatchObject({ response: { code: "offer_version_stale" }, status: 409 });
+    await expect(
+      tenantOffers.accept(tenantB, tenantUser, revised.id, randomUUID()),
+    ).rejects.toMatchObject({ response: { code: "offer_not_found" }, status: 404 });
+    await tenantOffers.accept(tenantA, tenantUser, revised.id, randomUUID());
+
+    const invoice = await billing.create(actor, {
+      ...invoiceInput(tenantA),
+      sourceRequestId: created.id,
+      sourceOfferId: revised.id,
+    });
+    const issued = await billing.issue(actor, invoice.id);
+    expect(issued.status).toBe("issued");
+    const firstPaymentKey = randomUUID();
+    const firstPaymentInput = {
+      amount: "40.00",
+      paidAt: new Date("2026-08-28T11:20:00.000Z"),
+      bankReference: `TASK13-PAYMENT-1-${randomUUID()}`,
+      idempotencyKey: firstPaymentKey,
+    };
+    const firstPayment = await payments.recordManual(actor, invoice.id, firstPaymentInput);
+    await expect(payments.recordManual(actor, invoice.id, firstPaymentInput)).resolves.toEqual(
+      firstPayment,
+    );
+    expect(firstPayment.invoiceStatus).toBe("partially_paid");
+    const firstPaymentLinkInput = {
+      type: "payment" as const,
+      targetId: firstPayment.id,
+      idempotencyKey: randomUUID(),
+    };
+    const firstPaymentLink = await requests.link(actor, created.id, firstPaymentLinkInput);
+    await expect(requests.link(actor, created.id, firstPaymentLinkInput)).resolves.toEqual(
+      firstPaymentLink,
+    );
+    const secondPayment = await payments.recordManual(actor, invoice.id, {
+      amount: "60.00",
+      paidAt: new Date("2026-08-28T11:30:00.000Z"),
+      bankReference: `TASK13-PAYMENT-2-${randomUUID()}`,
+      idempotencyKey: randomUUID(),
+    });
+    expect(secondPayment.invoiceStatus).toBe("paid");
+    await requests.link(actor, created.id, {
+      type: "payment",
+      targetId: secondPayment.id,
+      idempotencyKey: randomUUID(),
+    });
+    await requests.changeStatus(actor, created.id, {
+      status: "in_progress",
+      message: "Payment complete; work started",
+      idempotencyKey: randomUUID(),
+    });
+
+    const actKey = randomUUID();
+    const actInput = {
+      tenantId: tenantA,
+      requestId: created.id,
+      invoiceId: invoice.id,
+      number: `ACT-TASK13-${randomUUID()}`,
+      periodStart: "2026-08-27",
+      periodEnd: "2026-08-27",
+      idempotencyKey: actKey,
+    };
+    const act = await acts.create(actor, actInput);
+    await expect(acts.create(actor, actInput)).resolves.toEqual(act);
+    const issueKey = randomUUID();
+    const pdf = {
+      originalname: "task13-act.pdf",
+      mimetype: "application/pdf",
+      buffer: Buffer.from("%PDF-1.7\nTask 13 act\n%%EOF"),
+      size: Buffer.byteLength("%PDF-1.7\nTask 13 act\n%%EOF"),
+    };
+    const issuedAct = await acts.issue(actor, act.id, { idempotencyKey: issueKey }, pdf);
+    await expect(acts.issue(actor, act.id, { idempotencyKey: issueKey }, pdf)).resolves.toEqual(
+      issuedAct,
+    );
+    await requests.changeStatus(actor, created.id, {
+      status: "completed",
+      message: "Capacity work completed",
+      idempotencyKey: randomUUID(),
+    });
+
+    const detail = await tenantRequests.detail(tenantA, created.id);
+    const linkTargets = detail.links.map((link) =>
+      link.offerId
+        ? `offer:${link.offerId}`
+        : link.invoiceId
+          ? `invoice:${link.invoiceId}`
+          : link.paymentId
+            ? `payment:${link.paymentId}`
+            : link.actId
+              ? `act:${link.actId}`
+              : "unexpected",
+    );
+    expect(linkTargets).toEqual([
+      `offer:${firstOffer.offerId}`,
+      `invoice:${invoice.id}`,
+      `payment:${firstPayment.id}`,
+      `payment:${secondPayment.id}`,
+      `act:${act.id}`,
+    ]);
+    expect(new Set(linkTargets).size).toBe(linkTargets.length);
+    expect(detail.status).toBe("completed");
+    expect(detail.events.filter((event) => event.kind === "tenant_reply")).toHaveLength(1);
+    expect(detail.events.filter((event) => event.kind === "offer_linked")).toHaveLength(1);
+    expect(detail.events.filter((event) => event.kind === "offer_changes_requested")).toHaveLength(
+      1,
+    );
+    expect(detail.events.filter((event) => event.kind === "offer_accepted")).toHaveLength(1);
+    expect(detail.events.filter((event) => event.kind === "invoice_linked")).toHaveLength(1);
+    expect(detail.events.filter((event) => event.kind === "payment_confirmed")).toHaveLength(2);
+    expect(detail.events.filter((event) => event.kind === "act_linked")).toHaveLength(1);
+    const eventTimes = detail.events.map((event) => Date.parse(event.createdAt));
+    expect(eventTimes).toEqual([...eventTimes].sort((left, right) => left - right));
+    await expect(requests.detail(actor, created.id)).resolves.toMatchObject({
+      tenantId: tenantA,
+      status: "completed",
+    });
   });
 
   it("rolls back the request-bound offer when a link event conflicts", async () => {

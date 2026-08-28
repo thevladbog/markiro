@@ -99,20 +99,28 @@ export class TenantBillingOffersService {
       const links = await tx
         .select({ requestId: schema.tenantBillingRequestLinks.requestId })
         .from(schema.tenantBillingRequestLinks)
+        .innerJoin(
+          schema.commercialOffers,
+          and(
+            eq(schema.commercialOffers.tenantId, schema.tenantBillingRequestLinks.tenantId),
+            eq(schema.commercialOffers.id, schema.tenantBillingRequestLinks.offerId),
+          ),
+        )
         .where(
           and(
             eq(schema.tenantBillingRequestLinks.tenantId, tenantId),
-            eq(schema.tenantBillingRequestLinks.offerId, canonicalOfferId),
+            eq(schema.commercialOffers.familyId, discovered.familyId),
           ),
         )
         .orderBy(
           asc(schema.tenantBillingRequestLinks.createdAt),
           asc(schema.tenantBillingRequestLinks.id),
         );
-      if (links.length > 1) {
+      const requestIds = [...new Set(links.map((link) => link.requestId))];
+      if (requestIds.length > 1) {
         throw new ConflictException({ code: "offer_request_link_ambiguous" });
       }
-      const requestId = links[0]?.requestId ?? null;
+      const requestId = requestIds[0] ?? null;
       const family = await tx
         .select()
         .from(schema.commercialOffers)

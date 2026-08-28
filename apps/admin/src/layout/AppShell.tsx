@@ -172,7 +172,7 @@ export function AppShell() {
   }));
 
   return (
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+    <div className="mk-app-shell" style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
       <Sidebar
         className="mk-app-sidebar"
         // The footer link below carries its own 10px padding on every side;
@@ -215,7 +215,10 @@ export function AppShell() {
           />
         }
       />
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <div
+        className="mk-app-shell__content"
+        style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}
+      >
         <Header />
         <main style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
           <SubscriptionBanner />

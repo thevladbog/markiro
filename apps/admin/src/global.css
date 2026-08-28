@@ -1,3 +1,47 @@
 body {
   margin: 0;
 }
+
+@media (max-width: 767px) {
+  .mk-app-shell {
+    height: 100dvh !important;
+    flex-direction: column;
+  }
+
+  .mk-app-sidebar {
+    width: 100% !important;
+    height: auto !important;
+    padding: 8px !important;
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .mk-app-sidebar > div:first-child {
+    padding: 2px 10px 8px !important;
+  }
+
+  .mk-app-sidebar > ul {
+    flex: none !important;
+    flex-direction: row !important;
+    overflow: auto hidden !important;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+
+  .mk-app-sidebar > ul > li {
+    flex: 0 0 auto;
+  }
+
+  .mk-app-sidebar .mk-sidebar__section,
+  .mk-app-sidebar > a {
+    display: none;
+  }
+
+  .mk-app-sidebar .mk-sidebar__link {
+    width: auto;
+  }
+
+  .mk-app-shell__content {
+    min-height: 0;
+  }
+}
