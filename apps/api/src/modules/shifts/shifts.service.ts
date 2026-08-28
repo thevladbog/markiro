@@ -41,7 +41,9 @@ import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-
 
 type ShiftRow = typeof schema.shifts.$inferSelect;
 type CurrentShiftRow = Omit<ShiftRow, "labelTemplateId">;
-type ProductRow = Omit<typeof schema.products.$inferSelect, "defaultLabelTemplateId">;
+type ProductRow = Omit<typeof schema.products.$inferSelect, "defaultLabelTemplateId"> & {
+  productGroupName: string | null;
+};
 type JoinedShiftRow = Omit<ShiftDto, "image" | "number"> & {
   numberMonthKey: string;
   numberSeq: number;
@@ -105,7 +107,8 @@ const CURRENT_PRODUCT_SELECTION = {
   gtin14: schema.products.gtin14,
   name: schema.products.name,
   printName: schema.products.printName,
-  productGroup: schema.products.productGroup,
+  chzProductGroupCode: schema.products.chzProductGroupCode,
+  productGroupName: schema.chzProductGroups.name,
   boxCapacity: schema.products.boxCapacity,
   palletCapacity: schema.products.palletCapacity,
   status: schema.products.status,
@@ -803,7 +806,7 @@ export class ShiftsService {
       id: productRow.id,
       gtin14: productRow.gtin14,
       name: productRow.name,
-      productGroup: productRow.productGroup,
+      productGroup: productRow.productGroupName,
       boxCapacity: productRow.boxCapacity,
       palletCapacity: productRow.palletCapacity,
       status: productRow.status,
@@ -1019,6 +1022,10 @@ export class ShiftsService {
     const [row] = await this.db
       .select(CURRENT_PRODUCT_SELECTION)
       .from(schema.products)
+      .leftJoin(
+        schema.chzProductGroups,
+        eq(schema.chzProductGroups.code, schema.products.chzProductGroupCode),
+      )
       .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
     return row;
   }

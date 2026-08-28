@@ -225,6 +225,27 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     expect(bundle.body.operators[0].pinHash).toMatch(/^pbkdf2\$sha256\$100000\$/);
   });
 
+  it("sends the product group as its resolved name and never leaks the code", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      // Seeded with code 15 (beer) — the bundle must carry the human name the
+      // Station has always stored in its `product_group TEXT` mirror column.
+      chzProductGroupCode: 15,
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    const shiftId = created.body.id as string;
+
+    const bundle = await agent.get(`/shifts/${shiftId}/bundle`).expect(200);
+    expect(bundle.body.product.productGroup).toBe(
+      "Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки",
+    );
+    expect(bundle.body.product).not.toHaveProperty("chzProductGroupCode");
+  });
+
   it("GET /shifts/:id/bundle resolves the box snapshot without an item-template fallback", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
