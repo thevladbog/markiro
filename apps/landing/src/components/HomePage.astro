@@ -54,7 +54,16 @@ const siteConfig = readPublicSiteConfig(
         <p class="hero__lead" data-reveal>{copy.home.hero.lead}</p>
         <div class="hero__actions" data-reveal>
           <a class="button" href="#demo" data-analytics="landing_demo_click" data-placement="hero">{copy.common.requestDemoShort} <span aria-hidden="true">→</span></a>
-          {siteConfig.phone && <a class="hero__phone" href={siteConfig.phone.href}>{siteConfig.phone.display}</a>}
+          {siteConfig.phone && (
+            <a
+              class="hero__phone"
+              href={siteConfig.phone.href}
+              data-analytics="landing_phone_click"
+              data-placement="hero"
+            >
+              {siteConfig.phone.display}
+            </a>
+          )}
         </div>
         <p class="hero__note" data-reveal>{copy.home.hero.note}</p>
       </div>

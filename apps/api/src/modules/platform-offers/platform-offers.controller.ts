@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Headers, HttpCode, Param, Post, Query, Req } from "@nestjs/common";
+import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { platformCommercialContracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
@@ -24,6 +25,7 @@ const offerDocumentDownloadParamsPipe = new ZodValidationPipe(
   platformCommercialContracts.offers.documents.download.params,
 );
 
+@ApiTags("platform-offers")
 @Controller("platform/offers")
 export class PlatformOffersController {
   constructor(
@@ -32,6 +34,7 @@ export class PlatformOffersController {
   ) {}
 
   @Get()
+  @ApiOperation({ summary: "List commercial offers" })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.offers.list.response })
   @RequirePlatformCapabilities("billing.read")
   async list(@Req() req: RequestWithPlatformPrincipal, @Query("tenantId") tenantId?: string) {
@@ -42,6 +45,7 @@ export class PlatformOffersController {
   }
 
   @Get(":id")
+  @ApiOperation({ summary: "Get commercial offer details" })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.offers.detail.response })
   @RequirePlatformCapabilities("billing.read")
   async detail(
@@ -55,6 +59,7 @@ export class PlatformOffersController {
   }
 
   @Post()
+  @ApiOperation({ summary: "Create a commercial offer" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.offers.create.body,
     response: platformCommercialContracts.offers.create.response,
@@ -72,6 +77,11 @@ export class PlatformOffersController {
 
   @Post(":id/publish")
   @HttpCode(200)
+  @ApiOperation({
+    summary: "Publish a commercial offer",
+    description:
+      "Publishing also renders the offer document package and returns it with the offer.",
+  })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.offers.publish.response })
   @RequirePlatformCapabilities("billing.write")
   async publish(
@@ -87,6 +97,7 @@ export class PlatformOffersController {
   }
 
   @Post(":id/revise")
+  @ApiOperation({ summary: "Create a revised commercial offer" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.offers.revise.body,
     response: platformCommercialContracts.offers.revise.response,
@@ -104,6 +115,7 @@ export class PlatformOffersController {
   }
 
   @Get(":id/documents")
+  @ApiOperation({ summary: "List offer documents" })
   @PlatformApiProtectedOk({
     response: platformCommercialContracts.offers.documents.list.response,
   })
@@ -116,6 +128,10 @@ export class PlatformOffersController {
   }
 
   @Post(":id/documents")
+  @ApiOperation({
+    summary: "Render offer documents",
+    description: "Regenerates the offer document package.",
+  })
   @PlatformApiProtectedCreated({
     response: platformCommercialContracts.offers.documents.render.response,
   })
@@ -128,6 +144,7 @@ export class PlatformOffersController {
   }
 
   @Get(":id/documents/:documentId/download")
+  @ApiOperation({ summary: "Get an offer document download link" })
   @PlatformApiProtectedOk({
     response: platformCommercialContracts.offers.documents.download.response,
   })
@@ -149,6 +166,7 @@ export class PlatformOffersController {
 
   @Post(":id/cancel")
   @HttpCode(200)
+  @ApiOperation({ summary: "Cancel a commercial offer" })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.offers.cancel.response })
   @RequirePlatformCapabilities("billing.write")
   async cancel(
@@ -162,6 +180,10 @@ export class PlatformOffersController {
   }
 
   @Post(":id/payment")
+  @ApiOperation({
+    summary: "Register a payment for an offer",
+    description: "Supports an optional Idempotency-Key header to deduplicate retries.",
+  })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.offers.payment.body,
     response: platformCommercialContracts.offers.payment.response,

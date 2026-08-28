@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SchemaObject } from "@nestjs/swagger";
 
 /**
  * GET /conflicts query schema. `reviewed` arrives as a query string, so it is
@@ -36,3 +37,42 @@ export interface ConflictDto {
 export interface ListConflictsResponseDto {
   items: ConflictDto[];
 }
+
+const uuidSchema = { type: "string", format: "uuid" } as const;
+const dateTimeSchema = { type: "string", format: "date-time" } as const;
+
+export const conflictOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "codeHash",
+    "losingShiftId",
+    "losingTerminalId",
+    "losingScannedAt",
+    "winningShiftId",
+    "winningTerminalId",
+    "winningScannedAt",
+    "detectedAt",
+    "reviewedAt",
+  ],
+  properties: {
+    id: uuidSchema,
+    codeHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    losingShiftId: uuidSchema,
+    losingTerminalId: { ...uuidSchema, nullable: true },
+    losingScannedAt: dateTimeSchema,
+    winningShiftId: uuidSchema,
+    winningTerminalId: { ...uuidSchema, nullable: true },
+    winningScannedAt: dateTimeSchema,
+    detectedAt: dateTimeSchema,
+    reviewedAt: { ...dateTimeSchema, nullable: true },
+  },
+};
+
+export const listConflictsOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: { items: { type: "array", items: conflictOpenApiSchema } },
+};

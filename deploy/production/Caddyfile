@@ -45,7 +45,7 @@
 (landing_csp) {
 	header {
 		defer
-		Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru; worker-src 'self' blob:; manifest-src 'self'"
+		Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://www.googletagmanager.com https://mc.yandex.ru; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru https://cdn.jsdelivr.net/gh/yandex/webmaster-gtm-template@467fdc0c3ab3124a40ddf229fc8cd20392c71938/webmaster-verification.js https://www.googletagmanager.com https://mc.yandex.ru https://yastatic.net; frame-src 'self' https://smartcaptcha.cloud.yandex.ru https://mc.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://mc.yandex.ru wss://mc.yandex.ru; worker-src 'self' blob:; manifest-src 'self'"
 	}
 }
 

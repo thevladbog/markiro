@@ -10,6 +10,22 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+      - name: Review public-repository dependency changes
+        if: ${{ github.event.repository.private == false }}
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
         with:
           fail-on-severity: high
+      # GitHub Dependency Review requires GitHub Advanced Security once the
+      # source repository is private. Keep a real high-severity vulnerability
+      # gate instead of silently skipping the job when GHAS is unavailable.
+      - name: Set up pnpm for private-repository audit
+        if: ${{ github.event.repository.private == true }}
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Set up Node for private-repository audit
+        if: ${{ github.event.repository.private == true }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Audit private-repository production dependencies
+        if: ${{ github.event.repository.private == true }}
+        run: pnpm audit --prod --audit-level high

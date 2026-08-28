@@ -12,7 +12,7 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
-import { ApiBody, ApiConsumes } from "@nestjs/swagger";
+import { ApiBody, ApiConsumes, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { memoryStorage } from "multer";
 import {
   billingActUploadTooLargeErrorSchema,
@@ -40,11 +40,13 @@ import {
 import { BillingActsService } from "./billing-acts.service";
 import { BillingAttachmentUploadFilter } from "../tenant-billing/billing-attachment-upload.filter";
 
+@ApiTags("platform-billing-acts")
 @Controller("platform/billing/acts")
 export class BillingActsController {
   constructor(private readonly acts: BillingActsService) {}
 
   @Get()
+  @ApiOperation({ summary: "List billing acts" })
   @PlatformApiProtectedOk({
     query: platformCommercialContracts.billingActs.list.query,
     response: platformCommercialContracts.billingActs.list.response,
@@ -61,6 +63,7 @@ export class BillingActsController {
   }
 
   @Get(":id")
+  @ApiOperation({ summary: "Read a billing act" })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.billingActs.detail.response })
   @RequirePlatformCapabilities("billing.read")
   async detail(
@@ -74,6 +77,7 @@ export class BillingActsController {
   }
 
   @Post()
+  @ApiOperation({ summary: "Create a billing act" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.billingActs.create.body,
     response: platformCommercialContracts.billingActs.create.response,
@@ -90,6 +94,7 @@ export class BillingActsController {
   }
 
   @Post(":id/issue")
+  @ApiOperation({ summary: "Issue a billing act with its PDF" })
   @UseInterceptors(
     FileInterceptor("file", {
       storage: memoryStorage(),
@@ -128,6 +133,7 @@ export class BillingActsController {
   }
 
   @Post(":id/cancel")
+  @ApiOperation({ summary: "Cancel a billing act" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.billingActs.cancel.body,
     response: platformCommercialContracts.billingActs.cancel.response,

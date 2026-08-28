@@ -1,0 +1,134 @@
+---
+import { Picture } from "astro:assets";
+
+import articleHero from "../../../../assets/duplicate-beer-marking-hero.png";
+import LandingFooter from "../../../../components/LandingFooter.astro";
+import LandingHeader from "../../../../components/LandingHeader.astro";
+import { DUPLICATE_BEER_MARKING_ARTICLE_EN } from "../../../../content/articles";
+import { buildArticlePageGraph } from "../../../../lib/seo";
+import { readPublicSiteConfig } from "../../../../lib/site-config";
+import BaseLayout from "../../../../layouts/BaseLayout.astro";
+
+const article = DUPLICATE_BEER_MARKING_ARTICLE_EN;
+const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<BaseLayout metadata={article} graph={buildArticlePageGraph(article)}>
+  <LandingHeader page={article} phone={config.phone} />
+  <main id="main" class="article-page">
+    <header class="article-hero">
+      <div class="container article-hero__inner">
+        <nav class="breadcrumbs" aria-label="Breadcrumb"><ol><li><a href="/en/">Markiro</a></li><li aria-current="page">{article.navigationLabel}</li></ol></nav>
+        <div class="article-hero__layout">
+          <div class="article-hero__copy">
+            <p class="section-index">{article.eyebrow}</p>
+            <h1>{article.heading}</h1>
+            <p class="article-hero__lead">{article.introduction}</p>
+            <div class="article-byline" aria-label="Publication details"><span>{article.authorName}</span><time datetime={article.publishedAt}>August 27, 2026</time><span>{article.readingTimeMinutes} min read</span></div>
+          </div>
+          <figure class="article-hero__media" data-article-visual>
+            <Picture src={articleHero} alt="Operator comparing two cans after a duplicate-code warning at a compact brewery workstation" widths={[480, 720, 1080]} formats={["avif", "webp"]} sizes="(max-width: 767px) 100vw, 45vw" loading="eager" fetchpriority="high" data-article-hero-image />
+            <figcaption>A duplicate warning begins an investigation. The digital event must be connected to the actual physical items.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </header>
+
+    <article class="container article-body">
+      <aside class="article-summary" aria-labelledby="article-summary-title">
+        <p class="section-index">In brief</p><h2 id="article-summary-title">What matters when a code is reported as a duplicate</h2>
+        <ul>
+          <li data-key-takeaway>The same warning can refer to a scan, a physical product, a document, or a controlled reprint.</li>
+          <li data-key-takeaway>A repeated scan of one item must not increase the count, but the attempt should remain in the audit trail.</li>
+          <li data-key-takeaway>If one unique code is present on two items, quarantine the second and never release it under that identity.</li>
+          <li data-key-takeaway>A duplicate report often means the first submission already succeeded; check code and document status first.</li>
+          <li data-key-takeaway>A reprint reproduces the same identity for the same item or package. It is not a method for creating another product.</li>
+          <li data-key-takeaway>Markiro detects a local repeat immediately and exposes cross-terminal conflicts after synchronization.</li>
+        </ul>
+      </aside>
+
+      <nav class="article-toc" aria-label="Table of contents"><p class="section-index">Contents</p><ol><li><a href="#answer">Short answer</a></li><li><a href="#types">Four duplicate types</a></li><li><a href="#line">Repeated line scan</a></li><li><a href="#physical">Two products, one code</a></li><li><a href="#report">Duplicate report</a></li><li><a href="#reprint">Controlled reprint</a></li><li><a href="#diagnosis">Diagnostic sequence</a></li><li><a href="#markiro">How Markiro handles it</a></li></ol></nav>
+
+      <section id="answer" aria-labelledby="answer-title">
+        <p class="section-index">01 / Answer</p><h2 id="answer-title">What should you do with a duplicate Chestny ZNAK code warning?</h2>
+        <p><strong>Do not generate another code or automatically submit another report.</strong> Hold only the disputed item or document, preserve the original Data Matrix payload, and establish where the identity first appeared. The word “duplicate” describes an identity conflict; it does not identify its cause.</p>
+        <p>On a production line it can describe four events: the same can was scanned twice; one unique code was applied to two physical products; a code or application report was included twice in an external document; or an operator is making a controlled copy for the same item or package. Each event requires a different response.</p>
+        <div class="article-callout"><strong>The core rule is one physical product, one unique identity.</strong><p>A second image does not create a second identity. A new item cannot be released with a code that already belongs to another unit.</p></div>
+      </section>
+
+      <section id="types" aria-labelledby="types-title">
+        <p class="section-index">02 / Classification</p><h2 id="types-title">Four meanings of a duplicate marking code</h2>
+        <p><strong>Identify which object is duplicated before changing anything.</strong> Otherwise a fix in one layer creates an error in another: resubmitting after a lost response makes a duplicate document, while assigning a new code to an already-correct item breaks the production record.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/duplicate-beer-marking-code-types-en.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Four types of duplicate beer marking code and the correct response to each" data-article-diagram />
+          <figcaption>A repeated scan, a physical duplicate, a repeated document, and a controlled reprint are different incidents.</figcaption>
+        </figure>
+        <p>Many search results use “duplicate” to mean only a replacement label. That is incomplete for production: the team must prove that the copy still belongs to the same item, rather than silently giving two products one identity.</p>
+      </section>
+
+      <section id="line" aria-labelledby="line-title">
+        <p class="section-index">03 / Scanning</p><h2 id="line-title">The same bottle or can was scanned twice</h2>
+        <p><strong>If one physical unit passes the scanner twice, reject the second scan without increasing the production count.</strong> A conveyor may reverse after a pause, a handheld trigger may bounce, or an operator may repeat a scan because the first signal was unclear.</p>
+        <p>The workstation should show when and where the first accepted read occurred, including shift, station, operator, and case. The second attempt should still remain in the journal as a duplicate. That evidence distinguishes a harmless repeat of one item from the same code appearing later on another unit.</p>
+        <p>If decoding itself is intermittent, keep symbol-quality diagnosis separate from duplication. Inspect the original byte stream, GS separator, scanner configuration, and software verdict using our guide to a <a href="/en/articles/beer-data-matrix-not-scanning/">beer Data Matrix that will not scan</a>.</p>
+      </section>
+
+      <section id="physical" aria-labelledby="physical-title">
+        <p class="section-index">04 / Physical product</p><h2 id="physical-title">One Data Matrix is present on two products</h2>
+        <p><strong>This is a physical marking conflict, not a UI repeat.</strong> Remove the second unit from the flow, locate the first, and inspect the application point: source file, printer queue, restarted job, label roll, jam recovery, or manual reprint.</p>
+        <p>Do not move the first label to the second product and do not close both into the same case while the incident is unresolved. Each consumer package needs its own marking code. Chestny ZNAK's beer guidance states that a consumer package or keg should carry no more than one identification means readable by the specified technical methods: see the official <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/kakim-dolzhen-byt-datamatrix-trebovaniya-k-preobrazovaniyu-i-kachestvu-naneseniya-pivo">beer Data Matrix application and quality requirements</a>.</p>
+        <div class="article-callout article-callout--boundary"><strong>Quarantine the disputed unit, not an arbitrary volume.</strong><p>Stop the whole line when the duplicate source is still active and the affected batch boundary is unknown. One explained repeated scan does not require rejecting the entire run.</p></div>
+      </section>
+
+      <section id="report" aria-labelledby="report-title">
+        <p class="section-index">05 / Document</p><h2 id="report-title">A code is duplicated in an application report</h2>
+        <p><strong>A missing response does not prove that the first submission failed.</strong> One code may appear twice inside the report, the whole report may have been resent, or the original document may already have been accepted. Preserve the initial document number, timestamp, code set, and current status before acting.</p>
+        <p>Chestny ZNAK's beer community guidance lists these same causes: requesting issuance for the same code, including one code more than once in an application report, or submitting several identical reports. If the code already has the corresponding applied or received status, the original report may have succeeded and should not be sent again. Consult the official <a href="https://markirovka.ru/community/beer_producers/markirovka-piva-763">beer duplicate-error explanation</a> and the support answer on a <a href="https://markirovka.ru/community/beer_producers/oshibka-pri-otpravke-otcheta-o-nanesenii-">duplicate application report</a>.</p>
+        <p>Our complete guide to the <a href="/en/articles/beer-code-application-report-russia/">Russian beer code application report</a> covers source preparation, signature, and partial processing.</p>
+        <p>The Russian status names and the exact decision must be evaluated against the current beer-category rules and the specific document. Never replace a code merely because an integration client timed out.</p>
+      </section>
+
+      <section id="reprint" aria-labelledby="reprint-title">
+        <p class="section-index">06 / Printing</p><h2 id="reprint-title">When a reprint preserves rather than duplicates identity</h2>
+        <p><strong>A controlled reprint reproduces the same identity for the same physical unit or related package.</strong> It may be required when a label is damaged before release, a printer jams, or the category rules allow the identity image on external packaging.</p>
+        <p>Chestny ZNAK provides a beer-specific procedure for obtaining previously ordered codes from print and export sections: the official <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/povtornaya-pechat-kodov-markirovki-pivo">beer code reprinting guide</a>. A separate beer guidance page addresses a duplicate image of the unique identification means on external packaging: <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/povtornaya-pechat-km-dlya-naneseniya-na-vneshnyuyu-upakovku-pivo">reprinting for external packaging</a>.</p>
+        <p>Neither procedure allows one consumer code to represent several saleable units. Remove or invalidate the poor label, associate the reprint reason with the original job, and inspect the physical item after printing.</p>
+      </section>
+
+      <section id="diagnosis" aria-labelledby="diagnosis-title">
+        <p class="section-index">07 / Sequence</p><h2 id="diagnosis-title">How to diagnose the duplicate from evidence</h2>
+        <p><strong>Work from the unchanged code to the production event, physical item, and external document.</strong> Do not begin by clearing logs, deleting the job, or printing again; those actions remove the context needed to make a safe decision.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/duplicate-beer-marking-code-actions-en.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Six-step diagnostic sequence for a duplicate marking code on a production line" data-article-diagram />
+          <figcaption>Preserve the payload, locate the first event, inspect both items, and only then change production state.</figcaption>
+        </figure>
+        <ol class="article-steps">
+          <li><h3>Preserve the original</h3><p>Do not retype the code or lose control separators. Compare the normalized identity and the original byte stream.</p></li>
+          <li><h3>Locate the first event</h3><p>Check time, station, shift, operator, job, case, and synchronization outcome.</p></li>
+          <li><h3>Reconcile product and document</h3><p>Find both physical units and, for an external error, the original report and authoritative status.</p></li>
+          <li><h3>Correct and recount</h3><p>Quarantine the disputed unit, remove the extra count, and reconcile items, cases, and SSCCs.</p></li>
+        </ol>
+      </section>
+
+      <section id="markiro" aria-labelledby="markiro-title">
+        <p class="section-index">08 / Markiro</p><h2 id="markiro-title">How Markiro keeps identity stable on the line</h2>
+        <p><strong>A Markiro station keeps a local registry of accepted codes and checks it before adding another item.</strong> A repeat receives a duplicate verdict, does not increase the count, and remains in the journal with its first-seen context. If two isolated stations accept the same identity, synchronization preserves the deterministic owner and exposes the losing event as a conflict for review.</p>
+        <p>The current product chain is <strong>item → case → SSCC</strong>. Reprinting a closed case uses the same logical case, the same SSCC, and the frozen label fields; reason and outcome are appended to the audit trail. A direct Markiro connection to SUZ or GIS MT should not be treated as live until that integration has been configured and accepted separately.</p>
+        <p>This control loop remains accessible to a smaller producer: it can start with a compact workstation, scanner, printer, and explicit exception procedure rather than purchasing a fully automated line on day one. See the staged <a href="/en/articles/beer-marking-cost-russia/">beer marking budget</a> and our guide to <a href="/en/articles/beer-case-aggregation/">beer case aggregation</a>.</p>
+      </section>
+
+      <section class="article-conclusion" aria-labelledby="conclusion-title">
+        <p class="section-index">Conclusion</p><h2 id="conclusion-title">Resolve a duplicate by reconstructing the fact, not by printing again</h2>
+        <p>A reliable line preserves the raw identity and audit trail, connects the warning to the physical product, checks the external status, and acts only after classification. A harmless repeated scan stays visible, while a real identity conflict does not enter finished goods.</p>
+        <a class="button" href="/en/#demo" data-analytics="landing_demo_click" data-placement="article-conclusion">Review your line scenario <span aria-hidden="true">→</span></a>
+      </section>
+
+      <section class="article-related" aria-labelledby="article-related-title">
+        <p class="section-index">Related</p><h2 id="article-related-title">Continue planning the production flow</h2>
+        <div class="seo-related__grid"><a href="/en/articles/offline-beer-marking-russia/"><span>Offline beer marking</span><span aria-hidden="true">→</span></a><a href="/en/articles/beer-data-matrix-not-scanning/"><span>Data Matrix diagnostics</span><span aria-hidden="true">→</span></a><a href="/en/articles/beer-case-aggregation/"><span>Beer case aggregation</span><span aria-hidden="true">→</span></a></div>
+      </section>
+    </article>
+  </main>
+  <LandingFooter page={article} />
+  <script>import { browserLandingRuntime, initLanding } from "../../../../scripts/site"; initLanding(document, browserLandingRuntime(window));</script>
+</BaseLayout>

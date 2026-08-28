@@ -1,7 +1,23 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { STATION_MIGRATIONS } from "../src/sqlite/migrations.js";
-import { shiftMirror } from "../src/sqlite/schema.js";
+import {
+  STATION_MIGRATION_ENTRIES,
+  STATION_MIGRATIONS,
+  SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATION_IDS,
+} from "../src/sqlite/migrations.js";
+import {
+  inventoryCodeResultsMirror,
+  inventoryConflictsMirror,
+  inventoryEventClaimOutcomesMirror,
+  inventoryOutbox,
+  inventoryRepackBoxesMirror,
+  inventoryRepackItemsMirror,
+  inventoryScanEventsMirror,
+  inventorySnapshotCodesMirror,
+  inventoryTaskMirror,
+  inventoryTerminalState,
+  shiftMirror,
+} from "../src/sqlite/schema.js";
 
 /** Mirrors apps/station/src/lib/mirror.ts's applyMigrations against a raw node:sqlite handle. */
 function applyStatements(db: DatabaseSync, statements: readonly string[]): void {
@@ -20,7 +36,19 @@ function applyStatements(db: DatabaseSync, statements: readonly string[]): void 
 }
 
 function applyStationMigrations(db: DatabaseSync): void {
-  applyStatements(db, STATION_MIGRATIONS);
+  const columns = db.prepare("PRAGMA table_info(inventory_scan_events_mirror)").all() as Array<{
+    name: string;
+  }>;
+  const finalLegacyAuditExists = columns.some((column) => column.name === "legacy_audit_version");
+  const commitStateAlreadyExisted = columns.some((column) => column.name === "commit_state");
+  const skipLegacyAudits = finalLegacyAuditExists || commitStateAlreadyExisted;
+  const supersededIds = new Set<string>(SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATION_IDS);
+  applyStatements(
+    db,
+    STATION_MIGRATION_ENTRIES.filter(
+      (migration) => !skipLegacyAudits || !supersededIds.has(migration.id),
+    ).map((migration) => migration.sql),
+  );
 }
 
 function migratedDb(): DatabaseSync {
@@ -30,6 +58,1062 @@ function migratedDb(): DatabaseSync {
 }
 
 describe("STATION_MIGRATIONS", () => {
+  it("assigns unique append-only identities and names only the superseded audit steps", () => {
+    expect(STATION_MIGRATION_ENTRIES.map((migration) => migration.id)).toEqual(
+      STATION_MIGRATIONS.map(
+        (_statement, index) => `station-sqlite-${String(index).padStart(3, "0")}`,
+      ),
+    );
+    expect(new Set(STATION_MIGRATION_ENTRIES.map((migration) => migration.id)).size).toBe(
+      STATION_MIGRATION_ENTRIES.length,
+    );
+    expect(SUPERSEDED_INVENTORY_LEGACY_AUDIT_MIGRATION_IDS).toEqual([
+      "station-sqlite-078",
+      "station-sqlite-079",
+      "station-sqlite-081",
+      "station-sqlite-082",
+    ]);
+  });
+
+  it("backfills pre-source invalidated boxes as genuine claim-lost conflicts", () => {
+    const sourceMigrationIndex = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN invalidation_source"),
+    );
+    expect(sourceMigrationIndex).toBeGreaterThan(0);
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, sourceMigrationIndex));
+    db.prepare(
+      `INSERT INTO inventory_repack_boxes_mirror
+         (inventory_id, snapshot_id, box_id, opened_event_id, old_sscc_context, new_sscc,
+          owner_device_id, capacity, production_date, state, print_state, opened_at,
+          invalidated_at, updated_at)
+       VALUES ('inventory', 'snapshot', 'box', 'event', 'source', '346006820000000014',
+               'device', 20, '2026-08-19', 'invalidated', 'not_ready',
+               '2026-08-25T09:00:00.000Z', '2026-08-25T10:00:00.000Z',
+               '2026-08-25T10:00:00.000Z')`,
+    ).run();
+    applyStatements(db, STATION_MIGRATIONS.slice(sourceMigrationIndex));
+    expect(
+      db
+        .prepare(
+          "SELECT invalidation_source FROM inventory_repack_boxes_mirror WHERE box_id = 'box'",
+        )
+        .get(),
+    ).toEqual({ invalidation_source: "claim_lost" });
+  });
+
+  it("creates inventory mirrors and single-statement acknowledgement/progress receipts", () => {
+    const db = migratedDb();
+    const expectedTables = [
+      "inventory_task_mirror",
+      "inventory_snapshot_codes_mirror",
+      "inventory_terminal_state",
+      "inventory_code_results_mirror",
+      "inventory_scan_events_mirror",
+      "inventory_outbox",
+      "inventory_repack_boxes_mirror",
+      "inventory_repack_items_mirror",
+      "inventory_repack_journal",
+      "inventory_repack_print_attempts",
+      "inventory_repack_print_journal",
+      "inventory_remote_reprint_requests",
+      "inventory_conflicts_mirror",
+      "inventory_event_claim_outcomes_mirror",
+      "inventory_sync_ack_receipts",
+      "inventory_sync_ack_receipts_v2",
+      "inventory_sync_ack_receipts_v3",
+      "inventory_progress_receipts",
+      "inventory_progress_receipts_v2",
+    ];
+    const tables = db
+      .prepare(
+        `SELECT name FROM sqlite_master
+          WHERE type = 'table' AND name LIKE 'inventory_%'
+          ORDER BY name`,
+      )
+      .all() as Array<{ name: string }>;
+    expect(tables.map((row) => row.name)).toEqual([...expectedTables].sort());
+    expect(db.prepare("PRAGMA table_info(inventory_repack_boxes_mirror)").all()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "opened_event_id", notnull: 1 }),
+        expect.objectContaining({ name: "closed_event_id", notnull: 0 }),
+        expect.objectContaining({ name: "invalidation_source", notnull: 0 }),
+      ]),
+    );
+    expect(db.prepare("PRAGMA table_info(inventory_repack_items_mirror)").all()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "source_event_id", notnull: 1 }),
+        expect.objectContaining({ name: "position", notnull: 1 }),
+        expect.objectContaining({ name: "source_parent_mismatch", notnull: 1 }),
+      ]),
+    );
+    expect(
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = ?")
+        .all("inventory_repack_apply_journal_v1"),
+    ).toEqual([{ name: "inventory_repack_apply_journal_v1" }]);
+    expect(
+      db
+        .prepare(
+          `SELECT name FROM sqlite_master WHERE type = 'trigger'
+            AND name IN ('inventory_repack_claim_print_v2', 'inventory_repack_apply_print_v2')
+            ORDER BY name`,
+        )
+        .all(),
+    ).toEqual([
+      { name: "inventory_repack_apply_print_v2" },
+      { name: "inventory_repack_claim_print_v2" },
+    ]);
+    expect(
+      db
+        .prepare(
+          `SELECT name FROM sqlite_master
+            WHERE type = 'trigger'
+              AND name IN (
+                'inventory_sync_apply_ack', 'inventory_progress_apply_page',
+                'inventory_sync_apply_ack_v2', 'inventory_progress_apply_page_v2'
+              )
+            ORDER BY name`,
+        )
+        .all(),
+    ).toEqual([
+      { name: "inventory_progress_apply_page" },
+      { name: "inventory_progress_apply_page_v2" },
+      { name: "inventory_sync_apply_ack" },
+      { name: "inventory_sync_apply_ack_v2" },
+    ]);
+
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, active_snapshot_id, active_snapshot_revision,
+          active_combined_digest, active_code_count, active_manifest_json, staging_generation)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run("inventory-1", "INV-1", "snapshot-1", 1, "a".repeat(64), 1, "{}", 1);
+    db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status, source_state,
+          source_production_date, parent_sscc, expected, protected)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "snapshot-1",
+      "b".repeat(64),
+      "010460000000001521SERIAL",
+      "04600000000015",
+      "SERIAL",
+      "INTRODUCED",
+      null,
+      "2026-08-01",
+      "004600000000000015",
+      1,
+      0,
+    );
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          source_parent_sscc, next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "device-1",
+      "operator-1",
+      "2026-08-01",
+      null,
+      2,
+      "2026-08-25T08:00:00.000Z",
+    );
+    db.prepare(
+      `INSERT INTO inventory_code_results_mirror
+         (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
+          winning_scanned_at, observed_production_date, classification, origin_classification,
+          updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "b".repeat(64),
+      "event-1",
+      "device-1",
+      "2026-08-25T08:00:00.000Z",
+      "2026-08-01",
+      "expected",
+      "expected",
+      "2026-08-25T08:00:00.000Z",
+    );
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
+          scanned_at, kind, normalized_identity, code_hash, raw_payload,
+          active_production_date, local_verdict)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "event-1",
+      "device-1",
+      1,
+      "operator-1",
+      "2026-08-25T08:00:00.000Z",
+      "item",
+      "01...21...",
+      "b".repeat(64),
+      "010460000000001521SERIAL",
+      "2026-08-01",
+      "accepted",
+    );
+    db.prepare(
+      `INSERT INTO inventory_outbox
+         (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run("inventory-1", "snapshot-1", "event-1", 1, '{"kind":"item"}', "2026-08-25T08:00:00.000Z");
+    db.prepare(
+      `INSERT INTO inventory_event_claim_outcomes_mirror
+         (inventory_id, snapshot_id, source_event_id, code_hash, status, winning_event_id,
+          winning_device_id, winning_scanned_at, result_revision, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "event-1",
+      "b".repeat(64),
+      "claimed",
+      "event-1",
+      "device-1",
+      "2026-08-25T08:00:00.000Z",
+      1,
+      "2026-08-25T08:00:00.000Z",
+    );
+    db.prepare(
+      `INSERT INTO inventory_repack_boxes_mirror
+         (inventory_id, snapshot_id, box_id, old_sscc_context, new_sscc, owner_device_id,
+          capacity, production_date, state, print_state, print_attempt_count, opened_at,
+          updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "box-1",
+      null,
+      "004600000000000015",
+      "device-1",
+      12,
+      "2026-08-01",
+      "open",
+      "not_ready",
+      0,
+      "2026-08-25T08:00:00.000Z",
+      "2026-08-25T08:00:00.000Z",
+    );
+    db.prepare(
+      `INSERT INTO inventory_repack_items_mirror
+         (inventory_id, snapshot_id, item_id, box_id, code_hash, production_date, added_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "item-1",
+      "box-1",
+      "b".repeat(64),
+      "2026-08-01",
+      "2026-08-25T08:00:00.000Z",
+    );
+    db.prepare(
+      `INSERT INTO inventory_conflicts_mirror
+         (inventory_id, snapshot_id, conflict_id, code_hash, winning_event_id,
+          winning_device_id, winning_scanned_at, detected_at, state)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "conflict-1",
+      "b".repeat(64),
+      "event-0",
+      "device-2",
+      "2026-08-25T07:59:00.000Z",
+      "2026-08-25T08:00:00.000Z",
+      "open",
+    );
+    db.prepare(
+      `INSERT INTO inventory_remote_reprint_requests
+         (inventory_id, snapshot_id, correction_id, box_id, owner_device_id, requested_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "inventory-1",
+      "snapshot-1",
+      "correction-1",
+      "box-1",
+      "device-1",
+      "2026-08-25T08:01:00.000Z",
+    );
+
+    expect(
+      db.prepare("SELECT inventory_id, active_snapshot_id FROM inventory_task_mirror").get(),
+    ).toEqual({ inventory_id: "inventory-1", active_snapshot_id: "snapshot-1" });
+    for (const table of expectedTables
+      .slice(1)
+      .filter(
+        (table) =>
+          !table.startsWith("inventory_sync_ack_receipts") &&
+          !table.startsWith("inventory_progress_receipts") &&
+          table !== "inventory_repack_journal" &&
+          table !== "inventory_repack_print_attempts" &&
+          table !== "inventory_repack_print_journal",
+      )) {
+      expect(
+        db.prepare(`SELECT snapshot_id FROM ${table} LIMIT 1`).get(),
+        `${table} must retain its snapshot revision`,
+      ).toEqual({ snapshot_id: "snapshot-1" });
+    }
+
+    const indexes = db
+      .prepare(
+        `SELECT name FROM sqlite_master
+          WHERE type = 'index' AND tbl_name = 'inventory_snapshot_codes_mirror'`,
+      )
+      .all() as Array<{ name: string }>;
+    expect(indexes.map((row) => row.name)).toEqual(
+      expect.arrayContaining([
+        "inventory_snapshot_codes_mirror_parent_sscc_idx",
+        "inventory_snapshot_codes_mirror_expected_date_idx",
+      ]),
+    );
+
+    expect(inventoryTaskMirror).toBeDefined();
+    expect(inventorySnapshotCodesMirror).toBeDefined();
+    expect(inventoryTerminalState).toBeDefined();
+    expect(inventoryCodeResultsMirror).toBeDefined();
+    expect(inventoryScanEventsMirror).toBeDefined();
+    expect(inventoryOutbox).toBeDefined();
+    expect(inventoryRepackBoxesMirror).toBeDefined();
+    expect(inventoryRepackItemsMirror).toBeDefined();
+    expect(inventoryConflictsMirror).toBeDefined();
+    expect(inventoryEventClaimOutcomesMirror).toBeDefined();
+    expect(
+      db
+        .prepare("PRAGMA table_info(inventory_terminal_state)")
+        .all()
+        .some((column) => (column as { name?: string }).name === "progress_result_revision"),
+    ).toBe(true);
+  });
+
+  it("keeps the trailing inventory DDL rerunnable on an upgraded database", () => {
+    const firstInventoryMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("CREATE TABLE IF NOT EXISTS inventory_task_mirror"),
+    );
+    expect(firstInventoryMigration).toBeGreaterThan(0);
+
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, firstInventoryMigration));
+    applyStatements(db, STATION_MIGRATIONS.slice(firstInventoryMigration));
+    expect(() => applyStationMigrations(db)).not.toThrow();
+  });
+
+  it("adds nullable duplicate chronology without inventing a legacy winner", () => {
+    const chronologyMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN duplicate_winner_code_hash"),
+    );
+    expect(chronologyMigration).toBeGreaterThan(0);
+
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, chronologyMigration));
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
+          scanned_at, kind, normalized_identity, code_hash, raw_payload,
+          active_production_date, local_verdict, commit_state, legacy_audit_version)
+       VALUES ('inventory-legacy', 'snapshot-legacy', 'duplicate-legacy', 'device-legacy', 1,
+               'operator-legacy', '2026-08-25T08:00:00.000Z', 'item', 'item:legacy-hash',
+               'legacy-hash', 'legacy-raw', '2026-08-20', 'duplicate', 'committed', 1)`,
+    ).run();
+
+    applyStatements(db, STATION_MIGRATIONS.slice(chronologyMigration));
+    expect(
+      db
+        .prepare(
+          `SELECT duplicate_winner_code_hash, duplicate_winner_event_id,
+                  duplicate_winner_device_id, duplicate_winner_scanned_at
+             FROM inventory_scan_events_mirror WHERE event_id = 'duplicate-legacy'`,
+        )
+        .get(),
+    ).toEqual({
+      duplicate_winner_code_hash: null,
+      duplicate_winner_event_id: null,
+      duplicate_winner_device_id: null,
+      duplicate_winner_scanned_at: null,
+    });
+    expect(() => applyStationMigrations(db)).not.toThrow();
+  });
+
+  it("upgrades only exact legacy event/outbox pairs and compensates orphan projections", () => {
+    const stateMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN commit_state"),
+    );
+    expect(stateMigration).toBeGreaterThan(0);
+
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, stateMigration));
+    const insertEvent = db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
+          scanned_at, kind, normalized_identity, code_hash, raw_payload,
+          active_production_date, local_verdict)
+       VALUES ('inventory-legacy', 'snapshot-legacy', ?, 'device-legacy', ?,
+               'operator-legacy', ?, 'item', ?, ?, ?, '2026-08-20', ?)`,
+    );
+    insertEvent.run(
+      "event-orphan",
+      1,
+      "2026-08-25T08:00:00.000Z",
+      "item:orphan-hash",
+      "orphan-hash",
+      "orphan-raw",
+      "expected",
+    );
+    insertEvent.run(
+      "event-success",
+      2,
+      "2026-08-25T08:01:00.000Z",
+      "item:success-hash",
+      "success-hash",
+      "success-raw",
+      "expected",
+    );
+    insertEvent.run(
+      "event-unknown",
+      3,
+      "2026-08-25T08:02:00.000Z",
+      "item:unknown-hash",
+      "unknown-hash",
+      "unknown-raw",
+      "unknown",
+    );
+    insertEvent.run(
+      "event-mismatch",
+      4,
+      "2026-08-25T08:03:00.000Z",
+      "item:mismatch-hash",
+      "mismatch-hash",
+      "mismatch-raw",
+      "expected",
+    );
+
+    const insertProjection = db.prepare(
+      `INSERT INTO inventory_code_results_mirror
+         (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
+          winning_scanned_at, observed_production_date, classification,
+          origin_classification, updated_at)
+       VALUES ('inventory-legacy', 'snapshot-legacy', ?, ?, 'device-legacy', ?,
+               '2026-08-20', 'expected', 'expected', ?)`,
+    );
+    for (const [hash, eventId, scannedAt] of [
+      ["orphan-hash", "event-orphan", "2026-08-25T08:00:00.000Z"],
+      ["success-hash", "event-success", "2026-08-25T08:01:00.000Z"],
+      ["mismatch-hash", "event-mismatch", "2026-08-25T08:03:00.000Z"],
+    ] as const) {
+      insertProjection.run(hash, eventId, scannedAt, scannedAt);
+    }
+
+    const insertOutbox = db.prepare(
+      `INSERT INTO inventory_outbox
+         (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+       VALUES ('inventory-legacy', 'snapshot-legacy', ?, ?, ?, ?)`,
+    );
+    insertOutbox.run(
+      "event-success",
+      2,
+      JSON.stringify({
+        eventId: "event-success",
+        deviceSequence: 2,
+        operatorId: "operator-legacy",
+        scannedAt: "2026-08-25T08:01:00.000Z",
+        kind: "item",
+        normalizedIdentity: "item:success-hash",
+        codeHash: "success-hash",
+        canonicalRaw: "success-raw",
+        activeProductionDate: "2026-08-20",
+        localVerdict: "expected",
+      }),
+      "2026-08-25T08:01:00.000Z",
+    );
+    insertOutbox.run(
+      "event-unknown",
+      3,
+      JSON.stringify({
+        eventId: "event-unknown",
+        deviceSequence: 3,
+        operatorId: "operator-legacy",
+        scannedAt: "2026-08-25T08:02:00.000Z",
+        kind: "item",
+        normalizedIdentity: "item:unknown-hash",
+        codeHash: "unknown-hash",
+        canonicalRaw: "unknown-raw",
+        activeProductionDate: "2026-08-20",
+        localVerdict: "unknown",
+      }),
+      "2026-08-25T08:02:00.000Z",
+    );
+    insertOutbox.run(
+      "event-mismatch",
+      4,
+      JSON.stringify({
+        eventId: "event-mismatch",
+        deviceSequence: 4,
+        operatorId: "operator-legacy",
+        scannedAt: "2026-08-25T08:03:00.000Z",
+        kind: "item",
+        normalizedIdentity: "item:different-hash",
+        codeHash: "mismatch-hash",
+        canonicalRaw: "mismatch-raw",
+        activeProductionDate: "2026-08-20",
+        localVerdict: "expected",
+      }),
+      "2026-08-25T08:03:00.000Z",
+    );
+
+    applyStatements(db, STATION_MIGRATIONS.slice(stateMigration));
+    expect(() => applyStationMigrations(db)).not.toThrow();
+    expect(
+      db
+        .prepare(
+          `SELECT event_id, commit_state FROM inventory_scan_events_mirror ORDER BY device_sequence`,
+        )
+        .all(),
+    ).toEqual([
+      { event_id: "event-orphan", commit_state: "failed" },
+      { event_id: "event-success", commit_state: "committed" },
+      { event_id: "event-unknown", commit_state: "committed" },
+      { event_id: "event-mismatch", commit_state: "failed" },
+    ]);
+    expect(
+      db
+        .prepare(
+          `SELECT first_accepted_event_id FROM inventory_code_results_mirror
+           ORDER BY first_accepted_event_id`,
+        )
+        .all(),
+    ).toEqual([{ first_accepted_event_id: "event-success" }]);
+  });
+
+  it("re-audits orphan rows on devices that already applied the unsafe committed default", () => {
+    const stateMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN commit_state"),
+    );
+    expect(stateMigration).toBeGreaterThan(0);
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, stateMigration));
+    db.exec(
+      `ALTER TABLE inventory_scan_events_mirror
+         ADD COLUMN commit_state TEXT NOT NULL DEFAULT 'committed'`,
+    );
+    db.prepare(
+      `INSERT INTO inventory_scan_events_mirror
+         (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
+          scanned_at, kind, normalized_identity, code_hash, raw_payload,
+          active_production_date, local_verdict)
+       VALUES ('inventory-installed', 'snapshot-installed', 'event-installed-orphan',
+               'device-installed', 1, 'operator-installed', '2026-08-25T08:00:00.000Z',
+               'item', 'item:installed-hash', 'installed-hash', 'installed-raw',
+               '2026-08-20', 'expected')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO inventory_code_results_mirror
+         (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
+          winning_scanned_at, observed_production_date, classification,
+          origin_classification, updated_at)
+       VALUES ('inventory-installed', 'snapshot-installed', 'installed-hash',
+               'event-installed-orphan', 'device-installed', '2026-08-25T08:00:00.000Z',
+               '2026-08-20', 'expected', 'expected', '2026-08-25T08:00:00.000Z')`,
+    ).run();
+
+    applyStatements(db, STATION_MIGRATIONS.slice(stateMigration));
+    expect(db.prepare("SELECT commit_state FROM inventory_scan_events_mirror").get()).toEqual({
+      commit_state: "failed",
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get()).toEqual(
+      {
+        count: 0,
+      },
+    );
+  });
+
+  it("proves exact item and complete box projections before finalizing the legacy audit", () => {
+    const stateMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN commit_state"),
+    );
+    expect(stateMigration).toBeGreaterThan(0);
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, stateMigration));
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, active_snapshot_id)
+       VALUES ('inventory-proof', 'INV-PROOF', 'snapshot-proof')`,
+    ).run();
+
+    const insertSnapshot = db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status, source_state,
+          parent_sscc, expected, protected)
+       VALUES ('snapshot-proof', ?, ?, '04600000000015', ?, ?, ?, ?, ?, ?)`,
+    );
+    const snapshot = (
+      hash: string,
+      parent: string | null,
+      origin: "expected" | "protected" | "known-ineligible" = "expected",
+    ) => {
+      insertSnapshot.run(
+        hash,
+        `raw-${hash}`,
+        hash,
+        origin === "known-ineligible" ? "APPLIED" : "INTRODUCED",
+        origin === "protected" ? "MOVING_BY_UD" : null,
+        parent,
+        origin === "expected" ? 1 : 0,
+        origin === "protected" ? 1 : 0,
+      );
+    };
+    const events: Array<{
+      eventId: string;
+      sequence: number;
+      kind: "item" | "known_box";
+      identity: string;
+      codeHash: string | null;
+      rawPayload: string;
+      verdict: "expected" | "duplicate";
+    }> = [];
+    const addEvent = (event: (typeof events)[number]) => {
+      events.push(event);
+      const scannedAt = `2026-08-25T08:${String(event.sequence).padStart(2, "0")}:00.000Z`;
+      db.prepare(
+        `INSERT INTO inventory_scan_events_mirror
+           (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id,
+            scanned_at, kind, normalized_identity, code_hash, raw_payload,
+            active_production_date, local_verdict)
+         VALUES ('inventory-proof', 'snapshot-proof', ?, 'device-proof', ?, 'operator-proof',
+                 ?, ?, ?, ?, ?, '2026-08-20', ?)`,
+      ).run(
+        event.eventId,
+        event.sequence,
+        scannedAt,
+        event.kind,
+        event.identity,
+        event.codeHash,
+        event.rawPayload,
+        event.verdict,
+      );
+      db.prepare(
+        `INSERT INTO inventory_outbox
+           (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+         VALUES ('inventory-proof', 'snapshot-proof', ?, ?, ?, ?)`,
+      ).run(
+        event.eventId,
+        event.sequence,
+        JSON.stringify({
+          eventId: event.eventId,
+          deviceSequence: event.sequence,
+          operatorId: "operator-proof",
+          scannedAt,
+          kind: event.kind,
+          normalizedIdentity: event.identity,
+          codeHash: event.codeHash,
+          canonicalRaw: event.rawPayload,
+          activeProductionDate: "2026-08-20",
+          localVerdict: event.verdict,
+        }),
+        scannedAt,
+      );
+    };
+    const addResult = (
+      hash: string,
+      eventId: string,
+      sequence: number,
+      origin: "expected" | "protected" | "known-ineligible" = "expected",
+      classification = origin,
+    ) => {
+      const scannedAt = `2026-08-25T08:${String(sequence).padStart(2, "0")}:00.000Z`;
+      db.prepare(
+        `INSERT INTO inventory_code_results_mirror
+           (inventory_id, snapshot_id, code_hash, first_accepted_event_id, winning_device_id,
+            winning_scanned_at, observed_production_date, classification,
+            origin_classification, updated_at)
+         VALUES ('inventory-proof', 'snapshot-proof', ?, ?, 'device-proof', ?, '2026-08-20',
+                 ?, ?, ?)`,
+      ).run(hash, eventId, scannedAt, classification, origin, scannedAt);
+    };
+
+    addEvent({
+      eventId: "item-wrong-hash",
+      sequence: 1,
+      kind: "item",
+      identity: "item:item-right-hash",
+      codeHash: "item-right-hash",
+      rawPayload: "raw-item-right-hash",
+      verdict: "expected",
+    });
+    addResult("item-foreign-hash", "item-wrong-hash", 1);
+
+    addEvent({
+      eventId: "item-wrong-classification",
+      sequence: 2,
+      kind: "item",
+      identity: "item:item-class-hash",
+      codeHash: "item-class-hash",
+      rawPayload: "raw-item-class-hash",
+      verdict: "expected",
+    });
+    addResult("item-class-hash", "item-wrong-classification", 2, "expected", "protected");
+
+    const foreignBox = "111111111111111111";
+    snapshot("foreign-owned-child", foreignBox);
+    snapshot("foreign-extra-child", "999999999999999999");
+    addEvent({
+      eventId: "box-foreign-child",
+      sequence: 3,
+      kind: "known_box",
+      identity: `known_box:${foreignBox}`,
+      codeHash: null,
+      rawPayload: foreignBox,
+      verdict: "expected",
+    });
+    addResult("foreign-owned-child", "box-foreign-child", 3);
+    addResult("foreign-extra-child", "box-foreign-child", 3);
+
+    const partialBox = "222222222222222222";
+    snapshot("partial-child-one", partialBox);
+    snapshot("partial-child-two", partialBox);
+    addEvent({
+      eventId: "box-partial",
+      sequence: 4,
+      kind: "known_box",
+      identity: `known_box:${partialBox}`,
+      codeHash: null,
+      rawPayload: partialBox,
+      verdict: "expected",
+    });
+    addResult("partial-child-one", "box-partial", 4);
+
+    const mixedBox = "333333333333333333";
+    snapshot("mixed-expected", mixedBox, "expected");
+    snapshot("mixed-protected", mixedBox, "protected");
+    snapshot("mixed-ineligible", mixedBox, "known-ineligible");
+    addEvent({
+      eventId: "box-mixed-valid",
+      sequence: 5,
+      kind: "known_box",
+      identity: `known_box:${mixedBox}`,
+      codeHash: null,
+      rawPayload: mixedBox,
+      verdict: "expected",
+    });
+    addResult("mixed-expected", "box-mixed-valid", 5, "expected");
+    addResult("mixed-protected", "box-mixed-valid", 5, "protected");
+    addResult("mixed-ineligible", "box-mixed-valid", 5, "known-ineligible");
+    addEvent({
+      eventId: "box-mixed-duplicate",
+      sequence: 6,
+      kind: "known_box",
+      identity: `known_box:${mixedBox}`,
+      codeHash: null,
+      rawPayload: mixedBox,
+      verdict: "duplicate",
+    });
+    addEvent({
+      eventId: "item-extra-projection",
+      sequence: 7,
+      kind: "item",
+      identity: "item:item-extra-right",
+      codeHash: "item-extra-right",
+      rawPayload: "raw-item-extra-right",
+      verdict: "expected",
+    });
+    addResult("item-extra-right", "item-extra-projection", 7);
+    addResult("item-extra-foreign", "item-extra-projection", 7);
+
+    applyStatements(db, STATION_MIGRATIONS.slice(stateMigration));
+    expect(
+      db
+        .prepare(
+          `SELECT event_id, commit_state, legacy_audit_version
+             FROM inventory_scan_events_mirror
+           ORDER BY device_sequence`,
+        )
+        .all(),
+    ).toEqual([
+      { event_id: "item-wrong-hash", commit_state: "failed", legacy_audit_version: 1 },
+      {
+        event_id: "item-wrong-classification",
+        commit_state: "failed",
+        legacy_audit_version: 1,
+      },
+      { event_id: "box-foreign-child", commit_state: "failed", legacy_audit_version: 1 },
+      { event_id: "box-partial", commit_state: "failed", legacy_audit_version: 1 },
+      { event_id: "box-mixed-valid", commit_state: "committed", legacy_audit_version: 1 },
+      { event_id: "box-mixed-duplicate", commit_state: "committed", legacy_audit_version: 1 },
+      { event_id: "item-extra-projection", commit_state: "failed", legacy_audit_version: 1 },
+    ]);
+    expect(
+      db
+        .prepare(
+          `SELECT code_hash, first_accepted_event_id FROM inventory_code_results_mirror
+           ORDER BY code_hash`,
+        )
+        .all(),
+    ).toEqual([
+      { code_hash: "mixed-expected", first_accepted_event_id: "box-mixed-valid" },
+      { code_hash: "mixed-ineligible", first_accepted_event_id: "box-mixed-valid" },
+      { code_hash: "mixed-protected", first_accepted_event_id: "box-mixed-valid" },
+    ]);
+  });
+
+  it("adds durable content/order/page fences to an existing inventory mirror", () => {
+    const firstInventoryMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("CREATE TABLE IF NOT EXISTS inventory_task_mirror"),
+    );
+    const contentFenceMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN active_snapshot_fixed_at"),
+    );
+    expect(contentFenceMigration).toBeGreaterThan(firstInventoryMigration);
+
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, contentFenceMigration));
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, active_snapshot_id, active_snapshot_revision,
+          active_combined_digest, active_code_count, active_manifest_json)
+       VALUES ('inventory-1', 'INV-1', 'snapshot-1', 1, ?, 0, '{}')`,
+    ).run("a".repeat(64));
+
+    applyStatements(db, STATION_MIGRATIONS.slice(contentFenceMigration));
+    expect(() => applyStationMigrations(db)).not.toThrow();
+    expect(
+      db
+        .prepare(
+          `SELECT active_snapshot_fixed_at, active_content_digest,
+                  staged_snapshot_fixed_at, staged_content_digest,
+                  staged_verified_content_digest, staged_last_page_digest, staged_page_json,
+                  staged_reset_snapshot_id
+             FROM inventory_task_mirror`,
+        )
+        .get(),
+    ).toEqual({
+      active_snapshot_fixed_at: null,
+      active_content_digest: null,
+      staged_snapshot_fixed_at: null,
+      staged_content_digest: null,
+      staged_verified_content_digest: null,
+      staged_last_page_digest: null,
+      staged_page_json: null,
+      staged_reset_snapshot_id: null,
+    });
+  });
+
+  it("adds credential ownership to an existing inventory mirror for scoped recovery cleanup", () => {
+    const db = migratedDb();
+    const columns = db.prepare("PRAGMA table_info(inventory_task_mirror)").all() as Array<{
+      name: string;
+    }>;
+
+    expect(columns.map(({ name }) => name)).toContain("credential_ownership");
+  });
+
+  it("attributes a legacy staged mirror only when the strict active pointer matches its identity", () => {
+    const ownershipMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN credential_ownership"),
+    );
+    expect(ownershipMigration).toBeGreaterThan(0);
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, ownershipMigration));
+    const owner = "a".repeat(64);
+    const inventoryId = "11111111-1111-4111-8111-111111111111";
+    const snapshotId = "22222222-2222-4222-8222-222222222222";
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, staged_snapshot_id)
+       VALUES (?, ?, ?)`,
+    ).run(inventoryId, "INV-STAGED", snapshotId);
+    db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+          expected, protected)
+       VALUES (?, ?, 'raw', '04600000000015', 'SERIAL', 'available', 1, 0)`,
+    ).run(snapshotId, "c".repeat(64));
+    db.prepare("INSERT INTO station_meta (key, value) VALUES (?, ?)").run(
+      "active_inventory_floor_task_v1",
+      JSON.stringify({ inventoryId, snapshotId, credentialOwnership: owner }),
+    );
+
+    applyStatements(db, STATION_MIGRATIONS.slice(ownershipMigration));
+
+    expect(
+      db
+        .prepare(
+          `SELECT staged_snapshot_id, credential_ownership
+             FROM inventory_task_mirror WHERE inventory_id = ?`,
+        )
+        .get(inventoryId),
+    ).toEqual({ staged_snapshot_id: snapshotId, credential_ownership: owner });
+    expect(db.prepare("SELECT snapshot_id FROM inventory_snapshot_codes_mirror").all()).toEqual([
+      { snapshot_id: snapshotId },
+    ]);
+  });
+
+  it("does not attribute a shaped pointer whose task identities are not strict UUIDs", () => {
+    const ownershipMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN credential_ownership"),
+    );
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, ownershipMigration));
+    const inventoryId = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx";
+    const snapshotId = "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy";
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, staged_snapshot_id)
+       VALUES (?, 'INV-INVALID', ?)`,
+    ).run(inventoryId, snapshotId);
+    db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+          expected, protected)
+       VALUES (?, ?, 'raw', '04600000000015', 'SERIAL', 'available', 1, 0)`,
+    ).run(snapshotId, "f".repeat(64));
+    db.prepare("INSERT INTO station_meta (key, value) VALUES (?, ?)").run(
+      "active_inventory_floor_task_v1",
+      JSON.stringify({
+        inventoryId,
+        snapshotId,
+        credentialOwnership: "a".repeat(64),
+      }),
+    );
+
+    applyStatements(db, STATION_MIGRATIONS.slice(ownershipMigration));
+
+    expect(
+      db
+        .prepare(
+          `SELECT staged_snapshot_id, credential_ownership
+             FROM inventory_task_mirror WHERE inventory_id = ?`,
+        )
+        .get(inventoryId),
+    ).toEqual({ staged_snapshot_id: null, credential_ownership: null });
+    expect(db.prepare("SELECT * FROM inventory_snapshot_codes_mirror").all()).toEqual([]);
+  });
+
+  it("purges only unowned inactive staging while preserving active and newer-owner data", () => {
+    const ownershipMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ADD COLUMN credential_ownership"),
+    );
+    expect(ownershipMigration).toBeGreaterThan(0);
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, ownershipMigration));
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, active_snapshot_id, staged_snapshot_id)
+       VALUES ('inventory-legacy', 'INV-LEGACY', 'snapshot-active', 'snapshot-orphan')`,
+    ).run();
+    for (const [snapshotId, codeHash] of [
+      ["snapshot-active", "a".repeat(64)],
+      ["snapshot-orphan", "b".repeat(64)],
+    ] as const) {
+      db.prepare(
+        `INSERT INTO inventory_snapshot_codes_mirror
+           (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+            expected, protected)
+         VALUES (?, ?, 'raw', '04600000000015', 'SERIAL', 'available', 1, 0)`,
+      ).run(snapshotId, codeHash);
+    }
+    applyStatements(db, STATION_MIGRATIONS.slice(ownershipMigration, ownershipMigration + 1));
+    const newerOwner = "d".repeat(64);
+    const newerInventoryId = "33333333-3333-4333-8333-333333333333";
+    const newerSnapshotId = "44444444-4444-4444-8444-444444444444";
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, active_snapshot_id, credential_ownership)
+       VALUES (?, 'INV-NEW', ?, ?)`,
+    ).run(newerInventoryId, newerSnapshotId, newerOwner);
+    db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+          expected, protected)
+       VALUES (?, ?, 'raw', '04600000000015', 'SERIAL', 'available', 1, 0)`,
+    ).run(newerSnapshotId, "e".repeat(64));
+    const newerPointer = JSON.stringify({
+      inventoryId: newerInventoryId,
+      snapshotId: newerSnapshotId,
+      credentialOwnership: newerOwner,
+      activationId: "newer-activation",
+    });
+    db.prepare("INSERT INTO station_meta (key, value) VALUES (?, ?)").run(
+      "active_inventory_floor_task_v1",
+      newerPointer,
+    );
+
+    const recoveryMigrations = STATION_MIGRATIONS.slice(ownershipMigration + 1);
+    applyStatements(db, recoveryMigrations);
+    applyStatements(db, recoveryMigrations);
+
+    expect(
+      db
+        .prepare(
+          `SELECT inventory_id, active_snapshot_id, staged_snapshot_id, credential_ownership
+             FROM inventory_task_mirror ORDER BY inventory_id`,
+        )
+        .all(),
+    ).toEqual([
+      {
+        inventory_id: newerInventoryId,
+        active_snapshot_id: newerSnapshotId,
+        staged_snapshot_id: null,
+        credential_ownership: newerOwner,
+      },
+      {
+        inventory_id: "inventory-legacy",
+        active_snapshot_id: "snapshot-active",
+        staged_snapshot_id: null,
+        credential_ownership: null,
+      },
+    ]);
+    expect(
+      db
+        .prepare("SELECT snapshot_id FROM inventory_snapshot_codes_mirror ORDER BY snapshot_id")
+        .all(),
+    ).toEqual([{ snapshot_id: newerSnapshotId }, { snapshot_id: "snapshot-active" }]);
+    expect(
+      db
+        .prepare("SELECT value FROM station_meta WHERE key = ?")
+        .get("active_inventory_floor_task_v1"),
+    ).toEqual({ value: newerPointer });
+  });
+
+  it("atomically removes only an explicitly reset inactive snapshot", () => {
+    const db = migratedDb();
+    db.prepare(
+      `INSERT INTO inventory_task_mirror
+         (inventory_id, inventory_number, active_snapshot_id, staged_snapshot_id)
+       VALUES ('inventory-1', 'INV-1', 'active-1', 'legacy-stage')`,
+    ).run();
+    for (const snapshotId of ["active-1", "legacy-stage"]) {
+      db.prepare(
+        `INSERT INTO inventory_snapshot_codes_mirror
+           (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+            expected, protected)
+         VALUES (?, ?, 'raw', '04600000000015', 'S', 'EMITTED', 0, 0)`,
+      ).run(snapshotId, snapshotId === "active-1" ? "a".repeat(64) : "b".repeat(64));
+    }
+
+    db.prepare(
+      `UPDATE inventory_task_mirror
+          SET staged_snapshot_id = NULL, staged_reset_snapshot_id = 'legacy-stage'
+        WHERE inventory_id = 'inventory-1'`,
+    ).run();
+
+    expect(
+      db
+        .prepare(
+          "SELECT DISTINCT snapshot_id FROM inventory_snapshot_codes_mirror ORDER BY snapshot_id",
+        )
+        .all(),
+    ).toEqual([{ snapshot_id: "active-1" }]);
+  });
+
   it("creates the durable product image cache table", () => {
     const db = migratedDb();
     const rows = db
@@ -366,5 +1450,896 @@ describe("STATION_MIGRATIONS", () => {
     ).toEqual({
       disassembled_at: null,
     });
+  });
+});
+
+const RECEIPT_INVENTORY_ID = "11111111-1111-4111-8111-111111111111";
+const RECEIPT_SNAPSHOT_ID = "22222222-2222-4222-8222-222222222222";
+const RECEIPT_DEVICE_ID = "33333333-3333-4333-8333-333333333333";
+const RECEIPT_EVENT_ID = "44444444-4444-4444-8444-444444444444";
+const RECEIPT_BATCH_ID = "receipt-batch";
+const RECEIPT_DIGEST = "a".repeat(64);
+const RECEIPT_POINTER_KEY = "active_inventory_floor_task_v1";
+const RECEIPT_OWNERSHIP = "b".repeat(64);
+
+function receiptDb(kind: "item" | "old_box" = "item"): {
+  db: DatabaseSync;
+  outboxRowsJson: string;
+  pinKey: string;
+  pinValue: string;
+  responseJson: string;
+  pointerValue: string;
+} {
+  const db = migratedDb();
+  db.prepare(
+    `INSERT INTO inventory_task_mirror
+       (inventory_id, inventory_number, active_snapshot_id, active_snapshot_revision)
+     VALUES (?, 'INV-RECEIPT', ?, 1)`,
+  ).run(RECEIPT_INVENTORY_ID, RECEIPT_SNAPSHOT_ID);
+  db.prepare(
+    `INSERT INTO inventory_terminal_state
+       (inventory_id, snapshot_id, device_id, operator_id, next_device_sequence, updated_at)
+     VALUES (?, ?, ?, ?, 2, '2026-08-25T10:00:00.000Z')`,
+  ).run(RECEIPT_INVENTORY_ID, RECEIPT_SNAPSHOT_ID, RECEIPT_DEVICE_ID, RECEIPT_EVENT_ID);
+  const isOldBox = kind === "old_box";
+  const event = {
+    eventId: RECEIPT_EVENT_ID,
+    deviceSequence: 1,
+    operatorId: RECEIPT_EVENT_ID,
+    scannedAt: "2026-08-25T10:00:01.000Z",
+    kind,
+    normalizedIdentity: isOldBox ? "old_box:046000000000000001" : `item:${"c".repeat(64)}`,
+    codeHash: isOldBox ? null : "c".repeat(64),
+    canonicalRaw: isOldBox ? "000460000000000001" : "010460000000001521SERIAL",
+    activeProductionDate: "2026-08-20",
+    localVerdict: isOldBox ? "unknown" : "expected",
+  };
+  db.prepare(
+    `INSERT INTO inventory_scan_events_mirror
+       (inventory_id, snapshot_id, event_id, device_id, device_sequence, operator_id, scanned_at,
+        kind, normalized_identity, code_hash, raw_payload, active_production_date, local_verdict,
+        commit_state, legacy_audit_version)
+     VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, '2026-08-20', ?, 'committed', 1)`,
+  ).run(
+    RECEIPT_INVENTORY_ID,
+    RECEIPT_SNAPSHOT_ID,
+    RECEIPT_EVENT_ID,
+    RECEIPT_DEVICE_ID,
+    RECEIPT_EVENT_ID,
+    event.scannedAt,
+    event.kind,
+    event.normalizedIdentity,
+    event.codeHash,
+    event.canonicalRaw,
+    event.localVerdict,
+  );
+  const result = db
+    .prepare(
+      `INSERT INTO inventory_outbox
+         (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+       VALUES (?, ?, ?, 1, ?, '2026-08-25T10:00:01.000Z')`,
+    )
+    .run(RECEIPT_INVENTORY_ID, RECEIPT_SNAPSHOT_ID, RECEIPT_EVENT_ID, JSON.stringify(event));
+  const outboxRows = [
+    {
+      id: Number(result.lastInsertRowid),
+      eventId: RECEIPT_EVENT_ID,
+      payloadJson: JSON.stringify(event),
+    },
+  ];
+  const pinKey = `inventory_sync_batch_v1:${RECEIPT_INVENTORY_ID}:${RECEIPT_SNAPSHOT_ID}`;
+  const pinValue = JSON.stringify({
+    inventoryId: RECEIPT_INVENTORY_ID,
+    snapshotId: RECEIPT_SNAPSHOT_ID,
+    deviceId: RECEIPT_DEVICE_ID,
+    request: {
+      snapshotId: RECEIPT_SNAPSHOT_ID,
+      snapshotRevision: 1,
+      batchId: RECEIPT_BATCH_ID,
+      payloadDigest: RECEIPT_DIGEST,
+      sequenceCeiling: 1,
+      pendingEventCount: 1,
+      openBoxCount: 0,
+      events: [event],
+    },
+    outboxRows,
+  });
+  const pointerValue = JSON.stringify({
+    inventoryId: RECEIPT_INVENTORY_ID,
+    snapshotId: RECEIPT_SNAPSHOT_ID,
+    credentialOwnership: RECEIPT_OWNERSHIP,
+    activationId: "receipt-activation",
+  });
+  db.prepare("INSERT INTO station_meta (key, value) VALUES (?, ?), (?, ?)").run(
+    pinKey,
+    pinValue,
+    RECEIPT_POINTER_KEY,
+    pointerValue,
+  );
+  const responseJson = JSON.stringify({
+    inventoryId: RECEIPT_INVENTORY_ID,
+    snapshotId: RECEIPT_SNAPSHOT_ID,
+    snapshotRevision: 1,
+    batchId: RECEIPT_BATCH_ID,
+    payloadDigest: RECEIPT_DIGEST,
+    sequenceCeiling: 1,
+    resultRevision: 1,
+    outcomes: [
+      {
+        eventId: RECEIPT_EVENT_ID,
+        status: "applied",
+        reasonCode: "CLAIM_APPLIED",
+        claimedCount: isOldBox ? 0 : 1,
+        conflictCount: 0,
+        claims: isOldBox
+          ? []
+          : [
+              {
+                codeHash: "c".repeat(64),
+                status: "claimed",
+                winner: {
+                  codeHash: "c".repeat(64),
+                  eventId: RECEIPT_EVENT_ID,
+                  deviceId: RECEIPT_DEVICE_ID,
+                  scannedAt: event.scannedAt,
+                },
+              },
+            ],
+      },
+    ],
+  });
+  return {
+    db,
+    outboxRowsJson: JSON.stringify(outboxRows),
+    pinKey,
+    pinValue,
+    responseJson,
+    pointerValue,
+  };
+}
+
+function insertAckReceipt(
+  fixture: ReturnType<typeof receiptDb>,
+  overrides: Partial<{
+    receiptId: string;
+    responseJson: string;
+    outboxRowsJson: string;
+    pinKey: string;
+    pinValue: string;
+    appliedAt: string;
+  }> = {},
+): void {
+  fixture.db
+    .prepare(
+      `INSERT INTO inventory_sync_ack_receipts_v2
+         (receipt_id, inventory_id, snapshot_id, batch_id, payload_digest,
+          response_json, outbox_rows_json, pin_key, pin_value, applied_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(receipt_id) DO NOTHING`,
+    )
+    .run(
+      overrides.receiptId ??
+        `${RECEIPT_INVENTORY_ID}:${RECEIPT_SNAPSHOT_ID}:${RECEIPT_BATCH_ID}:${RECEIPT_DIGEST}`,
+      RECEIPT_INVENTORY_ID,
+      RECEIPT_SNAPSHOT_ID,
+      RECEIPT_BATCH_ID,
+      RECEIPT_DIGEST,
+      overrides.responseJson ?? fixture.responseJson,
+      overrides.outboxRowsJson ?? fixture.outboxRowsJson,
+      overrides.pinKey ?? fixture.pinKey,
+      overrides.pinValue ?? fixture.pinValue,
+      overrides.appliedAt ?? "2026-08-25T10:00:01.000Z",
+    );
+}
+
+function insertAckReceiptV3(
+  fixture: ReturnType<typeof receiptDb>,
+  responseJson: string,
+  receiptId = `${RECEIPT_INVENTORY_ID}:${RECEIPT_SNAPSHOT_ID}:${RECEIPT_BATCH_ID}:${RECEIPT_DIGEST}`,
+): void {
+  fixture.db
+    .prepare(
+      `INSERT INTO inventory_sync_ack_receipts_v3
+         (receipt_id, inventory_id, snapshot_id, batch_id, payload_digest,
+          response_json, outbox_rows_json, pin_key, pin_value, applied_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      receiptId,
+      RECEIPT_INVENTORY_ID,
+      RECEIPT_SNAPSHOT_ID,
+      RECEIPT_BATCH_ID,
+      RECEIPT_DIGEST,
+      responseJson,
+      fixture.outboxRowsJson,
+      fixture.pinKey,
+      fixture.pinValue,
+      "2026-08-25T10:00:01.000Z",
+    );
+}
+
+interface MutableReceiptResponse {
+  outcomes: Array<{
+    status: string;
+    reasonCode: string;
+    claimedCount: number;
+    conflictCount: number;
+    claims: Array<{
+      codeHash: string;
+      status: string;
+      winner: {
+        codeHash: string;
+        eventId: string;
+        deviceId: string;
+        scannedAt: string;
+      };
+    }>;
+  }>;
+}
+
+function mutableReceiptResponse(fixture: ReturnType<typeof receiptDb>): MutableReceiptResponse {
+  return JSON.parse(fixture.responseJson) as MutableReceiptResponse;
+}
+
+function seedClosedPendingRepackBox(fixture: ReturnType<typeof receiptDb>) {
+  const boxId = "66666666-6666-4666-8666-666666666666";
+  fixture.db
+    .prepare(
+      `INSERT INTO inventory_repack_boxes_mirror
+         (inventory_id, snapshot_id, box_id, opened_event_id, closed_event_id,
+          old_sscc_context, new_sscc, owner_device_id, capacity, production_date,
+          state, print_state, opened_at, closed_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, '346006820000000014', '046006820000000018', ?, 1,
+               '2026-08-20', 'closed', 'pending', '2026-08-25T10:00:00.000Z',
+               '2026-08-25T10:00:00.000Z', '2026-08-25T10:00:00.000Z')`,
+    )
+    .run(
+      RECEIPT_INVENTORY_ID,
+      RECEIPT_SNAPSHOT_ID,
+      boxId,
+      RECEIPT_EVENT_ID,
+      RECEIPT_EVENT_ID,
+      RECEIPT_DEVICE_ID,
+    );
+  fixture.db
+    .prepare(
+      `INSERT INTO inventory_repack_items_mirror
+         (inventory_id, snapshot_id, item_id, source_event_id, box_id, code_hash,
+          position, production_date, added_at)
+       VALUES (?, ?, '77777777-7777-4777-8777-777777777777', ?, ?, ?, 1,
+               '2026-08-20', '2026-08-25T10:00:00.000Z')`,
+    )
+    .run(RECEIPT_INVENTORY_ID, RECEIPT_SNAPSHOT_ID, RECEIPT_EVENT_ID, boxId, "c".repeat(64));
+  return boxId;
+}
+
+function expectAcknowledgementStateUntouched(fixture: ReturnType<typeof receiptDb>): void {
+  expect(fixture.db.prepare("SELECT count(*) AS count FROM inventory_outbox").get()).toEqual({
+    count: 1,
+  });
+  expect(
+    fixture.db.prepare("SELECT value FROM station_meta WHERE key = ?").get(fixture.pinKey),
+  ).toEqual({ value: fixture.pinValue });
+  expect(
+    fixture.db
+      .prepare(
+        `SELECT authoritative_verdict, server_reason_code
+           FROM inventory_scan_events_mirror WHERE event_id = ?`,
+      )
+      .get(RECEIPT_EVENT_ID),
+  ).toEqual({ authoritative_verdict: null, server_reason_code: null });
+  for (const table of [
+    "inventory_sync_ack_receipts_v2",
+    "inventory_sync_ack_receipts_v3",
+    "inventory_event_claim_outcomes_mirror",
+    "inventory_conflicts_mirror",
+  ]) {
+    expect(fixture.db.prepare(`SELECT count(*) AS count FROM ${table}`).get()).toEqual({
+      count: 0,
+    });
+  }
+}
+
+function insertProgressReceipt(
+  fixture: ReturnType<typeof receiptDb>,
+  input: {
+    receiptId?: string;
+    pageJson: string;
+    pointerValue?: string;
+    appliedAt?: string;
+  },
+): void {
+  fixture.db
+    .prepare(
+      `INSERT INTO inventory_progress_receipts_v2
+         (receipt_id, inventory_id, snapshot_id, device_id, requested_cursor,
+          prior_result_revision, page_json, pointer_key, pointer_value,
+          credential_ownership, applied_at)
+       VALUES (?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?)
+       ON CONFLICT(receipt_id) DO NOTHING`,
+    )
+    .run(
+      input.receiptId ??
+        `${RECEIPT_INVENTORY_ID}:${RECEIPT_SNAPSHOT_ID}:${RECEIPT_DEVICE_ID}:root:0:1:end`,
+      RECEIPT_INVENTORY_ID,
+      RECEIPT_SNAPSHOT_ID,
+      RECEIPT_DEVICE_ID,
+      input.pageJson,
+      RECEIPT_POINTER_KEY,
+      input.pointerValue ?? fixture.pointerValue,
+      RECEIPT_OWNERSHIP,
+      input.appliedAt ?? "2026-08-25T10:00:00.000Z",
+    );
+}
+
+describe("inventory receipt trigger admission", () => {
+  it("durably reduces a rejected event through v3 while preserving its diagnostic row", () => {
+    const fixture = receiptDb();
+    const rejected = mutableReceiptResponse(fixture);
+    const outcome = rejected.outcomes[0]!;
+    outcome.status = "rejected";
+    outcome.reasonCode = "INVENTORY_EVENT_REJECTED";
+    outcome.claimedCount = 0;
+    outcome.conflictCount = 0;
+    outcome.claims = [];
+
+    expect(() => insertAckReceiptV3(fixture, JSON.stringify(rejected))).not.toThrow();
+    expect(fixture.db.prepare("SELECT count(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 0,
+    });
+    expect(
+      fixture.db
+        .prepare(
+          `SELECT authoritative_verdict, server_reason_code, raw_payload
+             FROM inventory_scan_events_mirror WHERE event_id = ?`,
+        )
+        .get(RECEIPT_EVENT_ID),
+    ).toEqual({
+      authoritative_verdict: "rejected",
+      server_reason_code: "INVENTORY_EVENT_REJECTED",
+      raw_payload: "010460000000001521SERIAL",
+    });
+    expect(
+      fixture.db.prepare("SELECT count(*) AS count FROM inventory_sync_ack_receipts_v3").get(),
+    ).toEqual({ count: 1 });
+  });
+
+  it("rejects a contradictory rejected v3 receipt without draining evidence", () => {
+    const fixture = receiptDb();
+    const rejected = mutableReceiptResponse(fixture);
+    const outcome = rejected.outcomes[0]!;
+    outcome.status = "rejected";
+    outcome.reasonCode = "INVENTORY_EVENT_REJECTED";
+    outcome.claimedCount = 1;
+
+    expect(() => insertAckReceiptV3(fixture, JSON.stringify(rejected))).toThrow(
+      "inventory acknowledgement receipt invalid",
+    );
+    expectAcknowledgementStateUntouched(fixture);
+  });
+
+  it("rejects a non-derived v3 receipt identity without draining evidence", () => {
+    const fixture = receiptDb();
+    expect(() => insertAckReceiptV3(fixture, fixture.responseJson, "forged-receipt")).toThrow(
+      "inventory acknowledgement receipt invalid",
+    );
+    expectAcknowledgementStateUntouched(fixture);
+  });
+
+  it.each([
+    ["an empty acknowledgement object", () => ({ responseJson: "{}" })],
+    [
+      "missing response anchors",
+      (_fixture: ReturnType<typeof receiptDb>) => ({
+        responseJson: JSON.stringify({
+          snapshotId: RECEIPT_SNAPSHOT_ID,
+          batchId: RECEIPT_BATCH_ID,
+          payloadDigest: RECEIPT_DIGEST,
+          outcomes: [{ eventId: RECEIPT_EVENT_ID }],
+        }),
+      }),
+    ],
+    ["a non-derived receipt identity", () => ({ receiptId: "forged-receipt" })],
+    [
+      "an internally forged pinned batch",
+      (fixture: ReturnType<typeof receiptDb>) => {
+        const pinValue = JSON.stringify({
+          ...JSON.parse(fixture.pinValue),
+          inventoryId: "99999999-9999-4999-8999-999999999999",
+        });
+        fixture.db
+          .prepare("UPDATE station_meta SET value = ? WHERE key = ?")
+          .run(pinValue, fixture.pinKey);
+        return { pinValue };
+      },
+    ],
+    [
+      "contradictory aggregate claim totals",
+      (fixture: ReturnType<typeof receiptDb>) => {
+        const response = JSON.parse(fixture.responseJson) as {
+          outcomes: Array<{ claimedCount: number }>;
+        };
+        response.outcomes[0]!.claimedCount = 0;
+        return { responseJson: JSON.stringify(response) };
+      },
+    ],
+  ])("rejects %s before deleting an outbox row or pin", (_name, mutate) => {
+    const fixture = receiptDb();
+    const overrides = mutate(fixture);
+    const storedPin = fixture.db
+      .prepare("SELECT value FROM station_meta WHERE key = ?")
+      .get(fixture.pinKey);
+    expect(() => insertAckReceipt(fixture, overrides)).toThrow();
+    expect(fixture.db.prepare("SELECT count(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 1,
+    });
+    expect(
+      fixture.db.prepare("SELECT value FROM station_meta WHERE key = ?").get(fixture.pinKey),
+    ).toEqual(storedPin);
+    expect(
+      fixture.db.prepare("SELECT count(*) AS count FROM inventory_sync_ack_receipts_v2").get(),
+    ).toEqual({ count: 0 });
+  });
+
+  it("rejects a conflicting acknowledgement receipt instead of accepting its id", () => {
+    const fixture = receiptDb();
+    insertAckReceipt(fixture);
+    expect(() => insertAckReceipt(fixture)).not.toThrow();
+    expect(() =>
+      insertAckReceipt(fixture, {
+        outboxRowsJson: "[]",
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a forged zero-claim item acknowledgement without any mutation", () => {
+    const fixture = receiptDb();
+    const response = JSON.parse(fixture.responseJson) as {
+      outcomes: Array<{ claimedCount: number; claims: unknown[] }>;
+    };
+    response.outcomes[0]!.claimedCount = 0;
+    response.outcomes[0]!.claims = [];
+    const storedPin = fixture.db
+      .prepare("SELECT value FROM station_meta WHERE key = ?")
+      .get(fixture.pinKey);
+
+    expect(() => insertAckReceipt(fixture, { responseJson: JSON.stringify(response) })).toThrow();
+    expect(fixture.db.prepare("SELECT count(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 1,
+    });
+    expect(
+      fixture.db.prepare("SELECT value FROM station_meta WHERE key = ?").get(fixture.pinKey),
+    ).toEqual(storedPin);
+    expect(
+      fixture.db
+        .prepare(
+          `SELECT authoritative_verdict, server_reason_code
+             FROM inventory_scan_events_mirror WHERE event_id = ?`,
+        )
+        .get(RECEIPT_EVENT_ID),
+    ).toEqual({ authoritative_verdict: null, server_reason_code: null });
+    for (const table of [
+      "inventory_sync_ack_receipts_v2",
+      "inventory_event_claim_outcomes_mirror",
+      "inventory_conflicts_mirror",
+    ]) {
+      expect(fixture.db.prepare(`SELECT count(*) AS count FROM ${table}`).get()).toEqual({
+        count: 0,
+      });
+    }
+  });
+
+  it("accepts a zero-claim acknowledgement only for the pinned old_box event", () => {
+    const fixture = receiptDb("old_box");
+    expect(() => insertAckReceipt(fixture)).not.toThrow();
+    expect(fixture.db.prepare("SELECT count(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 0,
+    });
+    expect(
+      fixture.db.prepare("SELECT value FROM station_meta WHERE key = ?").get(fixture.pinKey),
+    ).toBeUndefined();
+    expect(
+      fixture.db
+        .prepare(
+          `SELECT authoritative_verdict, server_reason_code
+             FROM inventory_scan_events_mirror WHERE event_id = ?`,
+        )
+        .get(RECEIPT_EVENT_ID),
+    ).toEqual({ authoritative_verdict: "applied", server_reason_code: "CLAIM_APPLIED" });
+    expect(
+      fixture.db.prepare("SELECT count(*) AS count FROM inventory_sync_ack_receipts_v2").get(),
+    ).toEqual({ count: 1 });
+  });
+
+  it.each([
+    [
+      "replay with no item claim",
+      (response: MutableReceiptResponse) => {
+        const outcome = response.outcomes[0]!;
+        outcome.status = "replay";
+        outcome.reasonCode = "BATCH_REPLAY";
+        outcome.claimedCount = 0;
+        outcome.claims = [];
+      },
+    ],
+    [
+      "claimed winner from another device",
+      (response: MutableReceiptResponse) => {
+        response.outcomes[0]!.claims[0]!.winner.deviceId = "55555555-5555-4555-8555-555555555555";
+      },
+    ],
+    [
+      "claimed winner from another event",
+      (response: MutableReceiptResponse) => {
+        response.outcomes[0]!.claims[0]!.winner.eventId = "55555555-5555-4555-8555-555555555555";
+      },
+    ],
+    [
+      "claimed winner with another scan time",
+      (response: MutableReceiptResponse) => {
+        response.outcomes[0]!.claims[0]!.winner.scannedAt = "2026-08-25T10:00:02.000Z";
+      },
+    ],
+    [
+      "claim for another code",
+      (response: MutableReceiptResponse) => {
+        const claim = response.outcomes[0]!.claims[0]!;
+        claim.codeHash = "d".repeat(64);
+        claim.winner.codeHash = "d".repeat(64);
+      },
+    ],
+  ])("rejects a forged item %s without any acknowledgement mutation", (_name, forge) => {
+    const fixture = receiptDb();
+    const response = mutableReceiptResponse(fixture);
+    forge(response);
+
+    expect(() => insertAckReceipt(fixture, { responseJson: JSON.stringify(response) })).toThrow();
+    expectAcknowledgementStateUntouched(fixture);
+  });
+
+  it.each([
+    ["applied", (response: MutableReceiptResponse) => response],
+    [
+      "replay",
+      (response: MutableReceiptResponse) => {
+        response.outcomes[0]!.status = "replay";
+        response.outcomes[0]!.reasonCode = "BATCH_REPLAY";
+        return response;
+      },
+    ],
+    [
+      "duplicate",
+      (response: MutableReceiptResponse) => {
+        const outcome = response.outcomes[0]!;
+        const claim = outcome.claims[0]!;
+        outcome.status = "duplicate";
+        outcome.reasonCode = "CLAIM_LOST";
+        outcome.claimedCount = 0;
+        outcome.conflictCount = 1;
+        claim.status = "duplicate";
+        claim.winner.eventId = "55555555-5555-4555-8555-555555555555";
+        return response;
+      },
+    ],
+  ])("accepts a canonical %s item acknowledgement", (_name, canonicalize) => {
+    const fixture = receiptDb();
+    const response = canonicalize(mutableReceiptResponse(fixture));
+
+    expect(() =>
+      insertAckReceipt(fixture, { responseJson: JSON.stringify(response) }),
+    ).not.toThrow();
+    expect(fixture.db.prepare("SELECT count(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 0,
+    });
+    expect(
+      fixture.db.prepare("SELECT count(*) AS count FROM inventory_sync_ack_receipts_v2").get(),
+    ).toEqual({ count: 1 });
+  });
+
+  it("invalidates the losing local repack box in the atomic Task 6 acknowledgement transport", () => {
+    const fixture = receiptDb();
+    const boxId = "66666666-6666-4666-8666-666666666666";
+    const itemId = "77777777-7777-4777-8777-777777777777";
+    fixture.db
+      .prepare(
+        `INSERT INTO inventory_repack_boxes_mirror
+           (inventory_id, snapshot_id, box_id, opened_event_id, old_sscc_context,
+            new_sscc, owner_device_id, capacity, production_date, state, print_state,
+            opened_at, updated_at)
+         VALUES (?, ?, ?, ?, '346006820000000014', '046006820000000018', ?, 20,
+                 '2026-08-20', 'open', 'not_ready', '2026-08-25T10:00:00.000Z',
+                 '2026-08-25T10:00:00.000Z')`,
+      )
+      .run(RECEIPT_INVENTORY_ID, RECEIPT_SNAPSHOT_ID, boxId, RECEIPT_EVENT_ID, RECEIPT_DEVICE_ID);
+    fixture.db
+      .prepare(
+        `INSERT INTO inventory_repack_items_mirror
+           (inventory_id, snapshot_id, item_id, source_event_id, box_id, code_hash,
+            position, production_date, added_at)
+         VALUES (?, ?, ?, ?, ?, ?, 1, '2026-08-20', '2026-08-25T10:00:01.000Z')`,
+      )
+      .run(
+        RECEIPT_INVENTORY_ID,
+        RECEIPT_SNAPSHOT_ID,
+        itemId,
+        RECEIPT_EVENT_ID,
+        boxId,
+        "c".repeat(64),
+      );
+    const response = mutableReceiptResponse(fixture);
+    const outcome = response.outcomes[0]!;
+    const claim = outcome.claims[0]!;
+    outcome.status = "duplicate";
+    outcome.reasonCode = "CLAIM_LOST";
+    outcome.claimedCount = 0;
+    outcome.conflictCount = 1;
+    claim.status = "duplicate";
+    claim.winner.eventId = "55555555-5555-4555-8555-555555555555";
+
+    insertAckReceipt(fixture, { responseJson: JSON.stringify(response) });
+
+    expect(
+      fixture.db
+        .prepare(
+          "SELECT state, invalidated_at, invalidation_source FROM inventory_repack_boxes_mirror WHERE box_id = ?",
+        )
+        .get(boxId),
+    ).toEqual({
+      state: "invalidated",
+      invalidated_at: "2026-08-25T10:00:01.000Z",
+      invalidation_source: "claim_lost",
+    });
+  });
+
+  it.each(["acknowledgement", "progress"] as const)(
+    "atomically invalidates a closed pending-print box after a losing %s receipt",
+    (transport) => {
+      const fixture = receiptDb();
+      const boxId = seedClosedPendingRepackBox(fixture);
+
+      if (transport === "acknowledgement") {
+        const response = mutableReceiptResponse(fixture);
+        const outcome = response.outcomes[0]!;
+        outcome.status = "duplicate";
+        outcome.reasonCode = "CLAIM_LOST";
+        outcome.claimedCount = 0;
+        outcome.conflictCount = 1;
+        outcome.claims[0]!.status = "duplicate";
+        outcome.claims[0]!.winner.eventId = "55555555-5555-4555-8555-555555555555";
+        insertAckReceipt(fixture, { responseJson: JSON.stringify(response) });
+      } else {
+        const changeId = "99999999-9999-4999-8999-999999999999";
+        insertProgressReceipt(fixture, {
+          receiptId: `${RECEIPT_INVENTORY_ID}:${RECEIPT_SNAPSHOT_ID}:${RECEIPT_DEVICE_ID}:root:0:1:1:${changeId}`,
+          appliedAt: "2026-08-25T10:00:01.000Z",
+          pageJson: JSON.stringify({
+            inventoryId: RECEIPT_INVENTORY_ID,
+            snapshotId: RECEIPT_SNAPSHOT_ID,
+            snapshotRevision: 1,
+            cursor: null,
+            resultRevision: 1,
+            items: [
+              {
+                id: changeId,
+                revision: 1,
+                kind: "claim",
+                codeHash: "c".repeat(64),
+                classification: "expected",
+                observedProductionDate: "2026-08-20",
+                winner: {
+                  codeHash: "c".repeat(64),
+                  eventId: "55555555-5555-4555-8555-555555555555",
+                  deviceId: "88888888-8888-4888-8888-888888888888",
+                  scannedAt: "2026-08-25T09:00:00.000Z",
+                },
+                correctedAt: "2026-08-25T10:00:01.000Z",
+              },
+            ],
+            nextCursor: `1:${changeId}`,
+          }),
+        });
+      }
+
+      expect(
+        fixture.db
+          .prepare(
+            `SELECT state, print_state, invalidated_at, invalidation_source
+               FROM inventory_repack_boxes_mirror WHERE box_id = ?`,
+          )
+          .get(boxId),
+      ).toEqual({
+        state: "invalidated",
+        print_state: "failed",
+        invalidated_at: "2026-08-25T10:00:01.000Z",
+        invalidation_source: "claim_lost",
+      });
+    },
+  );
+
+  it("rejects malformed or unowned progress receipts without any mutation", () => {
+    const validPageJson = JSON.stringify({
+      inventoryId: RECEIPT_INVENTORY_ID,
+      snapshotId: RECEIPT_SNAPSHOT_ID,
+      snapshotRevision: 1,
+      cursor: null,
+      resultRevision: 1,
+      items: [],
+      nextCursor: null,
+    });
+    for (const [pageJson, mutate, pointerValue] of [
+      ["{}", false, undefined],
+      [
+        JSON.stringify({
+          snapshotId: RECEIPT_SNAPSHOT_ID,
+          snapshotRevision: 1,
+          cursor: null,
+          resultRevision: 1,
+          items: [],
+          nextCursor: null,
+        }),
+        false,
+        undefined,
+      ],
+      [validPageJson, true, undefined],
+      [
+        validPageJson,
+        false,
+        JSON.stringify({
+          inventoryId: RECEIPT_INVENTORY_ID,
+          snapshotId: RECEIPT_SNAPSHOT_ID,
+          credentialOwnership: RECEIPT_OWNERSHIP,
+          activationId: "forged-activation",
+        }),
+      ],
+    ] as const) {
+      const fixture = receiptDb();
+      if (mutate) {
+        fixture.db.prepare("DELETE FROM station_meta WHERE key = ?").run(RECEIPT_POINTER_KEY);
+      }
+      expect(() =>
+        insertProgressReceipt(fixture, {
+          pageJson,
+          ...(pointerValue ? { pointerValue } : {}),
+        }),
+      ).toThrow();
+      expect(
+        fixture.db
+          .prepare("SELECT progress_cursor, progress_result_revision FROM inventory_terminal_state")
+          .get(),
+      ).toEqual({ progress_cursor: null, progress_result_revision: 0 });
+      expect(
+        fixture.db.prepare("SELECT count(*) AS count FROM inventory_code_results_mirror").get(),
+      ).toEqual({ count: 0 });
+    }
+  });
+
+  it("accepts only a byte-for-byte equal progress receipt on conflict", () => {
+    const fixture = receiptDb();
+    const pageJson = JSON.stringify({
+      inventoryId: RECEIPT_INVENTORY_ID,
+      snapshotId: RECEIPT_SNAPSHOT_ID,
+      snapshotRevision: 1,
+      cursor: null,
+      resultRevision: 1,
+      items: [],
+      nextCursor: null,
+    });
+    insertProgressReceipt(fixture, { pageJson });
+    expect(() => insertProgressReceipt(fixture, { pageJson })).not.toThrow();
+    expect(() =>
+      insertProgressReceipt(fixture, {
+        pageJson,
+        appliedAt: "2026-08-25T10:02:00.000Z",
+      }),
+    ).toThrow();
+  });
+
+  it.each([
+    ["JSON null", null],
+    ["a valid leap day", "2024-02-29"],
+  ])("accepts observedProductionDate as %s", (_name, observed) => {
+    const fixture = receiptDb();
+    const changeId = "99999999-9999-4999-8999-999999999999";
+    const pageJson = JSON.stringify({
+      inventoryId: RECEIPT_INVENTORY_ID,
+      snapshotId: RECEIPT_SNAPSHOT_ID,
+      snapshotRevision: 1,
+      cursor: null,
+      resultRevision: 1,
+      items: [
+        {
+          id: changeId,
+          revision: 1,
+          kind: "claim",
+          codeHash: "c".repeat(64),
+          classification: "expected",
+          observedProductionDate: observed,
+          winner: {
+            codeHash: "c".repeat(64),
+            eventId: "77777777-7777-4777-8777-777777777777",
+            deviceId: "88888888-8888-4888-8888-888888888888",
+            scannedAt: "2026-08-25T09:00:00.000Z",
+          },
+          correctedAt: "2026-08-25T10:01:00.000Z",
+        },
+      ],
+      nextCursor: `1:${changeId}`,
+    });
+
+    expect(() =>
+      insertProgressReceipt(fixture, {
+        receiptId: `${RECEIPT_INVENTORY_ID}:${RECEIPT_SNAPSHOT_ID}:${RECEIPT_DEVICE_ID}:root:0:1:1:${changeId}`,
+        pageJson,
+        appliedAt: "2026-08-25T10:01:00.000Z",
+      }),
+    ).not.toThrow();
+    expect(
+      fixture.db
+        .prepare(
+          "SELECT observed_production_date FROM inventory_code_results_mirror WHERE code_hash = ?",
+        )
+        .get("c".repeat(64)),
+    ).toEqual({ observed_production_date: observed });
+    expect(
+      fixture.db
+        .prepare("SELECT progress_cursor, progress_result_revision FROM inventory_terminal_state")
+        .get(),
+    ).toEqual({ progress_cursor: `1:${changeId}`, progress_result_revision: 1 });
+  });
+
+  it.each([
+    ["an object", { forged: true }],
+    ["a number", 20260825],
+    ["an impossible civil date", "2023-02-29"],
+  ])("rejects observedProductionDate as %s without progress mutation", (_name, observed) => {
+    const fixture = receiptDb();
+    const changeId = "99999999-9999-4999-8999-999999999999";
+    const pageJson = JSON.stringify({
+      inventoryId: RECEIPT_INVENTORY_ID,
+      snapshotId: RECEIPT_SNAPSHOT_ID,
+      snapshotRevision: 1,
+      cursor: null,
+      resultRevision: 1,
+      items: [
+        {
+          id: changeId,
+          revision: 1,
+          kind: "claim",
+          codeHash: "c".repeat(64),
+          classification: "expected",
+          observedProductionDate: observed,
+          winner: {
+            codeHash: "c".repeat(64),
+            eventId: "77777777-7777-4777-8777-777777777777",
+            deviceId: "88888888-8888-4888-8888-888888888888",
+            scannedAt: "2026-08-25T09:00:00.000Z",
+          },
+          correctedAt: "2026-08-25T10:01:00.000Z",
+        },
+      ],
+      nextCursor: `1:${changeId}`,
+    });
+
+    expect(() =>
+      insertProgressReceipt(fixture, {
+        receiptId: `${RECEIPT_INVENTORY_ID}:${RECEIPT_SNAPSHOT_ID}:${RECEIPT_DEVICE_ID}:root:0:1:1:${changeId}`,
+        pageJson,
+        appliedAt: "2026-08-25T10:01:00.000Z",
+      }),
+    ).toThrow();
+    for (const table of [
+      "inventory_progress_receipts_v2",
+      "inventory_code_results_mirror",
+      "inventory_conflicts_mirror",
+    ]) {
+      expect(fixture.db.prepare(`SELECT count(*) AS count FROM ${table}`).get()).toEqual({
+        count: 0,
+      });
+    }
+    expect(
+      fixture.db
+        .prepare("SELECT progress_cursor, progress_result_revision FROM inventory_terminal_state")
+        .get(),
+    ).toEqual({ progress_cursor: null, progress_result_revision: 0 });
   });
 });

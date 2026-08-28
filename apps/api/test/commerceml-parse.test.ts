@@ -202,4 +202,42 @@ describe("commerceml parse", () => {
     const catalog = parseCatalog(bytes);
     expect(catalog.items[0]!.name).toBe("до&#0;после &#xD800;далее");
   });
+
+  describe("штрихкод и картинка", () => {
+    it("читает Штрихкод и повторяющиеся Картинка у товара", () => {
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<КоммерческаяИнформация>
+ <Каталог><Товары>
+  <Товар>
+   <Ид>guid-1</Ид><Наименование>Сидр</Наименование>
+   <Штрихкод>4680089900253</Штрихкод>
+   <Картинка>import_files/a.png</Картинка>
+   <Картинка>import_files/b.png</Картинка>
+  </Товар>
+ </Товары></Каталог>
+</КоммерческаяИнформация>`;
+      const { items } = parseCatalog(Buffer.from(xml));
+      expect(items[0]!.barcode).toBe("4680089900253");
+      expect(items[0]!.images).toEqual(["import_files/a.png", "import_files/b.png"]);
+    });
+
+    it("без тегов — barcode null и пустой images", () => {
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<КоммерческаяИнформация><Каталог><Товары>
+  <Товар><Ид>guid-1</Ид><Наименование>Сидр</Наименование></Товар>
+</Товары></Каталог></КоммерческаяИнформация>`;
+      const { items } = parseCatalog(Buffer.from(xml));
+      expect(items[0]!.barcode).toBeNull();
+      expect(items[0]!.images).toEqual([]);
+    });
+
+    it("читает Штрихкод предложения", () => {
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<КоммерческаяИнформация><ПакетПредложений><Предложения>
+  <Предложение><Ид>guid-1</Ид><Штрихкод>4680089900253</Штрихкод></Предложение>
+</Предложения></ПакетПредложений></КоммерческаяИнформация>`;
+      const { offers } = parseOffers(Buffer.from(xml));
+      expect(offers[0]!.barcode).toBe("4680089900253");
+    });
+  });
 });

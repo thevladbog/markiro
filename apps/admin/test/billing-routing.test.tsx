@@ -273,7 +273,9 @@ it.each([
   if (access.capabilities.length === 0) {
     expect(await screen.findByText("Доступ к кабинету пока не открыт")).toBeDefined();
   } else {
-    expect(await screen.findByRole("heading", { name: "Обзор" })).toBeDefined();
+    expect(await screen.findAllByRole("link", { name: "Открыть профиль Елена Ким" })).toHaveLength(
+      2,
+    );
   }
   expect(screen.queryByRole("link", { name: "Биллинг" })).toBeNull();
 });

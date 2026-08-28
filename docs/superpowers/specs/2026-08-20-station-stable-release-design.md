@@ -192,7 +192,7 @@ A service release/tag named `station-stable-channel` is marked Pre-release and
 owns only the current stable `latest.json`:
 
 ```text
-https://github.com/thevladbog/markiro/releases/download/station-stable-channel/latest.json
+https://github.com/thevladbog/markiro-station-releases/releases/download/station-stable-channel/latest.json
 ```
 
 The Pre-release flag prevents this mutable service release from becoming

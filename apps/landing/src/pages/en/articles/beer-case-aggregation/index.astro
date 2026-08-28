@@ -1,0 +1,143 @@
+---
+import { Picture } from "astro:assets";
+
+import articleHero from "../../../../assets/beer-case-aggregation-hero.png";
+import LandingFooter from "../../../../components/LandingFooter.astro";
+import LandingHeader from "../../../../components/LandingHeader.astro";
+import { BEER_CASE_AGGREGATION_ARTICLE_EN } from "../../../../content/articles";
+import { buildArticlePageGraph } from "../../../../lib/seo";
+import { readPublicSiteConfig } from "../../../../lib/site-config";
+import BaseLayout from "../../../../layouts/BaseLayout.astro";
+
+const article = BEER_CASE_AGGREGATION_ARTICLE_EN;
+const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<BaseLayout metadata={article} graph={buildArticlePageGraph(article)}>
+  <LandingHeader page={article} phone={config.phone} />
+  <main id="main" class="article-page">
+    <header class="article-hero">
+      <div class="container article-hero__inner">
+        <nav class="breadcrumbs" aria-label="Breadcrumbs">
+          <ol><li><a href="/en/">Markiro</a></li><li aria-current="page">{article.navigationLabel}</li></ol>
+        </nav>
+        <div class="article-hero__layout">
+          <div class="article-hero__copy">
+            <p class="section-index">{article.eyebrow}</p>
+            <h1>{article.heading}</h1>
+            <p class="article-hero__lead">{article.introduction}</p>
+            <div class="article-byline" aria-label="Publication details">
+              <span>{article.authorName}</span><time datetime={article.publishedAt}>August 26, 2026</time><span>{article.readingTimeMinutes} min read</span>
+            </div>
+          </div>
+          <figure class="article-hero__media" data-article-visual>
+            <Picture src={articleHero} alt="Operator scanning a Data Matrix before placing a bottle in a case and printing its SSCC" widths={[480, 720, 1080]} formats={["avif", "webp"]} sizes="(max-width: 767px) 100vw, 45vw" loading="eager" fetchpriority="high" data-article-hero-image />
+            <figcaption>Verifying each item before packing keeps the physical case and its digital contents aligned.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </header>
+
+    <article class="container article-body">
+      <aside class="article-summary" aria-labelledby="article-summary-title">
+        <p class="section-index">In brief</p>
+        <h2 id="article-summary-title">What a robust process needs</h2>
+        <ul>
+          <li data-key-takeaway>Aggregation belongs inside the packer’s normal workflow, not in a separate end-of-shift operation.</li>
+          <li data-key-takeaway>Every Data Matrix must be checked before it becomes part of a case.</li>
+          <li data-key-takeaway>An SSCC identifies one logistics unit and must not be reused for another case.</li>
+          <li data-key-takeaway>Duplicate scans, failed printing, and lost connectivity need explicit recovery paths.</li>
+          <li data-key-takeaway>A local station should preserve permitted work until it can synchronize safely.</li>
+        </ul>
+      </aside>
+
+      <nav class="article-toc" aria-label="Article contents">
+        <p class="section-index">Contents</p>
+        <ol><li><a href="#scope">Product scope</a></li><li><a href="#aggregation">Aggregation and SSCC</a></li><li><a href="#workflow">Case workflow</a></li><li><a href="#exceptions">Failure handling</a></li><li><a href="#checklist">Pre-launch check</a></li><li><a href="#markiro">Markiro’s current scope</a></li></ol>
+      </nav>
+
+      <section id="scope" aria-labelledby="scope-title">
+        <p class="section-index">01 / Scope</p>
+        <h2 id="scope-title">Which Russian product group is covered</h2>
+        <p>The official category name translates as <strong>“Beer, beer-based beverages, and certain types of low-alcohol beverages.”</strong> It includes beer and beer beverages as well as selected low-alcohol products, including cider types covered by the applicable classifications.</p>
+        <p>A commercial product name is not enough to determine whether the rules apply. Manufacturers should verify the current EAEU customs classification and the Russian OKPD 2 code against the applicable regulation and the <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/kakie-tovary-podlezhat-obyazatelnoy-markirovke-pivo">official Chestny ZNAK guidance</a> (in Russian).</p>
+      </section>
+
+      <section id="aggregation" aria-labelledby="aggregation-title">
+        <p class="section-index">02 / Identification</p>
+        <h2 id="aggregation-title">What aggregation means and why a case needs an SSCC</h2>
+        <p><strong>Aggregation creates a verified relationship between serialized bottles or cans and the transport package that contains them.</strong> An SSCC — Serial Shipping Container Code — can identify that logistics unit.</p>
+        <p><a href="https://www.gs1.org/standards/id-keys/sscc">GS1 defines the SSCC</a> as the identifier for a logistics unit such as a case or pallet. Russian marking terminology also uses KITU for a transport-package identification code. Application Identifier <code>(00)</code> is used for an SSCC.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/beer-case-aggregation-flow-en.svg" width="1200" height="520" loading="lazy" decoding="async" alt="Flow from a verified item Data Matrix through closed case contents to a unique SSCC label" data-article-diagram />
+          <figcaption>The verified chain is item code → case contents → unique SSCC label.</figcaption>
+        </figure>
+        <div class="article-callout"><strong>Do not recycle an SSCC.</strong><p>If a closed case is dismantled, its identifier remains in the audit history. A newly assembled physical case receives a new SSCC.</p></div>
+      </section>
+
+      <section id="workflow" aria-labelledby="workflow-title">
+        <p class="section-index">03 / Workflow</p>
+        <h2 id="workflow-title">A repeatable case-packing cycle</h2>
+        <p>A reliable process starts with the production job and packing rules, not with label printing. The operator should always see the next permitted action and the outcome of the latest scan.</p>
+        <ol class="article-steps">
+          <li><h3>Open the shift and load the job</h3><p>The station receives the product, pack configuration, workstation, and operator context.</p></li>
+          <li><h3>Open a new case</h3><p>The screen shows an empty case and its target count. Only codes valid for the current job can be added.</p></li>
+          <li><h3>Verify every item</h3><p>The station checks the Data Matrix and reports whether it was accepted, duplicated, malformed, or inconsistent with the job.</p></li>
+          <li><h3>Confirm the contents and close the case</h3><p>No item can belong to two packages. Once the target count is reached, the contents are fixed and an SSCC is assigned.</p></li>
+          <li><h3>Print and verify the label</h3><p>The SSCC appears in GS1-128 and human-readable form. Where label verification is enabled, the completed label is scanned before the case moves on.</p></li>
+        </ol>
+        <p>See the current product workflow on the <a href="/en/sscc-and-aggregation/">SSCC and case aggregation</a> page.</p>
+      </section>
+
+      <section id="exceptions" aria-labelledby="exceptions-title">
+        <p class="section-index">04 / Exceptions</p>
+        <h2 id="exceptions-title">Failures that must not corrupt case contents</h2>
+        <p><strong>A production system is defined as much by its recovery behavior as by a successful case close.</strong> Operator mistakes, print faults, connectivity loss, and restarts are normal operating conditions that need deterministic outcomes.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/beer-case-aggregation-exceptions-en.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Recovery map for duplicate scans, print failure, network loss, and station restart" data-article-diagram />
+          <figcaption>The station preserves context and tells the operator whether an operation was accepted or rejected and why.</figcaption>
+        </figure>
+        <div class="article-cases">
+          <article><h3>Duplicate scan</h3><p>The code is rejected and the case count does not change. The check includes previously accepted events, not only the current screen.</p></article>
+          <article><h3>Wrong case</h3><p>The latest scan can be reversed while an open case can be cleared under a controlled action, returning valid items to an available state.</p></article>
+          <article><h3>Premature close</h3><p>Dismantling is recorded as a separate event. The former SSCC remains in history and the rebuilt case gets a new identifier.</p></article>
+          <article><h3>Print failure</h3><p>A reprint belongs to the same closed case and keeps the same SSCC. Its reason remains in the operation journal.</p></article>
+          <article><h3>Network loss</h3><p>Permitted operations continue locally. The operator can see connection state and the number of events waiting to synchronize.</p></article>
+          <article><h3>Restart</h3><p>The shift, open case, accepted codes, and unsent journal must recover from durable local storage.</p></article>
+        </div>
+      </section>
+
+      <section id="checklist" aria-labelledby="checklist-title">
+        <p class="section-index">05 / Readiness</p>
+        <h2 id="checklist-title">What to verify before a live launch</h2>
+        <div class="article-checklist">
+          <div><h3>Data</h3><ul><li>Correct GTIN and pack configuration</li><li>Defined target case quantity</li><li>Unique SSCC allocation</li><li>Valid production job</li></ul></div>
+          <div><h3>Equipment</h3><ul><li>Real codes read at line speed</li><li>Label remains scannable after printing</li><li>Reprint uses the same SSCC</li><li>Scanner and printer reconnect predictably</li></ul></div>
+          <div><h3>Recovery</h3><ul><li>Duplicate is visibly rejected</li><li>Queue survives network loss</li><li>Restart restores the open case</li><li>Synchronization is retry-safe</li></ul></div>
+        </div>
+        <p>Offline queue behavior is explained in <a href="/en/offline-production/">Offline-first production</a>.</p>
+      </section>
+
+      <section id="markiro" aria-labelledby="markiro-title">
+        <p class="section-index">06 / Markiro</p>
+        <h2 id="markiro-title">Where Markiro fits today</h2>
+        <p>Markiro connects the job, scanner, printer, operator actions, and local journal in one production workflow. The goal is both to complete normal operations and to retain an unambiguous recovery point after a fault.</p>
+        <div class="article-callout article-callout--boundary"><strong>Markiro’s current aggregation chain is item → case → SSCC.</strong><p>Pallet aggregation is the next development stage. Exchange with GIS MT, EDI, 1C, or another external system is confirmed for each facility rather than presented as a universal ready-made integration.</p></div>
+        <p>The current primary category is beer, beer-based beverages, and selected low-alcohol beverages. Additional product types are being introduced gradually.</p>
+      </section>
+
+      <section class="article-conclusion" aria-labelledby="conclusion-title">
+        <p class="section-index">Conclusion</p><h2 id="conclusion-title">Aggregation should protect both throughput and traceability</h2>
+        <p>The safest rollout begins with one line, one packaging format, and a controlled set of normal and failure scenarios. Match every physical case to its digital contents, record every exception, and expand only after recovery behavior is repeatable.</p>
+        <a class="button" href="/en/#demo" data-analytics="landing_demo_click" data-placement="article-conclusion">Review one production line <span aria-hidden="true">→</span></a>
+      </section>
+
+      <section class="article-related" aria-labelledby="article-related-title">
+        <p class="section-index">Related</p><h2 id="article-related-title">Continue reading</h2>
+        <div class="seo-related__grid"><a href="/en/articles/beer-marking-2026/"><span>Beer marking in Russia in 2026</span><span aria-hidden="true">→</span></a><a href="/en/sscc-and-aggregation/"><span>SSCC and aggregation</span><span aria-hidden="true">→</span></a><a href="/en/articles/offline-beer-marking-russia/"><span>Offline beer marking in Russia</span><span aria-hidden="true">→</span></a></div>
+      </section>
+    </article>
+  </main>
+  <LandingFooter page={article} />
+  <script>import { browserLandingRuntime, initLanding } from "../../../../scripts/site"; initLanding(document, browserLandingRuntime(window));</script>
+</BaseLayout>

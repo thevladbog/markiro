@@ -1,4 +1,5 @@
 import { Controller, Get, Query, Req } from "@nestjs/common";
+import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { platformCommercialContracts } from "@markiro/platform-contracts";
 
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
@@ -10,6 +11,7 @@ import { dadataSuggestionQuerySchema, type DadataSuggestionQuery } from "./dto";
 import { PlatformDadataRateLimit } from "./platform-dadata-rate-limit";
 import { PlatformDadataService } from "./platform-dadata.service";
 
+@ApiTags("platform-dadata")
 @Controller("platform/suggestions")
 export class PlatformDadataController {
   constructor(
@@ -18,6 +20,7 @@ export class PlatformDadataController {
   ) {}
 
   @Get("organizations")
+  @ApiOperation({ summary: "Suggest organizations via DaData" })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.dadata.organizations.response })
   @RequirePlatformCapabilities("billing.read")
   async organizations(
@@ -32,6 +35,7 @@ export class PlatformDadataController {
   }
 
   @Get("addresses")
+  @ApiOperation({ summary: "Suggest addresses via DaData" })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.dadata.addresses.response })
   @RequirePlatformCapabilities("billing.read")
   async addresses(
@@ -46,6 +50,7 @@ export class PlatformDadataController {
   }
 
   @Get("banks")
+  @ApiOperation({ summary: "Suggest banks via DaData" })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.dadata.banks.response })
   @RequirePlatformCapabilities("billing.read")
   async banks(
@@ -60,6 +65,7 @@ export class PlatformDadataController {
   }
 
   @Get("status")
+  @ApiOperation({ summary: "Get DaData integration status" })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.dadata.status.response })
   @RequirePlatformCapabilities()
   status() {

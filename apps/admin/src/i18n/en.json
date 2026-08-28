@@ -4,6 +4,9 @@
     "loading": "Loading…",
     "signOut": "Sign out",
     "close": "Close",
+    "cancel": "Cancel",
+    "back": "Back",
+    "retry": "Retry",
     "loadError": "Failed to load data. Refresh the page or sign in again.",
     "yes": "Yes",
     "no": "No",
@@ -221,6 +224,7 @@
     "catalog": "Catalog",
     "shifts": "Shifts",
     "lines": "Lines",
+    "inventory": "Inventories",
     "codes": "Code search",
     "conflicts": "Conflicts",
     "counterparties": "Counterparties",
@@ -237,6 +241,12 @@
   "shell": {
     "navLabel": "Main navigation",
     "billingAttention": "Billing, attention required: {{count}}",
+    "mobileNavigation": {
+      "trigger": "Sections",
+      "openLabel": "Open mobile navigation",
+      "closeLabel": "Close mobile navigation",
+      "navLabel": "Mobile navigation"
+    },
     "sections": {
       "production": "Production",
       "reference": "Reference data",
@@ -284,6 +294,312 @@
     "lastEvent": "Last event: {{time}}"
   },
   "pages": {
+    "inventory": {
+      "title": "Inventories",
+      "description": "Preparation, station work, and final documents",
+      "createAction": "Create inventory",
+      "loadError": "Could not load inventories",
+      "emptyTitle": "No inventories yet",
+      "emptyHint": "Create a task for one product and an assigned line.",
+      "status": {
+        "draft": "Draft",
+        "preparing": "Preparing",
+        "ready": "Ready to start",
+        "running": "Running",
+        "closed": "Closed",
+        "completed": "Completed"
+      },
+      "mode": {
+        "check": "Without repacking",
+        "repack": "With repacking"
+      },
+      "list": {
+        "number": "Number / status",
+        "productDates": "Product / dates",
+        "lineMode": "Line / mode",
+        "updated": "Updated"
+      },
+      "steps": {
+        "label": "Inventory preparation steps",
+        "stage": "Step {{number}}",
+        "parameters": "Parameters",
+        "exports": "Chestny ZNAK exports",
+        "snapshot": "Snapshot review",
+        "terminals": "Stations",
+        "launch": "Launch"
+      },
+      "create": {
+        "title": "New inventory",
+        "cardTitle": "Task parameters",
+        "product": "Product",
+        "productPlaceholder": "Select one product",
+        "productSearch": "Search products",
+        "productEmpty": "No active products found",
+        "mode": "Inventory mode",
+        "line": "Line",
+        "linePlaceholder": "Select a line",
+        "template": "Box label template",
+        "templatePlaceholder": "Select a template",
+        "dateFrom": "Production date from",
+        "dateTo": "Production date to",
+        "inclusive": "The period is inclusive",
+        "requiredError": "Complete all required fields.",
+        "dateError": "The end date cannot be earlier than the start date.",
+        "dependenciesError": "Could not load products, lines, or templates.",
+        "archivedProductHint": "not in use",
+        "next": "Continue to exports"
+      },
+      "detail": {
+        "loadError": "Inventory unavailable",
+        "loadErrorHint": "Check the address or retry loading.",
+        "saveParameters": "Save and continue",
+        "backToList": "Back to inventories"
+      },
+      "chz": {
+        "EMITTED": "Emitted",
+        "INTRODUCED": "Introduced",
+        "APPLIED": "Applied",
+        "RETIRED": "Retired",
+        "WRITTEN_OFF": "Written off",
+        "DISAGGREGATION": "Disaggregated"
+      },
+      "exports": {
+        "title": "Code-status exports",
+        "description": "Provide one result for each of the six statuses. A valid zero-row export counts as successful.",
+        "ready": "Ready",
+        "missing": "Missing",
+        "chooseFile": "Drop a file or click",
+        "uploading": "Uploading…",
+        "fileLabel": "Choose file for {{status}}",
+        "selectFile": "Select {{status}} upload",
+        "noAttempts": "No uploads yet",
+        "useFile": "Use {{file}}",
+        "errors": "errors: {{count}}",
+        "duplicates": "duplicates: {{count}}",
+        "backToParameters": "Back to parameters",
+        "review": "Review snapshot"
+      },
+      "snapshot": {
+        "title": "Snapshot review",
+        "description": "Review the exact six selected uploads before fixing the immutable snapshot.",
+        "files": "Chestny ZNAK exports",
+        "expectedLabel": "Expected",
+        "expected": "Expected: {{count}}",
+        "fixHint": "The server calculates final counts and excluded MOVING_BY_UD codes during fixation.",
+        "fix": "Fix snapshot"
+      },
+      "terminals": {
+        "title": "Station access",
+        "description": "The task appears on stations assigned to this line after launch.",
+        "assigned": "Assigned stations: {{count}}",
+        "online": "{{online}} of {{total}} stations online",
+        "loadError": "Could not check line readiness.",
+        "formTitle": "Task form",
+        "formDescription": "Print-ready A4 form with a barcode that opens the task on a station.",
+        "openForm": "Open task form",
+        "next": "Continue to launch"
+      },
+      "launch": {
+        "title": "Launch inventory",
+        "snapshotReady": "Snapshot fixed: {{count}} expected codes",
+        "warehouseStopped": "Warehouse movements are stopped",
+        "blocked": "Confirm that warehouse movements are stopped before launch.",
+        "start": "Start inventory"
+      },
+      "live": {
+        "loading": "Loading inventory progress",
+        "loadError": "Could not load inventory progress",
+        "corrections": "Corrections",
+        "summary": "Current results",
+        "expected": "Expected",
+        "verified": "Verified",
+        "missing": "Missing",
+        "discrepancies": "Discrepancies",
+        "pending_one": "{{count}} event on stations has not synced yet",
+        "pending_few": "{{count}} events on stations have not synced yet",
+        "pending_many": "{{count}} events on stations have not synced yet",
+        "pending_other": "{{count}} events on stations have not synced yet",
+        "participants": "Participants",
+        "boxes": "Boxes",
+        "boxesTruncated": "Showing the latest {{shown}} of {{total}} boxes",
+        "recentEvents": "Recent events",
+        "none": "No data yet",
+        "localPending_one": "{{count}} local event",
+        "localPending_few": "{{count}} local events",
+        "localPending_many": "{{count}} local events",
+        "localPending_other": "{{count}} local events",
+        "items_one": "{{count}} code",
+        "items_few": "{{count}} codes",
+        "items_many": "{{count}} codes",
+        "items_other": "{{count}} codes",
+        "participantState": {
+          "active": "Active",
+          "stale": "Offline",
+          "left": "Left"
+        },
+        "boxState": {
+          "open": "Open",
+          "closed": "Closed",
+          "invalidated": "Invalidated"
+        },
+        "classification": {
+          "expected": "Expected",
+          "protected": "Protected",
+          "ineligible": "Ineligible",
+          "unknown": "Unknown",
+          "voided": "Voided"
+        }
+      },
+      "close": {
+        "title": "Close inventory",
+        "runningHint": "The system checks stations, local queues, boxes, and required discrepancies before closing.",
+        "open": "Close inventory",
+        "modalTitle": "Pre-close check",
+        "previewLoading": "Checking current blockers",
+        "previewError": "Unable to load the preliminary check. You can try safe close and the server will check again.",
+        "ready": "No blockers found. The result will freeze at the current revision.",
+        "blocked": "Safe close is unavailable. Resolve the blockers or record an emergency decision.",
+        "safe": "Close safely",
+        "emergency": "Emergency close",
+        "emergencyReason": "Emergency close reason",
+        "reasonTooLong": "The reason must not exceed 4096 UTF-8 bytes",
+        "acknowledgeBlockers": "I understand that the blockers will remain in the frozen result",
+        "closedHint": "The result is frozen. Review late events and final documents.",
+        "reopen": "Reopen",
+        "reopenConfirmTitle": "Reopen inventory?",
+        "reopenConfirm": "Confirm reopen",
+        "reopenExplanation": "The result revision will increase, close fields will be cleared, final documents will be invalidated once artifact storage is available, and pending late events will become available for replay.",
+        "completionUnavailable": "Completion will become available after final documents are generated, downloaded, and checked.",
+        "documentsChecked": "Final documents have been downloaded and checked",
+        "complete": "Complete inventory",
+        "completedImmutable": "The inventory is completed and cannot be changed",
+        "actionError": "The action could not be completed. Refresh the data and try again.",
+        "success": {
+          "closed": "Inventory closed",
+          "reopened": "Inventory reopened",
+          "completed": "Inventory completed"
+        },
+        "blocker": {
+          "active": "Active stations: {{count}}",
+          "stale": "Offline stations: {{count}}",
+          "pending": "Unsynced events: {{count}}",
+          "participantBoxes": "Open boxes reported by stations: {{count}}",
+          "openBoxes": "Open boxes: {{count}}",
+          "invalidated": "Invalidated boxes: {{count}}",
+          "unresolvedPrint": "Unfinished box printing: {{count}}",
+          "discrepancies": "Required discrepancies without a decision: {{count}}"
+        }
+      },
+      "documents": {
+        "title": "Final documents",
+        "completedReadOnly": "The inventory is completed — documents are available for viewing and download only",
+        "catalogEmptyTitle": "Document formats have not been approved yet",
+        "catalogEmptyHint": "Generation will become available after formats and control fixtures are approved. The system does not create files from unverified rules.",
+        "selectionTitle": "Documents to generate",
+        "selectionHint": "Select one or more formats from the approved server catalog.",
+        "generate": "Generate documents",
+        "history": "Generation history",
+        "historyEmpty": "No documents have been generated yet.",
+        "runRevision": "Result revision {{revision}}",
+        "previousRevision": "These documents belong to a previous result revision.",
+        "status": {
+          "queued": "Queued",
+          "processing": "Processing",
+          "ready": "Ready",
+          "failed": "Failed"
+        },
+        "failed": "Document generation failed ({{code}}).",
+        "retry": "Retry generation",
+        "artifactMeta": "codes: {{codes}} · boxes: {{boxes}} · {{bytes}} bytes",
+        "invalidated": "Document invalidated after reopening",
+        "downloaded": "Downloaded",
+        "unavailable": "Unavailable",
+        "downloadArtifact": "Download {{filename}}",
+        "downloadZip": "Download ZIP",
+        "completionTitle": "Completion",
+        "downloadFirst": "Download every document for the current result first",
+        "errors": {
+          "load": "Could not load the document catalog or history. Refresh the page and try again.",
+          "action": "The document action could not be completed. Refresh the data and try again.",
+          "formatChanged": "The format catalog changed. Refresh the page and select documents again.",
+          "requiresClosed": "Close the inventory first.",
+          "notRetryable": "This failure cannot be retried safely. Start a new generation.",
+          "runsActive": "Wait for the current document generation to finish.",
+          "invalidated": "The document was invalidated after the inventory reopened.",
+          "catalogUnavailable": "Approved document formats are not available yet.",
+          "notReady": "Current documents are not ready or have not been downloaded yet.",
+          "notAcknowledged": "Confirm that the downloaded documents were checked.",
+          "lateEvents": "Resolve every late inventory event first.",
+          "verifiedProductionDateMissing": "Verified codes do not have a production date. Resume the inventory, correct the dates, and generate the documents again.",
+          "invalidOrganizationInn": "The organization INN is missing or invalid. Fill it in Settings and retry the generation.",
+          "organizationInnRequired": "GIS MT XML documents require the organization INN. Fill it in Settings."
+        }
+      },
+      "late": {
+        "title": "Late events",
+        "open": "Late events",
+        "loading": "Loading late events",
+        "loadError": "Could not load late events",
+        "empty": "No late events",
+        "readOnly": "After completion, the journal is read-only",
+        "select": "Select batch {{batchId}}",
+        "events_one": "{{count}} event",
+        "events_few": "{{count}} events",
+        "events_many": "{{count}} events",
+        "events_other": "{{count}} events",
+        "reason": "Decision reason",
+        "reasonTooLong": "The reason must not exceed 4096 UTF-8 bytes",
+        "discard": "Exclude selected",
+        "reopen": "Reopen for replay",
+        "reopenSuccess": "Inventory reopened for replay",
+        "replay": "Replay {{batchId}}",
+        "replaySuccess": "Batch {{batchId}} was replayed",
+        "replayError": "The batch could not be replayed. It remains saved and retryable.",
+        "selectionLimit": "You can select at most 100 batches. Save this decision, then select the rest.",
+        "previous": "Previous page",
+        "next": "Next page",
+        "page": "Page {{page}}",
+        "actionError": "Could not save the late-event decision.",
+        "resolution": {
+          "pending": "Decision required",
+          "replayed": "Replayed",
+          "discarded": "Excluded"
+        }
+      },
+      "corrections": {
+        "title": "Corrections · {{number}}",
+        "runningOnly": "Corrections are available only while the inventory is running",
+        "auditHint": "Every action requires a reason and is retained as immutable audit evidence.",
+        "back": "Back to inventory progress",
+        "events": "Events and codes",
+        "boxes": "Boxes",
+        "search": "Search events",
+        "kind": "Event type",
+        "classification": "Classification",
+        "all": "All",
+        "kindItem": "Code",
+        "kindKnownBox": "Known box",
+        "kindOldBox": "Old box",
+        "previous": "Previous page",
+        "next": "Next page",
+        "page": "Page {{page}} · {{total}} total",
+        "select": "Select {{identity}}",
+        "formTitle": "Correction · {{identity}}",
+        "reason": "Correction reason",
+        "reasonTooLong": "The reason must not exceed 1024 UTF-8 bytes",
+        "observedDate": "Observed production date",
+        "saved": "Correction saved to the audit trail",
+        "saveError": "Could not save the correction. Refresh the data and try again.",
+        "action": {
+          "void_scan": "Void scan",
+          "restore_scan": "Restore scan",
+          "change_date": "Change date",
+          "remove_item": "Remove from box",
+          "invalidate_box": "Invalidate box",
+          "reprint": "Queue reprint request"
+        }
+      }
+    },
     "team": {
       "title": "Team",
       "inviteAction": "Invite",
@@ -370,10 +686,17 @@
       }
     },
     "dashboard": {
-      "title": "Overview",
+      "title": "Production today",
       "loading": "Loading overview",
       "emptyTitle": "No data yet",
       "emptyHint": "A summary of shifts and production will appear here once the first shift runs.",
+      "header": {
+        "generatedAt": "Updated"
+      },
+      "refreshing": {
+        "title": "Updating data",
+        "hint": "The previous summary is shown while the selected period loads."
+      },
       "setup": {
         "title": "Prepare the first shift",
         "hint": "Three actions take a new cabinet to its first production run.",
@@ -389,6 +712,120 @@
         "title": "Could not load the overview",
         "hint": "Some data is unavailable. Retry before making decisions from an incomplete summary.",
         "retry": "Retry"
+      },
+      "verdict": {
+        "eyebrow": "Production control",
+        "status": {
+          "under_control": "Production is under control",
+          "needs_attention": "Needs attention",
+          "critical": "Critical condition"
+        },
+        "reason": {
+          "unreviewed_conflicts_one": "{{count}} unreviewed conflict affects production",
+          "unreviewed_conflicts_few": "{{count}} unreviewed conflicts affect production",
+          "unreviewed_conflicts_many": "{{count}} unreviewed conflicts affect production",
+          "unreviewed_conflicts_other": "{{count}} unreviewed conflicts affect production",
+          "late_data_one": "Late data affected {{count}} shift",
+          "late_data_few": "Late data affected {{count}} shifts",
+          "late_data_many": "Late data affected {{count}} shifts",
+          "late_data_other": "Late data affected {{count}} shifts",
+          "missing_shift_duration_one": "{{count}} output series has no shift duration",
+          "missing_shift_duration_few": "{{count}} output series have no shift duration",
+          "missing_shift_duration_many": "{{count}} output series have no shift duration",
+          "missing_shift_duration_other": "{{count}} output series have no shift duration"
+        },
+        "noReasons": "There are no active reasons for intervention."
+      },
+      "headline": {
+        "scope": "Active shifts and shifts completed today",
+        "validation": "Validated individually",
+        "aggregationBoxes": "Closed boxes",
+        "aggregationUnits": "Units in boxes",
+        "active": "Active shifts",
+        "units": "units",
+        "boxes": "boxes",
+        "shiftUnit_one": "shift",
+        "shiftUnit_few": "shifts",
+        "shiftUnit_many": "shifts",
+        "shiftUnit_other": "shifts",
+        "validationAria": "{{count}} validated units",
+        "aggregationBoxesAria": "{{count}} closed boxes",
+        "aggregationUnitsAria": "{{count}} units in boxes",
+        "activeAria_one": "{{count}} active shift",
+        "activeAria_few": "{{count}} active shifts",
+        "activeAria_many": "{{count}} active shifts",
+        "activeAria_other": "{{count}} active shifts",
+        "includedClosed_one": "The summary also includes {{count}} shift completed today.",
+        "includedClosed_few": "The summary also includes {{count}} shifts completed today.",
+        "includedClosed_many": "The summary also includes {{count}} shifts completed today.",
+        "includedClosed_other": "The summary also includes {{count}} shifts completed today."
+      },
+      "dynamics": {
+        "title": "Production dynamics",
+        "shiftHourNote": "Rate is calculated per shift hour. Validation and aggregation stay separate.",
+        "metricControl": "Dynamics metric",
+        "periodControl": "Dynamics period",
+        "rate": "Rate",
+        "output": "Output",
+        "period": {
+          "today": "Today",
+          "7d": "7 days",
+          "30d": "30 days",
+          "12w": "12 weeks"
+        },
+        "validation": "Validation",
+        "aggregation": "Aggregation",
+        "regionLabel": "{{mode}} — {{metric}}",
+        "series": {
+          "acceptedUnits": "Validated units",
+          "closedBoxes": "Closed boxes",
+          "containedUnits": "Units in boxes"
+        },
+        "units": {
+          "units": "units",
+          "boxes": "boxes",
+          "unitsPerShiftHour": "units/shift hour",
+          "boxesPerShiftHour": "boxes/shift hour"
+        },
+        "current": "Selected period",
+        "comparison": {
+          "up": "up {{value}}% from the previous period",
+          "down": "down {{value}}% from the previous period",
+          "same": "unchanged from the previous period",
+          "unavailable": "no comparable baseline"
+        },
+        "barLabel": "{{label}}: {{value}} {{unit}}",
+        "missingRate": "Shift duration is missing — rate was not calculated.",
+        "empty": {
+          "validation": "No units were validated in the selected period.",
+          "aggregation": "No boxes were closed in the selected period.",
+          "containedUnits": "No units are contained in closed boxes for the selected period."
+        },
+        "provenance": "Calculation {{version}} · sources: {{sources}}"
+      },
+      "signals": {
+        "title": "Control signals",
+        "hint": "States that affect how this summary should be read.",
+        "status": {
+          "complete": "Complete data",
+          "provisional": "Provisional data",
+          "insufficient": "Insufficient data for rate"
+        },
+        "reason": {
+          "active_shifts_one": "Active shift: data may change",
+          "active_shifts_few": "{{count}} active shifts: data may change",
+          "active_shifts_many": "{{count}} active shifts: data may change",
+          "active_shifts_other": "{{count}} active shifts: data may change",
+          "late_data_one": "Late data: {{count}} shift",
+          "late_data_few": "Late data: {{count}} shifts",
+          "late_data_many": "Late data: {{count}} shifts",
+          "late_data_other": "Late data: {{count}} shifts",
+          "missing_shift_duration": "Shift duration is missing for the rate calculation"
+        },
+        "clear": "The selected period has no data limitations.",
+        "rateBasis": "Rate basis",
+        "shiftHour": "shift hour",
+        "lateData": "Shifts with late data"
       },
       "summary": {
         "label": "Summary",
@@ -412,11 +849,18 @@
       },
       "active": {
         "title": "Shifts running now",
+        "tableLabel": "Active production shifts",
+        "number": "Shift",
         "product": "Product",
         "line": "Line",
         "mode": "Mode",
-        "plan": "Plan",
+        "output": "Output",
         "started": "Opened",
+        "data": "Data",
+        "provisional": "Provisional",
+        "late": "Late data",
+        "validationOutput": "{{count}} units",
+        "aggregationOutput": "{{boxes}} boxes · {{units}} units",
         "empty": "No shifts are active now.",
         "openShifts": "Open shifts"
       },
@@ -904,11 +1348,13 @@
       "statusFilter": {
         "all": "All statuses",
         "draft": "Draft",
-        "active": "Active"
+        "active": "Active",
+        "archived": "Not in use"
       },
       "status": {
         "draft": "Draft",
-        "active": "Active"
+        "active": "Active",
+        "archived": "Not in use"
       },
       "deleteConfirmTitle": "Delete product?",
       "deleteConfirmBody": "Product \"{{name}}\" will be permanently deleted.",
@@ -954,6 +1400,7 @@
           "image": "Product photo"
         },
         "imageLabel": "Product photo",
+        "dropLabel": "Drop a file or click",
         "imageAlt": "Product photo",
         "imageEmpty": "No photo added",
         "imageHint": "JPEG, PNG, or WebP up to 5 MB",
@@ -961,6 +1408,8 @@
         "imageRemoveSuccess": "Photo removed",
         "imageError": "Could not change the photo. The current photo was preserved.",
         "draftBanner": "Draft — fill in the group and capacities to run shifts",
+        "archivedLabel": "Do not use",
+        "archivedHint": "The product cannot be selected on kiosks, in shifts, or in integrations. It stays available for inventory and in history.",
         "gtinOwnerHint": "GTIN owner — {{name}}",
         "applyCounterparty": "Apply counterparty",
         "gtinOwnerUnknown": "GTIN owner could not be determined — double check the code before saving.",
@@ -1286,6 +1735,7 @@
         "productSearchPlaceholder": "Search products",
         "productEmpty": "No products found",
         "draftHint": "draft -- unavailable",
+        "archivedHint": "not in use",
         "modeLabel": "Mode",
         "modeValidation": "Validation",
         "modeAggregation": "Aggregation",
@@ -1844,6 +2294,7 @@
         "addLinesPlaceholder": "Paste or scan SSCCs — one per line",
         "addLines": "Add lines",
         "importAction": "Import from file",
+        "dropLabel": "Drop a file or click",
         "addLinesError": "Could not add the lines. Please try again.",
         "importError": "Could not import the file. Please try again.",
         "linesTitle": "Boxes",
@@ -2068,6 +2519,8 @@
     "devices": {
       "title": "Devices",
       "add": "Add device",
+      "downloadStation": "Download Station for Windows",
+      "downloadStationHint": "Install Station on the production PC, then pair it with the organization using the code shown after the device is created.",
       "cancel": "Cancel",
       "create": "Create",
       "done": "Done",
@@ -2371,6 +2824,7 @@
           "table": {
             "name": "Name",
             "article": "Article",
+            "gtin": "GTIN",
             "externalRef": "1C id",
             "actions": "Actions",
             "suggestion": "Looks like: {{name}}"
@@ -2417,6 +2871,50 @@
             "neverUsed": "Never used",
             "actions": "Actions"
           }
+        },
+        "signer": {
+          "title": "Signer agent",
+          "tokenLabel": "True API token:",
+          "token": {
+            "none": "no token",
+            "active": "active",
+            "expiring": "expiring",
+            "expired": "expired"
+          },
+          "tokenExpires": "valid until {{at}}",
+          "issueCode": "Get pairing code",
+          "issueError": "Could not get a pairing code",
+          "codeExpires": "valid until {{at}}",
+          "emptyTitle": "No agents connected yet",
+          "emptyHint": "Install the \"Markiro Signer\" app on the computer holding the qualified certificate and enter the pairing code.",
+          "columns": {
+            "name": "Computer",
+            "status": "Status",
+            "cert": "Certificate",
+            "lastSeen": "Last seen"
+          },
+          "status": {
+            "active": "active",
+            "revoked": "revoked"
+          },
+          "revoke": "Revoke",
+          "revokeConfirmTitle": "Revoke this agent?",
+          "revokeConfirmBody": "The computer will lose access to signing and to the True API token. It can be reconnected later with a new pairing code.",
+          "revokeSuccess": "Agent revoked",
+          "revokeError": "Could not revoke the agent",
+          "cancel": "Cancel",
+          "loadError": "Could not load the agent list"
+        },
+        "danger": {
+          "title": "Delete integration",
+          "body": "Disconnect the exchange if you are switching to another system. Settings, exchange credentials, the journal and the unmatched queue will be deleted.",
+          "deleteAction": "Delete integration",
+          "confirmTitle": "Delete the integration?",
+          "confirmBody": "Exchange credentials will be revoked and 1C will lose access immediately. Settings, the journal and the unmatched queue will be deleted permanently. Product links to external items will be kept.",
+          "confirmAction": "Delete",
+          "cancelAction": "Cancel",
+          "success": "Integration deleted",
+          "error": "Failed to delete the integration"
         }
       }
     },
@@ -2426,6 +2924,8 @@
         "cardTitle": "Organisation profile",
         "glnLabel": "GLN",
         "innLabel": "Tax ID",
+        "timeZoneLabel": "Production timezone",
+        "timeZoneHint": "Controls calendar-day boundaries on production dashboards.",
         "prefixesLabel": "GS1 prefixes",
         "prefixesHint": "Comma-separated, e.g. 4600000, 4600001",
         "defaultBoxLabelTemplateLabel": "Default box label template",
@@ -2460,6 +2960,8 @@
         "previewAlt": "Organisation logo",
         "fallbackLabel": "Default Markiro logo",
         "uploadLabel": "Upload logo",
+        "dropLabel": "Drop a file or click",
+        "hint": "JPEG, PNG, or WebP",
         "removeAction": "Remove logo",
         "invalidType": "Choose one JPEG, PNG, or WebP file.",
         "uploadError": "Could not upload the logo",

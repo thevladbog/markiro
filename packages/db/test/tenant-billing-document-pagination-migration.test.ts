@@ -12,7 +12,7 @@ const indexNames = [
   "billing_act_documents_tenant_created_id_idx",
   "commercial_offer_documents_tenant_created_id_idx",
 ] as const;
-const originalMigrationTimestamp = 1_787_859_000_000;
+const migrationTimestamp = 1_787_913_627_143;
 const originalMigrationHash = "f1d1b9a161fce1cc0e810cf0a97c34678731ffa18ecff89852cd8c7461cea633";
 
 function quoteIdentifier(identifier: string): string {
@@ -23,10 +23,10 @@ function quoteIdentifier(identifier: string): string {
 }
 
 describe("tenant billing document pagination migration metadata", () => {
-  it("keeps the Drizzle snapshot chain contiguous through migration 0068", async () => {
+  it("keeps the Drizzle snapshot chain contiguous through migration 0092", async () => {
     const [previousText, currentText, journalText] = await Promise.all([
-      readFile(new URL("../migrations/meta/0067_snapshot.json", import.meta.url), "utf8"),
-      readFile(new URL("../migrations/meta/0068_snapshot.json", import.meta.url), "utf8"),
+      readFile(new URL("../migrations/meta/0091_snapshot.json", import.meta.url), "utf8"),
+      readFile(new URL("../migrations/meta/0092_snapshot.json", import.meta.url), "utf8"),
       readFile(new URL("../migrations/meta/_journal.json", import.meta.url), "utf8"),
     ]);
     const previous = JSON.parse(previousText) as { id: string };
@@ -37,10 +37,10 @@ describe("tenant billing document pagination migration metadata", () => {
 
     expect(current.id).not.toBe(previous.id);
     expect(current.prevId).toBe(previous.id);
-    expect(journal.entries.find((entry) => entry.idx === 68)).toMatchObject({
-      idx: 68,
-      tag: "0068_tenant_billing_document_pagination_indexes",
-      when: originalMigrationTimestamp,
+    expect(journal.entries.find((entry) => entry.idx === 92)).toMatchObject({
+      idx: 92,
+      tag: "0092_tenant_billing_document_pagination_indexes",
+      when: migrationTimestamp,
     });
   });
 });
@@ -120,7 +120,7 @@ describe.skipIf(!databaseUrl)("tenant billing document pagination migration", ()
     await maintenancePool.end();
   });
 
-  it("records 0068 with its original Drizzle timestamp and SQL hash", async () => {
+  it("records 0092 with its original Drizzle timestamp and SQL hash", async () => {
     const result = await pool.query<{
       id: number;
       hash: string;
@@ -129,14 +129,14 @@ describe.skipIf(!databaseUrl)("tenant billing document pagination migration", ()
       `SELECT id, hash, created_at
        FROM drizzle.__drizzle_migrations
        WHERE created_at = $1`,
-      [originalMigrationTimestamp],
+      [migrationTimestamp],
     );
 
     expect(result.rows).toEqual([
       {
-        id: 69,
+        id: 93,
         hash: originalMigrationHash,
-        created_at: String(originalMigrationTimestamp),
+        created_at: String(migrationTimestamp),
       },
     ]);
   });
@@ -201,7 +201,7 @@ describe.skipIf(!databaseUrl)("tenant billing document pagination migration", ()
     }
   });
 
-  it("does not reapply 0068 when the database records its original timestamp and hash", async () => {
+  it("does not reapply 0092 when the database records its original timestamp and hash", async () => {
     const originalRecord = await pool.query<{
       id: number;
       hash: string;
@@ -211,13 +211,13 @@ describe.skipIf(!databaseUrl)("tenant billing document pagination migration", ()
        SET hash = $1, created_at = $2
        WHERE created_at = $2
        RETURNING id, hash, created_at`,
-      [originalMigrationHash, originalMigrationTimestamp],
+      [originalMigrationHash, migrationTimestamp],
     );
     expect(originalRecord.rows).toEqual([
       {
-        id: 69,
+        id: 93,
         hash: originalMigrationHash,
-        created_at: String(originalMigrationTimestamp),
+        created_at: String(migrationTimestamp),
       },
     ]);
 

@@ -24,6 +24,7 @@ const LABEL_TEMPLATE_REFERENCE_CONSTRAINTS = new Set([
   "products_tenant_default_label_template_fk",
   "shifts_tenant_label_template_fk",
   "shifts_tenant_box_label_template_fk",
+  "inventories_tenant_box_label_template_fk",
 ]);
 
 @Injectable()
@@ -134,7 +135,7 @@ export class LabelTemplatesService {
         LABEL_TEMPLATE_REFERENCE_CONSTRAINTS.has(constraint)
       ) {
         throw new ConflictException(
-          "Label template is referenced by an organization default, product, or shift",
+          "Label template is referenced by an organization default, product, shift, or inventory",
         );
       }
       throw error;

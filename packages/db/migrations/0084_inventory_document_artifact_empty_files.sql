@@ -1,0 +1,2 @@
+ALTER TABLE "inventory_document_artifacts" DROP CONSTRAINT "inventory_document_artifacts_byte_size_positive_check";--> statement-breakpoint
+ALTER TABLE "inventory_document_artifacts" ADD CONSTRAINT "inventory_document_artifacts_byte_size_nonnegative_check" CHECK ("inventory_document_artifacts"."byte_size" >= 0);

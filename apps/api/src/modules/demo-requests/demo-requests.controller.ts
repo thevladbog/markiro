@@ -13,9 +13,16 @@ import {
   UseGuards,
   type ExceptionFilter,
 } from "@nestjs/common";
+import { ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
+import { ApiZodBody } from "../../lib/openapi";
 import { ZodValidationPipe } from "../../zod.pipe";
-import { demoRequestSchema, type DemoRequestDto } from "./demo-request.schema";
+import {
+  demoRequestAcceptedOpenApiSchema,
+  demoRequestErrorOpenApiSchema,
+  demoRequestSchema,
+  type DemoRequestDto,
+} from "./demo-request.schema";
 import { DemoRequestService } from "./demo-request.service";
 import { DemoRequestSubmissionGuard } from "./demo-request-submission.guard";
 import {
@@ -64,6 +71,7 @@ export class DemoRequestPublicErrorFilter implements ExceptionFilter<HttpExcepti
   }
 }
 
+@ApiTags("demo-requests")
 @Controller("demo-requests")
 @UseFilters(DemoRequestPublicErrorFilter)
 @UseGuards(DemoRequestSubmissionGuard)
@@ -75,6 +83,40 @@ export class DemoRequestsController {
 
   @Post()
   @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: "Submit a public demo request",
+    description:
+      "Public landing-page form intake — no authentication. `website` is a honeypot and must " +
+      "stay empty, `consentVersion` must match the currently published consent document, and " +
+      "`captchaToken` is verified before the request is stored. Every error is reduced to a " +
+      "single `{ code }` body by the module's exception filter.",
+  })
+  @ApiZodBody(demoRequestSchema)
+  @ApiResponse({
+    status: 202,
+    schema: demoRequestAcceptedOpenApiSchema,
+    description: "Request accepted for processing.",
+  })
+  @ApiResponse({
+    status: 400,
+    schema: demoRequestErrorOpenApiSchema("invalid_request", "captcha_invalid"),
+    description: "Validation, honeypot/consent, or captcha failure.",
+  })
+  @ApiResponse({
+    status: 404,
+    schema: demoRequestErrorOpenApiSchema("submission_disabled"),
+    description: "Public submission is disabled.",
+  })
+  @ApiResponse({
+    status: 429,
+    schema: demoRequestErrorOpenApiSchema("rate_limited"),
+    description: "Per-source rate limit exceeded.",
+  })
+  @ApiResponse({
+    status: 503,
+    schema: demoRequestErrorOpenApiSchema("captcha_unavailable", "submission_unavailable"),
+    description: "Captcha or storage dependency unavailable.",
+  })
   async submit(
     @Body(new ZodValidationPipe(demoRequestSchema)) body: DemoRequestDto,
     @Ip() source: string,

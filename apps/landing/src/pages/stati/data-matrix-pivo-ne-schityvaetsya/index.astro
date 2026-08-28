@@ -1,0 +1,146 @@
+---
+import { Picture } from "astro:assets";
+
+import articleHero from "../../../assets/beer-datamatrix-diagnostics-hero.png";
+import LandingFooter from "../../../components/LandingFooter.astro";
+import LandingHeader from "../../../components/LandingHeader.astro";
+import { BEER_DATAMATRIX_DIAGNOSTICS_ARTICLE } from "../../../content/articles";
+import { buildArticlePageGraph } from "../../../lib/seo";
+import { readPublicSiteConfig } from "../../../lib/site-config";
+import BaseLayout from "../../../layouts/BaseLayout.astro";
+
+const article = BEER_DATAMATRIX_DIAGNOSTICS_ARTICLE;
+const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<BaseLayout metadata={article} graph={buildArticlePageGraph(article)}>
+  <LandingHeader page={article} phone={config.phone} />
+  <main id="main" class="article-page">
+    <header class="article-hero">
+      <div class="container article-hero__inner">
+        <nav class="breadcrumbs" aria-label="Хлебные крошки"><ol><li><a href="/">Markiro</a></li><li aria-current="page">{article.navigationLabel}</li></ol></nav>
+        <div class="article-hero__layout">
+          <div class="article-hero__copy">
+            <p class="section-index">{article.eyebrow}</p>
+            <h1>{article.heading}</h1>
+            <p class="article-hero__lead">{article.introduction}</p>
+            <div class="article-byline" aria-label="Сведения о публикации"><span>{article.authorName}</span><time datetime={article.publishedAt}>26 августа 2026</time><span>{article.readingTimeMinutes} минут чтения</span></div>
+          </div>
+          <figure class="article-hero__media" data-article-visual>
+            <Picture src={articleHero} alt="Оператор сканирует Data Matrix на бутылке пива на производственной линии" widths={[480, 720, 1080]} formats={["avif", "webp"]} sizes="(max-width: 767px) 100vw, 45vw" loading="eager" fetchpriority="high" data-article-hero-image />
+            <figcaption>Диагностика начинается с точного вопроса: код не декодирован, искажён или осознанно отклонён?</figcaption>
+          </figure>
+        </div>
+      </div>
+    </header>
+
+    <article class="container article-body">
+      <aside class="article-summary" aria-labelledby="article-summary-title">
+        <p class="section-index">Коротко</p><h2 id="article-summary-title">Что проверить первым</h2>
+        <ul>
+          <li data-key-takeaway>Разделите отказ на четыре уровня: символ, поток сканера, правило программы и внешний обмен.</li>
+          <li data-key-takeaway>Если сканер вообще не декодирует символ, проверяйте печать, материал, изгиб, блики и условия линии.</li>
+          <li data-key-takeaway>Если данные появились, сравните фактический поток с эталоном, включая FNC1 и GS-разделитель ASCII 29.</li>
+          <li data-key-takeaway>Сообщение о дубле или неверном GTIN — это не «плохое чтение», а контролируемый отказ бизнес-правила.</li>
+          <li data-key-takeaway>Качество проверяют на реальной таре, при рабочей скорости и освещении, а не только на листе бумаги.</li>
+          <li data-key-takeaway>Оператору нужен однозначный следующий шаг; бесконечное «отсканируйте ещё раз» скрывает причину.</li>
+        </ul>
+      </aside>
+
+      <nav class="article-toc" aria-label="Содержание статьи">
+        <p class="section-index">Содержание</p>
+        <ol><li><a href="#triage">Диагностика за минуту</a></li><li><a href="#print">Печать и тара</a></li><li><a href="#scanner">Сканер и поток данных</a></li><li><a href="#software">Правила программы</a></li><li><a href="#pilot">Пилот на линии</a></li><li><a href="#operator">Действия оператора</a></li><li><a href="#markiro">Граница Markiro</a></li></ol>
+      </nav>
+
+      <section id="triage" aria-labelledby="triage-title">
+        <p class="section-index">01 / Локализация</p><h2 id="triage-title">Как за минуту понять, где возник отказ</h2>
+        <p><strong>Не начинайте с перенастройки принтера: сначала определите последний этап, на котором код ещё существовал в корректном виде.</strong> Один и тот же красный индикатор может скрывать физическую проблему, потерю управляющего символа или полезный запрет на повторную упаковку.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/data-matrix-pivo-diagnostic-layers.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Четыре уровня диагностики: символ, поток сканера, правило программы и внешний обмен" data-article-diagram />
+          <figcaption>Переходите вправо только после подтверждения предыдущего уровня. Так настройка одного узла не маскирует сбой другого.</figcaption>
+        </figure>
+        <div class="article-cases">
+          <article><h3>Нет события декодирования</h3><p>Сканер не выдаёт полезного результата. Возьмите заведомо читаемый контрольный код: если он проходит, сравнивайте символ и условия нанесения.</p></article>
+          <article><h3>Строка появилась, формат неверен</h3><p>Зафиксируйте безопасный технический дамп с длиной и управляющими символами. Проверяйте конфигурацию сканера и транспорт до приложения.</p></article>
+          <article><h3>Программа показала причину</h3><p>«Дубль», «неверный GTIN» и «неизвестный формат» требуют разных действий. Не объединяйте их в сообщение «код не читается».</p></article>
+          <article><h3>Локально принято, снаружи отказ</h3><p>Сохраните идентификатор операции и ответ внешней системы. Повтор физического сканирования обычно не исправляет состояние обмена.</p></article>
+        </div>
+      </section>
+
+      <section id="print" aria-labelledby="print-title">
+        <p class="section-index">02 / Физический код</p><h2 id="print-title">Почему Data Matrix читается на экране, но не на бутылке или банке</h2>
+        <p><strong>Файл с кодом и нанесённый символ — не одно и то же.</strong> После печати на результат влияют размер модуля, контраст, равномерность заливки, свободная зона вокруг матрицы, деформация этикетки и отражение света от лака, стекла или металла.</p>
+        <p>Для пива материал этикетки может быть разным, но официальный раздел «Честного знака» требует сохранять считываемость Data Matrix в течение всего срока годности при установленных условиях хранения и транспортировки. Там же указано качество печати не ниже класса <strong>1.5 (C)</strong> по ГОСТ Р ИСО/МЭК 15415-2012. Это характеристика верификации символа, а не обещание, что любой сканер прочитает его при любом угле.</p>
+        <ul>
+          <li><strong>Изгиб.</strong> На узкой бутылке или горлышке часть матрицы уходит из плоскости и меняет геометрию для камеры.</li>
+          <li><strong>Блик и прозрачность.</strong> Глянцевая плёнка, стекло, влага и направленный свет могут закрыть часть модулей.</li>
+          <li><strong>Процесс печати.</strong> Загрязнение головки, неверная температура, скорость или риббон дают пропуски, растискивание и нестабильный контраст.</li>
+          <li><strong>Масштабирование.</strong> Растровое преобразование с нецелым коэффициентом создаёт модули разной ширины, хотя изображение визуально похоже на правильное.</li>
+          <li><strong>Размещение.</strong> Стык этикетки, ребро, тиснение и соседняя графика нарушают свободное поле или затрудняют наведение.</li>
+        </ul>
+        <p>Сравните серию образцов в начале, середине и конце рулона, а также после остановки линии. Если отказ растёт постепенно, ищите дрейф печати и загрязнение. Если он привязан к конкретной позиции тары, проверяйте геометрию и свет.</p>
+        <p>Официальные требования собраны на странице <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/na-kakom-materiale-mozhno-pechatat-etiketki-s-kodom-markirovki-pivo">о материале и качестве этикетки с кодом маркировки пива</a>.</p>
+      </section>
+
+      <section id="scanner" aria-labelledby="scanner-title">
+        <p class="section-index">03 / Поток данных</p><h2 id="scanner-title">Что проверить, если сканер видит код, но программа его не принимает</h2>
+        <p><strong>Успешный звуковой сигнал сканера подтверждает декодирование символа, но не неизменность переданных данных.</strong> Режим клавиатуры, последовательный порт, префиксы и суффиксы, раскладка и правила замены управляющих символов могут изменить строку до проверки в производственной программе.</p>
+        <p><a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/sostav-koda-markirovki-pivo">Состав кода маркировки пива</a> в официальной базе описывает GS1 Data Matrix с FNC1, GTIN в AI 01, серийным номером в AI 21 и кодом проверки в AI 93. После группы переменной длины нужен GS-разделитель — управляющий символ <strong>ASCII 29</strong>. Строка «&lt;GS&gt;», пробел или пропущенный разделитель не равнозначны этому байту.</p>
+        <ol class="article-steps">
+          <li><h3>Снимите эталон</h3><p>Прочитайте один код диагностическим инструментом, который показывает длину и управляющие символы, не публикуя полный производственный код в тикете или общем чате.</p></li>
+          <li><h3>Сравните оба интерфейса</h3><p>Если оборудование поддерживает USB HID и COM, сравните результат. Клавиатурный режим зависит от раскладки и фокуса, а последовательный — от порта, скорости и параметров кадра.</p></li>
+          <li><h3>Проверьте окончание скана</h3><p>Enter, CR и LF могут завершать ввод, попадать в полезную строку или запускать кнопку интерфейса. Настройка должна соответствовать договорённости приложения.</p></li>
+          <li><h3>Не обрезайте строку вслепую</h3><p>Удалять «лишний хвост» по фиксированной длине опасно: так можно скрыть корректный криптографический фрагмент или потерять разделитель.</p></li>
+        </ol>
+      </section>
+
+      <section id="software" aria-labelledby="software-title">
+        <p class="section-index">04 / Решение программы</p><h2 id="software-title">Когда отказ означает, что контроль сработал правильно</h2>
+        <p><strong>Если поток дошёл без искажения, следующий вопрос — почему программа его отклонила.</strong> Код может быть структурно неверным, относиться к другому GTIN или заданию, уже присутствовать в текущем коробе либо быть ранее принят на другом рабочем месте.</p>
+        <p>Эти причины нельзя сводить к одному совету «попробуйте ещё раз». Для неверного формата нужен контроль источника и сканера; для неверного GTIN — сверка товара и задания; для дубля — поиск предыдущей операции и физического экземпляра. Если локальная операция принята, но внешний обмен вернул отказ, повтор отправки должен быть идемпотентным и привязанным к журналу, а не к новому сканированию товара.</p>
+        <div class="article-callout"><strong>Безопасная диагностика не требует показывать полный код.</strong><p>Оператору обычно достаточно типа ошибки, товара, времени и короткого безопасного суффикса. Полный сырой поток нужен только в ограниченном техническом контуре и с понятным сроком хранения.</p></div>
+      </section>
+
+      <section id="pilot" aria-labelledby="pilot-title">
+        <p class="section-index">05 / Проверка линии</p><h2 id="pilot-title">Как провести пилот, который обнаружит нестабильное чтение</h2>
+        <p><strong>Один удачный скан подтверждает только один образец в одном положении.</strong> Пилот должен воспроизвести диапазон тары, печати, скорости и среды, а также показать управляемое поведение при отказе.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/data-matrix-pivo-pilot.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Матрица пилота: тара, печать, скорость, среда и сценарии отказа" data-article-diagram />
+          <figcaption>Для каждого сценария фиксируйте не только процент чтения, но и уровень отказа, условия и допустимое действие оператора.</figcaption>
+        </figure>
+        <p>Подготовьте ограниченную, но репрезентативную выборку. Пройдите её на фактической скорости без ручной паузы перед камерой. Затем повторите дубль, шумовой ввод, разрыв связи и перезапуск рабочего места. После теста сопоставьте физические единицы, принятые коды, локальный журнал и очередь обмена.</p>
+        <p>Если нужен формальный контроль качества печати, используйте верификатор и утверждённую методику. Обычный производственный сканер отвечает на другой вопрос: прочитал ли он код в конкретной конфигурации линии.</p>
+      </section>
+
+      <section id="operator" aria-labelledby="operator-title">
+        <p class="section-index">06 / Реакция</p><h2 id="operator-title">Что должен делать оператор при каждом типе ошибки</h2>
+        <div class="article-checklist">
+          <div><h3>Нет декодирования</h3><ul><li>убрать очевидный блик или загрязнение;</li><li>проверить контрольный образец;</li><li>отложить единицу в согласованную зону;</li><li>передать образец наладчику печати.</li></ul></div>
+          <div><h3>Неверный поток или формат</h3><ul><li>не вводить код вручную;</li><li>зафиксировать время и рабочее место;</li><li>проверить профиль сканера;</li><li>сравнить безопасный дамп с эталоном.</li></ul></div>
+          <div><h3>Дубль или конфликт</h3><ul><li>не принимать единицу повторно;</li><li>найти предыдущую операцию;</li><li>сверить физический короб;</li><li>использовать штатное восстановление.</li></ul></div>
+        </div>
+        <p>Короткая инструкция должна висеть рядом с линией и совпадать с экранными статусами. Отдельно назначьте владельца печати, сканера, производственного ПО и внешнего обмена: так ошибка не путешествует между подразделениями без диагноза.</p>
+      </section>
+
+      <section id="markiro" aria-labelledby="markiro-title">
+        <p class="section-index">07 / Markiro</p><h2 id="markiro-title">Как Markiro помогает отделить отказ чтения от контролируемого запрета</h2>
+        <p>На рабочем месте Markiro вход сканера проходит через единый классификатор. Принятые и отклонённые попытки фиксируются в локальном журнале; отдельно различаются неверный формат, неверный GTIN и повтор. Для оператора показывается безопасная часть идентификатора, а не полный сырой код. Локальный индекс и база рабочего места дают защиту от повторного принятия даже при нестабильной сети.</p>
+        <div class="article-callout article-callout--boundary"><strong>Текущий контур Markiro — «единица → короб → SSCC».</strong><p>Паллетная агрегация относится к следующему этапу. Физическое качество конкретной печати, совместимость со сканером и приём внешней системой подтверждаются на предприятии отдельными проверками.</p></div>
+        <p>Основная специализация сейчас — товарная группа «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки». Новые типы продукции добавляются поэтапно.</p>
+      </section>
+
+      <section class="article-conclusion" aria-labelledby="conclusion-title">
+        <p class="section-index">Вывод</p><h2 id="conclusion-title">Сначала локализуйте уровень, затем меняйте настройку</h2>
+        <p>Устойчивая линия не пытается бесконечно перечитать любой отказ. Она различает физическое декодирование, транспорт данных, бизнес-правило и внешний статус — и для каждого случая предлагает проверяемый следующий шаг.</p>
+        <a class="button" href="/#demo" data-analytics="landing_demo_click" data-placement="article-conclusion">Разобрать один сканер и одну линию <span aria-hidden="true">→</span></a>
+      </section>
+
+      <section class="article-related" aria-labelledby="article-related-title">
+        <p class="section-index">По теме</p><h2 id="article-related-title">Продолжить подготовку линии</h2>
+        <div class="seo-related__grid"><a href="/stati/oborudovanie-dlya-markirovki-piva/"><span>Оборудование линии маркировки</span><span aria-hidden="true">→</span></a><a href="/stati/markirovka-piva-2026/"><span>Маркировка пива в 2026 году</span><span aria-hidden="true">→</span></a><a href="/stati/agregatsiya-piva-v-koroba/"><span>Агрегация пива в короба</span><span aria-hidden="true">→</span></a></div>
+      </section>
+    </article>
+  </main>
+  <LandingFooter page={article} />
+  <script>import { browserLandingRuntime, initLanding } from "../../../scripts/site"; initLanding(document, browserLandingRuntime(window));</script>
+</BaseLayout>

@@ -24,6 +24,20 @@ import { codes } from "../src/schema/codes.js";
 import { orgProfiles } from "../src/schema/org-profile.js";
 
 describe("platform schema", () => {
+  it("stores one non-null operational timezone per organization", () => {
+    expect(orgProfiles.timeZone.notNull).toBe(true);
+    expect(orgProfiles.timeZone.hasDefault).toBe(true);
+    expect(orgProfiles.timeZone.default).toBe("Europe/Moscow");
+  });
+
+  it("exports inventory preparation persistence", () => {
+    expect(getTableName(schema.inventories)).toBe("inventories");
+    expect(getTableName(schema.inventoryImports)).toBe("inventory_imports");
+    expect(getTableName(schema.inventorySnapshots)).toBe("inventory_snapshots");
+    expect(getTableName(schema.inventorySnapshotInputs)).toBe("inventory_snapshot_inputs");
+    expect(getTableName(schema.inventorySnapshotCodes)).toBe("inventory_snapshot_codes");
+  });
+
   it("gives organization profiles a nullable tenant-scoped default box label template", () => {
     expect(orgProfiles.defaultBoxLabelTemplateId).toBeDefined();
     expect(orgProfiles.defaultBoxLabelTemplateId.notNull).toBe(false);
@@ -54,6 +68,14 @@ describe("platform schema", () => {
     expect(Object.keys(products)).toContain("gtin14");
   });
 
+  it("lets a product be archived without being deleted", () => {
+    // Archived products stay for history (orders, shifts, reports); the flag
+    // only removes them from selection surfaces. New products start live.
+    expect(Object.keys(products)).toContain("archived");
+    expect(products.archived.default).toBe(false);
+    expect(products.archived.notNull).toBe(true);
+  });
+
   it("keys the sscc counter by tenant, issuer prefix and extension digit", () => {
     const cols = Object.keys(ssccCounters);
     expect(cols).toEqual(
@@ -67,10 +89,21 @@ describe("platform schema", () => {
 
   it("lets an sscc block be revoked without being deleted", () => {
     const cols = Object.keys(ssccBlocks);
-    expect(cols).toEqual(expect.arrayContaining(["revokedAt"]));
+    expect(cols).toEqual(expect.arrayContaining(["revokedAt", "allocationOrder"]));
     // Nullable: null IS the live state, and a revoked block must survive as
     // the only record of where a gap in the numbering came from.
     expect(ssccBlocks.revokedAt.notNull).toBe(false);
+    expect(ssccBlocks.allocationOrder.notNull).toBe(true);
+    expect(ssccBlocks.allocationOrder.hasDefault).toBe(false);
+    const allocationOrderIndex = getTableConfig(ssccBlocks).indexes.find(
+      (index) => index.config.name === "sscc_blocks_stream_allocation_order_uq",
+    );
+    expect(allocationOrderIndex?.config.unique).toBe(true);
+    expect(
+      allocationOrderIndex?.config.columns.map((column) =>
+        is(column, IndexedColumn) ? column.name : undefined,
+      ),
+    ).toEqual(["tenant_id", "issuer_prefix", "extension_digit", "device_id", "allocation_order"]);
   });
 
   it("gives boxes a tenant-unique sscc", () => {

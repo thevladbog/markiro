@@ -236,7 +236,7 @@ describe("integrations (cabinet) — issue exchange credentials", () => {
   });
 
   it("409 на канал, который ещё недоступен", async () => {
-    await agent.post("/integrations/chestny_znak/credentials").send({}).expect(409);
+    await agent.post("/integrations/gis_mt_files/credentials").send({}).expect(409);
   });
 
   it("не пускает ключ станции в кабинетный маршрут", async () => {

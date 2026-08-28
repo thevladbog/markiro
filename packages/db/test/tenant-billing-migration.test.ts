@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,8 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
@@ -26,44 +28,11 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
     created = true;
     temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-tenant-billing-migration-"));
     const legacyMigrations = join(temporaryRoot, "migrations");
-    await cp(migrationsFolder, legacyMigrations, { recursive: true });
-    await rm(join(legacyMigrations, "0066_tenant_billing_experience.sql"));
-    await rm(join(legacyMigrations, "0067_invoice_payment_completion.sql"));
-    await rm(join(legacyMigrations, "0068_tenant_billing_document_pagination_indexes.sql"));
-    await rm(join(legacyMigrations, "0069_tenant_billing_action_reconciliation.sql"));
-    await rm(join(legacyMigrations, "0070_tenant_billing_platform_workflow.sql"));
-    await rm(join(legacyMigrations, "0071_tenant_billing_target_cardinality.sql"));
-    await rm(join(legacyMigrations, "0072_tenant_billing_stale_family_repair.sql"));
-    await rm(join(legacyMigrations, "0073_tenant_billing_notification_delivery.sql"));
-    await rm(join(legacyMigrations, "0074_tenant_billing_attachment_idempotency.sql"));
-    await rm(join(legacyMigrations, "meta", "0066_snapshot.json"));
-    await rm(join(legacyMigrations, "meta", "0067_snapshot.json"));
-    await rm(join(legacyMigrations, "meta", "0068_snapshot.json"));
-    await rm(join(legacyMigrations, "meta", "0069_snapshot.json"));
-    await rm(join(legacyMigrations, "meta", "0070_snapshot.json"));
-    await rm(join(legacyMigrations, "meta", "0071_snapshot.json"));
-    await rm(join(legacyMigrations, "meta", "0072_snapshot.json"));
-    await rm(join(legacyMigrations, "meta", "0073_snapshot.json"));
-    await rm(join(legacyMigrations, "meta", "0074_snapshot.json"));
-
-    const journalPath = join(legacyMigrations, "meta", "_journal.json");
-    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
-      entries: Array<{ tag: string }>;
-    };
-    journal.entries = journal.entries.filter(
-      (entry) =>
-        entry.tag !== "0066_tenant_billing_experience" &&
-        entry.tag !== "0067_invoice_payment_completion" &&
-        entry.tag !== "0068_tenant_billing_document_pagination_indexes" &&
-        entry.tag !== "0069_tenant_billing_action_reconciliation" &&
-        entry.tag !== "0070_tenant_billing_platform_workflow" &&
-        entry.tag !== "0071_tenant_billing_target_cardinality" &&
-        entry.tag !== "0072_tenant_billing_stale_family_repair" &&
-        entry.tag !== "0073_tenant_billing_notification_delivery" &&
-        entry.tag !== "0074_tenant_billing_attachment_idempotency",
-    );
-    expect(journal.entries.at(-1)?.tag).toBe("0065_saas_party_actual_addresses");
-    await writeFile(journalPath, JSON.stringify(journal));
+    await copyMigrationsThroughIndex({
+      sourceFolder: migrationsFolder,
+      targetFolder: legacyMigrations,
+      lastIncludedIndex: 89,
+    });
 
     await migrate(drizzle(pool), { migrationsFolder: legacyMigrations });
     await pool.query(

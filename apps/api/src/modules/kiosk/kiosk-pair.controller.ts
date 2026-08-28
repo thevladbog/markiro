@@ -1,5 +1,6 @@
 import { Body, Controller, Header, Ip, Post } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
+import { ApiZodBody, ApiZodValidationError } from "../../lib/openapi";
 import { ZodValidationPipe } from "../../zod.pipe";
 import { pairKioskSchema, type PairKioskDto, type PairKioskResultDto } from "../pickup-orders/dto";
 import { PairingService } from "./pairing.service";
@@ -23,7 +24,28 @@ export class KioskPairController {
 
   @Post("pair")
   @Header("Cache-Control", "no-store")
+  @ApiOperation({
+    summary: "Pair a kiosk device",
+    description:
+      "The one unauthenticated kiosk route: exchanges the single-use 8-digit code shown in the cabinet for the device credential and initial dataset. Bounded by a per-code attempt lockout and a fixed-window rate limiter.",
+  })
+  @ApiZodBody(pairKioskSchema)
   @ApiKioskPairSecretResponse()
+  @ApiZodValidationError()
+  @ApiResponse({
+    status: 401,
+    description:
+      "Wrong, expired, used, or locked-out code; the kiosk is no longer active; or the pairing rate limit was exceeded.",
+  })
+  @ApiResponse({
+    status: 403,
+    description: "The tenant's subscription is read-only; pairing is refused.",
+    schema: {
+      type: "object",
+      required: ["code"],
+      properties: { code: { type: "string", enum: ["subscription_read_only"] } },
+    },
+  })
   async pair(
     @Body(new ZodValidationPipe(pairKioskSchema)) body: PairKioskDto,
     @Ip() ip: string,

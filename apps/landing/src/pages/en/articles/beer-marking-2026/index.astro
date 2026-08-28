@@ -1,0 +1,138 @@
+---
+import { Picture } from "astro:assets";
+
+import articleHero from "../../../../assets/beer-marking-2026-hero.png";
+import LandingFooter from "../../../../components/LandingFooter.astro";
+import LandingHeader from "../../../../components/LandingHeader.astro";
+import { BEER_MARKING_2026_ARTICLE_EN } from "../../../../content/articles";
+import { buildArticlePageGraph } from "../../../../lib/seo";
+import { readPublicSiteConfig } from "../../../../lib/site-config";
+import BaseLayout from "../../../../layouts/BaseLayout.astro";
+
+const article = BEER_MARKING_2026_ARTICLE_EN;
+const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<BaseLayout metadata={article} graph={buildArticlePageGraph(article)}>
+  <LandingHeader page={article} phone={config.phone} />
+  <main id="main" class="article-page">
+    <header class="article-hero">
+      <div class="container article-hero__inner">
+        <nav class="breadcrumbs" aria-label="Breadcrumbs"><ol><li><a href="/en/">Markiro</a></li><li aria-current="page">{article.navigationLabel}</li></ol></nav>
+        <div class="article-hero__layout">
+          <div class="article-hero__copy">
+            <p class="section-index">{article.eyebrow}</p><h1>{article.heading}</h1><p class="article-hero__lead">{article.introduction}</p>
+            <div class="article-byline" aria-label="Publication details"><span>{article.authorName}</span><time datetime={article.publishedAt}>August 26, 2026</time><span>{article.readingTimeMinutes} min read</span></div>
+          </div>
+          <figure class="article-hero__media" data-article-visual>
+            <Picture src={articleHero} alt="Engineer checking scanner, printer, and workstation readiness on a beer-marking line" widths={[480, 720, 1080]} formats={["avif", "webp"]} sizes="(max-width: 767px) 100vw, 45vw" loading="eager" fetchpriority="high" data-article-hero-image />
+            <figcaption>Readiness is proven on the real line, from code reading to recovery after a failure.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </header>
+
+    <article class="container article-body">
+      <aside class="article-summary" aria-labelledby="article-summary-title">
+        <p class="section-index">In brief</p><h2 id="article-summary-title">What matters in 2026</h2>
+        <ul>
+          <li data-key-takeaway>The main mandatory-marking stages for beer and selected low-alcohol beverages are already in force.</li>
+          <li data-key-takeaway>Item-level traceability applies to relevant consumer packages produced or imported from September 1, 2025.</li>
+          <li data-key-takeaway>The adaptation period addresses documented technical unpreparedness; it is not an industry-wide cancellation.</li>
+          <li data-key-takeaway>A manufacturer’s application report is due no later than the calendar day after identification means are applied.</li>
+          <li data-key-takeaway>Readiness spans product data, equipment, operator actions, the local journal, and external exchange.</li>
+          <li data-key-takeaway>A pilot must test duplicate scans, print failure, network loss, and restart recovery.</li>
+        </ul>
+      </aside>
+
+      <nav class="article-toc" aria-label="Article contents">
+        <p class="section-index">Contents</p><ol><li><a href="#requirements">Requirements already in force</a></li><li><a href="#adaptation">The 2026 adaptation period</a></li><li><a href="#production-line">Production-line controls</a></li><li><a href="#terms">Terms and identifiers</a></li><li><a href="#pilot">A meaningful pilot</a></li><li><a href="#markiro">Markiro’s current scope</a></li></ol>
+      </nav>
+
+      <section id="requirements" aria-labelledby="requirements-title">
+        <p class="section-index">01 / Requirements</p><h2 id="requirements-title">What is already required in 2026</h2>
+        <p><strong>A manufacturer is not starting from zero in 2026: mandatory code application for the main packaging types and key traceability stages have already entered into force.</strong> The practical focus is now reliable daily execution rather than a future implementation date.</p>
+        <p>For relevant beer and low-alcohol beverages in consumer packaging produced in or imported into Russia from September 1, 2025, item-level data must accompany shipment and acceptance between supply-chain participants. The corresponding stage for kegs began earlier, on March 1, 2025. The current timeline is published in the <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/sroki-i-etapy-zapuska-obyazatelnoy-markirovki-piva-pivnykh-i-slaboalkogolnykh-napitkov">official Chestny ZNAK roadmap</a> (in Russian).</p>
+        <div class="article-cases">
+          <article><h3>Before the batch</h3><p>Confirm the product, GTIN, packaging type, production job, and source of marking codes.</p></article>
+          <article><h3>On the line</h3><p>Apply the identification means, read it, and connect it to a specific operation result.</p></article>
+          <article><h3>After application</h3><p>Send the application report no later than the next calendar day, as explained in the <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/kogda-nuzhno-vvodit-pivo-i-pivnye-napitki-v-oborot">official circulation guidance</a> (in Russian).</p></article>
+          <article><h3>When goods move</h3><p>The physical shipment must match the item-level information transmitted through Russian EDI documents.</p></article>
+        </div>
+        <div class="article-callout article-callout--boundary"><strong>Check the scope for each SKU.</strong><p>A commercial beverage name is not sufficient. Applicability depends on current EAEU customs and Russian OKPD 2 classifications and on the actual supply-chain scenario.</p></div>
+      </section>
+
+      <section id="adaptation" aria-labelledby="adaptation-title">
+        <p class="section-index">02 / 2026 clarification</p><h2 id="adaptation-title">What the item-level accounting adaptation period means</h2>
+        <p><strong>The adaptation period does not cancel the requirement and does not postpone item-level accounting for the entire industry.</strong> It is intended for participants that are not yet technically ready to transmit item-level turnover data for consumer-packaged products made from September 1, 2025.</p>
+        <p>Participants that already exchange Universal Transfer Documents (UPD) with identification codes continue under the approved process. When a participant claims technical unpreparedness, the operator asks for organization details, the cause, a planned transition date, and responsible staff. These conditions appear in the <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/perenos-srokov-po-ekzemplyarnomu-uchetu-piva">official clarification dated July 14, 2026</a> (in Russian).</p>
+        <div class="article-callout"><strong>What the clarification does not treat as technical impossibility</strong><p>Missing registration, the operator’s electronic-document module, or an EDI connection — and a temporary mobile-internet outage by itself — do not establish technical impossibility.</p></div>
+        <p>Use the adaptation period as a bounded window for named technical work. Record unfinished integrations, test scenarios, owners, and a target production trial instead of relying on the general statement that “the system is not ready.”</p>
+      </section>
+
+      <section id="production-line" aria-labelledby="production-line-title">
+        <p class="section-index">03 / Production workflow</p><h2 id="production-line-title">What to verify on the actual packaging line</h2>
+        <p><strong>A configured administrative account does not prove line readiness.</strong> Between receiving codes and sending a correct shipment document are physical application, scanners, printers, operator decisions, packaging, and local workstation state.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/beer-marking-2026-control-map-en.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Readiness map connecting product data, code application, packing, a local journal, and external systems" data-article-diagram />
+          <figcaption>A regulatory requirement becomes a controlled process only when every physical step has a verifiable digital outcome.</figcaption>
+        </figure>
+        <div class="article-checklist">
+          <div><h3>Data and job</h3><ul><li>Product is mapped to the correct GTIN.</li><li>Pack type and batch parameters are known.</li><li>Critical identifiers are not typed manually.</li><li>An invalid batch is blocked before application.</li></ul></div>
+          <div><h3>Equipment and operator</h3><ul><li>The scanner reads real codes on the actual container.</li><li>The printer preserves code readability.</li><li>The latest outcome is visible without relying on color.</li><li>A duplicate cannot enter the case twice.</li></ul></div>
+          <div><h3>Journal and exchange</h3><ul><li>Every operation has an explicit local state.</li><li>The queue survives a disconnect and restart.</li><li>Retry does not create a duplicate.</li><li>A conflict is visible and recoverable.</li></ul></div>
+        </div>
+        <p>The full item-to-case cycle is covered in <a href="/en/articles/beer-case-aggregation/">Beer case aggregation: keeping a packaging line running</a>.</p>
+      </section>
+
+      <section id="terms" aria-labelledby="terms-title">
+        <p class="section-index">04 / Terms</p><h2 id="terms-title">Identifiers that should not be confused</h2>
+        <p><strong>Russian regulations distinguish the identification means, the marking code, and the identification code.</strong> They are related, but they serve different stages. Inaccurate terminology can lead to an incorrect exchange format or excess data being sent externally.</p>
+        <div class="article-cases">
+          <article><h3>Identification means (SI)</h3><p>The machine-readable representation of a marking code applied to a product, package, or label.</p></article>
+          <article><h3>Marking code (KM)</h3><p>The unique character sequence supplied to a participant for conversion into an identification means.</p></article>
+          <article><h3>Identification code (KI)</h3><p>The part of the marking code that identifies a specific item. Current official beer guidance describes a 25-character structure.</p></article>
+          <article><h3>SSCC and KITU</h3><p>These identify the transport package and its contents; they do not replace the code on an individual bottle or can.</p></article>
+        </div>
+        <p>The current definitions of SI, KM, and KI are in the <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/sredstvo-identifikatsii-kod-markirovki-i-kod-identifikatsii-kak-otlichit-i-gde-ispolzuyutsya-pivo">Chestny ZNAK clarification dated July 31, 2026</a> (in Russian). For transport packaging, see <a href="/en/sscc-and-aggregation/">SSCC and aggregation in Markiro</a>.</p>
+      </section>
+
+      <section id="pilot" aria-labelledby="pilot-title">
+        <p class="section-index">05 / Readiness test</p><h2 id="pilot-title">How to run a pilot that exposes real risk</h2>
+        <p><strong>A pilot is not successful merely because one bottle scanned and one case closed.</strong> It should confirm the normal production pace and a predetermined response to equipment, operator, and connectivity failures.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/beer-marking-2026-readiness-en.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Five pilot checks covering real-code reading, duplicate rejection, reprinting, offline work, and restart recovery" data-article-diagram />
+          <figcaption>Failure scenarios reveal more about production readiness than a single successful demonstration.</figcaption>
+        </figure>
+        <ol class="article-steps">
+          <li><h3>Prepare real samples</h3><p>Use the actual container, surface, line speed, and equipment rather than a printed test sheet alone.</p></li>
+          <li><h3>Define each expected outcome</h3><p>Specify the screen state, sound, journal entry, and next permitted action for accepted and rejected scans.</p></li>
+          <li><h3>Trigger failures deliberately</h3><p>Repeat a code, disconnect the printer and network, close the application, and restart with a case still open.</p></li>
+          <li><h3>Reconcile physical and digital contents</h3><p>After recovery, compare the actual bottles or cans, SSCC, journal events, and synchronization result.</p></li>
+          <li><h3>Separate automated from external proof</h3><p>UI tests do not prove real scanner reading, printing on the selected hardware, or document acceptance by an external system. Record those gates separately.</p></li>
+        </ol>
+        <p>Queue persistence and recovery are described on the <a href="/en/offline-production/">Offline-first production</a> page.</p>
+      </section>
+
+      <section id="markiro" aria-labelledby="markiro-title">
+        <p class="section-index">06 / Markiro</p><h2 id="markiro-title">Which part of the workflow Markiro covers</h2>
+        <p>Markiro connects the production job, scanner, printer, operator actions, and local journal in one line workflow. It verifies formats and duplicates, builds case contents, assigns SSCCs, preserves a local outbound queue, and restores unfinished work after restart.</p>
+        <div class="article-callout article-callout--boundary"><strong>Markiro’s current aggregation chain is item → case → SSCC.</strong><p>Pallet aggregation is the next development stage. The exact exchange with GIS MT, EDI, 1C, or another system is confirmed for each facility and is not described as a universal ready-made integration.</p></div>
+        <p>The current primary category is beer, beer-based beverages, and selected low-alcohol beverages. Additional product types are being introduced gradually.</p>
+      </section>
+
+      <section class="article-conclusion" aria-labelledby="conclusion-title">
+        <p class="section-index">Conclusion</p><h2 id="conclusion-title">Readiness is a repeatable process, not an account setting</h2>
+        <p>Begin with one line, one product, and a bounded set of real scenarios. Verify every step, including rejection and recovery, before expanding the pilot to additional packaging formats and external systems.</p>
+        <a class="button" href="/en/#demo" data-analytics="landing_demo_click" data-placement="article-conclusion">Review one production line <span aria-hidden="true">→</span></a>
+      </section>
+
+      <section class="article-related" aria-labelledby="article-related-title">
+        <p class="section-index">Related</p><h2 id="article-related-title">Continue reading</h2>
+        <div class="seo-related__grid"><a href="/en/articles/beer-data-matrix-not-scanning/"><span>Why a beer Data Matrix will not scan</span><span aria-hidden="true">→</span></a><a href="/en/articles/beer-case-aggregation/"><span>Beer case aggregation</span><span aria-hidden="true">→</span></a><a href="/en/sscc-and-aggregation/"><span>SSCC and aggregation</span><span aria-hidden="true">→</span></a></div>
+      </section>
+    </article>
+  </main>
+  <LandingFooter page={article} />
+  <script>import { browserLandingRuntime, initLanding } from "../../../../scripts/site"; initLanding(document, browserLandingRuntime(window));</script>
+</BaseLayout>

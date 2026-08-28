@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, Patch, Post, Req } from "@nestjs/common";
+import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { platformCommercialContracts } from "@markiro/platform-contracts";
 
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
@@ -19,11 +20,13 @@ import {
   type BankAccountInput,
 } from "./dto";
 
+@ApiTags("billing-accounts")
 @Controller("platform/billing")
 export class BillingAccountsController {
   constructor(private readonly accounts: BillingAccountsService) {}
 
   @Get("operator/accounts")
+  @ApiOperation({ summary: "List operator bank accounts" })
   @PlatformApiProtectedOk({
     response: platformCommercialContracts.billingAccounts.operator.list.response,
   })
@@ -36,6 +39,7 @@ export class BillingAccountsController {
   }
 
   @Post("operator/accounts")
+  @ApiOperation({ summary: "Create an operator bank account" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.billingAccounts.operator.create.body,
     response: platformCommercialContracts.billingAccounts.operator.create.response,
@@ -52,6 +56,7 @@ export class BillingAccountsController {
   }
 
   @Patch("operator/accounts/:accountId/default")
+  @ApiOperation({ summary: "Set the default operator bank account" })
   @PlatformApiProtectedOk({
     response: platformCommercialContracts.billingAccounts.operator.setDefault.response,
   })
@@ -68,6 +73,7 @@ export class BillingAccountsController {
 
   @Post("operator/accounts/:accountId/archive")
   @HttpCode(200)
+  @ApiOperation({ summary: "Archive an operator bank account" })
   @PlatformApiProtectedOk({
     body: platformCommercialContracts.billingAccounts.operator.archive.body,
     response: platformCommercialContracts.billingAccounts.operator.archive.response,
@@ -85,6 +91,7 @@ export class BillingAccountsController {
   }
 
   @Get("tenants/:tenantId/accounts")
+  @ApiOperation({ summary: "List tenant bank accounts" })
   @PlatformApiProtectedOk({
     response: platformCommercialContracts.billingAccounts.tenant.list.response,
   })
@@ -99,6 +106,7 @@ export class BillingAccountsController {
   }
 
   @Post("tenants/:tenantId/accounts")
+  @ApiOperation({ summary: "Create a tenant bank account" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.billingAccounts.tenant.create.body,
     response: platformCommercialContracts.billingAccounts.tenant.create.response,
@@ -116,6 +124,7 @@ export class BillingAccountsController {
   }
 
   @Patch("tenants/:tenantId/accounts/:accountId/default")
+  @ApiOperation({ summary: "Set the default tenant bank account" })
   @PlatformApiProtectedOk({
     response: platformCommercialContracts.billingAccounts.tenant.setDefault.response,
   })
@@ -133,6 +142,7 @@ export class BillingAccountsController {
 
   @Post("tenants/:tenantId/accounts/:accountId/archive")
   @HttpCode(200)
+  @ApiOperation({ summary: "Archive a tenant bank account" })
   @PlatformApiProtectedOk({
     body: platformCommercialContracts.billingAccounts.tenant.archive.body,
     response: platformCommercialContracts.billingAccounts.tenant.archive.response,

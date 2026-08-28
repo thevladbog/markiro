@@ -12,8 +12,8 @@ interface Props {
 const { page, phone } = Astro.props;
 const copy = getUiCopy(page.locale).common;
 const homePath = page.locale === "ru" ? "/" : "/en/";
-const ruPath = page.locale === "ru" ? page.path : page.alternatePath;
-const enPath = page.locale === "en" ? page.path : page.alternatePath;
+const ruPath = page.locale === "ru" ? page.path : (page.alternatePath ?? "/");
+const enPath = page.locale === "en" ? page.path : (page.alternatePath ?? "/en/");
 const paths = page.locale === "ru"
   ? {
       aggregation: "/sscc-i-agregatsiya/",
@@ -39,7 +39,16 @@ const paths = page.locale === "ru"
     <a href={paths.aggregation}>{copy.nav.aggregation}</a>
     <a href={paths.offline}>{copy.nav.offline}</a>
     <a href={paths.faq}>{copy.nav.faq}</a>
-    {phone && <a class="landing-nav__phone" href={phone.href}>{phone.display}</a>}
+    {phone && (
+      <a
+        class="landing-nav__phone"
+        href={phone.href}
+        data-analytics="landing_phone_click"
+        data-placement="header"
+      >
+        {phone.display}
+      </a>
+    )}
     <span class="language-switch" aria-label={page.locale === "ru" ? "Язык" : "Language"}>
       <a href={ruPath} hreflang="ru" lang="ru" aria-current={page.locale === "ru" ? "page" : undefined}>RU</a>
       <span aria-hidden="true">/</span>

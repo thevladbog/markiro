@@ -1,6 +1,6 @@
 {
-  "id": "e6264079-2c26-457c-a6c1-3e7fd58a8485",
-  "prevId": "3ebd8f62-be90-48ca-bbaf-8949b661eaca",
+  "id": "70c0cfff-5252-4a69-b15f-d53f6ec9422a",
+  "prevId": "99f5abb2-fb30-4c84-a48c-51d41aa6378a",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -8460,35 +8460,7 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "commercial_offer_documents_tenant_created_id_idx": {
-          "name": "commercial_offer_documents_tenant_created_id_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "commercial_offer_documents_tenant_offer_fk": {
           "name": "commercial_offer_documents_tenant_offer_fk",
@@ -10345,16 +10317,7 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "subscription_events_tenant_id_uq": {
-          "name": "subscription_events_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -10676,41 +10639,7 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "billing_payments_tenant_invoice_paid_idx": {
-          "name": "billing_payments_tenant_invoice_paid_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "invoice_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "paid_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "billing_payments_platform_user_id_platform_users_id_fk": {
           "name": "billing_payments_platform_user_id_platform_users_id_fk",
@@ -10762,6 +10691,14 @@
           "columns": [
             "tenant_id",
             "id"
+          ]
+        },
+        "billing_payments_invoice_uq": {
+          "name": "billing_payments_invoice_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "invoice_id"
           ]
         },
         "billing_payments_tenant_invoice_id_uq": {
@@ -11336,93 +11273,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.invoice_payment_completions": {
-      "name": "invoice_payment_completions",
-      "schema": "",
-      "columns": {
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "invoice_id": {
-          "name": "invoice_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "billing_payment_id": {
-          "name": "billing_payment_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "invoice_payment_completions_tenant_invoice_fk": {
-          "name": "invoice_payment_completions_tenant_invoice_fk",
-          "tableFrom": "invoice_payment_completions",
-          "tableTo": "invoices",
-          "columnsFrom": [
-            "tenant_id",
-            "invoice_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "invoice_payment_completions_tenant_payment_fk": {
-          "name": "invoice_payment_completions_tenant_payment_fk",
-          "tableFrom": "invoice_payment_completions",
-          "tableTo": "billing_payments",
-          "columnsFrom": [
-            "tenant_id",
-            "invoice_id",
-            "billing_payment_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "invoice_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "invoice_payment_completions_tenant_invoice_uq": {
-          "name": "invoice_payment_completions_tenant_invoice_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "invoice_id"
-          ]
-        },
-        "invoice_payment_completions_payment_uq": {
-          "name": "invoice_payment_completions_payment_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "billing_payment_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.invoices": {
       "name": "invoices",
       "schema": "",
@@ -11523,12 +11373,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'0'"
-        },
-        "source_offer_id": {
-          "name": "source_offer_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         },
         "application_mode": {
           "name": "application_mode",
@@ -11660,21 +11504,6 @@
             "issued_by_platform_user_id"
           ],
           "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "invoices_tenant_source_offer_fk": {
-          "name": "invoices_tenant_source_offer_fk",
-          "tableFrom": "invoices",
-          "tableTo": "commercial_offers",
-          "columnsFrom": [
-            "tenant_id",
-            "source_offer_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
             "id"
           ],
           "onDelete": "no action",
@@ -13072,1522 +12901,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.billing_act_documents": {
-      "name": "billing_act_documents",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "act_id": {
-          "name": "act_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "revision": {
-          "name": "revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "is_current": {
-          "name": "is_current",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "object_key": {
-          "name": "object_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "content_type": {
-          "name": "content_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sha256": {
-          "name": "sha256",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "byte_size": {
-          "name": "byte_size",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "uploaded_by_platform_user_id": {
-          "name": "uploaded_by_platform_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "billing_act_documents_tenant_created_id_idx": {
-          "name": "billing_act_documents_tenant_created_id_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "billing_act_documents_current_act_uq": {
-          "name": "billing_act_documents_current_act_uq",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "act_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"billing_act_documents\".\"is_current\" = true",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "billing_act_documents_uploaded_by_platform_user_id_platform_users_id_fk": {
-          "name": "billing_act_documents_uploaded_by_platform_user_id_platform_users_id_fk",
-          "tableFrom": "billing_act_documents",
-          "tableTo": "platform_users",
-          "columnsFrom": [
-            "uploaded_by_platform_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "billing_act_documents_tenant_act_fk": {
-          "name": "billing_act_documents_tenant_act_fk",
-          "tableFrom": "billing_act_documents",
-          "tableTo": "billing_acts",
-          "columnsFrom": [
-            "tenant_id",
-            "act_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "billing_act_documents_tenant_id_uq": {
-          "name": "billing_act_documents_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        },
-        "billing_act_documents_act_revision_uq": {
-          "name": "billing_act_documents_act_revision_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "act_id",
-            "revision"
-          ]
-        },
-        "billing_act_documents_object_key_uq": {
-          "name": "billing_act_documents_object_key_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "object_key"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "billing_act_documents_revision_positive": {
-          "name": "billing_act_documents_revision_positive",
-          "value": "\"billing_act_documents\".\"revision\" > 0"
-        },
-        "billing_act_documents_byte_size_positive": {
-          "name": "billing_act_documents_byte_size_positive",
-          "value": "\"billing_act_documents\".\"byte_size\" > 0"
-        },
-        "billing_act_documents_content_type_pdf": {
-          "name": "billing_act_documents_content_type_pdf",
-          "value": "\"billing_act_documents\".\"content_type\" = 'application/pdf'"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.billing_acts": {
-      "name": "billing_acts",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_id": {
-          "name": "request_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "invoice_id": {
-          "name": "invoice_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ordered_service_id": {
-          "name": "ordered_service_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "number": {
-          "name": "number",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "billing_act_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'draft'"
-        },
-        "period_start": {
-          "name": "period_start",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "period_end": {
-          "name": "period_end",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by_platform_user_id": {
-          "name": "created_by_platform_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "issued_by_platform_user_id": {
-          "name": "issued_by_platform_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "issued_at": {
-          "name": "issued_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cancelled_by_platform_user_id": {
-          "name": "cancelled_by_platform_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cancelled_at": {
-          "name": "cancelled_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "billing_acts_tenant_status_created_idx": {
-          "name": "billing_acts_tenant_status_created_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "billing_acts_tenant_id_organization_id_fk": {
-          "name": "billing_acts_tenant_id_organization_id_fk",
-          "tableFrom": "billing_acts",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "billing_acts_created_by_platform_user_id_platform_users_id_fk": {
-          "name": "billing_acts_created_by_platform_user_id_platform_users_id_fk",
-          "tableFrom": "billing_acts",
-          "tableTo": "platform_users",
-          "columnsFrom": [
-            "created_by_platform_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "billing_acts_issued_by_platform_user_id_platform_users_id_fk": {
-          "name": "billing_acts_issued_by_platform_user_id_platform_users_id_fk",
-          "tableFrom": "billing_acts",
-          "tableTo": "platform_users",
-          "columnsFrom": [
-            "issued_by_platform_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "billing_acts_cancelled_by_platform_user_id_platform_users_id_fk": {
-          "name": "billing_acts_cancelled_by_platform_user_id_platform_users_id_fk",
-          "tableFrom": "billing_acts",
-          "tableTo": "platform_users",
-          "columnsFrom": [
-            "cancelled_by_platform_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "billing_acts_tenant_request_fk": {
-          "name": "billing_acts_tenant_request_fk",
-          "tableFrom": "billing_acts",
-          "tableTo": "tenant_billing_requests",
-          "columnsFrom": [
-            "tenant_id",
-            "request_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "billing_acts_tenant_invoice_fk": {
-          "name": "billing_acts_tenant_invoice_fk",
-          "tableFrom": "billing_acts",
-          "tableTo": "invoices",
-          "columnsFrom": [
-            "tenant_id",
-            "invoice_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "billing_acts_tenant_service_fk": {
-          "name": "billing_acts_tenant_service_fk",
-          "tableFrom": "billing_acts",
-          "tableTo": "ordered_services",
-          "columnsFrom": [
-            "tenant_id",
-            "ordered_service_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "billing_acts_number_uq": {
-          "name": "billing_acts_number_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "number"
-          ]
-        },
-        "billing_acts_tenant_id_uq": {
-          "name": "billing_acts_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "billing_acts_period_order_check": {
-          "name": "billing_acts_period_order_check",
-          "value": "\"billing_acts\".\"period_end\" >= \"billing_acts\".\"period_start\""
-        },
-        "billing_acts_issue_shape_check": {
-          "name": "billing_acts_issue_shape_check",
-          "value": "((\"billing_acts\".\"issued_by_platform_user_id\" is null and \"billing_acts\".\"issued_at\" is null)\n        or (\"billing_acts\".\"issued_by_platform_user_id\" is not null and \"billing_acts\".\"issued_at\" is not null))\n        and ((\"billing_acts\".\"status\" = 'draft' and \"billing_acts\".\"issued_by_platform_user_id\" is null and \"billing_acts\".\"cancelled_by_platform_user_id\" is null and \"billing_acts\".\"cancelled_at\" is null)\n          or (\"billing_acts\".\"status\" = 'issued' and \"billing_acts\".\"issued_by_platform_user_id\" is not null and \"billing_acts\".\"cancelled_by_platform_user_id\" is null and \"billing_acts\".\"cancelled_at\" is null)\n          or (\"billing_acts\".\"status\" = 'cancelled' and \"billing_acts\".\"cancelled_by_platform_user_id\" is not null and \"billing_acts\".\"cancelled_at\" is not null))"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.commercial_offer_decisions": {
-      "name": "commercial_offer_decisions",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "offer_id": {
-          "name": "offer_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "decision": {
-          "name": "decision",
-          "type": "offer_decision_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "message": {
-          "name": "message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "actor_user_id": {
-          "name": "actor_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "idempotency_key": {
-          "name": "idempotency_key",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "commercial_offer_decisions_accepted_offer_uq": {
-          "name": "commercial_offer_decisions_accepted_offer_uq",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "offer_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"commercial_offer_decisions\".\"decision\" = 'accepted'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "commercial_offer_decisions_tenant_offer_created_idx": {
-          "name": "commercial_offer_decisions_tenant_offer_created_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "offer_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "commercial_offer_decisions_actor_user_id_user_id_fk": {
-          "name": "commercial_offer_decisions_actor_user_id_user_id_fk",
-          "tableFrom": "commercial_offer_decisions",
-          "tableTo": "user",
-          "columnsFrom": [
-            "actor_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "commercial_offer_decisions_tenant_offer_fk": {
-          "name": "commercial_offer_decisions_tenant_offer_fk",
-          "tableFrom": "commercial_offer_decisions",
-          "tableTo": "commercial_offers",
-          "columnsFrom": [
-            "tenant_id",
-            "offer_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "commercial_offer_decisions_tenant_id_uq": {
-          "name": "commercial_offer_decisions_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        },
-        "commercial_offer_decisions_tenant_idempotency_uq": {
-          "name": "commercial_offer_decisions_tenant_idempotency_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "idempotency_key"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "commercial_offer_decisions_message_shape_check": {
-          "name": "commercial_offer_decisions_message_shape_check",
-          "value": "\"commercial_offer_decisions\".\"decision\" <> 'changes_requested' or nullif(btrim(\"commercial_offer_decisions\".\"message\"), '') is not null"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.tenant_billing_request_attachments": {
-      "name": "tenant_billing_request_attachments",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_id": {
-          "name": "request_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "file_name": {
-          "name": "file_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "content_type": {
-          "name": "content_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "byte_size": {
-          "name": "byte_size",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sha256": {
-          "name": "sha256",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "object_key": {
-          "name": "object_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "uploaded_by_user_id": {
-          "name": "uploaded_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "tenant_billing_request_attachments_uploaded_by_user_id_user_id_fk": {
-          "name": "tenant_billing_request_attachments_uploaded_by_user_id_user_id_fk",
-          "tableFrom": "tenant_billing_request_attachments",
-          "tableTo": "user",
-          "columnsFrom": [
-            "uploaded_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "tenant_billing_request_attachments_tenant_request_fk": {
-          "name": "tenant_billing_request_attachments_tenant_request_fk",
-          "tableFrom": "tenant_billing_request_attachments",
-          "tableTo": "tenant_billing_requests",
-          "columnsFrom": [
-            "tenant_id",
-            "request_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "tenant_billing_request_attachments_tenant_id_uq": {
-          "name": "tenant_billing_request_attachments_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        },
-        "tenant_billing_request_attachments_object_key_uq": {
-          "name": "tenant_billing_request_attachments_object_key_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "object_key"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "tenant_billing_request_attachments_byte_size_positive": {
-          "name": "tenant_billing_request_attachments_byte_size_positive",
-          "value": "\"tenant_billing_request_attachments\".\"byte_size\" > 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.tenant_billing_request_events": {
-      "name": "tenant_billing_request_events",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_id": {
-          "name": "request_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "billing_request_event_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "from_status": {
-          "name": "from_status",
-          "type": "billing_request_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "to_status": {
-          "name": "to_status",
-          "type": "billing_request_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "actor_kind": {
-          "name": "actor_kind",
-          "type": "billing_actor_kind",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "actor_user_id": {
-          "name": "actor_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "actor_platform_user_id": {
-          "name": "actor_platform_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "message": {
-          "name": "message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "metadata": {
-          "name": "metadata",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "idempotency_key": {
-          "name": "idempotency_key",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "tenant_billing_request_events_tenant_request_created_idx": {
-          "name": "tenant_billing_request_events_tenant_request_created_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "request_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "tenant_billing_request_events_actor_user_id_user_id_fk": {
-          "name": "tenant_billing_request_events_actor_user_id_user_id_fk",
-          "tableFrom": "tenant_billing_request_events",
-          "tableTo": "user",
-          "columnsFrom": [
-            "actor_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "tenant_billing_request_events_actor_platform_user_id_platform_users_id_fk": {
-          "name": "tenant_billing_request_events_actor_platform_user_id_platform_users_id_fk",
-          "tableFrom": "tenant_billing_request_events",
-          "tableTo": "platform_users",
-          "columnsFrom": [
-            "actor_platform_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "tenant_billing_request_events_tenant_request_fk": {
-          "name": "tenant_billing_request_events_tenant_request_fk",
-          "tableFrom": "tenant_billing_request_events",
-          "tableTo": "tenant_billing_requests",
-          "columnsFrom": [
-            "tenant_id",
-            "request_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "tenant_billing_request_events_tenant_id_uq": {
-          "name": "tenant_billing_request_events_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        },
-        "tenant_billing_request_events_tenant_idempotency_uq": {
-          "name": "tenant_billing_request_events_tenant_idempotency_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "idempotency_key"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "tenant_billing_request_events_actor_shape_check": {
-          "name": "tenant_billing_request_events_actor_shape_check",
-          "value": "(\"tenant_billing_request_events\".\"actor_kind\" = 'tenant_user' and \"tenant_billing_request_events\".\"actor_user_id\" is not null and \"tenant_billing_request_events\".\"actor_platform_user_id\" is null)\n        or (\"tenant_billing_request_events\".\"actor_kind\" = 'platform_user' and \"tenant_billing_request_events\".\"actor_user_id\" is null and \"tenant_billing_request_events\".\"actor_platform_user_id\" is not null)\n        or (\"tenant_billing_request_events\".\"actor_kind\" = 'system' and \"tenant_billing_request_events\".\"actor_user_id\" is null and \"tenant_billing_request_events\".\"actor_platform_user_id\" is null)"
-        },
-        "tenant_billing_request_events_status_shape_check": {
-          "name": "tenant_billing_request_events_status_shape_check",
-          "value": "\"tenant_billing_request_events\".\"kind\" <> 'status_changed' or (\"tenant_billing_request_events\".\"from_status\" is not null and \"tenant_billing_request_events\".\"to_status\" is not null and \"tenant_billing_request_events\".\"from_status\" <> \"tenant_billing_request_events\".\"to_status\")"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.tenant_billing_request_links": {
-      "name": "tenant_billing_request_links",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "request_id": {
-          "name": "request_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "offer_id": {
-          "name": "offer_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "invoice_id": {
-          "name": "invoice_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "payment_id": {
-          "name": "payment_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "act_id": {
-          "name": "act_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ordered_service_id": {
-          "name": "ordered_service_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "subscription_event_id": {
-          "name": "subscription_event_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "tenant_billing_request_links_offer_uq": {
-          "name": "tenant_billing_request_links_offer_uq",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "request_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "offer_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"tenant_billing_request_links\".\"offer_id\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "tenant_billing_request_links_invoice_uq": {
-          "name": "tenant_billing_request_links_invoice_uq",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "request_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "invoice_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"tenant_billing_request_links\".\"invoice_id\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "tenant_billing_request_links_payment_uq": {
-          "name": "tenant_billing_request_links_payment_uq",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "request_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "payment_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"tenant_billing_request_links\".\"payment_id\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "tenant_billing_request_links_act_uq": {
-          "name": "tenant_billing_request_links_act_uq",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "request_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "act_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"tenant_billing_request_links\".\"act_id\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "tenant_billing_request_links_service_uq": {
-          "name": "tenant_billing_request_links_service_uq",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "request_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "ordered_service_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"tenant_billing_request_links\".\"ordered_service_id\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "tenant_billing_request_links_subscription_event_uq": {
-          "name": "tenant_billing_request_links_subscription_event_uq",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "request_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "subscription_event_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"tenant_billing_request_links\".\"subscription_event_id\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "tenant_billing_request_links_tenant_request_fk": {
-          "name": "tenant_billing_request_links_tenant_request_fk",
-          "tableFrom": "tenant_billing_request_links",
-          "tableTo": "tenant_billing_requests",
-          "columnsFrom": [
-            "tenant_id",
-            "request_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "tenant_billing_request_links_tenant_offer_fk": {
-          "name": "tenant_billing_request_links_tenant_offer_fk",
-          "tableFrom": "tenant_billing_request_links",
-          "tableTo": "commercial_offers",
-          "columnsFrom": [
-            "tenant_id",
-            "offer_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "tenant_billing_request_links_tenant_invoice_fk": {
-          "name": "tenant_billing_request_links_tenant_invoice_fk",
-          "tableFrom": "tenant_billing_request_links",
-          "tableTo": "invoices",
-          "columnsFrom": [
-            "tenant_id",
-            "invoice_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "tenant_billing_request_links_tenant_payment_fk": {
-          "name": "tenant_billing_request_links_tenant_payment_fk",
-          "tableFrom": "tenant_billing_request_links",
-          "tableTo": "billing_payments",
-          "columnsFrom": [
-            "tenant_id",
-            "payment_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "tenant_billing_request_links_tenant_act_fk": {
-          "name": "tenant_billing_request_links_tenant_act_fk",
-          "tableFrom": "tenant_billing_request_links",
-          "tableTo": "billing_acts",
-          "columnsFrom": [
-            "tenant_id",
-            "act_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "tenant_billing_request_links_tenant_service_fk": {
-          "name": "tenant_billing_request_links_tenant_service_fk",
-          "tableFrom": "tenant_billing_request_links",
-          "tableTo": "ordered_services",
-          "columnsFrom": [
-            "tenant_id",
-            "ordered_service_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "tenant_billing_request_links_tenant_subscription_event_fk": {
-          "name": "tenant_billing_request_links_tenant_subscription_event_fk",
-          "tableFrom": "tenant_billing_request_links",
-          "tableTo": "subscription_events",
-          "columnsFrom": [
-            "tenant_id",
-            "subscription_event_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "tenant_billing_request_links_tenant_id_uq": {
-          "name": "tenant_billing_request_links_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "tenant_billing_request_links_one_target_check": {
-          "name": "tenant_billing_request_links_one_target_check",
-          "value": "num_nonnulls(\"tenant_billing_request_links\".\"offer_id\", \"tenant_billing_request_links\".\"invoice_id\", \"tenant_billing_request_links\".\"payment_id\", \"tenant_billing_request_links\".\"act_id\", \"tenant_billing_request_links\".\"ordered_service_id\", \"tenant_billing_request_links\".\"subscription_event_id\") = 1"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.tenant_billing_requests": {
-      "name": "tenant_billing_requests",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "number": {
-          "name": "number",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "type": {
-          "name": "type",
-          "type": "billing_request_type",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "billing_request_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'new'"
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "desired_at": {
-          "name": "desired_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "context_type": {
-          "name": "context_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "context_id": {
-          "name": "context_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "responsible_side": {
-          "name": "responsible_side",
-          "type": "billing_responsible_side",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'markiro'"
-        },
-        "idempotency_key": {
-          "name": "idempotency_key",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by_user_id": {
-          "name": "created_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "tenant_billing_requests_tenant_status_updated_idx": {
-          "name": "tenant_billing_requests_tenant_status_updated_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "updated_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "tenant_billing_requests_tenant_id_organization_id_fk": {
-          "name": "tenant_billing_requests_tenant_id_organization_id_fk",
-          "tableFrom": "tenant_billing_requests",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "tenant_billing_requests_created_by_user_id_user_id_fk": {
-          "name": "tenant_billing_requests_created_by_user_id_user_id_fk",
-          "tableFrom": "tenant_billing_requests",
-          "tableTo": "user",
-          "columnsFrom": [
-            "created_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "tenant_billing_requests_number_uq": {
-          "name": "tenant_billing_requests_number_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "number"
-          ]
-        },
-        "tenant_billing_requests_tenant_id_uq": {
-          "name": "tenant_billing_requests_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        },
-        "tenant_billing_requests_tenant_idempotency_uq": {
-          "name": "tenant_billing_requests_tenant_idempotency_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "idempotency_key"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "tenant_billing_requests_context_shape_check": {
-          "name": "tenant_billing_requests_context_shape_check",
-          "value": "(\"tenant_billing_requests\".\"context_type\" is null) = (\"tenant_billing_requests\".\"context_id\" is null)"
-        },
-        "tenant_billing_requests_description_nonempty": {
-          "name": "tenant_billing_requests_description_nonempty",
-          "value": "nullif(btrim(\"tenant_billing_requests\".\"description\"), '') is not null"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.shift_export_artifacts": {
       "name": "shift_export_artifacts",
       "schema": "",
@@ -15476,6 +13789,1236 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
+    },
+    "public.inventories": {
+      "name": "inventories",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "number": {
+          "name": "number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gtin14_snapshot": {
+          "name": "gtin14_snapshot",
+          "type": "char(14)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "line_id": {
+          "name": "line_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mode": {
+          "name": "mode",
+          "type": "inventory_mode",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "production_date_from": {
+          "name": "production_date_from",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "production_date_to": {
+          "name": "production_date_to",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "box_label_template_id": {
+          "name": "box_label_template_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "inventory_lifecycle_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "active_snapshot_id": {
+          "name": "active_snapshot_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "result_revision": {
+          "name": "result_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_by_user_id": {
+          "name": "started_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "closed_by_user_id": {
+          "name": "closed_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "closed_at": {
+          "name": "closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "emergency_close_reason": {
+          "name": "emergency_close_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "emergency_closed_by_user_id": {
+          "name": "emergency_closed_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "emergency_closed_at": {
+          "name": "emergency_closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completion_acknowledged_by_user_id": {
+          "name": "completion_acknowledged_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completion_acknowledged_at": {
+          "name": "completion_acknowledged_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_by_user_id": {
+          "name": "completed_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "inventories_tenant_status_dates_idx": {
+          "name": "inventories_tenant_status_dates_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "production_date_from",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "production_date_to",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "inventories_tenant_id_organization_id_fk": {
+          "name": "inventories_tenant_id_organization_id_fk",
+          "tableFrom": "inventories",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventories_created_by_user_id_user_id_fk": {
+          "name": "inventories_created_by_user_id_user_id_fk",
+          "tableFrom": "inventories",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventories_started_by_user_id_user_id_fk": {
+          "name": "inventories_started_by_user_id_user_id_fk",
+          "tableFrom": "inventories",
+          "tableTo": "user",
+          "columnsFrom": [
+            "started_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventories_closed_by_user_id_user_id_fk": {
+          "name": "inventories_closed_by_user_id_user_id_fk",
+          "tableFrom": "inventories",
+          "tableTo": "user",
+          "columnsFrom": [
+            "closed_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventories_emergency_closed_by_user_id_user_id_fk": {
+          "name": "inventories_emergency_closed_by_user_id_user_id_fk",
+          "tableFrom": "inventories",
+          "tableTo": "user",
+          "columnsFrom": [
+            "emergency_closed_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventories_completion_acknowledged_by_user_id_user_id_fk": {
+          "name": "inventories_completion_acknowledged_by_user_id_user_id_fk",
+          "tableFrom": "inventories",
+          "tableTo": "user",
+          "columnsFrom": [
+            "completion_acknowledged_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventories_completed_by_user_id_user_id_fk": {
+          "name": "inventories_completed_by_user_id_user_id_fk",
+          "tableFrom": "inventories",
+          "tableTo": "user",
+          "columnsFrom": [
+            "completed_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventories_tenant_product_fk": {
+          "name": "inventories_tenant_product_fk",
+          "tableFrom": "inventories",
+          "tableTo": "products",
+          "columnsFrom": [
+            "tenant_id",
+            "product_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventories_tenant_line_fk": {
+          "name": "inventories_tenant_line_fk",
+          "tableFrom": "inventories",
+          "tableTo": "lines",
+          "columnsFrom": [
+            "tenant_id",
+            "line_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventories_tenant_box_label_template_fk": {
+          "name": "inventories_tenant_box_label_template_fk",
+          "tableFrom": "inventories",
+          "tableTo": "label_templates",
+          "columnsFrom": [
+            "tenant_id",
+            "box_label_template_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventories_tenant_active_snapshot_fk": {
+          "name": "inventories_tenant_active_snapshot_fk",
+          "tableFrom": "inventories",
+          "tableTo": "inventory_snapshots",
+          "columnsFrom": [
+            "tenant_id",
+            "active_snapshot_id",
+            "id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id",
+            "inventory_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "inventories_tenant_id_uq": {
+          "name": "inventories_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "inventories_tenant_number_uq": {
+          "name": "inventories_tenant_number_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "number"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "inventories_production_date_order_check": {
+          "name": "inventories_production_date_order_check",
+          "value": "\"inventories\".\"production_date_from\" <= \"inventories\".\"production_date_to\""
+        },
+        "inventories_gtin14_snapshot_check": {
+          "name": "inventories_gtin14_snapshot_check",
+          "value": "\"inventories\".\"gtin14_snapshot\" ~ '^[0-9]{14}$'"
+        },
+        "inventories_number_nonempty_check": {
+          "name": "inventories_number_nonempty_check",
+          "value": "length(btrim(\"inventories\".\"number\")) > 0"
+        },
+        "inventories_result_revision_nonnegative_check": {
+          "name": "inventories_result_revision_nonnegative_check",
+          "value": "\"inventories\".\"result_revision\" >= 0"
+        },
+        "inventories_mode_template_check": {
+          "name": "inventories_mode_template_check",
+          "value": "(\"inventories\".\"mode\" = 'check' and \"inventories\".\"box_label_template_id\" is null)\n        or (\"inventories\".\"mode\" = 'repack' and \"inventories\".\"box_label_template_id\" is not null)"
+        },
+        "inventories_active_snapshot_lifecycle_check": {
+          "name": "inventories_active_snapshot_lifecycle_check",
+          "value": "(\"inventories\".\"status\" in ('draft', 'preparing') and \"inventories\".\"active_snapshot_id\" is null)\n        or (\"inventories\".\"status\" in ('ready', 'running', 'closed', 'completed') and \"inventories\".\"active_snapshot_id\" is not null)"
+        },
+        "inventories_emergency_close_fields_check": {
+          "name": "inventories_emergency_close_fields_check",
+          "value": "(\"inventories\".\"emergency_close_reason\" is null and \"inventories\".\"emergency_closed_by_user_id\" is null and \"inventories\".\"emergency_closed_at\" is null)\n        or (\"inventories\".\"emergency_close_reason\" is not null and \"inventories\".\"emergency_closed_by_user_id\" is not null and \"inventories\".\"emergency_closed_at\" is not null)"
+        },
+        "inventories_completion_acknowledgement_fields_check": {
+          "name": "inventories_completion_acknowledgement_fields_check",
+          "value": "(\"inventories\".\"completion_acknowledged_by_user_id\" is null and \"inventories\".\"completion_acknowledged_at\" is null)\n        or (\"inventories\".\"completion_acknowledged_by_user_id\" is not null and \"inventories\".\"completion_acknowledged_at\" is not null)"
+        },
+        "inventories_started_fields_check": {
+          "name": "inventories_started_fields_check",
+          "value": "(\"inventories\".\"started_by_user_id\" is null and \"inventories\".\"started_at\" is null)\n          or (\"inventories\".\"started_by_user_id\" is not null and \"inventories\".\"started_at\" is not null)"
+        },
+        "inventories_closed_fields_check": {
+          "name": "inventories_closed_fields_check",
+          "value": "(\"inventories\".\"closed_by_user_id\" is null and \"inventories\".\"closed_at\" is null)\n          or (\"inventories\".\"closed_by_user_id\" is not null and \"inventories\".\"closed_at\" is not null)"
+        },
+        "inventories_completed_fields_check": {
+          "name": "inventories_completed_fields_check",
+          "value": "(\"inventories\".\"completed_by_user_id\" is null and \"inventories\".\"completed_at\" is null)\n          or (\"inventories\".\"completed_by_user_id\" is not null and \"inventories\".\"completed_at\" is not null)"
+        },
+        "inventories_completed_lifecycle_check": {
+          "name": "inventories_completed_lifecycle_check",
+          "value": "(\"inventories\".\"status\" = 'completed'\n            and \"inventories\".\"completed_by_user_id\" is not null\n            and \"inventories\".\"completed_at\" is not null\n            and \"inventories\".\"completion_acknowledged_by_user_id\" is not null\n            and \"inventories\".\"completion_acknowledged_at\" is not null)\n          or (\"inventories\".\"status\" <> 'completed'\n            and \"inventories\".\"completed_by_user_id\" is null\n            and \"inventories\".\"completed_at\" is null\n            and \"inventories\".\"completion_acknowledged_by_user_id\" is null\n            and \"inventories\".\"completion_acknowledged_at\" is null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.inventory_imports": {
+      "name": "inventory_imports",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "inventory_id": {
+          "name": "inventory_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "declared_status": {
+          "name": "declared_status",
+          "type": "inventory_chz_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_name": {
+          "name": "file_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "container_kind": {
+          "name": "container_kind",
+          "type": "inventory_import_container_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "byte_size": {
+          "name": "byte_size",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "char(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "object_key": {
+          "name": "object_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parsed_status": {
+          "name": "parsed_status",
+          "type": "inventory_chz_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "included_gtin14": {
+          "name": "included_gtin14",
+          "type": "char(14)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parse_outcome": {
+          "name": "parse_outcome",
+          "type": "inventory_import_parse_outcome",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "row_count": {
+          "name": "row_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "error_count": {
+          "name": "error_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "duplicate_count": {
+          "name": "duplicate_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "parsed_at": {
+          "name": "parsed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "inventory_imports_inventory_status_created_idx": {
+          "name": "inventory_imports_inventory_status_created_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "inventory_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "declared_status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "inventory_imports_tenant_id_organization_id_fk": {
+          "name": "inventory_imports_tenant_id_organization_id_fk",
+          "tableFrom": "inventory_imports",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventory_imports_created_by_user_id_user_id_fk": {
+          "name": "inventory_imports_created_by_user_id_user_id_fk",
+          "tableFrom": "inventory_imports",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventory_imports_tenant_inventory_fk": {
+          "name": "inventory_imports_tenant_inventory_fk",
+          "tableFrom": "inventory_imports",
+          "tableTo": "inventories",
+          "columnsFrom": [
+            "tenant_id",
+            "inventory_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "inventory_imports_tenant_id_uq": {
+          "name": "inventory_imports_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "inventory_imports_tenant_id_inventory_status_uq": {
+          "name": "inventory_imports_tenant_id_inventory_status_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id",
+            "inventory_id",
+            "declared_status"
+          ]
+        },
+        "inventory_imports_tenant_id_inventory_status_outcome_uq": {
+          "name": "inventory_imports_tenant_id_inventory_status_outcome_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id",
+            "inventory_id",
+            "declared_status",
+            "parse_outcome"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "inventory_imports_byte_size_nonnegative_check": {
+          "name": "inventory_imports_byte_size_nonnegative_check",
+          "value": "\"inventory_imports\".\"byte_size\" >= 0"
+        },
+        "inventory_imports_sha256_check": {
+          "name": "inventory_imports_sha256_check",
+          "value": "\"inventory_imports\".\"sha256\" ~ '^[0-9a-f]{64}$'"
+        },
+        "inventory_imports_included_gtin14_check": {
+          "name": "inventory_imports_included_gtin14_check",
+          "value": "\"inventory_imports\".\"included_gtin14\" is null or \"inventory_imports\".\"included_gtin14\" ~ '^[0-9]{14}$'"
+        },
+        "inventory_imports_counts_nonnegative_check": {
+          "name": "inventory_imports_counts_nonnegative_check",
+          "value": "\"inventory_imports\".\"row_count\" >= 0 and \"inventory_imports\".\"error_count\" >= 0 and \"inventory_imports\".\"duplicate_count\" >= 0"
+        },
+        "inventory_imports_error_code_check": {
+          "name": "inventory_imports_error_code_check",
+          "value": "\"inventory_imports\".\"error_code\" is null or \"inventory_imports\".\"error_code\" ~ '^[A-Z][A-Z0-9_]{0,127}$'"
+        },
+        "inventory_imports_parse_outcome_check": {
+          "name": "inventory_imports_parse_outcome_check",
+          "value": "(\"inventory_imports\".\"parse_outcome\" = 'succeeded'\n          and \"inventory_imports\".\"parsed_status\" is not null\n          and \"inventory_imports\".\"parsed_status\" = \"inventory_imports\".\"declared_status\"\n          and \"inventory_imports\".\"included_gtin14\" is not null\n          and \"inventory_imports\".\"error_count\" = 0\n          and \"inventory_imports\".\"error_code\" is null)\n        or (\"inventory_imports\".\"parse_outcome\" = 'failed'\n          and \"inventory_imports\".\"error_count\" > 0\n          and \"inventory_imports\".\"error_code\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.inventory_snapshot_codes": {
+      "name": "inventory_snapshot_codes",
+      "schema": "",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "snapshot_id": {
+          "name": "snapshot_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "canonical_raw": {
+          "name": "canonical_raw",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code_hash": {
+          "name": "code_hash",
+          "type": "char(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gtin14": {
+          "name": "gtin14",
+          "type": "char(14)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "serial": {
+          "name": "serial",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_status": {
+          "name": "source_status",
+          "type": "inventory_chz_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_state": {
+          "name": "source_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_production_date": {
+          "name": "source_production_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parent_sscc": {
+          "name": "parent_sscc",
+          "type": "char(18)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expected": {
+          "name": "expected",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "protected": {
+          "name": "protected",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "inventory_snapshot_codes_parent_sscc_idx": {
+          "name": "inventory_snapshot_codes_parent_sscc_idx",
+          "columns": [
+            {
+              "expression": "snapshot_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "parent_sscc",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "inventory_snapshot_codes_expected_date_idx": {
+          "name": "inventory_snapshot_codes_expected_date_idx",
+          "columns": [
+            {
+              "expression": "snapshot_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expected",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "source_production_date",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "inventory_snapshot_codes_tenant_id_organization_id_fk": {
+          "name": "inventory_snapshot_codes_tenant_id_organization_id_fk",
+          "tableFrom": "inventory_snapshot_codes",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventory_snapshot_codes_tenant_snapshot_fk": {
+          "name": "inventory_snapshot_codes_tenant_snapshot_fk",
+          "tableFrom": "inventory_snapshot_codes",
+          "tableTo": "inventory_snapshots",
+          "columnsFrom": [
+            "tenant_id",
+            "snapshot_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "inventory_snapshot_codes_tenant_hash_uq": {
+          "name": "inventory_snapshot_codes_tenant_hash_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "snapshot_id",
+            "code_hash"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "inventory_snapshot_codes_hash_check": {
+          "name": "inventory_snapshot_codes_hash_check",
+          "value": "\"inventory_snapshot_codes\".\"code_hash\" ~ '^[0-9a-f]{64}$'"
+        },
+        "inventory_snapshot_codes_gtin14_check": {
+          "name": "inventory_snapshot_codes_gtin14_check",
+          "value": "\"inventory_snapshot_codes\".\"gtin14\" ~ '^[0-9]{14}$'"
+        },
+        "inventory_snapshot_codes_canonical_raw_size_check": {
+          "name": "inventory_snapshot_codes_canonical_raw_size_check",
+          "value": "octet_length(\"inventory_snapshot_codes\".\"canonical_raw\") between 1 and 1024"
+        },
+        "inventory_snapshot_codes_serial_nonempty_check": {
+          "name": "inventory_snapshot_codes_serial_nonempty_check",
+          "value": "length(\"inventory_snapshot_codes\".\"serial\") > 0"
+        },
+        "inventory_snapshot_codes_parent_sscc_check": {
+          "name": "inventory_snapshot_codes_parent_sscc_check",
+          "value": "\"inventory_snapshot_codes\".\"parent_sscc\" is null or \"inventory_snapshot_codes\".\"parent_sscc\" ~ '^[0-9]{18}$'"
+        },
+        "inventory_snapshot_codes_classification_check": {
+          "name": "inventory_snapshot_codes_classification_check",
+          "value": "not (\"inventory_snapshot_codes\".\"expected\" and \"inventory_snapshot_codes\".\"protected\")\n        and \"inventory_snapshot_codes\".\"protected\" = coalesce(\"inventory_snapshot_codes\".\"source_state\" = 'MOVING_BY_UD', false)\n        and (\"inventory_snapshot_codes\".\"protected\"\n          or \"inventory_snapshot_codes\".\"source_status\" <> 'INTRODUCED'\n          or \"inventory_snapshot_codes\".\"source_production_date\" is not null)\n        and (not \"inventory_snapshot_codes\".\"expected\"\n          or (\"inventory_snapshot_codes\".\"source_status\" = 'INTRODUCED' and \"inventory_snapshot_codes\".\"source_production_date\" is not null))"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.inventory_snapshot_inputs": {
+      "name": "inventory_snapshot_inputs",
+      "schema": "",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "snapshot_id": {
+          "name": "snapshot_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "inventory_id": {
+          "name": "inventory_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "inventory_chz_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "import_id": {
+          "name": "import_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "import_parse_outcome": {
+          "name": "import_parse_outcome",
+          "type": "inventory_import_parse_outcome",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'succeeded'"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "inventory_snapshot_inputs_tenant_id_organization_id_fk": {
+          "name": "inventory_snapshot_inputs_tenant_id_organization_id_fk",
+          "tableFrom": "inventory_snapshot_inputs",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventory_snapshot_inputs_tenant_snapshot_inventory_fk": {
+          "name": "inventory_snapshot_inputs_tenant_snapshot_inventory_fk",
+          "tableFrom": "inventory_snapshot_inputs",
+          "tableTo": "inventory_snapshots",
+          "columnsFrom": [
+            "tenant_id",
+            "snapshot_id",
+            "inventory_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id",
+            "inventory_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventory_snapshot_inputs_tenant_import_inventory_status_fk": {
+          "name": "inventory_snapshot_inputs_tenant_import_inventory_status_fk",
+          "tableFrom": "inventory_snapshot_inputs",
+          "tableTo": "inventory_imports",
+          "columnsFrom": [
+            "tenant_id",
+            "import_id",
+            "inventory_id",
+            "status",
+            "import_parse_outcome"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id",
+            "inventory_id",
+            "declared_status",
+            "parse_outcome"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "inventory_snapshot_inputs_tenant_snapshot_status_uq": {
+          "name": "inventory_snapshot_inputs_tenant_snapshot_status_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "snapshot_id",
+            "status"
+          ]
+        },
+        "inventory_snapshot_inputs_tenant_snapshot_import_uq": {
+          "name": "inventory_snapshot_inputs_tenant_snapshot_import_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "snapshot_id",
+            "import_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "inventory_snapshot_inputs_successful_import_check": {
+          "name": "inventory_snapshot_inputs_successful_import_check",
+          "value": "\"inventory_snapshot_inputs\".\"import_parse_outcome\" = 'succeeded'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.inventory_snapshots": {
+      "name": "inventory_snapshots",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "inventory_id": {
+          "name": "inventory_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "combined_digest": {
+          "name": "combined_digest",
+          "type": "char(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "emitted_count": {
+          "name": "emitted_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "introduced_count": {
+          "name": "introduced_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "applied_count": {
+          "name": "applied_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retired_count": {
+          "name": "retired_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "written_off_count": {
+          "name": "written_off_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "disaggregation_count": {
+          "name": "disaggregation_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "protected_count": {
+          "name": "protected_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expected_count": {
+          "name": "expected_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "package_count": {
+          "name": "package_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "loose_count": {
+          "name": "loose_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fixed_by_user_id": {
+          "name": "fixed_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fixed_at": {
+          "name": "fixed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "inventory_snapshots_tenant_id_organization_id_fk": {
+          "name": "inventory_snapshots_tenant_id_organization_id_fk",
+          "tableFrom": "inventory_snapshots",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventory_snapshots_fixed_by_user_id_user_id_fk": {
+          "name": "inventory_snapshots_fixed_by_user_id_user_id_fk",
+          "tableFrom": "inventory_snapshots",
+          "tableTo": "user",
+          "columnsFrom": [
+            "fixed_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventory_snapshots_tenant_inventory_fk": {
+          "name": "inventory_snapshots_tenant_inventory_fk",
+          "tableFrom": "inventory_snapshots",
+          "tableTo": "inventories",
+          "columnsFrom": [
+            "tenant_id",
+            "inventory_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "inventory_snapshots_tenant_id_uq": {
+          "name": "inventory_snapshots_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "inventory_snapshots_tenant_id_inventory_uq": {
+          "name": "inventory_snapshots_tenant_id_inventory_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id",
+            "inventory_id"
+          ]
+        },
+        "inventory_snapshots_tenant_inventory_uq": {
+          "name": "inventory_snapshots_tenant_inventory_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "inventory_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "inventory_snapshots_revision_positive_check": {
+          "name": "inventory_snapshots_revision_positive_check",
+          "value": "\"inventory_snapshots\".\"revision\" > 0"
+        },
+        "inventory_snapshots_combined_digest_check": {
+          "name": "inventory_snapshots_combined_digest_check",
+          "value": "\"inventory_snapshots\".\"combined_digest\" ~ '^[0-9a-f]{64}$'"
+        },
+        "inventory_snapshots_counts_nonnegative_check": {
+          "name": "inventory_snapshots_counts_nonnegative_check",
+          "value": "\"inventory_snapshots\".\"emitted_count\" >= 0\n        and \"inventory_snapshots\".\"introduced_count\" >= 0\n        and \"inventory_snapshots\".\"applied_count\" >= 0\n        and \"inventory_snapshots\".\"retired_count\" >= 0\n        and \"inventory_snapshots\".\"written_off_count\" >= 0\n        and \"inventory_snapshots\".\"disaggregation_count\" >= 0\n        and \"inventory_snapshots\".\"protected_count\" >= 0\n        and \"inventory_snapshots\".\"expected_count\" >= 0\n        and \"inventory_snapshots\".\"package_count\" >= 0\n        and \"inventory_snapshots\".\"loose_count\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -15798,7 +15341,6 @@
       "values": [
         "draft",
         "issued",
-        "partially_paid",
         "paid",
         "cancelled"
       ]
@@ -15829,83 +15371,6 @@
       "values": [
         "manual",
         "bank_import"
-      ]
-    },
-    "public.billing_act_status": {
-      "name": "billing_act_status",
-      "schema": "public",
-      "values": [
-        "draft",
-        "issued",
-        "cancelled"
-      ]
-    },
-    "public.billing_actor_kind": {
-      "name": "billing_actor_kind",
-      "schema": "public",
-      "values": [
-        "tenant_user",
-        "platform_user",
-        "system"
-      ]
-    },
-    "public.billing_request_event_kind": {
-      "name": "billing_request_event_kind",
-      "schema": "public",
-      "values": [
-        "created",
-        "status_changed",
-        "tenant_reply",
-        "platform_comment",
-        "offer_linked",
-        "offer_accepted",
-        "offer_changes_requested",
-        "invoice_linked",
-        "payment_confirmed",
-        "service_linked",
-        "act_linked"
-      ]
-    },
-    "public.billing_request_status": {
-      "name": "billing_request_status",
-      "schema": "public",
-      "values": [
-        "new",
-        "under_review",
-        "clarification_required",
-        "offer_prepared",
-        "awaiting_payment",
-        "in_progress",
-        "completed",
-        "cancelled"
-      ]
-    },
-    "public.billing_request_type": {
-      "name": "billing_request_type",
-      "schema": "public",
-      "values": [
-        "renewal",
-        "capacity_change",
-        "additional_service",
-        "documents",
-        "other"
-      ]
-    },
-    "public.billing_responsible_side": {
-      "name": "billing_responsible_side",
-      "schema": "public",
-      "values": [
-        "tenant",
-        "markiro",
-        "none"
-      ]
-    },
-    "public.offer_decision_kind": {
-      "name": "offer_decision_kind",
-      "schema": "public",
-      "values": [
-        "accepted",
-        "changes_requested"
       ]
     },
     "public.shift_export_status": {
@@ -15947,21 +15412,59 @@
         "manual",
         "import"
       ]
+    },
+    "public.inventory_chz_status": {
+      "name": "inventory_chz_status",
+      "schema": "public",
+      "values": [
+        "EMITTED",
+        "INTRODUCED",
+        "APPLIED",
+        "RETIRED",
+        "WRITTEN_OFF",
+        "DISAGGREGATION"
+      ]
+    },
+    "public.inventory_import_container_kind": {
+      "name": "inventory_import_container_kind",
+      "schema": "public",
+      "values": [
+        "csv",
+        "zip",
+        "xlsx"
+      ]
+    },
+    "public.inventory_import_parse_outcome": {
+      "name": "inventory_import_parse_outcome",
+      "schema": "public",
+      "values": [
+        "succeeded",
+        "failed"
+      ]
+    },
+    "public.inventory_lifecycle_status": {
+      "name": "inventory_lifecycle_status",
+      "schema": "public",
+      "values": [
+        "draft",
+        "preparing",
+        "ready",
+        "running",
+        "closed",
+        "completed"
+      ]
+    },
+    "public.inventory_mode": {
+      "name": "inventory_mode",
+      "schema": "public",
+      "values": [
+        "check",
+        "repack"
+      ]
     }
   },
   "schemas": {},
-  "sequences": {
-    "public.tenant_billing_request_number_seq": {
-      "name": "tenant_billing_request_number_seq",
-      "schema": "public",
-      "increment": "1",
-      "startWith": "1",
-      "minValue": "1",
-      "maxValue": "9223372036854775807",
-      "cache": "1",
-      "cycle": false
-    }
-  },
+  "sequences": {},
   "roles": {},
   "policies": {},
   "views": {},

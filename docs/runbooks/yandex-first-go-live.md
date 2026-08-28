@@ -20,21 +20,59 @@ bucket, state bucket и KMS не должны удаляться или заме
 
 ## 3. Применить упрощение инфраструктуры
 
-Запустите вручную **Yandex infrastructure** на текущем `main`:
+Сначала запустите вручную **Yandex infrastructure** на текущем `main` в режиме
+планирования:
 
 ```text
+mode=plan
 target_sha=<current-main-40-character-sha>
 enable_public_dns=true
+enable_station_release_public_dns=false
+plan_key=
+plan_sha256=
+plan_version_id=
+plan_json_key=
+plan_json_sha256=
+plan_json_version_id=
+plan_review_confirmed=false
 ```
 
-Approve environment `production-infrastructure`. Workflow строит один saved
-Terraform plan, запрещает замену app VM и удаление PostgreSQL, базы, media и
-временно сохранённого audit bucket, затем применяет ровно этот plan.
+Approve Environment `production-infrastructure`. Workflow строит один saved
+Terraform plan, проверяет запрет замены app VM и удаления PostgreSQL, базы, media
+и временно сохранённого audit bucket, но ничего не применяет. Просмотрите
+полный exact plan по operator-only процедуре
+`yandex-infrastructure-apply.md` и сохраните обе тройки key/SHA-256/VersionId.
 
 Ожидаемые удаления: ALB, backend/target groups, ALB subnet/address/security
 group, Certificate Manager certificates, SWS/ARL, Audit Trails, облачные log
 groups и deployment-controller/runner ресурсы. Ожидаемые сохранения: app VM и
 её reserved IP, PostgreSQL, media, state, KMS, DNS zone и runtime secrets.
+
+После явного подтверждения владельца инфраструктуры запустите новый dispatch с
+теми же SHA и DNS flags:
+
+```text
+mode=apply
+target_sha=<current-main-40-character-sha>
+enable_public_dns=true
+enable_station_release_public_dns=false
+plan_key=<exact-key-from-reviewed-plan-run>
+plan_sha256=<exact-64-hex-from-reviewed-plan-run>
+plan_version_id=<exact-version-id-from-reviewed-plan-run>
+plan_json_key=<exact-json-key-from-reviewed-plan-run>
+plan_json_sha256=<exact-json-64-hex-from-reviewed-plan-run>
+plan_json_version_id=<exact-json-version-id-from-reviewed-plan-run>
+plan_review_confirmed=true
+owner_confirmation=APPLY-YANDEX-INFRASTRUCTURE
+```
+
+Dispatch выполняет владелец репозитория из `main`. До входа в отдельный
+Environment `production-infrastructure-apply` workflow проверит владельца и
+точную фразу, затем повторно проверит binding, оба SHA-256 и byte/semantic
+совпадение полного JSON, применит точный escrowed plan и удалит обе точные
+версии после успеха. Environment требует approve от `thevladbog` или
+`thevladbog-2` при включённом `prevent self-review`; owner-confirmation остаётся
+дополнительным gate и не заменяет approval другого reviewer.
 
 ## 4. Проверить прямой DNS
 

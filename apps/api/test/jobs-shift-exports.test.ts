@@ -1,12 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as MarkiroDb from "@markiro/db";
 import type { JobWithMetadata } from "pg-boss";
-import { BUILD_SHIFT_EXPORT_QUEUE, PgBossService } from "../src/jobs/jobs.module";
+import {
+  BUILD_INVENTORY_DOCUMENT_QUEUE,
+  BUILD_SHIFT_EXPORT_QUEUE,
+  PgBossService,
+} from "../src/jobs/jobs.module";
 import type { ExchangeSessionService } from "../src/modules/exchange/exchange-session.service";
 import type { JournalService } from "../src/modules/integrations/journal.service";
 import type { MailJobsService } from "../src/modules/mail/mail-jobs.service";
 import type { MailRetentionService } from "../src/modules/mail/mail-retention.service";
 import type { ShiftExportRunnerService } from "../src/modules/shift-exports/shift-export-runner.service";
+import type { InventoryDocumentRunnerService } from "../src/modules/inventories/inventory-document-runner.service";
+import type { SignerScheduler } from "../src/modules/signer-agents/signer-scheduler.service";
 import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
 
 interface ShiftExportJobData {
@@ -14,6 +20,7 @@ interface ShiftExportJobData {
 }
 
 type ShiftExportHandler = (jobs: JobWithMetadata<ShiftExportJobData>[]) => Promise<void>;
+type InventoryDocumentHandler = (jobs: JobWithMetadata<{ runId: string }>[]) => Promise<void>;
 
 const pgBossMock = vi.hoisted(() => ({
   instances: [] as unknown[],
@@ -81,6 +88,7 @@ function exportJob(
 function fakeBoss() {
   let workerIndex = 0;
   let shiftExportHandler: ShiftExportHandler | undefined;
+  let inventoryDocumentHandler: InventoryDocumentHandler | undefined;
   const boss = {
     on: vi.fn(),
     start: vi.fn(async () => boss),
@@ -95,6 +103,9 @@ function fakeBoss() {
       ) => {
         workerIndex += 1;
         if (name === BUILD_SHIFT_EXPORT_QUEUE && handler) shiftExportHandler = handler;
+        if (name === BUILD_INVENTORY_DOCUMENT_QUEUE && handler) {
+          inventoryDocumentHandler = handler as unknown as InventoryDocumentHandler;
+        }
         return `worker-${workerIndex}`;
       },
     ),
@@ -102,6 +113,7 @@ function fakeBoss() {
     getDb: vi.fn(() => ({ executeSql: vi.fn(async () => undefined) })),
     getWipData: vi.fn(() => []),
     getShiftExportHandler: () => shiftExportHandler,
+    getInventoryDocumentHandler: () => inventoryDocumentHandler,
   };
   return boss;
 }
@@ -123,6 +135,9 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
   const runner = {
     run: vi.fn(async () => undefined),
   } as unknown as ShiftExportRunnerService;
+  const inventoryRunner = {
+    run: vi.fn(async () => undefined),
+  } as unknown as InventoryDocumentRunnerService;
   return {
     runner,
     service: new PgBossService(
@@ -138,7 +153,10 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
       { prune: vi.fn(async () => undefined) } as unknown as MailRetentionService,
       { run: vi.fn(async () => undefined) } as unknown as SubscriptionStatusJob,
       runner,
+      inventoryRunner,
+      { run: vi.fn(async () => undefined) } satisfies SignerScheduler,
     ),
+    inventoryRunner,
   };
 }
 
@@ -203,5 +221,28 @@ describe("PgBossService shift export queue", () => {
     await expect(service.enqueueShiftExport("export-1")).rejects.toThrow(
       "shift export enqueue failed",
     );
+  });
+
+  it("registers, reconciles, and dispatches the inventory document queue", async () => {
+    const boss = fakeBoss();
+    const { service, inventoryRunner } = serviceWith(boss);
+    await service.onModuleInit();
+
+    expect(boss.createQueue).toHaveBeenCalledWith(BUILD_INVENTORY_DOCUMENT_QUEUE, {
+      retryLimit: 5,
+      retryDelay: 30,
+      retryBackoff: true,
+      retryDelayMax: 900,
+      expireInSeconds: 900,
+    });
+    const handler = boss.getInventoryDocumentHandler();
+    expect(handler).toBeDefined();
+    await handler?.([{ ...exportJob("job-inventory", "unused", 2, 5), data: { runId: "run-1" } }]);
+    expect(inventoryRunner.run).toHaveBeenCalledWith("run-1", {
+      retryCount: 2,
+      retryLimit: 5,
+    });
+    await expect(service.enqueueInventoryDocumentRun("run-2")).resolves.toBe("shift-export-job-id");
+    expect(boss.send).toHaveBeenCalledWith(BUILD_INVENTORY_DOCUMENT_QUEUE, { runId: "run-2" });
   });
 });

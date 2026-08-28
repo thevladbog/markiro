@@ -50,6 +50,17 @@ export interface SsccBlock {
   consumedThroughSerial: number | null;
 }
 
+export interface OrderedSsccBlock extends SsccBlock {
+  /** Monotonic only within this tenant/issuer/extension/device stream. */
+  allocationOrder: number;
+}
+
+export interface RevokedSsccBlock {
+  allocationOrder: number;
+  fromSerial: number;
+  toSerial: number;
+}
+
 /**
  * A second name for `sscc_blocks`, so `revokedFromSerials` can correlate a
  * revoked row against the SAME device's live rows in one query.
@@ -620,7 +631,29 @@ export class SsccService {
         consumedThroughSerial: null,
       };
 
+      // The counter upsert above holds the (tenant, issuer, extension) row
+      // lock until this transaction commits. Every allocation in this
+      // device stream therefore computes its next scoped order only after
+      // the previous one is visible; different tenants/devices still start
+      // at 1 and reveal nothing about allocations in other streams.
+      const [latestOrder] = await tx
+        .select({ value: max(schema.ssccBlocks.allocationOrder) })
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, tenantId),
+            eq(schema.ssccBlocks.issuerPrefix, issuerPrefix),
+            eq(schema.ssccBlocks.extensionDigit, extensionDigit),
+            eq(schema.ssccBlocks.deviceId, deviceId),
+          ),
+        );
+      const allocationOrder = Number(latestOrder?.value ?? 0) + 1;
+      if (!Number.isSafeInteger(allocationOrder)) {
+        throw new InternalServerErrorException("SSCC allocation order is exhausted");
+      }
+
       await tx.insert(schema.ssccBlocks).values({
+        allocationOrder,
         tenantId,
         issuerPrefix,
         extensionDigit,
@@ -676,17 +709,18 @@ export class SsccService {
    * restarting at `fromSerial` and reprinting labels already on boxes --
    * caught only later, and only at ingest, by `boxes_tenant_sscc_uq`.
    */
-  async allocateForBundle(
+  async allocateOrderedForBundle(
     tenantId: string,
     issuerPrefix: string,
     extensionDigit: number,
     deviceId: string,
     size: number,
     transaction?: SsccTransaction,
-  ): Promise<SsccBlock> {
-    const perform = async (tx: SsccTransaction): Promise<SsccBlock> => {
+  ): Promise<OrderedSsccBlock> {
+    const perform = async (tx: SsccTransaction): Promise<OrderedSsccBlock> => {
       const [existing] = await tx
         .select({
+          allocationOrder: schema.ssccBlocks.allocationOrder,
           issuerPrefix: schema.ssccBlocks.issuerPrefix,
           extensionDigit: schema.ssccBlocks.extensionDigit,
           fromSerial: schema.ssccBlocks.fromSerial,
@@ -707,7 +741,7 @@ export class SsccService {
             isNull(schema.ssccBlocks.revokedAt),
           ),
         )
-        .orderBy(desc(schema.ssccBlocks.issuedAt))
+        .orderBy(desc(schema.ssccBlocks.allocationOrder))
         .limit(1);
 
       // "< toSerial" (i.e. exhausted is ">=", not "==="): consumedThroughSerial
@@ -724,6 +758,7 @@ export class SsccService {
           existing.consumedThroughSerial < existing.toSerial)
       ) {
         return {
+          allocationOrder: Number(existing.allocationOrder),
           issuerPrefix: existing.issuerPrefix,
           extensionDigit: existing.extensionDigit,
           fromSerial: existing.fromSerial,
@@ -733,9 +768,78 @@ export class SsccService {
       }
       // No block at all yet, OR the held one is fully consumed -- either way,
       // cut a fresh one rather than hand back a range with nothing left in it.
-      return this.allocate(tenantId, issuerPrefix, extensionDigit, deviceId, size, tx);
+      const block = await this.allocate(tenantId, issuerPrefix, extensionDigit, deviceId, size, tx);
+      const [created] = await tx
+        .select({ allocationOrder: schema.ssccBlocks.allocationOrder })
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, tenantId),
+            eq(schema.ssccBlocks.deviceId, deviceId),
+            eq(schema.ssccBlocks.issuerPrefix, issuerPrefix),
+            eq(schema.ssccBlocks.extensionDigit, extensionDigit),
+            eq(schema.ssccBlocks.fromSerial, block.fromSerial),
+            eq(schema.ssccBlocks.toSerial, block.toSerial),
+          ),
+        )
+        .orderBy(desc(schema.ssccBlocks.allocationOrder))
+        .limit(1);
+      if (!created) throw new InternalServerErrorException("Failed to identify sscc block");
+      return { ...block, allocationOrder: Number(created.allocationOrder) };
     };
     return transaction ? perform(transaction) : this.db.transaction(perform);
+  }
+
+  async allocateForBundle(
+    tenantId: string,
+    issuerPrefix: string,
+    extensionDigit: number,
+    deviceId: string,
+    size: number,
+    transaction?: SsccTransaction,
+  ): Promise<SsccBlock> {
+    const { allocationOrder: ignoredAllocationOrder, ...block } =
+      await this.allocateOrderedForBundle(
+        tenantId,
+        issuerPrefix,
+        extensionDigit,
+        deviceId,
+        size,
+        transaction,
+      );
+    void ignoredAllocationOrder;
+    return block;
+  }
+
+  async revokedBlocks(
+    tenantId: string,
+    issuerPrefix: string,
+    extensionDigit: number,
+    deviceId: string,
+    executor: Pick<Db, "select"> = this.db,
+  ): Promise<RevokedSsccBlock[]> {
+    const rows = await executor
+      .select({
+        allocationOrder: schema.ssccBlocks.allocationOrder,
+        fromSerial: schema.ssccBlocks.fromSerial,
+        toSerial: schema.ssccBlocks.toSerial,
+      })
+      .from(schema.ssccBlocks)
+      .where(
+        and(
+          eq(schema.ssccBlocks.tenantId, tenantId),
+          eq(schema.ssccBlocks.issuerPrefix, issuerPrefix),
+          eq(schema.ssccBlocks.extensionDigit, extensionDigit),
+          eq(schema.ssccBlocks.deviceId, deviceId),
+          isNotNull(schema.ssccBlocks.revokedAt),
+        ),
+      )
+      .orderBy(schema.ssccBlocks.allocationOrder);
+    return rows.map((row) => ({
+      allocationOrder: Number(row.allocationOrder),
+      fromSerial: Number(row.fromSerial),
+      toSerial: Number(row.toSerial),
+    }));
   }
 
   /**
@@ -806,7 +910,7 @@ export class SsccService {
         ),
       )
       .orderBy(schema.ssccBlocks.fromSerial);
-    return rows.map((row) => Number(row.fromSerial));
+    return [...new Set(rows.map((row) => Number(row.fromSerial)))];
   }
 
   /**

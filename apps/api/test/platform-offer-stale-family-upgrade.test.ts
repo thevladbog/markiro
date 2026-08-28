@@ -32,7 +32,7 @@ const actor: PlatformPrincipal = {
   twoFactorReady: true,
 };
 
-describe.skipIf(!databaseUrl)("stale commercial family after a real 0070 to 0072 upgrade", () => {
+describe.skipIf(!databaseUrl)("stale commercial family after a real 0094 to 0096 upgrade", () => {
   const databaseName = `markiro_offer_stale_runtime_${randomUUID().replaceAll("-", "_")}`;
   const scratchUrl = new URL(databaseUrl ?? "postgres://invalid");
   scratchUrl.pathname = `/${databaseName}`;
@@ -51,27 +51,37 @@ describe.skipIf(!databaseUrl)("stale commercial family after a real 0070 to 0072
     await maintenance.pool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
     created = true;
     temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-offer-stale-runtime-"));
-    const migrationsThrough0070 = join(temporaryRoot, "migrations");
-    await cp(migrationsFolder, migrationsThrough0070, { recursive: true });
-    await rm(join(migrationsThrough0070, "0071_tenant_billing_target_cardinality.sql"), {
+    const migrationsThrough0094 = join(temporaryRoot, "migrations");
+    await cp(migrationsFolder, migrationsThrough0094, { recursive: true });
+    await rm(join(migrationsThrough0094, "0095_tenant_billing_target_cardinality.sql"), {
       force: true,
     });
-    await rm(join(migrationsThrough0070, "0072_tenant_billing_stale_family_repair.sql"), {
+    await rm(join(migrationsThrough0094, "0096_tenant_billing_stale_family_repair.sql"), {
       force: true,
     });
-    await rm(join(migrationsThrough0070, "meta", "0071_snapshot.json"), { force: true });
-    await rm(join(migrationsThrough0070, "meta", "0072_snapshot.json"), { force: true });
-    const journalPath = join(migrationsThrough0070, "meta", "_journal.json");
+    await rm(join(migrationsThrough0094, "0097_tenant_billing_notification_delivery.sql"), {
+      force: true,
+    });
+    await rm(join(migrationsThrough0094, "0098_tenant_billing_attachment_idempotency.sql"), {
+      force: true,
+    });
+    await rm(join(migrationsThrough0094, "meta", "0095_snapshot.json"), { force: true });
+    await rm(join(migrationsThrough0094, "meta", "0096_snapshot.json"), { force: true });
+    await rm(join(migrationsThrough0094, "meta", "0097_snapshot.json"), { force: true });
+    await rm(join(migrationsThrough0094, "meta", "0098_snapshot.json"), { force: true });
+    const journalPath = join(migrationsThrough0094, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
     };
     journal.entries = journal.entries.filter(
       ({ tag }) =>
-        tag !== "0071_tenant_billing_target_cardinality" &&
-        tag !== "0072_tenant_billing_stale_family_repair",
+        tag !== "0095_tenant_billing_target_cardinality" &&
+        tag !== "0096_tenant_billing_stale_family_repair" &&
+        tag !== "0097_tenant_billing_notification_delivery" &&
+        tag !== "0098_tenant_billing_attachment_idempotency",
     );
     await writeFile(journalPath, JSON.stringify(journal));
-    await migrate(connection.db, { migrationsFolder: migrationsThrough0070 });
+    await migrate(connection.db, { migrationsFolder: migrationsThrough0094 });
 
     await connection.db.insert(schema.organization).values({
       id: tenantId,
@@ -210,6 +220,7 @@ function invoiceInput(sourceOfferId: string) {
   return {
     tenantId,
     sourceOfferId,
+    idempotencyKey: randomUUID(),
     dueDate: null,
     applicationMode: "manual" as const,
     lines: [

@@ -1,0 +1,512 @@
+/* Width and vertical rhythm come from `.mk-admin-page` (the shell's full-width
+   content rail), exactly like every other admin route. Do not re-cap the width
+   here -- that produced a second, narrower rail on wide screens. */
+.mk-inventory-page {
+  min-width: 0;
+}
+
+.mk-inventory-close-panel,
+.mk-inventory-late-events,
+.mk-inventory-late-decision,
+.mk-inventory-documents,
+.mk-inventory-document-runs,
+.mk-inventory-document-completion {
+  display: grid;
+  gap: 16px;
+}
+
+.mk-inventory-documents h3 {
+  margin: 0 0 8px;
+  font: var(--text-h3);
+}
+
+.mk-inventory-document-formats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.mk-inventory-document-run {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-page);
+}
+
+.mk-inventory-document-run > header,
+.mk-inventory-document-artifacts > li,
+.mk-inventory-document-run__failure {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mk-inventory-document-run > header > span:not(.mk-chip),
+.mk-inventory-document-artifacts > li > span:not(.mk-chip) {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mk-inventory-page .mk-chip {
+  flex-direction: row;
+  flex-shrink: 0;
+}
+
+.mk-inventory-document-run small,
+.mk-inventory-document-artifacts small {
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.mk-inventory-document-artifacts {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-inventory-document-artifacts > li {
+  min-height: 58px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mk-inventory-document-artifacts > li:last-child {
+  border-bottom: 0;
+}
+
+.mk-inventory-document-completion {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.mk-inventory-close-blockers {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--fg-2);
+  display: grid;
+  gap: 6px;
+}
+
+.mk-inventory-late-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.mk-inventory-late-list > li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+}
+
+.mk-inventory-late-list__main,
+.mk-inventory-late-list__state {
+  display: grid;
+  gap: 4px;
+}
+
+.mk-inventory-late-list__main small,
+.mk-inventory-late-list__state small {
+  color: var(--fg-3);
+}
+
+.mk-inventory-late-list__state {
+  justify-items: end;
+}
+
+@media (max-width: 640px) {
+  .mk-inventory-late-list > li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .mk-inventory-late-list__state {
+    grid-column: 2;
+    justify-items: start;
+  }
+}
+
+.mk-inventory-page__description,
+.mk-inventory-section-description,
+.mk-inventory-note,
+.mk-inventory-back-link,
+.mk-inventory-list__stack small,
+.mk-inventory-upload-slot small,
+.mk-inventory-terminal-line small {
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.mk-inventory-steps {
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+  padding: 12px 16px;
+}
+
+.mk-inventory-steps ol {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-inventory-steps li,
+.mk-inventory-upload-slot__header,
+.mk-inventory-terminal-line,
+.mk-inventory-import-attempt,
+.mk-inventory-list__identity,
+.mk-inventory-list__stack {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mk-inventory-steps li > span:last-child,
+.mk-inventory-upload-slot__header > span,
+.mk-inventory-import-attempt > span,
+.mk-inventory-terminal-line > span,
+.mk-inventory-list__stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.mk-inventory-steps small {
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.mk-inventory-steps__number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  color: var(--fg-2);
+  flex: 0 0 auto;
+}
+
+.mk-inventory-steps li[aria-current="step"] .mk-inventory-steps__number {
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+}
+
+.mk-inventory-form {
+  display: grid;
+  gap: 18px;
+}
+.mk-inventory-form__dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.mk-inventory-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+.mk-inventory-list__identity {
+  flex-wrap: wrap;
+}
+.mk-inventory-list__identity a {
+  color: var(--fg-1);
+  font-weight: 600;
+}
+
+.mk-inventory-upload-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.mk-inventory-upload-slot,
+.mk-inventory-task-form,
+.mk-inventory-terminal-line,
+.mk-inventory-metric {
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  padding: 14px;
+  background: var(--surface-page);
+}
+
+.mk-inventory-terminals {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mk-inventory-upload-slot__header,
+.mk-inventory-terminal-line {
+  justify-content: space-between;
+}
+
+.mk-inventory-terminal-line > .mk-chip {
+  flex-direction: row;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.mk-inventory-upload-slot__file-drop {
+  margin: 12px 0;
+}
+.mk-inventory-import-history {
+  display: grid;
+  gap: 8px;
+}
+.mk-inventory-import-attempt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.mk-inventory-error {
+  color: var(--err-fg) !important;
+}
+
+.mk-inventory-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 16px 0;
+}
+.mk-inventory-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mk-inventory-metric strong {
+  font: var(--text-h2);
+  font-family: var(--font-mono);
+}
+.mk-inventory-metric--accent {
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+.mk-inventory-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.mk-inventory-summary div {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+}
+.mk-inventory-summary dt {
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+.mk-inventory-summary dd {
+  margin: 4px 0 0;
+  font-weight: 600;
+}
+.mk-inventory-centered {
+  display: flex;
+  justify-content: center;
+  padding: 72px;
+}
+.mk-inventory-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.mk-inventory-live__header,
+.mk-inventory-live__actions,
+.mk-inventory-evidence-list li,
+.mk-inventory-correction-list li,
+.mk-inventory-correction-list__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mk-inventory-live__header,
+.mk-inventory-evidence-list li,
+.mk-inventory-correction-list li {
+  justify-content: space-between;
+}
+
+.mk-inventory-live__header h1 {
+  margin: 0 0 4px;
+}
+
+.mk-inventory-action-link {
+  display: inline-flex;
+  min-height: var(--control-md);
+  align-items: center;
+  padding: 0 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-1);
+  font: 600 14px/1 var(--font-ui);
+  text-decoration: none;
+}
+
+.mk-inventory-live__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mk-inventory-live-metric {
+  display: flex;
+  min-height: 112px;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+  color: var(--fg-2);
+}
+
+.mk-inventory-live-metric strong {
+  color: var(--fg-1);
+  font: var(--text-h1);
+  font-family: var(--font-mono);
+}
+
+.mk-inventory-live-metric--ok {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+}
+
+.mk-inventory-live-metric--warn {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+}
+
+.mk-inventory-live-metric--error {
+  border-color: var(--err-border);
+  background: var(--err-bg);
+}
+
+.mk-inventory-live__columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mk-inventory-evidence-list,
+.mk-inventory-correction-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-inventory-evidence-list li,
+.mk-inventory-correction-list li {
+  min-height: 58px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mk-inventory-evidence-list li:last-child,
+.mk-inventory-correction-list li:last-child {
+  border-bottom: 0;
+}
+
+.mk-inventory-evidence-list li > span:first-child,
+.mk-inventory-correction-list li > span:first-child,
+.mk-inventory-evidence-list__state {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mk-inventory-evidence-list__state {
+  align-items: flex-end;
+}
+
+.mk-inventory-evidence-list small,
+.mk-inventory-correction-list small {
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.mk-inventory-mono {
+  font-family: var(--font-mono);
+}
+
+.mk-inventory-correction-list__actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.mk-inventory-correction-filters {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) repeat(2, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.mk-inventory-correction-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.mk-inventory-correction-form {
+  display: grid;
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .mk-inventory-steps ol {
+    grid-template-columns: 1fr;
+  }
+  .mk-inventory-upload-grid,
+  .mk-inventory-form__dates,
+  .mk-inventory-metrics,
+  .mk-inventory-summary {
+    grid-template-columns: 1fr;
+  }
+  .mk-inventory-correction-filters {
+    grid-template-columns: 1fr;
+  }
+  .mk-inventory-live__metrics,
+  .mk-inventory-live__columns,
+  .mk-inventory-document-formats {
+    grid-template-columns: 1fr;
+  }
+  .mk-inventory-live__header,
+  .mk-inventory-correction-list li,
+  .mk-inventory-document-artifacts > li,
+  .mk-inventory-document-run__failure {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .mk-inventory-correction-list__actions {
+    justify-content: flex-start;
+  }
+}

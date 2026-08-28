@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SchemaObject } from "@nestjs/swagger";
 
 /** Personnel number typed on the station keypad — digits only. */
 const loginSchema = z
@@ -44,3 +45,66 @@ export interface OperatorListItemDto {
 export interface ListOperatorsResponseDto {
   items: OperatorListItemDto[];
 }
+
+export const stationAccessOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["employeeId", "login", "active", "createdAt", "updatedAt"],
+  properties: {
+    employeeId: { type: "string", format: "uuid" },
+    login: { type: "string", pattern: "^\\d{3,12}$" },
+    active: { type: "boolean" },
+    createdAt: { type: "string", format: "date-time" },
+    updatedAt: { type: "string", format: "date-time" },
+  },
+};
+
+export const listOperatorsOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["employeeId", "fullName", "role", "login", "active", "hasBadge"],
+        properties: {
+          employeeId: { type: "string", format: "uuid" },
+          fullName: { type: "string" },
+          role: { type: "string", nullable: true },
+          login: { type: "string", pattern: "^\\d{3,12}$" },
+          active: { type: "boolean" },
+          hasBadge: { type: "boolean" },
+        },
+      },
+    },
+  },
+};
+
+/** GET /station/operators response: mirrored roster records (`OperatorMirrorRecord`). */
+export const stationOperatorRosterOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["operatorId", "name", "login", "role", "pinHash", "badgeHash", "active"],
+        properties: {
+          operatorId: { type: "string", format: "uuid" },
+          name: { type: "string" },
+          login: { type: "string" },
+          role: { type: "string" },
+          pinHash: { type: "string", description: "Offline PBKDF2 verifier, not a plaintext PIN." },
+          badgeHash: { type: "string", nullable: true },
+          active: { type: "boolean" },
+        },
+      },
+    },
+  },
+};

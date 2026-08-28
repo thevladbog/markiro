@@ -38,6 +38,33 @@ output "audit_bucket_name" {
   value       = module.object_storage.audit_bucket_name
 }
 
+output "station_release_bucket_name" {
+  description = "Dedicated versioned bucket containing Station release objects."
+  value       = var.station_release_bucket_name
+}
+
+output "station_release_publisher_access_key_id" {
+  description = "Dedicated Station publisher access key ID."
+  value       = module.station_releases.publisher_access_key_id
+  sensitive   = true
+}
+
+output "station_release_publisher_encrypted_secret_key" {
+  description = "PGP-encrypted Station publisher secret key."
+  value       = module.station_releases.publisher_encrypted_secret_key
+  sensitive   = true
+}
+
+output "station_release_cdn_provider_cname" {
+  description = "Provider-assigned CNAME target for the Station release CDN."
+  value       = module.station_releases.cdn_provider_cname
+}
+
+output "station_release_certificate_id" {
+  description = "Certificate Manager ID for releases.markiro.app."
+  value       = module.station_releases.certificate_id
+}
+
 output "admin_domain" {
   description = "Exact admin authority served directly by the app VM."
   value       = var.domain
@@ -56,6 +83,11 @@ output "kiosk_domain" {
 output "landing_domain" {
   description = "Exact landing authority served directly by the app VM."
   value       = var.landing_domain
+}
+
+output "station_release_domain" {
+  description = "Exact Station release authority served through Yandex Cloud CDN."
+  value       = var.station_release_domain
 }
 
 output "approved_a_records" {

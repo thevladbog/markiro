@@ -35,6 +35,7 @@ describe("sale import failure boundary", () => {
       journal as never,
       pickupOrders as never,
       { assertWriteAccess: vi.fn(async () => undefined) } as never,
+      {} as never,
     );
     const orderId = randomUUID();
     const bytes = Buffer.from(
@@ -97,6 +98,7 @@ describe("sale import failure boundary", () => {
       journal as never,
       pickupOrders as never,
       { assertWriteAccess: vi.fn(async () => undefined) } as never,
+      {} as never,
     );
     const orderIds = [randomUUID(), randomUUID()];
     const documents = orderIds
@@ -192,6 +194,7 @@ describe("CommerceML subscription apply boundary", () => {
       { append: vi.fn() } as never,
       {} as never,
       new EntitlementsService(db as never, "managed_only"),
+      {} as never,
     );
 
     await expect(
@@ -210,6 +213,7 @@ describe("CommerceML subscription apply boundary", () => {
       journal as never,
       {} as never,
       new EntitlementsService(db as never, "all"),
+      {} as never,
     );
     const res = response();
 

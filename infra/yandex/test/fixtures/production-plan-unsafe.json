@@ -1,0 +1,48 @@
+{
+  "resource_changes": [
+    {
+      "address": "module.compute.yandex_vpc_address.app",
+      "type": "yandex_vpc_address",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "module.compute.yandex_compute_instance.app",
+      "type": "yandex_compute_instance",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "module.postgres.yandex_mdb_postgresql_cluster.production",
+      "type": "yandex_mdb_postgresql_cluster",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "module.postgres.yandex_mdb_postgresql_database.application",
+      "type": "yandex_mdb_postgresql_database",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "module.object_storage.yandex_storage_bucket.media",
+      "type": "yandex_storage_bucket",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "module.object_storage.yandex_storage_bucket.audit",
+      "type": "yandex_storage_bucket",
+      "change": { "actions": ["no-op"], "before": {}, "after": {} }
+    },
+    {
+      "address": "module.station_releases.yandex_storage_bucket.releases",
+      "type": "yandex_storage_bucket",
+      "change": {
+        "actions": ["delete"],
+        "before": {
+          "bucket": "markiro-station-releases",
+          "force_destroy": false,
+          "anonymous_access_flags": [{ "read": true, "list": false, "config_read": false }],
+          "versioning": [{ "enabled": true }]
+        },
+        "after": null
+      }
+    }
+  ]
+}

@@ -71,7 +71,7 @@
     "serviceConnect": "Connect service credentials",
     "backToPairing": "Back to pairing",
     "success": "Station connected",
-    "sealedWork": "Unsynchronized work is sealed on this station: {{scans}} scans, {{boxes}} boxes, {{exceptions}} corrections.",
+    "sealedWork": "Unsynchronized work is sealed on this station: {{scans}} production scans, {{inventoryScans}} inventory scans, {{boxes}} boxes, {{exceptions}} corrections.",
     "recoverySealing": "Securing local work and removing the rejected credential…",
     "recoveryFailed": "Local work is sealed, but station recovery could not be completed. Retry or contact support.",
     "retryRecovery": "Retry recovery",
@@ -172,6 +172,154 @@
     "forCounterparty": "for:",
     "preparing": "Preparing the shift…"
   },
+  "inventory": {
+    "warehouseTitle": "Warehouse operations",
+    "actions": "Warehouse actions",
+    "refresh": "Refresh tasks",
+    "categories": {
+      "warehouse": "Warehouse operations {{count}}",
+      "backToShifts": "Back to shifts {{count}}"
+    },
+    "scanTitle": "Scan the task-form barcode",
+    "scanHint": "Inventory opens automatically. A task assigned to another line requires confirmation.",
+    "taskBarcode": "TASK BARCODE",
+    "assignedTitle": "Inventory tasks for {{line}}",
+    "taskCount_one": "{{count}} task",
+    "taskCount_few": "{{count}} tasks",
+    "taskCount_many": "{{count}} tasks",
+    "taskCount_other": "{{count}} tasks",
+    "loading": "Loading inventory tasks…",
+    "loadingLocalTask": "Checking local floor task…",
+    "empty": "No inventory tasks are assigned to this line.",
+    "loadFailed": "Could not load inventory tasks. Production shifts remain available.",
+    "joinFailed": "Could not verify and open the inventory task. Try again.",
+    "barcodeFailed": "The task barcode could not be resolved.",
+    "continue": "Continue",
+    "continueLabel": "Continue {{number}}",
+    "joining": "Verifying task…",
+    "modeCheck": "Without repacking",
+    "modeRepack": "With repacking",
+    "repack": {
+      "title": "Repacking",
+      "oldBox": "Source box",
+      "newBox": "New box",
+      "awaiting": "Scan the source box",
+      "scanning": "Scan every bottle",
+      "pendingPrint": "Box closed. Label printing is pending",
+      "invalidated": "Box blocked by an ownership conflict",
+      "adminInvalidated": "Box invalidated by an administrator",
+      "oldSelected": "Source box selected",
+      "accepted": "Bottle added to the new box",
+      "discrepancy": "Scan saved, but the bottle was not added",
+      "corrections": "Corrections",
+      "openBoxTitle": "Open box",
+      "removeLast": "Remove last bottle",
+      "clear": "Clear open box",
+      "resolveConflict": "Clear conflict and continue",
+      "closeIncomplete": "Close incomplete box",
+      "empty": "The open box has no bottles yet.",
+      "dateBlocked": "Close the incomplete box or clear it first.",
+      "print": {
+        "printing": "Printing label",
+        "printed": "Label printed",
+        "failed": "Label was not printed",
+        "quantity": "Bottle quantity",
+        "retry": "Retry printing",
+        "setup": "Configure printer",
+        "errors": {
+          "templateMissing": "The task has no label template.",
+          "printerUnconfigured": "No printer is configured.",
+          "renderFailed": "The label could not be prepared.",
+          "transportFailed": "The printer did not confirm printing.",
+          "persistenceFailed": "The print result was not saved. Retry with the same SSCC."
+        }
+      },
+      "reprint": {
+        "title": "Reprint a box label",
+        "sscc": "Box SSCC",
+        "hint": "Type at least 4 digits of the number — matching boxes appear automatically.",
+        "noMatches": "No matches among the boxes printed by this terminal.",
+        "action": "Reprint",
+        "keypad": "SSCC entry keypad",
+        "keypadBackspace": "Backspace",
+        "keypadClear": "Clear"
+      },
+      "position": "Position {{position}}: {{status}}",
+      "occupied": "occupied",
+      "free": "free"
+    },
+    "pagination": "Inventory task pages",
+    "previous": "Previous task",
+    "next": "Next task",
+    "page": "{{page}} of {{pageCount}}",
+    "readyEyebrow": "Verified local inventory task",
+    "ready": "The snapshot is stored and ready for offline work.",
+    "work": {
+      "title": "Product check",
+      "productionDate": "Production date",
+      "futureOnly": "Applies from the next accepted scan",
+      "change": "Change",
+      "changeDate": "Change production date",
+      "loadingDate": "Loading…",
+      "leave": "Leave task",
+      "leaving": "Finishing delivery…",
+      "leaveFailed": "Could not leave. The task and pending scans are preserved.",
+      "pendingSync": "Pending events: {{count}}",
+      "prompt": "Scan a bottle or box",
+      "promptHint": "A box verifies all known contents",
+      "recent": "Recent scans",
+      "emptyRecent": "No accepted scans yet.",
+      "invalidTime": "Time unavailable",
+      "serial": "Serial",
+      "dateDialogTitle": "Change production date",
+      "cancel": "Cancel",
+      "applyDate": "Apply date",
+      "verdict": {
+        "expected": "Code accepted",
+        "boxAccepted": "Box accepted: {{count}} codes",
+        "protected": "Code not counted: already in shipment",
+        "ineligible": "Code is not part of this inventory",
+        "unknown": "Code is absent from the source snapshot",
+        "duplicateHere": "Code was already checked on this terminal",
+        "duplicateOther": "Code was already checked on another terminal",
+        "invalid": "Code not recognized",
+        "writeFailed": "Scan was not saved — scan again"
+      },
+      "badge": {
+        "box": "BOX",
+        "duplicate": "DUPLICATE",
+        "protected": "NOT COUNTED",
+        "discrepancy": "DISCREPANCY",
+        "ineligible": "INELIGIBLE"
+      },
+      "progress": {
+        "verified": "Verified",
+        "discrepancies": "Discrepancies",
+        "protected": "Protected from counting",
+        "terminal": "checked by this terminal",
+        "boxes": "boxes accepted whole",
+        "items": "bottles scanned separately"
+      },
+      "status": {
+        "expected": "ACCEPTED",
+        "protected": "PROTECTED",
+        "ineligible": "INELIGIBLE",
+        "unknown": "DISCREPANCY",
+        "duplicate": "DUPLICATE"
+      }
+    },
+    "confirmation": {
+      "title": "Task is assigned to another line",
+      "cancel": "Cancel",
+      "join": "Join {{number}}",
+      "barcode": "Scanned barcode {{number}}",
+      "lines": "Line assignment comparison",
+      "currentLine": "Current station",
+      "assignedLine": "Task is assigned to",
+      "unknownLine": "Line is not configured",
+      "warning": "After confirmation, scans from this station will belong to this inventory and will be identified as work from another line."
+    }
+  },
   "shell": {
     "statusBar": "Station status",
     "stationActions": "Station actions",
@@ -225,6 +373,17 @@
     "pending_few": "{{count}} operations are still waiting to sync",
     "pending_many": "{{count}} operations are still waiting to sync",
     "pending_other": "{{count}} operations are still waiting to sync",
+    "source": {
+      "label": "Update source",
+      "primary": "Source: Markiro (Yandex)",
+      "legacyPrimary": "Source: GitHub (legacy channel)",
+      "backup": "GitHub backup source used",
+      "discoveryFallback": {
+        "primary-unavailable": "Checked through the GitHub backup because the primary source was unavailable.",
+        "primary-metadata-invalid": "Checked through the GitHub backup because the primary metadata could not be read."
+      },
+      "packageFallback": "The update package was downloaded through the GitHub backup."
+    },
     "age": {
       "none": "No update available",
       "info": "Released recently",
@@ -239,12 +398,18 @@
       "restarting": "Restarting station…"
     },
     "errors": {
-      "check-failed": "Could not check for updates. Local work continues.",
-      "invalid-metadata": "The update metadata is invalid.",
+      "check-failed": "Could not reach either update source. Local work continues.",
+      "invalid-metadata": "The update response is invalid. Installation was stopped; Station work continues.",
       "state-write-failed": "The update reminder could not be saved.",
       "active-shift": "Leave the active shift before installing",
       "target-changed": "The available version changed. Check again.",
-      "install-failed": "Installation failed. You can retry later."
+      "origin-mismatch": "The update sources do not match. Installation was stopped; Station work continues.",
+      "integrity-failed": "Update integrity could not be verified. Installation was stopped; Station work continues.",
+      "policy-denied": "Update policy rejected this release. Installation was stopped; Station work continues.",
+      "check-superseded": "A newer update check replaced this one. Check again.",
+      "candidate-invalid": "This update request is no longer current. Check again.",
+      "internal-error": "The update service encountered an internal error. Station work continues.",
+      "install-failed": "The update could not be installed. You can retry later; Station work continues."
     }
   },
   "signal": {

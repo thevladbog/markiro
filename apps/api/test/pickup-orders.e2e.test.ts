@@ -12,6 +12,7 @@ import { hashDeviceToken } from "../src/pickup/device-token";
 import { schema, type Db } from "@markiro/db";
 import { createTestEmployee } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { fixtureOrderNo } from "./support/order-no";
 import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.service";
 
 /** GTIN test vector (check-digit VALID). See kiosk-orders.e2e.test.ts for the full rationale. */
@@ -288,7 +289,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -313,6 +314,8 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     expect(found!.items).toEqual([
       { productId: linkedProductId, productExternalRef: expect.any(String), unitPrice: "10.00" },
     ]);
+    expect(found!.employeeId).toBe(employeeId);
+    expect(found!.employeeName).toBe("Иван Иванов");
 
     await db
       .update(schema.pickupOrders)
@@ -328,7 +331,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -338,7 +341,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     await db.insert(schema.pickupOrders).values({
       id: allVoidedOrderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -375,7 +378,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     await db.insert(schema.pickupOrders).values({
       id: heldOrderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -423,7 +426,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
       await db.insert(schema.pickupOrders).values({
         id: orderId,
         tenantId,
-        orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+        orderNo: fixtureOrderNo(),
         kioskId,
         employeeId,
         reason: "buy",
@@ -455,7 +458,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     await db.insert(schema.pickupOrders).values({
       id: eligibleOrderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -507,7 +510,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -539,7 +542,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -561,7 +564,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -584,7 +587,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -605,7 +608,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -622,7 +625,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",

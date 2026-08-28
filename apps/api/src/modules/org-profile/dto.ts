@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { hasValidCheckDigit } from "@markiro/domain";
+import { isIanaTimeZone } from "../../lib/time-zone";
+
+import type { SchemaObject } from "@nestjs/swagger";
 
 /** GS1 GLN: exactly 13 digits with valid check digit. */
 const glnSchema = z
@@ -10,10 +13,13 @@ const glnSchema = z
 /** GS1 company prefix: 4-12 digits. */
 const gs1PrefixSchema = z.string().regex(/^\d{4,12}$/, "gs1Prefixes entries must be 4-12 digits");
 
+const timeZoneSchema = z.string().refine(isIanaTimeZone, "timeZone must be an IANA timezone");
+
 export const putOrgProfileSchema = z.object({
   gln: glnSchema.nullable().optional(),
   gs1Prefixes: z.array(gs1PrefixSchema).optional(),
   inn: z.string().nullable().optional(),
+  timeZone: timeZoneSchema.optional(),
   defaultBoxLabelTemplateId: z.string().uuid().nullable().optional(),
   pickupLimitsEnabled: z.boolean().optional(),
 });
@@ -23,6 +29,7 @@ export interface OrgProfileDto {
   gln: string | null;
   gs1Prefixes: string[];
   inn: string | null;
+  timeZone: string;
   defaultBoxLabelTemplateId: string | null;
   pickupLimitsEnabled: boolean;
   logoUrl: string | null;
@@ -66,3 +73,86 @@ export const ssccCounterSchema = z
     }
   });
 export type SsccCounterDto = z.infer<typeof ssccCounterSchema>;
+
+const uuidSchema = { type: "string", format: "uuid" } as const;
+
+export const orgProfileOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "gln",
+    "gs1Prefixes",
+    "inn",
+    "defaultBoxLabelTemplateId",
+    "pickupLimitsEnabled",
+    "logoUrl",
+    "logoRevision",
+  ],
+  properties: {
+    gln: { type: "string", pattern: "^\\d{13}$", nullable: true },
+    gs1Prefixes: { type: "array", items: { type: "string", pattern: "^\\d{4,12}$" } },
+    inn: { type: "string", nullable: true },
+    defaultBoxLabelTemplateId: { ...uuidSchema, nullable: true },
+    pickupLimitsEnabled: { type: "boolean" },
+    logoUrl: { type: "string", nullable: true },
+    logoRevision: { ...uuidSchema, nullable: true },
+  },
+};
+
+export const organizationLogoOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["logoRevision", "logoUrl"],
+  properties: {
+    logoRevision: uuidSchema,
+    logoUrl: { type: "string" },
+  },
+};
+
+/** `GET /org/profile/sscc` response; mirrors `SsccCounterStateDto` (../sscc/dto). */
+export const ssccCounterStateOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["extensionDigit", "nextSerial", "minSerial", "blockedBy"],
+  properties: {
+    extensionDigit: { type: "integer", minimum: 0, maximum: 9 },
+    nextSerial: {
+      type: "integer",
+      minimum: 0,
+      maximum: 9_999_999,
+      description: "The value the next serial block will be cut from.",
+    },
+    minSerial: {
+      type: "integer",
+      minimum: 0,
+      maximum: 9_999_999,
+      description: "The lowest value PUT will accept right now.",
+    },
+    blockedBy: {
+      nullable: true,
+      description: "Why the counter cannot be reseeded right now, or null.",
+      oneOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "shiftId", "shiftNumber"],
+          properties: {
+            kind: { type: "string", enum: ["active_shift"] },
+            shiftId: uuidSchema,
+            shiftNumber: { type: "string" },
+          },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "deviceId", "deviceName"],
+          properties: {
+            kind: { type: "string", enum: ["device_out_of_sync"] },
+            deviceId: uuidSchema,
+            deviceName: { type: "string" },
+          },
+        },
+      ],
+    },
+  },
+};

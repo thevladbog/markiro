@@ -67,14 +67,23 @@ import {
 } from "./lib/credential-reset.js";
 import { useSyncEngine } from "./lib/use-sync-engine.js";
 import { closeShiftOffline } from "./lib/shift-close.js";
+import {
+  productionFloorTask,
+  readPersistedInventoryFloorTask,
+  type ActiveFloorTask,
+  type InventoryFloorTask,
+  type ProductionShiftTask,
+} from "./lib/floor-task.js";
 import { tauriStationUpdater } from "./lib/tauri-updater.js";
 import { useStationUpdater } from "./lib/use-station-updater.js";
+import type { ShiftEntryLease } from "./lib/shift-entry-lease.js";
 import { ConflictList } from "./pages/ConflictList.js";
 import { Enrollment } from "./pages/Enrollment.js";
 import { OperatorLogin } from "./pages/OperatorLogin.js";
-import { ShiftSelection } from "./pages/ShiftSelection.js";
+import { TaskSelection } from "./pages/TaskSelection.js";
 import { NewShift } from "./pages/NewShift.js";
 import { WorkScreen } from "./pages/WorkScreen.js";
+import { InventoryWorkScreen } from "./pages/InventoryWorkScreen.js";
 import { WorkstationSetup } from "./pages/WorkstationSetup.js";
 import { UpdateCenter } from "./pages/UpdateCenter.js";
 import { FloorShell } from "./ui/FloorShell.js";
@@ -82,12 +91,6 @@ import { OperatorSwitchControl } from "./ui/OperatorSwitchControl.js";
 import { FloorFooter } from "./ui/FloorFooter.js";
 import { WindowModeControl } from "./ui/WindowModeControl.js";
 import type { ScannerIndicator, UpdateIndicatorModel } from "./ui/StatusBar.js";
-
-interface ActiveShift {
-  id: string;
-  status: string;
-  mode: string;
-}
 
 export type CredentialRecoveryPhase = "sealing" | "failed" | "ready";
 
@@ -208,8 +211,17 @@ export function App() {
   const configTransitions = useRef(new ConfigTransitionCoordinator());
   const [operator, setOperator] = useState<OperatorMirrorRecord | null>(null);
   const [floorView, setFloorView] = useState<"select" | "new">("select");
-  const [shift, setShift] = useState<ActiveShift | null>(null);
+  const [activeFloorTask, setActiveFloorTask] = useState<ActiveFloorTask | null>(null);
+  const [floorRouteReady, setFloorRouteReady] = useState(false);
+  const shift = activeFloorTask?.kind === "production" ? activeFloorTask.shift : null;
+  const setShift = useCallback((next: ProductionShiftTask | null): void => {
+    setActiveFloorTask(next === null ? null : productionFloorTask(next));
+  }, []);
   const activeShiftIdRef = useRef<string | null>(null);
+  const shiftEntryLeaseRef = useRef<ShiftEntryLease | null>(null);
+  const [shiftEntryPending, setShiftEntryPending] = useState(false);
+  const updateOperationBlocked = useCallback(() => shiftEntryLeaseRef.current !== null, []);
+  const activeShiftGuard = useCallback(() => activeShiftIdRef.current !== null, []);
   const shiftEntryGenerationRef = useRef(0);
   const [shiftBundleRevision, setShiftBundleRevision] = useState(0);
   const [browserOnline, setBrowserOnline] = useState(() => navigator.onLine);
@@ -342,6 +354,40 @@ export function App() {
   // the station would be left with whatever session Setup's own buttons put
   // it in.
   const [sessionEpoch, setSessionEpoch] = useState(0);
+
+  useEffect(() => {
+    if (!operator) {
+      setFloorRouteReady(false);
+      return;
+    }
+    if (activeFloorTask !== null) {
+      setFloorRouteReady(true);
+      return;
+    }
+    let cancelled = false;
+    setFloorRouteReady(false);
+    const generation = currentCredentialGeneration.current;
+    void (
+      generation
+        ? readPersistedInventoryFloorTask(tauriExecutor, generation)
+        : readPersistedInventoryFloorTask(tauriExecutor)
+    )
+      .then((persisted) => {
+        if (!cancelled && persisted) {
+          activeShiftIdRef.current = persisted.inventory.inventoryId;
+          setActiveFloorTask(persisted);
+        }
+      })
+      .catch((error: unknown) => {
+        console.error("station: active inventory task recovery failed", error);
+      })
+      .finally(() => {
+        if (!cancelled) setFloorRouteReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFloorTask, operator]);
 
   useEffect(() => lockdown.start(), [lockdown]);
 
@@ -679,31 +725,34 @@ export function App() {
   // This makes React StrictMode overlap and any late async response obey the
   // same terminal seal. A newly provisioned apiKey creates a fresh generation.
   const credentialGeneration = useMemo(
-    () => (verifiedClient ? createCredentialGeneration() : null),
-    [verifiedClient],
+    () => (verifiedClient && config?.apiKey ? createCredentialGeneration(config.apiKey) : null),
+    [config?.apiKey, verifiedClient],
   );
   const currentCredentialGeneration = useRef<CredentialGeneration | null>(null);
   currentCredentialGeneration.current = credentialGeneration;
 
-  const onCredentialRejected = useCallback((event: CredentialRejectedEvent) => {
-    if (currentCredentialGeneration.current !== event.generation) return;
-    configTransitions.current.seal();
-    // These updates gate every authenticated surface in the next render.
-    // Cache deletion happens only from the post-commit effect below.
-    setOperator(null);
-    activeShiftIdRef.current = null;
-    shiftEntryGenerationRef.current += 1;
-    setShift(null);
-    setShiftContext(null);
-    setBoxCapacity(null);
-    setIssuerPrefix(null);
-    setFloorView("select");
-    setShowSetup(false);
-    printRecoverySetupLatch.current = "idle";
-    setPrintRecoveryBlocked(false);
-    setShowConflicts(false);
-    setCredentialRecovery((current) => current ?? { event, phase: "sealing" });
-  }, []);
+  const onCredentialRejected = useCallback(
+    (event: CredentialRejectedEvent) => {
+      if (currentCredentialGeneration.current !== event.generation) return;
+      configTransitions.current.seal();
+      // These updates gate every authenticated surface in the next render.
+      // Cache deletion happens only from the post-commit effect below.
+      setOperator(null);
+      activeShiftIdRef.current = null;
+      shiftEntryGenerationRef.current += 1;
+      setShift(null);
+      setShiftContext(null);
+      setBoxCapacity(null);
+      setIssuerPrefix(null);
+      setFloorView("select");
+      setShowSetup(false);
+      printRecoverySetupLatch.current = "idle";
+      setPrintRecoveryBlocked(false);
+      setShowConflicts(false);
+      setCredentialRecovery((current) => current ?? { event, phase: "sealing" });
+    },
+    [setShift],
+  );
 
   const credentialBoundClient = useMemo(() => {
     if (
@@ -801,11 +850,43 @@ export function App() {
   // the active shift or sync engine.
   const updater = useStationUpdater({
     enabled: config !== null,
+    updateCenterVisible: showUpdates,
     exec: tauriExecutor,
-    activeShift: shift !== null,
+    activeShift: activeFloorTask !== null,
     pendingOutbox: syncState.pending,
     port: tauriStationUpdater,
+    updateOperationBlocked,
+    activeShiftGuard,
   });
+  const cancelUpdate = updater.cancel;
+
+  const acquireShiftEntry = useCallback(async (): Promise<ShiftEntryLease> => {
+    if (shiftEntryLeaseRef.current || activeShiftIdRef.current) {
+      throw new Error("shift entry is already active");
+    }
+    let released = false;
+    const lease: ShiftEntryLease = {
+      isCurrent: () => !released && shiftEntryLeaseRef.current === lease,
+      release: () => {
+        if (released) return;
+        released = true;
+        if (shiftEntryLeaseRef.current === lease) {
+          shiftEntryLeaseRef.current = null;
+          setShiftEntryPending(false);
+        }
+      },
+    };
+    shiftEntryLeaseRef.current = lease;
+    setShiftEntryPending(true);
+    try {
+      await cancelUpdate();
+      if (!lease.isCurrent()) throw new Error("shift entry lease retired");
+      return lease;
+    } catch (error) {
+      lease.release();
+      throw error;
+    }
+  }, [cancelUpdate]);
 
   // React runs effects only after committing the recovery render. This is
   // the ordering boundary that guarantees an operator can no longer act on
@@ -828,7 +909,11 @@ export function App() {
         // action. Count all durable unsent facts in one SQLite snapshot before
         // deleting any reproducible state; a count failure stays fail-closed.
         const sealed = await readSealedWorkSummary(tauriExecutor, floorWorkRegistry.current());
-        await clearRejectedCredentialState({ exec: tauriExecutor, clearCredential });
+        await clearRejectedCredentialState({
+          exec: tauriExecutor,
+          clearCredential,
+          credentialGeneration: credentialRecovery.event.generation,
+        });
         const cleared = await readConfig();
         if (
           cleared.machineId !== previous.machineId ||
@@ -943,6 +1028,7 @@ export function App() {
   }
 
   async function performOperatorSwitch(): Promise<void> {
+    if (shiftEntryLeaseRef.current) return;
     setOperatorSwitchState("settling");
     const retirement =
       operatorRetirement.current ?? beginFloorWorkRetirement(floorWorkRegistry.current());
@@ -965,7 +1051,13 @@ export function App() {
   const floorRecoveryBlocked = printRecoveryBlocked || boxTemplateRecovery !== null;
 
   async function switchOperator(): Promise<void> {
-    if (floorRecoveryBlocked) return;
+    if (
+      floorRecoveryBlocked ||
+      shiftEntryLeaseRef.current ||
+      (activeShiftIdRef.current !== null && shift === null)
+    ) {
+      return;
+    }
     if (operatorSwitchAttempt.current) return operatorSwitchAttempt.current;
     const attempt = performOperatorSwitch();
     operatorSwitchAttempt.current = attempt;
@@ -981,8 +1073,8 @@ export function App() {
   const windowModeControl = (
     <WindowModeControl
       snapshot={lockdownSnapshot}
-      activeShift={shift !== null}
-      disabled={operatorSwitchState !== "idle" || floorRecoveryBlocked}
+      activeShift={activeFloorTask !== null}
+      disabled={operatorSwitchState !== "idle" || floorRecoveryBlocked || shiftEntryPending}
       onEnter={enterLockdown}
       onExit={exitLockdown}
       onDismissError={clearLockdownError}
@@ -1183,8 +1275,8 @@ export function App() {
   };
   const operatorControl = (
     <OperatorSwitchControl
-      activeShift={shift !== null}
-      pending={operatorSwitchState === "settling" || floorRecoveryBlocked}
+      activeShift={activeFloorTask !== null}
+      pending={operatorSwitchState === "settling" || floorRecoveryBlocked || shiftEntryPending}
       error={operatorSwitchState === "failed"}
       onSwitch={switchOperator}
       onDismissError={() => {
@@ -1193,11 +1285,12 @@ export function App() {
     />
   );
 
-  // Shared by ShiftSelection's `onSelected` and NewShift's `onStarted`: the
-  // shift is entered immediately (never blocked on the network). Recovery
-  // classification runs first; only its confirmed no-recovery branch starts
-  // the ordinary allocating bundle mirror through the ref above.
-  function handleShiftEntered(entered: ActiveShift) {
+  // Shared by ShiftSelection's `onSelected` and NewShift's `onStarted`, after
+  // each page's updater-cancellation barrier has settled. Recovery classification
+  // runs first; only its confirmed no-recovery branch starts the ordinary
+  // allocating bundle mirror through the ref above.
+  function handleShiftEntered(entered: ProductionShiftTask, lease?: ShiftEntryLease): void {
+    if (!lease || shiftEntryLeaseRef.current !== lease || !lease.isCurrent()) return;
     if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
     shiftEntryGenerationRef.current += 1;
     activeShiftIdRef.current = entered.id;
@@ -1207,6 +1300,13 @@ export function App() {
     setShift(entered);
     setShiftContext(null);
     setBoxTemplateRecovery(null);
+  }
+
+  function handleInventoryEntered(entered: InventoryFloorTask, lease?: ShiftEntryLease): void {
+    if (!lease || shiftEntryLeaseRef.current !== lease || !lease.isCurrent()) return;
+    if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
+    activeShiftIdRef.current = entered.inventory.inventoryId;
+    setActiveFloorTask(entered);
   }
 
   async function retryBackfilledBoxTemplateRecovery(): Promise<void> {
@@ -1303,8 +1403,13 @@ export function App() {
       syncStuck={syncState.stuck}
       conflicts={syncState.conflicts}
       update={updateIndicator}
-      actionsDisabled={operatorSwitchState !== "idle" || floorRecoveryBlocked}
-      onOpenUpdates={() => setShowUpdates(true)}
+      actionsDisabled={operatorSwitchState !== "idle" || floorRecoveryBlocked || shiftEntryPending}
+      onOpenUpdates={() => {
+        if (shiftEntryLeaseRef.current || (activeShiftIdRef.current !== null && shift === null)) {
+          return;
+        }
+        setShowUpdates(true);
+      }}
       footer={legacyNotice}
       statusBarCollapsible={shift !== null}
     >
@@ -1323,9 +1428,12 @@ export function App() {
       ) : showUpdates ? (
         <UpdateCenter
           controller={updater}
-          activeShift={shift !== null}
+          activeShift={activeFloorTask !== null}
           pendingOutbox={syncState.pending}
-          onBack={() => setShowUpdates(false)}
+          onBack={() => {
+            void updater.cancel();
+            setShowUpdates(false);
+          }}
         />
       ) : showSetup ? (
         <WorkstationSetup
@@ -1349,92 +1457,130 @@ export function App() {
         />
       ) : showConflicts ? (
         <ConflictList exec={tauriExecutor} onBack={() => setShowConflicts(false)} />
-      ) : shift ? (
-        boxTemplateRecovery ? (
-          <FullScreenDialog
-            open
-            title={t("box.printRecovery.restoreFailed")}
-            backLabel={t("box.printRecovery.backToShifts")}
-            backDisabled
-            onClose={() => {}}
-            initialFocus="dialog"
-            footer={
-              <Button
-                size="floor"
-                disabled={boxTemplateRecovery.phase === "retrying"}
-                onClick={() => void retryBackfilledBoxTemplateRecovery()}
-              >
-                {t(
-                  boxTemplateRecovery.phase === "retrying"
-                    ? "box.printRecovery.pending"
-                    : "box.printRecovery.retryRestore",
+      ) : !floorRouteReady ? (
+        <main className="station-centered-screen" data-testid="floor-route-loading">
+          <p role="status">{t("inventory.loadingLocalTask")}</p>
+        </main>
+      ) : activeFloorTask ? (
+        activeFloorTask.kind === "production" ? (
+          boxTemplateRecovery ? (
+            <FullScreenDialog
+              open
+              title={t("box.printRecovery.restoreFailed")}
+              backLabel={t("box.printRecovery.backToShifts")}
+              backDisabled
+              onClose={() => {}}
+              initialFocus="dialog"
+              footer={
+                <Button
+                  size="floor"
+                  disabled={boxTemplateRecovery.phase === "retrying"}
+                  onClick={() => void retryBackfilledBoxTemplateRecovery()}
+                >
+                  {t(
+                    boxTemplateRecovery.phase === "retrying"
+                      ? "box.printRecovery.pending"
+                      : "box.printRecovery.retryRestore",
+                  )}
+                </Button>
+              }
+            >
+              <Alert
+                tone="error"
+                title={t(
+                  boxTemplateRecovery.phase === "unavailable" && boxTemplateRecovery.kind === "box"
+                    ? "shifts.serverUnavailable"
+                    : "box.printRecovery.restoreFailedDetail",
                 )}
-              </Button>
-            }
-          >
-            <Alert
-              tone="error"
-              title={t(
-                boxTemplateRecovery.phase === "unavailable" && boxTemplateRecovery.kind === "box"
-                  ? "shifts.serverUnavailable"
-                  : "box.printRecovery.restoreFailedDetail",
-              )}
+              />
+              {boxTemplateRecovery.kind === "box" ? <p>{boxTemplateRecovery.sscc}</p> : null}
+            </FullScreenDialog>
+          ) : shiftContext && shift ? (
+            <WorkScreen
+              exec={tauriExecutor}
+              shiftId={shift.id}
+              terminalId={config.deviceId ?? null}
+              operatorId={operator.operatorId}
+              expectedGtin14={shiftContext.gtin14}
+              productName={shiftContext.productName}
+              productPrintName={shiftContext.productPrintName}
+              productId={shiftContext.productId}
+              productImage={shiftContext.image}
+              counterpartyName={shiftContext.counterpartyName}
+              productEgaisCode={shiftContext.egaisCode}
+              productShelfLifeDays={shiftContext.shelfLifeDays}
+              productionDate={shiftContext.productionDate}
+              shiftNumber={shiftContext.number}
+              plannedQty={shiftContext.plannedQty}
+              source={scanSource}
+              sound={sound}
+              onScanRecorded={nudgeSync}
+              onScanQueueRegister={registerFloorWorkBarrier}
+              exceptionWindowControl={windowModeControl}
+              onExit={() => {
+                // Both cleared together: `floorView` is separate state that
+                // stays "new" when this shift was entered through NewShift, so
+                // clearing only `shift` would re-render NewShift instead of
+                // shift selection -- the opposite of what this exit control
+                // promises (Finding 5).
+                activeShiftIdRef.current = null;
+                shiftEntryGenerationRef.current += 1;
+                setShift(null);
+                setFloorView("select");
+              }}
+              onCloseShift={async (reasonCode) => {
+                if (!config?.deviceId) throw new Error("Идентификатор станции недоступен");
+                const summary = await closeShiftOffline(tauriExecutor, {
+                  shiftId: shift.id,
+                  deviceId: config.deviceId,
+                  operatorId: operator.operatorId,
+                  ...(reasonCode === undefined ? {} : { reasonCode }),
+                });
+                nudgeSync();
+                return summary;
+              }}
+              pendingSync={syncState.pending}
+              // Read off `shift_mirror` alongside `shiftContext` above (Task 13
+              // review, Finding 1) -- null for a validation-mode shift, or a
+              // device the server could not resolve an issuer prefix for,
+              // which is exactly what turns WorkScreen's box UI off entirely.
+              issuerPrefix={issuerPrefix}
+              boxCapacity={boxCapacity}
+              bundleRevision={shiftBundleRevision}
+              verifyPrintedLabel={hardwareConfig.verifyPrintedLabel}
+              printing={
+                hardwareConfig.printer
+                  ? {
+                      target: hardwareConfig.printer,
+                      language: hardwareConfig.printerLanguage,
+                      print: (target, bytes) => tauriHardware.print(target, bytes),
+                    }
+                  : null
+              }
+              onOpenPrinterSetup={openPrintRecoverySetup}
+              onPrintRecoveryChange={handlePrintRecoveryChange}
             />
-            {boxTemplateRecovery.kind === "box" ? <p>{boxTemplateRecovery.sscc}</p> : null}
-          </FullScreenDialog>
-        ) : shiftContext ? (
-          <WorkScreen
+          ) : (
+            <main style={{ minHeight: "100%", display: "grid", placeItems: "center" }}>
+              <h1 style={{ fontSize: "2rem" }}>{t("shifts.preparing")}</h1>
+            </main>
+          )
+        ) : config.deviceId && activeClient ? (
+          <InventoryWorkScreen
             exec={tauriExecutor}
-            shiftId={shift.id}
-            terminalId={config.deviceId ?? null}
+            inventory={activeFloorTask.inventory}
+            deviceId={config.deviceId}
             operatorId={operator.operatorId}
-            expectedGtin14={shiftContext.gtin14}
-            productName={shiftContext.productName}
-            productPrintName={shiftContext.productPrintName}
-            productId={shiftContext.productId}
-            productImage={shiftContext.image}
-            counterpartyName={shiftContext.counterpartyName}
-            productEgaisCode={shiftContext.egaisCode}
-            productShelfLifeDays={shiftContext.shelfLifeDays}
-            productionDate={shiftContext.productionDate}
-            shiftNumber={shiftContext.number}
-            plannedQty={shiftContext.plannedQty}
             source={scanSource}
-            sound={sound}
-            onScanRecorded={nudgeSync}
-            onScanQueueRegister={registerFloorWorkBarrier}
-            exceptionWindowControl={windowModeControl}
-            onExit={() => {
-              // Both cleared together: `floorView` is separate state that
-              // stays "new" when this shift was entered through NewShift, so
-              // clearing only `shift` would re-render NewShift instead of
-              // shift selection -- the opposite of what this exit control
-              // promises (Finding 5).
+            client={activeClient}
+            floorTaskPointerValue={activeFloorTask.pointerValue}
+            {...(floorGeneration ? { credentialGeneration: floorGeneration } : {})}
+            onLeft={() => {
               activeShiftIdRef.current = null;
-              shiftEntryGenerationRef.current += 1;
-              setShift(null);
+              setActiveFloorTask(null);
               setFloorView("select");
             }}
-            onCloseShift={async (reasonCode) => {
-              if (!config?.deviceId) throw new Error("Идентификатор станции недоступен");
-              const summary = await closeShiftOffline(tauriExecutor, {
-                shiftId: shift.id,
-                deviceId: config.deviceId,
-                operatorId: operator.operatorId,
-                ...(reasonCode === undefined ? {} : { reasonCode }),
-              });
-              nudgeSync();
-              return summary;
-            }}
-            pendingSync={syncState.pending}
-            // Read off `shift_mirror` alongside `shiftContext` above (Task 13
-            // review, Finding 1) -- null for a validation-mode shift, or a
-            // device the server could not resolve an issuer prefix for,
-            // which is exactly what turns WorkScreen's box UI off entirely.
-            issuerPrefix={issuerPrefix}
-            boxCapacity={boxCapacity}
-            bundleRevision={shiftBundleRevision}
-            verifyPrintedLabel={hardwareConfig.verifyPrintedLabel}
+            onScanQueueRegister={registerFloorWorkBarrier}
             printing={
               hardwareConfig.printer
                 ? {
@@ -1448,18 +1594,25 @@ export function App() {
             onPrintRecoveryChange={handlePrintRecoveryChange}
           />
         ) : (
-          <main style={{ minHeight: "100%", display: "grid", placeItems: "center" }}>
-            <h1 style={{ fontSize: "2rem" }}>{t("shifts.preparing")}</h1>
+          <main className="station-centered-screen">
+            <p role="status">{t("inventory.loadingLocalTask")}</p>
           </main>
         )
       ) : floorView === "select" ? (
-        <ShiftSelection
+        <TaskSelection
           client={activeClient}
           exec={tauriExecutor}
-          onSelected={handleShiftEntered}
+          acquireShiftEntry={acquireShiftEntry}
+          source={scanSource}
+          operatorId={operator.operatorId}
+          currentLineName={config.lineName ?? null}
+          onShiftSelected={handleShiftEntered}
+          onInventorySelected={handleInventoryEntered}
           isCurrent={() =>
             floorGeneration ? credentialGenerationIsCurrent(floorGeneration) : false
           }
+          {...(floorGeneration ? { credentialGeneration: floorGeneration } : {})}
+          onFloorWorkRegister={registerFloorWorkBarrier}
           onNew={() => setFloorView("new")}
           onSetup={() => setShowSetup(true)}
           onConflicts={() => setShowConflicts(true)}
@@ -1468,8 +1621,12 @@ export function App() {
         <NewShift
           client={activeClient}
           source={scanSource}
+          acquireShiftEntry={acquireShiftEntry}
           onStarted={handleShiftEntered}
-          onBack={() => setFloorView("select")}
+          onBack={() => {
+            if (shiftEntryLeaseRef.current || activeShiftIdRef.current) return;
+            setFloorView("select");
+          }}
         />
       )}
     </FloorShell>

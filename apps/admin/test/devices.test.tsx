@@ -14,7 +14,12 @@ vi.mock("../src/layout/useActiveOrg.js", () => ({
 }));
 
 function response(body: unknown): Response {
-  return { ok: true, status: 200, json: async () => body } as Response;
+  return {
+    ok: true,
+    status: 200,
+    json: async () => body,
+    text: async () => (body === undefined ? "" : JSON.stringify(body)),
+  } as Response;
 }
 
 function activeExpiry(): string {
@@ -209,7 +214,7 @@ it("hydrates and clears URL filters independently while resetting the page", asy
   await waitFor(() => expect(requests).toContain("/api/devices?page=1&pageSize=8"));
 });
 
-it("hides Add device when the grant cannot create either type", async () => {
+it("keeps the stable Station download available when the grant cannot create devices", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => response({ items: [], page: 1, pageSize: 8, total: 0 })),
@@ -229,6 +234,9 @@ it("hides Add device when the grant cannot create either type", async () => {
   );
   await screen.findByText("Устройства не добавлены");
   expect(screen.queryByRole("button", { name: "Добавить устройство" })).toBeNull();
+  expect(
+    screen.getByRole("link", { name: "Скачать Station для Windows" }).getAttribute("href"),
+  ).toBe("https://releases.markiro.app/station/download");
 });
 
 it("keeps a station unassigned and directs operators to Production -> Lines when no lines exist", async () => {
@@ -237,6 +245,9 @@ it("keeps a station unassigned and directs operators to Production -> Lines when
 
   fireEvent.click(screen.getByRole("button", { name: "Добавить устройство" }));
   const drawer = await screen.findByRole("dialog", { name: "Новое устройство" });
+  expect(
+    within(drawer).getByRole("link", { name: "Скачать Station для Windows" }).getAttribute("href"),
+  ).toBe("https://releases.markiro.app/station/download");
   expect(within(drawer).getByRole("combobox", { name: "Линия" }).textContent).toContain(
     "Без линии",
   );

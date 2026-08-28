@@ -1,0 +1,147 @@
+---
+import { Picture } from "astro:assets";
+
+import articleHero from "../../../assets/beer-datamatrix-application-hero.png";
+import LandingFooter from "../../../components/LandingFooter.astro";
+import LandingHeader from "../../../components/LandingHeader.astro";
+import { BEER_DATAMATRIX_APPLICATION_ARTICLE } from "../../../content/articles";
+import { buildArticlePageGraph } from "../../../lib/seo";
+import { readPublicSiteConfig } from "../../../lib/site-config";
+import BaseLayout from "../../../layouts/BaseLayout.astro";
+
+const article = BEER_DATAMATRIX_APPLICATION_ARTICLE;
+const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<BaseLayout metadata={article} graph={buildArticlePageGraph(article)}>
+  <LandingHeader page={article} phone={config.phone} />
+  <main id="main" class="article-page">
+    <header class="article-hero">
+      <div class="container article-hero__inner">
+        <nav class="breadcrumbs" aria-label="Хлебные крошки"><ol><li><a href="/">Markiro</a></li><li aria-current="page">{article.navigationLabel}</li></ol></nav>
+        <div class="article-hero__layout">
+          <div class="article-hero__copy">
+            <p class="section-index">{article.eyebrow}</p>
+            <h1>{article.heading}</h1>
+            <p class="article-hero__lead">{article.introduction}</p>
+            <div class="article-byline" aria-label="Сведения о публикации"><span>{article.authorName}</span><time datetime={article.publishedAt}>26 августа 2026</time><span>{article.readingTimeMinutes} минут чтения</span></div>
+          </div>
+          <figure class="article-hero__media" data-article-visual>
+            <Picture src={articleHero} alt="Специалист сравнивает этикетку, типографский образец и прямую печать для маркировки пива" widths={[480, 720, 1080]} formats={["avif", "webp"]} sizes="(max-width: 767px) 100vw, 45vw" loading="eager" fetchpriority="high" data-article-hero-image />
+            <figcaption>Метод выбирают по таре, партии и управляемости процесса, а не по максимальной скорости из каталога.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </header>
+
+    <article class="container article-body">
+      <aside class="article-summary" aria-labelledby="article-summary-title">
+        <p class="section-index">Коротко</p><h2 id="article-summary-title">Что важно при выборе нанесения</h2>
+        <ul>
+          <li data-key-takeaway>Для небольших партий стикер может быть полноценным стартовым методом, если серия читается и брак учитывается.</li>
+          <li data-key-takeaway>Типография снимает печать с линии, но добавляет управление тиражом, остатками кодированной упаковки и списанием брака.</li>
+          <li data-key-takeaway>Прямая печать требует стабильного положения тары, расстояния до головки, синхронизации, чтения и отбраковки.</li>
+          <li data-key-takeaway>На бутылке или кеге допускается только одно машиночитаемое средство идентификации соответствующего формата.</li>
+          <li data-key-takeaway>Один хороший образец не доказывает готовность: проверяйте серию, старт после остановки, смену SKU и влажную тару.</li>
+          <li data-key-takeaway>Markiro контролирует уже нанесённые коды, дубли, короб и SSCC; физическое нанесение принимается отдельно на площадке.</li>
+        </ul>
+      </aside>
+
+      <nav class="article-toc" aria-label="Содержание статьи"><p class="section-index">Содержание</p><ol><li><a href="#answer">Короткий ответ</a></li><li><a href="#requirements">Требования и место</a></li><li><a href="#methods">Три метода</a></li><li><a href="#labels">Этикетирование</a></li><li><a href="#preprint">Типография</a></li><li><a href="#direct">Прямая печать</a></li><li><a href="#decision">Критерии выбора</a></li><li><a href="#pilot">Приёмочный пилот</a></li><li><a href="#markiro">Граница Markiro</a></li></ol></nav>
+
+      <section id="answer" aria-labelledby="answer-title">
+        <p class="section-index">01 / Ответ</p><h2 id="answer-title">Какой способ нанесения Data Matrix выбрать для пива</h2>
+        <p><strong>Для небольшого или часто меняющегося выпуска обычно проще начать с этикетки; для стабильных тиражей можно рассматривать типографию; прямую печать стоит выбирать для устойчивого потока после испытаний.</strong> Это не жёсткое правило по количеству бутылок. Важнее геометрия тары, частота смены SKU, доступное место кода, ответственность за брак и возможность остановить единицу до упаковки.</p>
+        <p>Во всех трёх вариантах уникальный код должен быть связан с конкретной единицей, считан после нанесения, исключён из повторного использования и попасть в корректный отчёт. Если поставщик показывает только печатающую головку или красивую этикетку, но не описывает судьбу непрочитанного, лишнего и повреждённого кода, контур ещё не закончен.</p>
+        <div class="article-callout"><strong>Информация важнее механики.</strong><p>Выбирайте не «принтер против типографии», а полный маршрут: где код получен, где физически нанесён, кто подтвердил чтение, как оформлен брак и что произойдёт после остановки линии.</p></div>
+      </section>
+
+      <section id="requirements" aria-labelledby="requirements-title">
+        <p class="section-index">02 / Требования</p><h2 id="requirements-title">Куда можно наносить код на бутылку или банку</h2>
+        <p><strong>Код можно размещать на упаковке, укупорочном средстве, этикетке или стикере, если он не отделяется без повреждения и беспрепятственно считывается.</strong> Для стеклянной и ПЭТ-бутылки официальный материал перечисляет кроненпробку или колпачок, кольеретку, контрэтикетку и основную этикетку. При этом код не должен закрывать обязательную информацию о товаре.</p>
+        <p>На поверхности потребительской упаковки или кега не может находиться более одного средства идентификации, считываемого оборудованием для Data Matrix и EAN-128. Для прямого нанесения установлен класс качества не ниже <strong>1,5 (C)</strong>. Полные требования приведены в материале «Честного знака» <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/kakim-dolzhen-byt-datamatrix-trebovaniya-k-preobrazovaniyu-i-kachestvu-naneseniya-pivo">о преобразовании, размещении и качестве Data Matrix для пива</a>.</p>
+        <p>Практически это означает, что место выбирают вместе с реальной тарой: изгиб бутылки, блик металла, конденсат, лак, шов этикетки и рельеф крышки могут превратить корректный файл в нестабильный физический символ.</p>
+      </section>
+
+      <section id="methods" aria-labelledby="methods-title">
+        <p class="section-index">03 / Сравнение</p><h2 id="methods-title">Чем отличаются этикетка, типография и прямая печать</h2>
+        <p><strong>Различие — в моменте персонализации упаковки и владельце контроля.</strong> При этикетировании код печатается на отдельном носителе и наносится вручную или аппликатором. При типографском методе код появляется на этикетке или упаковке до поступления на площадку. При прямой печати каждая единица персонализируется непосредственно в потоке.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/nanesenie-data-matrix-pivo-methods.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Сравнение этикетирования, типографского нанесения и прямой печати Data Matrix на пиво" data-article-diagram />
+          <figcaption>У каждого метода своя точка риска: аппликация, остатки кодированной упаковки или синхронизация печати с движением тары.</figcaption>
+        </figure>
+      </section>
+
+      <section id="labels" aria-labelledby="labels-title">
+        <p class="section-index">04 / Этикетка</p><h2 id="labels-title">Когда подходит ручное или автоматическое этикетирование</h2>
+        <p><strong>Этикетирование даёт самый гибкий вход и простую смену продукта.</strong> Для небольшой партии оператор может печатать стикеры на термотрансферном принтере, наносить их вручную и подтверждать код 2D-сканером. При росте объёма тот же принцип переносится на аппликатор или принтер-аппликатор.</p>
+        <p>Официальный обзор прямо относит ручной метод к малым предприятиям с небольшим выпуском и описывает автоматический вариант для более высокой скорости: <a href="https://markirovka.ru/knowledge/fast_start/marking_location/etiketirovanie-datamatrix-vneshniy-vid-oborudovanie-osobennosti-naneseniya">этикетирование Data Matrix и необходимое оборудование</a>. Но простота не отменяет контроля. Нужно исключить перекос, складку, наклейку на влажную поверхность, пропуск единицы и повторное использование уже напечатанного стикера.</p>
+        <div class="article-cases">
+          <article><h3>Сильная сторона</h3><p>Небольшой стартовый бюджет, короткая переналадка и возможность проверить процесс на одной станции.</p></article>
+          <article><h3>Ограничение</h3><p>Ручная производительность и качество аппликации зависят от рабочего места и инструкции оператора.</p></article>
+          <article><h3>Контроль</h3><p>Сканирование после нанесения, явный брак стикера и запрет повторного принятия кода.</p></article>
+        </div>
+      </section>
+
+      <section id="preprint" aria-labelledby="preprint-title">
+        <p class="section-index">05 / Типография</p><h2 id="preprint-title">Когда выгодно получать уже кодированную этикетку или упаковку</h2>
+        <p><strong>Типография убирает печатающий узел с линии, но переносит персонализацию раньше по цепочке.</strong> Подрядчик получает коды через защищённый контур, печатает переменные Data Matrix, проверяет их техническим зрением и передаёт заказчику материал вместе с отчётом.</p>
+        <p>Метод может быть удобен для устойчивых тиражей и упаковки, которую всё равно заказывают заранее. Официальное описание допускает его для металлических банок, стеклянных и ПЭТ-бутылок и подчёркивает повторную проверку после операций, способных повлиять на чтение, например ламинации или лакирования: <a href="https://markirovka.ru/knowledge/fast_start/typography/tipografskoe-nanesenie-datamatrix-preimushchestva-oborudovanie-protsess">процесс типографского нанесения Data Matrix</a>.</p>
+        <p>Главный производственный вопрос — не качество файла, а учёт кодированной упаковки. Нужно знать, какой тираж поступил, какие экземпляры испорчены до розлива, что осталось после смены SKU и как предотвращается использование упаковки не для того задания. При большом ассортименте и коротких сериях эти остатки могут стать существеннее экономии на печати.</p>
+      </section>
+
+      <section id="direct" aria-labelledby="direct-title">
+        <p class="section-index">06 / Прямая печать</p><h2 id="direct-title">Что требуется для прямого нанесения на линии</h2>
+        <p><strong>Прямая печать работает устойчиво только при повторяемой подаче тары.</strong> Единица должна проходить под головкой с контролируемой скоростью, ориентацией и расстоянием; после печати камера или сканер подтверждает код, а механизм или оператор отделяет непринятую единицу.</p>
+        <p>«Честный знак» перечисляет каплеструйные, термоструйные, термотрансферные и лазерные технологии и указывает ключевые условия: равномерное движение, одинаковое расстояние до поверхности и качество не ниже класса C. В официальном материале также приведены варианты мест для ПЭТ, стеклянной бутылки и металлической банки: <a href="https://markirovka.ru/knowledge/fast_start/marking_location/praktika-pryamogo-naneseniya-data-matrix-vidy-upakovki-mesta-naneseniya-materialy">практика прямого нанесения Data Matrix</a>.</p>
+        <p>Этот метод не следует выбирать только по паспортной скорости маркиратора. В проект входят датчик продукта, очередь кодов, триггер печати, камера, связь результата с исходным кодом, отбраковка, реакция на потерю связи и безопасный перезапуск. Ошибка синхронизации может дать качественный код не на той единице — сканер увидит символ, но прослеживаемость будет нарушена.</p>
+      </section>
+
+      <section id="decision" aria-labelledby="decision-title">
+        <p class="section-index">07 / Решение</p><h2 id="decision-title">По каким критериям выбирать метод нанесения</h2>
+        <p><strong>Сравните варианты по одному производственному сценарию, а не по цене отдельного устройства.</strong> Зафиксируйте репрезентативный и худший SKU, минимальную и максимальную скорость, длительность серии, число переналадок и допустимую ручную операцию.</p>
+        <div class="article-checklist">
+          <div><h3>Продукт и тара</h3><ul><li>стекло, ПЭТ или банка;</li><li>блик, изгиб и конденсат;</li><li>место обязательной информации;</li><li>срок и условия хранения.</li></ul></div>
+          <div><h3>Производство</h3><ul><li>объём и длина серии;</li><li>смена SKU и этикетки;</li><li>старт, стоп и накопитель;</li><li>доступная отбраковка.</li></ul></div>
+          <div><h3>Данные</h3><ul><li>получение и выдача кодов;</li><li>остатки и уничтожение;</li><li>связь чтения с заданием;</li><li>отчёт и журнал исключений.</li></ul></div>
+        </div>
+        <p>Для расчёта полной стоимости добавьте расходники, время переналадки, брак упаковки, обслуживание, простой и остатки кодированного материала. Подробнее о таком сравнении — в статье <a href="/stati/stoimost-markirovki-piva/">о стоимости маркировки пива</a>.</p>
+      </section>
+
+      <section id="pilot" aria-labelledby="pilot-title">
+        <p class="section-index">08 / Пилот</p><h2 id="pilot-title">Как принять способ нанесения до закупки всей линии</h2>
+        <p><strong>Проведите серию на реальной таре и включите в неё намеренные отказы.</strong> Один аккуратно напечатанный образец не показывает старт после простоя, накопление конденсата, перекос этикетки, смену рулона, пропуск триггера или повторную подачу единицы.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/nanesenie-data-matrix-pivo-pilot.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Приёмочный пилот нанесения Data Matrix: тара и SKU, производственная серия и учёт результата" data-article-diagram />
+          <figcaption>Приёмка заканчивается не процентом чтения, а сверкой принятого, брака, остатка кодов и отчёта.</figcaption>
+        </figure>
+        <ol class="article-steps">
+          <li><h3>Подготовьте худшую тару</h3><p>Возьмите самый сложный материал, геометрию, поверхность и реальную этикетку после всех технологических операций.</p></li>
+          <li><h3>Запустите серию</h3><p>Измерьте устойчивую скорость, первые единицы после старта, остановку и перезапуск, смену SKU и расходника.</p></li>
+          <li><h3>Вызовите отказ</h3><p>Проверьте непрочитанный код, дубль, повреждённую этикетку, потерю сети и отсутствие подтверждения от оборудования.</p></li>
+          <li><h3>Сведите баланс</h3><p>Каждый выданный код должен иметь понятный исход: принят, забракован, не использован или требует оформленного исключения.</p></li>
+        </ol>
+      </section>
+
+      <section id="markiro" aria-labelledby="markiro-title">
+        <p class="section-index">09 / Markiro</p><h2 id="markiro-title">Где начинается текущий контур Markiro</h2>
+        <p><strong>Markiro не подменяет выбор маркиратора, клея, типографии или места нанесения.</strong> Физический метод и совместимость оборудования подтверждаются на площадке. Текущий контур Markiro начинается там, где нанесённый код поступает на рабочую станцию: проверяется формат и GTIN, блокируется дубль, фиксируется результат и формируется состав короба.</p>
+        <p>Станция поддерживает ручной 2D-сканер в клавиатурном или последовательном режиме, сохраняет разрешённые операции локально при нестабильной сети и печатает коробную этикетку с SSCC через совместимый принтер ZPL или TSPL. Текущая граница агрегации — <strong>единица → короб → SSCC</strong>; паллетный уровень относится к следующему этапу.</p>
+        <div class="article-callout article-callout--boundary"><strong>Нанесение и контроль — два связанных, но разных проекта.</strong><p>Мы помогаем встроить выбранный метод в проверяемый рабочий процесс. Паспортная производительность, физическое качество печати и отбраковка конкретной линии принимаются совместно с поставщиком оборудования на предприятии.</p></div>
+      </section>
+
+      <section class="article-conclusion" aria-labelledby="conclusion-title">
+        <p class="section-index">Вывод</p><h2 id="conclusion-title">Выбирайте метод, у которого понятна судьба каждого кода</h2>
+        <p>Стикер, типография и прямая печать могут быть правильными решениями. Надёжным становится тот вариант, который прошёл серию на вашей таре, учитывает брак и остатки, переживает остановку и оставляет проверяемый журнал.</p>
+        <a class="button" href="/#demo" data-analytics="landing_demo_click" data-placement="article-conclusion">Разобрать способ нанесения <span aria-hidden="true">→</span></a>
+      </section>
+
+      <section class="article-related" aria-labelledby="article-related-title">
+        <p class="section-index">По теме</p><h2 id="article-related-title">Продолжить проектирование линии</h2>
+        <div class="seo-related__grid"><a href="/stati/oborudovanie-dlya-markirovki-piva/"><span>Оборудование линии маркировки</span><span aria-hidden="true">→</span></a><a href="/stati/data-matrix-pivo-ne-schityvaetsya/"><span>Диагностика чтения Data Matrix</span><span aria-hidden="true">→</span></a><a href="/stati/stoimost-markirovki-piva/"><span>Бюджет доступного запуска</span><span aria-hidden="true">→</span></a></div>
+      </section>
+    </article>
+  </main>
+  <LandingFooter page={article} />
+  <script>import { browserLandingRuntime, initLanding } from "../../../scripts/site"; initLanding(document, browserLandingRuntime(window));</script>
+</BaseLayout>

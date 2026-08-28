@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,6 +16,7 @@ import i18n from "../src/i18n/index.js";
 import { CatalogPage } from "../src/pages/catalog/index.js";
 import { CounterpartiesPage } from "../src/pages/counterparties/index.js";
 import { DashboardPage } from "../src/pages/dashboard/index.js";
+import type { DashboardOverviewDto } from "../src/pages/dashboard/api.js";
 import { SettingsPage } from "../src/pages/settings/index.js";
 import { ShiftsPage } from "../src/pages/shifts/index.js";
 import { ShellPage } from "../src/pages/Shell.js";
@@ -32,7 +34,62 @@ function jsonResponse(status: number, body: unknown): Response {
     ok: status >= 200 && status < 300,
     status,
     json: async () => body,
+    text: async () => (body === undefined ? "" : JSON.stringify(body)),
   } as Response;
+}
+
+function dashboardOverviewFixture(): DashboardOverviewDto {
+  return {
+    generatedAt: "2026-08-27T09:45:00.000Z",
+    timeZone: "Europe/Moscow",
+    metricVersion: "operations-dashboard-v1",
+    setup: { productCount: 0, shiftCount: 0, hasRunShift: false },
+    verdict: { status: "under_control", reasons: [] },
+    today: {
+      validationAcceptedUnits: 0,
+      aggregationClosedBoxes: 0,
+      aggregationContainedUnits: 0,
+      activeShiftCount: 0,
+      includedClosedShiftCount: 0,
+    },
+    dynamics: {
+      period: "7d",
+      grain: "day",
+      currentWindow: {
+        start: "2026-08-20T21:00:00.000Z",
+        end: "2026-08-27T09:45:00.000Z",
+        validation: { acceptedUnits: 0, shiftHours: 0, unitsPerShiftHour: null },
+        aggregation: {
+          closedBoxes: 0,
+          containedUnits: 0,
+          shiftHours: 0,
+          boxesPerShiftHour: null,
+          containedUnitsPerShiftHour: null,
+        },
+      },
+      comparisonWindow: {
+        start: "2026-08-13T21:00:00.000Z",
+        end: "2026-08-20T09:45:00.000Z",
+        validation: { acceptedUnits: 0, shiftHours: 0, unitsPerShiftHour: null },
+        aggregation: {
+          closedBoxes: 0,
+          containedUnits: 0,
+          shiftHours: 0,
+          boxesPerShiftHour: null,
+          containedUnitsPerShiftHour: null,
+        },
+      },
+      buckets: [],
+      quality: {
+        status: "complete",
+        reasons: [],
+        activeShiftCount: 0,
+        lateDataShiftCount: 0,
+        sources: ["code_registry", "boxes", "box_items"],
+      },
+    },
+    activeShifts: [],
+  };
 }
 
 beforeEach(() => {
@@ -60,6 +117,9 @@ beforeEach(() => {
         });
       }
       if (url.includes("/api/pickup-orders")) return jsonResponse(200, { items: [] });
+      if (url.endsWith("/api/dashboard/overview?period=7d")) {
+        return jsonResponse(200, dashboardOverviewFixture());
+      }
       if (
         url.endsWith("/api/products") ||
         url.endsWith("/api/shifts") ||
@@ -137,33 +197,85 @@ function renderApp(client: AuthClientLike, initialPath = "/") {
 }
 
 describe("app shell layout", () => {
+  it("keeps the desktop sidebar and exposes only authorized links in mobile navigation", async () => {
+    const user = userEvent.setup();
+    renderApp(createFakeAuthClient());
+
+    expect(await screen.findByRole("navigation", { name: "Основная навигация" })).toBeDefined();
+
+    const trigger = screen.getByRole("button", { name: "Открыть мобильную навигацию" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(trigger.getAttribute("aria-controls")).toBe("mobile-primary-navigation");
+
+    await user.click(trigger);
+
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    const mobileNav = screen.getByRole("navigation", { name: "Мобильная навигация" });
+    expect(within(mobileNav).getByRole("link", { name: "Обзор" })).toBeDefined();
+    expect(within(mobileNav).getByRole("link", { name: "Каталог" })).toBeDefined();
+    expect(within(mobileNav).queryByRole("link", { name: "Интеграции" })).toBeNull();
+    expect(within(mobileNav).queryByRole("link", { name: "Настройки" })).toBeNull();
+  });
+
+  it("opens mobile navigation and activates an authorized route with the keyboard", async () => {
+    const user = userEvent.setup();
+    renderApp(createFakeAuthClient());
+
+    const trigger = await screen.findByRole("button", { name: "Открыть мобильную навигацию" });
+    trigger.focus();
+    await user.keyboard("{Enter}");
+
+    const mobileNav = screen.getByRole("navigation", { name: "Мобильная навигация" });
+    const catalogLink = within(mobileNav).getByRole("link", { name: "Каталог" });
+    catalogLink.focus();
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location-pathname").textContent).toBe("/catalog");
+    });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("indicates the current route in mobile navigation", async () => {
+    const user = userEvent.setup();
+    renderApp(createFakeAuthClient(), "/catalog");
+
+    const trigger = await screen.findByRole("button", { name: "Открыть мобильную навигацию" });
+    await user.click(trigger);
+
+    const mobileNav = screen.getByRole("navigation", { name: "Мобильная навигация" });
+    expect(within(mobileNav).getByRole("link", { name: "Каталог", current: "page" })).toBeDefined();
+  });
+
   it("renders operational manager nav items and hides privileged sections", async () => {
     renderApp(createFakeAuthClient());
+    const desktopNav = await screen.findByRole("navigation", { name: "Основная навигация" });
 
     const expectedLinks: Array<[string, string]> = [
       ["Обзор", "/"],
       ["Каталог", "/catalog"],
       ["Смены", "/shifts"],
       ["Линии", "/lines"],
+      ["Инвентаризации", "/inventory"],
       ["Контрагенты", "/counterparties"],
       ["Операторы и сотрудники", "/employees"],
       ["Этикетки", "/labels"],
       ["Выбытие", "/pickup"],
     ];
     for (const [label, href] of expectedLinks) {
-      const link = await screen.findByRole("link", { name: label });
+      const link = within(desktopNav).getByRole("link", { name: label });
       expect(link.getAttribute("href")).toBe(href);
     }
-    expect(screen.getByText("Производство")).toBeDefined();
-    expect(screen.getByText("Справочники")).toBeDefined();
-    expect(screen.getByText("Оборудование и обмен")).toBeDefined();
-    expect(screen.queryByText("Организация")).toBeNull();
-    expect(screen.queryByRole("link", { name: "Интеграции" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Настройки" })).toBeNull();
+    expect(within(desktopNav).getByText("Производство")).toBeDefined();
+    expect(within(desktopNav).getByText("Справочники")).toBeDefined();
+    expect(within(desktopNav).getByText("Оборудование и обмен")).toBeDefined();
+    expect(within(desktopNav).queryByText("Организация")).toBeNull();
+    expect(within(desktopNav).queryByRole("link", { name: "Интеграции" })).toBeNull();
+    expect(within(desktopNav).queryByRole("link", { name: "Настройки" })).toBeNull();
 
-    const shiftsLink = screen.getByRole("link", { name: "Смены" });
-    const linesLink = screen.getByRole("link", { name: "Линии" });
-    const navLinks = screen.getAllByRole("link");
+    const shiftsLink = within(desktopNav).getByRole("link", { name: "Смены" });
+    const linesLink = within(desktopNav).getByRole("link", { name: "Линии" });
+    const navLinks = within(desktopNav).getAllByRole("link");
     expect(navLinks.indexOf(linesLink)).toBe(navLinks.indexOf(shiftsLink) + 1);
   });
 

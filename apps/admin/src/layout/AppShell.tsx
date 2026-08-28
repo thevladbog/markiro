@@ -1,9 +1,9 @@
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
 
 import { CABINET_CAPABILITY, type CabinetCapability } from "@markiro/domain";
-import { Sidebar, cn, type SidebarItem } from "@markiro/ui";
+import { Badge, Button, Sidebar, cn, type SidebarItem } from "@markiro/ui";
 
 import { useCan } from "../access/context.js";
 import { useAuthClient } from "../auth/client.js";
@@ -36,6 +36,12 @@ export const NAV_ITEMS: ReadonlyArray<{
   {
     to: "/lines",
     key: "nav.lines",
+    sectionKey: "shell.sections.production",
+    capability: C.OPERATIONS_READ,
+  },
+  {
+    to: "/inventory",
+    key: "nav.inventory",
     sectionKey: "shell.sections.production",
     capability: C.OPERATIONS_READ,
   },
@@ -150,6 +156,7 @@ export function AppShell() {
   const billingAttentionCount = billingAttention.data?.count ?? 0;
   const profile = useProfile();
   const avatar = useAvatarUrl(Boolean(profile.data?.hasAvatar));
+  const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
   const profileName = profile.data
     ? [profile.data.firstName, profile.data.middleName, profile.data.lastName]
         .filter(Boolean)
@@ -220,11 +227,126 @@ export function AppShell() {
         style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}
       >
         <Header />
+        <MobileNavigation
+          items={items}
+          pathname={location.pathname}
+          isOpen={isMobileNavigationOpen}
+          onToggle={() => setIsMobileNavigationOpen((isOpen) => !isOpen)}
+          onNavigate={() => setIsMobileNavigationOpen(false)}
+          triggerLabel={t(
+            isMobileNavigationOpen
+              ? "shell.mobileNavigation.closeLabel"
+              : "shell.mobileNavigation.openLabel",
+          )}
+          triggerText={t("shell.mobileNavigation.trigger")}
+          navLabel={t("shell.mobileNavigation.navLabel")}
+        />
         <main style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
           <SubscriptionBanner />
           <Outlet />
         </main>
       </div>
+    </div>
+  );
+}
+
+const MOBILE_NAVIGATION_ID = "mobile-primary-navigation";
+
+function MobileNavigation({
+  items,
+  pathname,
+  isOpen,
+  onToggle,
+  onNavigate,
+  triggerLabel,
+  triggerText,
+  navLabel,
+}: {
+  items: SidebarItem[];
+  pathname: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  onNavigate: () => void;
+  triggerLabel: string;
+  triggerText: string;
+  navLabel: string;
+}) {
+  const groups: Array<{ section: string; items: SidebarItem[] }> = [];
+  for (const item of items) {
+    const section = item.section ?? "";
+    const currentGroup = groups.at(-1);
+    if (currentGroup?.section === section) {
+      currentGroup.items.push(item);
+    } else {
+      groups.push({ section, items: [item] });
+    }
+  }
+
+  return (
+    <div className="mk-mobile-navigation-shell">
+      <Button
+        className="mk-mobile-navigation__trigger"
+        variant="secondary"
+        size="compact"
+        aria-label={triggerLabel}
+        aria-expanded={isOpen}
+        aria-controls={MOBILE_NAVIGATION_ID}
+        icon={<span aria-hidden="true">{isOpen ? "×" : "☰"}</span>}
+        onClick={onToggle}
+      >
+        {triggerText}
+      </Button>
+      <nav
+        id={MOBILE_NAVIGATION_ID}
+        className="mk-mobile-navigation"
+        aria-label={navLabel}
+        hidden={!isOpen}
+      >
+        <div className="mk-mobile-navigation__groups">
+          {groups.map((group, groupIndex) => {
+            const headingId = `mobile-navigation-section-${groupIndex}`;
+            return (
+              <section
+                key={group.section}
+                className="mk-mobile-navigation__group"
+                aria-labelledby={headingId}
+              >
+                {group.section ? (
+                  <h2 id={headingId} className="mk-mobile-navigation__heading">
+                    {group.section}
+                  </h2>
+                ) : null}
+                <ul className="mk-mobile-navigation__list">
+                  {group.items.map((item) => {
+                    const boxesRouteIsActive =
+                      item.to === "/codes" && pathname.startsWith("/boxes");
+                    return (
+                      <li key={item.to}>
+                        <NavLink
+                          to={item.to}
+                          end={item.to === "/"}
+                          aria-current={boxesRouteIsActive ? "page" : undefined}
+                          className={({ isActive }) =>
+                            cn(
+                              "mk-mobile-navigation__link",
+                              (isActive || boxesRouteIsActive) &&
+                                "mk-mobile-navigation__link--active",
+                            )
+                          }
+                          onClick={onNavigate}
+                        >
+                          <span>{item.labelKey}</span>
+                          {item.badge != null ? <Badge>{item.badge}</Badge> : null}
+                        </NavLink>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 }

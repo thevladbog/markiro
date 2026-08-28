@@ -1,12 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as MarkiroDb from "@markiro/db";
 import type { WipData, WorkerState } from "pg-boss";
-import { BUILD_SHIFT_EXPORT_QUEUE, PgBossService } from "../src/jobs/jobs.module";
+import {
+  BUILD_INVENTORY_DOCUMENT_QUEUE,
+  BUILD_SHIFT_EXPORT_QUEUE,
+  PgBossService,
+} from "../src/jobs/jobs.module";
 import type { ExchangeSessionService } from "../src/modules/exchange/exchange-session.service";
 import type { JournalService } from "../src/modules/integrations/journal.service";
 import type { MailJobsService } from "../src/modules/mail/mail-jobs.service";
 import type { MailRetentionService } from "../src/modules/mail/mail-retention.service";
 import type { ShiftExportRunnerService } from "../src/modules/shift-exports/shift-export-runner.service";
+import type { InventoryDocumentRunnerService } from "../src/modules/inventories/inventory-document-runner.service";
+import type { SignerScheduler } from "../src/modules/signer-agents/signer-scheduler.service";
 import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
 
 const pgBossMock = vi.hoisted(() => ({
@@ -29,7 +35,7 @@ vi.mock("@markiro/db", async (importOriginal) => {
   };
 });
 
-const WORKER_IDS = Array.from({ length: 11 }, (_, index) => `worker-${index + 1}`);
+const WORKER_IDS = Array.from({ length: 13 }, (_, index) => `worker-${index + 1}`);
 
 function wip(id: string, state: WorkerState = "active"): WipData {
   return {
@@ -111,6 +117,12 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
   const shiftExportRunner = {
     run: vi.fn(async () => undefined),
   } as unknown as ShiftExportRunnerService;
+  const inventoryDocumentRunner = {
+    run: vi.fn(async () => undefined),
+  } as unknown as InventoryDocumentRunnerService;
+  const signerScheduler = {
+    run: vi.fn(async () => undefined),
+  } satisfies SignerScheduler;
   return {
     service: new PgBossService(
       db,
@@ -121,8 +133,11 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
       mailRetention,
       subscriptionStatus,
       shiftExportRunner,
+      inventoryDocumentRunner,
+      signerScheduler,
     ),
     subscriptionStatus,
+    signerScheduler,
   };
 }
 
@@ -131,16 +146,18 @@ describe("PgBossService readiness", () => {
     pgBossMock.instances.length = 0;
   });
 
-  it("accepts the exact eleven successfully registered active workers including shift exports", async () => {
+  it("accepts the exact thirteen successfully registered active workers including document jobs", async () => {
     const boss = fakeBoss();
-    const { service, subscriptionStatus } = serviceWith(boss);
+    const { service, subscriptionStatus, signerScheduler } = serviceWith(boss);
 
     await service.onModuleInit();
 
     await expect(service.checkReady()).resolves.toBeUndefined();
-    expect(boss.work).toHaveBeenCalledTimes(11);
+    expect(boss.work).toHaveBeenCalledTimes(13);
     expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(BUILD_SHIFT_EXPORT_QUEUE);
+    expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(BUILD_INVENTORY_DOCUMENT_QUEUE);
     expect(subscriptionStatus.run).toHaveBeenCalledTimes(1);
+    expect(signerScheduler.run).toHaveBeenCalledTimes(1);
   });
 
   it.each([

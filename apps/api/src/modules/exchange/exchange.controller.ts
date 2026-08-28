@@ -11,9 +11,17 @@ import {
   Res,
   UseFilters,
 } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import {
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiProduces,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from "@nestjs/swagger";
 import { schema, type Db } from "@markiro/db";
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Response } from "express";
 import { DB } from "../../auth/auth.module";
 import type { IntegrationChannelType } from "../integrations/channel-registry";
@@ -22,11 +30,13 @@ import {
   PickupOrdersService,
   type ApplyExternalStatusResult,
 } from "../pickup-orders/pickup-orders.service";
-import { decideApplication, type KnownProduct } from "./commerceml/apply";
+import { decideApplication, type CatalogProduct } from "./commerceml/apply";
+import { downloadImage, ImageDownloadError } from "./commerceml/image-download";
 import { parseCommerceMl } from "./commerceml/parse";
 import { parseOrderStatusDocuments, resolveMappedStatus } from "./commerceml/order-status";
 import { buildOrdersDocument, planExport } from "./commerceml/order-export";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
+import { ProductsService } from "../products/products.service";
 import {
   assertUnderCheckauthLimit,
   checkauthWindowStart,
@@ -57,6 +67,21 @@ import {
 export const IMPORT_BATCH_SIZE = 500;
 
 /**
+ * Ceiling on how many `kind: "image"` rows ONE round of `IMPORT_BATCH_SIZE`
+ * may contain -- review Important 2 (Task 6 follow-up). Unlike a price
+ * `UPDATE` or a candidate upsert, applying one image row means a download
+ * (or session-file read), a `sharp` normalization pass, and an S3 `put` --
+ * 500 of those back-to-back in one HTTP round trip runs for minutes, well
+ * past any reverse-proxy timeout, and the round's own cursor is only written
+ * AFTER the whole batch finishes (`writeImportCursor` below), so a timed-out
+ * caller would retry a batch that never got the chance to persist partial
+ * progress. `importBatchEnd` enforces this ceiling ALONGSIDE
+ * `IMPORT_BATCH_SIZE`, not instead of it -- a worklist with few or no images
+ * still caps out at `IMPORT_BATCH_SIZE` exactly as before.
+ */
+export const IMPORT_IMAGE_BATCH_SIZE = 25;
+
+/**
  * Ceiling on how many orders `mode=query` offers in one round -- spec §5's
  * outbound direction, mirroring `IMPORT_BATCH_SIZE`'s own reasoning: an order
  * document is heavier than a single price row, so this batch is smaller.
@@ -65,33 +90,79 @@ export const IMPORT_BATCH_SIZE = 500;
  */
 export const EXPORT_BATCH_SIZE = 200;
 
-/** One row of the plan this controller actually writes, in a fixed, stable order (see `handleImport`). */
-type ImportWorkItem =
+/**
+ * One row of the plan this controller actually writes, in a fixed, stable
+ * order (see `handleImport`). Deliberately does NOT include a `link` kind:
+ * review Important 1 (Task 6 follow-up) moved GTIN-link application OUT of
+ * this worklist entirely -- see `import()`'s own comment on why applying a
+ * link changed the NEXT round's worklist and self-invalidated its own
+ * fingerprint. Links are applied directly, once, at `offset === 0`, before
+ * this worklist's batched loop even starts.
+ *
+ * Exported (along with `fingerprintOf`'s sibling `importBatchEnd` below) so
+ * `exchange-import-batch.test.ts` can build synthetic worklists without a
+ * database.
+ */
+export type ImportWorkItem =
   | { kind: "price"; productId: string; unitPrice: string }
+  | { kind: "image"; productId: string; source: string }
   | {
       kind: "candidate";
       externalRef: string;
       name: string;
       article: string | null;
       unit: string | null;
+      gtin: string | null;
     };
 
 /**
  * Fingerprints a `mode=import` worklist -- its length plus a hash of its
- * ordered keys (`productId` for a price row, `externalRef` for a candidate
- * row) -- so a stored cursor (Fix 2, `ExchangeSessionService.ImportCursor`)
- * can tell whether a later round's freshly rebuilt worklist is still the
- * SAME list its `offset` was measured against. Length alone would miss a
- * swap (one row replaced by another of the same overall count); hashing the
- * keys in order catches that too, at the cost of one cheap hash per round --
- * worklist itself is already rebuilt every round regardless.
+ * ordered keys (`productId` for a price/image row, `externalRef` for a
+ * candidate row) -- so a stored cursor (Fix 2, `ExchangeSessionService.
+ * ImportCursor`) can tell whether a later round's freshly rebuilt worklist is
+ * still the SAME list its `offset` was measured against. Length alone would
+ * miss a swap (one row replaced by another of the same overall count);
+ * hashing the keys in order catches that too, at the cost of one cheap hash
+ * per round -- worklist itself is already rebuilt every round regardless.
  */
 function fingerprintOf(worklist: ImportWorkItem[]): string {
-  const keys = worklist.map((item) =>
-    item.kind === "price" ? `p:${item.productId}` : `c:${item.externalRef}`,
-  );
+  const keys = worklist.map((item) => {
+    switch (item.kind) {
+      case "price":
+        return `p:${item.productId}`;
+      case "image":
+        return `i:${item.productId}`;
+      case "candidate":
+        return `c:${item.externalRef}`;
+    }
+  });
   const hash = createHash("sha256").update(keys.join(" ")).digest("hex");
   return `${worklist.length}:${hash}`;
+}
+
+/**
+ * Picks the end index of ONE `mode=import` batch starting at `offset` --
+ * pure, no DB, no session -- so it can be unit-tested directly with
+ * synthetic worklists (`exchange-import-batch.test.ts`). Enforces TWO caps
+ * at once: at most `IMPORT_BATCH_SIZE` rows total (unchanged from before
+ * this review pass), AND, within that, at most `IMPORT_IMAGE_BATCH_SIZE`
+ * `kind: "image"` rows -- see that constant's own comment for why a photo
+ * costs enough more than a price/candidate write to need its own, tighter
+ * sub-ceiling. Whichever cap is hit first ends the batch; a worklist with
+ * fewer than `IMPORT_IMAGE_BATCH_SIZE` images in its next `IMPORT_BATCH_SIZE`
+ * rows never notices the image cap at all.
+ */
+export function importBatchEnd(worklist: ImportWorkItem[], offset: number): number {
+  let imageCount = 0;
+  let end = offset;
+  while (end < worklist.length && end - offset < IMPORT_BATCH_SIZE) {
+    if (worklist[end]!.kind === "image") {
+      if (imageCount >= IMPORT_IMAGE_BATCH_SIZE) break;
+      imageCount++;
+    }
+    end++;
+  }
+  return end;
 }
 
 function saleFingerprint(
@@ -207,6 +278,16 @@ function isRequestBuffer(value: unknown): value is Buffer {
 const IMPORT_PARSE_FAILURE = "invalid file";
 
 /**
+ * Thrown by `applyImageWorkItem` when `ExchangeSessionService.assemble`
+ * comes back an empty `Buffer` for a session-file `<Картинка>` source -- a
+ * distinct type (rather than a bare `Error`) so that same method's `catch`
+ * can classify it as the machine-readable `reason: "file_not_found"`
+ * (review Minor 4) without matching on message text, the same way it already
+ * classifies a `downloadImage` failure via `ImageDownloadError.reason`.
+ */
+class SessionImageNotFoundError extends Error {}
+
+/**
  * Shape check for `type=sale&mode=import`'s per-document `<Ид>` -- raw text
  * lifted from an untrusted 1С file, compared against `pickupOrders.id`, a
  * `uuid` column. Checked BEFORE `applyExternalStatus` is ever called (see
@@ -258,9 +339,59 @@ export class ExchangeController {
     private readonly journal: JournalService,
     private readonly pickupOrders: PickupOrdersService,
     private readonly entitlements: EntitlementsService,
+    private readonly products: ProductsService,
   ) {}
 
   @Get("1c_exchange")
+  @ApiOperation({
+    summary: "1C CommerceML exchange (GET)",
+    description:
+      "Transport for 1C's «Обмен с сайтом» protocol; the `mode` query parameter selects the " +
+      "step. `mode=checkauth` authenticates with HTTP Basic credentials (issued via " +
+      "`POST /integrations/commerceml/credentials`) and answers three lines — `success`, the " +
+      "session cookie's name, and its value; every later call authenticates with that cookie, " +
+      "not with any of this API's usual schemes. `mode=init` reports transfer settings " +
+      "(`zip=no`, `file_limit=<bytes>`). `mode=import` assembles and applies a file previously " +
+      "uploaded via POST `mode=file` (catalog/offers, or order statuses when `type=sale`), " +
+      "answering `progress` until every batch is applied. `mode=query` returns the pending " +
+      "pickup orders as a CommerceML XML document, and `mode=success` confirms the offered " +
+      "batch. `checkauth` attempts are rate limited per source address " +
+      "(`failure\\ntoo many attempts`).",
+  })
+  @ApiQuery({
+    name: "mode",
+    required: true,
+    schema: { type: "string", enum: ["checkauth", "init", "import", "query", "success"] },
+    description: "Protocol step; any other value answers `failure\\nunknown mode`.",
+  })
+  @ApiQuery({
+    name: "type",
+    required: false,
+    schema: { type: "string" },
+    description:
+      "Exchange direction as named by 1C (e.g. `catalog`, `sale`). `mode=import` with " +
+      "`type=sale` applies order statuses instead of the catalog.",
+  })
+  @ApiQuery({
+    name: "filename",
+    required: false,
+    schema: { type: "string" },
+    description: "Uploaded file whose assembled chunks `mode=import` parses and applies.",
+  })
+  @ApiProduces("text/plain", "application/xml")
+  @ApiResponse({
+    status: 200,
+    description:
+      "Always 200, even on failure — 1C parses the body, not the status code. `checkauth` " +
+      "answers `success`, cookie name, and cookie value on three lines; `init` answers " +
+      "`zip=no` and `file_limit=<bytes>`; `import` answers `progress` or `success`; " +
+      "`query` answers the CommerceML orders document as `application/xml`; every failure " +
+      "is `failure\\n<message>`.",
+    content: {
+      "text/plain": { schema: { type: "string" } },
+      "application/xml": { schema: { type: "string" } },
+    },
+  })
   async get(
     @Query() query: Record<string, unknown>,
     @Req() req: ExchangeRequest,
@@ -350,6 +481,42 @@ export class ExchangeController {
   }
 
   @Post("1c_exchange")
+  @ApiOperation({
+    summary: "1C CommerceML exchange (POST)",
+    description:
+      "The upload direction of the exchange, authenticated by the session cookie `mode=checkauth` " +
+      "issued (see GET). `mode=file` appends the raw request body as a chunk of `filename`; the " +
+      "body is read as opaque bytes whatever the Content-Type says (a missing Content-Type is " +
+      "treated as `application/octet-stream`), and a chunk over the advertised `file_limit` " +
+      "answers `failure\\nchunk too large` — still with status 200. `mode=success` confirms the " +
+      "order batch offered by GET `mode=query`.",
+  })
+  @ApiQuery({
+    name: "mode",
+    required: true,
+    schema: { type: "string", enum: ["file", "success"] },
+    description: "Protocol step; any other value answers `failure\\nunknown mode`.",
+  })
+  @ApiQuery({
+    name: "filename",
+    required: false,
+    schema: { type: "string" },
+    description: "Target file for `mode=file`; a chunk without it answers a failure line.",
+  })
+  @ApiConsumes("application/octet-stream")
+  @ApiBody({
+    required: false,
+    description: "Raw file chunk for `mode=file`, appended to `filename`'s upload.",
+    schema: { type: "string", format: "binary" },
+  })
+  @ApiProduces("text/plain")
+  @ApiResponse({
+    status: 200,
+    description:
+      "Always 200, even on failure — 1C parses the body, not the status code. A stored chunk " +
+      "and a confirmed batch both answer `success`; every failure is `failure\\n<message>`.",
+    content: { "text/plain": { schema: { type: "string" } } },
+  })
   async post(
     @Query() query: Record<string, unknown>,
     @Req() req: ExchangeRequest,
@@ -638,16 +805,14 @@ export class ExchangeController {
       return;
     }
 
-    const knownRows = await this.db
-      .select({ id: schema.products.id, externalRef: schema.products.externalRef })
+    const productRows: CatalogProduct[] = await this.db
+      .select({
+        id: schema.products.id,
+        gtin14: schema.products.gtin14,
+        externalRef: schema.products.externalRef,
+      })
       .from(schema.products)
-      .where(
-        and(eq(schema.products.tenantId, session.tenantId), isNotNull(schema.products.externalRef)),
-      );
-    const known: KnownProduct[] = knownRows.map((row) => ({
-      id: row.id,
-      externalRef: row.externalRef!,
-    }));
+      .where(eq(schema.products.tenantId, session.tenantId));
 
     const [channelRow] = await this.db
       .select({ settings: schema.integrationChannels.settings })
@@ -661,7 +826,7 @@ export class ExchangeController {
     const configuredPriceType = (channelRow?.settings as { priceType?: string } | undefined)
       ?.priceType;
 
-    const plan = decideApplication({ known, items, offers, configuredPriceType });
+    const plan = decideApplication({ products: productRows, items, offers, configuredPriceType });
 
     // Offers decideApplication had nothing to do with at all: no known link
     // to price, and offers carry no name/article/unit, so unlike catalog
@@ -669,26 +834,38 @@ export class ExchangeController {
     // connection's fault and not necessarily wrong -- the matching catalog
     // item may simply not have arrived (or been linked) yet -- but it must
     // not vanish without a trace either, per this task's brief.
-    const knownRefs = new Set(known.map((product) => product.externalRef));
+    //
+    // «Без связанного товара» теперь означает: ни давней связи, ни автосвязи
+    // ЭТОГО раунда -- иначе только что связанное предложение попадало бы в
+    // warn ниже (Task 6: this round's own new GTIN links now count too).
+    const matchedRefs = new Set([
+      ...productRows.filter((p) => p.externalRef !== null).map((p) => p.externalRef!),
+      ...plan.links.map((link) => link.externalRef),
+    ]);
     const unmatchedOfferRefs = [
-      ...new Set(
-        offers.filter((offer) => !knownRefs.has(offer.externalRef)).map((o) => o.externalRef),
-      ),
+      ...new Set(offers.filter((o) => !matchedRefs.has(o.externalRef)).map((o) => o.externalRef)),
     ];
 
+    // Links are deliberately NOT a worklist row -- review Important 1: they
+    // are applied whole, once, below (inside `if (offset === 0)`), BEFORE
+    // this worklist's own batched loop. Applying a link changes what
+    // `decideApplication` sees on the VERY NEXT call for the same product
+    // (it moves from "unmatched, GTIN-claimed" to "known by `externalRef`"),
+    // which used to shrink `plan.links` -- and therefore this worklist --
+    // between round N and round N+1 of a multi-round file, self-invalidating
+    // the fingerprint below every single time a link had just been applied.
+    // Keeping links out of the fingerprinted worklist entirely removes that
+    // whole failure mode: the worklist a link's own application touches is
+    // never the one being resumed by offset/fingerprint.
     const worklist: ImportWorkItem[] = [
-      ...plan.priceUpdates.map((update): ImportWorkItem => ({
+      // Цена раньше фото (фото -- самый тяжёлый шаг), кандидаты последними.
+      ...plan.priceUpdates.map((u): ImportWorkItem => ({
         kind: "price",
-        productId: update.productId,
-        unitPrice: update.unitPrice,
+        productId: u.productId,
+        unitPrice: u.unitPrice,
       })),
-      ...plan.candidates.map((item): ImportWorkItem => ({
-        kind: "candidate",
-        externalRef: item.externalRef,
-        name: item.name,
-        article: item.article,
-        unit: item.unit,
-      })),
+      ...plan.images.map((img): ImportWorkItem => ({ kind: "image", ...img })),
+      ...plan.candidates.map((c): ImportWorkItem => ({ kind: "candidate", ...c })),
     ];
 
     // Fix 2: `worklist` above was just rebuilt from scratch -- a fresh
@@ -721,12 +898,72 @@ export class ExchangeController {
     }
 
     if (offset === 0) {
-      // Logged once, on the first batch of this import round (or again after
-      // a fingerprint-mismatch restart above) -- decideApplication is a pure
-      // function of `known`/`items`/`offers`, which do not change between
-      // retries of the SAME filename UNLESS that mismatch just fired, so an
-      // ordinary `progress` retry would just be re-deriving (and
-      // re-journaling) an identical list.
+      // Runs once, on the first batch of this import round (or again after a
+      // fingerprint-mismatch restart above). Honest reason this is safe to
+      // run only at offset 0, restated after review Important 1: links are
+      // applied right here, in full, BEFORE the batched worklist loop below
+      // even starts -- so by the time any `progress` retry of this SAME
+      // round re-enters this method, every product this round could link is
+      // already linked in the database, and this round's `plan` (recomputed
+      // fresh every call) simply comes back with `plan.links` empty on the
+      // retry. The retry's worklist (price/image/candidate only, per the
+      // comment above) is therefore IDENTICAL to this round's -- a linked
+      // product resolves to the exact same price/image/candidate outcome
+      // whether `decideApplication` sees it via `knownByRef` (already
+      // persisted) or via `linkedByRef` (linked this same call) -- so an
+      // ordinary `progress` retry never re-derives a DIFFERENT list, and
+      // this block never needs to (and must not) re-run.
+      for (const link of plan.links) {
+        // Cheap, individual `UPDATE ... RETURNING`, not batched with the
+        // worklist below: `IMPORT_BATCH_SIZE`/`IMPORT_IMAGE_BATCH_SIZE` exist
+        // to bound the EXPENSIVE rows (image downloads); a single-row link
+        // update is not one of those, and applying ALL of them up front is
+        // exactly what keeps the worklist below stable across retries (see
+        // this block's own comment).
+        const updated = await this.db
+          .update(schema.products)
+          .set({ externalRef: link.externalRef })
+          .where(
+            and(
+              eq(schema.products.tenantId, session.tenantId),
+              eq(schema.products.id, link.productId),
+              // isNull-гард: админ мог связать карточку руками между
+              // раундами; тихо не перезаписываем -- см. warn ниже, когда
+              // `RETURNING` не вернул ни одной строки.
+              isNull(schema.products.externalRef),
+            ),
+          )
+          .returning({ id: schema.products.id });
+        if (updated.length > 0) {
+          await this.journal.append({
+            tenantId: session.tenantId,
+            channelType: session.channelType,
+            sessionId: session.id,
+            direction: "in",
+            outcome: "ok",
+            grain: "item",
+            message: `связан автоматически по GTIN: ${link.externalRef}`,
+            details: { externalRef: link.externalRef, productId: link.productId, gtin: link.gtin },
+          });
+        } else {
+          // `RETURNING` came back empty -- the isNull-гард above refused the
+          // write because the card already carries SOME `external_ref` (an
+          // admin linked it by hand, or a concurrent round beat us to it).
+          // Honest about the outcome rather than silently pretending success:
+          // the next exchange will see the card as known and recompute from
+          // there.
+          await this.journal.append({
+            tenantId: session.tenantId,
+            channelType: session.channelType,
+            sessionId: session.id,
+            direction: "in",
+            outcome: "warn",
+            grain: "item",
+            message: `связь не применена — карточка уже связана: ${link.externalRef}`,
+            details: { externalRef: link.externalRef, productId: link.productId, gtin: link.gtin },
+          });
+        }
+      }
       for (const skip of plan.skipped) {
         await this.journal.append({
           tenantId: session.tenantId,
@@ -755,9 +992,45 @@ export class ExchangeController {
           details: { count: unmatchedOfferRefs.length, sample: unmatchedOfferRefs.slice(0, 20) },
         });
       }
+      for (const conflict of plan.gtinConflicts) {
+        await this.journal.append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "in",
+          outcome: "warn",
+          grain: "item",
+          message: `конфликт GTIN: карточка уже связана с другим Ид: ${conflict.externalRef}`,
+          details: { ...conflict },
+        });
+      }
+      for (const ambiguity of plan.gtinAmbiguities) {
+        await this.journal.append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "in",
+          outcome: "warn",
+          grain: "item",
+          message: `GTIN у нескольких позиций файла — автосвязь не выполнена: ${ambiguity.gtin}`,
+          details: { ...ambiguity },
+        });
+      }
+      if (plan.invalidBarcodes > 0) {
+        await this.journal.append({
+          tenantId: session.tenantId,
+          channelType: session.channelType,
+          sessionId: session.id,
+          direction: "in",
+          outcome: "warn",
+          grain: "session",
+          message: `штрихкодов отброшено (не GTIN): ${plan.invalidBarcodes}`,
+          details: { count: plan.invalidBarcodes },
+        });
+      }
     }
 
-    const end = Math.min(offset + IMPORT_BATCH_SIZE, worklist.length);
+    const end = importBatchEnd(worklist, offset);
     for (let i = offset; i < end; i++) {
       await this.applyWorkItem(session, worklist[i]!);
     }
@@ -797,8 +1070,22 @@ export class ExchangeController {
       details: {
         filename,
         updated: plan.priceUpdates.length,
+        // `plan` here is THIS call's own plan, recomputed fresh -- and links
+        // are applied and journaled per-row at offset 0 (above), not here.
+        // On a file that took more than one `progress` round, THIS final
+        // round's own `plan.links` is empty (every linkable product got
+        // linked back at offset 0, so `decideApplication` no longer proposes
+        // them) -- 0 here does not mean "nothing was linked this file", it
+        // means "nothing was linked in the round that happened to finish
+        // it". The per-item ok/warn events at offset 0 carry the accurate,
+        // complete history; this count is a same-round summary, not a
+        // file-wide total.
+        linked: plan.links.length,
+        images: plan.images.length,
         candidates: plan.candidates.length,
         skipped: plan.skipped.length,
+        gtinConflicts: plan.gtinConflicts.length,
+        invalidBarcodes: plan.invalidBarcodes,
         unmatchedOffers: unmatchedOfferRefs.length,
       },
     });
@@ -1047,11 +1334,16 @@ export class ExchangeController {
   }
 
   /**
-   * Writes exactly one planned row. The one rule this whole route exists to
-   * hold literally: a price update touches `products.unit_price` and
-   * NOTHING else on the row -- name, GTIN, ЕГАИС code, label template and
-   * kiosk listing are never part of this `set()`, no matter what the
-   * incoming catalog said about them.
+   * Writes exactly one planned row FROM THE BATCHED WORKLIST -- price/image/
+   * candidate only; a link is applied separately, once, at offset 0, before
+   * this method is ever called for a given round (see `import()`'s own
+   * comment for why). The one rule this whole route exists to hold
+   * literally: a price update touches `products.unit_price` and NOTHING else
+   * on the row; an image touches only the product's photo -- name, GTIN,
+   * ЕГАИС code, label template and kiosk listing are never part of either
+   * write, no matter what the incoming catalog said about them. (The link
+   * update above this method shares the same discipline: it touches only
+   * `external_ref`.)
    */
   private async applyWorkItem(
     session: ResolvedExchangeSession,
@@ -1070,6 +1362,11 @@ export class ExchangeController {
       return;
     }
 
+    if (work.kind === "image") {
+      await this.applyImageWorkItem(session, work);
+      return;
+    }
+
     const now = new Date();
     await this.db
       .insert(schema.integrationCandidates)
@@ -1080,6 +1377,7 @@ export class ExchangeController {
         name: work.name,
         article: work.article,
         unit: work.unit,
+        gtin: work.gtin,
         lastSeenAt: now,
       })
       .onConflictDoUpdate({
@@ -1088,8 +1386,69 @@ export class ExchangeController {
           schema.integrationCandidates.channelType,
           schema.integrationCandidates.externalRef,
         ],
-        set: { name: work.name, article: work.article, unit: work.unit, lastSeenAt: now },
+        set: {
+          name: work.name,
+          article: work.article,
+          unit: work.unit,
+          gtin: work.gtin,
+          lastSeenAt: now,
+        },
       });
+  }
+
+  /**
+   * Одно фото: достаём байты (файл сеанса или https-URL), прогоняем через
+   * общий media-пайплайн. ЛЮБАЯ ошибка -- warn по позиции, не падение раунда
+   * (спека §6): фото -- украшение карточки, а не учётный факт; принятое
+   * ограничение -- транзиентная ошибка БД внутри applyExchangeImage тоже
+   * попадёт в warn и не будет повторена до следующего обмена.
+   */
+  private async applyImageWorkItem(
+    session: ResolvedExchangeSession,
+    work: { productId: string; source: string },
+  ): Promise<void> {
+    try {
+      let source: Buffer;
+      if (/^https?:\/\//i.test(work.source)) {
+        source = await downloadImage(work.source); // http:// отвергнет сам (not_https)
+      } else {
+        source = await this.sessions.assemble(session.id, work.source);
+        if (source.byteLength === 0) {
+          // assemble возвращает пустой Buffer, когда файла в сеансе нет --
+          // назвать причину честно, а не «invalid image» из sharp.
+          throw new SessionImageNotFoundError(`файл картинки «${work.source}» не найден в сеансе`);
+        }
+      }
+      await this.products.applyExchangeImage(session.tenantId, work.productId, source);
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      // Review Minor 4: a machine-readable `reason` alongside the (already
+      // human-readable) `detail` in `message` -- so a future dashboard/report
+      // can bucket photo failures without parsing free text. `downloadImage`
+      // already classifies its own failures (`ImageDownloadError.reason`);
+      // the session-file-missing case gets its own sentinel below; anything
+      // else (an `applyExchangeImage` exception -- `NotFoundException`,
+      // `BadRequestException`, `ServiceUnavailableException`, or a genuine
+      // `sharp`/DB failure) is bucketed as `processing_failed`, the one case
+      // this method cannot subdivide further without duplicating
+      // `ProductsService`'s own exception taxonomy here.
+      const reason =
+        cause instanceof ImageDownloadError
+          ? cause.reason
+          : cause instanceof SessionImageNotFoundError
+            ? "file_not_found"
+            : "processing_failed";
+      await this.journal.append({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        sessionId: session.id,
+        direction: "in",
+        outcome: "warn",
+        grain: "item",
+        message: `фото не применено: ${detail}`,
+        details: { productId: work.productId, source: work.source, reason },
+      });
+    }
   }
 
   /**

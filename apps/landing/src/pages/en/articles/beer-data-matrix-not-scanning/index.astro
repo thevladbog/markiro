@@ -1,0 +1,141 @@
+---
+import { Picture } from "astro:assets";
+
+import articleHero from "../../../../assets/beer-datamatrix-diagnostics-hero.png";
+import LandingFooter from "../../../../components/LandingFooter.astro";
+import LandingHeader from "../../../../components/LandingHeader.astro";
+import { BEER_DATAMATRIX_DIAGNOSTICS_ARTICLE_EN } from "../../../../content/articles";
+import { buildArticlePageGraph } from "../../../../lib/seo";
+import { readPublicSiteConfig } from "../../../../lib/site-config";
+import BaseLayout from "../../../../layouts/BaseLayout.astro";
+
+const article = BEER_DATAMATRIX_DIAGNOSTICS_ARTICLE_EN;
+const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<BaseLayout metadata={article} graph={buildArticlePageGraph(article)}>
+  <LandingHeader page={article} phone={config.phone} />
+  <main id="main" class="article-page">
+    <header class="article-hero">
+      <div class="container article-hero__inner">
+        <nav class="breadcrumbs" aria-label="Breadcrumbs"><ol><li><a href="/en/">Markiro</a></li><li aria-current="page">{article.navigationLabel}</li></ol></nav>
+        <div class="article-hero__layout">
+          <div class="article-hero__copy">
+            <p class="section-index">{article.eyebrow}</p><h1>{article.heading}</h1><p class="article-hero__lead">{article.introduction}</p>
+            <div class="article-byline" aria-label="Publication details"><span>{article.authorName}</span><time datetime={article.publishedAt}>August 26, 2026</time><span>{article.readingTimeMinutes} min read</span></div>
+          </div>
+          <figure class="article-hero__media" data-article-visual>
+            <Picture src={articleHero} alt="Operator scanning a Data Matrix on a beer bottle on a production line" widths={[480, 720, 1080]} formats={["avif", "webp"]} sizes="(max-width: 767px) 100vw, 45vw" loading="eager" fetchpriority="high" data-article-hero-image />
+            <figcaption>Start with a precise question: was the code not decoded, altered in transit, or deliberately rejected?</figcaption>
+          </figure>
+        </div>
+      </div>
+    </header>
+
+    <article class="container article-body">
+      <aside class="article-summary" aria-labelledby="article-summary-title">
+        <p class="section-index">In brief</p><h2 id="article-summary-title">What to check first</h2>
+        <ul>
+          <li data-key-takeaway>Separate four layers: the printed symbol, scanner stream, line-software rule, and external exchange.</li>
+          <li data-key-takeaway>If there is no decode event, investigate print, substrate, curvature, glare, and actual line conditions.</li>
+          <li data-key-takeaway>If data arrives, compare the byte stream with a reference, including FNC1 and the GS separator ASCII 29.</li>
+          <li data-key-takeaway>A duplicate or wrong-GTIN verdict is a controlled rule decision, not an optical read failure.</li>
+          <li data-key-takeaway>Test the actual container at production speed and lighting, not just a perfect code on paper.</li>
+          <li data-key-takeaway>Give the operator a deterministic next action instead of repeating “scan again.”</li>
+        </ul>
+      </aside>
+
+      <nav class="article-toc" aria-label="Article contents"><p class="section-index">Contents</p><ol><li><a href="#triage">Sixty-second triage</a></li><li><a href="#print">Print and packaging</a></li><li><a href="#scanner">Scanner data stream</a></li><li><a href="#software">Software decisions</a></li><li><a href="#pilot">Line pilot</a></li><li><a href="#operator">Operator response</a></li><li><a href="#markiro">Markiro boundary</a></li></ol></nav>
+
+      <section id="triage" aria-labelledby="triage-title">
+        <p class="section-index">01 / Isolation</p><h2 id="triage-title">How to locate the failure in sixty seconds</h2>
+        <p><strong>Do not begin by changing the printer. First identify the last point where the code was known to be correct.</strong> The same red indicator may represent a physical defect, a missing control character, or a useful rule that prevents a duplicate from entering a case.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/beer-data-matrix-diagnostic-layers-en.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Four diagnostic layers: symbol, scanner stream, software rule, and external exchange" data-article-diagram />
+          <figcaption>Move to the next layer only after the previous one is proven. This prevents one adjustment from hiding another failure.</figcaption>
+        </figure>
+        <div class="article-cases">
+          <article><h3>No decode event</h3><p>Try a known-good control code. If that works, compare the failed symbol and its application conditions rather than replacing the scanner immediately.</p></article>
+          <article><h3>Data arrives in the wrong shape</h3><p>Capture a restricted diagnostic view that shows length and control characters. Compare scanner configuration and transport before the application parser.</p></article>
+          <article><h3>Software gives a reason</h3><p>Duplicate, wrong GTIN, and malformed payload require different responses. They should not share a generic “not scanned” message.</p></article>
+          <article><h3>Local accept, external reject</h3><p>Keep the operation ID and external response. Re-scanning the physical item rarely resolves an exchange-state conflict.</p></article>
+        </div>
+      </section>
+
+      <section id="print" aria-labelledby="print-title">
+        <p class="section-index">02 / Physical symbol</p><h2 id="print-title">Why a Data Matrix works on screen but fails on a bottle or can</h2>
+        <p><strong>A source image and the applied symbol are different artifacts.</strong> Printing introduces module-size variation, fill defects, contrast changes, and quiet-zone interference. The package then adds curvature, reflective varnish, glass or metal glare, condensation, and motion.</p>
+        <p>Official Chestny ZNAK guidance for beer allows different label materials but requires Data Matrix readability to survive the product’s full shelf life under defined storage and transport conditions. It also cites a minimum print-quality grade of <strong>class 1.5 (C)</strong> under GOST R ISO/IEC 15415-2012. That is a symbol-verification grade, not a promise that every scanner will read the code at every angle.</p>
+        <ul>
+          <li><strong>Curvature:</strong> a narrow bottle or neck moves modules out of one camera plane and changes apparent geometry.</li>
+          <li><strong>Reflection:</strong> glossy film, wet glass, aluminium, and directional lighting can obscure part of the matrix.</li>
+          <li><strong>Print drift:</strong> head contamination, heat, speed, or ribbon mismatch can create voids, growth, and unstable contrast.</li>
+          <li><strong>Scaling:</strong> non-integer raster resizing produces unequal modules even when the image still looks plausible to a person.</li>
+          <li><strong>Placement:</strong> seams, embossing, nearby artwork, and insufficient clear space make aiming and decoding less reliable.</li>
+        </ul>
+        <p>Compare samples from the beginning, middle, and end of a roll, including the first labels after a line stop. A gradually increasing failure rate points towards print drift or contamination; failures tied to one package position point towards geometry and lighting.</p>
+        <p>The Russian official source is the Chestny ZNAK page on <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/na-kakom-materiale-mozhno-pechatat-etiketki-s-kodom-markirovki-pivo">beer-label material and Data Matrix print quality</a>.</p>
+      </section>
+
+      <section id="scanner" aria-labelledby="scanner-title">
+        <p class="section-index">03 / Data stream</p><h2 id="scanner-title">What to check when the scanner decodes but line software rejects</h2>
+        <p><strong>A scanner beep proves optical decoding, not faithful delivery of the payload.</strong> Keyboard-wedge mode, a serial connection, keyboard layout, prefixes, suffixes, and control-character replacement can all alter the stream before validation.</p>
+        <p>The <a href="https://markirovka.ru/knowledge/tovarnye-gruppy/pivo-pivniye-napitki/sostav-koda-markirovki-pivo">official code structure</a> for Russian beer marking describes a GS1 Data Matrix that starts with FNC1 and includes GTIN in AI 01, a serial number in AI 21, and a verification code in AI 93. A variable-length group is terminated by the <strong>GS separator, ASCII 29</strong>. The text “&lt;GS&gt;”, a space, or an omitted separator is not the same byte.</p>
+        <ol class="article-steps">
+          <li><h3>Create a restricted reference capture</h3><p>Read one code with a diagnostic tool that exposes length and control characters. Do not paste a full production marking code into a public ticket or group chat.</p></li>
+          <li><h3>Compare transport modes</h3><p>If the scanner supports USB HID and serial output, compare them. HID depends on layout and focus; serial mode depends on port, baud rate, and frame settings.</p></li>
+          <li><h3>Check scan termination</h3><p>Enter, CR, and LF may terminate input, become part of the payload, or accidentally activate a focused UI control. Scanner and application contracts must agree.</p></li>
+          <li><h3>Avoid blind truncation</h3><p>Removing a “long tail” to reach a fixed character count can discard a valid verification fragment or conceal a missing separator.</p></li>
+        </ol>
+      </section>
+
+      <section id="software" aria-labelledby="software-title">
+        <p class="section-index">04 / Rule decision</p><h2 id="software-title">When rejection means the control worked correctly</h2>
+        <p><strong>Once the unaltered stream reaches software, ask which rule rejected it.</strong> The payload may be malformed, belong to another GTIN or production job, already exist in the open case, or have been accepted by another workstation.</p>
+        <p>These outcomes require different next steps. A malformed payload needs source and scanner checks; wrong GTIN needs product-and-job reconciliation; a duplicate needs the previous operation and physical item to be located. If the local operation was accepted but an external system rejected its state, use an idempotent retry tied to the journal rather than scanning the item as if it were new.</p>
+        <div class="article-callout"><strong>Useful diagnostics do not require exposing the full code.</strong><p>An operator usually needs the verdict, product, time, and a short safe suffix. Raw payload access belongs in a restricted technical workflow with an explicit retention period.</p></div>
+      </section>
+
+      <section id="pilot" aria-labelledby="pilot-title">
+        <p class="section-index">05 / Line validation</p><h2 id="pilot-title">How to run a pilot that exposes unstable reading</h2>
+        <p><strong>One successful scan proves one sample in one position.</strong> A meaningful pilot spans package formats, print states, line speed, and environment, then demonstrates controlled behavior under failure.</p>
+        <figure class="article-visual" data-article-visual>
+          <img src="/images/articles/beer-data-matrix-pilot-en.svg" width="1200" height="620" loading="lazy" decoding="async" alt="Pilot matrix covering package, print, speed, environment, and failure scenarios" data-article-diagram />
+          <figcaption>For every scenario, record the read result, failure layer, conditions, and permitted operator action.</figcaption>
+        </figure>
+        <p>Prepare a bounded representative sample. Run it at actual speed without manually pausing the package in front of the scanner. Then reproduce a duplicate, scanner noise, connectivity loss, and workstation restart. Reconcile physical items, accepted codes, the local journal, and outbound queue afterwards.</p>
+        <p>If you need formal print-quality evidence, use a verifier and an approved method. A production scanner answers a different question: whether the code can be read by that line configuration under those conditions.</p>
+      </section>
+
+      <section id="operator" aria-labelledby="operator-title">
+        <p class="section-index">06 / Response</p><h2 id="operator-title">What the operator should do for each failure type</h2>
+        <div class="article-checklist">
+          <div><h3>No decode</h3><ul><li>remove obvious glare or contamination;</li><li>try the control sample;</li><li>quarantine the item in the agreed area;</li><li>send the sample to the print owner.</li></ul></div>
+          <div><h3>Wrong stream or format</h3><ul><li>do not type the code manually;</li><li>record time and workstation;</li><li>check the scanner profile;</li><li>compare a safe capture with the reference.</li></ul></div>
+          <div><h3>Duplicate or conflict</h3><ul><li>do not accept the item again;</li><li>locate the previous operation;</li><li>reconcile the physical case;</li><li>use the controlled recovery path.</li></ul></div>
+        </div>
+        <p>The workstation instruction should match its on-screen verdicts. Assign separate owners for print, scanner configuration, line software, and external exchange so an incident does not travel between teams without a diagnosis.</p>
+      </section>
+
+      <section id="markiro" aria-labelledby="markiro-title">
+        <p class="section-index">07 / Markiro</p><h2 id="markiro-title">How Markiro separates a read failure from a controlled rejection</h2>
+        <p>At a Markiro workstation, scanner input passes through one classifier. Accepted and rejected attempts are recorded in a local journal; malformed input, wrong GTIN, and duplicates remain distinct outcomes. The operator sees a safe identifier fragment rather than the complete raw payload. A local index and workstation database protect against accepting the same code again during unstable connectivity.</p>
+        <div class="article-callout article-callout--boundary"><strong>Markiro’s current aggregation chain is item → case → SSCC.</strong><p>Pallet aggregation is the next development stage. Physical print quality, scanner compatibility, and external-system acceptance still require facility-specific validation.</p></div>
+        <p>The current primary category is beer, beer-based beverages, and selected low-alcohol beverages. Additional product types are being introduced gradually.</p>
+      </section>
+
+      <section class="article-conclusion" aria-labelledby="conclusion-title">
+        <p class="section-index">Conclusion</p><h2 id="conclusion-title">Locate the layer before changing the setting</h2>
+        <p>A robust line does not endlessly retry every rejected code. It distinguishes optical decoding, data transport, business rules, and external state, then gives each outcome a verifiable next action.</p>
+        <a class="button" href="/en/#demo" data-analytics="landing_demo_click" data-placement="article-conclusion">Review one scanner and one line <span aria-hidden="true">→</span></a>
+      </section>
+
+      <section class="article-related" aria-labelledby="article-related-title">
+        <p class="section-index">Related</p><h2 id="article-related-title">Continue preparing the line</h2>
+        <div class="seo-related__grid"><a href="/en/articles/beer-marking-line-equipment/"><span>Beer marking line equipment</span><span aria-hidden="true">→</span></a><a href="/en/articles/beer-marking-2026/"><span>Beer marking in Russia in 2026</span><span aria-hidden="true">→</span></a><a href="/en/articles/beer-case-aggregation/"><span>Beer case aggregation</span><span aria-hidden="true">→</span></a></div>
+      </section>
+    </article>
+  </main>
+  <LandingFooter page={article} />
+  <script>import { browserLandingRuntime, initLanding } from "../../../../scripts/site"; initLanding(document, browserLandingRuntime(window));</script>
+</BaseLayout>

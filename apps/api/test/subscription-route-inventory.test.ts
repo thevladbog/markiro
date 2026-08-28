@@ -62,6 +62,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /counterparties (CounterpartiesController.listCounterparties)",
       "GET /counterparties/:id (CounterpartiesController.getCounterparty)",
       "GET /counterparties/:id/sscc (CounterpartiesController.getSscc)",
+      "GET /dashboard/overview (DashboardController.overview)",
       "GET /disaggregation (DisaggregationController.list)",
       "GET /disaggregation-reasons (DisaggregationReasonsController.listReasons)",
       "GET /disaggregation/:id (DisaggregationController.get)",
@@ -73,6 +74,18 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /integrations/:type/candidates (IntegrationsController.listCandidates)",
       "GET /integrations/:type/journal (IntegrationsController.journal)",
       "GET /integrations/public_api/keys (ApiKeysController.list)",
+      "GET /inventories (InventoriesController.list)",
+      "GET /inventories/:id (InventoriesController.get)",
+      "GET /inventories/:id/close-preview (InventoriesController.closePreview)",
+      "GET /inventories/:id/discrepancies (InventoriesController.discrepancies)",
+      "GET /inventories/:id/document-runs (InventoriesController.documentRuns)",
+      "GET /inventories/:id/evidence (InventoriesController.evidence)",
+      "GET /inventories/:id/late-events (InventoriesController.lateEvents)",
+      "GET /inventories/:id/progress (InventoriesController.progress)",
+      "GET /inventories/:id/task-form (InventoriesController.taskForm)",
+      "GET /inventory-document-formats (InventoryDocumentFormatsController.list)",
+      "GET /inventory-document-runs/:runId/artifacts/:artifactId/download (InventoryDocumentRunsController.downloadArtifact)",
+      "GET /inventory-document-runs/:runId/download (InventoryDocumentRunsController.downloadZip)",
       "GET /kiosks (KiosksController.listKiosks)",
       "GET /label-templates (LabelTemplatesController.listLabelTemplates)",
       "GET /label-templates/:id (LabelTemplatesController.getLabelTemplate)",
@@ -117,6 +130,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /shifts/:shiftId/exports (ShiftExportsController.list)",
       "GET /lines/presence (LinesController.listPresence)",
       "GET /shift-close-conflicts (StationShiftCloseController.list)",
+      "GET /signer-agents (SignerAgentsController.overview)",
       "GET /station-devices (StationDevicesController.list)",
       "GET /team (TeamController.list)",
       "POST /products/gtin-check (ProductsController.checkGtinOwner)",
@@ -182,6 +196,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "DELETE /disaggregation-reasons/:id (DisaggregationReasonsController.archiveReason)",
       "DELETE /disaggregation/:id/lines/:lineId (DisaggregationController.removeLine)",
       "DELETE /employees/:id (EmployeesController.archiveEmployee)",
+      "DELETE /integrations/:type (IntegrationsController.deleteChannel)",
       "DELETE /lines/:id (LinesController.deleteLine)",
       "DELETE /org/profile/logo (OrgProfileController.deleteLogo)",
       "DELETE /pickup-reasons/:id (PickupReasonsController.archiveReason)",
@@ -198,6 +213,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "PATCH /employees/:id (EmployeesController.updateEmployee)",
       "PATCH /employees/:id/pickup-policy (EmployeesController.updatePickupPolicy)",
       "PATCH /integrations/:type (IntegrationsController.update)",
+      "PATCH /inventories/:id (InventoriesController.update)",
       "PATCH /kiosks/:id (KiosksController.updateKiosk)",
       "PATCH /lines/:id (LinesController.updateLine)",
       "PATCH /operators/:employeeId (OperatorsController.updateAccess)",
@@ -220,6 +236,19 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /integrations/:type/candidates/:id/link (IntegrationsController.linkCandidate)",
       "POST /integrations/:type/candidates/:id/unhide (IntegrationsController.unhideCandidate)",
       "POST /integrations/:type/credentials (IntegrationsController.issueCredentials)",
+      "POST /inventories (InventoriesController.create)",
+      "POST /inventories/:id/close (InventoriesController.close)",
+      "POST /inventories/:id/complete (InventoriesController.complete)",
+      "POST /inventories/:id/corrections (InventoriesController.correct)",
+      "POST /inventories/:id/document-runs (InventoriesController.createDocumentRun)",
+      "POST /inventories/:id/emergency-close (InventoriesController.emergencyClose)",
+      "POST /inventories/:id/imports/:status (InventoriesController.importEvidence)",
+      "POST /inventories/:id/late-events/discard (InventoriesController.discardLateEvents)",
+      "POST /inventories/:id/late-events/:lateEventId/replay (InventoriesController.replayLateEvent)",
+      "POST /inventories/:id/reopen (InventoriesController.reopen)",
+      "POST /inventories/:id/snapshots (InventoriesController.fixSnapshot)",
+      "POST /inventories/:id/start (InventoriesController.start)",
+      "POST /inventory-document-runs/:runId/retry (InventoryDocumentRunsController.retry)",
       "POST /kiosks (KiosksController.createKiosk)",
       "POST /kiosks/:id/enroll (KiosksController.enroll)",
       "POST /kiosks/:id/pairing-code (KiosksController.issuePairingCode)",
@@ -234,6 +263,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /shifts (ShiftsController.createShift)",
       "POST /shifts/:id/open (ShiftsController.openShift)",
       "POST /shift-close-conflicts/:eventId/dismiss (StationShiftCloseController.dismiss)",
+      "POST /signer-agents/:id/revoke (SignerAgentsController.revoke)",
+      "POST /signer-agents/pairing-code (SignerAgentsController.issuePairingCode)",
       "POST /station-devices (StationDevicesController.create)",
       "POST /station-devices/:id/pairing-code (StationDevicesController.issuePairingCode)",
       "POST /team/invitations (TeamController.createInvitation)",
@@ -273,6 +304,14 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   {
     contract: customerContract(STATION_GUARDS, { mode: "recovery", kind: "station" }),
     routes: [
+      "GET /station/inventories/:id/bundle/codes (StationInventoriesController.codes)",
+      "GET /station/inventories/:id/bundle/manifest (StationInventoriesController.manifest)",
+      "GET /station/inventories/:id/progress (StationInventoriesController.progress)",
+      "GET /station/inventory-tasks (StationInventoriesController.list)",
+      "POST /station/inventories/:id/event-batches (StationInventoriesController.eventBatch)",
+      "POST /station/inventories/:id/join (StationInventoriesController.join)",
+      "POST /station/inventories/:id/leave (StationInventoriesController.leave)",
+      "POST /station/inventory-tasks/resolve-barcode (StationInventoriesController.resolveBarcode)",
       "POST /station/conflicts/status (StationScansController.conflictStatus)",
       "POST /station/codes/releases (StationScansController.codeReleases)",
       "POST /station/scans (StationScansController.ingest)",
@@ -428,6 +467,20 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "StationPairController.pair": {
     reason:
       "unpaired station has no device identity; StationPairingService resolves the authoritative tenant and enforces write/quota access",
+  },
+  "SignerAgentPairController.pair": {
+    reason:
+      "unpaired signer agent has no device identity; the single-use pairing code, per-code attempt lockout, and shared fixed-window pairing rate limiter in SignerAgentsService.pair authenticate the exchange before a credential is issued",
+  },
+  "SignerAgentTasksController.complete": {
+    reason:
+      "signer agent task reporting is guarded by the agent's own x-signer-token device identity (SignerAgentGuard), not a cabinet subscription session",
+    requiredGuards: ["SignerAgentGuard"],
+  },
+  "SignerAgentTasksController.fail": {
+    reason:
+      "signer agent task reporting is guarded by the agent's own x-signer-token device identity (SignerAgentGuard), not a cabinet subscription session",
+    requiredGuards: ["SignerAgentGuard"],
   },
   "TenantOwnerActivationController.complete": {
     reason: "single-use tenant-owner activation token is a public authentication lifecycle flow",
@@ -657,6 +710,7 @@ describe("registered subscription route inventory", () => {
           route.controller.name === "KioskController"
             ? ["KioskDeviceGuard", "SubscriptionAccessGuard"]
             : route.controller.name === "StationScansController" ||
+                route.controller.name === "StationInventoriesController" ||
                 route.controller.name === "StationProductImagesController"
               ? ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"]
               : stationOnlyCabinetRoute

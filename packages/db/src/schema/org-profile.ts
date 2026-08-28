@@ -17,6 +17,7 @@ export const orgProfiles = pgTable(
     gln: text("gln"),
     gs1Prefixes: text("gs1_prefixes").array().notNull().default([]),
     inn: text("inn"),
+    timeZone: text("time_zone").notNull().default("Europe/Moscow"),
     logoAssetId: uuid("logo_asset_id"),
     defaultBoxLabelTemplateId: uuid("default_box_label_template_id"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

@@ -19,6 +19,7 @@ import { PickupReasonsModule } from "./modules/pickup-reasons/pickup-reasons.mod
 import { DisaggregationReasonsModule } from "./modules/disaggregation-reasons/disaggregation-reasons.module";
 import { DisaggregationModule } from "./modules/disaggregation/disaggregation.module";
 import { IntegrationsModule } from "./modules/integrations/integrations.module";
+import { SignerAgentsModule } from "./modules/signer-agents/signer-agents.module";
 import { ApiKeysModule } from "./modules/api-keys/api-keys.module";
 import { ExchangeModule } from "./modules/exchange/exchange.module";
 import { KioskModule } from "./modules/kiosk/kiosk.module";
@@ -55,6 +56,8 @@ import { StationShiftCloseModule } from "./modules/station-shift-close/station-s
 import { DemoRequestsModule } from "./modules/demo-requests/demo-requests.module";
 import { PlatformHttpModule } from "./platform-http/platform-http.module";
 import { HealthModule } from "./health/health.module";
+import { InventoriesModule } from "./modules/inventories/inventories.module";
+import { DashboardModule } from "./modules/dashboard/dashboard.module";
 
 @Module({})
 export class AppModule {
@@ -107,6 +110,8 @@ export class AppModule {
         ProductsModule,
         LinesModule,
         ShiftsModule,
+        DashboardModule,
+        InventoriesModule,
         ShiftExportsModule,
         StationShiftCloseModule,
         LabelTemplatesModule,
@@ -121,6 +126,7 @@ export class AppModule {
         DisaggregationReasonsModule,
         DisaggregationModule,
         IntegrationsModule,
+        SignerAgentsModule.forRoot(env),
         ApiKeysModule,
         ExchangeModule,
         KioskModule,

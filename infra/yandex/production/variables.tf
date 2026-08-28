@@ -118,6 +118,22 @@ variable "audit_bucket_name" {
   nullable    = false
 }
 
+variable "station_release_bucket_name" {
+  description = "Globally unique bucket dedicated to Station release objects."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition = (
+      can(regex("^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$", var.station_release_bucket_name)) &&
+      var.station_release_bucket_name != var.state_bucket_name &&
+      var.station_release_bucket_name != var.media_bucket_name &&
+      var.station_release_bucket_name != var.audit_bucket_name
+    )
+    error_message = "station_release_bucket_name must be a valid S3 bucket name distinct from state, media, and audit buckets."
+  }
+}
+
 variable "domain" {
   description = "Exact admin authority served directly by Caddy."
   type        = string
@@ -171,6 +187,29 @@ variable "landing_domain" {
   }
 }
 
+variable "station_release_domain" {
+  description = "Fixed public Station release authority served only through Yandex Cloud CDN."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = var.station_release_domain == "releases.markiro.app"
+    error_message = "station_release_domain must be exactly releases.markiro.app."
+  }
+}
+
+variable "station_release_publisher_pgp_key" {
+  description = "Base64-encoded PGP public key used to encrypt the Station publisher secret."
+  type        = string
+  nullable    = false
+  sensitive   = true
+
+  validation {
+    condition     = length(trimspace(var.station_release_publisher_pgp_key)) > 0
+    error_message = "station_release_publisher_pgp_key must be nonblank."
+  }
+}
+
 variable "dns_zone_id" {
   description = "Existing public Cloud DNS zone ID."
   type        = string
@@ -179,6 +218,13 @@ variable "dns_zone_id" {
 
 variable "public_dns_enabled" {
   description = "Whether all direct-VM A records are published."
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
+variable "station_release_public_dns_enabled" {
+  description = "Whether the final releases.markiro.app CNAME is published after separate approval."
   type        = bool
   default     = false
   nullable    = false

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,14 +8,16 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
+
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 
 describe("tenant billing platform workflow migration metadata", () => {
-  it("keeps the snapshot chain contiguous through 0070", async () => {
+  it("keeps the snapshot chain contiguous through 0094", async () => {
     const [previousText, currentText, journalText] = await Promise.all([
-      readFile(new URL("../migrations/meta/0069_snapshot.json", import.meta.url), "utf8"),
-      readFile(new URL("../migrations/meta/0070_snapshot.json", import.meta.url), "utf8"),
+      readFile(new URL("../migrations/meta/0093_snapshot.json", import.meta.url), "utf8"),
+      readFile(new URL("../migrations/meta/0094_snapshot.json", import.meta.url), "utf8"),
       readFile(new URL("../migrations/meta/_journal.json", import.meta.url), "utf8"),
     ]);
     const previous = JSON.parse(previousText) as { id: string };
@@ -24,9 +26,9 @@ describe("tenant billing platform workflow migration metadata", () => {
       entries: Array<{ idx: number; tag: string }>;
     };
     expect(current.prevId).toBe(previous.id);
-    expect(journal.entries.find(({ idx }) => idx === 70)).toMatchObject({
-      idx: 70,
-      tag: "0070_tenant_billing_platform_workflow",
+    expect(journal.entries.find(({ idx }) => idx === 94)).toMatchObject({
+      idx: 94,
+      tag: "0094_tenant_billing_platform_workflow",
     });
   });
 });
@@ -45,33 +47,13 @@ describe.skipIf(!databaseUrl)("tenant billing platform workflow migration", () =
     await maintenancePool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
     created = true;
     temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-billing-platform-migration-"));
-    const migrationsThrough0069 = join(temporaryRoot, "migrations");
-    await cp(migrationsFolder, migrationsThrough0069, { recursive: true });
-    await rm(join(migrationsThrough0069, "0070_tenant_billing_platform_workflow.sql"), {
-      force: true,
+    const migrationsThrough0093 = join(temporaryRoot, "migrations");
+    await copyMigrationsThroughIndex({
+      sourceFolder: migrationsFolder,
+      targetFolder: migrationsThrough0093,
+      lastIncludedIndex: 93,
     });
-    await rm(join(migrationsThrough0069, "0071_tenant_billing_target_cardinality.sql"), {
-      force: true,
-    });
-    await rm(join(migrationsThrough0069, "0072_tenant_billing_stale_family_repair.sql"), {
-      force: true,
-    });
-    await rm(join(migrationsThrough0069, "meta", "0070_snapshot.json"), { force: true });
-    await rm(join(migrationsThrough0069, "meta", "0071_snapshot.json"), { force: true });
-    await rm(join(migrationsThrough0069, "meta", "0072_snapshot.json"), { force: true });
-    const journalPath = join(migrationsThrough0069, "meta", "_journal.json");
-    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
-      entries: Array<{ tag: string }>;
-    };
-    journal.entries = journal.entries.filter(
-      (entry) =>
-        entry.tag !== "0070_tenant_billing_platform_workflow" &&
-        entry.tag !== "0071_tenant_billing_target_cardinality" &&
-        entry.tag !== "0072_tenant_billing_stale_family_repair" &&
-        entry.tag !== "0073_tenant_billing_notification_delivery",
-    );
-    await writeFile(journalPath, JSON.stringify(journal));
-    await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0069 });
+    await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0093 });
 
     await pool.query(`
       INSERT INTO organization (id, name, slug, created_at)

@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req } from "@nestjs/common";
+import { ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { platformCommercialContracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
@@ -20,11 +21,14 @@ import {
 } from "./dto";
 import { BillingPaymentsService } from "./billing-payments.service";
 
+@ApiTags("billing-payments")
 @Controller("platform/payments")
 export class BillingPaymentsController {
   constructor(private readonly payments: BillingPaymentsService) {}
 
   @Get()
+  @ApiOperation({ summary: "List payments" })
+  @ApiQuery({ name: "tenantId", required: false, schema: { type: "string" } })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.payments.list.response })
   @RequirePlatformCapabilities("billing.read")
   async list(@Query("tenantId") tenantId?: string) {
@@ -35,6 +39,8 @@ export class BillingPaymentsController {
   }
 
   @Get("matches")
+  @ApiOperation({ summary: "List payment matches" })
+  @ApiQuery({ name: "tenantId", required: false, schema: { type: "string" } })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.payments.matches.list.response })
   @RequirePlatformCapabilities("billing.read")
   async listMatches(@Query("tenantId") tenantId?: string) {
@@ -45,6 +51,7 @@ export class BillingPaymentsController {
   }
 
   @Patch("matches/:matchId")
+  @ApiOperation({ summary: "Resolve a payment match" })
   @PlatformApiProtectedOk({
     body: platformCommercialContracts.payments.matches.resolve.body,
     response: platformCommercialContracts.payments.matches.resolve.response,
@@ -62,6 +69,7 @@ export class BillingPaymentsController {
   }
 
   @Post("invoices/:invoiceId")
+  @ApiOperation({ summary: "Record a manual payment" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.payments.manual.body,
     response: platformCommercialContracts.payments.manual.response,
@@ -79,6 +87,7 @@ export class BillingPaymentsController {
   }
 
   @Post("imports")
+  @ApiOperation({ summary: "Import a bank statement file" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.payments.import.body,
     response: platformCommercialContracts.payments.import.response,

@@ -11,6 +11,11 @@ export interface ParsedItem {
   name: string;
   article: string | null;
   unit: string | null;
+  /** `<Штрихкод>` -- read as a single tag per CommerceML 2.05 spec.
+   * If multiple Штрихкод tags are present (non-compliant), degraded to null. */
+  barcode: string | null;
+  /** Zero or more `<Картинка>` tags, as a list of file paths. */
+  images: string[];
 }
 
 export interface ParsedCatalog {
@@ -49,6 +54,8 @@ export interface ParsedOfferPrice {
 export interface ParsedOffer {
   externalRef: string;
   prices: ParsedOfferPrice[];
+  /** `<Штрихкод>` of the offer, if present. */
+  barcode: string | null;
 }
 
 export interface ParsedOffers {
@@ -91,6 +98,7 @@ const REPEATING_TAGS = new Set([
   "ТипЦены",
   "Документ",
   "ЗначениеРеквизита",
+  "Картинка",
 ]);
 
 /**
@@ -272,11 +280,16 @@ function catalogItemsFrom(root: unknown): ParsedItem[] {
   const rawItems = goods["Товар"];
   return (Array.isArray(rawItems) ? rawItems : []).map((raw): ParsedItem => {
     const item = asObject(raw);
+    const rawImages = item["Картинка"];
     return {
       externalRef: textOf(item["Ид"]),
       name: textOf(item["Наименование"]),
       article: optionalTextOf(item["Артикул"]),
       unit: optionalTextOf(item["БазоваяЕдиница"]),
+      barcode: optionalTextOf(item["Штрихкод"]),
+      images: (Array.isArray(rawImages) ? rawImages : [])
+        .map((raw) => textOf(raw))
+        .filter((value) => value !== ""),
     };
   });
 }
@@ -330,7 +343,11 @@ function offersFrom(root: unknown, priceTypes: Record<string, string>): ParsedOf
         currency: textOf(price["Валюта"]),
       };
     });
-    return { externalRef: textOf(offer["Ид"]), prices };
+    return {
+      externalRef: textOf(offer["Ид"]),
+      prices,
+      barcode: optionalTextOf(offer["Штрихкод"]),
+    };
   });
 }
 

@@ -34,6 +34,15 @@ const routes = [
   "/",
   "/markirovka-chestny-znak/",
   "/sscc-i-agregatsiya/",
+  "/stati/agregatsiya-piva-v-koroba/",
+  "/stati/markirovka-piva-2026/",
+  "/stati/data-matrix-pivo-ne-schityvaetsya/",
+  "/stati/oborudovanie-dlya-markirovki-piva/",
+  "/stati/stoimost-markirovki-piva/",
+  "/stati/nanesenie-data-matrix-na-pivo/",
+  "/stati/markirovka-piva-bez-interneta/",
+  "/stati/dubl-koda-markirovki-pivo/",
+  "/stati/otchet-o-nanesenii-kodov-pivo/",
   "/rabochee-mesto-upakovki/",
   "/kiosk-samovydachi/",
   "/integratsiya-1c/",
@@ -42,6 +51,15 @@ const routes = [
   "/en/",
   "/en/chestny-znak-serialization/",
   "/en/sscc-and-aggregation/",
+  "/en/articles/beer-case-aggregation/",
+  "/en/articles/beer-marking-2026/",
+  "/en/articles/beer-data-matrix-not-scanning/",
+  "/en/articles/beer-marking-line-equipment/",
+  "/en/articles/beer-marking-cost-russia/",
+  "/en/articles/beer-data-matrix-application-methods/",
+  "/en/articles/offline-beer-marking-russia/",
+  "/en/articles/duplicate-beer-marking-code-russia/",
+  "/en/articles/beer-code-application-report-russia/",
   "/en/packing-workstation/",
   "/en/self-service-pickup-kiosk/",
   "/en/1c-integration/",
@@ -69,6 +87,111 @@ const MARKIRO_MODULE_LAYOUT = [
   { x: "38", y: "38", color: "rgb(19, 18, 22)" },
   { x: "26", y: "42", color: "rgb(61, 220, 122)" },
 ];
+
+test("cookie panel reveals granular controls only after an explicit settings action", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const panel = page.locator("[data-consent-panel]");
+  const details = panel.locator("[data-consent-details]");
+
+  await expect(panel).toBeVisible();
+  await expect(details).toBeHidden();
+  await panel.locator("[data-consent-customize]").click();
+  await expect(details).toBeVisible();
+});
+
+test("cookie panel stays anchored to the bottom edge without entering document flow", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const panel = page.locator("[data-consent-panel]");
+  await expect(panel).toBeVisible();
+
+  expect(
+    await panel.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return {
+        bottomGap: Math.round(window.innerHeight - box.bottom),
+        position: getComputedStyle(element).position,
+      };
+    }),
+  ).toEqual({ bottomGap: 0, position: "fixed" });
+});
+
+test("GTM stays offline until analytics consent and loads only once after permission", async ({
+  page,
+}) => {
+  const gtmRequests: string[] = [];
+  await page.route("https://www.googletagmanager.com/**", async (route) => {
+    gtmRequests.push(route.request().url());
+    await route.fulfill({ body: "", contentType: "application/javascript", status: 200 });
+  });
+
+  await page.goto("/");
+  expect(gtmRequests).toEqual([]);
+  await expect(page.locator("iframe[src*='googletagmanager.com']")).toHaveCount(0);
+
+  await page.locator("[data-consent-customize]").click();
+  await page.locator("[data-consent-marketing]").check();
+  await page.locator("[data-consent-save]").click();
+  expect(gtmRequests).toEqual([]);
+
+  await page.locator("[data-consent-settings]").click();
+  await page.locator("[data-consent-analytics]").check();
+  await page.locator("[data-consent-save]").click();
+  await expect.poll(() => gtmRequests).toHaveLength(1);
+  expect(gtmRequests[0]).toBe("https://www.googletagmanager.com/gtm.js?id=GTM-KZ6P7NVF");
+
+  await page.evaluate(() => window.dispatchEvent(new Event("markiro:consent-changed")));
+  await expect.poll(() => gtmRequests).toHaveLength(1);
+});
+
+test("a successful demo request emits one submit attempt and one lead event", async ({ page }) => {
+  await page.route("https://www.googletagmanager.com/**", async (route) => {
+    await route.fulfill({ body: "", contentType: "application/javascript", status: 200 });
+  });
+  await page.route("**/api/demo-requests", async (route) => {
+    const request = route.request().postDataJSON() as { requestId?: string };
+    await route.fulfill({
+      body: JSON.stringify({ accepted: true, requestId: request.requestId }),
+      contentType: "application/json",
+      status: 202,
+    });
+  });
+
+  await page.goto("/");
+  await page.locator("[data-consent-accept]").click();
+  const form = page.locator("[data-demo-form]");
+  await form.evaluate((element) => {
+    const token = document.createElement("input");
+    token.name = "smart-token";
+    token.type = "hidden";
+    element.append(token);
+  });
+  await form.locator('input[name="name"]').fill("Анна");
+  await form.locator('input[name="company"]').fill("Завод Север");
+  await form.locator('input[name="email"]').fill("anna@example.test");
+  await form.locator('input[name="consent"]').check();
+  await form.locator('input[name="smart-token"]').evaluate((input) => {
+    (input as HTMLInputElement).value = "captcha-token";
+  });
+  await form.locator('button[type="submit"]').click();
+  await expect(page.locator("[data-demo-success]")).toBeVisible();
+
+  expect(
+    await page.evaluate(() => {
+      const layer = (window as Window & { dataLayer?: unknown[] }).dataLayer ?? [];
+      return layer
+        .filter(
+          (item): item is Record<string, unknown> =>
+            typeof item === "object" && item !== null && "event" in item,
+        )
+        .map((item) => item.event)
+        .filter((event) => event === "landing_form_submit" || event === "landing_form_success");
+    }),
+  ).toEqual(["landing_form_submit", "landing_form_success"]);
+});
 
 const demoCases = [
   {
@@ -193,6 +316,21 @@ test("keyboard focus is visible on the first interactive control", async ({ page
   ).toBe(true);
 });
 
+test("article hero keeps a clear heading hierarchy", async ({ page }) => {
+  await page.goto("/stati/agregatsiya-piva-v-koroba/");
+  const sizes = await page.evaluate(() => ({
+    heading: Number.parseFloat(
+      getComputedStyle(document.querySelector(".article-hero h1")!).fontSize,
+    ),
+    lead: Number.parseFloat(
+      getComputedStyle(document.querySelector(".article-hero__lead")!).fontSize,
+    ),
+  }));
+
+  expect(sizes.heading).toBeGreaterThanOrEqual(42);
+  expect(sizes.heading).toBeGreaterThan(sizes.lead * 1.5);
+});
+
 for (const [route, wordmark] of [
   ["/", "маркиро"],
   ["/en/", "MARKIRO"],
@@ -241,6 +379,13 @@ for (const route of ["/", "/en/"] as const) {
     const expectedHref = "tel:+79343551490";
 
     await expect(page.locator(`a[href="${expectedHref}"]`)).toHaveCount(3);
+    expect(
+      await page
+        .locator(`a[href="${expectedHref}"][data-analytics="landing_phone_click"]`)
+        .evaluateAll((links) =>
+          links.map((link) => (link as HTMLElement).dataset.placement).sort(),
+        ),
+    ).toEqual(["demo", "header", "hero"]);
     for (const phone of [
       page.locator("#hero").getByRole("link", { name: expectedPhone, exact: true }),
       page.locator("#demo").getByRole("link", { name: expectedPhone, exact: true }),
@@ -330,6 +475,9 @@ test("crawler policy endpoints expose the approved search boundary", async ({ re
   );
   await expect((await request.get("/sitemap.xml")).text()).resolves.toContain(
     "https://markiro.app/privacy/",
+  );
+  await expect((await request.get("/sitemap.xml")).text()).resolves.toContain(
+    "https://markiro.app/stati/agregatsiya-piva-v-koroba/",
   );
   await expect((await request.get("/llms.txt")).text()).resolves.toContain("https://markiro.app/");
 });

@@ -1,11 +1,18 @@
 import { Controller, Get, Query, Req, UseGuards } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { ApiOkResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import {
+  ApiCabinetAuth,
+  ApiHttpErrors,
+  ApiZodQuery,
+  ApiZodValidationError,
+} from "../../lib/openapi";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
+  listBoxExceptionsOpenApiSchema,
   listBoxExceptionsQuerySchema,
   type ListBoxExceptionsQueryDto,
   type ListBoxExceptionsResponseDto,
@@ -23,10 +30,20 @@ import { BoxExceptionsService } from "./box-exceptions.service";
 @Controller("box-exceptions")
 @UseGuards(TenantGuard, AuthorizationGuard)
 @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+@ApiCabinetAuth()
 export class BoxExceptionsController {
   constructor(private readonly boxExceptionsService: BoxExceptionsService) {}
 
   @Get()
+  @ApiOperation({
+    summary: "List box exceptions for a shift",
+    description:
+      "The immutable undo/clear/disassemble/reprint audit trail a manager reviews, newest first.",
+  })
+  @ApiZodQuery(listBoxExceptionsQuerySchema)
+  @ApiOkResponse({ schema: listBoxExceptionsOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   async listBoxExceptions(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(listBoxExceptionsQuerySchema)) query: ListBoxExceptionsQueryDto,

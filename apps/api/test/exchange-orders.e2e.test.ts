@@ -11,6 +11,7 @@ import { loadEnv } from "../src/env";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
+import { fixtureOrderNo } from "./support/order-no";
 import { excludeExchangeRoute } from "../src/modules/exchange/exchange.module";
 import { checkauthWindowStart } from "../src/modules/exchange/exchange-credentials";
 import { IMPORT_BATCH_SIZE } from "../src/modules/exchange/exchange.controller";
@@ -106,7 +107,7 @@ describe("1c_exchange orders (И-2)", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -131,6 +132,13 @@ describe("1c_exchange orders (И-2)", () => {
       .expect(200);
     expect(queryRes.headers["content-type"]).toContain("application/xml");
     expect(queryRes.text).toContain(`<Ид>${orderId}</Ид>`);
+    // СБИС отклоняет документ без обязательного ключа «Контрагент» --
+    // покупателем едет сотрудник, оформивший заявку (order-export.ts).
+    expect(queryRes.text).toContain(
+      `<Контрагенты><Контрагент><Ид>${employeeId}</Ид><Наименование>Иван Иванов</Наименование>` +
+        "<Роль>Покупатель</Роль><ПолноеНаименование>Иван Иванов</ПолноеНаименование>" +
+        "</Контрагент></Контрагенты>",
+    );
 
     const [beforeSuccess] = await db
       .select({ exportedAt: schema.pickupOrders.exportedAt })
@@ -191,7 +199,7 @@ describe("1c_exchange orders (И-2)", () => {
     });
 
     const orderId = randomUUID();
-    const orderNo = `ORD-26-${randomUUID().slice(0, 4)}`;
+    const orderNo = fixtureOrderNo();
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
@@ -241,7 +249,7 @@ describe("1c_exchange orders (И-2)", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -401,7 +409,7 @@ describe("1c_exchange orders (И-2)", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -514,7 +522,7 @@ describe("1c_exchange orders (И-2)", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -577,7 +585,7 @@ describe("1c_exchange orders (И-2)", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",

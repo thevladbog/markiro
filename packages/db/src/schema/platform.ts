@@ -72,6 +72,10 @@ export const products = pgTable(
     boxCapacity: integer("box_capacity"),
     palletCapacity: integer("pallet_capacity"),
     status: productStatus("status").notNull().default("draft"),
+    // Operator-set "do not use" flag, orthogonal to the computed `status`:
+    // an archived product stays for history (orders, shifts, reports) but is
+    // excluded from every selection surface except inventory.
+    archived: boolean("archived").notNull().default(false),
     defaultCounterpartyId: uuid("default_counterparty_id"),
     defaultLabelTemplateId: uuid("default_label_template_id"),
     unitPrice: numeric("unit_price", { precision: 12, scale: 2 }),
@@ -661,6 +665,7 @@ export const ssccBlocks = pgTable(
   "sscc_blocks",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    allocationOrder: bigint("allocation_order", { mode: "number" }).notNull(),
     tenantId: tenantId(),
     issuerPrefix: char("issuer_prefix", { length: 9 }).notNull(),
     extensionDigit: integer("extension_digit").notNull(),
@@ -701,6 +706,13 @@ export const ssccBlocks = pgTable(
     issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    uniqueIndex("sscc_blocks_stream_allocation_order_uq").on(
+      t.tenantId,
+      t.issuerPrefix,
+      t.extensionDigit,
+      t.deviceId,
+      t.allocationOrder,
+    ),
     // Composite FK: device_id must belong to the same tenant as the sscc
     // block referencing it — same shape as shifts' own FKs above. Unlike
     // those, device_id is NOT NULL: a block always records the device that

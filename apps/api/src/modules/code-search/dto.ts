@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SchemaObject } from "@nestjs/swagger";
 import type { DateBound } from "../../lib/date-range";
 
 /** `^YYYY-MM-DD$`; must be checked against the RAW query string, not the coerced `Date` -- see `date-range.ts`. */
@@ -183,3 +184,327 @@ export interface BoxCardDto {
   }[];
   pickupOrders: { orderId: string; orderNo: string; status: string }[];
 }
+
+const uuidSchema = { type: "string", format: "uuid" } as const;
+const dateTimeSchema = { type: "string", format: "date-time" } as const;
+const codeHashSchema = { type: "string", pattern: "^[0-9a-f]{64}$" } as const;
+/** 20-digit GS1 AI "00" form (Chestny ZNAK), as everywhere in the cabinet. */
+const ssccSchema = { type: "string", pattern: "^[0-9]{20}$" } as const;
+const codeStatusSchema: SchemaObject = {
+  type: "string",
+  enum: ["free", "aggregated", "written_off"],
+};
+const productionDateSchema = {
+  type: "string",
+  format: "date",
+  nullable: true,
+  description:
+    "The owner shift's effective production day (coalesce(production_date, planned_date)).",
+} as const;
+
+const classifyBoxMatchOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["boxId", "sscc", "productName", "closedAt"],
+  properties: {
+    boxId: uuidSchema,
+    sscc: ssccSchema,
+    productName: { type: "string", nullable: true },
+    closedAt: { ...dateTimeSchema, nullable: true },
+  },
+};
+
+export const classifySearchResponseOpenApiSchema: SchemaObject = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "boxId"],
+      properties: { type: { type: "string", enum: ["box"] }, boxId: uuidSchema },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "codeHash"],
+      properties: { type: { type: "string", enum: ["code"] }, codeHash: codeHashSchema },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "items"],
+      properties: {
+        type: { type: "string", enum: ["boxes"] },
+        items: {
+          type: "array",
+          maxItems: 20,
+          items: classifyBoxMatchOpenApiSchema,
+          description: "Disambiguation list; returned only when more than one box matches.",
+        },
+      },
+    },
+  ],
+  discriminator: { propertyName: "type" },
+};
+
+export const classifyNotFoundOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["code"],
+  properties: {
+    code: {
+      type: "string",
+      enum: ["unrecognized", "not_found"],
+      description:
+        "unrecognized: the input is neither an SSCC nor a KM shape; not_found: well-formed, but nothing in this tenant matches.",
+    },
+  },
+};
+
+const codeListItemOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "codeHash",
+    "gtin14",
+    "serial",
+    "productId",
+    "productName",
+    "status",
+    "scannedAt",
+    "productionDate",
+    "boxId",
+    "boxSscc",
+  ],
+  properties: {
+    codeHash: codeHashSchema,
+    gtin14: { type: "string", pattern: "^[0-9]{14}$" },
+    serial: { type: "string" },
+    productId: { ...uuidSchema, nullable: true },
+    productName: { type: "string", nullable: true },
+    status: codeStatusSchema,
+    scannedAt: dateTimeSchema,
+    productionDate: productionDateSchema,
+    boxId: { ...uuidSchema, nullable: true },
+    boxSscc: { ...ssccSchema, nullable: true },
+  },
+};
+
+export const listCodesOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items", "page", "pageCount", "total"],
+  properties: {
+    items: { type: "array", items: codeListItemOpenApiSchema },
+    page: { type: "integer", minimum: 1 },
+    pageCount: { type: "integer", minimum: 1 },
+    total: { type: "integer", minimum: 0 },
+  },
+};
+
+function boxHistoryEventBranch(type: "box_added" | "box_displaced" | "box_removed"): SchemaObject {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "at", "boxId", "boxSscc"],
+    properties: {
+      type: { type: "string", enum: [type] },
+      at: dateTimeSchema,
+      boxId: uuidSchema,
+      boxSscc: { ...ssccSchema, nullable: true },
+    },
+  };
+}
+
+const codeHistoryEventOpenApiSchema: SchemaObject = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "at", "verdict", "shiftId", "terminalId", "operatorId"],
+      properties: {
+        type: { type: "string", enum: ["scanned"] },
+        at: dateTimeSchema,
+        verdict: { type: "string" },
+        shiftId: uuidSchema,
+        terminalId: { ...uuidSchema, nullable: true },
+        operatorId: { ...uuidSchema, nullable: true },
+      },
+    },
+    boxHistoryEventBranch("box_added"),
+    boxHistoryEventBranch("box_displaced"),
+    boxHistoryEventBranch("box_removed"),
+    {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "type",
+        "at",
+        "boxId",
+        "boxSscc",
+        "reason",
+        "disaggregationDocumentId",
+        "disaggregationDocNo",
+      ],
+      properties: {
+        type: { type: "string", enum: ["box_disassembled"] },
+        at: dateTimeSchema,
+        boxId: uuidSchema,
+        boxSscc: { ...ssccSchema, nullable: true },
+        reason: { type: "string", nullable: true },
+        disaggregationDocumentId: { ...uuidSchema, nullable: true },
+        disaggregationDocNo: { type: "string", nullable: true },
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "at", "orderId", "orderNo"],
+      properties: {
+        type: { type: "string", enum: ["pickup_locked"] },
+        at: dateTimeSchema,
+        orderId: uuidSchema,
+        orderNo: { type: "string" },
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "at", "orderId", "orderNo", "orderStatus"],
+      properties: {
+        type: { type: "string", enum: ["pickup_resolved"] },
+        at: dateTimeSchema,
+        orderId: uuidSchema,
+        orderNo: { type: "string" },
+        orderStatus: { type: "string", enum: ["punched", "writtenoff", "cancelled"] },
+      },
+    },
+  ],
+  discriminator: { propertyName: "type" },
+};
+
+export const codeCardOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "codeHash",
+    "gtin14",
+    "serial",
+    "productId",
+    "productName",
+    "status",
+    "productionDate",
+    "currentBox",
+    "history",
+  ],
+  properties: {
+    codeHash: codeHashSchema,
+    gtin14: { type: "string", pattern: "^[0-9]{14}$" },
+    serial: { type: "string" },
+    productId: { ...uuidSchema, nullable: true },
+    productName: { type: "string", nullable: true },
+    status: codeStatusSchema,
+    productionDate: productionDateSchema,
+    currentBox: {
+      type: "object",
+      nullable: true,
+      additionalProperties: false,
+      required: ["id", "sscc"],
+      properties: { id: uuidSchema, sscc: { ...ssccSchema, nullable: true } },
+    },
+    history: {
+      type: "array",
+      items: codeHistoryEventOpenApiSchema,
+      description: "Ascending by `at`.",
+    },
+  },
+};
+
+const boxCardItemOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["codeHash", "gtin14", "serial", "rawKm", "addedAt", "displacedAt", "removedAt"],
+  properties: {
+    codeHash: codeHashSchema,
+    gtin14: { type: "string", pattern: "^[0-9]{14}$", nullable: true },
+    serial: { type: "string", nullable: true },
+    rawKm: {
+      type: "string",
+      nullable: true,
+      description: "The FULL stored wire form, including the GS-separated crypto tail.",
+    },
+    addedAt: dateTimeSchema,
+    displacedAt: { ...dateTimeSchema, nullable: true },
+    removedAt: { ...dateTimeSchema, nullable: true },
+  },
+};
+
+export const boxCardOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "sscc",
+    "status",
+    "shiftId",
+    "productId",
+    "productName",
+    "terminalId",
+    "operatorId",
+    "openedAt",
+    "closedAt",
+    "disassembledAt",
+    "items",
+    "exceptions",
+    "pickupOrders",
+  ],
+  properties: {
+    id: uuidSchema,
+    sscc: { ...ssccSchema, nullable: true },
+    status: { type: "string", enum: ["open", "closed", "disassembled"] },
+    shiftId: uuidSchema,
+    productId: { ...uuidSchema, nullable: true },
+    productName: { type: "string", nullable: true },
+    terminalId: { ...uuidSchema, nullable: true },
+    operatorId: { ...uuidSchema, nullable: true },
+    openedAt: dateTimeSchema,
+    closedAt: { ...dateTimeSchema, nullable: true },
+    disassembledAt: { ...dateTimeSchema, nullable: true },
+    items: { type: "array", items: boxCardItemOpenApiSchema },
+    exceptions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "kind",
+          "reason",
+          "occurredAt",
+          "operatorId",
+          "disaggregationDocumentId",
+          "disaggregationDocNo",
+        ],
+        properties: {
+          kind: { type: "string" },
+          reason: { type: "string", nullable: true },
+          occurredAt: dateTimeSchema,
+          operatorId: { ...uuidSchema, nullable: true },
+          disaggregationDocumentId: { ...uuidSchema, nullable: true },
+          disaggregationDocNo: { type: "string", nullable: true },
+        },
+      },
+    },
+    pickupOrders: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["orderId", "orderNo", "status"],
+        properties: {
+          orderId: uuidSchema,
+          orderNo: { type: "string" },
+          status: { type: "string" },
+        },
+      },
+    },
+  },
+};

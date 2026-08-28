@@ -308,6 +308,36 @@ describe("ObjectStorageService", () => {
     await expect(storage.get("tenants/t/branding/a.webp")).rejects.toThrow(/5 MiB/);
   });
 
+  it("accepts an explicit bounded private-read limit without changing the 5 MiB default", async () => {
+    const exactEightMiB = Buffer.alloc(8 * 1024 * 1024);
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({
+        Body: exactEightMiB,
+        ContentLength: exactEightMiB.byteLength,
+        ContentType: "text/csv",
+      })
+      .mockResolvedValueOnce({
+        Body: Buffer.alloc(8 * 1024 * 1024 + 1),
+        ContentLength: 8 * 1024 * 1024 + 1,
+        ContentType: "text/csv",
+      });
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    const exact = await storage.get("tenants/t/inventories/i/imports/INTRODUCED/evidence.csv", {
+      maxBytes: 8 * 1024 * 1024,
+    });
+    expect(exact.contentType).toBe("text/csv");
+    expect(exact.body.byteLength).toBe(8 * 1024 * 1024);
+    expect(exact.body[0]).toBe(0);
+    expect(exact.body.at(-1)).toBe(0);
+    await expect(
+      storage.get("tenants/t/inventories/i/imports/INTRODUCED/oversized.csv", {
+        maxBytes: 8 * 1024 * 1024,
+      }),
+    ).rejects.toThrow(/8 MiB/);
+  });
+
   it("cancels an oversized web response body when destroy is unavailable", async () => {
     const cancel = vi.fn().mockResolvedValue(undefined);
     const send = vi.fn().mockResolvedValue({

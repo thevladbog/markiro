@@ -2,13 +2,13 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 describe("tenant billing notification delivery migration", () => {
-  it("appends one narrowly-scoped recipient uniqueness index after 0072", async () => {
+  it("appends one narrowly-scoped recipient uniqueness index after 0096", async () => {
     const [previousText, currentText, journalText, sqlText] = await Promise.all([
-      readFile(new URL("../migrations/meta/0072_snapshot.json", import.meta.url), "utf8"),
-      readFile(new URL("../migrations/meta/0073_snapshot.json", import.meta.url), "utf8"),
+      readFile(new URL("../migrations/meta/0096_snapshot.json", import.meta.url), "utf8"),
+      readFile(new URL("../migrations/meta/0097_snapshot.json", import.meta.url), "utf8"),
       readFile(new URL("../migrations/meta/_journal.json", import.meta.url), "utf8"),
       readFile(
-        new URL("../migrations/0073_tenant_billing_notification_delivery.sql", import.meta.url),
+        new URL("../migrations/0097_tenant_billing_notification_delivery.sql", import.meta.url),
         "utf8",
       ),
     ]);
@@ -22,9 +22,9 @@ describe("tenant billing notification delivery migration", () => {
     };
 
     expect(current.prevId).toBe(previous.id);
-    expect(journal.entries.at(-1)).toMatchObject({
-      idx: 73,
-      tag: "0073_tenant_billing_notification_delivery",
+    expect(journal.entries.find(({ idx }) => idx === 97)).toMatchObject({
+      idx: 97,
+      tag: "0097_tenant_billing_notification_delivery",
     });
     expect(
       current.tables["public.email_deliveries"]?.indexes[

@@ -4,17 +4,31 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Publish a new beta or retry the unpromoted latest beta
+        description: Publish, repair, or seed the one-time dual-origin beta baseline
         required: true
         type: choice
         default: publish
-        options: [publish, promote-existing]
+        options: [publish, promote-existing, seed-baseline]
+      owner_confirmation:
+        description: Type PUBLISH-STATION-BETA; only the repository owner may dispatch
+        required: true
+        type: string
       bump:
-        description: Beta version increment
+        description: Beta version increment for publish and seed-baseline
         required: true
         type: choice
         default: next-beta
         options: [next-beta, next-patch-beta, next-minor-beta, next-major-beta]
+      repair_tag:
+        description: Exact published beta tag; promote-existing only
+        required: false
+        type: string
+        default: ""
+      seed_infrastructure_evidence:
+        description: Exact applied DNS-disabled infrastructure evidence JSON; seed-baseline only
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -24,16 +38,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  authorize:
     if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Authorize station beta release owner
+        shell: bash
+        env:
+          OWNER_CONFIRMATION: ${{ inputs.owner_confirmation }}
+          RELEASE_ACTOR: ${{ github.actor }}
+          RELEASE_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$RELEASE_ACTOR" = "$RELEASE_OWNER"
+          test "$OWNER_CONFIRMATION" = "PUBLISH-STATION-BETA"
+
+  build:
+    if: github.ref == 'refs/heads/main'
+    needs: authorize
     runs-on: windows-latest
     timeout-minutes: 60
     environment: station-beta
     permissions:
       actions: read
-      contents: write
+      contents: read
     env:
       VITE_STATION_API_URL: https://admin.markiro.app
+      STATION_RELEASE_REPOSITORY: thevladbog/markiro-station-releases
 
     steps:
       - name: Checkout the dispatch SHA
@@ -58,10 +92,10 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          test "$GITHUB_SHA" = "$(git rev-parse origin/main)"
           ci_ok=false
           for attempt in {1..90}; do
-            ci_state="$(gh run list --workflow ci.yml --branch main --commit "$GITHUB_SHA" --limit 20 --json status,conclusion,headSha --jq '.[] | select(.headSha == "'"$GITHUB_SHA"'") | [.status, (.conclusion // "")] | @tsv' | head -n 1)"
+            ci_state="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --commit "$GITHUB_SHA" --limit 20 --json status,conclusion,headSha --jq '.[] | select(.headSha == "'"$GITHUB_SHA"'") | [.status, (.conclusion // "")] | @tsv' | head -n 1)"
             ci_status="${ci_state%%$'\t'*}"
             ci_conclusion="${ci_state#*$'\t'}"
             if [ "$ci_status" = "completed" ]; then
@@ -77,8 +111,30 @@ jobs:
           done
           test "$ci_ok" = true
 
+      - name: Validate release mode
+        env:
+          MODE: ${{ inputs.mode }}
+          REPAIR_TAG: ${{ inputs.repair_tag }}
+          SEED_INFRASTRUCTURE_EVIDENCE: ${{ inputs.seed_infrastructure_evidence }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$MODE" = "publish" -o "$MODE" = "promote-existing" -o "$MODE" = "seed-baseline" || exit 1
+          if [ "$MODE" = "promote-existing" ]; then
+            [[ "$REPAIR_TAG" =~ ^station-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.([1-9][0-9]*)$ ]] || exit 1
+            test -z "$SEED_INFRASTRUCTURE_EVIDENCE" || exit 1
+          elif [ "$MODE" = "seed-baseline" ]; then
+            test -z "$REPAIR_TAG" || exit 1
+            test -n "$SEED_INFRASTRUCTURE_EVIDENCE" || exit 1
+            test "$(printf '%s' "$SEED_INFRASTRUCTURE_EVIDENCE" | wc -c)" -le 262144 || exit 1
+          else
+            test -z "$REPAIR_TAG" || exit 1
+            test -z "$SEED_INFRASTRUCTURE_EVIDENCE" || exit 1
+          fi
+
       - name: Prepare deterministic beta version
-        if: inputs.mode == 'publish'
+        id: release-state
+        if: inputs.mode == 'publish' || inputs.mode == 'seed-baseline'
         shell: bash
         run: |
           set -euo pipefail
@@ -97,28 +153,12 @@ jobs:
           printf 'version=%s\ntag=%s\nrelease_sha=%s\n' "$version" "$tag" "$release_sha" >> "$GITHUB_OUTPUT"
           printf 'version=%s\ntag=%s\nrelease_sha=%s\n' "$version" "$tag" "$release_sha" >> "$GITHUB_ENV"
 
-      - name: Resolve existing beta for promotion retry
-        if: inputs.mode == 'promote-existing'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "${{ inputs.bump }}" = "next-beta" -o "${{ inputs.bump }}" = "next-patch-beta" -o "${{ inputs.bump }}" = "next-minor-beta" -o "${{ inputs.bump }}" = "next-major-beta"
-          tag="$(gh release list --repo "$GITHUB_REPOSITORY" --prerelease --limit 100 --json tagName,isDraft --jq '[.[] | select(.isDraft == false) | select(.tagName | test("^station-v[0-9]+\\.[0-9]+\\.[0-9]+-beta\\.[0-9]+$"))] | sort_by(.tagName | capture("^station-v(?<major>[0-9]+)\\.(?<minor>[0-9]+)\\.(?<patch>[0-9]+)-beta\\.(?<beta>[0-9]+)$") | [.major|tonumber, .minor|tonumber, .patch|tonumber, .beta|tonumber]) | last | .tagName')"
-          test -n "$tag"
-          version="${tag#station-v}"
-          release_sha="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq .targetCommitish)"
-          printf 'version=%s\ntag=%s\nrelease_sha=%s\n' "$version" "$tag" "$release_sha" >> "$GITHUB_OUTPUT"
-          printf 'version=%s\ntag=%s\nrelease_sha=%s\n' "$version" "$tag" "$release_sha" >> "$GITHUB_ENV"
-
       - name: Install locked workspace dependencies
-        if: inputs.mode == 'publish' || inputs.mode == 'promote-existing'
         shell: bash
         run: pnpm install --frozen-lockfile
 
       - name: Build and verify station
-        if: inputs.mode == 'publish'
+        if: inputs.mode == 'publish' || inputs.mode == 'seed-baseline'
         shell: bash
         run: |
           set -euo pipefail
@@ -129,15 +169,17 @@ jobs:
           pnpm --filter @markiro/station typecheck
           pnpm --filter @markiro/station lint
           pnpm --filter @markiro/station build
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            cargo test --manifest-path apps/station/src-tauri/Cargo.toml --features legacy-github-updater
+          fi
           pnpm test:station-release:contract
           git diff --check
 
       - name: Verify production station pairing CORS
-        if: inputs.mode == 'publish' || inputs.mode == 'promote-existing'
         run: pnpm verify:station-production-cors
 
       - name: Build signed Windows NSIS updater artifacts
-        if: inputs.mode == 'publish'
+        if: inputs.mode == 'publish' || inputs.mode == 'seed-baseline'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -149,90 +191,548 @@ jobs:
           signing_key_file="$RUNNER_TEMP/station-updater.key"
           trap 'rm -f "$signing_key_file"' EXIT
           printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > "$signing_key_file"
+          chmod 600 "$signing_key_file"
           export TAURI_SIGNING_PRIVATE_KEY="$signing_key_file"
-          pnpm --filter @markiro/station tauri build
+          set --
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            set -- --features legacy-github-updater --config src-tauri/tauri.beta-seed.conf.json
+          fi
+          pnpm --filter @markiro/station tauri build "$@"
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            node tools/station-release/verify-seed-updater-binary.mjs apps/station/src-tauri/target/release/markiro-station.exe
+          fi
           bundle_dir="apps/station/src-tauri/target/release/bundle/nsis"
           installer="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.exe' -print -quit)"
-          # Tauri 2.10 emits the signed NSIS installer itself as the updater payload.
           bundle="$installer"
           signature="$bundle.sig"
           test -f "$installer" -a -f "$bundle" -a -f "$signature"
-          mkdir -p "$RUNNER_TEMP/station-input"
+          rm -rf "$RUNNER_TEMP/station-input"
+          mkdir "$RUNNER_TEMP/station-input"
           cp "$installer" "$RUNNER_TEMP/station-input/markiro-station-${version}-windows-x86_64-setup.exe"
           cp "$bundle" "$RUNNER_TEMP/station-input/markiro-station-${version}-windows-x86_64.nsis.zip"
           cp "$signature" "$RUNNER_TEMP/station-input/markiro-station-${version}-windows-x86_64.nsis.zip.sig"
 
-      - name: Stage canonical release assets
-        if: inputs.mode == 'publish'
+      - name: Stage and validate dual-origin release trees
+        if: inputs.mode == 'publish' || inputs.mode == 'seed-baseline'
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf "$RUNNER_TEMP/station-staged"
-          node tools/station-release/artifacts.mjs stage beta \
-            "$RUNNER_TEMP/station-input" "$RUNNER_TEMP/station-staged" "$version" \
-            "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$GITHUB_SHA" "$release_sha"
-          node tools/station-release/artifacts.mjs validate beta "$RUNNER_TEMP/station-staged" "$version"
+          rm -rf "$RUNNER_TEMP/station-github" "$RUNNER_TEMP/station-yandex" "$RUNNER_TEMP/station-candidate"
+          published_at="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          node tools/station-release/artifacts.mjs stage-origin github beta \
+            "$RUNNER_TEMP/station-input" "$RUNNER_TEMP/station-github" "$version" \
+            "$published_at" "$GITHUB_SHA" "$release_sha"
+          node tools/station-release/artifacts.mjs stage-origin yandex beta \
+            "$RUNNER_TEMP/station-input" "$RUNNER_TEMP/station-yandex" "$version" \
+            "$published_at" "$GITHUB_SHA" "$release_sha"
+          node tools/station-release/artifacts.mjs validate-origin github beta \
+            "$RUNNER_TEMP/station-github" "$version"
+          node tools/station-release/artifacts.mjs validate-origin yandex beta \
+            "$RUNNER_TEMP/station-yandex" "$version"
+          node tools/station-release/artifacts.mjs compare-origins \
+            "$RUNNER_TEMP/station-github" "$RUNNER_TEMP/station-yandex" beta "$version"
+          mkdir "$RUNNER_TEMP/station-candidate"
+          mv "$RUNNER_TEMP/station-github" "$RUNNER_TEMP/station-candidate/github"
+          mv "$RUNNER_TEMP/station-yandex" "$RUNNER_TEMP/station-candidate/yandex"
+          git bundle create "$RUNNER_TEMP/station-candidate/source.bundle" \
+            HEAD "^$GITHUB_SHA"
+          printf 'version=%s\ntag=%s\nrelease_sha=%s\n' \
+            "$version" "$tag" "$release_sha" > "$RUNNER_TEMP/station-candidate/release-state.txt"
 
-      - name: Publish immutable version release
-        id: immutable-release
-        if: inputs.mode == 'publish'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          candidate_ref="station-release-candidate-${GITHUB_RUN_ID}"
-          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          git -c "http.extraheader=$auth_header" push origin "HEAD:refs/heads/$candidate_ref"
-          printf 'candidate_ref=%s\n' "$candidate_ref" >> "$GITHUB_ENV"
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --prerelease --target "$release_sha" --title "Markiro Station $version" --notes-file "$RUNNER_TEMP/station-staged/release-notes.md"
-          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-staged"/*
-          rm -rf "$RUNNER_TEMP/station-downloaded"
-          mkdir "$RUNNER_TEMP/station-downloaded"
-          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/station-downloaded"
-          node tools/station-release/artifacts.mjs validate beta "$RUNNER_TEMP/station-downloaded" "$version"
-          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
-          echo "candidate_ref=$candidate_ref" >> "$GITHUB_OUTPUT"
+      - name: Upload dual-origin release candidate
+        if: inputs.mode == 'publish' || inputs.mode == 'seed-baseline'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: station-beta-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/station-candidate
+          if-no-files-found: error
+          retention-days: 1
 
-      - name: Prepare existing beta assets for promotion
-        if: inputs.mode == 'promote-existing'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf "$RUNNER_TEMP/station-staged"
-          mkdir "$RUNNER_TEMP/station-staged"
-          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/station-staged"
-          node tools/station-release/artifacts.mjs validate beta "$RUNNER_TEMP/station-staged" "$version"
+  release:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 60
+    environment: station-release
+    permissions:
+      actions: read
+      contents: write
+    env:
+      VITE_STATION_API_URL: https://admin.markiro.app
+      STATION_RELEASE_REPOSITORY: thevladbog/markiro-station-releases
 
-      - name: Promote beta channel
-        if: inputs.mode == 'publish' || inputs.mode == 'promote-existing'
+    steps:
+      - name: Checkout release tooling
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Initialize bounded beta release summary
         env:
-          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ inputs.mode }}
         shell: bash
         run: |
           set -euo pipefail
-          if ! gh release view station-beta-channel --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create station-beta-channel --repo "$GITHUB_REPOSITORY" --prerelease --title "Markiro Station beta channel" --notes "Mutable beta channel pointer; immutable releases remain versioned."
+          node tools/station-release/release-summary.mjs beta-init \
+            "$MODE" "$RUNNER_TEMP/station-beta-release-summary.json"
+
+      - name: Install locked publisher dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Download dual-origin release candidate
+        if: inputs.mode == 'publish' || inputs.mode == 'seed-baseline'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: station-beta-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/station-candidate
+
+      - name: Resolve release candidate
+        env:
+          GH_TOKEN: ${{ secrets.STATION_RELEASE_REPOSITORY_TOKEN }}
+          REPAIR_TAG: ${{ inputs.repair_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.mode }}" = "promote-existing" ]; then
+            tag="$REPAIR_TAG"
+            version="${tag#station-v}"
+            release_json="$RUNNER_TEMP/station-beta-repair-release.json"
+            gh release view "$tag" --repo "$STATION_RELEASE_REPOSITORY" \
+              --json tagName,isDraft,isPrerelease,targetCommitish > "$release_json"
+            node -e 'const r=require(process.argv[1]);if(r.tagName!==process.argv[2]||r.isDraft||!r.isPrerelease||!/^[0-9a-f]{40}$/.test(r.targetCommitish))process.exit(1)' \
+              "$release_json" "$tag"
+            distribution_sha="$(node -e 'const r=require(process.argv[1]);process.stdout.write(r.targetCommitish)' "$release_json")"
+            gh api "repos/$STATION_RELEASE_REPOSITORY/commits/$distribution_sha" >/dev/null
+            rm -rf "$RUNNER_TEMP/station-github-public"
+            env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+              download-release beta "$version" "$RUNNER_TEMP/station-github-public"
+            node tools/station-release/artifacts.mjs validate-origin github beta \
+              "$RUNNER_TEMP/station-github-public" "$version"
+            release_sha="$(node -e 'const e=require(process.argv[1]);process.stdout.write(e.releaseSha)' \
+              "$RUNNER_TEMP/station-github-public/release-evidence.json")"
           else
-            rm -rf "$RUNNER_TEMP/station-channel-backup"
-            mkdir "$RUNNER_TEMP/station-channel-backup"
-            gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP/station-channel-backup" || true
+            state="$RUNNER_TEMP/station-candidate/release-state.txt"
+            test -f "$state" -a ! -L "$state"
+            version="$(sed -n 's/^version=//p' "$state")"
+            tag="$(sed -n 's/^tag=//p' "$state")"
+            release_sha="$(sed -n 's/^release_sha=//p' "$state")"
+            git fetch "$RUNNER_TEMP/station-candidate/source.bundle" "$release_sha"
+            test "$(git rev-parse FETCH_HEAD)" = "$release_sha"
+            git checkout --detach "$release_sha"
+            node tools/station-release/artifacts.mjs validate-origin github beta \
+              "$RUNNER_TEMP/station-candidate/github" "$version"
+            node tools/station-release/artifacts.mjs validate-origin yandex beta \
+              "$RUNNER_TEMP/station-candidate/yandex" "$version"
+            node tools/station-release/artifacts.mjs compare-origins \
+              "$RUNNER_TEMP/station-candidate/github" "$RUNNER_TEMP/station-candidate/yandex" \
+              beta "$version"
           fi
-          cp "$RUNNER_TEMP/station-staged/latest.json" "$RUNNER_TEMP/latest.json"
-          if ! gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/latest.json" --clobber; then
-            if [ -f "$RUNNER_TEMP/station-channel-backup/latest.json" ]; then
-              gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-backup/latest.json" --clobber
-            fi
+          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.([1-9][0-9]*)$ ]]
+          test "$tag" = "station-v$version"
+          [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
+          if [ "${{ inputs.mode }}" = "promote-existing" ]; then
+            test "$(git rev-parse "$tag^{commit}")" = "$release_sha"
+          fi
+          printf 'version=%s\ntag=%s\nrelease_sha=%s\n' \
+            "$version" "$tag" "$release_sha" >> "$GITHUB_ENV"
+
+      - name: Record beta release summary provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/station-release/release-summary.mjs beta-update \
+            "$RUNNER_TEMP/station-beta-release-summary.json" \
+            version "$version" \
+            sourceSha "$GITHUB_SHA" \
+            releaseSha "$release_sha"
+
+      - name: Publish immutable GitHub beta
+        if: inputs.mode == 'publish' || inputs.mode == 'seed-baseline'
+        env:
+          GH_TOKEN: ${{ secrets.STATION_RELEASE_REPOSITORY_TOKEN }}
+          SOURCE_REPOSITORY_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          github_tree="$RUNNER_TEMP/station-candidate/github"
+          candidate_ref="station-release-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if gh release view "$tag" --repo "$STATION_RELEASE_REPOSITORY" >/dev/null 2>&1; then
+            echo "immutable GitHub release already exists" >&2
             exit 1
           fi
-          mkdir "$RUNNER_TEMP/station-channel-verify"
-          if ! gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP/station-channel-verify" || ! cmp "$RUNNER_TEMP/station-channel-verify/latest.json" "$RUNNER_TEMP/station-staged/latest.json"; then
-            if [ -f "$RUNNER_TEMP/station-channel-backup/latest.json" ]; then
-              gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-backup/latest.json" --clobber
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" github-publication-attempted
+          source_auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$SOURCE_REPOSITORY_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=$source_auth_header" push origin "HEAD:refs/heads/$candidate_ref"
+          distribution_sha="$(gh api "repos/$STATION_RELEASE_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          [[ "$distribution_sha" =~ ^[0-9a-f]{40}$ ]]
+          gh release create "$tag" --repo "$STATION_RELEASE_REPOSITORY" --draft --prerelease \
+            --target "$distribution_sha" --title "Markiro Station $version" \
+            --notes-file "$github_tree/release-notes.md"
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" github-draft-created
+          gh release upload "$tag" --repo "$STATION_RELEASE_REPOSITORY" "$github_tree"/*
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" github-assets-uploaded
+          rm -rf "$RUNNER_TEMP/station-github-public"
+          mkdir "$RUNNER_TEMP/station-github-public"
+          gh release download "$tag" --repo "$STATION_RELEASE_REPOSITORY" \
+            --dir "$RUNNER_TEMP/station-github-public"
+          node tools/station-release/artifacts.mjs validate-origin github beta \
+            "$RUNNER_TEMP/station-github-public" "$version"
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" github-draft-assets-validated
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" github-undraft-attempted
+          gh release edit "$tag" --repo "$STATION_RELEASE_REPOSITORY" --draft=false
+          rm -rf "$RUNNER_TEMP/station-github-public"
+          env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+            download-release beta "$version" "$RUNNER_TEMP/station-github-public"
+          node tools/station-release/artifacts.mjs validate-origin github beta \
+            "$RUNNER_TEMP/station-github-public" "$version"
+          git tag "$tag" "$release_sha"
+          git -c "http.extraheader=$source_auth_header" push origin "refs/tags/$tag"
+          test "$(git rev-parse "$tag^{commit}")" = "$release_sha"
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" github-public-validated
+
+      - name: Publish immutable Yandex beta
+        if: inputs.mode == 'publish' || inputs.mode == 'seed-baseline'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.YANDEX_STATION_RELEASE_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}
+          YANDEX_STATION_RELEASE_BUCKET: ${{ vars.YANDEX_STATION_RELEASE_BUCKET }}
+          YANDEX_STATION_RELEASE_ENDPOINT: ${{ vars.YANDEX_STATION_RELEASE_ENDPOINT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          echo "::add-mask::$AWS_ACCESS_KEY_ID"
+          echo "::add-mask::$AWS_SECRET_ACCESS_KEY"
+          cleanup_credentials() {
+            unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+          }
+          trap cleanup_credentials EXIT
+          trap 'exit 129' HUP
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          unset AWS_SESSION_TOKEN
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" yandex-publication-attempted
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            node tools/station-release/yandex-publisher.mjs prepare-seed-immutable \
+              "$RUNNER_TEMP/station-candidate/yandex" beta "$version"
+          else
+            node tools/station-release/yandex-publisher.mjs publish-immutable \
+              "$RUNNER_TEMP/station-candidate/yandex" beta "$version"
+          fi
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" yandex-immutable-published
+
+      - name: Download and validate public immutable trees
+        if: inputs.mode == 'publish' || inputs.mode == 'promote-existing' || inputs.mode == 'seed-baseline'
+        env:
+          GH_TOKEN: ${{ secrets.STATION_RELEASE_REPOSITORY_TOKEN }}
+          YANDEX_STATION_RELEASE_BUCKET: ${{ vars.YANDEX_STATION_RELEASE_BUCKET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          github_public="$RUNNER_TEMP/station-github-public"
+          yandex_public="$RUNNER_TEMP/station-yandex-public"
+          rm -rf "$github_public" "$yandex_public"
+          mkdir "$yandex_public"
+          if [ "${{ inputs.mode }}" = "promote-existing" ]; then
+            node tools/station-release/release-summary.mjs beta-transition \
+              "$RUNNER_TEMP/station-beta-release-summary.json" existing-public-validation-started
+          fi
+          distribution_sha="$(gh release view "$tag" --repo "$STATION_RELEASE_REPOSITORY" \
+            --json targetCommitish --jq .targetCommitish)"
+          gh api "repos/$STATION_RELEASE_REPOSITORY/commits/$distribution_sha" >/dev/null
+          test "$(gh release view "$tag" --repo "$STATION_RELEASE_REPOSITORY" \
+            --json tagName,isDraft,isPrerelease,targetCommitish \
+            --jq 'select(.isDraft == false and .isPrerelease == true and .targetCommitish == "'"$distribution_sha"'") | .tagName')" = "$tag"
+          env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+            download-release beta "$version" "$github_public"
+          installer="markiro-station-${version}-windows-x86_64-setup.exe"
+          bundle="markiro-station-${version}-windows-x86_64.nsis.zip"
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            [[ "$YANDEX_STATION_RELEASE_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
+            [[ "$YANDEX_STATION_RELEASE_BUCKET" != *..* ]]
+            yandex_release_base="https://storage.yandexcloud.net/$YANDEX_STATION_RELEASE_BUCKET/station/beta/releases/$version"
+          else
+            yandex_release_base="https://releases.markiro.app/station/beta/releases/$version"
+          fi
+          for asset in \
+            "$installer" \
+            "$bundle" \
+            "$bundle.sig" \
+            latest.json \
+            SHA256SUMS \
+            release-evidence.json \
+            release-notes.md; do
+            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
+              --output "$yandex_public/$asset" \
+              "$yandex_release_base/$asset"
+          done
+          node tools/station-release/artifacts.mjs validate-origin github beta \
+            "$github_public" "$version"
+          node tools/station-release/artifacts.mjs validate-origin yandex beta \
+            "$yandex_public" "$version"
+          node tools/station-release/artifacts.mjs compare-origins \
+            "$github_public" "$yandex_public" beta "$version"
+          for evidence_path in \
+            "$github_public/release-evidence.json" \
+            "$yandex_public/release-evidence.json"; do
+            RELEASE_SHA="$release_sha" node -e '
+              const e=require(process.argv[1]);
+              if(e.releaseSha!==process.env.RELEASE_SHA)process.exit(1)
+            ' "$evidence_path"
+          done
+          sha256_file() {
+            node -e 'const{createHash}=require("node:crypto"),{readFileSync}=require("node:fs");process.stdout.write(createHash("sha256").update(readFileSync(process.argv[1])).digest("hex"))' "$1"
+          }
+          github_manifest_sha256="$(sha256_file "$github_public/latest.json")"
+          yandex_manifest_sha256="$(sha256_file "$yandex_public/latest.json")"
+          github_evidence_sha256="$(sha256_file "$github_public/release-evidence.json")"
+          yandex_evidence_sha256="$(sha256_file "$yandex_public/release-evidence.json")"
+          installer_sha256="$(sha256_file "$github_public/$installer")"
+          bundle_sha256="$(sha256_file "$github_public/$bundle")"
+          signature_sha256="$(sha256_file "$github_public/$bundle.sig")"
+          node tools/station-release/release-summary.mjs beta-update \
+            "$RUNNER_TEMP/station-beta-release-summary.json" \
+            githubManifestSha256 "$github_manifest_sha256" \
+            yandexManifestSha256 "$yandex_manifest_sha256" \
+            githubEvidenceSha256 "$github_evidence_sha256" \
+            yandexEvidenceSha256 "$yandex_evidence_sha256" \
+            installerSha256 "$installer_sha256" \
+            bundleSha256 "$bundle_sha256" \
+            signatureSha256 "$signature_sha256"
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" both-public-validated
+
+      - name: Promote beta mutable targets
+        env:
+          GH_TOKEN: ${{ secrets.STATION_RELEASE_REPOSITORY_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.YANDEX_STATION_RELEASE_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY }}
+          YANDEX_STATION_RELEASE_BUCKET: ${{ vars.YANDEX_STATION_RELEASE_BUCKET }}
+          YANDEX_STATION_RELEASE_ENDPOINT: ${{ vars.YANDEX_STATION_RELEASE_ENDPOINT }}
+          SEED_INFRASTRUCTURE_EVIDENCE: ${{ inputs.seed_infrastructure_evidence }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          echo "::add-mask::$AWS_ACCESS_KEY_ID"
+          echo "::add-mask::$AWS_SECRET_ACCESS_KEY"
+          unset AWS_SESSION_TOKEN
+          github_may_have_changed=false
+          github_channel_preexisting=false
+          yandex_may_have_changed=false
+          backup_complete=false
+          restoration_failed=false
+          yandex_backup="$RUNNER_TEMP/station-yandex-channel-backup"
+
+          rollback_transaction() {
+            status="$?"
+            trap - EXIT HUP INT TERM
+            if [ "$status" -eq 0 ]; then
+              unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+              return 0
             fi
-            exit 1
+            if [ "$yandex_may_have_changed" = true ]; then
+              if ! node tools/station-release/yandex-publisher.mjs rollback beta "$yandex_backup"; then
+                restoration_failed=true
+              fi
+            fi
+            if [ "$github_may_have_changed" = true ]; then
+              if [ "$github_channel_preexisting" = false ]; then
+                if ! gh release delete station-beta-channel --repo "$STATION_RELEASE_REPOSITORY" \
+                  --cleanup-tag --yes; then
+                  restoration_failed=true
+                fi
+              else
+                if ! gh release upload station-beta-channel --repo "$STATION_RELEASE_REPOSITORY" \
+                  "$RUNNER_TEMP/station-github-channel-backup/latest.json" --clobber; then
+                  restoration_failed=true
+                else
+                  if ! rm -rf "$RUNNER_TEMP/station-github-rollback-verify" || \
+                    ! mkdir "$RUNNER_TEMP/station-github-rollback-verify"; then
+                    restoration_failed=true
+                  elif ! env -u GH_TOKEN -u GITHUB_TOKEN node \
+                    tools/station-release/github-public.mjs download-channel-exact beta \
+                    "$RUNNER_TEMP/station-github-channel-backup/latest.json" \
+                    "$RUNNER_TEMP/station-github-rollback-verify/latest.json"; then
+                    restoration_failed=true
+                  fi
+                fi
+              fi
+            fi
+            unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+            if [ "$restoration_failed" = true ]; then
+              if [ "$backup_complete" = true ]; then
+                node tools/station-release/release-summary.mjs beta-transition \
+                  "$RUNNER_TEMP/station-beta-release-summary.json" restoration-failed
+              fi
+              echo "station release mutable restoration failed" >&2
+              exit 86
+            fi
+            if [ "$backup_complete" = true ] && \
+              { [ "$github_may_have_changed" = true ] || [ "$yandex_may_have_changed" = true ]; }; then
+              node tools/station-release/release-summary.mjs beta-transition \
+                "$RUNNER_TEMP/station-beta-release-summary.json" restored
+            fi
+            exit "$status"
+          }
+          trap rollback_transaction EXIT
+          trap 'exit 129' HUP
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          rm -rf "$RUNNER_TEMP/station-github-channel-backup"
+          mkdir "$RUNNER_TEMP/station-github-channel-backup"
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            if gh release view station-beta-channel --repo "$STATION_RELEASE_REPOSITORY" \
+              >/dev/null 2>&1; then
+              echo "station beta channel already exists before baseline seed" >&2
+              exit 1
+            fi
+          else
+            test "$(gh release view station-beta-channel --repo "$STATION_RELEASE_REPOSITORY" \
+              --json tagName,isDraft,isPrerelease \
+              --jq 'select(.isDraft == false and .isPrerelease == true) | .tagName')" = \
+              "station-beta-channel"
+            github_channel_preexisting=true
+            env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+              download-channel beta \
+              "$RUNNER_TEMP/station-github-channel-backup/latest.json"
+            test -f "$RUNNER_TEMP/station-github-channel-backup/latest.json"
+          fi
+
+          github_tree="$RUNNER_TEMP/station-github-public"
+          test -d "$github_tree"
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            node tools/station-release/yandex-publisher.mjs preflight-seed-mutables \
+              "$RUNNER_TEMP/station-yandex-public" beta "$version"
+          else
+            rm -rf "$yandex_backup"
+            node tools/station-release/yandex-publisher.mjs backup-mutables beta "$yandex_backup"
+          fi
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" mutable-backup-complete
+          backup_complete=true
+
+          rm -rf "$RUNNER_TEMP/station-github-channel-upload"
+          mkdir "$RUNNER_TEMP/station-github-channel-upload"
+          cp "$github_tree/latest.json" "$RUNNER_TEMP/station-github-channel-upload/latest.json"
+          github_may_have_changed=true
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            distribution_sha="$(gh release view "$tag" --repo "$STATION_RELEASE_REPOSITORY" \
+              --json targetCommitish --jq .targetCommitish)"
+            gh release create station-beta-channel --repo "$STATION_RELEASE_REPOSITORY" \
+              --prerelease --target "$distribution_sha" --title "Markiro Station beta channel" \
+              "$RUNNER_TEMP/station-github-channel-upload/latest.json"
+          else
+            gh release upload station-beta-channel --repo "$STATION_RELEASE_REPOSITORY" \
+              "$RUNNER_TEMP/station-github-channel-upload/latest.json" --clobber
+          fi
+          rm -rf "$RUNNER_TEMP/station-github-channel-verify"
+          mkdir "$RUNNER_TEMP/station-github-channel-verify"
+          env -u GH_TOKEN -u GITHUB_TOKEN node tools/station-release/github-public.mjs \
+            download-channel-exact beta "$github_tree/latest.json" \
+            "$RUNNER_TEMP/station-github-channel-verify/latest.json"
+          node tools/station-release/release-summary.mjs beta-transition \
+            "$RUNNER_TEMP/station-beta-release-summary.json" github-manifest-promoted
+
+          if [ "${{ inputs.mode }}" = "seed-baseline" ]; then
+            release_metadata="$RUNNER_TEMP/station-seed-release.json"
+            infrastructure_evidence="$RUNNER_TEMP/station-seed-infrastructure.json"
+            seed_backup="$RUNNER_TEMP/station-yandex-seed-backup"
+            bootstrap_record="$RUNNER_TEMP/station-bootstrap-record.json"
+            test -n "$SEED_INFRASTRUCTURE_EVIDENCE"
+            printf '%s' "$SEED_INFRASTRUCTURE_EVIDENCE" > "$infrastructure_evidence"
+            chmod 600 "$infrastructure_evidence"
+            gh release view "$tag" --repo "$STATION_RELEASE_REPOSITORY" \
+              --json tagName,isDraft,isPrerelease,targetCommitish > "$release_metadata"
+            chmod 600 "$release_metadata"
+            rm -rf "$seed_backup"
+            rm -f "$bootstrap_record"
+            node tools/station-release/yandex-publisher.mjs seed-baseline \
+              "$github_tree" "$tag" "$release_metadata" "$infrastructure_evidence" beta \
+              "$seed_backup" "$bootstrap_record" --confirm-empty-channel-bootstrap
+            node tools/station-release/release-summary.mjs beta-transition \
+              "$RUNNER_TEMP/station-beta-release-summary.json" yandex-manifest-promoted
+            node tools/station-release/release-summary.mjs beta-transition \
+              "$RUNNER_TEMP/station-beta-release-summary.json" all-promoted
+          else
+            yandex_may_have_changed=true
+            node tools/station-release/yandex-publisher.mjs promote \
+              "$RUNNER_TEMP/station-yandex-public" beta "$yandex_backup"
+            rm -rf "$RUNNER_TEMP/station-yandex-channel-verify"
+            mkdir "$RUNNER_TEMP/station-yandex-channel-verify"
+            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
+              --output "$RUNNER_TEMP/station-yandex-channel-verify/latest.json" \
+              "https://releases.markiro.app/station/beta/latest.json"
+            curl --fail --silent --show-error --max-redirs 0 --connect-timeout 15 --retry 3 --retry-all-errors --retry-max-time 30 \
+              --output "$RUNNER_TEMP/station-yandex-channel-verify/download" \
+              "https://releases.markiro.app/station/beta/download"
+            cmp "$RUNNER_TEMP/station-yandex-channel-verify/latest.json" \
+              "$RUNNER_TEMP/station-yandex-public/latest.json"
+            node tools/station-release/release-summary.mjs beta-transition \
+              "$RUNNER_TEMP/station-beta-release-summary.json" yandex-manifest-promoted
+            cmp "$RUNNER_TEMP/station-yandex-channel-verify/download" \
+              "$RUNNER_TEMP/station-yandex-public/markiro-station-${version}-windows-x86_64-setup.exe"
+            node tools/station-release/release-summary.mjs beta-transition \
+              "$RUNNER_TEMP/station-beta-release-summary.json" all-promoted
+          fi
+
+      - name: Preserve beta baseline recovery evidence
+        if: always() && inputs.mode == 'seed-baseline'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: station-beta-baseline-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/station-yandex-seed-backup
+            ${{ runner.temp }}/station-bootstrap-record.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Write bounded beta release summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          summary_state="$RUNNER_TEMP/station-beta-release-summary.json"
+          if [ -f "$summary_state" ] && [ ! -L "$summary_state" ]; then
+            node tools/station-release/release-summary.mjs beta-render \
+              "$summary_state" "$GITHUB_STEP_SUMMARY"
+          else
+            printf '%s\n' \
+              '## Markiro Station beta publication' \
+              '- Mode: `not-recorded`' \
+              '- Version: `not-recorded`' \
+              '- Source commit: `not-recorded`' \
+              '- Release commit: `not-recorded`' \
+              '- GitHub manifest SHA-256: `not-recorded`' \
+              '- Yandex manifest SHA-256: `not-recorded`' \
+              '- GitHub evidence SHA-256: `not-recorded`' \
+              '- Yandex evidence SHA-256: `not-recorded`' \
+              '- Installer SHA-256: `not-recorded`' \
+              '- Updater bundle SHA-256: `not-recorded`' \
+              '- Detached signature SHA-256: `not-recorded`' \
+              '- Immutable publication: `not-started`' \
+              '- Promotion: `not-started`' \
+              '- Rollback/restoration: `not-required`' \
+              '- Outcome: `not-completed`' \
+              '- External acceptance: `NOT_RUN`.' >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Cleanup owned candidate ref and temporary release material
@@ -242,6 +742,25 @@ jobs:
         shell: bash
         run: |
           set +e
-          candidate_ref="station-release-candidate-${GITHUB_RUN_ID}"
-          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$candidate_ref"
-          rm -rf "$RUNNER_TEMP/station-input" "$RUNNER_TEMP/station-staged" "$RUNNER_TEMP/station-downloaded" "$RUNNER_TEMP/station-channel-backup" "$RUNNER_TEMP/station-channel-verify" "$RUNNER_TEMP/latest.json"
+          if [ "${{ inputs.mode }}" != "promote-existing" ]; then
+            candidate_ref="station-release-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            if [ -n "${tag:-}" ] && \
+              gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$candidate_ref"
+            else
+              echo "Preserving the private candidate ref until its source tag exists" >&2
+            fi
+          fi
+          unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+          rm -rf "$RUNNER_TEMP/station-candidate" \
+            "$RUNNER_TEMP/station-github-public" \
+            "$RUNNER_TEMP/station-yandex-public" \
+            "$RUNNER_TEMP/station-github-channel-backup" \
+            "$RUNNER_TEMP/station-github-channel-upload" \
+            "$RUNNER_TEMP/station-github-channel-verify" \
+            "$RUNNER_TEMP/station-github-rollback-verify" \
+            "$RUNNER_TEMP/station-yandex-channel-backup" \
+            "$RUNNER_TEMP/station-yandex-channel-verify" \
+            "$RUNNER_TEMP/station-beta-repair-release.json" \
+            "$RUNNER_TEMP/station-seed-release.json" \
+            "$RUNNER_TEMP/station-seed-infrastructure.json"

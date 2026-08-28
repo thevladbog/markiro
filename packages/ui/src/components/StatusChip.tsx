@@ -19,6 +19,8 @@ export interface StatusChipProps extends Omit<HTMLAttributes<HTMLSpanElement>, "
   status: StatusChipStatus;
   /** Override the default label text (e.g. for translated copy) */
   label?: ReactNode;
+  /** Override the status glyph; `null` renders a glyphless chip. */
+  glyph?: ReactNode | null;
   /** Fill with the solid status color (for dark panels) */
   solid?: boolean;
 }
@@ -72,12 +74,14 @@ const STATUS: Record<StatusChipStatus, StatusConfig> = {
 export function StatusChip({
   status,
   label,
+  glyph,
   solid = false,
   className,
   style,
   ...rest
 }: StatusChipProps) {
   const config = STATUS[status];
+  const resolvedGlyph = glyph === undefined ? config.glyph : glyph;
 
   return (
     <span
@@ -98,7 +102,7 @@ export function StatusChip({
       }}
       {...rest}
     >
-      <span aria-hidden="true">{config.glyph}</span>
+      {resolvedGlyph !== null ? <span aria-hidden="true">{resolvedGlyph}</span> : null}
       <span>{label ?? config.label}</span>
     </span>
   );

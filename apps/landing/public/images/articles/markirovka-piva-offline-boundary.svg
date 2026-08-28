@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Граница локальной работы при потере сети</title>
+  <desc id="desc">Слева показаны операции, которые продолжаются на станции, справа — действия, которым нужна восстановленная связь.</desc>
+  <rect width="1200" height="620" fill="#131216"/>
+  <text x="64" y="68" fill="#3ddc7a" font-family="IBM Plex Sans,Arial,sans-serif" font-size="18" font-weight="700" letter-spacing="2">ПРОПАЛА СВЯЗЬ ≠ ПРОПАЛА ОПЕРАЦИЯ</text>
+  <rect x="64" y="110" width="504" height="420" rx="4" fill="#1b1a1f" stroke="#35333b"/>
+  <rect x="632" y="110" width="504" height="420" rx="4" fill="#1b1a1f" stroke="#35333b"/>
+  <circle cx="112" cy="160" r="12" fill="#3ddc7a"/>
+  <text x="142" y="168" fill="#f4f2f6" font-family="IBM Plex Sans,Arial,sans-serif" font-size="26" font-weight="700">Можно продолжать локально</text>
+  <text x="96" y="224" fill="#9d9aa4" font-family="IBM Plex Sans,Arial,sans-serif" font-size="16">ТОЛЬКО ЗАРАНЕЕ ПОДГОТОВЛЕННЫЙ СЦЕНАРИЙ</text>
+  <g fill="#f4f2f6" font-family="IBM Plex Sans,Arial,sans-serif" font-size="22">
+    <text x="112" y="282">01  Сканировать коды задания</text>
+    <text x="112" y="335">02  Блокировать локальные дубли</text>
+    <text x="112" y="388">03  Собирать единицы в короб</text>
+    <text x="112" y="441">04  Печатать SSCC из локального пула</text>
+  </g>
+  <text x="96" y="494" fill="#3ddc7a" font-family="IBM Plex Sans,Arial,sans-serif" font-size="17" font-weight="700">ЖУРНАЛ И ОЧЕРЕДЬ СОХРАНЯЮТСЯ</text>
+  <circle cx="680" cy="160" r="12" fill="#f2a341"/>
+  <text x="710" y="168" fill="#f4f2f6" font-family="IBM Plex Sans,Arial,sans-serif" font-size="26" font-weight="700">Должно ждать сети</text>
+  <text x="664" y="224" fill="#9d9aa4" font-family="IBM Plex Sans,Arial,sans-serif" font-size="16">НОВЫЕ ДАННЫЕ И ВНЕШНИЕ ПОДТВЕРЖДЕНИЯ</text>
+  <g fill="#f4f2f6" font-family="IBM Plex Sans,Arial,sans-serif" font-size="22">
+    <text x="680" y="282">01  Получить новое задание</text>
+    <text x="680" y="335">02  Пополнить запас кодов и SSCC</text>
+    <text x="680" y="388">03  Передать очередь на сервер</text>
+    <text x="680" y="441">04  Получить итоговые статусы</text>
+  </g>
+  <text x="664" y="494" fill="#f2a341" font-family="IBM Plex Sans,Arial,sans-serif" font-size="17" font-weight="700">НЕ ПОКАЗЫВАТЬ ЛОЖНЫЙ УСПЕХ</text>
+  <line x1="64" y1="574" x2="1136" y2="574" stroke="#35333b"/>
+  <text x="64" y="602" fill="#9d9aa4" font-family="IBM Plex Sans,Arial,sans-serif" font-size="16">Граница зависит от уже загруженного задания, прав и локальных запасов.</text>
+</svg>

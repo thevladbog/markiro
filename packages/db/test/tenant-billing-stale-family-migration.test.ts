@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,17 +8,19 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
+
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 
 describe("tenant billing stale-family migration metadata", () => {
-  it("appends 0072 without rewriting 0071", async () => {
+  it("appends 0096 without rewriting 0095", async () => {
     const [previousText, currentText, journalText, sqlText] = await Promise.all([
-      readFile(new URL("../migrations/meta/0071_snapshot.json", import.meta.url), "utf8"),
-      readFile(new URL("../migrations/meta/0072_snapshot.json", import.meta.url), "utf8"),
+      readFile(new URL("../migrations/meta/0095_snapshot.json", import.meta.url), "utf8"),
+      readFile(new URL("../migrations/meta/0096_snapshot.json", import.meta.url), "utf8"),
       readFile(new URL("../migrations/meta/_journal.json", import.meta.url), "utf8"),
       readFile(
-        new URL("../migrations/0072_tenant_billing_stale_family_repair.sql", import.meta.url),
+        new URL("../migrations/0096_tenant_billing_stale_family_repair.sql", import.meta.url),
         "utf8",
       ),
     ]);
@@ -29,9 +31,9 @@ describe("tenant billing stale-family migration metadata", () => {
     };
 
     expect(current.prevId).toBe(previous.id);
-    expect(journal.entries.find(({ idx }) => idx === 72)).toMatchObject({
-      idx: 72,
-      tag: "0072_tenant_billing_stale_family_repair",
+    expect(journal.entries.find(({ idx }) => idx === 96)).toMatchObject({
+      idx: 96,
+      tag: "0096_tenant_billing_stale_family_repair",
     });
     expect(sqlText).toContain("commercial_offer_current_revision_ambiguous");
     expect(sqlText).toContain("billing_act_request_link_mismatch");
@@ -53,28 +55,13 @@ describe.skipIf(!databaseUrl)("tenant billing stale-family upgrade", () => {
     await maintenance.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
     created = true;
     temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-billing-stale-family-"));
-    const migrationsThrough0070 = join(temporaryRoot, "migrations");
-    await cp(migrationsFolder, migrationsThrough0070, { recursive: true });
-    await rm(join(migrationsThrough0070, "0071_tenant_billing_target_cardinality.sql"), {
-      force: true,
+    const migrationsThrough0094 = join(temporaryRoot, "migrations");
+    await copyMigrationsThroughIndex({
+      sourceFolder: migrationsFolder,
+      targetFolder: migrationsThrough0094,
+      lastIncludedIndex: 94,
     });
-    await rm(join(migrationsThrough0070, "0072_tenant_billing_stale_family_repair.sql"), {
-      force: true,
-    });
-    await rm(join(migrationsThrough0070, "meta", "0071_snapshot.json"), { force: true });
-    await rm(join(migrationsThrough0070, "meta", "0072_snapshot.json"), { force: true });
-    const journalPath = join(migrationsThrough0070, "meta", "_journal.json");
-    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
-      entries: Array<{ tag: string }>;
-    };
-    journal.entries = journal.entries.filter(
-      ({ tag }) =>
-        tag !== "0071_tenant_billing_target_cardinality" &&
-        tag !== "0072_tenant_billing_stale_family_repair" &&
-        tag !== "0073_tenant_billing_notification_delivery",
-    );
-    await writeFile(journalPath, JSON.stringify(journal));
-    await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0070 });
+    await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0094 });
 
     await pool.query(`
       INSERT INTO organization (id, name, slug, created_at)

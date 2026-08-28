@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, Req } from "@nestjs/common";
+import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { platformCommercialContracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
@@ -23,11 +24,13 @@ import {
 } from "./dto";
 import { PlatformBillingRequestsService } from "./platform-billing-requests.service";
 
+@ApiTags("platform-billing-requests")
 @Controller("platform/billing/requests")
 export class PlatformBillingRequestsController {
   constructor(private readonly requests: PlatformBillingRequestsService) {}
 
   @Get()
+  @ApiOperation({ summary: "List tenant billing requests for the platform" })
   @PlatformApiProtectedOk({
     query: platformCommercialContracts.billingRequests.list.query,
     response: platformCommercialContracts.billingRequests.list.response,
@@ -45,6 +48,7 @@ export class PlatformBillingRequestsController {
   }
 
   @Get(":id")
+  @ApiOperation({ summary: "Read a tenant billing request for the platform" })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.billingRequests.detail.response })
   @RequirePlatformCapabilities("billing.read")
   async detail(
@@ -58,6 +62,7 @@ export class PlatformBillingRequestsController {
   }
 
   @Post(":id/offer")
+  @ApiOperation({ summary: "Create an offer for a tenant billing request" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.billingRequests.createOffer.body,
     response: platformCommercialContracts.billingRequests.createOffer.response,
@@ -76,6 +81,7 @@ export class PlatformBillingRequestsController {
   }
 
   @Post(":id/comments")
+  @ApiOperation({ summary: "Comment on a tenant billing request" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.billingRequests.comment.body,
     response: platformCommercialContracts.billingRequests.comment.response,
@@ -94,6 +100,7 @@ export class PlatformBillingRequestsController {
   }
 
   @Post(":id/status")
+  @ApiOperation({ summary: "Change a tenant billing request status" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.billingRequests.status.body,
     response: platformCommercialContracts.billingRequests.status.response,
@@ -112,6 +119,7 @@ export class PlatformBillingRequestsController {
   }
 
   @Post(":id/links")
+  @ApiOperation({ summary: "Link a resource to a tenant billing request" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.billingRequests.link.body,
     response: platformCommercialContracts.billingRequests.link.response,

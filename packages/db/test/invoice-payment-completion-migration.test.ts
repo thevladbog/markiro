@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,8 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
+
+import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
@@ -35,8 +37,8 @@ describe.skipIf(!databaseUrl)("invoice payment completion migration", () => {
   }, 120_000);
 
   it("backfills one unambiguous exact-total legacy payment", async () => {
-    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0066 }) => {
-      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0066 });
+    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0090 }) => {
+      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0090 });
       await seedBillingActors(pool);
       await seedPaidInvoice(pool, {
         invoiceId: "00000000-0000-4000-8000-000000000901",
@@ -60,8 +62,8 @@ describe.skipIf(!databaseUrl)("invoice payment completion migration", () => {
   }, 120_000);
 
   it("rejects a paid invoice with no exact-total legacy payment candidate", async () => {
-    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0066 }) => {
-      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0066 });
+    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0090 }) => {
+      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0090 });
       await seedBillingActors(pool);
       await seedPaidInvoice(pool, {
         invoiceId: "00000000-0000-4000-8000-000000000911",
@@ -76,8 +78,8 @@ describe.skipIf(!databaseUrl)("invoice payment completion migration", () => {
   }, 120_000);
 
   it("rejects a paid invoice with multiple exact-total legacy payment candidates", async () => {
-    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0066 }) => {
-      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0066 });
+    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0090 }) => {
+      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0090 });
       await seedBillingActors(pool);
       const invoiceId = "00000000-0000-4000-8000-000000000921";
       await seedPaidInvoice(pool, { invoiceId, number: "INV-COMPLETION-AMBIGUOUS" });
@@ -100,8 +102,8 @@ describe.skipIf(!databaseUrl)("invoice payment completion migration", () => {
   }, 120_000);
 
   it("backfills an old completing payment inserted before trigger DDL after waiting for its transaction", async () => {
-    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0066 }) => {
-      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0066 });
+    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0090 }) => {
+      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0090 });
       await seedBillingActors(pool);
       const invoiceId = "00000000-0000-4000-8000-000000000941";
       const paymentId = "00000000-0000-4000-8000-000000000942";
@@ -170,8 +172,8 @@ describe.skipIf(!databaseUrl)("invoice payment completion migration", () => {
   }, 120_000);
 
   it("captures old manual and imported completions after DDL even when a transaction started first", async () => {
-    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0066 }) => {
-      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0066 });
+    await withScratchDatabase(maintenancePool, async ({ pool, migrationsThrough0090 }) => {
+      await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0090 });
       await seedBillingActors(pool);
       const manualInvoiceId = "00000000-0000-4000-8000-000000000931";
       const importedInvoiceId = "00000000-0000-4000-8000-000000000932";
@@ -279,7 +281,7 @@ describe.skipIf(!databaseUrl)("invoice payment completion migration", () => {
 
 async function withScratchDatabase(
   maintenancePool: pg.Pool,
-  run: (context: { pool: pg.Pool; migrationsThrough0066: string }) => Promise<void>,
+  run: (context: { pool: pg.Pool; migrationsThrough0090: string }) => Promise<void>,
 ): Promise<void> {
   const databaseName = `markiro_payment_completion_${randomUUID().replaceAll("-", "_")}`;
   const scratchUrl = new URL(databaseUrl ?? "postgres://invalid");
@@ -287,23 +289,17 @@ async function withScratchDatabase(
   scratchUrl.search = "";
   const pool = new pg.Pool({ connectionString: scratchUrl.toString() });
   const temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-payment-completion-migration-"));
-  const migrationsThrough0066 = join(temporaryRoot, "migrations");
+  const migrationsThrough0090 = join(temporaryRoot, "migrations");
   let created = false;
   try {
     await maintenancePool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
     created = true;
-    await cp(migrationsFolder, migrationsThrough0066, { recursive: true });
-    await rm(join(migrationsThrough0066, "0067_invoice_payment_completion.sql"));
-    await rm(join(migrationsThrough0066, "meta", "0067_snapshot.json"));
-    const journalPath = join(migrationsThrough0066, "meta", "_journal.json");
-    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
-      entries: Array<{ tag: string }>;
-    };
-    journal.entries = journal.entries.filter(
-      (entry) => entry.tag !== "0067_invoice_payment_completion",
-    );
-    await writeFile(journalPath, JSON.stringify(journal));
-    await run({ pool, migrationsThrough0066 });
+    await copyMigrationsThroughIndex({
+      sourceFolder: migrationsFolder,
+      targetFolder: migrationsThrough0090,
+      lastIncludedIndex: 90,
+    });
+    await run({ pool, migrationsThrough0090 });
   } finally {
     await pool.end();
     if (created) await maintenancePool.query(`DROP DATABASE ${quoteIdentifier(databaseName)}`);

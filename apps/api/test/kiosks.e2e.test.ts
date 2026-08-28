@@ -170,6 +170,28 @@ describe.skipIf(!ready)("kiosks e2e", () => {
     expect(res.body.message).toEqual(expect.stringContaining("Unknown product"));
   });
 
+  it("PUT /kiosks/:id/products rejects an archived product with 400", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const archivedProductId = randomUUID();
+    await db.insert(schema.products).values({
+      id: archivedProductId,
+      tenantId,
+      gtin14: "04650075195928",
+      name: "Retired Product",
+      archived: true,
+    });
+
+    const kiosk = await agent.post("/kiosks").send({ name: "Киоск-архивный-товар" }).expect(201);
+    const id = kiosk.body.id as string;
+
+    const res = await agent
+      .put(`/kiosks/${id}/products`)
+      .send({ productIds: [archivedProductId] })
+      .expect(400);
+    expect(res.body.message).toEqual(expect.stringContaining("Archived"));
+  });
+
   it("PUT /kiosks/:id/products replaces the previous allowlist wholesale", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);

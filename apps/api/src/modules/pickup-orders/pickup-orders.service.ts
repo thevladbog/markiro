@@ -194,6 +194,8 @@ export interface ExportCandidatesResult {
     createdAt: Date;
     reason: "buy" | "writeoff";
     writeoffReasonName: string | null;
+    employeeId: string;
+    employeeName: string;
     totalPrice: string | null;
     items: { productId: string; productExternalRef: string | null; unitPrice: string | null }[];
   }[];
@@ -607,6 +609,9 @@ export class PickupOrdersService {
         and(
           eq(schema.products.tenantId, schema.kioskProducts.tenantId),
           eq(schema.products.id, schema.kioskProducts.productId),
+          // An assignment may predate archiving; the join (not the allowlist
+          // table) is where an archived product drops off the kiosk.
+          eq(schema.products.archived, false),
         ),
       )
       .leftJoin(
@@ -840,12 +845,23 @@ export class PickupOrdersService {
         createdAt: schema.pickupOrders.createdAt,
         reason: schema.pickupOrders.reason,
         writeoffReasonName: schema.pickupOrderReasons.name,
+        employeeId: schema.pickupOrders.employeeId,
+        employeeName: schema.employees.fullName,
         totalPrice: schema.pickupOrders.totalPrice,
       })
       .from(schema.pickupOrders)
       .leftJoin(
         schema.pickupOrderReasons,
         eq(schema.pickupOrderReasons.id, schema.pickupOrders.writeoffReasonId),
+      )
+      // Inner join can't drop rows: employee_id is NOT NULL with a composite
+      // (tenant_id, employee_id) FK, matched here on both columns.
+      .innerJoin(
+        schema.employees,
+        and(
+          eq(schema.employees.tenantId, schema.pickupOrders.tenantId),
+          eq(schema.employees.id, schema.pickupOrders.employeeId),
+        ),
       )
       .where(
         and(
@@ -1891,6 +1907,10 @@ export class PickupOrdersService {
         and(
           eq(schema.products.tenantId, schema.kioskProducts.tenantId),
           eq(schema.products.id, schema.kioskProducts.productId),
+          // Mirrors the bootstrap join above: scanned codes of an archived
+          // product must stop being admitted into orders, not just vanish
+          // from the product list.
+          eq(schema.products.archived, false),
         ),
       )
       .where(

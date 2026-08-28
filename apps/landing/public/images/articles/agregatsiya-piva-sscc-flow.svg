@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title description">
+  <title id="title">Схема агрегации пива из единиц продукции в короб с SSCC</title>
+  <desc id="description">Data Matrix каждой бутылки проверяется и добавляется в короб. После проверки состава короб получает уникальный SSCC.</desc>
+  <rect width="1200" height="520" fill="#131216"/>
+  <rect x="1" y="1" width="1198" height="518" fill="none" stroke="#343238" stroke-width="2"/>
+
+  <g font-family="IBM Plex Mono, monospace" font-size="16" font-weight="600" letter-spacing="2" fill="#3ddc7a">
+    <text x="68" y="70">01 / СКАН</text>
+    <text x="442" y="70">02 / СОСТАВ</text>
+    <text x="827" y="70">03 / ИДЕНТИФИКАЦИЯ</text>
+  </g>
+
+  <g transform="translate(68 112)">
+    <rect width="286" height="314" fill="#1b1a1f" stroke="#45434a"/>
+    <g transform="translate(94 35) scale(.8)">
+      <path d="M52 0h22v28c0 12 10 18 17 31 9 17 12 42 12 83v75c0 17-10 28-25 28H48c-15 0-25-11-25-28v-75c0-41 3-66 12-83 7-13 17-19 17-31z" fill="#a86b2d" stroke="#e1a864" stroke-width="3"/>
+      <path d="M52 21h22" stroke="#f0c68f" stroke-width="4"/>
+      <rect x="41" y="112" width="44" height="44" rx="2" fill="#f4f2ed"/>
+      <path d="M48 119h8v8h-8zm12 0h5v5h-5zm9 0h9v9h-9zm-21 12h5v5h-5zm9-1h10v10H57zm14 4h7v7h-7zm-23 9h10v7H48zm14 1h5v5h-5zm9 0h7v7h-7z" fill="#131216"/>
+    </g>
+    <circle cx="230" cy="78" r="26" fill="#3ddc7a"/>
+    <path d="m219 78 8 8 15-17" fill="none" stroke="#131216" stroke-linecap="square" stroke-width="5"/>
+    <text x="24" y="280" font-family="IBM Plex Sans, sans-serif" font-size="22" font-weight="600" fill="#f5f4f1">Код единицы проверен</text>
+  </g>
+
+  <path d="M372 269h50" stroke="#3ddc7a" stroke-width="3"/>
+  <path d="m411 258 12 11-12 11" fill="none" stroke="#3ddc7a" stroke-width="3"/>
+
+  <g transform="translate(442 112)">
+    <rect width="286" height="314" fill="#1b1a1f" stroke="#45434a"/>
+    <path d="M43 107 84 58h116l43 49-20 123H64z" fill="#a87848" stroke="#d5a675" stroke-width="3"/>
+    <path d="m84 58 59 49 57-49M43 107h200M143 107v123" fill="none" stroke="#e0b486" stroke-width="3"/>
+    <g fill="#d18b43" stroke="#f0bd82" stroke-width="2">
+      <rect x="79" y="119" width="27" height="78" rx="9"/>
+      <rect x="116" y="119" width="27" height="78" rx="9"/>
+      <rect x="153" y="119" width="27" height="78" rx="9"/>
+      <rect x="190" y="119" width="27" height="78" rx="9"/>
+    </g>
+    <text x="24" y="280" font-family="IBM Plex Sans, sans-serif" font-size="22" font-weight="600" fill="#f5f4f1">Состав короба закрыт</text>
+  </g>
+
+  <path d="M746 269h61" stroke="#3ddc7a" stroke-width="3"/>
+  <path d="m796 258 12 11-12 11" fill="none" stroke="#3ddc7a" stroke-width="3"/>
+
+  <g transform="translate(827 112)">
+    <rect width="305" height="314" fill="#1b1a1f" stroke="#45434a"/>
+    <rect x="33" y="55" width="239" height="159" rx="4" fill="#f4f2ed"/>
+    <text x="53" y="88" font-family="IBM Plex Mono, monospace" font-size="15" font-weight="600" fill="#242228">(00) 146123456789012345</text>
+    <g fill="#242228">
+      <rect x="53" y="106" width="3" height="65"/><rect x="60" y="106" width="7" height="65"/><rect x="71" y="106" width="3" height="65"/><rect x="78" y="106" width="10" height="65"/><rect x="92" y="106" width="4" height="65"/><rect x="101" y="106" width="7" height="65"/><rect x="113" y="106" width="3" height="65"/><rect x="121" y="106" width="11" height="65"/><rect x="136" y="106" width="5" height="65"/><rect x="146" y="106" width="3" height="65"/><rect x="153" y="106" width="8" height="65"/><rect x="165" y="106" width="4" height="65"/><rect x="174" y="106" width="10" height="65"/><rect x="188" y="106" width="3" height="65"/><rect x="196" y="106" width="7" height="65"/><rect x="208" y="106" width="4" height="65"/><rect x="217" y="106" width="11" height="65"/><rect x="233" y="106" width="4" height="65"/><rect x="242" y="106" width="8" height="65"/>
+    </g>
+    <text x="53" y="195" font-family="IBM Plex Mono, monospace" font-size="13" fill="#56535c">УНИКАЛЬНЫЙ SSCC</text>
+    <text x="33" y="263" font-family="IBM Plex Sans, sans-serif" font-size="22" font-weight="600" fill="#f5f4f1">Этикетка проверена</text>
+    <text x="33" y="290" font-family="IBM Plex Sans, sans-serif" font-size="17" fill="#aaa7af">Короб готов к движению</text>
+  </g>
+</svg>

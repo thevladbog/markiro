@@ -38,7 +38,7 @@
 - Modify `packages/db/src/schema/billing.ts`: permit `partially_paid`, multiple confirmed payments, and optional source-offer/source-request links.
 - Create `packages/db/test/tenant-billing-schema.test.ts`: schema constraints and composite tenant keys.
 - Create `packages/db/test/tenant-billing-migration.test.ts`: upgrade existing invoice/payment rows and apply the new migration on a scratch database.
-- Generate `packages/db/migrations/0066_tenant_billing_experience.sql` and its Drizzle metadata.
+- Generate `packages/db/migrations/0090_tenant_billing_experience.sql` and its Drizzle metadata.
 
 ### API
 
@@ -164,9 +164,9 @@ git commit -m "feat(domain): add tenant billing capabilities"
 - Modify: `packages/db/src/schema/billing.ts:24-520`
 - Create: `packages/db/test/tenant-billing-schema.test.ts`
 - Create: `packages/db/test/tenant-billing-migration.test.ts`
-- Create: `packages/db/migrations/0066_tenant_billing_experience.sql`
+- Create: `packages/db/migrations/0090_tenant_billing_experience.sql`
 - Modify: `packages/db/migrations/meta/_journal.json`
-- Create: `packages/db/migrations/meta/0066_snapshot.json`
+- Create: `packages/db/migrations/meta/0090_snapshot.json`
 
 **Interfaces:**
 
@@ -260,7 +260,7 @@ Add `sourceOfferId` and `sourceRequestId` to invoices plus named composite FKs t
 
 Run: `pnpm --filter @markiro/db db:generate -- --name tenant_billing_experience`
 
-Rename the generated SQL/snapshot tag to `0066_tenant_billing_experience` only if Drizzle does not honor the name. Review that it adds enum values before using them, drops only `billing_payments_invoice_uq`, creates the replacement index, creates all composite tenant keys, and does not touch SQLite or unrelated tables.
+Rename the generated SQL/snapshot tag to `0090_tenant_billing_experience` only if Drizzle does not honor the name. Review that it adds enum values before using them, drops only `billing_payments_invoice_uq`, creates the replacement index, creates all composite tenant keys, and does not touch SQLite or unrelated tables.
 
 - [ ] **Step 6: Write and run the migration upgrade test**
 
@@ -275,7 +275,7 @@ Expected: PASS with `DATABASE_URL`; if unavailable, report the database-backed s
 Run: `pnpm --filter @markiro/db test && pnpm --filter @markiro/db typecheck && pnpm --filter @markiro/db lint && pnpm --filter @markiro/db build && git diff --check`
 
 ```bash
-git add packages/db/src/schema.ts packages/db/src/schema/billing.ts packages/db/src/schema/tenant-billing.ts packages/db/test/tenant-billing-schema.test.ts packages/db/test/tenant-billing-migration.test.ts packages/db/migrations/0066_tenant_billing_experience.sql packages/db/migrations/meta/_journal.json packages/db/migrations/meta/0066_snapshot.json
+git add packages/db/src/schema.ts packages/db/src/schema/billing.ts packages/db/src/schema/tenant-billing.ts packages/db/test/tenant-billing-schema.test.ts packages/db/test/tenant-billing-migration.test.ts packages/db/migrations/0090_tenant_billing_experience.sql packages/db/migrations/meta/_journal.json packages/db/migrations/meta/0090_snapshot.json
 git commit -m "feat(db): add tenant billing workflow records"
 ```
 

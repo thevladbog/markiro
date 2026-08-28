@@ -16,6 +16,7 @@ import { DB } from "../../auth/auth.module";
 import { lockTenantBoxRegistry } from "../boxes/box-registry-lock";
 import { MediaAssetsService } from "../media/media-assets.service";
 import { processProductImage } from "../media/product-image-processor";
+import type { ProcessedProductImage } from "../media/product-image-processor";
 import { OrgProfileService } from "../org-profile/org-profile.service";
 import { ObjectStorageService } from "../storage/object-storage.service";
 import type {
@@ -52,6 +53,7 @@ const CURRENT_PRODUCT_SELECTION = {
   boxCapacity: schema.products.boxCapacity,
   palletCapacity: schema.products.palletCapacity,
   status: schema.products.status,
+  archived: schema.products.archived,
   defaultCounterpartyId: schema.products.defaultCounterpartyId,
   unitPrice: schema.products.unitPrice,
   egaisCode: schema.products.egaisCode,
@@ -87,6 +89,13 @@ export class ProductsService {
     query: ListProductsQueryDto,
   ): Promise<ListProductsResponseDto> {
     const conditions = [eq(schema.products.tenantId, tenantId)];
+
+    // Deny-by-default: archived products only appear when the caller opts in
+    // ("all" for history-aware readers, "true" for the catalog's archive filter).
+    const archivedFilter = query.archived ?? "false";
+    if (archivedFilter !== "all") {
+      conditions.push(eq(schema.products.archived, archivedFilter === "true"));
+    }
 
     if (query.status) {
       conditions.push(eq(schema.products.status, query.status));
@@ -132,6 +141,7 @@ export class ProductsService {
           boxCapacity,
           palletCapacity,
           status,
+          archived: data.archived ?? false,
           defaultCounterpartyId: data.defaultCounterpartyId ?? null,
           unitPrice: data.unitPrice ?? null,
           printName: data.printName ?? null,
@@ -189,6 +199,7 @@ export class ProductsService {
           defaultCounterpartyId,
           status,
         };
+        if (data.archived !== undefined) set.archived = data.archived;
         if (data.unitPrice !== undefined) set.unitPrice = data.unitPrice;
         if (data.printName !== undefined) set.printName = data.printName;
         if (data.egaisCode !== undefined) set.egaisCode = data.egaisCode;
@@ -299,6 +310,58 @@ export class ProductsService {
       throw new BadRequestException(errorMessage(error));
     }
 
+    await this.activateProcessedImage(tenantId, actorUserId, productId, image, initialImage);
+    return this.getProduct(tenantId, productId);
+  }
+
+  /**
+   * Фото из обмена (CommerceML `<Картинка>`): тот же пайплайн, что ручная
+   * загрузка, но актор — машина (`actorUserId: null`), а совпадение checksum
+   * обработанного webp с текущим активным фото — «unchanged», не новый asset:
+   * без этого КАЖДЫЙ обмен с той же картинкой плодил бы asset + запись аудита.
+   * Сравнивается checksum ОБРАБОТАННОГО изображения (это то, что хранит
+   * media_assets.checksum), а не исходных байт — sharp детерминирован для
+   * одного входа/версии; смена версии sharp в худшем случае даст одну лишнюю
+   * перезаливку.
+   */
+  async applyExchangeImage(
+    tenantId: string,
+    productId: string,
+    source: Buffer,
+  ): Promise<"applied" | "unchanged"> {
+    const product = await this.findRow(tenantId, productId);
+    if (!product) throw new NotFoundException();
+    const initialImage = this.imageDescriptor(product);
+
+    let image: ProcessedProductImage;
+    try {
+      image = await processProductImage(source);
+    } catch (error) {
+      const reason = isImageInfrastructureFailure(error)
+        ? "processing_unavailable"
+        : "invalid_image";
+      await this.writeFailureAudit(tenantId, null, productId, initialImage, null, reason);
+      if (reason === "processing_unavailable") {
+        throw new ServiceUnavailableException("Product image processing is unavailable");
+      }
+      throw new BadRequestException(errorMessage(error));
+    }
+
+    if (initialImage !== null && initialImage.checksum === image.checksum) return "unchanged";
+    await this.activateProcessedImage(tenantId, null, productId, image, initialImage);
+    return "applied";
+  }
+
+  /** Общий хвост uploadImage/applyExchangeImage: staging-asset -> storage ->
+   *  активация/переключение -> cleanup прежнего. `actorUserId: null` — обмен
+   *  (машинный актор), аудит остаётся, юзера в нём нет. */
+  private async activateProcessedImage(
+    tenantId: string,
+    actorUserId: string | null,
+    productId: string,
+    image: ProcessedProductImage,
+    initialImage: ProductImageDescriptor | null,
+  ): Promise<void> {
     const descriptor: ProductImageDescriptor = {
       checksum: image.checksum,
       contentType: image.contentType,
@@ -447,7 +510,6 @@ export class ProductsService {
     if (previousAssetId) {
       await this.mediaAssets.cleanupDeletingTenantAsset(tenantId, previousAssetId);
     }
-    return this.getProduct(tenantId, productId);
   }
 
   async recordImageUploadFailure(
@@ -638,7 +700,7 @@ export class ProductsService {
   private async writeSuccessAudit(
     tx: ProductAuditTx,
     tenantId: string,
-    actorUserId: string,
+    actorUserId: string | null,
     productId: string,
     action: "product.image.uploaded" | "product.image.replaced" | "product.image.deleted",
     before: ProductImageDescriptor | null,
@@ -658,7 +720,7 @@ export class ProductsService {
 
   private async writeFailureAudit(
     tenantId: string,
-    actorUserId: string,
+    actorUserId: string | null,
     productId: string,
     before: ProductImageDescriptor | null,
     attemptedImage: ProductImageDescriptor | null,
@@ -753,6 +815,7 @@ export class ProductsService {
       boxCapacity: row.boxCapacity,
       palletCapacity: row.palletCapacity,
       status: row.status,
+      archived: row.archived,
       defaultCounterpartyId: row.defaultCounterpartyId,
       unitPrice: row.unitPrice,
       egaisCode: row.egaisCode,

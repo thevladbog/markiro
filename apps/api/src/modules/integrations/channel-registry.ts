@@ -23,10 +23,10 @@ export interface ChannelDescriptor {
    * доступен, ни разу не тронув эту таблицу — у `public_api` своя
    * аутентификация через `apikey` (`api-keys.service.ts`), у файловых
    * экспортов её вообще нет. Уже и чем `inbound`: `chestny_znak` тоже
-   * входящий, но его реальная схема подключения ещё не решена (таблица
-   * брифа 08, «Undecided» для остальных строк не про это, но для
-   * `chestny_znak` статус — «placeholder»), так что заводить его на эту
-   * таблицу заранее значит угадывать контракт, которого ещё нет.
+   * входящий, но подключается через отдельные signer-agents эндпоинты
+   * (агент подписи предъявляет собственный секрет агента, не эту пару), так
+   * что заводить его на эту таблицу означало бы дублировать чужой контракт
+   * аутентификации.
    *
    * Единственный канал с `true` сегодня — `commerceml`: это единственный,
    * кто реально предъявляет этот логин+секрет на `POST /1c_exchange`.
@@ -94,14 +94,32 @@ const commercemlSettings = z
   .strict();
 
 // `.passthrough()` stays: unlike `commercemlSettings` above, this schema
-// declares no fields AT ALL on purpose -- these three channels have no
-// settings contract yet, and accepting (not rejecting) an arbitrary shape
-// here is the deliberate, already-tested placeholder for that
+// declares no fields AT ALL on purpose -- `public_api` and `gis_mt_files`
+// (the two channels below still using it -- `chestny_znak` moved to
+// `chzSignerSettingsSchema` once the signer-agent scheduler needed to parse
+// its settings) have no settings contract yet, and accepting (not rejecting)
+// an arbitrary shape here is the deliberate, already-tested placeholder for
+// that
 // (`channel-registry.test.ts`'s "схема другого канала принимает произвольные
 // поля"). Item 8's regression was a NAMED field silently swallowing a typo of
 // itself (`commercemlSettings`, above); it was never about a channel that
 // declares no fields to begin with.
 const emptySettings = z.object({}).passthrough();
+
+/**
+ * Настройки канала `chestny_znak`. Планировщик (задача 7) разбирает
+ * `integration_channels.settings` этой схемой, так что имя экспорта и форма
+ * должны совпадать с тем, что он ожидает.
+ */
+export const chzSignerSettingsSchema = z
+  .object({
+    environment: z.enum(["production", "sandbox"]).default("production"),
+    mchdInn: z
+      .string()
+      .regex(/^\d{10}(\d{2})?$/)
+      .optional(),
+  })
+  .strict();
 
 export const CHANNELS: readonly ChannelDescriptor[] = [
   {
@@ -131,10 +149,10 @@ export const CHANNELS: readonly ChannelDescriptor[] = [
   {
     type: "chestny_znak",
     labelKey: "integrations.channel.chestnyZnak",
-    available: false,
+    available: true,
     inbound: true,
     usesExchangeCredentials: false,
-    settingsSchema: emptySettings,
+    settingsSchema: chzSignerSettingsSchema,
   },
 ];
 

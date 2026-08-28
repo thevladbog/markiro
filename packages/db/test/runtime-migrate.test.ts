@@ -88,14 +88,27 @@ if (!databaseUrl || !migrationsFolder || !runtimeModule) {
 }
 
 const databaseName = "markiro_runtime_" + randomUUID().replaceAll("-", "_");
+const freshDatabaseName = "markiro_fresh_" + randomUUID().replaceAll("-", "_");
+const stationDatabaseName = "markiro_station_" + randomUUID().replaceAll("-", "_");
 const scratchUrl = new URL(databaseUrl);
 scratchUrl.pathname = "/" + databaseName;
 scratchUrl.search = "";
+const freshUrl = new URL(databaseUrl);
+freshUrl.pathname = "/" + freshDatabaseName;
+freshUrl.search = "";
+const stationUrl = new URL(databaseUrl);
+stationUrl.pathname = "/" + stationDatabaseName;
+stationUrl.search = "";
 const temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-runtime-migrate-"));
 const legacyMigrationsFolder = join(temporaryRoot, "migrations");
+const stationMigrationsFolder = join(temporaryRoot, "station-migrations");
 const maintenancePool = new pg.Pool({ connectionString: databaseUrl });
 let pool;
+let freshPool;
+let stationPool;
 let databaseCreated = false;
+let freshDatabaseCreated = false;
+let stationDatabaseCreated = false;
 let primaryError;
 let cleanupError;
 
@@ -110,12 +123,33 @@ try {
   await maintenancePool.query("CREATE DATABASE " + quoteDatabaseIdentifier(databaseName));
   databaseCreated = true;
   await cp(migrationsFolder, legacyMigrationsFolder, { recursive: true });
-  await rm(join(legacyMigrationsFolder, "0029_loving_triathlon.sql"));
-  await rm(join(legacyMigrationsFolder, "meta", "0029_snapshot.json"));
   const journalPath = join(legacyMigrationsFolder, "meta", "_journal.json");
   const journal = JSON.parse(await readFile(journalPath, "utf8"));
-  journal.entries = journal.entries.filter((entry) => entry.tag !== "0029_loving_triathlon");
+  const scopedOrderMigration = journal.entries.find((entry) => entry.tag.startsWith("0072_"));
+  if (!scopedOrderMigration) {
+    throw new Error("Missing forward-only 0072 SSCC allocation-order migration");
+  }
+  await rm(join(legacyMigrationsFolder, scopedOrderMigration.tag + ".sql"));
+  await rm(join(legacyMigrationsFolder, "meta", "0072_snapshot.json"));
+  journal.entries = journal.entries.filter((entry) => Number(entry.tag.slice(0, 4)) < 72);
   await writeFile(journalPath, JSON.stringify(journal));
+
+  await cp(migrationsFolder, stationMigrationsFolder, { recursive: true });
+  for (const tag of ["0029_loving_triathlon", "0071_fantastic_hellion", scopedOrderMigration.tag]) {
+    await rm(join(stationMigrationsFolder, tag + ".sql"));
+  }
+  for (const index of ["0029", "0071", "0072"]) {
+    await rm(join(stationMigrationsFolder, "meta", index + "_snapshot.json"));
+  }
+  const stationJournalPath = join(stationMigrationsFolder, "meta", "_journal.json");
+  const stationJournal = JSON.parse(await readFile(stationJournalPath, "utf8"));
+  stationJournal.entries = stationJournal.entries.filter(
+    (entry) =>
+      entry.tag !== "0029_loving_triathlon" &&
+      entry.tag !== "0071_fantastic_hellion" &&
+      Number(entry.tag.slice(0, 4)) < 72,
+  );
+  await writeFile(stationJournalPath, JSON.stringify(stationJournal));
 
   pool = new pg.Pool({ connectionString: scratchUrl.toString() });
   await migrate(drizzle(pool), { migrationsFolder: legacyMigrationsFolder });
@@ -134,20 +168,118 @@ try {
     ],
   );
   await pool.query(
-    "INSERT INTO sscc_blocks (tenant_id, issuer_prefix, extension_digit, device_id, from_serial, to_serial) VALUES ($1, $2, $3, $4, $5, $6)",
-    ["runtime-fixture-tenant", "460000000", 1, "00000000-0000-0000-0000-000000000001", 1, 1],
+    "INSERT INTO station_devices (id, tenant_id, name, api_key_id, enrolled_at) VALUES ($1, $2, $3, $4, $5)",
+    [
+      "00000000-0000-0000-0000-000000000002",
+      "runtime-fixture-tenant",
+      "Second legacy station",
+      "second-legacy-api-key",
+      new Date("2026-08-06T00:00:00.000Z"),
+    ],
+  );
+  await pool.query(
+    "INSERT INTO sscc_blocks " +
+      "(tenant_id, issuer_prefix, extension_digit, device_id, from_serial, to_serial, issued_at) " +
+      "VALUES " +
+      "($1, $2, $3, $4, 1, 1, '2026-08-06T00:00:01.000Z'), " +
+      "($1, $2, $3, $5, 2, 2, '2026-08-06T00:00:01.000Z'), " +
+      "($1, $2, $3, $4, 3, 3, '2026-08-06T00:00:01.000Z')",
+    [
+      "runtime-fixture-tenant",
+      "460000000",
+      1,
+      "00000000-0000-0000-0000-000000000001",
+      "00000000-0000-0000-0000-000000000002",
+    ],
+  );
+
+  const legacyOrders = await pool.query(
+    "SELECT device_id, allocation_order FROM sscc_blocks ORDER BY allocation_order",
   );
 
   const { runRuntimeMigrations } = await import(pathToFileURL(runtimeModule).href);
   await runRuntimeMigrations({ databaseUrl: scratchUrl.toString(), migrationsFolder, log: () => {} });
+  await runRuntimeMigrations({ databaseUrl: scratchUrl.toString(), migrationsFolder, log: () => {} });
 
   const result = await pool.query(
-    "SELECT d.id, d.api_key_id, d.enrolled_at, b.device_id FROM station_devices d JOIN sscc_blocks b ON b.tenant_id = d.tenant_id AND b.device_id = d.id WHERE d.id = $1",
-    ["00000000-0000-0000-0000-000000000001"],
+    "SELECT d.id, d.api_key_id, d.enrolled_at, b.device_id, b.allocation_order FROM station_devices d JOIN sscc_blocks b ON b.tenant_id = d.tenant_id AND b.device_id = d.id WHERE d.id IN ($1, $2) ORDER BY d.id, b.allocation_order",
+    [
+      "00000000-0000-0000-0000-000000000001",
+      "00000000-0000-0000-0000-000000000002",
+    ],
+  );
+  const artifacts = await pool.query(
+    "SELECT " +
+      "(SELECT column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'sscc_blocks' AND column_name = 'allocation_order') AS column_default, " +
+      "to_regclass('public.sscc_blocks_allocation_order_seq')::text AS sequence_name, " +
+      "to_regclass('public.sscc_blocks_allocation_order_uq')::text AS global_index, " +
+      "pg_get_indexdef(to_regclass('public.sscc_blocks_stream_allocation_order_uq')) AS scoped_index",
+  );
+
+  let duplicateSqlState;
+  try {
+    await pool.query(
+      "INSERT INTO sscc_blocks " +
+        "(tenant_id, issuer_prefix, extension_digit, device_id, from_serial, to_serial, issued_at, allocation_order) " +
+        "VALUES ($1, $2, $3, $4, 4, 4, '2026-08-06T00:00:04.000Z', 1)",
+      [
+        "runtime-fixture-tenant",
+        "460000000",
+        1,
+        "00000000-0000-0000-0000-000000000001",
+      ],
+    );
+  } catch (error) {
+    duplicateSqlState = error.code;
+  }
+
+  await maintenancePool.query("CREATE DATABASE " + quoteDatabaseIdentifier(freshDatabaseName));
+  freshDatabaseCreated = true;
+  freshPool = new pg.Pool({ connectionString: freshUrl.toString() });
+  await migrate(drizzle(freshPool), { migrationsFolder });
+  await migrate(drizzle(freshPool), { migrationsFolder });
+  const freshArtifacts = await freshPool.query(
+    "SELECT " +
+      "(SELECT column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'sscc_blocks' AND column_name = 'allocation_order') AS column_default, " +
+      "to_regclass('public.sscc_blocks_allocation_order_seq')::text AS sequence_name, " +
+      "to_regclass('public.sscc_blocks_stream_allocation_order_uq')::text AS scoped_index",
+  );
+
+  await maintenancePool.query("CREATE DATABASE " + quoteDatabaseIdentifier(stationDatabaseName));
+  stationDatabaseCreated = true;
+  stationPool = new pg.Pool({ connectionString: stationUrl.toString() });
+  await migrate(drizzle(stationPool), { migrationsFolder: stationMigrationsFolder });
+  await stationPool.query(
+    "INSERT INTO organization (id, name, slug, created_at) VALUES ($1, $2, $3, $4)",
+    ["station-fixture-tenant", "Station fixture", "station-fixture", new Date("2026-08-06T00:00:00.000Z")],
+  );
+  await stationPool.query(
+    "INSERT INTO station_devices (id, tenant_id, name, api_key_id, enrolled_at) VALUES ($1, $2, $3, $4, $5)",
+    [
+      "00000000-0000-0000-0000-000000000003",
+      "station-fixture-tenant",
+      "Pre-0029 station",
+      "pre-0029-api-key",
+      new Date("2026-08-06T00:00:00.000Z"),
+    ],
+  );
+  await stationPool.query(
+    "INSERT INTO sscc_blocks (tenant_id, issuer_prefix, extension_digit, device_id, from_serial, to_serial) VALUES ($1, $2, $3, $4, $5, $6)",
+    ["station-fixture-tenant", "460000001", 1, "00000000-0000-0000-0000-000000000003", 1, 1],
+  );
+  await runRuntimeMigrations({ databaseUrl: stationUrl.toString(), migrationsFolder, log: () => {} });
+  const stationRecord = await stationPool.query(
+    "SELECT d.id, d.api_key_id, d.enrolled_at, b.device_id, b.allocation_order FROM station_devices d JOIN sscc_blocks b ON b.tenant_id = d.tenant_id AND b.device_id = d.id WHERE d.id = $1",
+    ["00000000-0000-0000-0000-000000000003"],
   );
   process.stdout.write(
     JSON.stringify({
-      record: result.rows[0],
+      legacyOrders: legacyOrders.rows,
+      records: result.rows,
+      artifacts: artifacts.rows[0],
+      freshArtifacts: freshArtifacts.rows[0],
+      stationRecord: stationRecord.rows[0],
+      duplicateSqlState,
       databaseUrlArguments: process.argv.filter((argument) => argument.includes(databaseUrl)),
     }),
   );
@@ -161,6 +293,16 @@ try {
     cleanupError ??= error;
   }
   try {
+    await freshPool?.end();
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  try {
+    await stationPool?.end();
+  } catch (error) {
+    cleanupError ??= error;
+  }
+  try {
     await rm(temporaryRoot, { recursive: true, force: true });
   } catch (error) {
     cleanupError ??= error;
@@ -168,6 +310,20 @@ try {
   if (databaseCreated) {
     try {
       await maintenancePool.query("DROP DATABASE " + quoteDatabaseIdentifier(databaseName));
+    } catch (error) {
+      cleanupError ??= error;
+    }
+  }
+  if (freshDatabaseCreated) {
+    try {
+      await maintenancePool.query("DROP DATABASE " + quoteDatabaseIdentifier(freshDatabaseName));
+    } catch (error) {
+      cleanupError ??= error;
+    }
+  }
+  if (stationDatabaseCreated) {
+    try {
+      await maintenancePool.query("DROP DATABASE " + quoteDatabaseIdentifier(stationDatabaseName));
     } catch (error) {
       cleanupError ??= error;
     }
@@ -303,7 +459,7 @@ describe("runRuntimeMigrations", () => {
   });
 
   test.skipIf(!databaseUrlFromEnvironment)(
-    "preserves a legacy keyed station and SSCC reference through the real 0029 migration",
+    "preserves pre-0029 station data and upgrades exact legacy 0071 allocation order",
     async () => {
       const { stdout } = await execFile(
         process.execPath,
@@ -324,12 +480,63 @@ describe("runRuntimeMigrations", () => {
       );
 
       expect(JSON.parse(stdout)).toEqual({
-        record: {
-          id: "00000000-0000-0000-0000-000000000001",
-          api_key_id: "legacy-api-key",
-          enrolled_at: "2026-08-06T00:00:00.000Z",
-          device_id: "00000000-0000-0000-0000-000000000001",
+        legacyOrders: [
+          {
+            device_id: "00000000-0000-0000-0000-000000000001",
+            allocation_order: "1",
+          },
+          {
+            device_id: "00000000-0000-0000-0000-000000000002",
+            allocation_order: "2",
+          },
+          {
+            device_id: "00000000-0000-0000-0000-000000000001",
+            allocation_order: "3",
+          },
+        ],
+        records: [
+          {
+            id: "00000000-0000-0000-0000-000000000001",
+            api_key_id: "legacy-api-key",
+            enrolled_at: "2026-08-06T00:00:00.000Z",
+            device_id: "00000000-0000-0000-0000-000000000001",
+            allocation_order: "1",
+          },
+          {
+            id: "00000000-0000-0000-0000-000000000001",
+            api_key_id: "legacy-api-key",
+            enrolled_at: "2026-08-06T00:00:00.000Z",
+            device_id: "00000000-0000-0000-0000-000000000001",
+            allocation_order: "2",
+          },
+          {
+            id: "00000000-0000-0000-0000-000000000002",
+            api_key_id: "second-legacy-api-key",
+            enrolled_at: "2026-08-06T00:00:00.000Z",
+            device_id: "00000000-0000-0000-0000-000000000002",
+            allocation_order: "1",
+          },
+        ],
+        artifacts: {
+          column_default: null,
+          sequence_name: null,
+          global_index: null,
+          scoped_index:
+            "CREATE UNIQUE INDEX sscc_blocks_stream_allocation_order_uq ON public.sscc_blocks USING btree (tenant_id, issuer_prefix, extension_digit, device_id, allocation_order)",
         },
+        freshArtifacts: {
+          column_default: null,
+          sequence_name: null,
+          scoped_index: "sscc_blocks_stream_allocation_order_uq",
+        },
+        stationRecord: {
+          id: "00000000-0000-0000-0000-000000000003",
+          api_key_id: "pre-0029-api-key",
+          enrolled_at: "2026-08-06T00:00:00.000Z",
+          device_id: "00000000-0000-0000-0000-000000000003",
+          allocation_order: "1",
+        },
+        duplicateSqlState: "23505",
         databaseUrlArguments: [],
       });
     },

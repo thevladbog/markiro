@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Controller, useFieldArray, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import {
@@ -9,6 +9,7 @@ import {
   Button,
   Card,
   Checkbox,
+  ConfirmDialog,
   Input,
   PageHeader,
   Select,
@@ -25,8 +26,10 @@ import { toast } from "../../lib/toast.js";
 import { ApiKeysPanel } from "./ApiKeysPanel.js";
 import { CandidatesQueue } from "./CandidatesQueue.js";
 import { JournalList } from "./JournalList.js";
+import { SignerAgentsPanel } from "./SignerAgentsPanel.js";
 import {
   useChannelDetail,
+  useDeleteChannel,
   useIssueCredentials,
   useUpdateChannelSettings,
   type ChannelDetailDto,
@@ -455,6 +458,78 @@ function AuthorizedCredentialsSection({ channel }: { channel: ChannelDetailDto }
   );
 }
 
+/**
+ * "Удаление интеграции" -- полное отключение канала (тенант переходит на
+ * другую систему). Сервер удаляет настройки, учётные данные обмена, сеансы,
+ * журнал и очередь несопоставленных одной транзакцией
+ * (`IntegrationsService.deleteChannel`); связи товаров с внешней
+ * номенклатурой при этом сознательно остаются -- это и перечисляет текст
+ * подтверждения, чтобы оператор соглашался с конкретными последствиями, а
+ * не с абстрактным "удалить".
+ *
+ * Ошибка показывается внутри диалога (слот `error` у `ConfirmDialog`), а не
+ * тостом: диалог остаётся открытым, и оператор видит отказ (например, 409
+ * "интеграция не настроена") рядом с кнопкой, которую нажал. После успеха --
+ * уход на список интеграций: страница канала осталась бы валидной
+ * (`not_configured`), но задача оператора здесь закончена.
+ */
+function DangerZoneSection({ channel }: { channel: ChannelDetailDto }) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const deleteChannel = useDeleteChannel(channel.type);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleConfirm = async () => {
+    setError(null);
+    try {
+      await deleteChannel.mutateAsync();
+      setConfirmOpen(false);
+      toast("ok", t("pages.integrations.channel.danger.success"));
+      void navigate("/integrations");
+    } catch (err) {
+      setError(
+        err instanceof ApiRequestError ? err.message : t("pages.integrations.channel.danger.error"),
+      );
+    }
+  };
+
+  return (
+    <Card title={t("pages.integrations.channel.danger.title")}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <p style={{ margin: 0, font: "var(--text-body)", color: "var(--fg-2)" }}>
+          {t("pages.integrations.channel.danger.body")}
+        </p>
+        <div>
+          <Button type="button" variant="destructive" onClick={() => setConfirmOpen(true)}>
+            {t("pages.integrations.channel.danger.deleteAction")}
+          </Button>
+        </div>
+      </div>
+      {confirmOpen ? (
+        <ConfirmDialog
+          open
+          tone="destructive"
+          title={t("pages.integrations.channel.danger.confirmTitle")}
+          description={t("pages.integrations.channel.danger.confirmBody")}
+          entity={t(channel.labelKey)}
+          error={error}
+          confirmLabel={t("pages.integrations.channel.danger.confirmAction")}
+          cancelLabel={t("pages.integrations.channel.danger.cancelAction")}
+          busy={deleteChannel.isPending}
+          onConfirm={() => void handleConfirm()}
+          onCancel={() => {
+            if (!deleteChannel.isPending) {
+              setConfirmOpen(false);
+              setError(null);
+            }
+          }}
+        />
+      ) : null}
+    </Card>
+  );
+}
+
 function RestrictedChannelSettingsNotice() {
   const { t } = useTranslation();
   return (
@@ -581,7 +656,28 @@ export function ChannelPage() {
        */}
       {channel.type === "public_api" && <ApiKeysPanel />}
 
+      {/*
+       * `chestny_znak` has no exchange credentials of its own (task-8-brief.md):
+       * its "credentials" are the paired "Markiro Подписант" desktop agents
+       * holding a КЭП certificate, listed here instead of slotting into
+       * `AuthorizedCredentialsSection`'s login+secret form above -- the same
+       * "own area, not a forced fit" discipline `ApiKeysPanel` follows for
+       * `public_api` just above.
+       */}
+      {channel.type === "chestny_znak" ? <SignerAgentsPanel /> : null}
+
       <JournalList type={type} />
+
+      {/*
+       * Удаление доступно только `commerceml` (сервер отвечает 409 каналу без
+       * учётных данных обмена -- см. `deleteChannel`'s doc comment) и только
+       * тем, кто может и настраивать интеграции, и распоряжаться учётными
+       * данными: удаление стирает логин+хэш секрета, то есть отзывает их --
+       * та же пара capability, что у кнопки "Выпустить" выше.
+       */}
+      {channel.type === "commerceml" && canWriteIntegrations && canManageCredentials ? (
+        <DangerZoneSection channel={channel} />
+      ) : null}
     </div>
   );
 }

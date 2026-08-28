@@ -22,6 +22,7 @@ export type { ScanVerdict, ShiftScanContext } from "./scan/validate.js";
 export {
   LABEL_FIELDS,
   labelFieldDisplayValue,
+  labelTemplateSpecSchema,
   mmToDots,
   parseLabelTemplate,
   ptToDots,
@@ -118,6 +119,132 @@ export {
 } from "./shift-close.js";
 export type { ShiftCloseReasonCode } from "./shift-close.js";
 export { formatShiftNumber, shiftMonthKey } from "./shift-number.js";
+export {
+  canDisposeChzCode,
+  classifyInventorySnapshotRow,
+  INVENTORY_CHZ_STATUSES,
+} from "./inventory/index.js";
+export {
+  createInventoryDocumentRegistry,
+  getInventoryDocumentFormat,
+  getRegisteredInventoryDocumentFormat,
+  INVENTORY_DOCUMENT_FORMAT_AVAILABILITIES,
+  INVENTORY_DOCUMENT_FORMATS,
+  INVENTORY_DOCUMENT_MIME_TYPE_PATTERN,
+  INVENTORY_DOCUMENT_SOURCE_CATEGORIES,
+  inventoryDocumentFormatDescriptorSchema,
+  inventoryDocumentRegistry,
+  InventoryDocumentRegistryError,
+} from "./inventory/index.js";
+export type {
+  InventoryDocumentFormatAvailability,
+  InventoryDocumentFormatDescriptor,
+  InventoryDocumentRegistry,
+  InventoryDocumentRegistryErrorCode,
+  InventoryDocumentSourceCategory,
+} from "./inventory/index.js";
+export {
+  generateInventoryAggregationXml,
+  generateInventoryAggregationXmlV2,
+  generateInventoryBalancesByProductionDateCsv,
+  generateInventoryCurrentStockCsv,
+  generateInventoryDisaggregationXml,
+  generateInventoryFinalBoxContentsCsv,
+  generateInventoryFinalBoxesTxt,
+  generateInventoryWriteOffCsv,
+  generateInventoryWriteOffTxt,
+  inventoryDocumentFilenamePrefix,
+  InventoryDocumentGenerationError,
+  isParticipantInn,
+} from "./inventory/index.js";
+export type {
+  InventoryDocumentGeneratedPart,
+  InventoryDocumentGenerationErrorCode,
+  InventoryDocumentGenerationMetadata,
+  InventoryDocumentGenerationSource,
+} from "./inventory/index.js";
+export { selectEligibleInventoryFinalBoxes } from "./inventory/index.js";
+export type { EligibleInventoryFinalBox } from "./inventory/index.js";
+export {
+  INVENTORY_EVENT_BATCH_SIZE,
+  INVENTORY_EVENT_BATCH_CLAIM_OUTCOME_SIZE,
+  INVENTORY_EVENT_CLAIM_OUTCOME_SIZE,
+  INVENTORY_EVENT_OUTCOMES,
+  INVENTORY_EVENT_REASON_CODES,
+  INVENTORY_PROGRESS_CURSOR_PATTERN,
+  INVENTORY_PROGRESS_PAGE_SIZE,
+  inventoryEventBatchDigest,
+  inventoryEventBatchPayloadSchema,
+  inventoryEventBatchResponseSchema,
+  inventoryEventBatchSchema,
+  inventoryEventOutcomeSchema,
+  inventoryRepackMutationSchema,
+  inventoryEventClaimOutcomeSchema,
+  inventoryEventSchema,
+  inventoryProgressChangeSchema,
+  inventoryProgressCursorSchema,
+  inventoryProgressPageSchema,
+  parseInventoryEventBatch,
+  parseInventoryEventBatchResponse,
+  parseInventoryProgressPage,
+} from "./inventory/index.js";
+export type {
+  InventoryClaimWinner,
+  InventoryEvent,
+  InventoryEventBatch,
+  InventoryEventBatchPayload,
+  InventoryEventBatchResponse,
+  InventoryEventClaimOutcome,
+  InventoryEventOutcome,
+  ExpectedInventoryProgressPage,
+  InventoryProgressChange,
+  InventoryProgressPage,
+  InventoryRepackMutation,
+} from "./inventory/index.js";
+export {
+  inventorySnapshotContentDigest,
+  inventorySnapshotPageDigest,
+  parseStationInventoryBundleManifest,
+  parseStationInventoryBundlePage,
+  STATION_INVENTORY_BUNDLE_LIMITS,
+  stationInventoryBundleCodeSchema,
+  stationInventoryBundleManifestSchema,
+  stationInventoryBundlePageSchema,
+} from "./inventory/index.js";
+export type {
+  StationInventoryBundleCode,
+  StationInventoryBundleManifest,
+  StationInventoryBundlePage,
+} from "./inventory/index.js";
+export type {
+  InventoryChzCodeDispositionInput,
+  InventoryChzStatus,
+  InventoryCodeState,
+  InventoryProductionDateRange,
+  InventorySnapshotClassification,
+  InventorySnapshotSourceRow,
+} from "./inventory/index.js";
+export { classifyInventoryScan } from "./inventory/index.js";
+export { createInventoryRepackingState, reduceInventoryRepacking } from "./inventory/index.js";
+export type {
+  InventoryRepackBoxState,
+  InventoryRepackMembership,
+  InventoryRepackObservationClassification,
+  InventoryRepackingAction,
+  InventoryRepackingEffect,
+  InventoryRepackingFailureReason,
+  InventoryRepackingPhase,
+  InventoryRepackingResult,
+  InventoryRepackingState,
+} from "./inventory/index.js";
+export type {
+  InventoryBoxChildClassification,
+  InventoryLocalClaim,
+  InventoryOriginClassification,
+  InventoryScanClassification,
+  InventoryScanClassifierContext,
+  InventoryScanSnapshotRow,
+} from "./inventory/index.js";
 export {
   CABINET_CAPABILITY,
   hasCabinetCapabilities,

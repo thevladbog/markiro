@@ -8,11 +8,12 @@ terraform {
 }
 
 locals {
-  github_owner                  = split("/", var.github_repository)[0]
-  github_repository_name        = split("/", var.github_repository)[1]
-  github_repository_subject     = "${local.github_owner}@${var.github_repository_owner_id}/${local.github_repository_name}@${var.github_repository_id}"
-  github_audience               = "https://github.com/${local.github_owner}"
-  github_infrastructure_subject = "repo:${local.github_repository_subject}:environment:${var.github_infrastructure_environment}"
+  github_owner                        = split("/", var.github_repository)[0]
+  github_repository_name              = split("/", var.github_repository)[1]
+  github_repository_subject           = "${local.github_owner}@${var.github_repository_owner_id}/${local.github_repository_name}@${var.github_repository_id}"
+  github_audience                     = "https://github.com/${local.github_owner}"
+  github_infrastructure_subject       = "repo:${local.github_repository_subject}:environment:${var.github_infrastructure_environment}"
+  github_infrastructure_apply_subject = "repo:${local.github_repository_subject}:environment:${var.github_infrastructure_apply_environment}"
 }
 
 resource "yandex_iam_service_account" "terraform" {
@@ -60,6 +61,12 @@ resource "yandex_iam_workload_identity_federated_credential" "github_infrastruct
   external_subject_id = local.github_infrastructure_subject
 }
 
+resource "yandex_iam_workload_identity_federated_credential" "github_infrastructure_apply" {
+  service_account_id  = yandex_iam_service_account.terraform.id
+  federation_id       = yandex_iam_workload_identity_oidc_federation.github.id
+  external_subject_id = local.github_infrastructure_apply_subject
+}
+
 resource "yandex_storage_bucket_iam_binding" "state_backend" {
   bucket  = var.state_bucket_name
   role    = "storage.editor"
@@ -80,16 +87,20 @@ resource "yandex_lockbox_secret_iam_member" "terraform_state_backend" {
 
 locals {
   terraform_production_action_roles = {
-    "compute.instances-and-access.manage" = "compute.admin"
-    "dns.recordsets.manage"               = "dns.editor"
-    "managed-postgresql.resources.manage" = "managed-postgresql.editor"
-    "storage.buckets-and-policies.manage" = "storage.admin"
-    "vpc.gateways.attach-to-routes"       = "vpc.gateways.user"
-    "vpc.gateways.manage"                 = "vpc.gateways.editor"
-    "vpc.networks-subnets-routes.manage"  = "vpc.privateAdmin"
-    "vpc.public-addresses.manage"         = "vpc.publicAdmin"
-    "vpc.resources.use"                   = "vpc.user"
-    "vpc.security-groups.manage"          = "vpc.securityGroups.admin"
+    "cdn.origins-and-resources.manage"          = "cdn.editor"
+    "certificate-manager.certificates.download" = "certificate-manager.certificates.downloader"
+    "certificate-manager.certificates.manage"   = "certificate-manager.editor"
+    "compute.instances-and-access.manage"       = "compute.admin"
+    "dns.recordsets.manage"                     = "dns.editor"
+    "iam.service-accounts-and-keys.manage"      = "iam.serviceAccounts.admin"
+    "managed-postgresql.resources.manage"       = "managed-postgresql.editor"
+    "storage.buckets-and-policies.manage"       = "storage.admin"
+    "vpc.gateways.attach-to-routes"             = "vpc.gateways.user"
+    "vpc.gateways.manage"                       = "vpc.gateways.editor"
+    "vpc.networks-subnets-routes.manage"        = "vpc.privateAdmin"
+    "vpc.public-addresses.manage"               = "vpc.publicAdmin"
+    "vpc.resources.use"                         = "vpc.user"
+    "vpc.security-groups.manage"                = "vpc.securityGroups.admin"
   }
   terraform_folder_roles = toset(values(local.terraform_production_action_roles))
 }

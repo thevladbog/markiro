@@ -11,6 +11,7 @@ import express from "express";
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import { JournalService } from "../integrations/journal.service";
 import { PickupOrdersModule } from "../pickup-orders/pickup-orders.module";
+import { ProductsModule } from "../products/products.module";
 import { ExchangeController } from "./exchange.controller";
 import {
   ExchangeSessionService,
@@ -278,7 +279,7 @@ class ExchangeRawBodyMiddleware implements NestMiddleware {
  * `exchange.controller.ts` advertises as `file_limit` on `mode=init`.
  */
 @Module({
-  imports: [PickupOrdersModule],
+  imports: [PickupOrdersModule, ProductsModule],
   controllers: [ExchangeController],
   providers: [
     ExchangeSessionService,

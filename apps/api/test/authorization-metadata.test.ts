@@ -11,6 +11,7 @@ import { BoxesController } from "../src/modules/boxes/boxes.controller";
 import { ConflictsController } from "../src/modules/conflicts/conflicts.controller";
 import { CounterpartiesController } from "../src/modules/counterparties/counterparties.controller";
 import { DevicesController } from "../src/modules/devices/devices.controller";
+import { DashboardController } from "../src/modules/dashboard/dashboard.controller";
 import { EmployeesController } from "../src/modules/employees/employees.controller";
 import { LabelTemplatesController } from "../src/modules/label-templates/label-templates.controller";
 import { LinesController } from "../src/modules/lines/lines.controller";
@@ -19,6 +20,12 @@ import {
   ProductExternalLinkController,
 } from "../src/modules/integrations/integrations.controller";
 import { KiosksController } from "../src/modules/kiosks/kiosks.controller";
+import {
+  InventoriesController,
+  InventoryDocumentRunsController,
+} from "../src/modules/inventories/inventories.controller";
+import { InventoryDocumentFormatsController } from "../src/modules/inventories/inventory-document-formats.controller";
+import { StationInventoriesController } from "../src/modules/inventories/station-inventories.controller";
 import { OperatorsController } from "../src/modules/operators/operators.controller";
 import { OrgProfileController } from "../src/modules/org-profile/org-profile.controller";
 import { StationOperatorsController } from "../src/modules/operators/station-operators.controller";
@@ -82,6 +89,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
   ControllerClass,
   Readonly<Record<string, RouteAccessPolicy>>,
 ][] = [
+  [DashboardController, { overview: readPolicy }],
   [DevicesController, { listDevices: readPolicy }],
   [BoxesController, { listBoxes: readPolicy, getSellCodes: readPolicy }],
   [BoxExceptionsController, { listBoxExceptions: readPolicy }],
@@ -143,6 +151,38 @@ const OPERATIONAL_CONTROLLERS: readonly [
     },
   ],
   [ConflictsController, { listConflicts: readPolicy, reviewConflict: writePolicy }],
+  [InventoryDocumentFormatsController, { list: readPolicy }],
+  [
+    InventoryDocumentRunsController,
+    { retry: writePolicy, downloadArtifact: readPolicy, downloadZip: readPolicy },
+  ],
+  [
+    InventoriesController,
+    {
+      list: readPolicy,
+      progress: readPolicy,
+      closePreview: readPolicy,
+      discrepancies: readPolicy,
+      evidence: readPolicy,
+      lateEvents: readPolicy,
+      documentRuns: readPolicy,
+      createDocumentRun: writePolicy,
+      discardLateEvents: writePolicy,
+      replayLateEvent: writePolicy,
+      close: writePolicy,
+      emergencyClose: writePolicy,
+      reopen: writePolicy,
+      complete: writePolicy,
+      correct: writePolicy,
+      create: writePolicy,
+      taskForm: readPolicy,
+      get: readPolicy,
+      update: writePolicy,
+      importEvidence: writePolicy,
+      fixSnapshot: writePolicy,
+      start: writePolicy,
+    },
+  ],
   [
     OperatorsController,
     {
@@ -222,6 +262,9 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
       update: integrationsWritePolicy,
       journal: integrationsReadPolicy,
       issueCredentials: integrationCredentialsPolicy,
+      // Удаление стирает credentialLogin/credentialHash, то есть отзывает
+      // учётные данные обмена -- та же пара capability, что у их выпуска.
+      deleteChannel: integrationCredentialsPolicy,
       listCandidates: integrationsReadPolicy,
       linkCandidate: integrationsWritePolicy,
       hideCandidate: integrationsWritePolicy,
@@ -261,6 +304,10 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
 const STATION_ONLY_CONTROLLERS: readonly [ControllerClass, readonly string[]][] = [
   [StationOperatorsController, ["listRoster"]],
   [StationScansController, ["codeReleases", "conflictStatus", "ingest"]],
+  [
+    StationInventoriesController,
+    ["codes", "eventBatch", "join", "leave", "list", "manifest", "progress", "resolveBarcode"],
+  ],
 ];
 
 const reflector = new Reflector();

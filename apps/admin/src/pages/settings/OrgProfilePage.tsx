@@ -7,7 +7,17 @@ import { Link } from "react-router";
 import { z } from "zod";
 
 import { hasValidCheckDigit } from "@markiro/domain";
-import { Alert, Button, Card, Checkbox, Input, PageHeader, Select, Spinner } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  FileDropZone,
+  Input,
+  PageHeader,
+  Select,
+  Spinner,
+} from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { errorProp } from "../../lib/form-error.js";
@@ -26,6 +36,7 @@ import {
   useDeleteOrganizationLogo,
   type PutOrgProfileInput,
 } from "./api.js";
+import { OPERATIONAL_TIME_ZONES } from "./time-zones.js";
 import { useLabelTemplates } from "../labels/api.js";
 
 /**
@@ -61,6 +72,7 @@ const profileFormSchema = z.object({
     .refine((v) => !v || /^\d{13}$/.test(v), "pages.settings.profile.errors.glnFormat")
     .refine((v) => !v || hasValidCheckDigit(v), "pages.settings.profile.errors.glnCheckDigit"),
   inn: z.string().trim().optional(),
+  timeZone: z.string(),
   gs1Prefixes: z
     .string()
     .trim()
@@ -76,6 +88,7 @@ const EMPTY_PROFILE_VALUES: ProfileFormValues = {
   defaultBoxLabelTemplateId: "",
   gln: "",
   inn: "",
+  timeZone: "Europe/Moscow",
   gs1Prefixes: "",
 };
 
@@ -111,6 +124,7 @@ function toProfileInput(
   const input: PutOrgProfileInput = {
     gln: gln ? gln : null,
     inn: inn ? inn : null,
+    timeZone: values.timeZone,
     gs1Prefixes: values.gs1Prefixes
       ? values.gs1Prefixes
           .split(",")
@@ -128,12 +142,14 @@ function toProfileFormValues(profile: {
   defaultBoxLabelTemplateId: string | null;
   gln: string | null;
   inn: string | null;
+  timeZone: string;
   gs1Prefixes: string[];
 }): ProfileFormValues {
   return {
     defaultBoxLabelTemplateId: profile.defaultBoxLabelTemplateId ?? "",
     gln: profile.gln ?? "",
     inn: profile.inn ?? "",
+    timeZone: profile.timeZone,
     gs1Prefixes: profile.gs1Prefixes.join(", "),
   };
 }
@@ -169,6 +185,11 @@ export function OrgProfilePage() {
   }, [isProfileDirty, profileQuery.data, resetProfile]);
 
   const defaultBoxLabelTemplateId = watchProfile("defaultBoxLabelTemplateId");
+  const timeZone = watchProfile("timeZone");
+  const timeZoneOptions = [
+    ...OPERATIONAL_TIME_ZONES,
+    ...(OPERATIONAL_TIME_ZONES.some((option) => option === timeZone) ? [] : [timeZone]),
+  ].map((option) => ({ value: option, label: option }));
   const labelTemplates = labelTemplatesQuery.data ?? [];
   const savedTemplateIsUnavailable =
     defaultBoxLabelTemplateId !== "" &&
@@ -235,6 +256,14 @@ export function OrgProfilePage() {
                 mono
                 {...errorProp(translateFieldError(t, profileErrors.inn?.message))}
                 {...registerProfile("inn")}
+              />
+              <Select
+                native
+                label={t("pages.settings.profile.timeZoneLabel")}
+                hint={t("pages.settings.profile.timeZoneHint")}
+                options={timeZoneOptions}
+                value={timeZone}
+                onValueChange={(value) => setProfileValue("timeZone", value, { shouldDirty: true })}
               />
               <Input
                 label={t("pages.settings.profile.prefixesLabel")}
@@ -405,12 +434,16 @@ function OrganizationLogoCard({ logoUrl }: { logoUrl: string | null }) {
             Markiro
           </div>
         )}
-        <Input
-          type="file"
+        <FileDropZone
           accept="image/jpeg,image/png,image/webp"
-          label={t("pages.settings.logo.uploadLabel")}
+          label={t("pages.settings.logo.dropLabel")}
+          hint={t("pages.settings.logo.hint")}
+          ariaLabel={t("pages.settings.logo.uploadLabel")}
           disabled={upload.isPending || remove.isPending}
-          onChange={(event) => void uploadFile(event.target.files?.[0])}
+          onFile={(file) => void uploadFile(file)}
+          // Страница валидирует тип сама (ALLOWED_LOGO_TYPES) и показывает
+          // собственное сообщение — отказ зоны не должен быть молчаливым.
+          onRejected={(file) => void uploadFile(file)}
         />
         {previewUrl ? (
           <Button

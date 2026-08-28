@@ -1,0 +1,9 @@
+# Agent skill installations are tooling, not Markiro project knowledge.
+.agents/
+
+# Generated previews and rendered artifacts are not source material.
+output/
+
+# PNG and SVG share one extensionless Graphify node ID; keep the PNG node.
+apps/api/src/modules/billing/assets/markiro-logo-on-light.svg
+docs/design-briefs/design_handoff_markiro/design-system/assets/qr-design-mock.svg

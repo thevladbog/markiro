@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,8 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
@@ -25,35 +27,13 @@ describe.skipIf(!databaseUrl)("tenant billing action reconciliation migration", 
     await maintenancePool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
     created = true;
     temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-billing-reconcile-migration-"));
-    const migrationsThrough0068 = join(temporaryRoot, "migrations");
-    await cp(migrationsFolder, migrationsThrough0068, { recursive: true });
-    await rm(join(migrationsThrough0068, "0069_tenant_billing_action_reconciliation.sql"));
-    await rm(join(migrationsThrough0068, "0070_tenant_billing_platform_workflow.sql"));
-    await rm(join(migrationsThrough0068, "0071_tenant_billing_target_cardinality.sql"));
-    await rm(join(migrationsThrough0068, "0072_tenant_billing_stale_family_repair.sql"));
-    await rm(join(migrationsThrough0068, "0073_tenant_billing_notification_delivery.sql"));
-    await rm(join(migrationsThrough0068, "0074_tenant_billing_attachment_idempotency.sql"));
-    await rm(join(migrationsThrough0068, "meta", "0069_snapshot.json"));
-    await rm(join(migrationsThrough0068, "meta", "0070_snapshot.json"));
-    await rm(join(migrationsThrough0068, "meta", "0071_snapshot.json"));
-    await rm(join(migrationsThrough0068, "meta", "0072_snapshot.json"));
-    await rm(join(migrationsThrough0068, "meta", "0073_snapshot.json"));
-    await rm(join(migrationsThrough0068, "meta", "0074_snapshot.json"));
-    const journalPath = join(migrationsThrough0068, "meta", "_journal.json");
-    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
-      entries: Array<{ tag: string }>;
-    };
-    journal.entries = journal.entries.filter(
-      (entry) =>
-        entry.tag !== "0069_tenant_billing_action_reconciliation" &&
-        entry.tag !== "0070_tenant_billing_platform_workflow" &&
-        entry.tag !== "0071_tenant_billing_target_cardinality" &&
-        entry.tag !== "0072_tenant_billing_stale_family_repair" &&
-        entry.tag !== "0073_tenant_billing_notification_delivery" &&
-        entry.tag !== "0074_tenant_billing_attachment_idempotency",
-    );
-    await writeFile(journalPath, JSON.stringify(journal));
-    await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0068 });
+    const migrationsThrough0092 = join(temporaryRoot, "migrations");
+    await copyMigrationsThroughIndex({
+      sourceFolder: migrationsFolder,
+      targetFolder: migrationsThrough0092,
+      lastIncludedIndex: 92,
+    });
+    await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0092 });
 
     await pool.query(`
       INSERT INTO organization (id, name, slug, created_at)

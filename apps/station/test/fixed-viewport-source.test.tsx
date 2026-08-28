@@ -68,7 +68,13 @@ describe("fixed station viewport source contract", () => {
 
   it("keeps shared alert copy at floor-readable size inside the station application", () => {
     expect(stationSource("station.css")).toMatch(
-      /#root \.mk-alert > span,[^{]+\{[^}]*font-size:\s*18px !important;[^}]*line-height:\s*26px !important;/s,
+      /#root \.mk-alert > span:not\(\.mk-badge\),[^{]+\{[^}]*font-size:\s*18px !important;[^}]*line-height:\s*26px !important;/s,
+    );
+  });
+
+  it("keeps the alert badge compact so two-word badges do not read as double-spaced", () => {
+    expect(stationSource("station.css")).toMatch(
+      /#root \.mk-alert \.mk-badge\s*\{[^}]*font-size:\s*14px !important;[^}]*line-height:\s*20px !important;/s,
     );
   });
 

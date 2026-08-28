@@ -10,10 +10,11 @@ import { RUNTIME_DEPENDENCY_PROBE_SOURCE } from "./runtime-dependency-probe.mjs"
 const APPLICATION_CSP =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://storage.yandexcloud.net; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
 const LANDING_CSP =
-  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
+  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://www.googletagmanager.com https://mc.yandex.ru; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru https://cdn.jsdelivr.net/gh/yandex/webmaster-gtm-template@467fdc0c3ab3124a40ddf229fc8cd20392c71938/webmaster-verification.js https://www.googletagmanager.com https://mc.yandex.ru https://yastatic.net; frame-src 'self' https://smartcaptcha.cloud.yandex.ru https://mc.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://mc.yandex.ru wss://mc.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
 const VBTECH_CSP =
   "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; frame-src https://smartcaptcha.cloud.yandex.ru; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline' https://smartcaptcha.cloud.yandex.ru; style-src 'self' 'unsafe-inline'; upgrade-insecure-requests";
 const LANDING_SITE_URL = "https://markiro.app";
+const STATION_STABLE_DOWNLOAD_URL = "https://releases.markiro.app/station/download";
 const COMMAND_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 1_000;
 function timeoutError(command, timeoutMs) {
@@ -374,9 +375,16 @@ function kioskShellSignature(html, baseUrl) {
   };
 }
 
-function assertNoExternalOrigins(html, baseUrl, allowedCanonicalUrl, allowedExternalOrigins = []) {
+function assertNoExternalOrigins(
+  html,
+  baseUrl,
+  allowedCanonicalUrl,
+  allowedExternalOrigins = [],
+  allowedExternalLinks = [],
+) {
   const baseOrigin = new URL(baseUrl).origin;
   const allowedOriginSet = new Set(allowedExternalOrigins.map((value) => new URL(value).origin));
+  const allowedExternalLinkSet = new Set(allowedExternalLinks);
   let runtimeHtml = html;
   if (allowedCanonicalUrl) {
     const allowedMetadataOrigin = new URL(allowedCanonicalUrl).origin;
@@ -400,6 +408,11 @@ function assertNoExternalOrigins(html, baseUrl, allowedCanonicalUrl, allowedExte
       return tag;
     });
   }
+  runtimeHtml = runtimeHtml.replace(/<a\b[^>]*>/gi, (tag) =>
+    tag.replace(/\bhref\s*=\s*(["'])([^"']+)\1/i, (attribute, _quote, href) =>
+      allowedExternalLinkSet.has(href) ? "" : attribute,
+    ),
+  );
   const assertUrl = (value) => {
     if (!value.startsWith("//") && !/^https?:\/\//i.test(value)) return;
     const origin = new URL(value, baseUrl).origin;
@@ -460,7 +473,9 @@ function assertLandingRoute(check, response, body, baseUrl, landingDemoSubmissio
       throw new Error(`landing ${path} is not revalidation-only`);
     const allowedExternalOrigins =
       landingDemoSubmissionState === "enabled" ? ["https://smartcaptcha.cloud.yandex.ru"] : [];
-    assertNoExternalOrigins(body, baseUrl, expectedUrl, allowedExternalOrigins);
+    assertNoExternalOrigins(body, baseUrl, expectedUrl, allowedExternalOrigins, [
+      STATION_STABLE_DOWNLOAD_URL,
+    ]);
     return;
   }
 

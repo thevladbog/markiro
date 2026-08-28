@@ -41,6 +41,7 @@ function stubChannels(channels: unknown[]): void {
       ok: true,
       status: 200,
       json: async () => ({ channels }),
+      text: async () => JSON.stringify({ channels }),
     })),
   );
 }
@@ -55,15 +56,15 @@ describe("IntegrationsPage", () => {
         lastEventAt: new Date().toISOString(),
       },
       {
-        type: "chestny_znak",
-        labelKey: "integrations.channel.chestnyZnak",
+        type: "gis_mt_files",
+        labelKey: "integrations.channel.gisMtFiles",
         state: "unavailable",
         lastEventAt: null,
       },
     ]);
     renderPage();
     expect(await screen.findByText("Обмен с 1С")).toBeDefined();
-    expect(screen.getByText("Честный ЗНАК")).toBeDefined();
+    expect(screen.getByText("Файлы ГИС МТ")).toBeDefined();
     expect(screen.getByText("Недоступно")).toBeDefined();
   });
 

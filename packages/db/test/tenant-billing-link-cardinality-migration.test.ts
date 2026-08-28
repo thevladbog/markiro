@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,17 +8,19 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
+
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 
 describe("tenant billing target cardinality migration", () => {
-  it("adds 0071 after the immutable 0070 snapshot", async () => {
+  it("adds 0095 after the immutable 0094 snapshot", async () => {
     const [previousText, currentText, journalText, sqlText] = await Promise.all([
-      readFile(new URL("../migrations/meta/0070_snapshot.json", import.meta.url), "utf8"),
-      readFile(new URL("../migrations/meta/0071_snapshot.json", import.meta.url), "utf8"),
+      readFile(new URL("../migrations/meta/0094_snapshot.json", import.meta.url), "utf8"),
+      readFile(new URL("../migrations/meta/0095_snapshot.json", import.meta.url), "utf8"),
       readFile(new URL("../migrations/meta/_journal.json", import.meta.url), "utf8"),
       readFile(
-        new URL("../migrations/0071_tenant_billing_target_cardinality.sql", import.meta.url),
+        new URL("../migrations/0095_tenant_billing_target_cardinality.sql", import.meta.url),
         "utf8",
       ),
     ]);
@@ -29,9 +31,9 @@ describe("tenant billing target cardinality migration", () => {
     };
 
     expect(current.prevId).toBe(previous.id);
-    expect(journal.entries.find(({ idx }) => idx === 71)).toMatchObject({
-      idx: 71,
-      tag: "0071_tenant_billing_target_cardinality",
+    expect(journal.entries.find(({ idx }) => idx === 95)).toMatchObject({
+      idx: 95,
+      tag: "0095_tenant_billing_target_cardinality",
     });
     for (const target of ["offer", "invoice", "act"] as const) {
       expect(sqlText).toContain(`tenant_billing_request_links_${target}_uq`);
@@ -60,24 +62,13 @@ describe.skipIf(!databaseUrl)("tenant billing target cardinality upgrade", () =>
     await maintenance.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
     created = true;
     temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-billing-cardinality-"));
-    const migrationsThrough0070 = join(temporaryRoot, "migrations");
-    await cp(migrationsFolder, migrationsThrough0070, { recursive: true });
-    await rm(join(migrationsThrough0070, "0071_tenant_billing_target_cardinality.sql"));
-    await rm(join(migrationsThrough0070, "0072_tenant_billing_stale_family_repair.sql"));
-    await rm(join(migrationsThrough0070, "meta", "0071_snapshot.json"));
-    await rm(join(migrationsThrough0070, "meta", "0072_snapshot.json"));
-    const journalPath = join(migrationsThrough0070, "meta", "_journal.json");
-    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
-      entries: Array<{ tag: string }>;
-    };
-    journal.entries = journal.entries.filter(
-      ({ tag }) =>
-        tag !== "0071_tenant_billing_target_cardinality" &&
-        tag !== "0072_tenant_billing_stale_family_repair" &&
-        tag !== "0073_tenant_billing_notification_delivery",
-    );
-    await writeFile(journalPath, JSON.stringify(journal));
-    await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0070 });
+    const migrationsThrough0094 = join(temporaryRoot, "migrations");
+    await copyMigrationsThroughIndex({
+      sourceFolder: migrationsFolder,
+      targetFolder: migrationsThrough0094,
+      lastIncludedIndex: 94,
+    });
+    await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0094 });
     await pool.query(`
       INSERT INTO organization (id, name, slug, created_at)
       VALUES ('billing-cardinality', 'Billing cardinality', 'billing-cardinality', now());

@@ -210,7 +210,7 @@ import {
 
 const version = "0.1.0-beta.1";
 const names = stationAssetNames(version);
-const bundleUrl = `https://github.com/thevladbog/markiro/releases/download/station-v${version}/${names.bundle}`;
+const bundleUrl = `https://github.com/thevladbog/markiro-station-releases/releases/download/station-v${version}/${names.bundle}`;
 
 test("creates the exact one-platform Tauri beta manifest", () => {
   const manifest = createBetaUpdateManifest({
@@ -340,7 +340,7 @@ git commit -m "feat(station): validate beta release artifacts"
 
 **Interfaces:**
 
-- Produces fixed updater endpoint `https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json`.
+- Produces fixed updater endpoint `https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json`.
 - Produces an actual embedded Tauri public key and `bundle.createUpdaterArtifacts = true`.
 - Produces `@tauri-apps/plugin-updater` 2.10.1 and `@tauri-apps/plugin-process` 2.3.1 guest APIs.
 - Produces only the restart capability required after explicit installation.
@@ -362,7 +362,7 @@ describe("packaged station updater contract", () => {
     );
     expect(config.bundle.createUpdaterArtifacts).toBe(true);
     expect(config.plugins.updater.endpoints).toEqual([
-      "https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json",
+      "https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json",
     ]);
     expect(config.plugins.updater.pubkey).toMatch(/^[A-Za-z0-9+/=]{40,}$/);
     expect(config.plugins.updater.pubkey).not.toMatch(/replace|example|test/i);
@@ -439,7 +439,7 @@ Add to `tauri.conf.json` using the exact generated public key from Step 3:
 "plugins": {
   "updater": {
     "endpoints": [
-      "https://github.com/thevladbog/markiro/releases/download/station-beta-channel/latest.json"
+      "https://github.com/thevladbog/markiro-station-releases/releases/download/station-beta-channel/latest.json"
     ]
   }
 }

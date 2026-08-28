@@ -130,6 +130,7 @@ function renderAccessRoute(
       if (path.includes("/api/devices"))
         return jsonResponse(200, { items: [], page: 1, pageSize: 8, total: 0 });
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path.endsWith("/api/inventories")) return jsonResponse(200, { items: [] });
       if (path.endsWith("/api/lines")) return jsonResponse(200, { items: [] });
       if (path.includes("/api/integrations/commerceml/candidates")) {
         return jsonResponse(200, { candidates: [] });
@@ -258,6 +259,15 @@ it.each(["/lines/new", "/lines/line-1/edit"])(
   },
 );
 
+it("keeps inventory reads available but denies the direct create route to read-only operators", async () => {
+  const list = renderAccessRoute("/inventory", OPERATIONS_READ_ONLY);
+  expect(await screen.findByRole("heading", { name: "Инвентаризации" })).toBeDefined();
+  list.unmount();
+
+  renderAccessRoute("/inventory/new", OPERATIONS_READ_ONLY);
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+});
+
 it.each(["/employees/new", "/employees/1/edit"])(
   "forbids the direct employee write route %s for a read-only operator",
   async (path) => {
@@ -332,7 +342,7 @@ it("shows integrations and settings navigation to administrators", async () => {
   expect(await screen.findByRole("link", { name: "Интеграции" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Настройки" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Доступ в кабинет" })).toBeDefined();
-  expect(screen.getByRole("link", { name: "Открыть профиль Елена Ким" })).toBeDefined();
+  expect(screen.getAllByRole("link", { name: "Открыть профиль Елена Ким" })).toHaveLength(2);
 });
 
 it("redirects legacy signed-in users to global profile completion and preserves the requested route", async () => {

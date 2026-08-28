@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Functional equipment loop for a beer marking line</title>
+  <desc id="desc">Six connected functions: job, application, reading, decision, case, and local journal.</desc>
+  <rect width="1200" height="620" fill="#131216"/>
+  <text x="58" y="68" fill="#39ef8a" font-family="Arial, sans-serif" font-size="15" font-weight="700" letter-spacing="2">ONE CONTROL LOOP, NOT A DEVICE LIST</text>
+  <text x="58" y="112" fill="#f4f2f5" font-family="Arial, sans-serif" font-size="30" font-weight="700">From production job to confirmed case</text>
+  <g font-family="Arial, sans-serif">
+    <g transform="translate(58 158)"><rect width="320" height="126" rx="2" fill="#1d1c21" stroke="#3b3941"/><text x="24" y="34" fill="#39ef8a" font-size="13" font-weight="700">01 / JOB</text><text x="24" y="68" fill="#f4f2f5" font-size="21" font-weight="700">GTIN · batch · codes</text><text x="24" y="98" fill="#a8a4ad" font-size="15">active revision on the line</text></g>
+    <g transform="translate(440 158)"><rect width="320" height="126" rx="2" fill="#1d1c21" stroke="#3b3941"/><text x="24" y="34" fill="#39ef8a" font-size="13" font-weight="700">02 / APPLICATION</text><text x="24" y="68" fill="#f4f2f5" font-size="21" font-weight="700">Print · apply</text><text x="24" y="98" fill="#a8a4ad" font-size="15">code on actual packaging</text></g>
+    <g transform="translate(822 158)"><rect width="320" height="126" rx="2" fill="#1d1c21" stroke="#3b3941"/><text x="24" y="34" fill="#39ef8a" font-size="13" font-weight="700">03 / READING</text><text x="24" y="68" fill="#f4f2f5" font-size="21" font-weight="700">Scanner · vision</text><text x="24" y="98" fill="#a8a4ad" font-size="15">unaltered data stream</text></g>
+    <path d="M388 221h38m-11-10 11 10-11 10M770 221h38m-11-10 11 10-11 10" fill="none" stroke="#39ef8a" stroke-width="3"/>
+    <g transform="translate(58 336)"><rect width="320" height="126" rx="2" fill="#1d1c21" stroke="#3b3941"/><text x="24" y="34" fill="#39ef8a" font-size="13" font-weight="700">04 / DECISION</text><text x="24" y="68" fill="#f4f2f5" font-size="21" font-weight="700">Accept · reject</text><text x="24" y="98" fill="#a8a4ad" font-size="15">reason and operator action</text></g>
+    <g transform="translate(440 336)"><rect width="320" height="126" rx="2" fill="#1d1c21" stroke="#3b3941"/><text x="24" y="34" fill="#39ef8a" font-size="13" font-weight="700">05 / PACKING</text><text x="24" y="68" fill="#f4f2f5" font-size="21" font-weight="700">Item → case → SSCC</text><text x="24" y="98" fill="#a8a4ad" font-size="15">confirmed composition</text></g>
+    <g transform="translate(822 336)"><rect width="320" height="126" rx="2" fill="#1d1c21" stroke="#3b3941"/><text x="24" y="34" fill="#39ef8a" font-size="13" font-weight="700">06 / JOURNAL</text><text x="24" y="68" fill="#f4f2f5" font-size="21" font-weight="700">Local first · exchange</text><text x="24" y="98" fill="#a8a4ad" font-size="15">recovery without duplicates</text></g>
+    <path d="M388 399h38m-11-10 11 10-11 10M770 399h38m-11-10 11 10-11 10" fill="none" stroke="#39ef8a" stroke-width="3"/>
+    <path d="M982 298v22H218v-22" fill="none" stroke="#625f69" stroke-width="2" stroke-dasharray="6 7"/>
+    <rect x="58" y="512" width="1084" height="54" rx="27" fill="#242228"/><circle cx="87" cy="539" r="8" fill="#39ef8a"/><text x="108" y="545" fill="#d8d5dc" font-size="16">Every transition has an acknowledgement, failure owner, and recovery path.</text>
+  </g>
+</svg>

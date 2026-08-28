@@ -126,6 +126,10 @@ export const tenantInvoiceSchema = z.strictObject({
   paymentSummary: paymentSummarySchema.nullable(),
 });
 
+export const tenantInvoiceListSchema = z.strictObject({
+  items: z.array(tenantInvoiceSchema),
+});
+
 export const tenantInvoiceDetailSchema = tenantInvoiceSchema.extend({
   subtotal: billingMoneySchema,
   vatTotal: billingMoneySchema,
@@ -193,6 +197,10 @@ export const tenantDocumentSchema = z.strictObject({
   contentType: z.string().nullable(),
   byteSize: z.number().int().positive().nullable(),
   createdAt: billingDateSchema,
+});
+
+export const tenantDocumentListSchema = z.strictObject({
+  items: z.array(tenantDocumentSchema),
 });
 
 const subscriptionSchema = z.strictObject({
@@ -293,6 +301,68 @@ export const tenantBillingOverviewSchema = tenantSubscriptionBillingSchema.exten
 });
 
 export const privateDownloadSchema = z.strictObject({ url: z.string().url() });
+
+export const tenantBillingRequestSourceSchema = z.strictObject({
+  id: billingUuidSchema,
+  number: z.string(),
+  type: z.enum(schema.BILLING_REQUEST_TYPES),
+  status: requestStatusSchema,
+  description: z.string(),
+  desiredAt: billingDateSchema.nullable(),
+  context: z.strictObject({ type: z.string(), id: z.string() }).nullable(),
+  responsibleSide: z.enum(schema.BILLING_RESPONSIBLE_SIDES),
+  createdAt: billingDateSchema,
+  updatedAt: billingDateSchema,
+});
+
+export const tenantBillingRequestEventSchema = z.strictObject({
+  id: billingUuidSchema,
+  kind: z.enum(schema.BILLING_REQUEST_EVENT_KINDS),
+  fromStatus: requestStatusSchema.nullable(),
+  toStatus: requestStatusSchema.nullable(),
+  actorKind: z.enum(schema.BILLING_ACTOR_KINDS),
+  message: z.string().nullable(),
+  metadata: z.unknown().nullable(),
+  createdAt: billingDateSchema,
+});
+
+export const tenantBillingRequestAttachmentSchema = z.strictObject({
+  id: billingUuidSchema,
+  fileName: z.string(),
+  contentType: z.string(),
+  byteSize: z.number().int().positive(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  createdAt: billingDateSchema,
+});
+
+export const tenantBillingRequestDetailSchema = tenantBillingRequestSourceSchema.extend({
+  events: z.array(tenantBillingRequestEventSchema),
+  attachments: z.array(tenantBillingRequestAttachmentSchema),
+  links: z.array(
+    z.strictObject({
+      id: billingUuidSchema,
+      offerId: billingUuidSchema.nullable(),
+      invoiceId: billingUuidSchema.nullable(),
+      paymentId: billingUuidSchema.nullable(),
+      actId: billingUuidSchema.nullable(),
+      orderedServiceId: billingUuidSchema.nullable(),
+      subscriptionEventId: billingUuidSchema.nullable(),
+      createdAt: billingDateSchema,
+    }),
+  ),
+});
+
+export const tenantBillingRequestListSchema = z.strictObject({
+  items: z.array(tenantBillingRequestSourceSchema),
+});
+
+export const tenantOfferDecisionSchema = z.strictObject({
+  id: billingUuidSchema,
+  offerId: billingUuidSchema,
+  decision: z.enum(schema.OFFER_DECISION_KINDS),
+  message: z.string().nullable(),
+  createdAt: billingDateSchema,
+});
 
 const idempotencyKeySchema = billingUuidSchema;
 const trimmedText = (maximum: number) =>
