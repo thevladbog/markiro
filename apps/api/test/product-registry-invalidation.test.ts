@@ -131,7 +131,8 @@ describe("ProductsService update registry boundary", () => {
       },
     ]);
     const whereProduct = vi.fn(() => ({ limit }));
-    const joinAsset = vi.fn(() => ({ where: whereProduct }));
+    const joinGroup = vi.fn(() => ({ where: whereProduct }));
+    const joinAsset = vi.fn(() => ({ leftJoin: joinGroup }));
     const joinImage = vi.fn(() => ({ leftJoin: joinAsset }));
     const fromProduct = vi.fn(() => ({ leftJoin: joinImage }));
     const selectProduct = vi.fn(() => ({ from: fromProduct }));
