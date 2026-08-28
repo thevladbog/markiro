@@ -56,7 +56,7 @@ function runFailureMessage(code: string | null, t: TFunction): string {
     return t("pages.inventory.documents.errors.verifiedProductionDateMissing");
   }
   if (code === "INVALID_ORGANIZATION_INN") {
-    return t("pages.inventory.documents.errors.INVALID_ORGANIZATION_INN");
+    return t("pages.inventory.documents.errors.invalidOrganizationInn");
   }
   return t("pages.inventory.documents.failed", { code: code ?? "UNKNOWN" });
 }
@@ -423,7 +423,7 @@ function errorMessage(error: unknown, t: (key: string) => string): string {
       INVENTORY_DOCUMENT_ARTIFACTS_NOT_READY: "notReady",
       INVENTORY_DOCUMENTS_NOT_ACKNOWLEDGED: "notAcknowledged",
       INVENTORY_LATE_EVENTS_UNRESOLVED: "lateEvents",
-      ORGANIZATION_INN_REQUIRED: "ORGANIZATION_INN_REQUIRED",
+      ORGANIZATION_INN_REQUIRED: "organizationInnRequired",
     };
     const key = known[error.code];
     if (key) return t(`pages.inventory.documents.errors.${key}`);

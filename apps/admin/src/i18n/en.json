@@ -521,8 +521,8 @@
           "notAcknowledged": "Confirm that the downloaded documents were checked.",
           "lateEvents": "Resolve every late inventory event first.",
           "verifiedProductionDateMissing": "Verified codes do not have a production date. Resume the inventory, correct the dates, and generate the documents again.",
-          "INVALID_ORGANIZATION_INN": "The organization INN is missing or invalid. Fill it in Settings and retry the generation.",
-          "ORGANIZATION_INN_REQUIRED": "GIS MT XML documents require the organization INN. Fill it in Settings."
+          "invalidOrganizationInn": "The organization INN is missing or invalid. Fill it in Settings and retry the generation.",
+          "organizationInnRequired": "GIS MT XML documents require the organization INN. Fill it in Settings."
         }
       },
       "late": {

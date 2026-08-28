@@ -285,10 +285,6 @@ export class InventoryDocumentRunnerService {
       publicationAttempted = true;
       await this.publishReady(claimed, uploaded);
     } catch (error) {
-      this.logger.warn(
-        `inventory document run ${claimed.id} generation failed`,
-        error instanceof Error ? (error.stack ?? error.message) : String(error),
-      );
       if (publicationAttempted) {
         try {
           if (await this.hasCommittedPublication(claimed)) return;
@@ -298,14 +294,29 @@ export class InventoryDocumentRunnerService {
       }
       await Promise.allSettled(attemptedObjectKeys.map((key) => this.storage.delete(key)));
       if (error instanceof InventoryDocumentClaimLostError) return;
+      // Logged here, below the two early returns above: a lost claim and a
+      // publication that actually committed are both expected outcomes of
+      // concurrent workers/retries, not failures worth surfacing.
       const safeError = safeDocumentErrorCode(error);
       if (safeError !== null) {
+        this.logger.warn(
+          `inventory document run ${claimed.id} generation failed`,
+          this.describeErrorForLog(error),
+        );
         await this.publishFailed(claimed, safeError);
         return;
       }
       if (attempt.retryCount < attempt.retryLimit) {
+        this.logger.warn(
+          `inventory document run ${claimed.id} generation failed, requeuing for retry`,
+          this.describeErrorForLog(error),
+        );
         await this.requeue(claimed);
       } else {
+        this.logger.error(
+          `inventory document run ${claimed.id} generation failed terminally`,
+          this.describeErrorForLog(error),
+        );
         await this.publishFailed(claimed, infrastructureErrorCode);
       }
       throw error;
@@ -437,6 +448,17 @@ export class InventoryDocumentRunnerService {
         attemptCount: claimed.attemptCount,
       });
     });
+  }
+
+  /**
+   * Drizzle embeds the full SQL statement and bound parameters in a query
+   * error's `message`/`stack`, so logging the raw stack can leak row data
+   * into logs. Bound to the message plus the first few stack lines instead.
+   */
+  private describeErrorForLog(error: unknown): string {
+    if (!(error instanceof Error)) return String(error);
+    const stackLines = (error.stack ?? "").split("\n").slice(0, 5);
+    return [error.message, ...stackLines].join("\n");
   }
 
   private ownedProcessingAttempt(claimed: InventoryDocumentRunRow) {
