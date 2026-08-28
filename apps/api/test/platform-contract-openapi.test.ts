@@ -273,6 +273,50 @@ describe("current SaaS platform OpenAPI contracts", () => {
     }
   });
 
+  it("documents every linked invoice source shape as requiring an idempotency key", async () => {
+    const platformDocument = await createPlatformDocument();
+    try {
+      const contract = CURRENT_SAAS_ROUTES.find(
+        (route) => route.method === "post" && route.path === "/platform/invoices",
+      );
+      if (!contract) throw new Error("Missing POST /platform/invoices route contract");
+      const body = inlineJsonSchema(operation(platformDocument.document, contract).requestBody) as {
+        anyOf?: Array<{
+          additionalProperties?: boolean;
+          properties?: Record<string, unknown>;
+          required?: string[];
+        }>;
+      };
+
+      expect(body.anyOf).toHaveLength(4);
+      const direct = body.anyOf?.filter(
+        (candidate) =>
+          !("sourceOfferId" in (candidate.properties ?? {})) &&
+          !("sourceRequestId" in (candidate.properties ?? {})),
+      );
+      const linked = body.anyOf?.filter(
+        (candidate) =>
+          "sourceOfferId" in (candidate.properties ?? {}) ||
+          "sourceRequestId" in (candidate.properties ?? {}),
+      );
+      expect(direct).toEqual([expect.objectContaining({ additionalProperties: false })]);
+      expect(direct?.[0]?.required ?? []).not.toContain("idempotencyKey");
+      expect(linked).toHaveLength(3);
+      for (const candidate of linked ?? []) {
+        const sourceProperties = Object.keys(candidate.properties ?? {}).filter((property) =>
+          property.startsWith("source"),
+        );
+        expect(sourceProperties.length).toBeGreaterThan(0);
+        expect(candidate).toMatchObject({ additionalProperties: false });
+        expect(candidate.required).toEqual(
+          expect.arrayContaining(["idempotencyKey", ...sourceProperties]),
+        );
+      }
+    } finally {
+      await platformDocument.close();
+    }
+  });
+
   it("documents the explicit billing-request registry truncation signal", async () => {
     const platformDocument = await createPlatformDocument();
     try {

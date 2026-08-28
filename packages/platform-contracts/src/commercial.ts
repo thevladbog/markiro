@@ -1020,27 +1020,44 @@ const invoiceCreateLineSchema = z
   })
   .strict();
 
-export const invoiceCreateSchema = z
-  .object({
-    tenantId: platformTenantIdSchema,
-    idempotencyKey: platformUuidSchema.optional(),
-    sourceOfferId: platformUuidSchema.optional(),
-    sourceRequestId: platformUuidSchema.optional(),
-    sellerBankAccountId: platformUuidSchema.nullable().optional(),
-    dueDate: nullableRequestDateSchema.optional(),
-    applicationMode: z.enum(["manual", "automatic"]),
-    lines: z.array(invoiceCreateLineSchema).min(1).max(100),
-  })
-  .strict()
-  .superRefine((invoice, context) => {
-    if ((invoice.sourceOfferId || invoice.sourceRequestId) && !invoice.idempotencyKey) {
-      context.addIssue({
-        code: "custom",
-        path: ["idempotencyKey"],
-        message: "Linked invoice creation requires an idempotency key",
-      });
-    }
-  });
+const invoiceCreateCommonShape = {
+  tenantId: platformTenantIdSchema,
+  sellerBankAccountId: platformUuidSchema.nullable().optional(),
+  dueDate: nullableRequestDateSchema.optional(),
+  applicationMode: z.enum(["manual", "automatic"]),
+  lines: z.array(invoiceCreateLineSchema).min(1).max(100),
+} as const;
+
+export const invoiceCreateSchema = z.union([
+  z
+    .object({
+      ...invoiceCreateCommonShape,
+      idempotencyKey: platformUuidSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...invoiceCreateCommonShape,
+      idempotencyKey: platformUuidSchema,
+      sourceOfferId: platformUuidSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...invoiceCreateCommonShape,
+      idempotencyKey: platformUuidSchema,
+      sourceRequestId: platformUuidSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...invoiceCreateCommonShape,
+      idempotencyKey: platformUuidSchema,
+      sourceOfferId: platformUuidSchema,
+      sourceRequestId: platformUuidSchema,
+    })
+    .strict(),
+]);
 
 export const invoiceApplySchema = z
   .object({

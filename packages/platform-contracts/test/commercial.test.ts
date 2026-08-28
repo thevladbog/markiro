@@ -1237,7 +1237,7 @@ describe("platform commercial contracts", () => {
       }),
     ).toEqual({ tenantId: TENANT_ID, status: "under_review", type: "renewal" });
 
-    const direct = platformCommercialContracts.invoices.create.body.parse({
+    const linked = platformCommercialContracts.invoices.create.body.parse({
       tenantId: TENANT_ID,
       idempotencyKey,
       applicationMode: "manual",
@@ -1255,28 +1255,78 @@ describe("platform commercial contracts", () => {
       sourceOfferId: OFFER_ID,
       sourceRequestId: requestId,
     });
-    expect(direct).toMatchObject({
+    expect(linked).toMatchObject({
       idempotencyKey,
       sourceOfferId: OFFER_ID,
       sourceRequestId: requestId,
     });
-    const linkedWithoutIdempotency = { ...direct, idempotencyKey: undefined };
-    expect(
-      platformCommercialContracts.invoices.create.body.safeParse(linkedWithoutIdempotency).success,
-      "linked invoice creation must carry a durable retry key",
-    ).toBe(false);
+    const sourceLess = {
+      tenantId: TENANT_ID,
+      applicationMode: linked.applicationMode,
+      lines: linked.lines,
+    };
+    for (const linkedWithoutIdempotency of [
+      { ...sourceLess, sourceOfferId: OFFER_ID },
+      { ...sourceLess, sourceRequestId: requestId },
+      { ...sourceLess, sourceOfferId: OFFER_ID, sourceRequestId: requestId },
+    ]) {
+      expect(
+        platformCommercialContracts.invoices.create.body.safeParse(linkedWithoutIdempotency)
+          .success,
+        "every linked invoice provenance shape must carry a durable retry key",
+      ).toBe(false);
+    }
     expect(
       platformCommercialContracts.invoices.create.body.safeParse({
-        ...direct,
+        ...linked,
         sourceOfferId: "not-a-uuid",
       }).success,
     ).toBe(false);
     expect(
       platformCommercialContracts.invoices.create.body.safeParse({
-        ...direct,
+        ...linked,
         sourceRequestId: "not-a-uuid",
       }).success,
     ).toBe(false);
+    expect(
+      platformCommercialContracts.invoices.create.body.parse({
+        ...sourceLess,
+        idempotencyKey,
+        sourceOfferId: OFFER_ID,
+      }),
+      "offer-only provenance remains supported",
+    ).toMatchObject({ sourceOfferId: OFFER_ID, idempotencyKey });
+    expect(
+      platformCommercialContracts.invoices.create.body.parse({
+        ...sourceLess,
+        idempotencyKey,
+        sourceRequestId: requestId,
+      }),
+      "request-only provenance remains supported",
+    ).toMatchObject({ sourceRequestId: requestId, idempotencyKey });
+  });
+
+  it("keeps truly source-less legacy invoice creation compatible without an idempotency key", () => {
+    const legacy = platformCommercialContracts.invoices.create.body.parse({
+      tenantId: TENANT_ID,
+      applicationMode: "manual",
+      lines: [
+        {
+          kind: "custom",
+          nameRu: "Разовые работы",
+          nameEn: "One-off work",
+          quantity: 1,
+          unit: "шт.",
+          agreedUnitPrice: "100.00",
+          vatIncluded: true,
+        },
+      ],
+    });
+
+    expect(legacy).toMatchObject({ tenantId: TENANT_ID, applicationMode: "manual" });
+    expect(legacy).not.toHaveProperty("idempotencyKey");
+    expect(legacy).not.toHaveProperty("sourceOfferId");
+    expect(legacy).not.toHaveProperty("sourceRequestId");
   });
 
   it("returns server-authoritative request transitions without accepting client transition policy", () => {

@@ -57,12 +57,14 @@ export class BillingService {
   ): Promise<InvoiceCreateServiceResultSource> {
     const normalizedInput = platformCommercialContracts.invoices.create.body.parse(input);
     return this.db.transaction(async (tx) => {
-      const canonicalSourceRequestId = normalizedInput.sourceRequestId
-        ? canonicalBillingUuid(normalizedInput.sourceRequestId)
-        : null;
-      const canonicalSourceOfferId = normalizedInput.sourceOfferId
-        ? canonicalBillingUuid(normalizedInput.sourceOfferId)
-        : null;
+      const canonicalSourceRequestId =
+        "sourceRequestId" in normalizedInput
+          ? canonicalBillingUuid(normalizedInput.sourceRequestId)
+          : null;
+      const canonicalSourceOfferId =
+        "sourceOfferId" in normalizedInput
+          ? canonicalBillingUuid(normalizedInput.sourceOfferId)
+          : null;
       const mutation = normalizedInput.idempotencyKey
         ? await beginPlatformBillingMutation(tx, {
             tenantId: normalizedInput.tenantId,
