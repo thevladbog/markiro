@@ -26,7 +26,11 @@ const nonCanonicalSources: DashboardDataQualityDto["sources"] = [
   "box_items",
 ] as const;
 // @ts-expect-error duplicate source labels are never a valid dashboard source tuple
-const duplicateSources: DashboardDataQualityDto["sources"] = ["code_registry", "code_registry", "box_items"] as const;
+const duplicateSources: DashboardDataQualityDto["sources"] = [
+  "code_registry",
+  "code_registry",
+  "box_items",
+] as const;
 // @ts-expect-error every dashboard source tuple contains all three source labels
 const incompleteSources: DashboardDataQualityDto["sources"] = ["code_registry", "boxes"] as const;
 
@@ -57,7 +61,8 @@ function expectClosedObject(
 
 function matchesOpenApiSchema(schema: OpenApiSchema, value: unknown): boolean {
   if (value === null) return schema.nullable === true;
-  if (schema.oneOf) return schema.oneOf.filter((variant) => matchesOpenApiSchema(variant, value)).length === 1;
+  if (schema.oneOf)
+    return schema.oneOf.filter((variant) => matchesOpenApiSchema(variant, value)).length === 1;
   if (schema.enum && !schema.enum.some((candidate) => Object.is(candidate, value))) return false;
 
   switch (schema.type) {
@@ -83,11 +88,15 @@ function matchesOpenApiSchema(schema: OpenApiSchema, value: unknown): boolean {
       const record = value as Record<string, unknown>;
       const properties = schema.properties ?? {};
       if ((schema.required ?? []).some((name) => !(name in record))) return false;
-      if (schema.additionalProperties === false && Object.keys(record).some((name) => !(name in properties))) {
+      if (
+        schema.additionalProperties === false &&
+        Object.keys(record).some((name) => !(name in properties))
+      ) {
         return false;
       }
       return Object.entries(record).every(
-        ([name, propertyValue]) => !properties[name] || matchesOpenApiSchema(properties[name], propertyValue),
+        ([name, propertyValue]) =>
+          !properties[name] || matchesOpenApiSchema(properties[name], propertyValue),
       );
     }
     default:
@@ -153,7 +162,9 @@ describe("dashboard overview DTO contract", () => {
     expect(dashboardOverviewQuerySchema.parse({})).toEqual({ period: "7d" });
     expect(dashboardOverviewQuerySchema.parse({ period: "today" })).toEqual({ period: "today" });
     expect(dashboardOverviewQuerySchema.safeParse({ period: "year" }).success).toBe(false);
-    expect(dashboardOverviewQuerySchema.safeParse({ period: "today", tenantId: "forged" }).success).toBe(false);
+    expect(
+      dashboardOverviewQuerySchema.safeParse({ period: "today", tenantId: "forged" }).success,
+    ).toBe(false);
   });
 
   it("documents the exact enum sets", () => {
@@ -171,7 +182,11 @@ describe("dashboard overview DTO contract", () => {
     expect(schemaProperty(dynamics, "grain").enum).toEqual(["hour", "day", "week"]);
 
     const quality = schemaProperty(dynamics, "quality");
-    expect(schemaProperty(quality, "status").enum).toEqual(["complete", "provisional", "insufficient"]);
+    expect(schemaProperty(quality, "status").enum).toEqual([
+      "complete",
+      "provisional",
+      "insufficient",
+    ]);
     expect(schemaItems(schemaProperty(quality, "reasons")).enum).toEqual([
       "active_shifts",
       "late_data",
@@ -198,17 +213,19 @@ describe("dashboard overview DTO contract", () => {
       "dynamics",
       "activeShifts",
     ]);
-    expectClosedObject(schemaProperty(overview, "setup"), ["productCount", "shiftCount", "hasRunShift"]);
+    expectClosedObject(schemaProperty(overview, "setup"), [
+      "productCount",
+      "shiftCount",
+      "hasRunShift",
+    ]);
 
     const verdict = schemaProperty(overview, "verdict");
     expectClosedObject(verdict, ["status", "reasons"]);
-    expectClosedObject(schemaItems(schemaProperty(verdict, "reasons")), [
-      "code",
-      "severity",
-      "count",
-      "route",
-      "affectedModes",
-    ], ["code", "severity", "count"]);
+    expectClosedObject(
+      schemaItems(schemaProperty(verdict, "reasons")),
+      ["code", "severity", "count", "route", "affectedModes"],
+      ["code", "severity", "count"],
+    );
 
     expectClosedObject(schemaProperty(overview, "today"), [
       "validationAcceptedUnits",

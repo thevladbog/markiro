@@ -21,8 +21,6 @@ describe("tenant operational timezone migration", () => {
     expect(alterAddColumnOperations).toEqual([expectedAddition]);
     expect(statements).toEqual([expectedAddition]);
     expect(sql).not.toMatch(/\bUPDATE\s+(?:"org_profiles"|org_profiles)(?![A-Za-z0-9_])/i);
-    expect(sql).not.toMatch(
-      /\bDELETE\s+FROM\s+(?:"org_profiles"|org_profiles)(?![A-Za-z0-9_])/i,
-    );
+    expect(sql).not.toMatch(/\bDELETE\s+FROM\s+(?:"org_profiles"|org_profiles)(?![A-Za-z0-9_])/i);
   });
 });

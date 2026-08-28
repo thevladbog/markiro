@@ -18,9 +18,11 @@ export type DashboardDataSources =
   | readonly ["box_items", "code_registry", "boxes"]
   | readonly ["box_items", "boxes", "code_registry"];
 
-export const dashboardOverviewQuerySchema = z.object({
-  period: z.enum(dashboardPeriods).default("7d"),
-}).strict();
+export const dashboardOverviewQuerySchema = z
+  .object({
+    period: z.enum(dashboardPeriods).default("7d"),
+  })
+  .strict();
 export type DashboardOverviewQueryDto = z.infer<typeof dashboardOverviewQuerySchema>;
 
 export interface DashboardValidationMetricsDto {
@@ -141,12 +143,14 @@ const aggregationMetricsOpenApiSchema = {
     boxesPerShiftHour: {
       type: "number",
       nullable: true,
-      description: "Closed non-disassembled boxes per shift hour; null when eligible duration is zero",
+      description:
+        "Closed non-disassembled boxes per shift hour; null when eligible duration is zero",
     },
     containedUnitsPerShiftHour: {
       type: "number",
       nullable: true,
-      description: "Accepted units in closed boxes per shift hour; null when eligible duration is zero",
+      description:
+        "Accepted units in closed boxes per shift hour; null when eligible duration is zero",
     },
   },
 };
@@ -187,7 +191,10 @@ const reasonOpenApiSchema = {
     severity: { type: "string", enum: ["needs_attention", "critical"] },
     count: { type: "integer", minimum: 1 },
     route: { type: "string" },
-    affectedModes: { type: "array", items: { type: "string", enum: ["validation", "aggregation"] } },
+    affectedModes: {
+      type: "array",
+      items: { type: "string", enum: ["validation", "aggregation"] },
+    },
   },
 };
 
