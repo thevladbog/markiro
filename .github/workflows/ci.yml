@@ -67,6 +67,7 @@ jobs:
       SAAS_ADMIN_ORIGIN: http://localhost:5473
       KIOSK_ORIGIN: http://localhost:5373
       PAIRING_CODE_PEPPER: insecure-dummy-ci-pairing-pepper-not-a-secret
+      CHZ_TOKEN_ENCRYPTION_KEY: u/Nb9Z0kzM3lY2p4qR6sT8vW0xA2cE4gI6kM8oQ0sU4=
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -114,6 +115,7 @@ jobs:
       PLATFORM_AUTH_URL: http://127.0.0.1:3000
       SAAS_ADMIN_ORIGIN: http://127.0.0.1:5473
       PAIRING_CODE_PEPPER: insecure-dummy-ci-pairing-pepper-not-a-secret
+      CHZ_TOKEN_ENCRYPTION_KEY: u/Nb9Z0kzM3lY2p4qR6sT8vW0xA2cE4gI6kM8oQ0sU4=
       SMTP_HOST: 127.0.0.1
       SMTP_PORT: "1025"
       SMTP_SECURE: "false"
