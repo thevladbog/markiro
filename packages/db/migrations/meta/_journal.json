@@ -603,6 +603,13 @@
       "when": 1787870898879,
       "tag": "0085_yielding_warbound",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1787899412364,
+      "tag": "0086_chz_signer_agent",
+      "breakpoints": true
     }
   ]
 }
