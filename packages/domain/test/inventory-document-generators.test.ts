@@ -336,6 +336,50 @@ describe("inventory GISMT aggregation XML", () => {
     });
     expect(inventoryPart?.bytes).toEqual(shiftPart?.bytes);
   });
+
+  it("returns a zero-byte artifact for zero actionable boxes instead of an invalid empty XML root", () => {
+    const emptyBoxes = {
+      writeOffCandidates: [],
+      verified: [],
+      protected: [],
+      oldBoxes: [],
+      newBoxes: [],
+    };
+
+    const [part] = generateInventoryAggregationXml(emptyBoxes, metadata);
+
+    expect(part).toMatchObject({
+      partNumber: 1,
+      filename: "inventory-INV-2026-0001-aggregation.xml",
+      mimeType: "application/xml; charset=utf-8",
+      rowCount: 0,
+      codeCount: 0,
+      boxCount: 0,
+    });
+    expect(part?.bytes.byteLength).toBe(0);
+  });
+
+  it("v2 returns a zero-byte artifact for zero actionable boxes instead of an invalid empty XML root", () => {
+    const emptyBoxes = {
+      writeOffCandidates: [],
+      verified: [],
+      protected: [],
+      oldBoxes: [],
+      newBoxes: [],
+    };
+
+    const [part] = generateInventoryAggregationXmlV2(emptyBoxes, metadata);
+
+    expect(part).toMatchObject({
+      partNumber: 1,
+      filename: "inventory-INV-2026-0001-aggregation.xml",
+      mimeType: "application/xml; charset=utf-8",
+      rowCount: 0,
+      codeCount: 0,
+      boxCount: 0,
+    });
+    expect(part?.bytes.byteLength).toBe(0);
+  });
 });
 
 describe("inventory GISMT disaggregation XML", () => {
@@ -381,15 +425,26 @@ describe("inventory GISMT disaggregation XML", () => {
     expect(decoder.decode(part?.bytes)).not.toContain("046800899000256049");
   });
 
-  it("rejects empty actionable output and malformed organization metadata", () => {
+  it("returns a zero-byte artifact for zero actionable output instead of an invalid empty XML root", () => {
     const onlyProtected = source();
     onlyProtected.newBoxes = onlyProtected.newBoxes.filter(
       (box) => box.oldSsccContext === "046800899000256049",
     );
 
-    expect(() => generateInventoryDisaggregationXml(onlyProtected, metadata)).toThrow(
-      new InventoryDocumentGenerationError("EMPTY_SOURCE"),
-    );
+    const [part] = generateInventoryDisaggregationXml(onlyProtected, metadata);
+
+    expect(part).toMatchObject({
+      partNumber: 1,
+      filename: "inventory-INV-2026-0001-disaggregation.xml",
+      mimeType: "application/xml; charset=utf-8",
+      rowCount: 0,
+      codeCount: 0,
+      boxCount: 0,
+    });
+    expect(part?.bytes.byteLength).toBe(0);
+  });
+
+  it("rejects malformed organization metadata regardless of actionable output", () => {
     expect(() =>
       generateInventoryDisaggregationXml(source(), { ...metadata, organizationInn: "0000000000" }),
     ).toThrow(new InventoryDocumentGenerationError("INVALID_ORGANIZATION_INN"));

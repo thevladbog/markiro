@@ -21,6 +21,7 @@ import type { KiosksPanelContext } from "../kiosks/KioskPanelRoute.js";
 import { useKiosks } from "../kiosks/api.js";
 import { DeviceActions } from "./DeviceActions.js";
 import { DeviceDrawer } from "./DeviceDrawer.js";
+import { StationDownloadLink } from "./StationDownloadLink.js";
 import { DevicePager } from "./DevicePager.js";
 import { useDevices, type DeviceDto, type DeviceStatus, type DeviceType } from "./api.js";
 
@@ -163,9 +164,19 @@ export function DevicesPage() {
       <PageHeader
         title={t("pages.devices.title")}
         actions={
-          allowStation || allowKiosk ? (
-            <Button onClick={() => setDrawer({ mode: "create" })}>{t("pages.devices.add")}</Button>
-          ) : undefined
+          <>
+            <StationDownloadLink
+              data-analytics="station_download_click"
+              data-placement="devices-header"
+            >
+              {t("pages.devices.downloadStation")}
+            </StationDownloadLink>
+            {allowStation || allowKiosk ? (
+              <Button onClick={() => setDrawer({ mode: "create" })}>
+                {t("pages.devices.add")}
+              </Button>
+            ) : null}
+          </>
         }
       />
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>

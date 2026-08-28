@@ -313,6 +313,8 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     expect(found!.items).toEqual([
       { productId: linkedProductId, productExternalRef: expect.any(String), unitPrice: "10.00" },
     ]);
+    expect(found!.employeeId).toBe(employeeId);
+    expect(found!.employeeName).toBe("Иван Иванов");
 
     await db
       .update(schema.pickupOrders)

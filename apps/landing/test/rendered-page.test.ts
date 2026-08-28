@@ -967,6 +967,42 @@ describe("rendered landing page", () => {
     }
   });
 
+  it("publishes the stable Windows Station download on the localized workstation pages", () => {
+    for (const [route, labels] of [
+      [
+        "/rabochee-mesto-upakovki/",
+        ["Station для Windows", "Скачать стабильную версию", "Windows x64 · установщик .exe"],
+      ],
+      [
+        "/en/packing-workstation/",
+        ["Station for Windows", "Download the stable release", "Windows x64 · .exe installer"],
+      ],
+    ] as const) {
+      const download = documents.get(route)?.querySelector("[data-station-download]");
+      const link = download?.querySelector<HTMLAnchorElement>(
+        'a[data-analytics="station_download_click"]',
+      );
+
+      expect(download?.querySelector("h2")?.textContent?.trim()).toBe(labels[0]);
+      expect(link?.textContent?.replace(/\s+/g, " ").trim()).toContain(labels[1]);
+      expect(link?.getAttribute("href")).toBe("https://releases.markiro.app/station/download");
+      expect(link?.getAttribute("data-placement")).toBe("workstation-page");
+      expect(download?.textContent).toContain(labels[2]);
+    }
+  });
+
+  it("links the localized footer to the Station product page instead of the binary", () => {
+    const ruLink = documents
+      .get("/")
+      ?.querySelector<HTMLAnchorElement>('footer a[href="/rabochee-mesto-upakovki/"]');
+    const enLink = documents
+      .get("/en/")
+      ?.querySelector<HTMLAnchorElement>('footer a[href="/en/packing-workstation/"]');
+
+    expect(ruLink?.textContent?.trim()).toBe("Station для Windows");
+    expect(enLink?.textContent?.trim()).toBe("Station for Windows");
+  });
+
   it("activates the shared dark design tokens", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
   });

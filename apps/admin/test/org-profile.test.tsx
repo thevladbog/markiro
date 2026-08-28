@@ -16,6 +16,7 @@ function jsonResponse(status: number, body: unknown): Response {
     ok: status >= 200 && status < 300,
     status,
     json: async () => body,
+    text: async () => (body === undefined ? "" : JSON.stringify(body)),
   } as Response;
 }
 
@@ -322,7 +323,8 @@ describe("OrgProfilePage", () => {
     renderPage();
 
     expect(await screen.findByLabelText("Логотип Markiro по умолчанию")).toBeDefined();
-    const input = screen.getByLabelText("Загрузить логотип");
+    expect(screen.getByRole("button", { name: "Загрузить логотип" })).toBeDefined();
+    const input = screen.getByTestId("file-drop-input") as HTMLInputElement;
     fireEvent.change(input, {
       target: { files: [new File(["svg"], "logo.svg", { type: "image/svg+xml" })] },
     });
@@ -397,7 +399,7 @@ describe("OrgProfilePage", () => {
     fireEvent.change(prefixes, { target: { value: "4600000, 4609999" } });
     fireEvent.change(defaultTemplate, { target: { value: LABEL_TEMPLATES[0]?.id } });
 
-    const logoInput = screen.getByLabelText("Загрузить логотип");
+    const logoInput = screen.getByTestId("file-drop-input") as HTMLInputElement;
     fireEvent.change(logoInput, {
       target: { files: [new File(["png"], "logo.png", { type: "image/png" })] },
     });
@@ -498,7 +500,7 @@ describe("OrgProfilePage", () => {
     fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
     await screen.findByText("Профиль сохранён");
 
-    fireEvent.change(screen.getByLabelText("Загрузить логотип"), {
+    fireEvent.change(screen.getByTestId("file-drop-input"), {
       target: { files: [new File(["png"], "logo.png", { type: "image/png" })] },
     });
     await screen.findByRole("img", { name: "Логотип организации" });

@@ -11,7 +11,7 @@
  * DetailField grid + Table + ConfirmDialog) and reuses `./index.tsx`'s
  * document-status -> StatusChip tone mapping.
  */
-import { useState, type ChangeEvent, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router";
 
@@ -20,7 +20,7 @@ import {
   Button,
   Card,
   ConfirmDialog,
-  Input,
+  FileDropZone,
   PageHeader,
   RowActions,
   Select,
@@ -220,10 +220,7 @@ function AddLinesPanel({ docId }: { docId: string }) {
     }
   };
 
-  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
+  const handleFile = async (file: File) => {
     try {
       await importMutation.mutateAsync(file);
     } catch (error) {
@@ -254,12 +251,13 @@ function AddLinesPanel({ docId }: { docId: string }) {
           >
             {t("pages.disaggregation.detail.addLines")}
           </Button>
-          <Input
-            type="file"
+          <FileDropZone
+            compact
             accept=".txt,.csv"
-            label={t("pages.disaggregation.detail.importAction")}
+            label={t("pages.disaggregation.detail.dropLabel")}
+            ariaLabel={t("pages.disaggregation.detail.importAction")}
             disabled={importMutation.isPending}
-            onChange={(event) => void handleFileChange(event)}
+            onFile={(file) => void handleFile(file)}
           />
         </div>
       </div>

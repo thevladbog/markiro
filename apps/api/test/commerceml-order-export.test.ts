@@ -11,6 +11,8 @@ const baseOrder: ExportCandidateOrder = {
   createdAt: new Date("2026-07-30T12:34:56.000Z"),
   reason: "buy",
   writeoffReasonName: null,
+  employeeId: "e5f6a7b8-0000-0000-0000-000000000002",
+  employeeName: "Иван Иванов",
   totalPrice: "199.80",
   items: [
     { productId: "p1", productExternalRef: "ext-1", unitPrice: "99.90" },
@@ -85,6 +87,20 @@ describe("commerceml order-export: buildOrdersDocument", () => {
     expect(xml).toContain("<Ид>ext-1</Ид><Количество>2</Количество>");
   });
 
+  it("несёт контрагента-покупателя из сотрудника заявки — СБИС требует ключ «Контрагент»", () => {
+    const plan = planExport([baseOrder]);
+    const xml = buildOrdersDocument(plan.eligible, { splitWriteoffDocument: false });
+
+    expect(xml).toContain(
+      "<Контрагенты><Контрагент>" +
+        "<Ид>e5f6a7b8-0000-0000-0000-000000000002</Ид>" +
+        "<Наименование>Иван Иванов</Наименование>" +
+        "<Роль>Покупатель</Роль>" +
+        "<ПолноеНаименование>Иван Иванов</ПолноеНаименование>" +
+        "</Контрагент></Контрагенты>",
+    );
+  });
+
   it("использует writeoffDocumentType только когда splitWriteoffDocument включён", () => {
     const writeoffOrder: ExportCandidateOrder = {
       ...baseOrder,
@@ -117,10 +133,15 @@ describe("commerceml order-export: buildOrdersDocument", () => {
   });
 
   it("экранирует & < > в текстовых полях", () => {
-    const weirdOrder: ExportCandidateOrder = { ...baseOrder, orderNo: "A&B <test>" };
+    const weirdOrder: ExportCandidateOrder = {
+      ...baseOrder,
+      orderNo: "A&B <test>",
+      employeeName: "Иванов & Ко <ИП>",
+    };
     const plan = planExport([weirdOrder]);
     const xml = buildOrdersDocument(plan.eligible, { splitWriteoffDocument: false });
     expect(xml).toContain("<Номер>A&amp;B &lt;test&gt;</Номер>");
+    expect(xml).toContain("<Наименование>Иванов &amp; Ко &lt;ИП&gt;</Наименование>");
   });
 
   it("пустой список заявок всё равно строит валидный пустой пакет", () => {

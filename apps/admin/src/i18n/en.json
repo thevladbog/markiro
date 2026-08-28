@@ -358,8 +358,9 @@
         "description": "Provide one result for each of the six statuses. A valid zero-row export counts as successful.",
         "ready": "Ready",
         "missing": "Missing",
-        "chooseFile": "Choose file",
-        "fileLabel": "{{status}} file",
+        "chooseFile": "Drop a file or click",
+        "uploading": "Uploading…",
+        "fileLabel": "Choose file for {{status}}",
         "selectFile": "Select {{status}} upload",
         "noAttempts": "No uploads yet",
         "useFile": "Use {{file}}",
@@ -396,7 +397,6 @@
         "start": "Start inventory"
       },
       "live": {
-        "title": "Inventory {{number}}",
         "loading": "Loading inventory progress",
         "loadError": "Could not load inventory progress",
         "corrections": "Corrections",
@@ -812,6 +812,7 @@
           "image": "Product photo"
         },
         "imageLabel": "Product photo",
+        "dropLabel": "Drop a file or click",
         "imageAlt": "Product photo",
         "imageEmpty": "No photo added",
         "imageHint": "JPEG, PNG, or WebP up to 5 MB",
@@ -1702,6 +1703,7 @@
         "addLinesPlaceholder": "Paste or scan SSCCs — one per line",
         "addLines": "Add lines",
         "importAction": "Import from file",
+        "dropLabel": "Drop a file or click",
         "addLinesError": "Could not add the lines. Please try again.",
         "importError": "Could not import the file. Please try again.",
         "linesTitle": "Boxes",
@@ -1926,6 +1928,8 @@
     "devices": {
       "title": "Devices",
       "add": "Add device",
+      "downloadStation": "Download Station for Windows",
+      "downloadStationHint": "Install Station on the production PC, then pair it with the organization using the code shown after the device is created.",
       "cancel": "Cancel",
       "create": "Create",
       "done": "Done",
@@ -2275,6 +2279,17 @@
             "neverUsed": "Never used",
             "actions": "Actions"
           }
+        },
+        "danger": {
+          "title": "Delete integration",
+          "body": "Disconnect the exchange if you are switching to another system. Settings, exchange credentials, the journal and the unmatched queue will be deleted.",
+          "deleteAction": "Delete integration",
+          "confirmTitle": "Delete the integration?",
+          "confirmBody": "Exchange credentials will be revoked and 1C will lose access immediately. Settings, the journal and the unmatched queue will be deleted permanently. Product links to external items will be kept.",
+          "confirmAction": "Delete",
+          "cancelAction": "Cancel",
+          "success": "Integration deleted",
+          "error": "Failed to delete the integration"
         }
       }
     },
@@ -2318,6 +2333,8 @@
         "previewAlt": "Organisation logo",
         "fallbackLabel": "Default Markiro logo",
         "uploadLabel": "Upload logo",
+        "dropLabel": "Drop a file or click",
+        "hint": "JPEG, PNG, or WebP",
         "removeAction": "Remove logo",
         "invalidType": "Choose one JPEG, PNG, or WebP file.",
         "uploadError": "Could not upload the logo",

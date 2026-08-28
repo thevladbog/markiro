@@ -7,6 +7,7 @@ import { Alert, Button, Drawer, Input, Select } from "@markiro/ui";
 
 import { useLines } from "../shifts/api.js";
 import { PairingCodePanel } from "./PairingCodePanel.js";
+import { StationDownloadLink } from "./StationDownloadLink.js";
 import {
   useCreateKiosk,
   useCreateStation,
@@ -195,6 +196,7 @@ export function DeviceDrawer({
       : mode === "pair"
         ? t("pages.devices.drawer.codeTitle")
         : t("pages.devices.drawer.title");
+  const isStationContext = (pairing?.type ?? device?.type ?? type) === "station";
 
   return (
     <Drawer
@@ -240,6 +242,31 @@ export function DeviceDrawer({
       }
     >
       {error ? <Alert tone="error">{error}</Alert> : null}
+      {isStationContext ? (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-start",
+            gap: "var(--sp-2)",
+            marginBottom: "var(--sp-4)",
+            padding: "var(--sp-3)",
+            border: "1px solid var(--line)",
+            borderRadius: "var(--r-2)",
+            background: "var(--surface-panel)",
+          }}
+        >
+          <p style={{ margin: 0, font: "var(--text-body-sm)", color: "var(--fg-2)" }}>
+            {t("pages.devices.downloadStationHint")}
+          </p>
+          <StationDownloadLink
+            data-analytics="station_download_click"
+            data-placement="device-pairing"
+          >
+            {t("pages.devices.downloadStation")}
+          </StationDownloadLink>
+        </div>
+      ) : null}
       {pairing ? (
         <PairingCodePanel
           pairing={pairing.code}

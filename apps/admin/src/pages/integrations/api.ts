@@ -203,6 +203,25 @@ export function useIssueCredentials(type: string): { issue: () => Promise<Creden
 }
 
 /**
+ * `DELETE /integrations/:type` -- полное отключение интеграции: сервер
+ * удаляет настройки, учётные данные обмена, сеансы, журнал и очередь
+ * несопоставленных одной транзакцией (`IntegrationsService.deleteChannel`).
+ * Никакого секрета в ответе нет, так что, в отличие от `useIssueCredentials`
+ * выше, обычный `useMutation` безопасен. Инвалидируется корневой ключ
+ * `["integrations"]`: удаление меняет сразу список каналов, деталь, журнал
+ * и очередь -- перечислять их по одному значит забыть следующий.
+ */
+export function useDeleteChannel(type: string): UseMutationResult<void, Error, void> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<void>(`/integrations/${type}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: INTEGRATIONS_QUERY_KEY });
+    },
+  });
+}
+
+/**
  * Mirrors `apps/api/src/modules/integrations/dto.ts`'s `CandidateDto` -- one
  * position from the exchange the queue (Task 14) has not yet matched to the
  * catalog. `suggestedProductId` is `null` whenever the server found no
