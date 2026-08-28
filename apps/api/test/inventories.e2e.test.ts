@@ -354,7 +354,10 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
       createdByUserId: await actorUserId(tenantId),
     });
 
-    const created = await agent.post("/inventories").send(createBody(productId, lineId)).expect(201);
+    const created = await agent
+      .post("/inventories")
+      .send(createBody(productId, lineId))
+      .expect(201);
     const yy = String(new Date().getUTCFullYear() % 100).padStart(2, "0");
     expect(created.body.number).toBe(`IVN-${yy}-0043`);
   });
