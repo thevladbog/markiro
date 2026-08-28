@@ -190,6 +190,7 @@ describe.skipIf(!databaseUrl)("invoice notifications on isolated Postgres", () =
 function invoiceInput(tenantId: string): CreateInvoiceDto {
   return {
     tenantId,
+    idempotencyKey: randomUUID(),
     dueDate: "2026-08-30",
     applicationMode: "manual",
     lines: [

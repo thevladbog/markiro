@@ -880,6 +880,7 @@ function quoteIdentifier(identifier: string): string {
 function invoiceInput(tenantId: string) {
   return {
     tenantId,
+    idempotencyKey: randomUUID(),
     dueDate: null,
     applicationMode: "manual" as const,
     lines: [
