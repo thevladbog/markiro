@@ -1,5 +1,5 @@
 import { Controller, Get, Query, Req, UseGuards } from "@nestjs/common";
-import { ApiOkResponse, ApiQuery, ApiTags } from "@nestjs/swagger";
+import { ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { RequirePermissions } from "../../authorization/access-policy";
@@ -26,6 +26,7 @@ export class DashboardController {
   constructor(private readonly dashboard: DashboardService) {}
 
   @Get("overview")
+  @ApiOperation({ summary: "Read the tenant production dashboard overview" })
   @ApiQuery({
     name: "period",
     required: false,

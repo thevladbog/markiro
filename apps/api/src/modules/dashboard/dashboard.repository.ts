@@ -262,6 +262,7 @@ export class DrizzleDashboardRepository implements DashboardRepository {
           select count(*)::int
           from products product
           where product.tenant_id = p.tenant_id
+            and product.archived = false
         ) as "productCount",
         (
           select count(*)::int

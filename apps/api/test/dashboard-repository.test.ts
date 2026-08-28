@@ -22,6 +22,7 @@ const LATE_WINDOW_TENANT = `dashboard-late-window-${randomUUID()}`;
 
 const A_VALIDATION_PRODUCT = randomUUID();
 const A_AGGREGATION_PRODUCT = randomUUID();
+const A_ARCHIVED_PRODUCT = randomUUID();
 const A_LINE = randomUUID();
 const A_ACTIVE_VALIDATION_SHIFT = randomUUID();
 const A_TODAY_AGGREGATION_SHIFT = randomUUID();
@@ -357,12 +358,14 @@ async function seedOrganizations(db: Db): Promise<void> {
 }
 
 async function seedTenantA(db: Db): Promise<void> {
-  await db
-    .insert(schema.products)
-    .values([
-      product(TENANT_A, A_VALIDATION_PRODUCT, "04600000000015", "Tenant A validation product"),
-      product(TENANT_A, A_AGGREGATION_PRODUCT, "04600000000022", "Tenant A aggregation product"),
-    ]);
+  await db.insert(schema.products).values([
+    product(TENANT_A, A_VALIDATION_PRODUCT, "04600000000015", "Tenant A validation product"),
+    product(TENANT_A, A_AGGREGATION_PRODUCT, "04600000000022", "Tenant A aggregation product"),
+    {
+      ...product(TENANT_A, A_ARCHIVED_PRODUCT, "04600000000084", "Tenant A archived product"),
+      archived: true,
+    },
+  ]);
   await db.insert(schema.lines).values({ id: A_LINE, tenantId: TENANT_A, name: "Tenant A line" });
   await db.insert(schema.shifts).values([
     {

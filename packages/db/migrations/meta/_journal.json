@@ -603,6 +603,13 @@
       "when": 1787870898879,
       "tag": "0085_yielding_warbound",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1787894381028,
+      "tag": "0086_keen_silvermane",
+      "breakpoints": true
     }
   ]
 }
