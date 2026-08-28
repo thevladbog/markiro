@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
 import { CABINET_CAPABILITY, isValidGtin } from "@markiro/domain";
-import { Alert, Button, Checkbox, Input, Select, SidePanel } from "@markiro/ui";
+import { Alert, Button, Checkbox, FileDropZone, Input, Select, SidePanel } from "@markiro/ui";
 import type { OverlayDismissReason, SelectOption } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
@@ -506,12 +506,12 @@ export function ProductForm({
                 {t("pages.catalog.form.imageEmpty")}
               </div>
             )}
-            <Input
-              type="file"
+            <FileDropZone
               accept="image/jpeg,image/png,image/webp"
-              label={t("pages.catalog.form.imageLabel")}
+              label={t("pages.catalog.form.dropLabel")}
+              ariaLabel={t("pages.catalog.form.imageLabel")}
               disabled={submitting || imageBusy}
-              onChange={(event) => setSelectedImage(event.target.files?.[0] ?? null)}
+              onFile={(file) => setSelectedImage(file)}
             />
             {mode === "edit" && image && onDeleteImage ? (
               <Button

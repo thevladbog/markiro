@@ -89,8 +89,9 @@ it("rasterizes a selected product photo into a canvas preview instead of a DOM U
   const objectUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:untrusted-preview");
   const { user } = renderCreatePanel();
 
+  expect(await screen.findByRole("button", { name: "Фотография продукта" })).toBeDefined();
   await user.upload(
-    await screen.findByLabelText("Фотография продукта"),
+    screen.getByTestId("file-drop-input"),
     new File(["not-really-a-png"], "photo.png", { type: "image/png" }),
   );
 
