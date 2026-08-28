@@ -26,7 +26,7 @@ const GTIN = "04600000000015";
 
 const manifest: StationInventoryBundleManifest & { mode: "check" } = {
   inventoryId: INVENTORY_ID,
-  inventoryNumber: "ИНВ-42",
+  inventoryNumber: "IVN-26-0042",
   snapshotId: SNAPSHOT_ID,
   snapshotRevision: 1,
   snapshotFixedAt: "2026-08-25T01:00:00.000Z",
@@ -95,7 +95,7 @@ async function fixture() {
   const exec = makeExec(db);
   await applyMigrations(exec);
   db.prepare(
-    "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'ИНВ-42', ?)",
+    "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0042', ?)",
   ).run(INVENTORY_ID, SNAPSHOT_ID);
   for (const [serial, sourceStatus, sourceState, expected, protectedFlag] of [
     ["EXPECTED", "INTRODUCED", null, 1, 0],
@@ -223,7 +223,7 @@ describe("simple inventory work screen", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Проверка продукции" })).toBeDefined();
-    expect(screen.getByText("ИНВ-42")).toBeDefined();
+    expect(screen.getByText("IVN-26-0042")).toBeDefined();
     expect(screen.getByText("Пиво светлое 0,45 л")).toBeDefined();
     expect(screen.getByText("19.08.2026")).toBeDefined();
     await waitFor(() => expect(onQueueRegister).toHaveBeenCalledOnce());

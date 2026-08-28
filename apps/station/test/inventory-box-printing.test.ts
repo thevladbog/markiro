@@ -28,7 +28,7 @@ const TEMPLATE: LabelTemplateSpec = {
 };
 const MANIFEST = {
   inventoryId: INVENTORY_ID,
-  inventoryNumber: "ИНВ-42",
+  inventoryNumber: "IVN-26-0042",
   snapshotId: SNAPSHOT_ID,
   snapshotRevision: 1,
   snapshotFixedAt: "2026-08-25T01:00:00.000Z",

@@ -21,7 +21,7 @@ const SSCC = "046006820000621515";
 
 const manifest: StationInventoryBundleManifest & { mode: "repack" } = {
   inventoryId: INVENTORY_ID,
-  inventoryNumber: "ИНВ-Р-42",
+  inventoryNumber: "IVN-26-0043",
   snapshotId: SNAPSHOT_ID,
   snapshotRevision: 1,
   snapshotFixedAt: "2026-08-25T01:00:00.000Z",

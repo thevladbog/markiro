@@ -49,7 +49,7 @@ async function setup(capacity = 2) {
   db.prepare(
     `INSERT INTO inventory_task_mirror
        (inventory_id, inventory_number, active_snapshot_id, active_snapshot_revision)
-     VALUES (?, 'ИНВ-42', ?, 1)`,
+     VALUES (?, 'IVN-26-0042', ?, 1)`,
   ).run(INVENTORY_ID, SNAPSHOT_ID);
   db.prepare(
     `INSERT INTO inventory_terminal_state
@@ -211,7 +211,7 @@ describe("durable inventory repacking", () => {
     });
     const manifest = {
       inventoryId: INVENTORY_ID,
-      inventoryNumber: "ИНВ-42",
+      inventoryNumber: "IVN-26-0042",
       snapshotId: SNAPSHOT_ID,
       snapshotRevision: 1,
       snapshotFixedAt: "2026-08-25T01:00:00.000Z",

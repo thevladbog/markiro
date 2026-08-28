@@ -80,7 +80,7 @@ async function setup() {
   const exec = makeExec(db);
   await applyMigrations(exec);
   db.prepare(
-    "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'ИНВ-42', ?)",
+    "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0042', ?)",
   ).run(INVENTORY_ID, SNAPSHOT_ID);
   await setInventoryProductionDate(exec, {
     inventoryId: INVENTORY_ID,
