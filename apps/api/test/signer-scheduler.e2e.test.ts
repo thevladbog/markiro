@@ -169,4 +169,89 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
       .where(eq(schema.chzSignerTasks.id, t!.id));
     expect(row!.status).toBe("expired");
   });
+
+  it("keeps a claimed task alive when it was created long ago but claimed recently", async () => {
+    const tenantId = await freshTenant();
+    await insertAgent(tenantId);
+    const [t] = await db
+      .insert(schema.chzSignerTasks)
+      .values({
+        tenantId,
+        type: "true_api_auth",
+        payload: {},
+        status: "claimed",
+        createdAt: new Date(Date.now() - 45 * 60_000),
+        claimedAt: new Date(Date.now() - 2 * 60_000),
+      })
+      .returning();
+    await svc.run(new Date());
+    const [row] = await db
+      .select()
+      .from(schema.chzSignerTasks)
+      .where(eq(schema.chzSignerTasks.id, t!.id));
+    expect(row!.status).toBe("claimed");
+  });
+
+  it("expires a claimed task once claimedAt itself is stale", async () => {
+    const tenantId = await freshTenant();
+    await insertAgent(tenantId);
+    const [t] = await db
+      .insert(schema.chzSignerTasks)
+      .values({
+        tenantId,
+        type: "true_api_auth",
+        payload: {},
+        status: "claimed",
+        createdAt: new Date(Date.now() - 45 * 60_000),
+        claimedAt: new Date(Date.now() - 31 * 60_000),
+      })
+      .returning();
+    await svc.run(new Date());
+    const [row] = await db
+      .select()
+      .from(schema.chzSignerTasks)
+      .where(eq(schema.chzSignerTasks.id, t!.id));
+    expect(row!.status).toBe("expired");
+  });
+
+  async function errorEvents(tenantId: string) {
+    return db
+      .select()
+      .from(schema.integrationEvents)
+      .where(
+        and(
+          eq(schema.integrationEvents.tenantId, tenantId),
+          eq(schema.integrationEvents.channelType, "chestny_znak"),
+          eq(schema.integrationEvents.outcome, "error"),
+        ),
+      );
+  }
+
+  it("emits one degradation error event when the token expired within the last 15 minutes", async () => {
+    const now = new Date();
+    const tenantId = await freshTenant();
+    await insertAgent(tenantId);
+    await setToken(tenantId, new Date(now.getTime() - 5 * 60_000));
+    await svc.run(now);
+    expect(await errorEvents(tenantId)).toHaveLength(1);
+  });
+
+  it("does not emit a degradation error event once the 15-minute window has passed", async () => {
+    const now = new Date();
+    const tenantId = await freshTenant();
+    await insertAgent(tenantId);
+    await setToken(tenantId, new Date(now.getTime() - 20 * 60_000));
+    await svc.run(now);
+    expect(await errorEvents(tenantId)).toHaveLength(0);
+  });
+
+  it("does not emit a degradation error event for a token expiring in the future, but still enqueues a refresh", async () => {
+    const now = new Date();
+    const tenantId = await freshTenant();
+    await insertAgent(tenantId);
+    await setToken(tenantId, new Date(now.getTime() + 5 * 60_000));
+    await svc.run(now);
+    expect(await errorEvents(tenantId)).toHaveLength(0);
+    expect(await pendingTasks(tenantId)).toHaveLength(1);
+  });
 });

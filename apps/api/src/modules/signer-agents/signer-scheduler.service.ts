@@ -99,15 +99,28 @@ export class SignerSchedulerService {
       if (open) continue;
 
       const settings = await this.loadSettings(tenantId);
-      await this.db.insert(schema.chzSignerTasks).values({
-        tenantId,
-        type: "true_api_auth",
-        payload: {
-          trueApiBaseUrl: CHZ_TRUE_API_BASE_URLS[settings.environment],
-          ...(settings.mchdInn ? { inn: settings.mchdInn } : {}),
-        },
-      });
-      this.logger.log(`Enqueued True API token refresh for tenant ${tenantId}`);
+      // This check-then-insert is an optimization, not the guarantee: two
+      // overlapping run() invocations (two API replicas booting, or boot
+      // racing the cron tick) can both pass the `open` check above for the
+      // same tenant. The partial unique index chz_signer_tasks_open_uq is
+      // the real backstop — onConflictDoNothing() makes the race loser a
+      // silent no-op instead of a duplicate КЭП login, and we only log when
+      // a row actually landed.
+      const [inserted] = await this.db
+        .insert(schema.chzSignerTasks)
+        .values({
+          tenantId,
+          type: "true_api_auth",
+          payload: {
+            trueApiBaseUrl: CHZ_TRUE_API_BASE_URLS[settings.environment],
+            ...(settings.mchdInn ? { inn: settings.mchdInn } : {}),
+          },
+        })
+        .onConflictDoNothing()
+        .returning({ id: schema.chzSignerTasks.id });
+      if (inserted) {
+        this.logger.log(`Enqueued True API token refresh for tenant ${tenantId}`);
+      }
     }
   }
 

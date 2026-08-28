@@ -129,6 +129,14 @@ export const chzSignerTasks = pgTable(
     }),
     index("chz_signer_tasks_tenant_status_idx").on(t.tenantId, t.status),
     index("chz_signer_tasks_status_created_idx").on(t.status, t.createdAt),
+    // Инвариант: не более одной открытой задачи на тенант+тип. Claim держит
+    // строку в предикате (status остаётся 'claimed'), терминальные статусы
+    // (completed/failed/expired) его покидают — DB-бэкстоп на случай гонки
+    // между перекрывающимися прогонами scheduler.run() (два реплика API,
+    // старт процесса против тика cron).
+    uniqueIndex("chz_signer_tasks_open_uq")
+      .on(t.tenantId, t.type)
+      .where(sql`status in ('pending', 'claimed')`),
   ],
 );
 

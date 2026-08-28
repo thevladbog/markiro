@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "chz_signer_tasks_open_uq" ON "chz_signer_tasks" USING btree ("tenant_id","type") WHERE status in ('pending', 'claimed');
