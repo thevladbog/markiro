@@ -52,6 +52,7 @@ interface CandidateFixture {
   externalRef: string;
   name: string;
   article: string | null;
+  gtin?: string | null;
   suggestedProductId?: string | null;
 }
 
@@ -67,6 +68,7 @@ function toCandidateDto(fixture: CandidateFixture) {
     firstSeenAt: "2026-01-01T00:00:00.000Z",
     lastSeenAt: "2026-01-01T00:00:00.000Z",
     hidden: false,
+    gtin: fixture.gtin ?? null,
     suggestedProductId: fixture.suggestedProductId ?? null,
   };
 }
@@ -247,6 +249,28 @@ describe("CandidatesQueue", () => {
     expect(await screen.findByRole("button", { name: /связать/i })).toBeDefined();
     expect(screen.getByRole("button", { name: /создать/i })).toBeDefined();
     expect(screen.getByRole("button", { name: /скрыть/i })).toBeDefined();
+  });
+
+  it("показывает gtin кандидата, а без него — прочерк", async () => {
+    stubCandidates([
+      {
+        id: "c1",
+        externalRef: "guid-9",
+        name: "Новинка",
+        article: "N-1",
+        gtin: "04680089900253",
+      },
+      {
+        id: "c2",
+        externalRef: "guid-10",
+        name: "Без штрихкода",
+        article: null,
+        gtin: null,
+      },
+    ]);
+    renderQueue();
+    expect(await screen.findByText("04680089900253")).toBeDefined();
+    expect(screen.getByText("Без штрихкода").closest("tr")?.textContent).toMatch(/—/);
   });
 
   it("даёт подтвердить подсказки пачкой — первый обмен приносит весь каталог", async () => {

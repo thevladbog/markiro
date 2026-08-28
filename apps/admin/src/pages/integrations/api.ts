@@ -217,6 +217,7 @@ export interface CandidateDto {
   name: string;
   article: string | null;
   unit: string | null;
+  gtin: string | null;
   price: string | null;
   priceType: string | null;
   firstSeenAt: string;

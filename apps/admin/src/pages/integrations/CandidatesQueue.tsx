@@ -379,6 +379,12 @@ export function CandidatesQueue({ type }: { type: string }) {
         render: (row) => row.article ?? "—",
       },
       {
+        key: "gtin",
+        title: t("pages.integrations.channel.candidates.table.gtin"),
+        mono: true,
+        render: (row) => row.gtin ?? "—",
+      },
+      {
         key: "externalRef",
         title: t("pages.integrations.channel.candidates.table.externalRef"),
         mono: true,

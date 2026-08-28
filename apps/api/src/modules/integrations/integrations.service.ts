@@ -497,6 +497,7 @@ export class IntegrationsService {
         name: row.name,
         article: row.article,
         unit: row.unit,
+        gtin: row.gtin,
         price: row.price,
         priceType: row.priceType,
         firstSeenAt: row.firstSeenAt.toISOString(),
