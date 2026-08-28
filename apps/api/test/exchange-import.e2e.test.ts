@@ -907,8 +907,8 @@ ${guids.map((guid) => `  <Товар><Ид>${guid}</Ид><Наименовани
         .expect(200);
       expect(first.text.trim()).toBe("success");
 
-      const [imageRow] = await db
-        .select({ status: schema.mediaAssets.status })
+      const [imageRowFirst] = await db
+        .select({ assetId: schema.productImages.assetId, status: schema.mediaAssets.status })
         .from(schema.productImages)
         .innerJoin(schema.mediaAssets, eq(schema.mediaAssets.id, schema.productImages.assetId))
         .where(
@@ -917,7 +917,7 @@ ${guids.map((guid) => `  <Товар><Ид>${guid}</Ид><Наименовани
             eq(schema.productImages.productId, photoProductId),
           ),
         );
-      expect(imageRow).toMatchObject({ status: "active" });
+      expect(imageRowFirst).toMatchObject({ status: "active" });
 
       const assetsAfterFirst = await db
         .select({ id: schema.mediaAssets.id })
@@ -938,6 +938,31 @@ ${guids.map((guid) => `  <Товар><Ид>${guid}</Ид><Наименовани
         .from(schema.mediaAssets)
         .where(eq(schema.mediaAssets.ownerTenantId, tenant.tenantId));
       expect(assetsAfterSecond).toHaveLength(assetsAfterFirst.length);
+
+      // Review Minor 5: row count matching is not enough on its own -- also
+      // pin that the SAME asset still backs the product (not a swap with the
+      // count merely unchanged by coincidence), and that "unchanged" really
+      // did take the quiet path: no "фото не применено" warn for this tenant.
+      const [imageRowSecond] = await db
+        .select({ assetId: schema.productImages.assetId, status: schema.mediaAssets.status })
+        .from(schema.productImages)
+        .innerJoin(schema.mediaAssets, eq(schema.mediaAssets.id, schema.productImages.assetId))
+        .where(
+          and(
+            eq(schema.productImages.tenantId, tenant.tenantId),
+            eq(schema.productImages.productId, photoProductId),
+          ),
+        );
+      expect(imageRowSecond).toMatchObject({
+        assetId: imageRowFirst!.assetId,
+        status: "active",
+      });
+
+      const events = await db
+        .select()
+        .from(schema.integrationEvents)
+        .where(eq(schema.integrationEvents.tenantId, tenant.tenantId));
+      expect(events.some((e) => e.message.includes("фото не применено"))).toBe(false);
     });
 
     it("битое фото не валит раунд — предупреждение в журнале, цена и связь применяются", async () => {
@@ -986,6 +1011,97 @@ ${guids.map((guid) => `  <Товар><Ид>${guid}</Ид><Наименовани
       const warnEvent = events.find((e) => e.message.includes("фото не применено"));
       expect(warnEvent).toMatchObject({ outcome: "warn", grain: "item" });
       expect(warnEvent!.message).toMatch(/не найден в сеансе/);
+      // Review Minor 4: a machine-readable reason alongside the free-text message.
+      expect((warnEvent!.details as { reason?: string } | null)?.reason).toBe("file_not_found");
+    });
+
+    // Review Important 1 + 2 regression: a link used to be its own worklist
+    // row, fingerprinted alongside price/image/candidate rows. Applying it
+    // made the NEXT round's `plan.links` empty, shrinking that round's
+    // worklist -- which the fingerprint check read as "the list changed
+    // between rounds", restarting the whole file and re-journaling/re-doing
+    // already-applied work. This only ever showed up on a file that took
+    // MORE than one round -- reproduced here cheaply via the image sub-cap
+    // (`IMPORT_IMAGE_BATCH_SIZE = 25`, review Important 2) rather than 501
+    // cheap rows: one catalog file carrying a fresh GTIN link (no image of
+    // its own) plus 26 already-linked products each with a `<Картинка>`
+    // forces exactly two `mode=import` rounds (25 images, then 1).
+    it("связь в многораундовом файле (лимит фото) применяется один раз — без «список изменился между кругами»", async () => {
+      const tenant = await setupTenant();
+      const linkTargetId = randomUUID();
+      await db.insert(schema.products).values({
+        id: linkTargetId,
+        tenantId: tenant.tenantId,
+        gtin14: "04680089900253",
+        name: "Связываемый товар",
+        unitPrice: "100.00",
+        externalRef: null,
+      });
+
+      const photoProductIds = Array.from({ length: 26 }, () => randomUUID());
+      for (const [i, id] of photoProductIds.entries()) {
+        await db.insert(schema.products).values({
+          id,
+          tenantId: tenant.tenantId,
+          gtin14: `9${String(i).padStart(13, "0")}`,
+          name: `Товар с фото ${i}`,
+          unitPrice: "5.00",
+          externalRef: `guid-multiround-photo-${i}`,
+        });
+      }
+
+      const auth = await checkauthAs(tenant.login, tenant.secret);
+      await uploadFile(auth, "import_files/1.png", TINY_PNG);
+
+      const items = [
+        `<Товар><Ид>guid-multiround-link</Ид><Наименование>Связываемый</Наименование><Штрихкод>4680089900253</Штрихкод></Товар>`,
+        ...photoProductIds.map(
+          (_, i) =>
+            `<Товар><Ид>guid-multiround-photo-${i}</Ид><Наименование>Фото ${i}</Наименование><Картинка>import_files/1.png</Картинка></Товар>`,
+        ),
+      ].join("\n");
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<КоммерческаяИнформация ВерсияСхемы="2.05">
+ <Каталог><Товары>
+${items}
+ </Товары></Каталог>
+</КоммерческаяИнформация>`;
+      await uploadFile(auth, "multiround.xml", xml);
+
+      const first = await request(app!.getHttpServer())
+        .get("/1c_exchange?type=catalog&mode=import&filename=multiround.xml")
+        .set("Cookie", auth.cookie)
+        .expect(200);
+      expect(first.text.trim()).toBe("progress");
+
+      // Applied at offset 0, inside round 1, BEFORE the batched image loop --
+      // already true after round 1, not only after the file finishes.
+      const [afterFirst] = await db
+        .select({ externalRef: schema.products.externalRef })
+        .from(schema.products)
+        .where(eq(schema.products.id, linkTargetId));
+      expect(afterFirst!.externalRef).toBe("guid-multiround-link");
+
+      const second = await request(app!.getHttpServer())
+        .get("/1c_exchange?type=catalog&mode=import&filename=multiround.xml")
+        .set("Cookie", auth.cookie)
+        .expect(200);
+      expect(second.text.trim()).toBe("success");
+
+      const events = await db
+        .select()
+        .from(schema.integrationEvents)
+        .where(eq(schema.integrationEvents.tenantId, tenant.tenantId));
+      const linkEvents = events.filter((e) => e.message.includes("связан автоматически по GTIN"));
+      expect(linkEvents).toHaveLength(1);
+      expect(linkEvents[0]).toMatchObject({ outcome: "ok", grain: "item" });
+      expect(events.some((e) => e.message.includes("изменился между кругами"))).toBe(false);
+
+      const imageRows = await db
+        .select({ productId: schema.productImages.productId })
+        .from(schema.productImages)
+        .where(eq(schema.productImages.tenantId, tenant.tenantId));
+      expect(imageRows).toHaveLength(26);
     });
   });
 });
