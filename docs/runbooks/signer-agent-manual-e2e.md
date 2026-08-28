@@ -13,6 +13,19 @@ before scheduling a manual session; a red `signer-windows-build` is the
 expected first signal of a problem, and it is cheaper to fix there than to
 discover the same failure by hand.
 
+## Known limitations (as built, not as originally specced)
+
+- **No auto-update check yet.** The updater plugin is registered and the release
+  workflow produces signed artifacts, but nothing in the app calls the updater's
+  check/download/install APIs. Today "auto-update" only means the artifacts exist —
+  getting a fix onto a customer machine still requires manually shipping a new
+  installer, not a self-triggered update.
+- **The local journal is in-memory, not a rolling file.** It holds the last 200 entries
+  and is empty again after any restart (crash, update, reboot, `Отвязать агента`). If an
+  incident happened overnight and the process restarted since, the journal cannot answer
+  "what happened" — only the cloud's `integration_sessions` / `integration_events` audit
+  can, for whatever the agent successfully reported before failing.
+
 ## Prerequisites
 
 - Windows 10/11 with CryptoPro CSP installed and a valid test certificate in
@@ -81,6 +94,23 @@ it is real).
    token delivered_.
 7. Confirm in the cabinet that the token status shows **действует** with an
    expiry roughly ten hours out.
+8. Open the agent's row in the cabinet (Интеграции → Честный ЗНАК → agent
+   list) and read back **hostname**, **certSubject**, and **certInn**.
+   Confirm all three look like real values, not placeholders or artifacts:
+   - `hostname` is the actual machine name (e.g. `BUH-PC`), never
+     `tauri.localhost` or any other webview-origin-shaped string.
+   - `certSubject` is the certificate's real X.500 subject line, not
+     truncated mid-word at a suspicious length.
+   - `certInn` is a plausible 10-digit (legal entity) or 12-digit
+     (individual entrepreneur) INN — in particular, a legal-entity INN must
+     not be silently zero-padded to 12 digits (e.g. `007712345678` instead
+     of `7712345678`).
+
+   This step is what would have caught two release-blocking bugs that
+   otherwise only show up as quietly wrong data in the cabinet with no error
+   anywhere: the agent registering under the webview's origin instead of the
+   real machine name, and a zero-padded legal-entity INN passing validation
+   as a bogus 12-digit INN.
 
 ## The signature-format verdict
 

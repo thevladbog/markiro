@@ -56,8 +56,8 @@ GIS MT submissions) without protocol changes.
 ### `apps/signer` — Tauri 2 tray application (Windows-only)
 
 Same stack and build infrastructure as the Station: Tauri 2 (Rust backend, small React
-frontend on `@markiro/ui`), auto-update via `@tauri-apps/plugin-updater`, autostart on
-user login. Runs as a tray icon; clicking it opens a compact window with:
+frontend on `@markiro/ui`), the updater plugin, autostart on user login. Runs as a tray
+icon; clicking it opens a compact window with:
 
 - pairing screen (enter pairing code, shows tenant/organization name after pairing);
 - certificate picker: enumerates the `MY` certificate store, filters GOST certificates
@@ -66,6 +66,20 @@ user login. Runs as a tray icon; clicking it opens a compact window with:
 - local operation journal (rolling file mirrored in the UI);
 - tray notifications for actionable failures ("insert the Rutoken", "certificate
   expires in 14 days", "PIN required").
+
+Two pieces of this description are aspirational, not yet built, and are called out
+explicitly rather than left to be discovered by reading code:
+
+- **Auto-update.** `@tauri-apps/plugin-updater` is registered and the release workflow
+  produces signed update artifacts, but nothing in the app calls the updater's check/
+  download/install APIs — there is no update check wired up yet. Today, "auto-update"
+  means "ships with the release workflow," not "the running agent updates itself."
+- **The local journal is in-memory, not a rolling file.** `signer_core::journal::Journal`
+  holds the last 200 entries in a `VecDeque` and is reconstructed empty on every process
+  restart. It is not persisted to disk, so "what happened overnight" is answerable only
+  for a window that survived without a restart — a rolling file on disk is future work.
+  Autostart on user login is implemented, via the NSIS installer's `Run` registry hook
+  rather than the autostart plugin (the plugin is not used).
 
 ### `signer-core` — Rust crate
 
@@ -163,9 +177,11 @@ Agent-side error classes, each with a structured code reported to the cloud:
 - **True API:** errors are passed through verbatim (e.g. 403 "no active contract for
   the product group") so the admin sees the real cause.
 
-The agent keeps a local rolling journal file; the cloud keeps the authoritative audit in
+The agent keeps a local journal; the cloud keeps the authoritative audit in
 `integration_sessions` / `integration_events` (pairing, task lifecycle, token refresh,
-degradation transitions). Token values never appear in journals.
+degradation transitions). Token values never appear in journals. As built, the local
+journal is in-memory only (see the note under `apps/signer` above) — it is not yet the
+rolling file this section originally described.
 
 ## Security
 
