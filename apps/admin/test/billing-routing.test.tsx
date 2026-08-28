@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -131,6 +131,9 @@ function renderRoute(path: string, access: AccessDocument) {
       }
       if (url.endsWith("/api/access/me")) return response(access);
       if (url.includes("/api/pickup-orders")) return response({ items: [] });
+      if (url.endsWith("/api/billing/invoices/invoice_1/documents/document_1/download")) {
+        return response({ url: "https://example.test/invoice-184.pdf" });
+      }
       if (url.endsWith("/api/billing/invoices/invoice_1")) return response(INVOICE_DETAIL);
       if (url.endsWith("/api/billing/invoices")) return response({ items: [INVOICE] });
       throw new Error(`Unexpected request: ${url}`);
@@ -153,6 +156,7 @@ function renderRoute(path: string, access: AccessDocument) {
 
 afterEach(async () => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   await i18n.changeLanguage("ru");
 });
@@ -226,13 +230,28 @@ it("keeps invoice list and detail routes connected to their existing page compon
   const list = renderRoute("/billing/invoices", OWNER_ACCESS);
 
   expect(await screen.findByRole("link", { name: "Счёт №184" })).toBeDefined();
+  expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  expect(screen.getByRole("heading", { name: "Счета", level: 2 })).toBeDefined();
+  expect(document.querySelectorAll(".mk-admin-page")).toHaveLength(1);
   expect(document.querySelector(".mk-billing-route-placeholder")).toBeNull();
   list.unmount();
 
+  const open = vi.spyOn(window, "open").mockImplementation(() => null);
   renderRoute("/billing/invoices/invoice_1", OWNER_ACCESS);
 
   expect(await screen.findByText("Позиции")).toBeDefined();
+  expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  expect(screen.getByRole("heading", { name: "Счет Счёт №184", level: 2 })).toBeDefined();
+  expect(document.querySelectorAll(".mk-admin-page")).toHaveLength(1);
   expect(screen.getByRole("button", { name: "Скачать" })).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "Скачать" }));
+  await waitFor(() =>
+    expect(open).toHaveBeenCalledWith(
+      "https://example.test/invoice-184.pdf",
+      "_blank",
+      "noopener,noreferrer",
+    ),
+  );
   expect(document.querySelector(".mk-billing-route-placeholder")).toBeNull();
 });
 

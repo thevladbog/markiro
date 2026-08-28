@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router";
-import { Button, Card, EmptyState, PageHeader, Spinner, Table } from "@markiro/ui";
+import { Button, Card, EmptyState, Spinner, Table } from "@markiro/ui";
 import { downloadInvoice, useInvoice, useInvoices } from "./api.js";
 
 export function InvoicesPage() {
@@ -9,9 +9,11 @@ export function InvoicesPage() {
   if (isError) return <EmptyState title="Не удалось загрузить счета" />;
   if (!data?.items.length) return <EmptyState title="Счетов пока нет" />;
   return (
-    <div style={{ padding: "28px 32px" }}>
-      <PageHeader title="Счета" />
-      <div style={{ overflowX: "auto" }}>
+    <section aria-labelledby="billing-invoices-heading" className="mk-billing-invoices">
+      <h2 className="mk-billing-section-heading" id="billing-invoices-heading">
+        Счета
+      </h2>
+      <div className="mk-billing-table-wrap">
         <Table
           columns={[
             {
@@ -31,7 +33,7 @@ export function InvoicesPage() {
           rows={data.items}
         />
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -53,10 +55,12 @@ export function InvoiceDetailPage() {
   if (isPending) return <Spinner label="Загрузка счета" />;
   if (isError || !data) return <EmptyState title="Счет не найден" />;
   return (
-    <div style={{ padding: "28px 32px" }}>
-      <PageHeader title={`Счет ${data.number}`} />
+    <section aria-labelledby="billing-invoice-heading" className="mk-billing-invoice-detail">
+      <h2 className="mk-billing-section-heading" id="billing-invoice-heading">
+        Счет {data.number}
+      </h2>
       <Card title="Позиции">
-        <div style={{ overflowX: "auto" }}>
+        <div className="mk-billing-table-wrap">
           <Table
             columns={[
               { key: "position", title: "№" },
@@ -74,10 +78,7 @@ export function InvoiceDetailPage() {
       </Card>
       <Card title="Документы">
         {data.documents.map((document) => (
-          <div
-            key={document.id}
-            style={{ display: "flex", justifyContent: "space-between", padding: "8px 0" }}
-          >
+          <div className="mk-billing-invoice-document" key={document.id}>
             <span>
               {document.format.toUpperCase()} · ревизия {document.revision} · {document.status}
             </span>
@@ -89,6 +90,6 @@ export function InvoiceDetailPage() {
           </div>
         ))}
       </Card>
-    </div>
+    </section>
   );
 }

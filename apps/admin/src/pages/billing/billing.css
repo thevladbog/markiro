@@ -79,6 +79,38 @@
   background: var(--surface-card);
 }
 
+.mk-billing-invoices,
+.mk-billing-invoice-detail {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.mk-billing-section-heading {
+  margin: 0;
+  color: var(--fg-1);
+  font: var(--text-h2);
+}
+
+.mk-billing-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.mk-billing-invoice-document {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+}
+
+.mk-billing-invoice-document span {
+  min-width: 0;
+}
+
 /* Child pages use this grid contract for compact billing cards. */
 .mk-billing-card-grid {
   display: grid;
@@ -99,6 +131,11 @@
 
   .mk-billing-card-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mk-billing-invoice-document {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

@@ -120,3 +120,42 @@ No existing standalone admin invoice test file is present; the expanded real
 route coverage is the regression proof added in this round. No live 320px
 browser/visual confirmation was run; that remains separate from the source and
 component evidence here.
+
+## Fix Round 2
+
+### Review finding resolved
+
+- `InvoicesPage` and `InvoiceDetailPage` are used only beneath `BillingLayout`,
+  so they now render embedded billing content rather than a second page header
+  and fixed 28px/32px outer gutter. The shared layout owns the only `h1` and
+  outer padding; each invoice route uses an `h2` section heading instead.
+- Invoice tables retain their existing internal horizontal scroll surface while
+  the content sections and document row use `min-width: 0`; the document action
+  stacks below its label at narrow widths. This leaves the 320px spacing to the
+  shared billing shell rather than adding a nested page gutter.
+- The existing query, loading/error/empty states, canonical routes, invoice
+  fields, and ready-document download path are unchanged. Route tests exercise
+  the download response through `window.open` and assert one page-shell marker
+  plus the semantic invoice subheading.
+
+### RED / GREEN
+
+- **RED:** the invoice route test observed two level-one headings before the
+  refactor, proving the nested page-header regression.
+- **GREEN:** the embedded route has one billing `h1`, an invoice `h2`, no nested
+  admin page shell, fetches the real invoice fixtures, and opens the returned
+  download URL for ready documents.
+
+### Fix-round verification
+
+- PASS — focused routing, subscription-banner, and i18n Vitest: 3 files,
+  18 tests.
+- PASS — admin TypeScript no-emit and production build. The build retains only
+  the existing Vite large-chunk advisory.
+- PASS — admin ESLint without errors; the same five unrelated hook-dependency
+  warnings remain in `boxes` and `conflicts`.
+- PASS — scoped Prettier and `git diff --check` after final review.
+
+No live browser or 320px screenshot was run. The responsive result is verified
+in source and DOM tests only; visual confirmation remains the separate browser
+gate.
