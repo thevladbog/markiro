@@ -1,0 +1,8 @@
+{
+  "id": "3f0e0f5e-8d1c-4d7a-9b1a-222222222222",
+  "type": "true_api_auth",
+  "payload": {
+    "trueApiBaseUrl": "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
+    "inn": "7712345678"
+  }
+}
