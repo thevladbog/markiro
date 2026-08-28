@@ -202,4 +202,21 @@ describe("useDashboardOverview", () => {
       ["activeShifts", 0, "id"],
     );
   });
+
+  it.each([
+    ["validation", ["dynamics", "currentWindow", "validation", "unitsPerShiftHour"]],
+    ["boxes", ["dynamics", "currentWindow", "aggregation", "boxesPerShiftHour"]],
+    ["containedUnits", ["dynamics", "currentWindow", "aggregation", "containedUnitsPerShiftHour"]],
+  ] as const)("rejects a negative %s rate from the server", async (rate, expectedPath) => {
+    const response = dashboardFixture();
+    if (rate === "validation") {
+      response.dynamics.currentWindow.validation.unitsPerShiftHour = -0.1;
+    } else if (rate === "boxes") {
+      response.dynamics.currentWindow.aggregation.boxesPerShiftHour = -0.1;
+    } else {
+      response.dynamics.currentWindow.aggregation.containedUnitsPerShiftHour = -0.1;
+    }
+
+    await expectRejectedOverview(response, expectedPath);
+  });
 });

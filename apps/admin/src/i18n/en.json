@@ -793,7 +793,8 @@
         "missingRate": "Shift duration is missing — rate was not calculated.",
         "empty": {
           "validation": "No units were validated in the selected period.",
-          "aggregation": "No boxes were closed in the selected period."
+          "aggregation": "No boxes were closed in the selected period.",
+          "containedUnits": "No units are contained in closed boxes for the selected period."
         },
         "provenance": "Calculation {{version}} · sources: {{sources}}"
       },

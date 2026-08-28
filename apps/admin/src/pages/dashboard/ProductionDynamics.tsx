@@ -211,7 +211,7 @@ function getAggregationSeries(
         metric === "rate"
           ? dynamics.comparisonWindow.aggregation.containedUnitsPerShiftHour
           : dynamics.comparisonWindow.aggregation.containedUnits,
-      emptyText: t("pages.dashboard.dynamics.empty.aggregation"),
+      emptyText: t("pages.dashboard.dynamics.empty.containedUnits"),
     },
   ];
 }

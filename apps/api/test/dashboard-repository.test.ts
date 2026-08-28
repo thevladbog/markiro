@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { createDb, schema, type Db } from "@markiro/db";
+import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { DrizzleDashboardRepository } from "../src/modules/dashboard/dashboard.repository";
+import { DashboardService } from "../src/modules/dashboard/dashboard.service";
 
 const databaseUrl = process.env.DATABASE_URL;
 const NOW = new Date("2026-08-27T12:00:00.000Z");
@@ -15,6 +17,8 @@ const TENANT_A = `dashboard-a-${randomUUID()}`;
 const TENANT_B = `dashboard-b-${randomUUID()}`;
 const BERLIN_TENANT = `dashboard-berlin-${randomUUID()}`;
 const INVALID_TIME_ZONE_TENANT = `dashboard-invalid-tz-${randomUUID()}`;
+const NO_PROFILE_TENANT = `dashboard-no-profile-${randomUUID()}`;
+const LATE_WINDOW_TENANT = `dashboard-late-window-${randomUUID()}`;
 
 const A_VALIDATION_PRODUCT = randomUUID();
 const A_AGGREGATION_PRODUCT = randomUUID();
@@ -30,6 +34,11 @@ const B_AGGREGATION_SHIFT = randomUUID();
 
 const BERLIN_VALIDATION_PRODUCT = randomUUID();
 const BERLIN_VALIDATION_SHIFT = randomUUID();
+
+const NO_PROFILE_PRODUCT = randomUUID();
+
+const LATE_WINDOW_PRODUCT = randomUUID();
+const LATE_WINDOW_SHIFT = randomUUID();
 
 const HASH_1 = "1".repeat(64);
 const HASH_2 = "2".repeat(64);
@@ -97,7 +106,8 @@ describe.skipIf(!databaseUrl)("tenant dashboard repository", () => {
       includedClosedShiftCount: 1,
     });
     expect(facts.unreviewedConflictCount).toBe(1);
-    expect(facts.lateDataShiftCount).toBe(1);
+    expect(facts.todayLateDataShiftCount).toBe(1);
+    expect(facts.selectedWindowLateDataShiftCount).toBe(1);
     expect(facts.missingDurationModes).toEqual([]);
     expect(facts.activeShifts).toEqual([
       {
@@ -194,7 +204,8 @@ describe.skipIf(!databaseUrl)("tenant dashboard repository", () => {
     });
     expect(facts.missingDurationModes).toEqual(["validation"]);
     expect(facts.unreviewedConflictCount).toBe(1);
-    expect(facts.lateDataShiftCount).toBe(1);
+    expect(facts.todayLateDataShiftCount).toBe(1);
+    expect(facts.selectedWindowLateDataShiftCount).toBe(1);
     expect(facts.activeShifts).toEqual([]);
     expect(JSON.stringify(facts)).not.toContain("Tenant A");
   });
@@ -237,6 +248,74 @@ describe.skipIf(!databaseUrl)("tenant dashboard repository", () => {
       "Invalid dashboard timezone",
     );
   });
+
+  it("uses the Moscow fallback for an organization without a profile and does not create one", async () => {
+    const repository = new DrizzleDashboardRepository(connection.db);
+
+    expect(
+      await connection.db
+        .select({ tenantId: schema.orgProfiles.tenantId })
+        .from(schema.orgProfiles)
+        .where(eq(schema.orgProfiles.tenantId, NO_PROFILE_TENANT)),
+    ).toEqual([]);
+
+    const facts = await repository.load(NO_PROFILE_TENANT, "today", NOW);
+
+    expect(facts.timeZone).toBe("Europe/Moscow");
+    expect(facts.setup).toEqual({
+      productCount: 1,
+      shiftCount: 0,
+      hasRunShift: false,
+      activeShiftCount: 0,
+    });
+    expect(facts.today).toEqual({
+      validationAcceptedUnits: 0,
+      aggregationClosedBoxes: 0,
+      aggregationContainedUnits: 0,
+      activeShiftCount: 0,
+      includedClosedShiftCount: 0,
+    });
+    expect(facts.activeShifts).toEqual([]);
+    expect(facts.unreviewedConflictCount).toBe(0);
+    expect(facts.todayLateDataShiftCount).toBe(0);
+    expect(facts.selectedWindowLateDataShiftCount).toBe(0);
+    expect(
+      await connection.db
+        .select({ tenantId: schema.orgProfiles.tenantId })
+        .from(schema.orgProfiles)
+        .where(eq(schema.orgProfiles.tenantId, NO_PROFILE_TENANT)),
+    ).toEqual([]);
+  });
+
+  it("keeps old late data out of today's verdict while marking the selected seven-day window", async () => {
+    const repository = new DrizzleDashboardRepository(connection.db);
+
+    const sevenDayFacts = await repository.load(LATE_WINDOW_TENANT, "7d", NOW);
+    expect(sevenDayFacts.todayLateDataShiftCount).toBe(0);
+    expect(sevenDayFacts.selectedWindowLateDataShiftCount).toBe(1);
+    expect(sevenDayFacts.currentWindow.validation).toEqual({
+      acceptedUnits: 1,
+      shiftHours: 2,
+      unitsPerShiftHour: 0.5,
+    });
+
+    const service = new DashboardService(repository, () => NOW);
+    const sevenDayOverview = await service.overview(LATE_WINDOW_TENANT, "7d");
+    expect(sevenDayOverview.verdict).toEqual({ status: "under_control", reasons: [] });
+    expect(sevenDayOverview.dynamics.quality).toMatchObject({
+      status: "provisional",
+      reasons: ["late_data"],
+      lateDataShiftCount: 1,
+    });
+
+    const todayOverview = await service.overview(LATE_WINDOW_TENANT, "today");
+    expect(todayOverview.verdict).toEqual({ status: "under_control", reasons: [] });
+    expect(todayOverview.dynamics.quality).toMatchObject({
+      status: "complete",
+      reasons: [],
+      lateDataShiftCount: 0,
+    });
+  });
 });
 
 async function seedOrganizations(db: Db): Promise<void> {
@@ -247,13 +326,34 @@ async function seedOrganizations(db: Db): Promise<void> {
       organization(TENANT_B, "Tenant B"),
       organization(BERLIN_TENANT, "Berlin tenant"),
       organization(INVALID_TIME_ZONE_TENANT, "Invalid timezone tenant"),
+      organization(NO_PROFILE_TENANT, "No-profile tenant"),
+      organization(LATE_WINDOW_TENANT, "Late-window tenant"),
     ]);
   await db.insert(schema.orgProfiles).values([
     { tenantId: TENANT_A, timeZone: "Asia/Yekaterinburg" },
     { tenantId: TENANT_B, timeZone: "Asia/Yekaterinburg" },
     { tenantId: BERLIN_TENANT, timeZone: "Europe/Berlin" },
     { tenantId: INVALID_TIME_ZONE_TENANT, timeZone: "Not/A_Time_Zone" },
+    { tenantId: LATE_WINDOW_TENANT, timeZone: "Europe/Moscow" },
   ]);
+  await db
+    .insert(schema.products)
+    .values(product(NO_PROFILE_TENANT, NO_PROFILE_PRODUCT, "04600000000060", "Own product"));
+  await db
+    .insert(schema.products)
+    .values(
+      product(LATE_WINDOW_TENANT, LATE_WINDOW_PRODUCT, "04600000000077", "Late-window product"),
+    );
+  await db.insert(schema.shifts).values({
+    ...shift(LATE_WINDOW_TENANT, LATE_WINDOW_SHIFT, LATE_WINDOW_PRODUCT, 1, "validation"),
+    status: "closed",
+    openedAt: new Date("2026-08-24T07:00:00.000Z"),
+    closedAt: new Date("2026-08-24T09:00:00.000Z"),
+    lateDataAt: new Date("2026-08-25T10:00:00.000Z"),
+  });
+  await db
+    .insert(schema.codeRegistry)
+    .values(registry(LATE_WINDOW_TENANT, LATE_WINDOW_SHIFT, HASH_B, "2026-08-24T08:00:00.000Z"));
 }
 
 async function seedTenantA(db: Db): Promise<void> {

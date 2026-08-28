@@ -121,6 +121,7 @@ const validationMetricsOpenApiSchema = {
     unitsPerShiftHour: {
       type: "number",
       nullable: true,
+      minimum: 0,
       description: "Accepted individual units per shift hour; null when eligible duration is zero",
     },
   },
@@ -143,12 +144,14 @@ const aggregationMetricsOpenApiSchema = {
     boxesPerShiftHour: {
       type: "number",
       nullable: true,
+      minimum: 0,
       description:
         "Closed non-disassembled boxes per shift hour; null when eligible duration is zero",
     },
     containedUnitsPerShiftHour: {
       type: "number",
       nullable: true,
+      minimum: 0,
       description:
         "Accepted units in closed boxes per shift hour; null when eligible duration is zero",
     },

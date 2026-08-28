@@ -33,7 +33,8 @@ export interface DashboardOverviewFacts {
   buckets: DashboardBucketDto[];
   activeShifts: DashboardActiveShiftDto[];
   unreviewedConflictCount: number;
-  lateDataShiftCount: number;
+  todayLateDataShiftCount: number;
+  selectedWindowLateDataShiftCount: number;
   missingDurationModes: DashboardMode[];
 }
 
@@ -60,7 +61,7 @@ interface SummaryRow {
   aggregationContainedUnits: DatabaseNumber;
   includedClosedShiftCount: DatabaseNumber;
   unreviewedConflictCount: DatabaseNumber;
-  lateDataShiftCount: DatabaseNumber;
+  todayLateDataShiftCount: DatabaseNumber;
 }
 
 interface WindowRow {
@@ -74,6 +75,7 @@ interface WindowRow {
   aggregationClosedBoxes: DatabaseNumber;
   aggregationContainedUnits: DatabaseNumber;
   aggregationShiftHours: DatabaseNumber;
+  lateDataShiftCount: DatabaseNumber;
 }
 
 interface ActiveShiftRow {
@@ -173,7 +175,14 @@ export class DrizzleDashboardRepository implements DashboardRepository {
         summary.unreviewedConflictCount,
         "unreviewed conflict count",
       ),
-      lateDataShiftCount: asNumber(summary.lateDataShiftCount, "late-data shift count"),
+      todayLateDataShiftCount: asNumber(
+        summary.todayLateDataShiftCount,
+        "today late-data shift count",
+      ),
+      selectedWindowLateDataShiftCount: asNumber(
+        currentRow.lateDataShiftCount,
+        "selected-window late-data shift count",
+      ),
       missingDurationModes,
     };
   }
@@ -185,10 +194,12 @@ export class DrizzleDashboardRepository implements DashboardRepository {
   ): Promise<string> {
     const result = await tx.execute(sql<ProfileRow>`
       select
-        profile.time_zone as "timeZone",
+        coalesce(profile.time_zone, 'Europe/Moscow') as "timeZone",
         ${generatedAt}::timestamptz as "boundGeneratedAt"
-      from org_profiles profile
-      where profile.tenant_id = ${tenantId}
+      from organization tenant
+      left join org_profiles profile
+        on profile.tenant_id = tenant.id
+      where tenant.id = ${tenantId}
       limit 1
     `);
     const row = result.rows[0];
@@ -336,7 +347,7 @@ export class DrizzleDashboardRepository implements DashboardRepository {
           from included_shifts included
           where included.tenant_id = p.tenant_id
             and included.late_data_at is not null
-        ) as "lateDataShiftCount"
+        ) as "todayLateDataShiftCount"
       from params p
     `);
     const row = result.rows[0];
@@ -531,7 +542,51 @@ export class DrizzleDashboardRepository implements DashboardRepository {
             and shift.opened_at is not null
             and shift.opened_at < interval.end_at
             and coalesce(shift.closed_at, p.generated_at) > interval.start_at
-        ), 0)::numeric as "aggregationShiftHours"
+        ), 0)::numeric as "aggregationShiftHours",
+        case
+          when interval.kind = 'current' then (
+            select count(*)::int
+            from shifts late_shift
+            where late_shift.tenant_id = p.tenant_id
+              and late_shift.late_data_at is not null
+              and late_shift.late_data_at <= p.generated_at
+              and (
+                (
+                  late_shift.status in ('active', 'closed')
+                  and late_shift.opened_at is not null
+                  and late_shift.opened_at < interval.end_at
+                  and coalesce(late_shift.closed_at, p.generated_at) > interval.start_at
+                )
+                or (
+                  late_shift.mode = 'validation'
+                  and exists (
+                    select 1
+                    from code_registry late_registry
+                    where late_registry.tenant_id = late_shift.tenant_id
+                      and late_registry.tenant_id = p.tenant_id
+                      and late_registry.shift_id = late_shift.id
+                      and late_registry.scanned_at >= interval.start_at
+                      and late_registry.scanned_at < interval.end_at
+                  )
+                )
+                or (
+                  late_shift.mode = 'aggregation'
+                  and exists (
+                    select 1
+                    from boxes late_box
+                    where late_box.tenant_id = late_shift.tenant_id
+                      and late_box.tenant_id = p.tenant_id
+                      and late_box.shift_id = late_shift.id
+                      and late_box.closed_at is not null
+                      and late_box.disassembled_at is null
+                      and late_box.closed_at >= interval.start_at
+                      and late_box.closed_at < interval.end_at
+                  )
+                )
+              )
+          )
+          else 0
+        end as "lateDataShiftCount"
       from intervals interval
       cross join params p
       order by
@@ -705,7 +760,7 @@ function parseSummaryRow(row: DatabaseRow): SummaryRow {
     aggregationContainedUnits: readNumber(row, "aggregationContainedUnits"),
     includedClosedShiftCount: readNumber(row, "includedClosedShiftCount"),
     unreviewedConflictCount: readNumber(row, "unreviewedConflictCount"),
-    lateDataShiftCount: readNumber(row, "lateDataShiftCount"),
+    todayLateDataShiftCount: readNumber(row, "todayLateDataShiftCount"),
   };
 }
 
@@ -732,6 +787,7 @@ function parseWindowRow(row: DatabaseRow): WindowRow {
     aggregationClosedBoxes: readNumber(row, "aggregationClosedBoxes"),
     aggregationContainedUnits: readNumber(row, "aggregationContainedUnits"),
     aggregationShiftHours: readNumber(row, "aggregationShiftHours"),
+    lateDataShiftCount: readNumber(row, "lateDataShiftCount"),
   };
 }
 

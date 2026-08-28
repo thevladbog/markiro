@@ -424,6 +424,75 @@ describe("DashboardPage", () => {
     expect(screen.getByText("Недостаточно данных для темпа")).toBeDefined();
   });
 
+  it.each([
+    {
+      language: "ru",
+      rateButton: "Темп",
+      outputButton: "Выпуск",
+      rateRegion: "Агрегация — темп",
+      outputRegion: "Агрегация — выпуск",
+      containedEmpty: "За выбранный период единиц в закрытых коробах нет.",
+      boxesEmpty: "За выбранный период закрытых коробов нет.",
+    },
+    {
+      language: "en",
+      rateButton: "Rate",
+      outputButton: "Output",
+      rateRegion: "Aggregation — rate",
+      outputRegion: "Aggregation — output",
+      containedEmpty: "No units are contained in closed boxes for the selected period.",
+      boxesEmpty: "No boxes were closed in the selected period.",
+    },
+  ])(
+    "describes boxes-positive contained-unit zeroes accurately in $language rate and output views",
+    async ({
+      language,
+      rateButton,
+      outputButton,
+      rateRegion,
+      outputRegion,
+      containedEmpty,
+      boxesEmpty,
+    }) => {
+      await i18n.changeLanguage(language);
+      const fixture = dashboardFixture({ hasRunShift: true });
+      const aggregation = {
+        closedBoxes: 12,
+        containedUnits: 0,
+        shiftHours: 4,
+        boxesPerShiftHour: 3,
+        containedUnitsPerShiftHour: 0,
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          jsonResponse(200, {
+            ...fixture,
+            dynamics: {
+              ...fixture.dynamics,
+              currentWindow: { ...fixture.dynamics.currentWindow, aggregation },
+              comparisonWindow: { ...fixture.dynamics.comparisonWindow, aggregation },
+              buckets: fixture.dynamics.buckets.map((bucket) => ({ ...bucket, aggregation })),
+            },
+          }),
+        ),
+      );
+
+      renderDashboard();
+
+      expect(await screen.findByRole("button", { name: rateButton })).toBeDefined();
+      const rateAggregation = screen.getByRole("region", { name: rateRegion });
+      expect(within(rateAggregation).getByText(containedEmpty)).toBeDefined();
+      expect(within(rateAggregation).queryByText(boxesEmpty)).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: outputButton }));
+
+      const outputAggregation = screen.getByRole("region", { name: outputRegion });
+      expect(within(outputAggregation).getByText(containedEmpty)).toBeDefined();
+      expect(within(outputAggregation).queryByText(boxesEmpty)).toBeNull();
+    },
+  );
+
   it("renders eligible numeric zero rates safely when every chart value is zero", async () => {
     const fixture = dashboardFixture({ hasRunShift: true });
     vi.stubGlobal(

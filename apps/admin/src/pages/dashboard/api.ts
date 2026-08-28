@@ -16,7 +16,7 @@ const dashboardValidationMetricsSchema = z
   .object({
     acceptedUnits: z.number().int().nonnegative(),
     shiftHours: z.number().nonnegative(),
-    unitsPerShiftHour: z.number().nullable(),
+    unitsPerShiftHour: z.number().nonnegative().nullable(),
   })
   .strict();
 const dashboardAggregationMetricsSchema = z
@@ -24,8 +24,8 @@ const dashboardAggregationMetricsSchema = z
     closedBoxes: z.number().int().nonnegative(),
     containedUnits: z.number().int().nonnegative(),
     shiftHours: z.number().nonnegative(),
-    boxesPerShiftHour: z.number().nullable(),
-    containedUnitsPerShiftHour: z.number().nullable(),
+    boxesPerShiftHour: z.number().nonnegative().nullable(),
+    containedUnitsPerShiftHour: z.number().nonnegative().nullable(),
   })
   .strict();
 const dashboardWindowSchema = z

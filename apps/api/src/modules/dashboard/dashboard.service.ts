@@ -76,7 +76,7 @@ export class DashboardService {
   private verdictReasons(
     facts: Pick<
       DashboardOverviewFacts,
-      "unreviewedConflictCount" | "lateDataShiftCount" | "missingDurationModes"
+      "unreviewedConflictCount" | "todayLateDataShiftCount" | "missingDurationModes"
     >,
   ): DashboardReasonDto[] {
     const reasons: DashboardReasonDto[] = [];
@@ -89,11 +89,11 @@ export class DashboardService {
         route: reasonRoutes.unreviewed_conflicts,
       });
     }
-    if (facts.lateDataShiftCount > 0) {
+    if (facts.todayLateDataShiftCount > 0) {
       reasons.push({
         code: "late_data",
         severity: "needs_attention",
-        count: facts.lateDataShiftCount,
+        count: facts.todayLateDataShiftCount,
         route: reasonRoutes.late_data,
       });
     }
@@ -116,23 +116,26 @@ export class DashboardService {
   }
 
   private quality(
-    facts: Pick<DashboardOverviewFacts, "setup" | "lateDataShiftCount" | "missingDurationModes">,
+    facts: Pick<
+      DashboardOverviewFacts,
+      "setup" | "selectedWindowLateDataShiftCount" | "missingDurationModes"
+    >,
   ): DashboardDataQualityDto {
     const reasons: DashboardQualityReasonCode[] = [];
     if (facts.setup.activeShiftCount > 0) reasons.push("active_shifts");
-    if (facts.lateDataShiftCount > 0) reasons.push("late_data");
+    if (facts.selectedWindowLateDataShiftCount > 0) reasons.push("late_data");
     if (facts.missingDurationModes.length > 0) reasons.push("missing_shift_duration");
 
     return {
       status:
         facts.missingDurationModes.length > 0
           ? "insufficient"
-          : facts.setup.activeShiftCount > 0 || facts.lateDataShiftCount > 0
+          : facts.setup.activeShiftCount > 0 || facts.selectedWindowLateDataShiftCount > 0
             ? "provisional"
             : "complete",
       reasons,
       activeShiftCount: facts.setup.activeShiftCount,
-      lateDataShiftCount: facts.lateDataShiftCount,
+      lateDataShiftCount: facts.selectedWindowLateDataShiftCount,
       sources: ["code_registry", "boxes", "box_items"],
     };
   }

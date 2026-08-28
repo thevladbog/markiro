@@ -44,7 +44,8 @@ function overviewFacts(overrides: Partial<DashboardOverviewFacts> = {}): Dashboa
     buckets: [],
     activeShifts: [],
     unreviewedConflictCount: 0,
-    lateDataShiftCount: 0,
+    todayLateDataShiftCount: 0,
+    selectedWindowLateDataShiftCount: 0,
     missingDurationModes: [],
     ...overrides,
   };
@@ -61,7 +62,8 @@ describe("DashboardService.overview", () => {
     const { service, load } = serviceFor(
       overviewFacts({
         unreviewedConflictCount: 2,
-        lateDataShiftCount: 1,
+        todayLateDataShiftCount: 1,
+        selectedWindowLateDataShiftCount: 1,
         missingDurationModes: ["validation", "aggregation"],
       }),
     );
@@ -137,7 +139,9 @@ describe("DashboardService.overview", () => {
   });
 
   it("makes late data need attention even when every rate has eligible duration", async () => {
-    const { service } = serviceFor(overviewFacts({ lateDataShiftCount: 3 }));
+    const { service } = serviceFor(
+      overviewFacts({ todayLateDataShiftCount: 3, selectedWindowLateDataShiftCount: 3 }),
+    );
 
     const result = await service.overview(TENANT_ID, "30d");
 
@@ -149,6 +153,23 @@ describe("DashboardService.overview", () => {
       status: "provisional",
       reasons: ["late_data"],
       lateDataShiftCount: 3,
+    });
+  });
+
+  it("keeps historical-window late data in quality without lowering today's verdict", async () => {
+    const { service } = serviceFor(
+      overviewFacts({ todayLateDataShiftCount: 0, selectedWindowLateDataShiftCount: 2 }),
+    );
+
+    const result = await service.overview(TENANT_ID, "7d");
+
+    expect(result.verdict).toEqual({ status: "under_control", reasons: [] });
+    expect(result.dynamics.quality).toEqual({
+      status: "provisional",
+      reasons: ["late_data"],
+      activeShiftCount: 0,
+      lateDataShiftCount: 2,
+      sources: ["code_registry", "boxes", "box_items"],
     });
   });
 

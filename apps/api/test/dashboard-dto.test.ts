@@ -18,6 +18,7 @@ interface OpenApiSchema {
   minItems?: number;
   maxItems?: number;
   uniqueItems?: boolean;
+  minimum?: number;
 }
 
 const nonCanonicalSources: DashboardDataQualityDto["sources"] = [
@@ -78,9 +79,13 @@ function matchesOpenApiSchema(schema: OpenApiSchema, value: unknown): boolean {
     case "boolean":
       return typeof value === "boolean";
     case "integer":
-      return typeof value === "number" && Number.isInteger(value);
+      return (
+        typeof value === "number" &&
+        Number.isInteger(value) &&
+        (schema.minimum === undefined || value >= schema.minimum)
+      );
     case "number":
-      return typeof value === "number";
+      return typeof value === "number" && (schema.minimum === undefined || value >= schema.minimum);
     case "string":
       return typeof value === "string";
     case "object": {
@@ -309,6 +314,44 @@ describe("dashboard overview DTO contract", () => {
     expect(output.oneOf).toHaveLength(2);
     expectClosedObject(output.oneOf![0]!, ["mode", "acceptedUnits"]);
     expectClosedObject(output.oneOf![1]!, ["mode", "closedBoxes", "containedUnits"]);
+  });
+
+  it("documents every nullable rate as nonnegative and rejects a negative response rate", () => {
+    const overview = dashboardOverviewOpenApiSchema as OpenApiSchema;
+    const dynamics = schemaProperty(overview, "dynamics");
+    const windows = [
+      schemaProperty(dynamics, "currentWindow"),
+      schemaProperty(dynamics, "comparisonWindow"),
+      schemaItems(schemaProperty(dynamics, "buckets")),
+    ];
+
+    for (const window of windows) {
+      expect(
+        schemaProperty(schemaProperty(window, "validation"), "unitsPerShiftHour"),
+      ).toMatchObject({ nullable: true, minimum: 0 });
+      expect(
+        schemaProperty(schemaProperty(window, "aggregation"), "boxesPerShiftHour"),
+      ).toMatchObject({ nullable: true, minimum: 0 });
+      expect(
+        schemaProperty(schemaProperty(window, "aggregation"), "containedUnitsPerShiftHour"),
+      ).toMatchObject({ nullable: true, minimum: 0 });
+    }
+
+    expect(
+      matchesOpenApiSchema(overview, {
+        ...validOverview,
+        dynamics: {
+          ...validOverview.dynamics,
+          currentWindow: {
+            ...validOverview.dynamics.currentWindow,
+            validation: {
+              ...validOverview.dynamics.currentWindow.validation,
+              unitsPerShiftHour: -0.1,
+            },
+          },
+        },
+      }),
+    ).toBe(false);
   });
 
   it("rejects unknown and cross-mode response fields through the documented schema", () => {
