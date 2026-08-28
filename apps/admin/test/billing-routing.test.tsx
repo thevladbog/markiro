@@ -1,13 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, within } from "@testing-library/react";
-import { createMemoryRouter, MemoryRouter, RouterProvider } from "react-router";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { ThemeProvider } from "@markiro/ui";
 
 import type { AccessDocument } from "../src/access/api.js";
-import { AccessProvider, RequireCapability } from "../src/access/context.js";
 import { appRoutes } from "../src/app.js";
 import {
   AuthClientProvider,
@@ -16,7 +15,6 @@ import {
   type SessionData,
 } from "../src/auth/client.js";
 import i18n from "../src/i18n/index.js";
-import { BillingLayout } from "../src/pages/billing/BillingLayout.js";
 
 const ACTIVE_SESSION: SessionData = {
   session: { activeOrganizationId: "org_1" },
@@ -25,6 +23,15 @@ const ACTIVE_SESSION: SessionData = {
 
 const ORGANIZATIONS: OrganizationSummary[] = [{ id: "org_1", name: "Марка Ко", slug: "marka-ko" }];
 
+const TRIAL_SUBSCRIPTION: NonNullable<AccessDocument["subscription"]> = {
+  access: "managed",
+  status: "trial",
+  startsAt: "2026-08-01T00:00:00.000Z",
+  endsAt: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+  plan: { id: "plan_1", version: 1, nameRu: "Демо", nameEn: "Demo" },
+  addons: [],
+};
+
 const OWNER_ACCESS: AccessDocument = {
   roles: ["owner"],
   capabilities: [
@@ -32,6 +39,7 @@ const OWNER_ACCESS: AccessDocument = {
     CABINET_CAPABILITY.BILLING_READ,
     CABINET_CAPABILITY.BILLING_REQUEST,
   ],
+  subscription: TRIAL_SUBSCRIPTION,
 };
 
 const ADMIN_ACCESS: AccessDocument = {
@@ -41,16 +49,51 @@ const ADMIN_ACCESS: AccessDocument = {
     CABINET_CAPABILITY.BILLING_READ,
     CABINET_CAPABILITY.BILLING_REQUEST,
   ],
+  subscription: TRIAL_SUBSCRIPTION,
 };
 
 const MANAGER_ACCESS: AccessDocument = {
   roles: ["manager"],
   capabilities: [CABINET_CAPABILITY.OPERATIONS_READ],
+  subscription: TRIAL_SUBSCRIPTION,
 };
 
 const MEMBER_ACCESS: AccessDocument = {
   roles: ["member"],
   capabilities: [],
+};
+
+const BILLING_READ_ONLY_ACCESS: AccessDocument = {
+  roles: ["admin"],
+  capabilities: [CABINET_CAPABILITY.OPERATIONS_READ, CABINET_CAPABILITY.BILLING_READ],
+  subscription: TRIAL_SUBSCRIPTION,
+};
+
+const INVOICE = {
+  id: "invoice_1",
+  number: "Счёт №184",
+  issueDate: "2026-08-01T00:00:00.000Z",
+  dueDate: "2026-08-15T00:00:00.000Z",
+  status: "issued",
+  total: "48000",
+  currency: "RUB",
+};
+
+const INVOICE_DETAIL = {
+  ...INVOICE,
+  subtotal: "40000",
+  vatTotal: "8000",
+  lines: [
+    {
+      position: 1,
+      nameRu: "Подписка",
+      unit: "мес.",
+      quantity: 1,
+      agreedUnitPrice: "40000",
+      lineTotal: "40000",
+    },
+  ],
+  documents: [{ id: "document_1", revision: 1, format: "pdf", status: "ready", byteSize: 123 }],
 };
 
 function response(body: unknown): Response {
@@ -88,6 +131,8 @@ function renderRoute(path: string, access: AccessDocument) {
       }
       if (url.endsWith("/api/access/me")) return response(access);
       if (url.includes("/api/pickup-orders")) return response({ items: [] });
+      if (url.endsWith("/api/billing/invoices/invoice_1")) return response(INVOICE_DETAIL);
+      if (url.endsWith("/api/billing/invoices")) return response({ items: [INVOICE] });
       throw new Error(`Unexpected request: ${url}`);
     }),
   );
@@ -151,20 +196,10 @@ it("forbids a manager from opening the billing route directly", async () => {
   expect(screen.queryByRole("heading", { name: "Биллинг" })).toBeNull();
 });
 
-it("keeps the billing capability boundary for a member direct route", () => {
-  render(
-    <ThemeProvider defaultTheme="light">
-      <MemoryRouter initialEntries={["/billing"]}>
-        <AccessProvider value={MEMBER_ACCESS}>
-          <RequireCapability capability={CABINET_CAPABILITY.BILLING_READ}>
-            <BillingLayout />
-          </RequireCapability>
-        </AccessProvider>
-      </MemoryRouter>
-    </ThemeProvider>,
-  );
+it("denies a member direct billing access through the real shell route", async () => {
+  renderRoute("/billing", MEMBER_ACCESS);
 
-  expect(screen.getByTestId("forbidden-page")).toBeDefined();
+  expect(await screen.findByText("Доступ к кабинету пока не открыт")).toBeDefined();
 });
 
 it("redirects the saved subscription route to the canonical billing tab", async () => {
@@ -174,4 +209,66 @@ it("redirects the saved subscription route to the canonical billing tab", async 
   expect(screen.getByRole("link", { name: "Подписка и лимиты" }).getAttribute("aria-current")).toBe(
     "page",
   );
+});
+
+it("keeps the documents tab current for a commercial offer route", async () => {
+  renderRoute("/billing/offers/offer_1", OWNER_ACCESS);
+
+  expect(await screen.findByRole("heading", { name: "Биллинг" })).toBeDefined();
+  expect(
+    within(screen.getByRole("navigation", { name: "Разделы биллинга" }))
+      .getByRole("link", { name: "Документы" })
+      .getAttribute("aria-current"),
+  ).toBe("page");
+});
+
+it("keeps invoice list and detail routes connected to their existing page components", async () => {
+  const list = renderRoute("/billing/invoices", OWNER_ACCESS);
+
+  expect(await screen.findByRole("link", { name: "Счёт №184" })).toBeDefined();
+  expect(document.querySelector(".mk-billing-route-placeholder")).toBeNull();
+  list.unmount();
+
+  renderRoute("/billing/invoices/invoice_1", OWNER_ACCESS);
+
+  expect(await screen.findByText("Позиции")).toBeDefined();
+  expect(screen.getByRole("button", { name: "Скачать" })).toBeDefined();
+  expect(document.querySelector(".mk-billing-route-placeholder")).toBeNull();
+});
+
+it("allows a billing reader to view invoices but not create a request", async () => {
+  const reader = renderRoute("/billing/invoices", BILLING_READ_ONLY_ACCESS);
+
+  expect(await screen.findByRole("link", { name: "Счёт №184" })).toBeDefined();
+  expect(screen.queryByRole("link", { name: "Создать заявку" })).toBeNull();
+  reader.unmount();
+
+  renderRoute("/billing/requests/new", BILLING_READ_ONLY_ACCESS);
+
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+});
+
+it.each([
+  ["owner", OWNER_ACCESS, true],
+  ["manager", MANAGER_ACCESS, false],
+] as const)(
+  "keeps billing recovery CTA capability-safe for an %s",
+  async (_role, access, canRead) => {
+    renderRoute("/billing", access);
+
+    expect(await screen.findByRole("alert")).toBeDefined();
+    if (canRead) {
+      expect(screen.getByRole("link", { name: "Посмотреть лимиты" })).toBeDefined();
+    } else {
+      expect(screen.queryByRole("link", { name: "Посмотреть лимиты" })).toBeNull();
+    }
+  },
+);
+
+it("keeps the billing tabs in their labelled narrow-screen navigation rail", async () => {
+  renderRoute("/billing", OWNER_ACCESS);
+
+  const tabs = await screen.findByRole("navigation", { name: "Разделы биллинга" });
+  expect(tabs.classList.contains("mk-billing-tabs")).toBe(true);
+  expect(within(tabs).getAllByRole("link")).toHaveLength(5);
 });

@@ -207,7 +207,8 @@
       "trial": "The demo ends in {{days}} days.",
       "expired": "The subscription has expired: writes are disabled.",
       "overLimit": "A limit is exceeded: new writes are blocked.",
-      "link": "View limits"
+      "link": "View limits",
+      "noBillingAccess": "Contact your cabinet administrator."
     },
     "page": {
       "title": "Subscription and limits",

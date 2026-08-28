@@ -84,3 +84,39 @@ request pages.
 
 The final commit SHA is reported in the task handoff. A commit cannot contain
 its own content-derived SHA without changing that SHA.
+
+## Fix Round 1
+
+### Review findings resolved
+
+- Restored `InvoicesPage` and `InvoiceDetailPage` under the guarded billing
+  layout, retaining their existing invoice fetches, ready-document download
+  action, and `/billing/invoices` plus `/billing/invoices/:id` URLs. Focused
+  route tests now prove both pages replace the temporary placeholder.
+- An offer detail now marks the Documents tab current with `aria-current="page"`.
+  Invoice and request detail retain the normal `NavLink` prefix matching.
+- `SubscriptionBanner` now gates its billing link with `BILLING_READ`. A user
+  without that capability receives translated recovery copy, never a link to a
+  forbidden billing URL. Tests exercise this through the real app shell for an
+  owner and manager.
+- A billing reader without `BILLING_REQUEST` can use read routes but sees no
+  create-request CTA and receives the established forbidden surface for
+  `/billing/requests/new`.
+- At widths up to 767px, the billing page uses the existing scoped mobile-shell
+  pattern to hide the fixed sidebar and gives its labelled tab navigation an
+  internal horizontal scroll rail. Links retain 40px touch targets and visible
+  focus; this prevents the 224px sidebar from clipping the 320px workspace.
+
+### Fix-round verification
+
+- PASS — routing, banner, and i18n focused Vitest: 3 files, 18 tests.
+- PASS — admin TypeScript no-emit check and production build (the existing
+  Vite large-chunk advisory remains).
+- PASS — admin ESLint without errors; the same 5 pre-existing hook-dependency
+  warnings remain in unrelated `boxes` and `conflicts` pages.
+- PASS — scoped Prettier and `git diff --check` after the final diff review.
+
+No existing standalone admin invoice test file is present; the expanded real
+route coverage is the regression proof added in this round. No live 320px
+browser/visual confirmation was run; that remains separate from the source and
+component evidence here.

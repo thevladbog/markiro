@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Link, NavLink, Outlet } from "react-router";
+import { Link, NavLink, Outlet, useLocation } from "react-router";
 
 import { AdminPage, PageHeader, Spinner } from "@markiro/ui";
 
@@ -18,7 +18,9 @@ const BILLING_TABS = [
 /** Shared tenant billing heading, navigation, and route outlet. */
 export function BillingLayout() {
   const { t } = useTranslation();
+  const location = useLocation();
   const canCreateRequest = useCan(CABINET_CAPABILITY.BILLING_REQUEST);
+  const isOfferDetail = location.pathname.startsWith("/billing/offers/");
 
   return (
     <AdminPage className="mk-billing-page" data-testid="billing-page">
@@ -37,11 +39,17 @@ export function BillingLayout() {
       </div>
 
       <nav className="mk-billing-tabs" aria-label={t("pages.billing.tabs.label")}>
-        {BILLING_TABS.map((tab) => (
-          <NavLink key={tab.to} to={tab.to} end={tab.end}>
-            {t(tab.key)}
-          </NavLink>
-        ))}
+        {BILLING_TABS.map((tab) =>
+          tab.to === "/billing/documents" && isOfferDetail ? (
+            <Link key={tab.to} to={tab.to} aria-current="page">
+              {t(tab.key)}
+            </Link>
+          ) : (
+            <NavLink key={tab.to} to={tab.to} end={tab.end}>
+              {t(tab.key)}
+            </NavLink>
+          ),
+        )}
       </nav>
 
       <Outlet />

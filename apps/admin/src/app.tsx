@@ -67,6 +67,7 @@ import { ShiftPanelRoute } from "./pages/shifts/ShiftPanelRoute.js";
 import { ShellPage } from "./pages/Shell.js";
 import { TeamPage } from "./pages/team/TeamPage.js";
 import { BillingLayout, BillingRoutePlaceholder } from "./pages/billing/BillingLayout.js";
+import { InvoiceDetailPage, InvoicesPage } from "./pages/billing/InvoicesPage.js";
 
 /**
  * The data router is used even though route data is fetched through React
@@ -438,8 +439,8 @@ function appRouteElements() {
         >
           <Route index element={<BillingRoutePlaceholder />} />
           <Route path="subscription" element={<BillingRoutePlaceholder />} />
-          <Route path="invoices" element={<BillingRoutePlaceholder />} />
-          <Route path="invoices/:id" element={<BillingRoutePlaceholder />} />
+          <Route path="invoices" element={<InvoicesPage />} />
+          <Route path="invoices/:id" element={<InvoiceDetailPage />} />
           <Route path="documents" element={<BillingRoutePlaceholder />} />
           <Route path="offers/:id" element={<BillingRoutePlaceholder />} />
           <Route path="requests" element={<BillingRoutePlaceholder />} />
