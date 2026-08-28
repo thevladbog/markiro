@@ -31,10 +31,14 @@ describe.skipIf(!databaseUrl)("tenant billing action reconciliation migration", 
     await rm(join(migrationsThrough0068, "0070_tenant_billing_platform_workflow.sql"));
     await rm(join(migrationsThrough0068, "0071_tenant_billing_target_cardinality.sql"));
     await rm(join(migrationsThrough0068, "0072_tenant_billing_stale_family_repair.sql"));
+    await rm(join(migrationsThrough0068, "0073_tenant_billing_notification_delivery.sql"));
+    await rm(join(migrationsThrough0068, "0074_tenant_billing_attachment_idempotency.sql"));
     await rm(join(migrationsThrough0068, "meta", "0069_snapshot.json"));
     await rm(join(migrationsThrough0068, "meta", "0070_snapshot.json"));
     await rm(join(migrationsThrough0068, "meta", "0071_snapshot.json"));
     await rm(join(migrationsThrough0068, "meta", "0072_snapshot.json"));
+    await rm(join(migrationsThrough0068, "meta", "0073_snapshot.json"));
+    await rm(join(migrationsThrough0068, "meta", "0074_snapshot.json"));
     const journalPath = join(migrationsThrough0068, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -45,7 +49,8 @@ describe.skipIf(!databaseUrl)("tenant billing action reconciliation migration", 
         entry.tag !== "0070_tenant_billing_platform_workflow" &&
         entry.tag !== "0071_tenant_billing_target_cardinality" &&
         entry.tag !== "0072_tenant_billing_stale_family_repair" &&
-        entry.tag !== "0073_tenant_billing_notification_delivery",
+        entry.tag !== "0073_tenant_billing_notification_delivery" &&
+        entry.tag !== "0074_tenant_billing_attachment_idempotency",
     );
     await writeFile(journalPath, JSON.stringify(journal));
     await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0068 });
@@ -94,7 +99,7 @@ describe.skipIf(!databaseUrl)("tenant billing action reconciliation migration", 
 
   it("upgrades existing attachments to ready and backfills canonical decision keys", async () => {
     const attachments = await pool.query(
-      `SELECT state, ready_at, created_at
+      `SELECT state, ready_at, created_at, idempotency_key::text
        FROM tenant_billing_request_attachments
        WHERE id = '00000000-0000-4000-8000-000000000904'`,
     );
@@ -103,6 +108,7 @@ describe.skipIf(!databaseUrl)("tenant billing action reconciliation migration", 
         state: "ready",
         ready_at: new Date("2026-08-27T12:00:00.000Z"),
         created_at: new Date("2026-08-27T12:00:00.000Z"),
+        idempotency_key: "00000000-0000-4000-8000-000000000904",
       },
     ]);
     const keys = await pool.query(
@@ -125,9 +131,10 @@ describe.skipIf(!databaseUrl)("tenant billing action reconciliation migration", 
   it("defaults new attachment intents to pending after preserving legacy readiness", async () => {
     const inserted = await pool.query(
       `INSERT INTO tenant_billing_request_attachments
-         (tenant_id, request_id, file_name, content_type, byte_size, sha256, object_key,
+         (tenant_id, request_id, idempotency_key, file_name, content_type, byte_size, sha256, object_key,
           uploaded_by_user_id)
-       VALUES ('billing-reconcile', '00000000-0000-4000-8000-000000000902', 'pending.txt',
+       VALUES ('billing-reconcile', '00000000-0000-4000-8000-000000000902',
+               '00000000-0000-4000-8000-000000000907', 'pending.txt',
                'text/plain', 1, 'pending-sha',
                'tenant-billing/billing-reconcile/requests/00000000-0000-4000-8000-000000000902/00000000-0000-4000-8000-000000000907',
                'billing-reconcile-user')

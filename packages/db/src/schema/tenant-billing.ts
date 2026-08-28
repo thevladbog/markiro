@@ -189,6 +189,7 @@ export const tenantBillingRequestAttachments = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: text("tenant_id").notNull(),
     requestId: uuid("request_id").notNull(),
+    idempotencyKey: uuid("idempotency_key").notNull(),
     fileName: text("file_name").notNull(),
     contentType: text("content_type").notNull(),
     byteSize: integer("byte_size").notNull(),
@@ -204,6 +205,11 @@ export const tenantBillingRequestAttachments = pgTable(
   },
   (table) => [
     unique("tenant_billing_request_attachments_tenant_id_uq").on(table.tenantId, table.id),
+    unique("tenant_billing_request_attachments_tenant_request_idempotency_uq").on(
+      table.tenantId,
+      table.requestId,
+      table.idempotencyKey,
+    ),
     unique("tenant_billing_request_attachments_object_key_uq").on(table.objectKey),
     index("tenant_billing_request_attachments_tenant_request_state_idx").on(
       table.tenantId,

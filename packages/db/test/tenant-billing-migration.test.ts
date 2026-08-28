@@ -34,6 +34,8 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
     await rm(join(legacyMigrations, "0070_tenant_billing_platform_workflow.sql"));
     await rm(join(legacyMigrations, "0071_tenant_billing_target_cardinality.sql"));
     await rm(join(legacyMigrations, "0072_tenant_billing_stale_family_repair.sql"));
+    await rm(join(legacyMigrations, "0073_tenant_billing_notification_delivery.sql"));
+    await rm(join(legacyMigrations, "0074_tenant_billing_attachment_idempotency.sql"));
     await rm(join(legacyMigrations, "meta", "0066_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0067_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0068_snapshot.json"));
@@ -41,6 +43,8 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
     await rm(join(legacyMigrations, "meta", "0070_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0071_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0072_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0073_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0074_snapshot.json"));
 
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
@@ -55,7 +59,8 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
         entry.tag !== "0070_tenant_billing_platform_workflow" &&
         entry.tag !== "0071_tenant_billing_target_cardinality" &&
         entry.tag !== "0072_tenant_billing_stale_family_repair" &&
-        entry.tag !== "0073_tenant_billing_notification_delivery",
+        entry.tag !== "0073_tenant_billing_notification_delivery" &&
+        entry.tag !== "0074_tenant_billing_attachment_idempotency",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0065_saas_party_actual_addresses");
     await writeFile(journalPath, JSON.stringify(journal));
@@ -222,10 +227,11 @@ describe.skipIf(!databaseUrl)("tenant billing workflow migration", () => {
     await expectForeignKeyViolation(
       pool.query(
         `INSERT INTO tenant_billing_request_attachments
-           (tenant_id, request_id, file_name, content_type, byte_size, sha256, object_key,
+           (tenant_id, request_id, idempotency_key, file_name, content_type, byte_size, sha256, object_key,
             uploaded_by_user_id)
          VALUES
            ('billing-migration-b', '00000000-0000-4000-8000-000000000806',
+            '00000000-0000-4000-8000-000000000815',
             'foreign.pdf', 'application/pdf', 1, 'fixture-sha256',
             'tenant-billing/foreign-attachment', 'billing-migration-user')`,
       ),

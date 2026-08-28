@@ -130,7 +130,7 @@ function requestQuery(
 
 function renderDetail(
   canMutate = true,
-  attachmentUploads: Array<{ file: File; state: string }> = [],
+  attachmentUploads: Array<{ file: File; state: string; idempotencyKey: string }> = [],
 ) {
   return render(
     <QueryClientProvider client={new QueryClient()}>
@@ -174,6 +174,7 @@ it("keeps a retryable attachment failure textual but non-actionable after capabi
     {
       file: new File(["plain"], "revoked.txt", { type: "text/plain" }),
       state: "failed_retryable",
+      idempotencyKey: "00000000-0000-4000-8000-000000000801",
     },
   ]);
   expect(screen.getByText("revoked.txt: не загружен — можно повторить")).toBeDefined();
@@ -194,12 +195,18 @@ it("uses a synchronous single-flight lock and restores retry after a network fai
     {
       file: new File(["plain"], "network.txt", { type: "text/plain" }),
       state: "failed_retryable",
+      idempotencyKey: "00000000-0000-4000-8000-000000000802",
     },
   ]);
   const retry = screen.getByRole("button", { name: "Повторить загрузку network.txt" });
   retry.click();
   retry.click();
   expect(uploadBillingRequestAttachment).toHaveBeenCalledTimes(1);
+  expect(uploadBillingRequestAttachment).toHaveBeenCalledWith(
+    ID,
+    expect.any(File),
+    "00000000-0000-4000-8000-000000000802",
+  );
   expect(await screen.findByText("network.txt: загружается")).toBeDefined();
   expect(screen.queryByRole("button", { name: "Повторить загрузку network.txt" })).toBeNull();
   reject(new Error("offline"));
@@ -226,6 +233,7 @@ it.each([
     {
       file: new File(["plain"], "server.txt", { type: "text/plain" }),
       state: "failed_retryable",
+      idempotencyKey: "00000000-0000-4000-8000-000000000803",
     },
   ]);
   fireEvent.click(screen.getByRole("button", { name: "Повторить загрузку server.txt" }));

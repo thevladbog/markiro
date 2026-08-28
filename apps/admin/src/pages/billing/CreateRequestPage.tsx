@@ -30,6 +30,7 @@ import {
 
 export interface AttachmentUploadResult {
   file: File;
+  idempotencyKey: string;
   state: "uploading" | "failed_retryable" | "failed_terminal";
 }
 
@@ -127,13 +128,19 @@ export function CreateRequestPage() {
         client.setQueryData(tenantBillingKeys.request(created.id), created);
         const attachmentUploads: AttachmentUploadResult[] = [];
         for (const file of values.files) {
+          const idempotencyKey = crypto.randomUUID();
           setUploading(file.name);
           try {
-            const attachment = await uploadBillingRequestAttachment(created.id, file);
+            const attachment = await uploadBillingRequestAttachment(
+              created.id,
+              file,
+              idempotencyKey,
+            );
             mergeBillingRequestAttachment(client, created.id, attachment);
           } catch (cause) {
             attachmentUploads.push({
               file,
+              idempotencyKey,
               state: isRetryableApiError(cause) ? "failed_retryable" : "failed_terminal",
             });
           }

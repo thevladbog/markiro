@@ -240,7 +240,7 @@ describe.skipIf(!ready)("tenant billing requests isolated Postgres service", () 
       idempotencyKey: randomUUID(),
     });
     const body = Buffer.from("%PDF-1.7\nfixture");
-    const attachment = await service.attach(tenantA, userA, request.id, {
+    const attachment = await service.attach(tenantA, userA, request.id, randomUUID(), {
       originalname: "../unsafe\r\nname.pdf",
       mimetype: "application/pdf",
       size: body.byteLength,
@@ -277,7 +277,7 @@ describe.skipIf(!ready)("tenant billing requests isolated Postgres service", () 
     });
     const body = Buffer.from("plain text");
 
-    const attachment = await service.attach(opaqueTenantId, userA, request.id, {
+    const attachment = await service.attach(opaqueTenantId, userA, request.id, randomUUID(), {
       originalname: "note.txt",
       mimetype: "text/plain",
       size: body.byteLength,
@@ -324,7 +324,7 @@ describe.skipIf(!ready)("tenant billing requests isolated Postgres service", () 
     storage.verifyObject.mockRejectedValueOnce(new Error("HEAD still unavailable"));
     const body = Buffer.from("plain text");
     await expect(
-      service.attach(tenantA, userA, request.id, {
+      service.attach(tenantA, userA, request.id, randomUUID(), {
         originalname: "note.txt",
         mimetype: "text/plain",
         size: body.byteLength,
@@ -360,7 +360,7 @@ describe.skipIf(!ready)("tenant billing requests isolated Postgres service", () 
     storage.deleteConfirmed.mockRejectedValueOnce(new Error("delete timeout"));
     const body = Buffer.from("plain text");
     await expect(
-      service.attach(tenantA, userA, request.id, {
+      service.attach(tenantA, userA, request.id, randomUUID(), {
         originalname: "note.txt",
         mimetype: "text/plain",
         size: body.byteLength,
@@ -391,7 +391,7 @@ describe.skipIf(!ready)("tenant billing requests isolated Postgres service", () 
     `);
     const body = Buffer.from("plain text");
     await expect(
-      service.attach(tenantA, userA, request.id, {
+      service.attach(tenantA, userA, request.id, randomUUID(), {
         originalname: "note.txt",
         mimetype: "text/plain",
         size: body.byteLength,
@@ -437,7 +437,7 @@ describe.skipIf(!ready)("tenant billing requests isolated Postgres service", () 
       storage as unknown as ObjectStorageService,
     );
     const body = Buffer.from("plain text");
-    const attachment = await ambiguousService.attach(tenantA, userA, request.id, {
+    const attachment = await ambiguousService.attach(tenantA, userA, request.id, randomUUID(), {
       originalname: "note.txt",
       mimetype: "text/plain",
       size: body.byteLength,
@@ -461,6 +461,70 @@ describe.skipIf(!ready)("tenant billing requests isolated Postgres service", () 
         ),
       );
     expect(audits).toHaveLength(1);
+  });
+
+  it("returns one attachment and one audit fact for an exact browser retry after a lost response", async () => {
+    const request = await service.create(tenantA, userA, {
+      type: "documents",
+      description: "Retry attachment",
+      idempotencyKey: randomUUID(),
+    });
+    const key = randomUUID();
+    const body = Buffer.from("same browser file");
+    const file = {
+      originalname: "proof.txt",
+      mimetype: "text/plain",
+      size: body.byteLength,
+      buffer: body,
+    };
+
+    const first = await service.attach(tenantA, userA, request.id, key, file);
+    const replay = await service.attach(tenantA, userB, request.id, key, file);
+
+    expect(replay).toEqual(first);
+    expect(storage.putVerified).toHaveBeenCalledTimes(1);
+    const attachments = await db
+      .select()
+      .from(schema.tenantBillingRequestAttachments)
+      .where(
+        and(
+          eq(schema.tenantBillingRequestAttachments.tenantId, tenantA),
+          eq(schema.tenantBillingRequestAttachments.requestId, request.id),
+        ),
+      );
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]).toMatchObject({ idempotencyKey: key, uploadedByUserId: userA });
+    const audits = await db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantA),
+          eq(schema.tenantAuditEvents.targetId, first.id),
+          eq(schema.tenantAuditEvents.action, "billing.request.attachment_uploaded"),
+        ),
+      );
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.actorUserId).toBe(userA);
+
+    const differentBody = Buffer.from("different browser file");
+    await expect(
+      service.attach(tenantA, userA, request.id, key, {
+        ...file,
+        buffer: differentBody,
+        size: differentBody.byteLength,
+      }),
+    ).rejects.toMatchObject({ response: { code: "idempotency_key_reused" }, status: 409 });
+    expect(storage.putVerified).toHaveBeenCalledTimes(1);
+
+    const otherRequest = await service.create(tenantA, userA, {
+      type: "documents",
+      description: "Same file identity in another request",
+      idempotencyKey: randomUUID(),
+    });
+    const independentlyScoped = await service.attach(tenantA, userA, otherRequest.id, key, file);
+    expect(independentlyScoped.id).not.toBe(first.id);
+    expect(storage.putVerified).toHaveBeenCalledTimes(2);
   });
 });
 

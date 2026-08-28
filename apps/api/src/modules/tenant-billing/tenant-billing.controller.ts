@@ -13,6 +13,7 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
+import { ApiBody, ApiConsumes } from "@nestjs/swagger";
 import { memoryStorage } from "multer";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
@@ -32,6 +33,7 @@ import {
   offerChangeRequestSchema,
   offerDocumentParamsSchema,
   requestAttachmentParamsSchema,
+  requestAttachmentUploadSchema,
   requestReplySchema,
   type CreateBillingRequestDto,
   type ListDocumentsQueryDto,
@@ -39,6 +41,7 @@ import {
   type OfferAcceptDto,
   type OfferChangeRequestDto,
   type RequestReplyDto,
+  type RequestAttachmentUploadDto,
 } from "./dto";
 import { BillingAttachmentUploadFilter } from "./billing-attachment-upload.filter";
 import { TenantBillingOffersService } from "./tenant-billing-offers.service";
@@ -179,19 +182,32 @@ export class TenantBillingController {
   @UseInterceptors(
     FileInterceptor("file", {
       storage: memoryStorage(),
-      limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 0, parts: 2 },
+      limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 1, parts: 2 },
     }),
   )
   @UseFilters(BillingAttachmentUploadFilter)
+  @ApiConsumes("multipart/form-data")
+  @ApiBody({
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["idempotencyKey", "file"],
+      properties: {
+        idempotencyKey: { type: "string", format: "uuid" },
+        file: { type: "string", format: "binary" },
+      },
+    },
+  })
   @AllowSubscriptionReadOnly("read")
   @RequirePermissions(CABINET_CAPABILITY.BILLING_REQUEST)
   attachToRequest(
     @Req() req: RequestWithTenant,
     @Param(new ZodValidationPipe(billingIdParamsSchema)) params: { id: string },
+    @Body(new ZodValidationPipe(requestAttachmentUploadSchema)) body: RequestAttachmentUploadDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException({ code: "billing_attachment_required" });
-    return this.requests.attach(req.tenantId!, req.userId!, params.id, file);
+    return this.requests.attach(req.tenantId!, req.userId!, params.id, body.idempotencyKey, file);
   }
 
   @Get("requests/:id/attachments/:attachmentId/download")

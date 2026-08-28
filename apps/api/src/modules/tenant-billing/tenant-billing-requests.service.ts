@@ -187,23 +187,18 @@ export class TenantBillingRequestsService {
     });
   }
 
-  async attach(tenantId: string, userId: string, requestId: string, file: BillingAttachmentUpload) {
-    const [request] = await this.db
-      .select({ id: schema.tenantBillingRequests.id })
-      .from(schema.tenantBillingRequests)
-      .where(
-        and(
-          eq(schema.tenantBillingRequests.tenantId, tenantId),
-          eq(schema.tenantBillingRequests.id, requestId),
-        ),
-      )
-      .limit(1);
-    if (!request) requestNotFound();
+  async attach(
+    tenantId: string,
+    userId: string,
+    requestId: string,
+    idempotencyKey: string,
+    file: BillingAttachmentUpload,
+  ) {
     validateBillingAttachment(file);
-    const attachmentId = randomUUID();
-    const objectKey = tenantBillingRequestAttachmentObjectKey(tenantId, requestId, attachmentId);
+    const fileName = safeFileName(file.originalname);
     const sha256 = createHash("sha256").update(file.buffer).digest("hex");
-    await this.db.transaction(async (tx) => {
+    const intent = await this.db.transaction(async (tx) => {
+      await lockIdempotency(tx, tenantId, `attachment:${requestId}:${idempotencyKey}`);
       const [locked] = await tx
         .select({ id: schema.tenantBillingRequests.id })
         .from(schema.tenantBillingRequests)
@@ -216,13 +211,58 @@ export class TenantBillingRequestsService {
         .for("update")
         .limit(1);
       if (!locked) requestNotFound();
-      const [intent] = await tx
+      const [existing] = await tx
+        .select()
+        .from(schema.tenantBillingRequestAttachments)
+        .where(
+          and(
+            eq(schema.tenantBillingRequestAttachments.tenantId, tenantId),
+            eq(schema.tenantBillingRequestAttachments.requestId, requestId),
+            eq(schema.tenantBillingRequestAttachments.idempotencyKey, idempotencyKey),
+          ),
+        )
+        .limit(1);
+      if (existing) {
+        if (
+          existing.fileName !== fileName ||
+          existing.contentType !== file.mimetype ||
+          existing.byteSize !== file.buffer.byteLength ||
+          existing.sha256 !== sha256
+        ) {
+          idempotencyConflict();
+        }
+        if (existing.state === "ready") return { attachment: existing, upload: false } as const;
+        if (existing.state === "cleanup_required") {
+          throw new ConflictException({ code: "billing_attachment_cleanup_required" });
+        }
+        if (existing.state === "failed") {
+          const [pending] = await tx
+            .update(schema.tenantBillingRequestAttachments)
+            .set({ state: "pending", updatedAt: new Date() })
+            .where(
+              and(
+                eq(schema.tenantBillingRequestAttachments.tenantId, tenantId),
+                eq(schema.tenantBillingRequestAttachments.requestId, requestId),
+                eq(schema.tenantBillingRequestAttachments.id, existing.id),
+                eq(schema.tenantBillingRequestAttachments.state, "failed"),
+              ),
+            )
+            .returning();
+          if (!pending) throw new Error("billing attachment retry transition failed");
+          return { attachment: pending, upload: true } as const;
+        }
+        return { attachment: existing, upload: true } as const;
+      }
+      const attachmentId = randomUUID();
+      const objectKey = tenantBillingRequestAttachmentObjectKey(tenantId, requestId, attachmentId);
+      const [created] = await tx
         .insert(schema.tenantBillingRequestAttachments)
         .values({
           id: attachmentId,
           tenantId,
           requestId,
-          fileName: safeFileName(file.originalname),
+          idempotencyKey,
+          fileName,
           contentType: file.mimetype,
           byteSize: file.buffer.byteLength,
           sha256,
@@ -230,9 +270,13 @@ export class TenantBillingRequestsService {
           state: "pending",
           uploadedByUserId: userId,
         })
-        .returning({ id: schema.tenantBillingRequestAttachments.id });
-      if (!intent) throw new Error("billing attachment intent insert failed");
+        .returning();
+      if (!created) throw new Error("billing attachment intent insert failed");
+      return { attachment: created, upload: true } as const;
     });
+    if (!intent.upload) return attachmentSource(intent.attachment);
+    const attachmentId = intent.attachment.id;
+    const objectKey = intent.attachment.objectKey;
 
     try {
       await this.storage.putVerified(objectKey, file.buffer, file.mimetype, sha256);
@@ -265,7 +309,7 @@ export class TenantBillingRequestsService {
     }
 
     try {
-      return await this.finalizeAttachment(tenantId, userId, requestId, attachmentId);
+      return await this.finalizeAttachment(tenantId, requestId, attachmentId);
     } catch (error) {
       const committed = await this.readAttachment(tenantId, requestId, attachmentId).catch(
         () => null,
@@ -280,7 +324,7 @@ export class TenantBillingRequestsService {
           );
           if (verification === "verified") {
             try {
-              return await this.finalizeAttachment(tenantId, userId, requestId, attachmentId);
+              return await this.finalizeAttachment(tenantId, requestId, attachmentId);
             } catch {
               const retried = await this.readAttachment(tenantId, requestId, attachmentId).catch(
                 () => null,
@@ -319,12 +363,7 @@ export class TenantBillingRequestsService {
     };
   }
 
-  private async finalizeAttachment(
-    tenantId: string,
-    userId: string,
-    requestId: string,
-    attachmentId: string,
-  ) {
+  private async finalizeAttachment(tenantId: string, requestId: string, attachmentId: string) {
     return this.db.transaction(async (tx) => {
       const [attachment] = await tx
         .select()
@@ -359,7 +398,7 @@ export class TenantBillingRequestsService {
       if (!ready) throw new Error("billing attachment ready transition failed");
       await tx.insert(schema.tenantAuditEvents).values({
         organizationId: tenantId,
-        actorUserId: userId,
+        actorUserId: ready.uploadedByUserId,
         action: "billing.request.attachment_uploaded",
         outcome: "success",
         targetType: "tenant_billing_request_attachment",

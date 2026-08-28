@@ -319,6 +319,10 @@ export const requestReplySchema = z.strictObject({
   idempotencyKey: idempotencyKeySchema,
 });
 
+export const requestAttachmentUploadSchema = z.strictObject({
+  idempotencyKey: idempotencyKeySchema,
+});
+
 export const offerAcceptSchema = z.strictObject({ idempotencyKey: idempotencyKeySchema });
 
 export const offerChangeRequestSchema = z.strictObject({
@@ -328,6 +332,7 @@ export const offerChangeRequestSchema = z.strictObject({
 
 export type CreateBillingRequestDto = z.infer<typeof createBillingRequestSchema>;
 export type RequestReplyDto = z.infer<typeof requestReplySchema>;
+export type RequestAttachmentUploadDto = z.infer<typeof requestAttachmentUploadSchema>;
 export type OfferAcceptDto = z.infer<typeof offerAcceptSchema>;
 export type OfferChangeRequestDto = z.infer<typeof offerChangeRequestSchema>;
 

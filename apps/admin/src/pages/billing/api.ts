@@ -245,8 +245,13 @@ export function createBillingRequest(payload: CreateBillingRequestPayload, idemp
   });
 }
 
-export function uploadBillingRequestAttachment(requestId: string, file: File) {
+export function uploadBillingRequestAttachment(
+  requestId: string,
+  file: File,
+  idempotencyKey: string,
+) {
   const body = new FormData();
+  body.append("idempotencyKey", idempotencyKey);
   body.append("file", file);
   return apiFetch<TenantBillingRequestAttachment>(`/billing/requests/${requestId}/attachments`, {
     method: "POST",

@@ -389,11 +389,19 @@ it("merges complete upload rows, locks retry double clicks, and reconciles an ac
   let firstUploadDone = false;
   let secondUploadCount = 0;
   let resolveRetry!: (response: Response) => void;
-  const calls: Array<{ url: string; method: string }> = [];
+  const calls: Array<{
+    url: string;
+    method: string;
+    idempotencyKey: FormDataEntryValue | null | undefined;
+  }> = [];
   const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = String(input);
     const method = init?.method ?? "GET";
-    calls.push({ url, method });
+    calls.push({
+      url,
+      method,
+      idempotencyKey: init?.body instanceof FormData ? init.body.get("idempotencyKey") : undefined,
+    });
     if (url.endsWith("/api/billing/requests") && method === "POST") {
       return Promise.resolve(json(request));
     }
@@ -443,6 +451,11 @@ it("merges complete upload rows, locks retry double clicks, and reconciles an ac
   retry.click();
   retry.click();
   expect(secondUploadCount).toBe(2);
+  const secondUploadKeys = calls
+    .filter(({ url }) => url.endsWith(`/api/billing/requests/${REQUEST_ID}/attachments`))
+    .slice(1)
+    .map(({ idempotencyKey }) => idempotencyKey);
+  expect(secondUploadKeys).toEqual([KEY, KEY]);
   expect(await screen.findByText("second.pdf: загружается")).toBeDefined();
   expect(screen.queryByRole("button", { name: "Повторить загрузку second.pdf" })).toBeNull();
   resolveRetry(json(secondAttachment));

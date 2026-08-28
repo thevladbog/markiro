@@ -43,7 +43,11 @@ function attachmentUploadsFromState(state: unknown): AttachmentUploadResult[] {
   if (!Array.isArray(uploads)) return [];
   return uploads.filter(
     (item): item is AttachmentUploadResult =>
-      isRecord(item) && item.file instanceof File && isAttachmentUploadState(item.state),
+      isRecord(item) &&
+      item.file instanceof File &&
+      typeof item.idempotencyKey === "string" &&
+      item.idempotencyKey.length > 0 &&
+      isAttachmentUploadState(item.state),
   );
 }
 
@@ -168,7 +172,11 @@ export function RequestDetailPage() {
       );
       try {
         try {
-          const attachment = await uploadBillingRequestAttachment(request.id, item.file);
+          const attachment = await uploadBillingRequestAttachment(
+            request.id,
+            item.file,
+            item.idempotencyKey,
+          );
           mergeBillingRequestAttachment(client, request.id, attachment);
           setUploads((current) => current.filter((upload) => upload.file !== item.file));
         } catch (cause) {

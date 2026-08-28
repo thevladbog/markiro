@@ -95,6 +95,9 @@ describe("tenant billing workflow schema", () => {
     expect(constraintNames(schema.tenantBillingRequestAttachments).indexes).toContain(
       "tenant_billing_request_attachments_tenant_request_state_idx",
     );
+    expect(constraintNames(schema.tenantBillingRequestAttachments).uniqueConstraints).toContain(
+      "tenant_billing_request_attachments_tenant_request_idempotency_uq",
+    );
     expect(constraintNames(schema.tenantBillingRequestLinks).foreignKeys).toEqual(
       expect.arrayContaining([
         "tenant_billing_request_links_tenant_request_fk",

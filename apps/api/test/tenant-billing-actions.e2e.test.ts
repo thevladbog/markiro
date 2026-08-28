@@ -52,7 +52,7 @@ describe("tenant billing action route security and validation", () => {
     expect(interceptor.multer.limits).toEqual({
       fileSize: 5 * 1024 * 1024,
       files: 1,
-      fields: 0,
+      fields: 1,
       parts: 2,
     });
     expect(interceptor.multer.storage?._handleFile).toBeTypeOf("function");
