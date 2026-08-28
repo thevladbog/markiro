@@ -161,9 +161,26 @@ mod tests {
             ..AgentConfig::default()
         };
         write_config(dir.path(), &good).unwrap();
-        // Simulate a crashed write leaving a stray temp file behind.
-        std::fs::write(dir.path().join(".signer-tmp-leftover"), b"{ broken").unwrap();
+
+        // A write that died before its rename leaves the real temp file behind,
+        // half-written. Use the exact name `write_config` uses -- a made-up
+        // name would let this test pass against a truncate-in-place
+        // implementation, which is the very thing it exists to rule out.
+        let stale_temp = dir.path().join(".signer.json.tmp");
+        std::fs::write(&stale_temp, b"{ broken").unwrap();
+
+        // The previous config is still the one that is read...
         assert_eq!(read_config(dir.path()).unwrap(), good);
+
+        // ...and the next write recovers, overwriting the stale temp rather
+        // than tripping over it.
+        let next = AgentConfig {
+            agent_id: Some("a-2".into()),
+            ..AgentConfig::default()
+        };
+        write_config(dir.path(), &next).unwrap();
+        assert_eq!(read_config(dir.path()).unwrap(), next);
+        assert!(!stale_temp.exists(), "the temp file must be renamed away, not left behind");
     }
 
     #[test]
