@@ -46,7 +46,7 @@ describe("integrations (cabinet)", () => {
     const types = res.body.channels.map((c: { type: string }) => c.type);
     expect(types).toEqual(["commerceml", "public_api", "gis_mt_files", "chestny_znak"]);
     const chz = res.body.channels.find((c: { type: string }) => c.type === "chestny_znak");
-    expect(chz.state).toBe("unavailable");
+    expect(chz.state).toBe("not_configured");
   });
 
   it("ненастроенный канал — это состояние, а не отсутствие записи", async () => {
@@ -225,7 +225,7 @@ describe("integrations (cabinet)", () => {
   });
 
   it("отказывает в настройке недоступного канала", async () => {
-    await agent.patch("/integrations/chestny_znak").send({}).expect(409);
+    await agent.patch("/integrations/gis_mt_files").send({}).expect(409);
   });
 
   // Fix 1 (review, task 15 follow-up): before this guard, `issueCredentials`
