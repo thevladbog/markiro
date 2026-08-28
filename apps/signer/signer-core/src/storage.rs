@@ -93,7 +93,12 @@ pub fn validate_http_url(value: &str) -> Result<(), SignerError> {
         .strip_prefix("https://")
         .or_else(|| value.strip_prefix("http://"))
         .ok_or_else(|| SignerError::Storage("the server URL must be http or https".into()))?;
-    let authority = rest.split('/').next().unwrap_or_default();
+    // The authority ends at the first `/`, `?`, or `#` -- not just `/` -- so
+    // a URL with no path but a query or fragment (`https://?query`,
+    // `https://#frag`) does not leave the whole rest of the string, empty
+    // host included, mistaken for a host.
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
     if authority.is_empty() {
         return Err(SignerError::Storage("the server URL has no host".into()));
     }
@@ -188,5 +193,18 @@ mod tests {
         assert!(validate_http_url("https://user:pass@admin.markiro.app").is_err());
         assert!(validate_http_url("ftp://admin.markiro.app").is_err());
         assert!(validate_http_url("https://admin.markiro.app").is_ok());
+    }
+
+    // F5: taking the authority as "everything before the first `/`" let a
+    // query or fragment with no path (`https://?query`, `https://#frag`)
+    // through with an empty host, because neither `?` nor `#` is a `/`.
+    #[test]
+    fn rejects_a_server_url_with_no_host_before_a_query_or_fragment() {
+        assert!(validate_http_url("https://?query").is_err());
+        assert!(validate_http_url("https://#frag").is_err());
+        assert!(validate_http_url("https://").is_err());
+        // A real host followed by a query or fragment is still fine.
+        assert!(validate_http_url("https://admin.markiro.app?query").is_ok());
+        assert!(validate_http_url("https://admin.markiro.app#frag").is_ok());
     }
 }

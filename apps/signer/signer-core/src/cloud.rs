@@ -151,13 +151,14 @@ impl CloudClient {
             StatusCode::NOT_FOUND => Err(SignerError::Protocol(
                 "the task is no longer claimed by this agent".to_string(),
             )),
-            // 503 means the cloud has no encryption key configured; it will also
-            // stop enqueueing, so backing off is the only sane response.
-            StatusCode::SERVICE_UNAVAILABLE => Err(SignerError::Network(
-                "the cloud cannot store tokens right now".to_string(),
-            )),
             status if status.is_success() => Ok(()),
-            status => Err(SignerError::Protocol(format!("report answered {status}"))),
+            // Everything else -- 503 (no encryption key configured), a plain
+            // 500/502/504, or anything else unexpected -- is not a definitive
+            // client-side verdict the way 401/404 are. Treating it as
+            // `Protocol` would make the retry loop in `runtime.rs` give up
+            // for good, throwing away a token that already cost a PIN prompt
+            // and a True API round trip over what may be a transient blip.
+            status => Err(SignerError::Network(format!("report answered {status}"))),
         }
     }
 }
@@ -274,6 +275,33 @@ mod tests {
         assert!(matches!(
             client.complete("s", "t2", &body).await,
             Err(SignerError::Protocol(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_transient_5xx_on_complete_is_network_not_protocol() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/signer-agent/tasks/t1/complete"))
+            .respond_with(ResponseTemplate::new(502))
+            .mount(&server)
+            .await;
+        let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
+        let body = TaskComplete {
+            token: "t".into(),
+            expires_at: "2026-08-28T20:00:00.000Z".into(),
+            cert_thumbprint: "AB".into(),
+            cert_subject: None,
+            cert_inn: None,
+            cert_not_after: None,
+        };
+        // A 502 is not a definitive verdict the way 404 is: `runtime.rs`'s
+        // retry loop treats `Protocol` as terminal, and a freshly minted
+        // token (a PIN prompt plus a True API round trip) must not be thrown
+        // away over what may be a transient gateway blip.
+        assert!(matches!(
+            client.complete("s", "t1", &body).await,
+            Err(SignerError::Network(_))
         ));
     }
 

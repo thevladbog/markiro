@@ -112,8 +112,11 @@ fn open_my_store() -> Result<HCERTSTORE, SignerError> {
     Ok(store)
 }
 
-/// Returns `None` for anything the agent cannot use: no private key, not a
-/// GOST key, or an unreadable subject.
+/// Returns `None` for a certificate the agent cannot ever use for signing --
+/// not a GOST key, or an unreadable subject/thumbprint. A missing private key
+/// does *not* return `None`: the certificate is still summarized, with
+/// `has_private_key: false`, so the caller (the UI's certificate picker) can
+/// filter it out itself rather than have it silently vanish from the list.
 unsafe fn summarize(context: *const CERT_CONTEXT) -> Option<CertificateSummary> {
     let info = (*context).pCertInfo;
     if info.is_null() {

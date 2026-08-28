@@ -35,12 +35,6 @@ pub trait Signer: Send + Sync {
 /// would fail the whole report rather than just this field.
 pub fn inn_from_subject(subject: &str) -> Option<String> {
     const KEYS: [&str; 4] = ["ИНН ЮЛ", "ИНН", "INN", "1.2.643.3.131.1.1"];
-    // Under this OID spelling, a legal entity's 10-digit INN is stored
-    // zero-padded to 12 characters (e.g. `007712345678`). Left as-is, that
-    // passes the cloud's `^\d{10}(\d{2})?$` check as a *valid but wrong*
-    // 12-digit (individual entrepreneur) INN instead of the real 10-digit
-    // one, and is shown that way in the cabinet with no error anywhere.
-    const OID_KEY: &str = "1.2.643.3.131.1.1";
     for key in KEYS {
         let mut haystack = subject;
         while let Some(index) = haystack.find(key) {
@@ -50,11 +44,18 @@ pub fn inn_from_subject(subject: &str) -> Option<String> {
                 .chars()
                 .take_while(char::is_ascii_digit)
                 .collect();
-            if key == OID_KEY {
-                if let Some(unpadded) = digits.strip_prefix("00") {
-                    if unpadded.len() == 10 {
-                        return Some(unpadded.to_string());
-                    }
+            // Some CAs store a legal entity's 10-digit INN zero-padded to 12
+            // characters (e.g. `007712345678`), and not only under the OID
+            // spelling -- `ИНН`/`ИНН ЮЛ`/`INN` can carry the same padding.
+            // Left as-is, that passes the cloud's `^\d{10}(\d{2})?$` check as
+            // a *valid but wrong* 12-digit (individual entrepreneur) INN
+            // instead of the real 10-digit one, and is shown that way in the
+            // cabinet with no error anywhere. Stripping is safe for every
+            // spelling: a genuine 12-digit personal INN begins with a region
+            // code, never `00`.
+            if let Some(unpadded) = digits.strip_prefix("00") {
+                if unpadded.len() == 10 {
+                    return Some(unpadded.to_string());
                 }
             }
             if digits.len() == 10 || digits.len() == 12 {
@@ -122,6 +123,12 @@ mod tests {
         assert_eq!(
             inn_from_subject("CN=ИП Иванов, 1.2.643.3.131.1.1=771234567890").as_deref(),
             Some("771234567890")
+        );
+        // F4: the same zero-padding shows up under the plain `ИНН` spelling
+        // too, not only the OID key -- de-padding must apply to every key.
+        assert_eq!(
+            inn_from_subject("CN=ООО Ромашка, ИНН=007712345678").as_deref(),
+            Some("7712345678")
         );
     }
 

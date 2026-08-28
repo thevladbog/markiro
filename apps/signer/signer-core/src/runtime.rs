@@ -298,12 +298,17 @@ impl Runtime {
                 }
                 Err(error) => {
                     self.note("Poll failed", Some(&error.to_string()));
-                    tokio::time::sleep(backoff_for(failures)).await;
-                    failures = failures.saturating_add(1);
+                    // Emit the Degraded status before sleeping through the
+                    // backoff, not after: the sleep can run for up to
+                    // `MAX_BACKOFF` (60 s), and delaying `on_change` until it
+                    // returns would leave the UI showing nothing wrong for
+                    // that whole window after a failure.
                     self.set_last_error(Some(error.to_string()));
                     let mut status = self.status();
                     status.phase = AgentPhase::Degraded;
                     on_change(status);
+                    tokio::time::sleep(backoff_for(failures)).await;
+                    failures = failures.saturating_add(1);
                 }
             }
         }
