@@ -1,8 +1,9 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, SectionHeader, Spinner } from "@markiro/ui";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Navigate, useNavigate, useSearchParams } from "react-router";
+import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router";
+import { z } from "zod";
 
 import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
@@ -19,6 +20,7 @@ import {
 import { createOffer } from "./api.js";
 import { OfferTermsEditor } from "./OfferTermsEditor.js";
 import { listOperatorBankAccounts } from "../settings/api.js";
+import { linkBillingRequest } from "../billing-requests/api.js";
 
 function toTenantListItem(detail: TenantDetail): TenantListItem {
   return {
@@ -40,10 +42,44 @@ export function CreateOfferPage() {
 
 function OfferEditor() {
   const { t } = useTranslation();
+  const location = useLocation();
   const navigate = useNavigate();
+  const client = useQueryClient();
   const [search] = useSearchParams();
   const [termsMarkdown, setTermsMarkdown] = useState<string | null>(null);
+  const pendingLink = useRef<{ offerId: string; idempotencyKey: string } | null>(null);
+  const sourceRequestId = z
+    .uuid()
+    .safeParse((location.state as { sourceRequestId?: unknown } | null)?.sourceRequestId).data;
   const selectedTenantId = tenantIdSchema.safeParse(search.get("tenantId")).data;
+  const refreshSourceRequest = async () => {
+    if (!sourceRequestId) return;
+    await Promise.all([
+      client.invalidateQueries({ queryKey: ["platform", "billing", "requests"] }),
+      client.invalidateQueries({
+        queryKey: ["platform", "billing", "requests", sourceRequestId],
+      }),
+    ]);
+  };
+  const linkSourceOffer = async (attempt: { offerId: string; idempotencyKey: string }) => {
+    if (!sourceRequestId) return;
+    try {
+      await linkBillingRequest(sourceRequestId, {
+        type: "offer",
+        targetId: attempt.offerId,
+        idempotencyKey: attempt.idempotencyKey,
+      });
+      pendingLink.current = null;
+      await refreshSourceRequest();
+    } catch (error) {
+      if (!(error instanceof ApiRequestError) || error.status === null || error.status >= 500) {
+        throw error;
+      }
+      pendingLink.current = null;
+      await refreshSourceRequest();
+      throw error;
+    }
+  };
   const tenants = useQuery({
     queryKey: ["platform", "tenants", "document-picker"],
     queryFn: () => listTenants({ page: 1, limit: 100 }),
@@ -83,8 +119,19 @@ function OfferEditor() {
       ) {
         throw new ApiRequestError(409, "Catalog version unavailable", "catalog_version_stale");
       }
+      if (pendingLink.current && sourceRequestId) {
+        const linkedOffer = pendingLink.current.offerId;
+        await linkSourceOffer(pendingLink.current);
+        return linkedOffer;
+      }
       const input = toOfferCreateInput(draft);
-      return createOffer(termsMarkdown ? { ...input, termsMarkdown } : input);
+      const offer = await createOffer(termsMarkdown ? { ...input, termsMarkdown } : input);
+      if (sourceRequestId) {
+        const linkAttempt = { offerId: offer.id, idempotencyKey: crypto.randomUUID() };
+        pendingLink.current = linkAttempt;
+        await linkSourceOffer(linkAttempt);
+      }
+      return offer.id;
     },
   });
 

@@ -65,11 +65,12 @@ export async function platformApiFetch<S extends z.ZodType>(
   const endpoint = safeEndpoint(path);
   let response: Response;
   try {
+    const jsonHeaders = init.body instanceof FormData ? {} : { "Content-Type": "application/json" };
     response = await fetch(`${PLATFORM_API_BASE}${path}`, {
       ...init,
       credentials: "include",
       headers: {
-        "Content-Type": "application/json",
+        ...jsonHeaders,
         ...init.headers,
       },
     });

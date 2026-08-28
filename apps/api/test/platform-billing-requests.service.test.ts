@@ -253,6 +253,59 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     },
   );
 
+  it("returns the authoritative next transitions in list and detail", async () => {
+    const request = await insertRequest(connection.db, tenantA, tenantUser, "under_review");
+
+    const list = await requests.list(actor, { tenantId: tenantA, status: "under_review" });
+    expect(list.items.find((item) => item.id === request.id)?.allowedTransitions).toEqual([
+      "clarification_required",
+      "offer_prepared",
+      "in_progress",
+      "cancelled",
+    ]);
+    await expect(requests.detail(actor, request.id)).resolves.toMatchObject({
+      allowedTransitions: ["clarification_required", "offer_prepared", "in_progress", "cancelled"],
+    });
+  });
+
+  it("projects linked-offer revision and invoice actions from authoritative offer state", async () => {
+    const request = await insertRequest(connection.db, tenantA, tenantUser, "offer_prepared");
+    const [offer] = await connection.db
+      .insert(schema.commercialOffers)
+      .values({
+        tenantId: tenantA,
+        revision: 1,
+        status: "published",
+        number: `KP-ACTION-${randomUUID()}`,
+        publishedAt: new Date(),
+        createdByPlatformUserId: actorId,
+      })
+      .returning();
+    await requests.link(actor, request.id, {
+      type: "offer",
+      targetId: offer!.id,
+      idempotencyKey: randomUUID(),
+    });
+    await connection.db.insert(schema.commercialOfferDecisions).values({
+      tenantId: tenantA,
+      offerId: offer!.id,
+      decision: "changes_requested",
+      message: "Revise the period",
+      actorUserId: tenantUser,
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(requests.detail(actor, request.id)).resolves.toMatchObject({
+      offerAction: {
+        offerId: offer!.id,
+        currentOfferId: offer!.id,
+        latestDecision: "changes_requested",
+        canRevise: true,
+        canCreateInvoice: false,
+      },
+    });
+  });
+
   it.each(forbiddenTransitions)(
     "rejects forbidden %s to %s without state, event, or audit changes",
     async (fromStatus, toStatus) => {

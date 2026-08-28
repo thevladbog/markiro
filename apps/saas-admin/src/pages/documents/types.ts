@@ -29,6 +29,8 @@ export interface DocumentLineDraft {
 
 export interface DocumentDraft {
   tenantId: string;
+  sourceOfferId?: string;
+  sourceRequestId?: string;
   sellerBankAccountId?: string | null;
   applicationMode: "manual" | "automatic";
   date: string;

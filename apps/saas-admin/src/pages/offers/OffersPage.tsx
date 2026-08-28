@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation, useNavigate } from "react-router";
+import { Link, useLocation, useSearchParams } from "react-router";
 import { Alert, Button, Input, SectionHeader, Spinner, StatusChip, Table } from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { getOffer, listOffers, payOffer, publishOffer, type Offer } from "./api.js";
@@ -11,10 +11,10 @@ export function OffersPage() {
   const principal = usePlatformPrincipal();
   const client = useQueryClient();
   const location = useLocation();
-  const navigate = useNavigate();
+  const [search] = useSearchParams();
   const offers = useQuery({ queryKey: ["platform", "offers"], queryFn: listOffers });
   const [bankReference, setBankReference] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(search.get("selected"));
   const selected = useQuery({
     queryKey: ["platform", "offers", selectedId],
     queryFn: () => getOffer(selectedId!),
@@ -130,14 +130,6 @@ export function OffersPage() {
           {selected.data.status === "published" &&
           principal.capabilities.includes("billing.write") ? (
             <div className="offer-detail-actions">
-              <Button
-                variant="secondary"
-                onClick={() =>
-                  void navigate("/invoices/new", { state: { sourceOfferId: selected.data.id } })
-                }
-              >
-                {t("offers.createInvoice")}
-              </Button>
               <Input
                 label={t("offers.bankReference")}
                 value={bankReference}

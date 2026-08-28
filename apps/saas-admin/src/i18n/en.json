@@ -267,6 +267,7 @@
     "loadError": "Could not load invoices",
     "newTitle": "New invoice",
     "newDescription": "Build the catalog items and their post-payment application rules.",
+    "sourceNotAccepted": "An invoice can be created only from the accepted current offer linked to a request.",
     "tenantId": "Tenant ID",
     "amount": "Amount",
     "create": "Create invoice",
@@ -383,6 +384,113 @@
         "title": "Commercial cycle complete",
         "body": "Payment and every line result are recorded in history."
       }
+    }
+  },
+  "billingRequests": {
+    "title": "Billing requests",
+    "description": "Operational handling of tenant requests and linked documents.",
+    "forbiddenTitle": "Billing request access restricted",
+    "forbiddenBody": "Your current permissions do not allow billing request access.",
+    "loadError": "Could not load the authoritative request state",
+    "empty": "No requests match these filters",
+    "none": "No events",
+    "actions": "Request operations",
+    "back": "Back to request register",
+    "history": "Event history",
+    "comment": "Markiro comment",
+    "addComment": "Add comment",
+    "retry": "Retry the same request",
+    "actionError": "The operation failed. Conflicts refresh authority; network attempts can be retried.",
+    "readOnly": "Read-only access. Billing write permission is required for actions.",
+    "createOffer": "Create offer",
+    "createInvoice": "Create invoice",
+    "reviseOffer": "Create new revision",
+    "issueAct": "Issue act",
+    "filters": { "title": "Request filters", "all": "All" },
+    "fields": {
+      "number": "Number",
+      "tenant": "Tenant",
+      "type": "Type",
+      "status": "Status",
+      "responsible": "Responsible side",
+      "latestEvent": "Latest event"
+    },
+    "type": {
+      "renewal": "Renewal",
+      "capacity_change": "Capacity change",
+      "additional_service": "Additional service",
+      "documents": "Documents",
+      "other": "Other"
+    },
+    "status": {
+      "new": "New",
+      "under_review": "Under review",
+      "clarification_required": "Clarification required",
+      "offer_prepared": "Offer prepared",
+      "awaiting_payment": "Awaiting payment",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
+    "side": { "tenant": "Tenant", "markiro": "Markiro", "none": "None" },
+    "actor": { "tenant_user": "Tenant", "platform_user": "Markiro", "system": "System" },
+    "event": {
+      "created": "Request created",
+      "status_changed": "Status changed",
+      "tenant_reply": "Tenant reply",
+      "platform_comment": "Markiro comment",
+      "offer_linked": "Offer linked",
+      "offer_accepted": "Offer accepted",
+      "offer_changes_requested": "Changes requested",
+      "invoice_linked": "Invoice linked",
+      "payment_confirmed": "Payment confirmed",
+      "service_linked": "Service linked",
+      "act_linked": "Act linked"
+    },
+    "links": {
+      "title": "Linked objects",
+      "type": "Link type",
+      "target": "Object ID",
+      "add": "Add link",
+      "offer": "Offer",
+      "invoice": "Invoice",
+      "payment": "Payment",
+      "act": "Act",
+      "ordered_service": "Service"
+    }
+  },
+  "billingActs": {
+    "title": "Issue act",
+    "description": "Create act metadata and upload one final PDF.",
+    "actions": "Navigation",
+    "back": "Back to request",
+    "forbiddenTitle": "Act issue unavailable",
+    "forbiddenBody": "Billing write permission is required to issue an act.",
+    "submit": "Issue act",
+    "retry": "Retry issue",
+    "fields": {
+      "number": "Act number",
+      "periodStart": "Period start",
+      "periodEnd": "Period end",
+      "tenant": "Tenant",
+      "request": "Request",
+      "invoice": "Invoice",
+      "service": "Service",
+      "pdf": "Act PDF",
+      "pdfHint": "One PDF, up to 5 MiB"
+    },
+    "errors": {
+      "pdfOnly": "Only PDF files are allowed",
+      "pdfSize": "The PDF must be non-empty and no larger than 5 MiB",
+      "pdfRequired": "Choose the act PDF",
+      "form": "Check the number, period, tenant, and linked objects",
+      "retryable": "The network or server is unavailable. Retry uses the same operation without duplication.",
+      "authoritative": "The server rejected the operation. Check current links and document state."
+    },
+    "progress": {
+      "creating": "Creating act…",
+      "uploading": "Uploading and issuing PDF…",
+      "issued": "Act issued"
     }
   },
   "payments": {
@@ -538,6 +646,7 @@
     "offers": "Offers",
     "invoices": "Invoices",
     "payments": "Payments",
+    "billingRequests": "Requests",
     "monitoring": "Monitoring",
     "team": "Team",
     "audit": "Audit",

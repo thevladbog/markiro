@@ -703,7 +703,7 @@ export const offerPaymentResultSchema = z
   })
   .strict();
 
-const billingRequestTypeSchema = z.enum([
+export const billingRequestTypeSchema = z.enum([
   "renewal",
   "capacity_change",
   "additional_service",
@@ -720,7 +720,7 @@ export const platformBillingRequestStatusSchema = z.enum([
   "completed",
   "cancelled",
 ]);
-const platformBillingRequestTargetStatusSchema = z.enum([
+export const platformBillingRequestTargetStatusSchema = z.enum([
   "under_review",
   "clarification_required",
   "offer_prepared",
@@ -847,10 +847,24 @@ export const platformBillingRequestSchema = z
   })
   .strict();
 export const platformBillingRequestListItemSchema = platformBillingRequestSchema
-  .extend({ latestEvent: platformBillingRequestEventSchema.nullable() })
+  .extend({
+    latestEvent: platformBillingRequestEventSchema.nullable(),
+    allowedTransitions: z.array(platformBillingRequestTargetStatusSchema),
+  })
+  .strict();
+export const platformBillingRequestOfferActionSchema = z
+  .object({
+    offerId: platformUuidSchema,
+    currentOfferId: platformUuidSchema,
+    latestDecision: z.enum(["accepted", "changes_requested"]).nullable(),
+    canRevise: z.boolean(),
+    canCreateInvoice: z.boolean(),
+  })
   .strict();
 export const platformBillingRequestDetailSchema = platformBillingRequestSchema
   .extend({
+    allowedTransitions: z.array(platformBillingRequestTargetStatusSchema),
+    offerAction: platformBillingRequestOfferActionSchema.nullable(),
     events: z.array(platformBillingRequestEventSchema),
     links: z.array(platformBillingRequestLinkResponseSchema),
   })
@@ -859,6 +873,7 @@ export const platformBillingRequestListQuerySchema = z
   .object({
     tenantId: platformTenantIdSchema.optional(),
     status: platformBillingRequestStatusSchema.optional(),
+    type: billingRequestTypeSchema.optional(),
   })
   .strict();
 

@@ -12,7 +12,10 @@ function vatRateBps(value: string | null): number | null {
 }
 
 export function sourceOfferDraft(
-  source: Pick<OfferDetail, "tenantId" | "sellerBankAccountId" | "lines">,
+  source: Pick<OfferDetail, "tenantId" | "sellerBankAccountId" | "lines"> & {
+    id?: string;
+    sourceRequestId?: string;
+  },
   catalog: readonly CatalogVersionDto[],
 ): DocumentDraft {
   const lines: DocumentLineDraft[] = source.lines.map((line) => {
@@ -54,6 +57,8 @@ export function sourceOfferDraft(
   });
   return {
     tenantId: source.tenantId,
+    ...(source.id !== undefined ? { sourceOfferId: source.id } : {}),
+    ...(source.sourceRequestId !== undefined ? { sourceRequestId: source.sourceRequestId } : {}),
     ...(source.sellerBankAccountId !== undefined
       ? { sellerBankAccountId: source.sellerBankAccountId }
       : {}),

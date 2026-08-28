@@ -59,6 +59,16 @@ const BillingPage = lazy(() =>
 const PaymentsPage = lazy(() =>
   import("./pages/payments/PaymentsPage.js").then((module) => ({ default: module.PaymentsPage })),
 );
+const BillingRequestsPage = lazy(() =>
+  import("./pages/billing-requests/BillingRequestsPage.js").then((module) => ({
+    default: module.BillingRequestsPage,
+  })),
+);
+const CreateBillingActPage = lazy(() =>
+  import("./pages/billing-acts/CreateBillingActPage.js").then((module) => ({
+    default: module.CreateBillingActPage,
+  })),
+);
 const CreateInvoicePage = lazy(() =>
   import("./pages/billing/CreateInvoicePage.js").then((module) => ({
     default: module.CreateInvoicePage,
@@ -133,6 +143,9 @@ export const appRoutes = createRoutesFromElements(
         <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
         <Route path="/billing" element={<LegacyBillingRedirect target="index" />} />
         <Route path="/payments" element={<PaymentsPage />} />
+        <Route path="/billing-requests" element={<BillingRequestsPage />} />
+        <Route path="/billing-requests/:requestId" element={<BillingRequestsPage />} />
+        <Route path="/billing-acts/new" element={<CreateBillingActPage />} />
         <Route path="/billing/new" element={<LegacyBillingRedirect target="new" />} />
         <Route path="/billing/:invoiceId" element={<LegacyBillingRedirect target="detail" />} />
         <Route path="/monitoring" element={<MonitoringPage />} />

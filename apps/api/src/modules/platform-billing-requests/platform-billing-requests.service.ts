@@ -49,6 +49,7 @@ export class PlatformBillingRequestsService {
     const conditions = [];
     if (query.tenantId) conditions.push(eq(schema.tenantBillingRequests.tenantId, query.tenantId));
     if (query.status) conditions.push(eq(schema.tenantBillingRequests.status, query.status));
+    if (query.type) conditions.push(eq(schema.tenantBillingRequests.type, query.type));
     const requests = await this.db
       .select()
       .from(schema.tenantBillingRequests)
@@ -75,6 +76,7 @@ export class PlatformBillingRequestsService {
     return {
       items: requests.map((request) => ({
         ...requestSource(request),
+        allowedTransitions: transitions[request.status],
         latestEvent: latest.has(request.id) ? eventSource(latest.get(request.id)!) : null,
       })),
     };
@@ -348,12 +350,75 @@ export class PlatformBillingRequestsService {
         asc(schema.tenantBillingRequestLinks.createdAt),
         asc(schema.tenantBillingRequestLinks.id),
       );
+    const linkedOfferId = links.filter((link) => link.offerId !== null).at(-1)?.offerId ?? null;
+    const offerAction = linkedOfferId
+      ? await resolveRequestOfferAction(db, request.tenantId, linkedOfferId)
+      : null;
     return {
       ...requestSource(request),
+      allowedTransitions: transitions[request.status],
+      offerAction,
       events: events.map(eventSource),
       links: links.map(inferLinkSource),
     };
   }
+}
+
+async function resolveRequestOfferAction(
+  db: RequestReadExecutor,
+  tenantId: string,
+  offerId: string,
+) {
+  const [linkedOffer] = await db
+    .select({ familyId: schema.commercialOffers.familyId })
+    .from(schema.commercialOffers)
+    .where(
+      and(eq(schema.commercialOffers.tenantId, tenantId), eq(schema.commercialOffers.id, offerId)),
+    )
+    .limit(1);
+  if (!linkedOffer) return null;
+  const family = await db
+    .select({
+      id: schema.commercialOffers.id,
+      revision: schema.commercialOffers.revision,
+      status: schema.commercialOffers.status,
+    })
+    .from(schema.commercialOffers)
+    .where(
+      and(
+        eq(schema.commercialOffers.tenantId, tenantId),
+        eq(schema.commercialOffers.familyId, linkedOffer.familyId),
+      ),
+    )
+    .orderBy(desc(schema.commercialOffers.revision), desc(schema.commercialOffers.id));
+  const current = family.find((offer) => offer.status !== "draft");
+  if (!current) return null;
+  const [decision] = await db
+    .select({ decision: schema.commercialOfferDecisions.decision })
+    .from(schema.commercialOfferDecisions)
+    .where(
+      and(
+        eq(schema.commercialOfferDecisions.tenantId, tenantId),
+        eq(schema.commercialOfferDecisions.offerId, offerId),
+      ),
+    )
+    .orderBy(
+      desc(schema.commercialOfferDecisions.createdAt),
+      desc(schema.commercialOfferDecisions.id),
+    )
+    .limit(1);
+  const latestDecision = decision?.decision ?? null;
+  const linkedIsCurrent = current.id === offerId && current.status === "published";
+  return {
+    offerId,
+    currentOfferId: current.id,
+    latestDecision,
+    canRevise:
+      linkedIsCurrent &&
+      latestDecision === "changes_requested" &&
+      !family.some((offer) => offer.status === "draft"),
+    canCreateInvoice: linkedIsCurrent && latestDecision === "accepted",
+  };
 }
 
 async function lockRequest(tx: RequestReadExecutor, tenantId: string, requestId: string) {

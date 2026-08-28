@@ -1229,6 +1229,13 @@ describe("platform commercial contracts", () => {
     expect(platformCommercialContracts.billingRequests.detail.params.parse(requestId)).toBe(
       requestId,
     );
+    expect(
+      platformCommercialContracts.billingRequests.list.query.parse({
+        tenantId: TENANT_ID,
+        status: "under_review",
+        type: "renewal",
+      }),
+    ).toEqual({ tenantId: TENANT_ID, status: "under_review", type: "renewal" });
 
     const direct = platformCommercialContracts.invoices.create.body.parse({
       tenantId: TENANT_ID,
@@ -1258,6 +1265,48 @@ describe("platform commercial contracts", () => {
       platformCommercialContracts.invoices.create.body.safeParse({
         ...direct,
         sourceRequestId: "not-a-uuid",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("returns server-authoritative request transitions without accepting client transition policy", () => {
+    const requestId = "82111111-1111-4111-8111-111111111120";
+    const parsed = platformCommercialContracts.billingRequests.detail.response.parse({
+      id: requestId,
+      tenantId: TENANT_ID,
+      number: "BR-2026-001",
+      type: "renewal",
+      status: "under_review",
+      description: "Renew the subscription",
+      desiredAt: null,
+      context: null,
+      responsibleSide: "markiro",
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+      allowedTransitions: ["clarification_required", "offer_prepared", "in_progress", "cancelled"],
+      offerAction: {
+        offerId: OFFER_ID,
+        currentOfferId: OFFER_ID,
+        latestDecision: "changes_requested",
+        canRevise: true,
+        canCreateInvoice: false,
+      },
+      events: [],
+      links: [],
+    });
+
+    expect(parsed.allowedTransitions).toEqual([
+      "clarification_required",
+      "offer_prepared",
+      "in_progress",
+      "cancelled",
+    ]);
+    expect(parsed.offerAction).toMatchObject({ canRevise: true, canCreateInvoice: false });
+    expect(
+      platformCommercialContracts.billingRequests.status.body.safeParse({
+        status: "completed",
+        idempotencyKey: "81111111-1111-4111-8111-111111111119",
+        allowedTransitions: ["completed"],
       }).success,
     ).toBe(false);
   });

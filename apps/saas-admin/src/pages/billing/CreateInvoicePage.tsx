@@ -49,12 +49,20 @@ function InvoiceEditor() {
   const [search] = useSearchParams();
   const requestedTenant = tenantIdSchema.safeParse(search.get("tenantId")).data;
   const rawSourceOfferId = (location.state as { sourceOfferId?: unknown } | null)?.sourceOfferId;
+  const rawSourceRequestId = (location.state as { sourceRequestId?: unknown } | null)
+    ?.sourceRequestId;
+  const sourceAccepted =
+    (location.state as { sourceAccepted?: unknown } | null)?.sourceAccepted === true;
   const createdInvoiceId = useRef<string | null>(null);
   const sourceOfferId = z.uuid().safeParse(rawSourceOfferId).data;
+  const sourceRequestId = z.uuid().safeParse(rawSourceRequestId).data;
+  const invalidSourceNavigation =
+    rawSourceOfferId !== undefined &&
+    (sourceOfferId === undefined || sourceRequestId === undefined || !sourceAccepted);
   const sourceOffer = useQuery({
     queryKey: ["platform", "offers", sourceOfferId],
     queryFn: () => getOffer(sourceOfferId!),
-    enabled: sourceOfferId !== undefined,
+    enabled: sourceOfferId !== undefined && !invalidSourceNavigation,
   });
   const tenants = useQuery({
     queryKey: ["platform", "tenants", "document-picker"],
@@ -112,7 +120,7 @@ function InvoiceEditor() {
     tenants.isPending ||
     catalog.isPending ||
     sellerAccounts.isPending ||
-    (sourceOfferId !== undefined && sourceOffer.isPending) ||
+    (sourceOfferId !== undefined && !invalidSourceNavigation && sourceOffer.isPending) ||
     (needsTenantPrefetch && prefetchedTenant.isPending)
   ) {
     return (
@@ -123,6 +131,18 @@ function InvoiceEditor() {
           description={t("billing.newDescription")}
         />
         <Spinner label={t("shell.routeLoading")} />
+      </section>
+    );
+  }
+  if (invalidSourceNavigation) {
+    return (
+      <section className="catalog-page">
+        <SectionHeader
+          eyebrow="COMMERCE / INVOICES / NEW"
+          title={t("billing.newTitle")}
+          description={t("billing.newDescription")}
+        />
+        <Alert tone="error">{t("billing.sourceNotAccepted")}</Alert>
       </section>
     );
   }
@@ -152,9 +172,10 @@ function InvoiceEditor() {
   ) {
     pickerTenants.push(toTenantListItem(prefetchedTenant.data));
   }
-  const initialDraft: DocumentDraft = sourceOffer.data
-    ? sourceOfferDraft(sourceOffer.data, catalog.data?.items ?? [])
-    : { tenantId: selectedTenantId ?? "", applicationMode: "automatic", date: "", lines: [] };
+  const initialDraft: DocumentDraft =
+    sourceOffer.data && sourceRequestId
+      ? sourceOfferDraft({ ...sourceOffer.data, sourceRequestId }, catalog.data?.items ?? [])
+      : { tenantId: selectedTenantId ?? "", applicationMode: "automatic", date: "", lines: [] };
 
   return (
     <DocumentComposer
