@@ -63,7 +63,7 @@ icon; clicking it opens a compact window with:
 - certificate picker: enumerates the `MY` certificate store, filters GOST certificates
   with a private key, persists the chosen thumbprint;
 - status panel: last token obtained at / expires at, last task outcome, connectivity;
-- local operation journal (rolling file mirrored in the UI);
+- local operation journal (in-memory, mirrored in the UI — see the note below);
 - tray notifications for actionable failures ("insert the Rutoken", "certificate
   expires in 14 days", "PIN required").
 
