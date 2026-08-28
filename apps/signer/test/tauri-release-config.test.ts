@@ -44,7 +44,23 @@ describe("signer release configuration", () => {
   it("does not let the webview reach the network directly", () => {
     // Every cloud and True API call happens in Rust; a webview that could
     // reach https: would be a way to exfiltrate a token from the UI layer.
-    expect(base.app.security.csp).not.toContain("https:");
+    // Asserting `not.toContain("https:")` on the whole CSP string would also
+    // pass if `connect-src` were deleted entirely (an unset directive falls
+    // back to `default-src`, whose `'self'` on a `tauri://`/custom-protocol
+    // origin does not include `https:` either) or widened by editing a
+    // different directive, so pin down the actual `connect-src` directive's
+    // contents instead.
+    const directives = Object.fromEntries(
+      base.app.security.csp
+        .split(";")
+        .map((directive: string) => directive.trim())
+        .filter(Boolean)
+        .map((directive: string) => {
+          const [name, ...sources] = directive.split(/\s+/);
+          return [name, sources];
+        }),
+    );
+    expect(directives["connect-src"]).toEqual(["'self'", "ipc:", "http://ipc.localhost"]);
   });
 
   it("grants the webview no filesystem or shell capability", () => {

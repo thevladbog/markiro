@@ -20,11 +20,21 @@ export function App(): ReactElement {
   const [status, setStatus] = useState<AgentStatus | null>(null);
 
   useEffect(() => {
+    // `bridge.status()` (the initial snapshot) and `bridge.onStatus` (the
+    // live event stream) race: if an event arrives before the initial
+    // promise resolves, applying the snapshot afterwards would overwrite a
+    // newer status with a stale one. `receivedEvent` makes the snapshot a
+    // no-op once any event has landed, on top of the unmount guard `disposed`
+    // already provided.
     let disposed = false;
+    let receivedEvent = false;
     void bridge.status().then((initial) => {
-      if (!disposed) setStatus(initial);
+      if (!disposed && !receivedEvent) setStatus(initial);
     });
-    const unlisten = bridge.onStatus((next) => setStatus(next));
+    const unlisten = bridge.onStatus((next) => {
+      receivedEvent = true;
+      setStatus(next);
+    });
     return () => {
       disposed = true;
       void unlisten.then((stop) => stop());

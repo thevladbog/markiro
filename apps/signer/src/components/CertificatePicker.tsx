@@ -17,6 +17,15 @@ export function expiryWarning(
   return remaining <= EXPIRY_WARNING_WINDOW_MS ? "expiring" : null;
 }
 
+/** The agent can only sign with a certificate whose private key is present in
+ *  the store; a certificate without one is listed by CryptoAPI but useless
+ *  here. Both the initial load and the refresh button must apply this filter
+ *  through this one function, or pressing refresh makes unusable
+ *  certificates reappear. */
+function usableCertificates(list: CertificateSummary[]): CertificateSummary[] {
+  return list.filter((c) => c.hasPrivateKey);
+}
+
 export function CertificatePicker({
   selected,
   onSelected,
@@ -33,7 +42,7 @@ export function CertificatePicker({
     bridge
       .listCertificates()
       .then((list) => {
-        if (!disposed) setCertificates(list.filter((c) => c.hasPrivateKey));
+        if (!disposed) setCertificates(usableCertificates(list));
       })
       .catch((cause: unknown) => {
         if (!disposed) setError(String(cause));
@@ -70,7 +79,11 @@ export function CertificatePicker({
           label: `${certificate.subject} · ${new Date(certificate.notAfter).toLocaleDateString()}`,
         }))}
       />
-      <Button onClick={() => void bridge.listCertificates().then(setCertificates)}>
+      <Button
+        onClick={() =>
+          void bridge.listCertificates().then((list) => setCertificates(usableCertificates(list)))
+        }
+      >
         {t("certificates.refresh")}
       </Button>
     </div>
