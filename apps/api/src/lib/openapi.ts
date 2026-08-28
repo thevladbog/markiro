@@ -11,6 +11,7 @@ import { z, type ZodObject, type ZodType } from "zod";
 export const CABINET_SESSION_SECURITY = "cabinetSession";
 export const STATION_API_KEY_SECURITY = "stationApiKey";
 export const KIOSK_TOKEN_SECURITY = "kioskToken";
+export const SIGNER_AGENT_TOKEN_SECURITY = "signerAgentToken";
 
 /**
  * Converts a zod schema into an OpenAPI 3.0 SchemaObject describing the JSON
@@ -156,4 +157,9 @@ export function ApiStationAuth(): ClassDecorator & MethodDecorator {
 /** Kiosk-device routes (KioskDeviceGuard): the paired kiosk's x-kiosk-token. */
 export function ApiKioskAuth(): ClassDecorator & MethodDecorator {
   return ApiSecurity(KIOSK_TOKEN_SECURITY);
+}
+
+/** Signer-agent routes (SignerAgentGuard): the paired agent's x-signer-token. */
+export function ApiSignerAgentAuth(): ClassDecorator & MethodDecorator {
+  return ApiSecurity(SIGNER_AGENT_TOKEN_SECURITY);
 }

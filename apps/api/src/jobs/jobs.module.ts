@@ -25,6 +25,11 @@ import { MailRetentionService } from "../modules/mail/mail-retention.service";
 import { ShiftExportRunnerService } from "../modules/shift-exports/shift-export-runner.service";
 import { ShiftExportSourceService } from "../modules/shift-exports/shift-export-source.service";
 import {
+  SignerSchedulerService,
+  type SignerScheduler,
+} from "../modules/signer-agents/signer-scheduler.service";
+import { ChzCryptoService } from "../modules/signer-agents/chz-crypto.service";
+import {
   INVENTORY_DOCUMENT_GENERATOR_REGISTRY,
   InventoryDocumentRunnerService,
   productionInventoryDocumentGeneratorRegistry,
@@ -94,9 +99,17 @@ const RECONCILE_EMAIL_DELIVERIES_QUEUE_CRON = "*/5 * * * *";
 const PRUNE_EMAIL_DELIVERIES_QUEUE_NAME = "prune-email-deliveries";
 const PRUNE_EMAIL_DELIVERIES_QUEUE_CRON = "30 2 * * *";
 
+// `SignerSchedulerService` (Task 7) expires stale `chz_signer_tasks` and
+// enqueues `true_api_auth` refresh tasks before a tenant's True API token
+// runs out -- every 15 minutes so a 90-minute refresh lead window
+// (`CHZ_TOKEN_REFRESH_LEAD_MS`) still leaves several ticks of slack even if
+// one run is skipped.
+const CHZ_SIGNER_SCHEDULER_QUEUE_NAME = "chz-signer-token-scheduler";
+const CHZ_SIGNER_SCHEDULER_QUEUE_CRON = "*/15 * * * *";
+
 /**
  * Boots a dedicated pg-boss instance (its own `pgboss` schema, same
- * database as the app), three request-driven workers, and nine schedules on it:
+ * database as the app), three request-driven workers, and ten schedules on it:
  *  - keeps the `codes`/`scan_events` monthly partitions ahead of traffic:
  *    ensures the current + next month exist once at startup, then again
  *    every day at 04:00 UTC.
@@ -118,6 +131,9 @@ const PRUNE_EMAIL_DELIVERIES_QUEUE_CRON = "30 2 * * *";
  *    daily at 02:30 UTC.
  *  - materializes subscription and add-on activation/expiry reporting status
  *    every minute while request-time entitlement checks remain authoritative.
+ *  - expires stale `chz_signer_tasks` and enqueues True API token refresh
+ *    tasks for tenants with an active signer agent, once at startup and
+ *    then every 15 minutes (`SignerSchedulerService`, Task 7).
  *  - generates shift export artifacts on demand with bounded retries; this
  *    queue is deliberately not scheduled because export requests enqueue it.
  *  - generates inventory document artifacts on demand with the same bounded
@@ -147,6 +163,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     private readonly subscriptionStatus: SubscriptionStatusJob,
     private readonly shiftExportRunner: ShiftExportRunnerService,
     private readonly inventoryDocumentRunner: InventoryDocumentRunnerService,
+    @Inject(SignerSchedulerService) private readonly signerScheduler: SignerScheduler,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -311,7 +328,15 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       );
       await this.reconcileQueuedInventoryDocumentRuns(boss);
 
-      // Also run all nine maintenance paths once immediately at boot rather
+      await boss.createQueue(CHZ_SIGNER_SCHEDULER_QUEUE_NAME);
+      await boss.schedule(CHZ_SIGNER_SCHEDULER_QUEUE_NAME, CHZ_SIGNER_SCHEDULER_QUEUE_CRON);
+      this.workerIds.push(
+        await boss.work(CHZ_SIGNER_SCHEDULER_QUEUE_NAME, async () => {
+          await this.signerScheduler.run();
+        }),
+      );
+
+      // Also run all ten maintenance paths once immediately at boot rather
       // than waiting for the first tick of any schedule.
       await this.runEnsurePartitions();
       await this.runPruneKioskPairAttempts();
@@ -322,6 +347,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       await this.mailJobs.reconcile(this.mailQueue(boss));
       await this.mailRetention.prune();
       await this.subscriptionStatus.run();
+      await this.signerScheduler.run();
       this.started = true;
     } catch (e) {
       // Bootstrap failed partway through: stop whatever pg-boss managed to
@@ -425,7 +451,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 12 ||
+      this.workerIds.length !== 13 ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {
@@ -533,6 +559,16 @@ export class JobsModule {
           useValue: productionInventoryDocumentGeneratorRegistry,
         },
         InventoryDocumentRunnerService,
+        {
+          // Same construction as `SignerAgentsModule.forRoot`: `SignerSchedulerService`
+          // (this module) needs its own `ChzCryptoService` instance to check whether
+          // `CHZ_TOKEN_ENCRYPTION_KEY` is configured before enqueueing refresh tasks
+          // (final review, Finding A) -- `SignerAgentsModule`'s export isn't reachable
+          // here without a circular import between it and `JobsModule`.
+          provide: ChzCryptoService,
+          useFactory: () => new ChzCryptoService(env.CHZ_TOKEN_ENCRYPTION_KEY),
+        },
+        SignerSchedulerService,
       ],
       exports: [PgBossService, INVENTORY_DOCUMENT_GENERATOR_REGISTRY],
     };

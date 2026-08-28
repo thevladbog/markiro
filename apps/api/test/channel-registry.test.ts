@@ -12,7 +12,7 @@ describe("channel registry", () => {
   });
 
   it("канал без адаптера объявлен недоступным, а не спрятан", () => {
-    expect(describeChannel("chestny_znak").available).toBe(false);
+    expect(describeChannel("chestny_znak").available).toBe(true);
     expect(describeChannel("gis_mt_files").available).toBe(false);
     expect(describeChannel("commerceml").available).toBe(true);
   });
@@ -131,5 +131,14 @@ describe("channel registry", () => {
     expect(describeChannel("public_api").usesExchangeCredentials).toBe(false);
     expect(describeChannel("gis_mt_files").usesExchangeCredentials).toBe(false);
     expect(describeChannel("chestny_znak").usesExchangeCredentials).toBe(false);
+  });
+
+  it("chestny_znak settings accept environment and mchdInn and reject junk", () => {
+    const schema = describeChannel("chestny_znak").settingsSchema;
+    expect(schema.safeParse({ environment: "sandbox" }).success).toBe(true);
+    expect(schema.safeParse({ environment: "sandbox", mchdInn: "7712345678" }).success).toBe(true);
+    expect(schema.safeParse({ environment: "staging" }).success).toBe(false);
+    expect(schema.safeParse({ mchdInn: "123" }).success).toBe(false);
+    expect(schema.safeParse({ unknown: true }).success).toBe(false);
   });
 });

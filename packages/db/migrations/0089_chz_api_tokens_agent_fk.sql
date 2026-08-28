@@ -1,0 +1,1 @@
+ALTER TABLE "chz_api_tokens" ADD CONSTRAINT "chz_api_tokens_tenant_agent_fk" FOREIGN KEY ("tenant_id","agent_id") REFERENCES "public"."chz_signer_agents"("tenant_id","id") ON DELETE no action ON UPDATE no action;

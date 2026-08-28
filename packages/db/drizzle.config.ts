@@ -20,6 +20,7 @@ export default defineConfig({
     "./src/schema/shift-exports.ts",
     "./src/schema/disaggregation.ts",
     "./src/schema/inventory.ts",
+    "./src/schema/chz.ts",
   ],
   out: "./migrations",
   dbCredentials: { url: process.env.DATABASE_URL ?? "" },
