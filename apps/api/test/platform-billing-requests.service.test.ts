@@ -264,6 +264,7 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     const request = await insertRequest(connection.db, tenantA, tenantUser, "under_review");
 
     const list = await requests.list(actor, { tenantId: tenantA, status: "under_review" });
+    expect(list.truncated).toBe(false);
     expect(list.items.find((item) => item.id === request.id)?.allowedTransitions).toEqual([
       "clarification_required",
       "offer_prepared",
@@ -364,6 +365,7 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     const result = await observedRequests.list(actor, { tenantId: registryTenant });
 
     expect(result.items).toHaveLength(100);
+    expect(result.truncated).toBe(true);
     expect(
       result.items
         .filter((item) => latestRequestIds.includes(item.id))
@@ -383,6 +385,15 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     );
     expect(loaded.rows).toHaveLength(2);
     expect(loaded.rows.every((row) => row.tenant_id === registryTenant)).toBe(true);
+
+    const oldestRequestId = requestIds[0];
+    if (!oldestRequestId) throw new Error("registry oldest fixture missing");
+    await connection.db
+      .delete(schema.tenantBillingRequests)
+      .where(eq(schema.tenantBillingRequests.id, oldestRequestId));
+    const completeResult = await requests.list(actor, { tenantId: registryTenant });
+    expect(completeResult.items).toHaveLength(100);
+    expect(completeResult.truncated).toBe(false);
   });
 
   it("projects linked-offer revision and invoice actions from authoritative offer state", async () => {

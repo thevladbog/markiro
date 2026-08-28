@@ -34,21 +34,20 @@ function toTenantListItem(detail: TenantDetail): TenantListItem {
 
 export function CreateOfferPage() {
   const principal = usePlatformPrincipal();
-  if (!principal.capabilities.includes("billing.write")) {
+  const [forbidden, setForbidden] = useState(false);
+  if (!principal.capabilities.includes("billing.write") && !forbidden) {
     return <Navigate to="/offers" replace />;
   }
-  return <OfferEditor />;
+  return <OfferEditor forbidden={forbidden} onForbidden={() => setForbidden(true)} />;
 }
 
-function OfferEditor() {
+function OfferEditor({ forbidden, onForbidden }: { forbidden: boolean; onForbidden: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const client = useQueryClient();
-  const retryNavigation = useNavigationGuard(false, false);
   const { requestId } = useParams();
   const [search] = useSearchParams();
   const [termsMarkdown, setTermsMarkdown] = useState<string | null>(null);
-  const [forbidden, setForbidden] = useState(false);
   const retryPending = useRef(false);
   const request = useQuery({
     queryKey: ["platform", "billing", "requests", requestId],
@@ -111,7 +110,8 @@ function OfferEditor() {
           return result.offerId;
         } catch (error) {
           if (isForbidden(error)) {
-            setForbidden(true);
+            setRequestAttempt(null);
+            onForbidden();
             await Promise.all([
               client.invalidateQueries({ queryKey: ["platform", "me"] }),
               invalidateRequestAuthority(),
@@ -166,7 +166,8 @@ function OfferEditor() {
           return result.offerId;
         } catch (error) {
           if (isForbidden(error)) {
-            setForbidden(true);
+            setRequestAttempt(null);
+            onForbidden();
             await Promise.all([
               client.invalidateQueries({ queryKey: ["platform", "me"] }),
               invalidateRequestAuthority(),
@@ -180,10 +181,22 @@ function OfferEditor() {
           throw error;
         }
       }
-      const offer = await createOffer(termsMarkdown ? { ...input, termsMarkdown } : input);
-      return offer.id;
+      try {
+        const offer = await createOffer(termsMarkdown ? { ...input, termsMarkdown } : input);
+        return offer.id;
+      } catch (error) {
+        if (isForbidden(error)) {
+          onForbidden();
+          await Promise.all([
+            client.invalidateQueries({ queryKey: ["platform", "me"] }),
+            client.invalidateQueries({ queryKey: ["platform", "offers"] }),
+          ]);
+        }
+        throw error;
+      }
     },
   });
+  const retryNavigation = useNavigationGuard(requestAttempt !== null, create.isPending);
 
   if (forbidden) {
     return (

@@ -128,6 +128,9 @@ function RequestList() {
       </form>
       {requests.isPending ? <Spinner label={t("shell.routeLoading")} /> : null}
       {requests.error ? <Alert tone="error">{t("billingRequests.loadError")}</Alert> : null}
+      {requests.data?.truncated ? (
+        <Alert tone="warn">{t("billingRequests.truncated")}</Alert>
+      ) : null}
       {requests.data ? (
         <Table
           columns={[

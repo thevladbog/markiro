@@ -1,7 +1,7 @@
 import { Test } from "@nestjs/testing";
 import type { Server } from "node:http";
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
-import { platformErrorSchema } from "@markiro/platform-contracts";
+import { platformCommercialContracts, platformErrorSchema } from "@markiro/platform-contracts";
 import { z, type ZodType } from "zod";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -268,6 +268,29 @@ describe("current SaaS platform OpenAPI contracts", () => {
           /secret|session|token|password|totp|recovery/i,
         );
       }
+    } finally {
+      await platformDocument.close();
+    }
+  });
+
+  it("documents the explicit billing-request registry truncation signal", async () => {
+    const platformDocument = await createPlatformDocument();
+    try {
+      const contract = CURRENT_SAAS_ROUTES.find(
+        (route) => route.method === "get" && route.path === "/platform/billing/requests",
+      );
+      if (!contract) throw new Error("Missing platform billing request list contract");
+      const responseSchema = inlineJsonSchema(
+        operation(platformDocument.document, contract).responses["200"],
+      );
+
+      expect(responseSchema).toEqual(
+        jsonSchema(platformCommercialContracts.billingRequests.list.response),
+      );
+      expect(responseSchema).toMatchObject({
+        required: expect.arrayContaining(["items", "truncated"]),
+        properties: { truncated: { type: "boolean" } },
+      });
     } finally {
       await platformDocument.close();
     }

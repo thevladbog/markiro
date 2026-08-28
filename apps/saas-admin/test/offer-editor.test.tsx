@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -52,6 +52,7 @@ function installOfferEditorApi({
   failCatalogRefresh = false,
   tenantItems = [TENANT_LIST_ITEM],
   me = ACCOUNTANT_ME,
+  meAfterMutation,
   offers = [],
   requestDetail = null,
   requestOfferStatuses = [201],
@@ -62,6 +63,7 @@ function installOfferEditorApi({
   failCatalogRefresh?: boolean;
   tenantItems?: Array<Record<string, unknown>>;
   me?: Record<string, unknown>;
+  meAfterMutation?: Record<string, unknown>;
   offers?: Array<Record<string, unknown>>;
   requestDetail?: Record<string, unknown> | null;
   requestOfferStatuses?: number[];
@@ -70,12 +72,16 @@ function installOfferEditorApi({
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
   let catalogFetches = 0;
   let requestOfferAttempts = 0;
+  let meFetches = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = String(input);
       const method = init.method ?? "GET";
-      if (url.endsWith("/api/platform/me")) return jsonResponse(200, me);
+      if (url.endsWith("/api/platform/me")) {
+        meFetches += 1;
+        return jsonResponse(200, meFetches > 1 && meAfterMutation ? meAfterMutation : me);
+      }
       if (url.endsWith("/api/platform/billing/operator/accounts") && method === "GET") {
         return jsonResponse(200, []);
       }
@@ -131,6 +137,7 @@ function installOfferEditorApi({
           }>;
         };
         calls.push({ method, path: url, body });
+        if (createStatus === 403) return jsonResponse(403, { code: "forbidden" });
         if (createStatus === 409) return jsonResponse(409, { code: "offer_conflict" });
         return jsonResponse(
           201,
@@ -214,6 +221,7 @@ describe("offer editor route", () => {
     const api = installOfferEditorApi({
       requestDetail: billingRequestDetail(),
       requestOfferStatuses: [403],
+      meAfterMutation: SUPPORT_ME,
     });
     const user = userEvent.setup();
     const rendered = renderSaasApp({
@@ -234,6 +242,27 @@ describe("offer editor route", () => {
     });
     expect(screen.queryByRole("button", { name: "Создать черновик предложения" })).toBeNull();
     expect(api.calls()).toHaveLength(1);
+  });
+
+  it("latches the same forbidden surface when direct offer authority is revoked", async () => {
+    const api = installOfferEditorApi({ createStatus: 403, meAfterMutation: SUPPORT_ME });
+    const randomUuid = vi.spyOn(crypto, "randomUUID");
+    const user = userEvent.setup();
+    const rendered = renderSaasApp({ initialEntry: `/offers/new?tenantId=${TENANT_ID}` });
+    const invalidate = vi.spyOn(rendered.queryClient, "invalidateQueries");
+
+    await screen.findByRole("combobox", { name: "Тенант" });
+    await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
+    const uuidCount = randomUuid.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Доступ к заявкам ограничен" }),
+    ).toBeDefined();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["platform", "me"] });
+    expect(screen.queryByRole("button", { name: "Создать черновик предложения" })).toBeNull();
+    expect(api.calls()).toHaveLength(1);
+    expect(randomUuid).toHaveBeenCalledTimes(uuidCount);
   });
 
   it("freezes an ambiguous request offer and retries the exact payload and key once", async () => {
@@ -261,6 +290,19 @@ describe("offer editor route", () => {
     expect(screen.queryByDisplayValue("17000.00")).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Добавить позицию" })).toBeNull();
     await user.type(price, "19000.00");
+    await user.click(screen.getByRole("link", { name: "Каталог" }));
+    expect(
+      within(screen.getByRole("alertdialog")).getByText("Есть несохранённые изменения"),
+    ).toBeDefined();
+    await user.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Продолжить редактирование",
+      }),
+    );
+    expect(screen.getByRole("button", { name: "Повторить точно эту попытку" })).toBeDefined();
+    const unload = new Event("beforeunload", { cancelable: true });
+    fireEvent(window, unload);
+    expect(unload.defaultPrevented).toBe(true);
     const uuidCount = randomUuid.mock.calls.length;
     await user.click(retry);
     await waitFor(() => expect(api.calls()).toHaveLength(2));

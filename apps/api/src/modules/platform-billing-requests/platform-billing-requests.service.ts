@@ -53,13 +53,15 @@ export class PlatformBillingRequestsService {
     if (query.tenantId) conditions.push(eq(schema.tenantBillingRequests.tenantId, query.tenantId));
     if (query.status) conditions.push(eq(schema.tenantBillingRequests.status, query.status));
     if (query.type) conditions.push(eq(schema.tenantBillingRequests.type, query.type));
-    const requests = await this.db
+    const requestWindow = await this.db
       .select()
       .from(schema.tenantBillingRequests)
       .where(conditions.length === 0 ? undefined : and(...conditions))
       .orderBy(desc(schema.tenantBillingRequests.updatedAt), desc(schema.tenantBillingRequests.id))
-      .limit(registryLimit);
-    if (requests.length === 0) return { items: [] };
+      .limit(registryLimit + 1);
+    const truncated = requestWindow.length > registryLimit;
+    const requests = requestWindow.slice(0, registryLimit);
+    if (requests.length === 0) return { items: [], truncated };
     const events = await this.db
       .selectDistinctOn([
         schema.tenantBillingRequestEvents.tenantId,
@@ -87,6 +89,7 @@ export class PlatformBillingRequestsService {
       events.map((event) => [`${event.tenantId}:${event.requestId}`, event] as const),
     );
     return {
+      truncated,
       items: requests.map((request) => {
         const latestEvent = latest.get(`${request.tenantId}:${request.id}`);
         return {

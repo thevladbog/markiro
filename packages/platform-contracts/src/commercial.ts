@@ -1726,7 +1726,12 @@ export const platformCommercialContracts = {
   billingRequests: {
     list: {
       query: platformBillingRequestListQuerySchema,
-      response: z.object({ items: z.array(platformBillingRequestListItemSchema) }).strict(),
+      response: z
+        .object({
+          items: z.array(platformBillingRequestListItemSchema),
+          truncated: z.boolean(),
+        })
+        .strict(),
     },
     detail: { params: platformUuidSchema, response: platformBillingRequestDetailSchema },
     createOffer: {

@@ -401,6 +401,7 @@
     "forbiddenTitle": "Billing request access restricted",
     "forbiddenBody": "Your current permissions do not allow billing request access.",
     "loadError": "Could not load the authoritative request state",
+    "truncated": "Showing the latest 100 requests. Narrow the tenant, status, or type filters.",
     "empty": "No requests match these filters",
     "none": "No events",
     "actions": "Request operations",
@@ -476,6 +477,11 @@
     "forbiddenTitle": "Act issue unavailable",
     "forbiddenBody": "Billing write permission is required to issue an act.",
     "forbiddenDraft": "Saved draft ID remains available read-only:",
+    "recovery": {
+      "title": "Saved act recovery state",
+      "status": "State",
+      "draft": "Draft awaits reconciliation or issue continuation"
+    },
     "submit": "Issue act",
     "retry": "Retry issue",
     "resume": "Continue issuing saved draft",

@@ -1311,6 +1311,35 @@ describe("platform commercial contracts", () => {
     ).toBe(false);
   });
 
+  it("requires an explicit request-registry truncation signal", () => {
+    const item = {
+      id: "82111111-1111-4111-8111-111111111120",
+      tenantId: TENANT_ID,
+      number: "BR-2026-001",
+      type: "renewal",
+      status: "under_review",
+      description: "Renew the subscription",
+      desiredAt: null,
+      context: null,
+      responsibleSide: "markiro",
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+      allowedTransitions: ["offer_prepared"],
+      latestEvent: null,
+    };
+
+    const parsed = platformCommercialContracts.billingRequests.list.response.parse({
+      items: [item],
+      truncated: true,
+    });
+    expect(parsed.truncated).toBe(true);
+    expect(parsed.items).toEqual([expect.objectContaining({ id: item.id })]);
+    expect(
+      platformCommercialContracts.billingRequests.list.response.safeParse({ items: [item] })
+        .success,
+    ).toBe(false);
+  });
+
   it("contracts an atomic request-bound offer creation without a client tenant id", () => {
     const requestId = "82111111-1111-4111-8111-111111111120";
     const idempotencyKey = "83111111-1111-4111-8111-111111111120";

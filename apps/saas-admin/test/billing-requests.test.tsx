@@ -75,6 +75,7 @@ describe("platform billing request operations", () => {
         if (url.includes("/api/platform/billing/requests?")) {
           return jsonResponse(200, {
             items: [{ ...request, allowedTransitions: ["offer_prepared"], latestEvent: event }],
+            truncated: false,
           });
         }
         throw new Error(`Unexpected request: ${url}`);
@@ -99,7 +100,7 @@ describe("platform billing request operations", () => {
         const url = String(input);
         if (url.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
         if (url.endsWith("/api/platform/billing/requests")) {
-          return jsonResponse(200, { items: [] });
+          return jsonResponse(200, { items: [], truncated: false });
         }
         throw new Error(`Unexpected request: ${url}`);
       }),
@@ -110,6 +111,31 @@ describe("platform billing request operations", () => {
     expect(await screen.findByRole("heading", { name: "Billing requests" })).toBeDefined();
     expect(screen.getByRole("form", { name: "Request filters" })).toBeDefined();
   });
+
+  it.each([
+    ["ru", "Показаны 100 последних заявок. Уточните фильтры по тенанту, статусу или типу."],
+    ["en", "Showing the latest 100 requests. Narrow the tenant, status, or type filters."],
+  ] as const)(
+    "warns in %s when the authoritative registry is truncated",
+    async (language, copy) => {
+      await i18n.changeLanguage(language);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+          if (url.endsWith("/api/platform/billing/requests")) {
+            return jsonResponse(200, { items: [], truncated: true });
+          }
+          throw new Error(`Unexpected request: ${url}`);
+        }),
+      );
+
+      renderSaasApp({ initialEntry: "/billing-requests" });
+
+      expect((await screen.findByRole("alert")).textContent).toContain(copy);
+    },
+  );
 
   it("uses authoritative offer actionability and posts a locked idempotent comment", async () => {
     const calls: Array<{ path: string; method: string; body?: unknown }> = [];
@@ -203,7 +229,7 @@ describe("platform billing request operations", () => {
           return jsonResponse(201, { ...event, kind: "platform_comment", message: "Exact" });
         }
         if (url.endsWith("/api/platform/billing/requests")) {
-          return jsonResponse(200, { items: [] });
+          return jsonResponse(200, { items: [], truncated: false });
         }
         throw new Error(`Unexpected request: ${url}`);
       }),

@@ -1,8 +1,8 @@
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { jsonResponse, PLATFORM_ADMIN_ME, renderSaasApp } from "./render.js";
+import { jsonResponse, PLATFORM_ADMIN_ME, renderSaasApp, SUPPORT_ME } from "./render.js";
 
 const TENANT_ID = "21111111-1111-4111-8111-111111111121";
 const REQUEST_ID = "11111111-1111-4111-8111-111111111121";
@@ -197,6 +197,76 @@ describe("platform billing act issue", () => {
       expect(randomUuid).toHaveBeenCalledTimes(uuidCount);
     },
   );
+
+  it("preserves one created act through principal downgrade, guarded navigation, and restoration", async () => {
+    let principal: typeof PLATFORM_ADMIN_ME | typeof SUPPORT_ME = PLATFORM_ADMIN_ME;
+    let createCount = 0;
+    let issueCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, principal);
+        if (url.endsWith("/api/platform/billing/acts") && method === "POST") {
+          createCount += 1;
+          return jsonResponse(201, act("draft", null));
+        }
+        if (url.endsWith(`/api/platform/billing/acts/${ACT_ID}/issue`) && method === "POST") {
+          issueCount += 1;
+          if (issueCount === 1) {
+            principal = SUPPORT_ME;
+            return jsonResponse(403, { code: "forbidden" });
+          }
+          return jsonResponse(201, act("issued", readyDocument()));
+        }
+        if (url.endsWith(`/api/platform/billing/requests/${REQUEST_ID}`) && method === "GET") {
+          return jsonResponse(404, { code: "not_found" });
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      }),
+    );
+    const randomUuid = vi.spyOn(crypto, "randomUUID");
+    const user = userEvent.setup();
+    const rendered = renderSaasApp({
+      initialEntry: `/billing-acts/new?tenantId=${TENANT_ID}&requestId=${REQUEST_ID}`,
+    });
+
+    await fillActForm(user);
+    await user.click(screen.getByRole("button", { name: "Выпустить акт" }));
+
+    expect(await screen.findByRole("heading", { name: "Выпуск акта недоступен" })).toBeDefined();
+    expect(screen.getByText(ACT_ID)).toBeDefined();
+    expect(screen.getByText("ACT-42")).toBeDefined();
+    expect(screen.getByText("Черновик акта сохранён")).toBeDefined();
+    expect(screen.queryByRole("button", { name: /выпуск|Сверить|Продолжить/i })).toBeNull();
+    const uuidCount = randomUuid.mock.calls.length;
+
+    await user.click(screen.getByRole("link", { name: "Вернуться к заявке" }));
+    expect(
+      within(screen.getByRole("alertdialog")).getByText("Есть несохранённые изменения"),
+    ).toBeDefined();
+    await user.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Продолжить редактирование",
+      }),
+    );
+    const unload = new Event("beforeunload", { cancelable: true });
+    fireEvent(window, unload);
+    expect(unload.defaultPrevented).toBe(true);
+
+    principal = PLATFORM_ADMIN_ME;
+    await rendered.queryClient.invalidateQueries({ queryKey: ["platform", "me"] });
+    await user.click(await screen.findByRole("button", { name: "Продолжить выпуск черновика" }));
+
+    expect(await screen.findByText("Акт выпущен")).toBeDefined();
+    expect(createCount).toBe(1);
+    expect(issueCount).toBe(2);
+    expect(randomUuid).toHaveBeenCalledTimes(uuidCount);
+    await user.click(screen.getByRole("link", { name: "Вернуться к заявке" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(await screen.findByRole("heading", { name: "Заявки по биллингу" })).toBeDefined();
+  });
 
   it("reconciles a lost issue response to issued without retaining the stale failure", async () => {
     vi.stubGlobal(

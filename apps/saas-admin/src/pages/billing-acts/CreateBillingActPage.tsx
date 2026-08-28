@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
 import { Alert, Button, Input, SectionHeader } from "@markiro/ui";
@@ -7,6 +7,7 @@ import { platformCommercialContracts, type BillingActCreateDto } from "@markiro/
 
 import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
+import { useNavigationGuard } from "../../layout/NavigationGuard.js";
 import { createBillingAct, getBillingAct, issueBillingAct } from "./api.js";
 
 type Progress = "idle" | "creating" | "uploading" | "draft" | "issued";
@@ -19,20 +20,11 @@ interface IssueAttempt {
 }
 
 export function CreateBillingActPage() {
-  const { t } = useTranslation();
   const principal = usePlatformPrincipal();
-  if (!principal.capabilities.includes("billing.write")) {
-    return (
-      <section className="catalog-page">
-        <h1>{t("billingActs.forbiddenTitle")}</h1>
-        <Alert tone="error">{t("billingActs.forbiddenBody")}</Alert>
-      </section>
-    );
-  }
-  return <BillingActForm />;
+  return <BillingActForm writable={principal.capabilities.includes("billing.write")} />;
 }
 
-function BillingActForm() {
+function BillingActForm({ writable }: { writable: boolean }) {
   const { t } = useTranslation();
   const [search] = useSearchParams();
   const client = useQueryClient();
@@ -43,12 +35,23 @@ function BillingActForm() {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress>("idle");
   const [forbidden, setForbidden] = useState(false);
+  const observedRevocation = useRef(false);
   const attemptRef = useRef<IssueAttempt | null>(null);
   const [attempt, setAttempt] = useState<IssueAttempt | null>(null);
   const [tenantId, setTenantId] = useState(search.get("tenantId") ?? "");
   const [requestId, setRequestId] = useState(search.get("requestId") ?? "");
   const [invoiceId, setInvoiceId] = useState(search.get("invoiceId") ?? "");
   const [orderedServiceId, setOrderedServiceId] = useState(search.get("orderedServiceId") ?? "");
+  useEffect(() => {
+    if (!writable) {
+      observedRevocation.current = true;
+      return;
+    }
+    if (observedRevocation.current) {
+      observedRevocation.current = false;
+      setForbidden(false);
+    }
+  }, [writable]);
   const invalidateActFamilies = async (current: IssueAttempt) => {
     await Promise.all([
       client.invalidateQueries({ queryKey: ["platform", "billing", "acts"] }),
@@ -110,8 +113,14 @@ function BillingActForm() {
     onError: async (error) => {
       const retained = attemptRef.current;
       if (retained && isForbidden(error)) {
-        setAttempt(retained);
-        if (retained.actId) setProgress("draft");
+        if (retained.actId) {
+          setAttempt(retained);
+          setProgress("draft");
+        } else {
+          attemptRef.current = null;
+          setAttempt(null);
+          setProgress("idle");
+        }
         await latchForbidden(retained);
         return;
       }
@@ -217,15 +226,38 @@ function BillingActForm() {
     issue.mutate(attempt);
   };
   const frozen = attempt !== null;
-  if (forbidden) {
+  useNavigationGuard(frozen, issue.isPending || reconcile.isPending);
+  if (forbidden || !writable) {
     return (
       <section className="catalog-page">
-        <h1>{t("billingActs.forbiddenTitle")}</h1>
+        <SectionHeader
+          eyebrow="COMMERCE / ACTS / READ ONLY"
+          title={t("billingActs.forbiddenTitle")}
+          description={t("billingActs.forbiddenBody")}
+          actionsLabel={t("billingActs.actions")}
+          actions={
+            <Link
+              to={optionalUuid(requestId) ? `/billing-requests/${requestId}` : "/billing-requests"}
+            >
+              {t("billingActs.back")}
+            </Link>
+          }
+        />
         <Alert tone="error">{t("billingActs.forbiddenBody")}</Alert>
         {attempt?.actId ? (
-          <p>
-            {t("billingActs.forbiddenDraft")} <code>{attempt.actId}</code>
-          </p>
+          <div className="billing-act-recovery" aria-label={t("billingActs.recovery.title")}>
+            <Alert tone="info">{t("billingActs.progress.draftSaved")}</Alert>
+            <dl>
+              <dt>{t("billingActs.fields.number")}</dt>
+              <dd>{attempt.create.number}</dd>
+              <dt>{t("billingActs.fields.actId")}</dt>
+              <dd>
+                <code>{attempt.actId}</code>
+              </dd>
+              <dt>{t("billingActs.recovery.status")}</dt>
+              <dd>{t("billingActs.recovery.draft")}</dd>
+            </dl>
+          </div>
         ) : null}
       </section>
     );
