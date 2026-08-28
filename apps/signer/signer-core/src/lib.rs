@@ -7,6 +7,9 @@ pub mod cloud;
 pub mod signer;
 #[cfg(windows)]
 pub mod signer_capi;
+pub mod storage;
+#[cfg(windows)]
+pub mod storage_dpapi;
 pub mod trueapi;
 
 use thiserror::Error;
