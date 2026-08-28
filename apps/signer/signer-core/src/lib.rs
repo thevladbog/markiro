@@ -3,6 +3,7 @@
 //! the runtime loop can be exercised on any platform.
 
 pub mod contracts;
+pub mod cloud;
 
 use thiserror::Error;
 
