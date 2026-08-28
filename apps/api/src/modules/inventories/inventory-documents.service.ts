@@ -60,13 +60,13 @@ export class InventoryDocumentsService {
       if (replay.shouldEnqueue) await this.enqueueOrFail(replay.row, actorUserId);
       return this.getById(tenantId, replay.row.id);
     }
-    for (const selected of selectedFormats) {
+    const resolvedGenerators = selectedFormats.map((selected) => {
       try {
-        this.generators.resolveForSelection(selected.id, selected.version);
+        return this.generators.resolveForSelection(selected.id, selected.version);
       } catch (error) {
         throw formatSelectionError(error);
       }
-    }
+    });
 
     let row: InventoryDocumentRunRow;
     let shouldEnqueue = true;
@@ -98,6 +98,12 @@ export class InventoryDocumentsService {
           .where(eq(schema.organization.id, tenantId))
           .limit(1);
         if (!organization) throw new NotFoundException();
+        const needsInn = resolvedGenerators.some(
+          (generator) => generator.descriptor.requiresOrganizationInn === true,
+        );
+        if (needsInn && !organization.inn?.trim()) {
+          throw new ConflictException({ code: "ORGANIZATION_INN_REQUIRED" });
+        }
         const [created] = await tx
           .insert(schema.inventoryDocumentRuns)
           .values({

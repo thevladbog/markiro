@@ -2118,6 +2118,44 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
     }
   });
 
+  it("rejects creating a run needing an organization INN when the org has none, but still allows tabular-only runs", async () => {
+    registry = productionInventoryDocumentGeneratorRegistry;
+    try {
+      const owner = await seedInventory();
+      await db
+        .update(schema.orgProfiles)
+        .set({ inn: null })
+        .where(eq(schema.orgProfiles.tenantId, owner.tenantId));
+
+      await owner.agent
+        .post(`/inventories/${owner.inventoryId}/document-runs`)
+        .send({
+          selectedFormats: [
+            { id: "inventory_xml_gismt_aggregation", version: 2 },
+            { id: "inventory_csv_current_stock", version: 1 },
+          ],
+          idempotencyKey: randomUUID(),
+        })
+        .expect(409, { code: "ORGANIZATION_INN_REQUIRED" });
+      const rejectedRuns = await db
+        .select({ id: schema.inventoryDocumentRuns.id })
+        .from(schema.inventoryDocumentRuns)
+        .where(eq(schema.inventoryDocumentRuns.inventoryId, owner.inventoryId));
+      expect(rejectedRuns).toHaveLength(0);
+
+      const tabularOnly = await owner.agent
+        .post(`/inventories/${owner.inventoryId}/document-runs`)
+        .send({
+          selectedFormats: [{ id: "inventory_csv_current_stock", version: 1 }],
+          idempotencyKey: randomUUID(),
+        })
+        .expect(201);
+      expect(tabularOnly.body.status).toBe("queued");
+    } finally {
+      registry = new InventoryDocumentGeneratorRegistry(syntheticGenerators);
+    }
+  });
+
   it("runs one inventory continuously through preparation, two-station work, correction, all current formats, frozen aggregation v1, and completion", async () => {
     registry = productionInventoryDocumentGeneratorRegistry;
     try {
