@@ -12,7 +12,7 @@ import type { MailJobsService } from "../src/modules/mail/mail-jobs.service";
 import type { MailRetentionService } from "../src/modules/mail/mail-retention.service";
 import type { ShiftExportRunnerService } from "../src/modules/shift-exports/shift-export-runner.service";
 import type { InventoryDocumentRunnerService } from "../src/modules/inventories/inventory-document-runner.service";
-import type { SignerSchedulerService } from "../src/modules/signer-agents/signer-scheduler.service";
+import type { SignerScheduler } from "../src/modules/signer-agents/signer-scheduler.service";
 import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
 
 const pgBossMock = vi.hoisted(() => ({
@@ -122,7 +122,7 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
   } as unknown as InventoryDocumentRunnerService;
   const signerScheduler = {
     run: vi.fn(async () => undefined),
-  } as unknown as SignerSchedulerService;
+  } satisfies SignerScheduler;
   return {
     service: new PgBossService(
       db,

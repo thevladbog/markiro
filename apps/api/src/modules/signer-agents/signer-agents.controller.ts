@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Post,
   Req,
   UseGuards,
@@ -72,10 +73,13 @@ export class SignerAgentsController {
   @ApiOperation({ summary: "Revoke a signer agent" })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
   @ApiResponse({ status: 204, description: "The signer agent was revoked." })
-  @ApiHttpErrors(401, 403, 404)
+  @ApiHttpErrors(400, 401, 403, 404)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE, CABINET_CAPABILITY.CREDENTIALS_MANAGE)
-  async revoke(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
+  async revoke(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ParseUUIDPipe()) id: string,
+  ): Promise<void> {
     try {
       await this.service.revoke(req.tenantId!, id);
     } catch (error) {

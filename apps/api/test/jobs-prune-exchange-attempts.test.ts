@@ -12,7 +12,7 @@ import type { MailRetentionService } from "../src/modules/mail/mail-retention.se
 import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
 import type { ShiftExportRunnerService } from "../src/modules/shift-exports/shift-export-runner.service";
 import type { InventoryDocumentRunnerService } from "../src/modules/inventories/inventory-document-runner.service";
-import type { SignerSchedulerService } from "../src/modules/signer-agents/signer-scheduler.service";
+import type { SignerScheduler } from "../src/modules/signer-agents/signer-scheduler.service";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -54,7 +54,7 @@ describe.skipIf(!ready)("PgBossService: prune exchange_attempts", () => {
       {} as SubscriptionStatusJob,
       shiftExportRunner,
       {} as InventoryDocumentRunnerService,
-      {} as SignerSchedulerService,
+      { run: async () => undefined } satisfies SignerScheduler,
     );
   });
 

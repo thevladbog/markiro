@@ -13,8 +13,18 @@ import {
 } from "./chz-constants";
 import { ChzCryptoService } from "./chz-crypto.service";
 
+/**
+ * Narrow contract PgBossService depends on for its cron-driven `run()` call.
+ * Keeping this separate from the concrete class means a rename of `run()`
+ * fails the callers' typecheck instead of silently passing through an
+ * `as SignerSchedulerService` cast in tests.
+ */
+export interface SignerScheduler {
+  run(now?: Date): Promise<void>;
+}
+
 @Injectable()
-export class SignerSchedulerService {
+export class SignerSchedulerService implements SignerScheduler {
   private readonly logger = new Logger(SignerSchedulerService.name);
 
   constructor(

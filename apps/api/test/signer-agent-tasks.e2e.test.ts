@@ -56,6 +56,10 @@ describe.skipIf(!ready)("signer agent task queue", () => {
     return { agentId: pair.body.agentId, secret: pair.body.agentSecret };
   }
 
+  // `chz_signer_tasks_open_uq` allows at most one open (pending/claimed) task
+  // per tenant+type, so every `it` below must terminalize (complete/fail/
+  // expire) the task it creates before the next `insertTask()` call --
+  // otherwise the insert races the partial unique index and fails.
   async function insertTask(): Promise<string> {
     const [row] = await db
       .insert(schema.chzSignerTasks)
@@ -148,5 +152,62 @@ describe.skipIf(!ready)("signer agent task queue", () => {
         certThumbprint: "CD",
       })
       .expect(404);
+
+    // The previous assertion left `taskId` still `claimed` by a1 -- close it
+    // out before the next `it` seeds its own task (see the ordering-
+    // constraint comment on `insertTask`).
+    await request(app!.getHttpServer())
+      .post(`/signer-agent/tasks/${taskId}/complete`)
+      .set("x-signer-token", a1.secret)
+      .send({
+        token: "x",
+        expiresAt: new Date(Date.now() + 1000).toISOString(),
+        certThumbprint: "CD",
+      })
+      .expect(204);
+  });
+
+  it("does not let an agent paired to another tenant complete or fail a task", async () => {
+    const taskId = await insertTask();
+
+    const otherSession = request.agent(app!.getHttpServer());
+    await signUpAndActivate(otherSession);
+    const { body: issuedOther } = await otherSession
+      .post("/signer-agents/pairing-code")
+      .expect(201);
+    const pairOther = await request(app!.getHttpServer())
+      .post("/signer-agent/pair")
+      .send({ pairingCode: issuedOther.code, hostname: "PC-OTHER-TENANT", appVersion: "0.1.0" })
+      .expect(201);
+    const otherSecret = pairOther.body.agentSecret as string;
+
+    await request(app!.getHttpServer())
+      .post(`/signer-agent/tasks/${taskId}/complete`)
+      .set("x-signer-token", otherSecret)
+      .send({
+        token: "x",
+        expiresAt: new Date(Date.now() + 1000).toISOString(),
+        certThumbprint: "CD",
+      })
+      .expect(404);
+
+    await request(app!.getHttpServer())
+      .post(`/signer-agent/tasks/${taskId}/fail`)
+      .set("x-signer-token", otherSecret)
+      .send({ errorCode: "CRYPTO_PIN_REQUIRED", message: "not this agent's task" })
+      .expect(404);
+
+    // The task belongs to tenant A and was never claimed by tenant B's
+    // agent, so it is still `pending` here -- terminalize it so it doesn't
+    // linger as an open task for the next `it`.
+    const [row] = await db
+      .select({ status: schema.chzSignerTasks.status })
+      .from(schema.chzSignerTasks)
+      .where(eq(schema.chzSignerTasks.id, taskId));
+    expect(row!.status).toBe("pending");
+    await db
+      .update(schema.chzSignerTasks)
+      .set({ status: "expired" })
+      .where(eq(schema.chzSignerTasks.id, taskId));
   });
 });

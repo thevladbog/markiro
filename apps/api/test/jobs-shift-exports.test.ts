@@ -12,7 +12,7 @@ import type { MailJobsService } from "../src/modules/mail/mail-jobs.service";
 import type { MailRetentionService } from "../src/modules/mail/mail-retention.service";
 import type { ShiftExportRunnerService } from "../src/modules/shift-exports/shift-export-runner.service";
 import type { InventoryDocumentRunnerService } from "../src/modules/inventories/inventory-document-runner.service";
-import type { SignerSchedulerService } from "../src/modules/signer-agents/signer-scheduler.service";
+import type { SignerScheduler } from "../src/modules/signer-agents/signer-scheduler.service";
 import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
 
 interface ShiftExportJobData {
@@ -154,7 +154,7 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
       { run: vi.fn(async () => undefined) } as unknown as SubscriptionStatusJob,
       runner,
       inventoryRunner,
-      { run: vi.fn(async () => undefined) } as unknown as SignerSchedulerService,
+      { run: vi.fn(async () => undefined) } satisfies SignerScheduler,
     ),
     inventoryRunner,
   };

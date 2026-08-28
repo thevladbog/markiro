@@ -28,6 +28,16 @@ import type {
 
 const MINT_ATTEMPTS = 5;
 
+const AGENT_STATUSES = new Set<string>(schema.CHZ_SIGNER_AGENT_STATUSES);
+
+/** Narrows a raw `chz_signer_agents.status` DB value, throwing on corruption. */
+function toAgentStatus(status: string): schema.ChzSignerAgentStatus {
+  if (!AGENT_STATUSES.has(status)) {
+    throw new Error(`Unexpected chz_signer_agents.status value: ${status}`);
+  }
+  return status as schema.ChzSignerAgentStatus;
+}
+
 class PairingCodeHashCollisionError extends Error {}
 
 @Injectable()
@@ -55,7 +65,7 @@ export class SignerAgentsService {
         id: a.id,
         name: a.name,
         appVersion: a.appVersion,
-        status: a.status as "active" | "revoked",
+        status: toAgentStatus(a.status),
         certThumbprint: a.certThumbprint,
         certSubject: a.certSubject,
         certInn: a.certInn,

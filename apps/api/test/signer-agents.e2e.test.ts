@@ -84,4 +84,24 @@ describe.skipIf(!ready)("signer agents pairing", () => {
     );
     expect(revoked.status).toBe("revoked");
   });
+
+  it("does not let one tenant revoke another tenant's agent", async () => {
+    const { body: issued } = await agent.post("/signer-agents/pairing-code").expect(201);
+    const pair = await request(app!.getHttpServer())
+      .post("/signer-agent/pair")
+      .send({ pairingCode: issued.code, hostname: "PC-3", appVersion: "0.1.0" })
+      .expect(201);
+
+    const otherAgent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(otherAgent);
+
+    await otherAgent.post(`/signer-agents/${pair.body.agentId}/revoke`).expect(404);
+
+    // The agent from tenant A must remain untouched by tenant B's denied attempt.
+    const overview = await agent.get("/signer-agents").expect(200);
+    const stillActive = overview.body.agents.find(
+      (a: { id: string; status: string }) => a.id === pair.body.agentId,
+    );
+    expect(stillActive.status).toBe("active");
+  });
 });

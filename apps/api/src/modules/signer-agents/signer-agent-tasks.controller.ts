@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   Req,
@@ -69,10 +70,10 @@ export class SignerAgentTasksController {
   @ApiZodBody(chzSignerTaskCompleteSchema)
   @ApiResponse({ status: 204, description: "The task was recorded as completed." })
   @ApiZodValidationError()
-  @ApiHttpErrors(401, 404)
+  @ApiHttpErrors(401, 404, 503)
   async complete(
     @Req() req: RequestWithSignerAgent,
-    @Param("id") id: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
     @Body(new ZodValidationPipe(chzSignerTaskCompleteSchema)) body: ChzSignerTaskComplete,
   ): Promise<void> {
     await this.tasks.complete(req.tenantId!, req.signerAgentId!, id, body);
@@ -88,7 +89,7 @@ export class SignerAgentTasksController {
   @ApiHttpErrors(401, 404)
   async fail(
     @Req() req: RequestWithSignerAgent,
-    @Param("id") id: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
     @Body(new ZodValidationPipe(chzSignerTaskFailSchema)) body: ChzSignerTaskFail,
   ): Promise<void> {
     await this.tasks.fail(req.tenantId!, req.signerAgentId!, id, body);

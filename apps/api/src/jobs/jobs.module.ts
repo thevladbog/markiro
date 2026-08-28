@@ -24,7 +24,10 @@ import { MailModule } from "../modules/mail/mail.module";
 import { MailRetentionService } from "../modules/mail/mail-retention.service";
 import { ShiftExportRunnerService } from "../modules/shift-exports/shift-export-runner.service";
 import { ShiftExportSourceService } from "../modules/shift-exports/shift-export-source.service";
-import { SignerSchedulerService } from "../modules/signer-agents/signer-scheduler.service";
+import {
+  SignerSchedulerService,
+  type SignerScheduler,
+} from "../modules/signer-agents/signer-scheduler.service";
 import { ChzCryptoService } from "../modules/signer-agents/chz-crypto.service";
 import {
   INVENTORY_DOCUMENT_GENERATOR_REGISTRY,
@@ -160,7 +163,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     private readonly subscriptionStatus: SubscriptionStatusJob,
     private readonly shiftExportRunner: ShiftExportRunnerService,
     private readonly inventoryDocumentRunner: InventoryDocumentRunnerService,
-    private readonly signerScheduler: SignerSchedulerService,
+    @Inject(SignerSchedulerService) private readonly signerScheduler: SignerScheduler,
   ) {}
 
   async onModuleInit(): Promise<void> {

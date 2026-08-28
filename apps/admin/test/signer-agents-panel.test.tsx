@@ -9,24 +9,17 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import { SignerAgentsPanel } from "../src/pages/integrations/SignerAgentsPanel.js";
 import type { SignerAgent, SignerTokenStatus } from "../src/pages/integrations/api.js";
+import { jsonResponse } from "./helpers/http.js";
 
 // Общего рендер-хелпера в этом репозитории нет -- каждый админ-тест пишет
-// свой render*/стаб fetch заново (см. `apps/admin/test/integrations-api-keys.test.tsx`,
-// которому этот файл следует почти дословно).
+// свой render* заново (см. `apps/admin/test/integrations-api-keys.test.tsx`,
+// которому этот файл следует почти дословно), но fetch-стаб строит настоящий
+// Response через общий helpers/http.js (см. employees-routing.test.tsx,
+// kiosks-routing.test.tsx).
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-
-/** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
-function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => body,
-    text: async () => (body === undefined ? "" : JSON.stringify(body)),
-  } as Response;
-}
 
 function newQueryClient() {
   return new QueryClient({

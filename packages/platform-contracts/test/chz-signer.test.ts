@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   chzSignerPairRequestSchema,
@@ -10,7 +9,7 @@ import {
 } from "../src/chz-signer.js";
 
 const fixture = (name: string): unknown =>
-  JSON.parse(readFileSync(join(__dirname, "..", "fixtures", "chz-signer", name), "utf8"));
+  JSON.parse(readFileSync(new URL(`../fixtures/chz-signer/${name}`, import.meta.url), "utf8"));
 
 describe("chz-signer contracts", () => {
   it("accept the shared fixtures (Rust signer-core parses the same files)", () => {

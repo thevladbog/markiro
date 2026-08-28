@@ -24,7 +24,7 @@ react-i18next (admin), vitest + supertest.
 ## Global Constraints
 
 - Monorepo: pnpm + turbo. API tests: `pnpm --filter @markiro/api exec vitest run test/<file>`. DB: `pnpm --filter @markiro/db ...`.
-- Migration flow (AGENTS.md): `set -a; source .env; set +a` → `db:generate` → `build` → `test` → `db:migrate`. Never edit an applied migration. Next migration number: **0086** (last applied: `0085_yielding_warbound`).
+- Migration flow (AGENTS.md): `set -a; source .env; set +a` → `db:generate` → `build` → `test` → `db:migrate`. Never edit an applied migration. Next migration number was **0086** at plan-writing time (last applied: `0085_yielding_warbound`); `main` landed its own `0086`/`0087` in the meantime, so this plan actually shipped as `0088_chz_signer_agent` (+ `0089_chz_api_tokens_agent_fk`, added in review follow-up for the `chz_api_tokens.agent_id` FK).
 - New schema files must be added to BOTH `packages/db/src/schema.ts` (barrel) and `packages/db/drizzle.config.ts` (explicit whitelist).
 - Every new HTTP endpoint must carry OpenAPI decorators (`@ApiTags`, `ApiZodBody`/`ApiZodResponse`/explicit response schema, auth decorator) — `apps/api/test/openapi-coverage.test.ts` is a hard gate. Helpers live in `apps/api/src/lib/openapi.ts`.
 - API e2e tests need the dev Postgres from `docker-compose.dev.yml` and env (`DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`); gate with `describe.skipIf(!ready)` like `apps/api/test/api-keys.e2e.test.ts:15-17`. `fileParallelism: false` is intentional — don't change it.

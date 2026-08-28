@@ -6,6 +6,7 @@ import type { INestApplication } from "@nestjs/common";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { schema, type Db } from "@markiro/db";
+import { chzTrueApiAuthPayloadSchema } from "@markiro/platform-contracts";
 import { AppModule } from "../src/app.module";
 import { loadEnv } from "../src/env";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -52,8 +53,22 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
     await app?.close();
   });
 
+  /** Guards the `beforeAll`-populated app instance instead of `app!`. */
+  function requireApp(): INestApplication {
+    if (!app) throw new Error("app was not initialized");
+    return app;
+  }
+
+  /** Asserts an array has exactly one element and returns it, sidestepping
+   * `noUncheckedIndexedAccess` without a non-null assertion. */
+  function firstRow<T>(rows: T[], message: string): T {
+    const [row] = rows;
+    if (!row) throw new Error(message);
+    return row;
+  }
+
   async function freshTenant(): Promise<string> {
-    return signUpAndActivate(request.agent(app!.getHttpServer()));
+    return signUpAndActivate(request.agent(requireApp().getHttpServer()));
   }
 
   async function insertAgent(tenantId: string): Promise<void> {
@@ -94,6 +109,22 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
       );
   }
 
+  /** Asserts exactly one pending/claimed task exists for the tenant and returns it. */
+  async function singlePendingTask(tenantId: string) {
+    const tasks = await pendingTasks(tenantId);
+    expect(tasks).toHaveLength(1);
+    return firstRow(tasks, `expected exactly one pending task for tenant ${tenantId}`);
+  }
+
+  /** Fetches a task row by id, asserting it still exists (row was not pruned/missing). */
+  async function taskRow(id: string) {
+    const rows = await db
+      .select()
+      .from(schema.chzSignerTasks)
+      .where(eq(schema.chzSignerTasks.id, id));
+    return firstRow(rows, `expected task ${id} to exist`);
+  }
+
   it("does nothing for tenants without active agents", async () => {
     const tenantId = await freshTenant();
     await svc.run(new Date());
@@ -104,9 +135,8 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
     const tenantId = await freshTenant();
     await insertAgent(tenantId);
     await svc.run(new Date());
-    const tasks = await pendingTasks(tenantId);
-    expect(tasks).toHaveLength(1);
-    expect((tasks[0]!.payload as { trueApiBaseUrl: string }).trueApiBaseUrl).toBe(
+    const task = await singlePendingTask(tenantId);
+    expect(chzTrueApiAuthPayloadSchema.parse(task.payload).trueApiBaseUrl).toBe(
       "https://markirovka.crpt.ru/api/v3/true-api",
     );
   });
@@ -145,17 +175,16 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
         set: { settings: { environment: "sandbox", mchdInn: "7712345678" } },
       });
     await svc.run(new Date());
-    const [task] = await pendingTasks(tenantId);
-    expect((task!.payload as { trueApiBaseUrl: string }).trueApiBaseUrl).toBe(
-      "https://markirovka.sandbox.crptech.ru/api/v3/true-api",
-    );
-    expect((task!.payload as { inn: string }).inn).toBe("7712345678");
+    const task = await singlePendingTask(tenantId);
+    const payload = chzTrueApiAuthPayloadSchema.parse(task.payload);
+    expect(payload.trueApiBaseUrl).toBe("https://markirovka.sandbox.crptech.ru/api/v3/true-api");
+    expect(payload.inn).toBe("7712345678");
   });
 
   it("expires stale pending and claimed tasks", async () => {
     const tenantId = await freshTenant();
     await insertAgent(tenantId);
-    const [t] = await db
+    const inserted = await db
       .insert(schema.chzSignerTasks)
       .values({
         tenantId,
@@ -164,18 +193,16 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
         createdAt: new Date(Date.now() - 31 * 60_000),
       })
       .returning();
+    const t = firstRow(inserted, "insert did not return the seeded task row");
     await svc.run(new Date());
-    const [row] = await db
-      .select()
-      .from(schema.chzSignerTasks)
-      .where(eq(schema.chzSignerTasks.id, t!.id));
-    expect(row!.status).toBe("expired");
+    const row = await taskRow(t.id);
+    expect(row.status).toBe("expired");
   });
 
   it("keeps a claimed task alive when it was created long ago but claimed recently", async () => {
     const tenantId = await freshTenant();
     await insertAgent(tenantId);
-    const [t] = await db
+    const inserted = await db
       .insert(schema.chzSignerTasks)
       .values({
         tenantId,
@@ -186,18 +213,16 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
         claimedAt: new Date(Date.now() - 2 * 60_000),
       })
       .returning();
+    const t = firstRow(inserted, "insert did not return the seeded task row");
     await svc.run(new Date());
-    const [row] = await db
-      .select()
-      .from(schema.chzSignerTasks)
-      .where(eq(schema.chzSignerTasks.id, t!.id));
-    expect(row!.status).toBe("claimed");
+    const row = await taskRow(t.id);
+    expect(row.status).toBe("claimed");
   });
 
   it("expires a claimed task once claimedAt itself is stale", async () => {
     const tenantId = await freshTenant();
     await insertAgent(tenantId);
-    const [t] = await db
+    const inserted = await db
       .insert(schema.chzSignerTasks)
       .values({
         tenantId,
@@ -208,12 +233,10 @@ describe.skipIf(!ready)("signer token refresh scheduler", () => {
         claimedAt: new Date(Date.now() - 31 * 60_000),
       })
       .returning();
+    const t = firstRow(inserted, "insert did not return the seeded task row");
     await svc.run(new Date());
-    const [row] = await db
-      .select()
-      .from(schema.chzSignerTasks)
-      .where(eq(schema.chzSignerTasks.id, t!.id));
-    expect(row!.status).toBe("expired");
+    const row = await taskRow(t.id);
+    expect(row.status).toBe("expired");
   });
 
   async function errorEvents(tenantId: string) {
