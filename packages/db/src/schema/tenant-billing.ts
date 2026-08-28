@@ -482,16 +482,16 @@ export const tenantBillingRequestLinks = pgTable(
   (table) => [
     unique("tenant_billing_request_links_tenant_id_uq").on(table.tenantId, table.id),
     uniqueIndex("tenant_billing_request_links_offer_uq")
-      .on(table.tenantId, table.requestId, table.offerId)
+      .on(table.tenantId, table.offerId)
       .where(sql`${table.offerId} is not null`),
     uniqueIndex("tenant_billing_request_links_invoice_uq")
-      .on(table.tenantId, table.requestId, table.invoiceId)
+      .on(table.tenantId, table.invoiceId)
       .where(sql`${table.invoiceId} is not null`),
     uniqueIndex("tenant_billing_request_links_payment_uq")
       .on(table.tenantId, table.requestId, table.paymentId)
       .where(sql`${table.paymentId} is not null`),
     uniqueIndex("tenant_billing_request_links_act_uq")
-      .on(table.tenantId, table.requestId, table.actId)
+      .on(table.tenantId, table.actId)
       .where(sql`${table.actId} is not null`),
     uniqueIndex("tenant_billing_request_links_service_uq")
       .on(table.tenantId, table.requestId, table.orderedServiceId)

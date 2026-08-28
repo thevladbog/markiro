@@ -91,7 +91,7 @@ describe("BillingService invoice payment detail", () => {
       select: vi.fn(() => queryFor(rowsFor)),
       update: vi.fn(),
       transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) =>
-        run({ select: vi.fn(() => queryFor(rowsFor)), update: vi.fn() }),
+        run({ execute: vi.fn(), select: vi.fn(() => queryFor(rowsFor)), update: vi.fn() }),
       ),
     }) as Db;
     const service = new BillingService(db, {} as PlatformAuditService);
@@ -192,7 +192,7 @@ describe("BillingService invoice payment detail", () => {
     });
   });
 
-  it("does not let cancellation overwrite a payment that wins the invoice lock", async () => {
+  it("does not let cancellation overwrite a payment that commits before the resource lock", async () => {
     const invoiceId = "31111111-1111-4111-8111-111111111111";
     const tenantId = "21111111-1111-4111-8111-111111111111";
     let status: "issued" | "partially_paid" | "cancelled" = "issued";
@@ -246,6 +246,7 @@ describe("BillingService invoice payment detail", () => {
       transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) => {
         try {
           return await run({
+            execute: vi.fn(),
             select: vi.fn(() => makeSelect(true)),
             update: vi.fn(() => makeUpdate()),
           });
@@ -260,11 +261,12 @@ describe("BillingService invoice payment detail", () => {
     }) as Db;
     const service = new BillingService(db, {} as PlatformAuditService);
 
-    await expect(service.cancel({} as PlatformPrincipal, invoiceId)).resolves.toMatchObject({
-      status: "cancelled",
+    await expect(service.cancel({} as PlatformPrincipal, invoiceId)).rejects.toMatchObject({
+      response: { code: "invoice_paid" },
+      status: 409,
     });
     expect(invoiceLocked).toBe(false);
-    expect(status).toBe("cancelled");
-    expect(paymentCommitted).toBe(false);
+    expect(status).toBe("partially_paid");
+    expect(paymentCommitted).toBe(true);
   });
 });

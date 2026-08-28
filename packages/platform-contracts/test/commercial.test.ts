@@ -196,19 +196,25 @@ describe("platform commercial contracts", () => {
       {
         ...offerBase,
         id: "13111111-1111-4111-8111-111111111111",
+        status: "superseded",
+        ...publishedOfferMetadata,
+      },
+      {
+        ...offerBase,
+        id: "14111111-1111-4111-8111-111111111111",
         status: "paid",
         ...publishedOfferMetadata,
         paidAt: CREATED_AT,
       },
       {
         ...offerBase,
-        id: "14111111-1111-4111-8111-111111111111",
+        id: "15111111-1111-4111-8111-111111111111",
         status: "cancelled",
         ...publishedOfferMetadata,
       },
       {
         ...offerBase,
-        id: "15111111-1111-4111-8111-111111111111",
+        id: "16111111-1111-4111-8111-111111111111",
         status: "expired",
         ...publishedOfferMetadata,
       },
@@ -276,6 +282,11 @@ describe("platform commercial contracts", () => {
       ...publishedOfferMetadata,
       status: "published",
     } as const;
+    const superseded = {
+      ...offerBase,
+      ...publishedOfferMetadata,
+      status: "superseded",
+    } as const;
     const paid = {
       ...offerBase,
       ...publishedOfferMetadata,
@@ -290,7 +301,9 @@ describe("platform commercial contracts", () => {
     const expired = { ...offerBase, ...publishedOfferMetadata, status: "expired" } as const;
     const contract = platformCommercialContracts.offers.list.response;
 
-    expect(contract.parse([draft, published, paid, cancelled, expired])).toHaveLength(5);
+    expect(contract.parse([draft, published, superseded, paid, cancelled, expired])).toHaveLength(
+      6,
+    );
 
     const invalid = [
       ["draft number", { ...draft, number: "KP-2026-000001" }],
@@ -301,6 +314,10 @@ describe("platform commercial contracts", () => {
       ["published publishedAt", { ...published, publishedAt: null }],
       ["published publisher", { ...published, publishedByPlatformUserId: null }],
       ["published paidAt", { ...published, paidAt: CREATED_AT }],
+      ["superseded number", { ...superseded, number: null }],
+      ["superseded publishedAt", { ...superseded, publishedAt: null }],
+      ["superseded publisher", { ...superseded, publishedByPlatformUserId: null }],
+      ["superseded paidAt", { ...superseded, paidAt: CREATED_AT }],
       ["paid number", { ...paid, number: null }],
       ["paid publishedAt", { ...paid, publishedAt: null }],
       ["paid publisher", { ...paid, publishedByPlatformUserId: null }],

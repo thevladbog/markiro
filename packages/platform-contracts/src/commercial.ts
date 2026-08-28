@@ -437,6 +437,9 @@ const draftOfferSchema = offerRecordCommonSchema
 const publishedOfferSchema = offerRecordCommonSchema
   .extend({ status: z.literal("published"), ...publishedOfferFields })
   .strict();
+const supersededOfferSchema = offerRecordCommonSchema
+  .extend({ status: z.literal("superseded"), ...publishedOfferFields })
+  .strict();
 const paidOfferSchema = offerRecordCommonSchema
   .extend({ status: z.literal("paid"), ...paidOfferFields })
   .strict();
@@ -450,6 +453,7 @@ const expiredOfferSchema = offerRecordCommonSchema
 export const offerSchema = z.discriminatedUnion("status", [
   draftOfferSchema,
   publishedOfferSchema,
+  supersededOfferSchema,
   paidOfferSchema,
   cancelledOfferSchema,
   expiredOfferSchema,
@@ -457,7 +461,7 @@ export const offerSchema = z.discriminatedUnion("status", [
 
 export const offerServiceRecordSchema = offerRecordCommonSchema
   .extend({
-    status: z.enum(["draft", "published", "paid", "cancelled", "expired"]),
+    status: z.enum(["draft", "published", "superseded", "paid", "cancelled", "expired"]),
     number: z.string().min(1).nullable(),
     expiresAt: nullableServiceTimestampSchema,
     publishedAt: nullableServiceTimestampSchema,
@@ -551,6 +555,9 @@ const draftOfferDetailSchema = draftOfferSchema
 const publishedOfferDetailSchema = publishedOfferSchema
   .extend({ lines: z.array(offerLineSchema) })
   .strict();
+const supersededOfferDetailSchema = supersededOfferSchema
+  .extend({ lines: z.array(offerLineSchema) })
+  .strict();
 const paidOfferDetailSchema = paidOfferSchema.extend({ lines: z.array(offerLineSchema) }).strict();
 const cancelledOfferDetailSchema = cancelledOfferSchema
   .extend({ lines: z.array(offerLineSchema) })
@@ -562,6 +569,7 @@ const expiredOfferDetailSchema = expiredOfferSchema
 export const offerDetailSchema = z.discriminatedUnion("status", [
   draftOfferDetailSchema,
   publishedOfferDetailSchema,
+  supersededOfferDetailSchema,
   paidOfferDetailSchema,
   cancelledOfferDetailSchema,
   expiredOfferDetailSchema,
@@ -883,6 +891,13 @@ export const billingActUploadMetadataSchema = z
       .int()
       .positive()
       .max(5 * 1024 * 1024),
+  })
+  .strict();
+export const billingActUploadTooLargeErrorSchema = z
+  .object({
+    code: z.literal("billing_act_pdf_too_large"),
+    message: z.literal("Billing act PDF exceeds the 5 MiB limit"),
+    requestId: platformUuidSchema,
   })
   .strict();
 export const billingActDocumentSchema = z.discriminatedUnion("state", [

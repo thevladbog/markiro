@@ -6,10 +6,11 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   platformCommercialContracts,
+  tenantBillingActObjectKey,
   type BillingAct,
   type BillingActCancelDto,
   type BillingActCreateDto,
@@ -18,6 +19,12 @@ import {
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
+import {
+  acquireBillingWorkflowLocks,
+  canonicalBillingResourceId,
+  canonicalBillingUuid,
+  type BillingWorkflowResource,
+} from "../billing-workflow-locks";
 import {
   beginPlatformBillingMutation,
   commitPlatformBillingMutation,
@@ -47,6 +54,7 @@ interface PreparedActIssue {
   objectKey: string;
   byteSize: number;
   sha256: string;
+  needsReconciliation: boolean;
 }
 
 interface CommittedActIssue {
@@ -82,18 +90,13 @@ export class BillingActsService {
 
   async create(actor: PlatformPrincipal, input: BillingActCreateDto): Promise<BillingAct> {
     return this.db.transaction(async (tx) => {
-      const [tenant] = await tx
-        .select({ id: schema.organization.id })
-        .from(schema.organization)
-        .where(eq(schema.organization.id, input.tenantId))
-        .for("share")
-        .limit(1);
-      if (!tenant) throw new NotFoundException({ code: "tenant_not_found" });
       const payload = {
         tenantId: input.tenantId,
-        requestId: input.requestId ?? null,
-        invoiceId: input.invoiceId ?? null,
-        orderedServiceId: input.orderedServiceId ?? null,
+        requestId: input.requestId ? canonicalBillingUuid(input.requestId) : null,
+        invoiceId: input.invoiceId ? canonicalBillingUuid(input.invoiceId) : null,
+        orderedServiceId: input.orderedServiceId
+          ? canonicalBillingUuid(input.orderedServiceId)
+          : null,
         number: input.number.trim(),
         periodStart: input.periodStart,
         periodEnd: input.periodEnd,
@@ -108,9 +111,20 @@ export class BillingActsService {
       });
       if (mutation.kind === "committed") return parseActReplay(mutation.result);
       if (mutation.kind === "pending") mutationInProgress();
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`billing-act-number:${payload.number}`}, 0))`,
-      );
+      const resources: BillingWorkflowResource[] = [{ kind: "act_number", id: payload.number }];
+      if (payload.requestId) resources.push({ kind: "request", id: payload.requestId });
+      if (payload.invoiceId) resources.push({ kind: "invoice", id: payload.invoiceId });
+      if (payload.orderedServiceId) {
+        resources.push({ kind: "ordered_service", id: payload.orderedServiceId });
+      }
+      await acquireBillingWorkflowLocks(tx, input.tenantId, resources);
+      const [tenant] = await tx
+        .select({ id: schema.organization.id })
+        .from(schema.organization)
+        .where(eq(schema.organization.id, input.tenantId))
+        .for("share")
+        .limit(1);
+      if (!tenant) throw new NotFoundException({ code: "tenant_not_found" });
       const [numberCollision] = await tx
         .select({ id: schema.billingActs.id })
         .from(schema.billingActs)
@@ -166,10 +180,11 @@ export class BillingActsService {
     file: BillingActPdfUpload,
   ): Promise<BillingAct> {
     validateBillingActPdf(file);
+    const canonicalActId = canonicalBillingUuid(actId);
     const [located] = await this.db
       .select({ tenantId: schema.billingActs.tenantId })
       .from(schema.billingActs)
-      .where(eq(schema.billingActs.id, actId))
+      .where(eq(schema.billingActs.id, canonicalActId))
       .limit(1);
     if (!located) actNotFound();
     const sha256 = createHash("sha256").update(file.buffer).digest("hex");
@@ -177,20 +192,47 @@ export class BillingActsService {
       tenantId: located.tenantId,
       idempotencyKey: input.idempotencyKey,
       operation: "billing.act.issue",
-      targetId: actId,
+      targetId: canonicalActId,
       payload: { contentType: "application/pdf", byteSize: file.buffer.byteLength, sha256 },
       actorPlatformUserId: actor.userId,
     };
-    const prepared = await this.prepareIssue(actor, actId, spec, file.buffer.byteLength, sha256);
+    const prepared = await this.prepareIssue(
+      actor,
+      canonicalActId,
+      spec,
+      file.buffer.byteLength,
+      sha256,
+    );
     if (prepared.kind === "committed") return prepared.result;
 
+    let shouldUpload = true;
+    if (prepared.needsReconciliation) {
+      let verification: "verified" | "missing" | "mismatch";
+      try {
+        verification = await this.storage.verifyObject(
+          prepared.objectKey,
+          prepared.byteSize,
+          prepared.sha256,
+        );
+        if (verification === "mismatch") {
+          await this.storage.deleteConfirmed(prepared.objectKey);
+        }
+      } catch {
+        throw new ConflictException({ code: "act_issue_in_progress" });
+      }
+      await this.markDocumentPending(prepared);
+      shouldUpload = verification !== "verified";
+    }
+
     try {
-      await this.storage.putVerified(
-        prepared.objectKey,
-        file.buffer,
-        "application/pdf",
-        prepared.sha256,
-      );
+      if (shouldUpload) {
+        await this.storage.putVerified(
+          prepared.objectKey,
+          file.buffer,
+          "application/pdf",
+          prepared.sha256,
+        );
+      }
     } catch (error) {
       let recovered = false;
       try {
@@ -238,10 +280,11 @@ export class BillingActsService {
     actId: string,
     input: BillingActCancelDto,
   ): Promise<BillingAct> {
+    const canonicalActId = canonicalBillingUuid(actId);
     const [located] = await this.db
       .select({ tenantId: schema.billingActs.tenantId })
       .from(schema.billingActs)
-      .where(eq(schema.billingActs.id, actId))
+      .where(eq(schema.billingActs.id, canonicalActId))
       .limit(1);
     if (!located) actNotFound();
     return this.db.transaction(async (tx) => {
@@ -249,13 +292,33 @@ export class BillingActsService {
         tenantId: located.tenantId,
         idempotencyKey: input.idempotencyKey,
         operation: "billing.act.cancel",
-        targetId: actId,
-        payload: { actId },
+        targetId: canonicalActId,
+        payload: { actId: canonicalActId },
         actorPlatformUserId: actor.userId,
       });
       if (mutation.kind === "committed") return parseActReplay(mutation.result);
       if (mutation.kind === "pending") mutationInProgress();
-      const act = await lockAct(tx, located.tenantId, actId);
+      const discovered = await discoverActWorkflowResources(tx, located.tenantId, canonicalActId);
+      await acquireBillingWorkflowLocks(tx, located.tenantId, discovered);
+      const act = await lockAct(tx, located.tenantId, canonicalActId);
+      const currentDocuments = await tx
+        .select()
+        .from(schema.billingActDocuments)
+        .where(
+          and(
+            eq(schema.billingActDocuments.tenantId, act.tenantId),
+            eq(schema.billingActDocuments.actId, act.id),
+            eq(schema.billingActDocuments.isCurrent, true),
+          ),
+        )
+        .for("update");
+      if (currentDocuments.length > 1) throw new Error("billing act current document ambiguity");
+      if (
+        currentDocuments[0]?.state === "pending" ||
+        currentDocuments[0]?.state === "cleanup_required"
+      ) {
+        throw new ConflictException({ code: "act_issue_in_progress" });
+      }
       if (act.status === "cancelled") {
         throw new ConflictException({ code: "billing_act_already_cancelled" });
       }
@@ -312,6 +375,8 @@ export class BillingActsService {
       if (mutation.kind === "committed") {
         return { kind: "committed", result: parseActReplay(mutation.result) };
       }
+      const discovered = await discoverActWorkflowResources(tx, spec.tenantId, actId);
+      await acquireBillingWorkflowLocks(tx, spec.tenantId, discovered);
       const act = await lockAct(tx, spec.tenantId, actId);
       const [currentDocument] = await tx
         .select()
@@ -347,9 +412,6 @@ export class BillingActsService {
         ) {
           throw new ConflictException({ code: "idempotency_key_reused" });
         }
-        if (currentDocument.state === "cleanup_required") {
-          throw new ConflictException({ code: "billing_act_upload_cleanup_required" });
-        }
         if (currentDocument.state === "ready") {
           throw new ConflictException({ code: "billing_act_issue_in_progress" });
         }
@@ -367,13 +429,14 @@ export class BillingActsService {
           objectKey: currentDocument.objectKey,
           byteSize,
           sha256,
+          needsReconciliation: currentDocument.state === "cleanup_required",
         };
       }
       if (currentDocument) {
         throw new ConflictException({ code: "billing_act_issue_in_progress" });
       }
       const documentId = randomUUID();
-      const objectKey = billingActObjectKey(act.tenantId, act.id, documentId);
+      const objectKey = tenantBillingActObjectKey(act.tenantId, act.id, documentId);
       const [document] = await tx
         .insert(schema.billingActDocuments)
         .values({
@@ -398,6 +461,7 @@ export class BillingActsService {
         objectKey,
         byteSize,
         sha256,
+        needsReconciliation: false,
       };
     });
   }
@@ -410,6 +474,8 @@ export class BillingActsService {
     return this.db.transaction(async (tx) => {
       const mutation = await beginPlatformBillingMutation(tx, spec);
       if (mutation.kind === "committed") return parseActReplay(mutation.result);
+      const discovered = await discoverActWorkflowResources(tx, prepared.tenantId, prepared.actId);
+      await acquireBillingWorkflowLocks(tx, prepared.tenantId, discovered);
       const act = await lockAct(tx, prepared.tenantId, prepared.actId);
       const [document] = await tx
         .select()
@@ -478,7 +544,7 @@ export class BillingActsService {
           .for("update")
           .limit(1);
         if (!request) throw new ConflictException({ code: "billing_act_request_invalid" });
-        const [existingLink] = await tx
+        const existingLinks = await tx
           .select()
           .from(schema.tenantBillingRequestLinks)
           .where(
@@ -487,8 +553,9 @@ export class BillingActsService {
               eq(schema.tenantBillingRequestLinks.actId, issued.id),
             ),
           )
-          .for("update")
-          .limit(1);
+          .for("update");
+        if (existingLinks.length > 1) throw new Error("billing act request link ambiguity");
+        const existingLink = existingLinks[0];
         if (existingLink && existingLink.requestId !== request.id) {
           throw new ConflictException({ code: "billing_target_already_linked" });
         }
@@ -501,32 +568,34 @@ export class BillingActsService {
               .returning()
           )[0];
         if (!link) throw new Error("billing act request link insert failed");
-        const [event] = await tx
-          .insert(schema.tenantBillingRequestEvents)
-          .values({
-            tenantId: issued.tenantId,
-            requestId: request.id,
-            kind: "act_linked",
-            actorKind: "platform_user",
+        if (!existingLink) {
+          const [event] = await tx
+            .insert(schema.tenantBillingRequestEvents)
+            .values({
+              tenantId: issued.tenantId,
+              requestId: request.id,
+              kind: "act_linked",
+              actorKind: "platform_user",
+              actorPlatformUserId: actor.userId,
+              metadata: { actId: issued.id, documentId: readyDocument.id },
+              idempotencyKey: randomUUID(),
+            })
+            .returning({ id: schema.tenantBillingRequestEvents.id });
+          if (!event) throw new Error("billing act request event insert failed");
+          await this.audit.record(tx, {
             actorPlatformUserId: actor.userId,
-            metadata: { actId: issued.id, documentId: readyDocument.id },
-            idempotencyKey: randomUUID(),
-          })
-          .returning({ id: schema.tenantBillingRequestEvents.id });
-        if (!event) throw new Error("billing act request event insert failed");
-        await this.audit.record(tx, {
-          actorPlatformUserId: actor.userId,
-          actorRole: actor.role,
-          action: "billing.request.act_linked",
-          outcome: "success",
-          tenantId: issued.tenantId,
-          targetType: "tenant_billing_request",
-          targetId: request.id,
-          reason: null,
-          before: { status: request.status },
-          after: { status: request.status, actId: issued.id, linkId: link.id, eventId: event.id },
-          requestId: null,
-        });
+            actorRole: actor.role,
+            action: "billing.request.act_linked",
+            outcome: "success",
+            tenantId: issued.tenantId,
+            targetType: "tenant_billing_request",
+            targetId: request.id,
+            reason: null,
+            before: { status: request.status },
+            after: { status: request.status, actId: issued.id, linkId: link.id, eventId: event.id },
+            requestId: null,
+          });
+        }
       }
       await this.audit.record(tx, {
         actorPlatformUserId: actor.userId,
@@ -594,6 +663,22 @@ export class BillingActsService {
       );
   }
 
+  private async markDocumentPending(prepared: PreparedActIssue) {
+    const [pending] = await this.db
+      .update(schema.billingActDocuments)
+      .set({ state: "pending", readyAt: null, updatedAt: this.now() })
+      .where(
+        and(
+          eq(schema.billingActDocuments.tenantId, prepared.tenantId),
+          eq(schema.billingActDocuments.actId, prepared.actId),
+          eq(schema.billingActDocuments.id, prepared.documentId),
+          eq(schema.billingActDocuments.state, "cleanup_required"),
+        ),
+      )
+      .returning({ id: schema.billingActDocuments.id });
+    if (!pending) throw new ConflictException({ code: "act_issue_in_progress" });
+  }
+
   private async readCommittedMutation(spec: PlatformBillingMutationSpec) {
     const [row] = await this.db
       .select({
@@ -607,13 +692,16 @@ export class BillingActsService {
       .where(
         and(
           eq(schema.platformBillingMutationIdempotency.tenantId, spec.tenantId),
-          eq(schema.platformBillingMutationIdempotency.idempotencyKey, spec.idempotencyKey),
+          eq(
+            schema.platformBillingMutationIdempotency.idempotencyKey,
+            canonicalBillingUuid(spec.idempotencyKey),
+          ),
         ),
       )
       .limit(1);
     return row?.state === "committed" &&
       row.operation === spec.operation &&
-      row.targetId === spec.targetId &&
+      row.targetId === canonicalBillingResourceId(spec.targetId) &&
       row.payloadHash === platformBillingPayloadHash(spec.payload)
       ? parseActReplay(row.result)
       : null;
@@ -745,6 +833,30 @@ async function lockAct(tx: ActReadExecutor, tenantId: string, actId: string) {
   return act;
 }
 
+async function discoverActWorkflowResources(
+  tx: ActReadExecutor,
+  tenantId: string,
+  actId: string,
+): Promise<BillingWorkflowResource[]> {
+  const [act] = await tx
+    .select({
+      requestId: schema.billingActs.requestId,
+      invoiceId: schema.billingActs.invoiceId,
+      orderedServiceId: schema.billingActs.orderedServiceId,
+    })
+    .from(schema.billingActs)
+    .where(and(eq(schema.billingActs.tenantId, tenantId), eq(schema.billingActs.id, actId)))
+    .limit(1);
+  if (!act) actNotFound();
+  const resources: BillingWorkflowResource[] = [{ kind: "act", id: actId }];
+  if (act.requestId) resources.push({ kind: "request", id: act.requestId });
+  if (act.invoiceId) resources.push({ kind: "invoice", id: act.invoiceId });
+  if (act.orderedServiceId) {
+    resources.push({ kind: "ordered_service", id: act.orderedServiceId });
+  }
+  return resources;
+}
+
 function actDocumentSource(
   document: typeof schema.billingActDocuments.$inferSelect,
 ): BillingAct["document"] {
@@ -764,13 +876,6 @@ function actDocumentSource(
   }
   if (document.state === "pending") return { ...common, state: "pending", readyAt: null };
   return { ...common, state: document.state, readyAt: null };
-}
-
-function billingActObjectKey(tenantId: string, actId: string, documentId: string) {
-  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(tenantId)) {
-    throw new Error("Tenant ID cannot be represented in an object key");
-  }
-  return `tenant-billing/${tenantId}/acts/${actId}/${documentId}.pdf`;
 }
 
 function businessDate(at: Date): string {

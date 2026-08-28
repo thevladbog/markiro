@@ -24,7 +24,7 @@ describe("tenant billing platform workflow migration metadata", () => {
       entries: Array<{ idx: number; tag: string }>;
     };
     expect(current.prevId).toBe(previous.id);
-    expect(journal.entries.at(-1)).toMatchObject({
+    expect(journal.entries.find(({ idx }) => idx === 70)).toMatchObject({
       idx: 70,
       tag: "0070_tenant_billing_platform_workflow",
     });
@@ -50,13 +50,19 @@ describe.skipIf(!databaseUrl)("tenant billing platform workflow migration", () =
     await rm(join(migrationsThrough0069, "0070_tenant_billing_platform_workflow.sql"), {
       force: true,
     });
+    await rm(join(migrationsThrough0069, "0071_tenant_billing_target_cardinality.sql"), {
+      force: true,
+    });
     await rm(join(migrationsThrough0069, "meta", "0070_snapshot.json"), { force: true });
+    await rm(join(migrationsThrough0069, "meta", "0071_snapshot.json"), { force: true });
     const journalPath = join(migrationsThrough0069, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
     };
     journal.entries = journal.entries.filter(
-      (entry) => entry.tag !== "0070_tenant_billing_platform_workflow",
+      (entry) =>
+        entry.tag !== "0070_tenant_billing_platform_workflow" &&
+        entry.tag !== "0071_tenant_billing_target_cardinality",
     );
     await writeFile(journalPath, JSON.stringify(journal));
     await migrate(drizzle(pool), { migrationsFolder: migrationsThrough0069 });

@@ -1,4 +1,5 @@
 import {
+  billingActUploadTooLargeErrorSchema,
   platformAuditContracts,
   platformAuthContracts,
   platformCatalogContracts,
@@ -18,6 +19,8 @@ export interface PlatformRouteContract {
   status: PlatformSuccessStatus;
   response: ZodType;
   body?: ZodType;
+  query?: ZodType;
+  errors?: ReadonlyArray<{ status: string; schema: ZodType }>;
   multipart?: true;
   public?: true;
 }
@@ -27,7 +30,7 @@ const route = (
   path: string,
   status: PlatformSuccessStatus,
   response: ZodType,
-  options: Pick<PlatformRouteContract, "body" | "multipart" | "public"> = {},
+  options: Pick<PlatformRouteContract, "body" | "query" | "errors" | "multipart" | "public"> = {},
 ): PlatformRouteContract => ({ method, path, status, response, ...options });
 
 export const CURRENT_SAAS_ROUTES = [
@@ -268,6 +271,7 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/billing/requests",
     "200",
     platformCommercialContracts.billingRequests.list.response,
+    { query: platformCommercialContracts.billingRequests.list.query },
   ),
   route(
     "get",
@@ -301,6 +305,7 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/billing/acts",
     "200",
     platformCommercialContracts.billingActs.list.response,
+    { query: platformCommercialContracts.billingActs.list.query },
   ),
   route(
     "get",
@@ -322,7 +327,11 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/billing/acts/{id}/issue",
     "201",
     platformCommercialContracts.billingActs.issue.response,
-    { body: platformCommercialContracts.billingActs.issue.body, multipart: true },
+    {
+      body: platformCommercialContracts.billingActs.issue.body,
+      multipart: true,
+      errors: [{ status: "413", schema: billingActUploadTooLargeErrorSchema }],
+    },
   ),
   route(
     "post",

@@ -34,7 +34,7 @@ export const tenantInvoiceStatusSchema = z.enum([
   "cancelled",
 ]);
 export const invoicePaymentStatusSchema = z.enum(["issued", "partially_paid", "paid"]);
-export const tenantOfferStatusSchema = z.enum([...schema.OFFER_STATUSES, "superseded"] as const);
+export const tenantOfferStatusSchema = z.enum(schema.OFFER_STATUSES);
 export const tenantDocumentTypeSchema = z.enum(["offer", "act"]);
 export const tenantDocumentStatusSchema = z.enum(["pending", "ready", "failed"]);
 

@@ -8,12 +8,16 @@ import {
   Query,
   Req,
   UploadedFile,
+  UseFilters,
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { ApiBody, ApiConsumes } from "@nestjs/swagger";
 import { memoryStorage } from "multer";
-import { platformCommercialContracts } from "@markiro/platform-contracts";
+import {
+  billingActUploadTooLargeErrorSchema,
+  platformCommercialContracts,
+} from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
 import {
@@ -34,13 +38,17 @@ import {
   type BillingActListQueryDto,
 } from "./dto";
 import { BillingActsService } from "./billing-acts.service";
+import { BillingAttachmentUploadFilter } from "../tenant-billing/billing-attachment-upload.filter";
 
 @Controller("platform/billing/acts")
 export class BillingActsController {
   constructor(private readonly acts: BillingActsService) {}
 
   @Get()
-  @PlatformApiProtectedOk({ response: platformCommercialContracts.billingActs.list.response })
+  @PlatformApiProtectedOk({
+    query: platformCommercialContracts.billingActs.list.query,
+    response: platformCommercialContracts.billingActs.list.response,
+  })
   @RequirePlatformCapabilities("billing.read")
   async list(
     @Req() req: RequestWithPlatformPrincipal,
@@ -88,6 +96,7 @@ export class BillingActsController {
       limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 1, parts: 2 },
     }),
   )
+  @UseFilters(BillingAttachmentUploadFilter)
   @ApiConsumes("multipart/form-data")
   @ApiBody({
     schema: {
@@ -100,7 +109,10 @@ export class BillingActsController {
       },
     },
   })
-  @PlatformApiProtectedCreated({ response: platformCommercialContracts.billingActs.issue.response })
+  @PlatformApiProtectedCreated({
+    response: platformCommercialContracts.billingActs.issue.response,
+    errors: [{ status: 413, schema: billingActUploadTooLargeErrorSchema }],
+  })
   @RequirePlatformCapabilities("billing.write")
   async issue(
     @Req() req: RequestWithPlatformPrincipal,

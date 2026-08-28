@@ -25,6 +25,11 @@ import {
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import type { EntitlementsExecutor } from "../../subscriptions/entitlements.types";
+import {
+  acquireBillingWorkflowLocks,
+  canonicalBillingResourceId,
+  canonicalBillingUuid,
+} from "../billing-workflow-locks";
 import { calculateOfferTotals } from "./offer-totals";
 import { normalizeOfferTerms } from "./offer-terms";
 import type { CreateOfferDto, PaymentDto } from "./dto";
@@ -158,13 +163,39 @@ export class PlatformOffersService {
   }
 
   async publish(actor: PlatformPrincipal, id: string): Promise<OfferServiceDetailSource> {
+    const canonicalOfferId = canonicalBillingUuid(id);
     return this.db.transaction(async (tx) => {
-      const [draft] = await tx
+      const [located] = await tx
+        .select({
+          tenantId: schema.commercialOffers.tenantId,
+          familyId: schema.commercialOffers.familyId,
+        })
+        .from(schema.commercialOffers)
+        .where(eq(schema.commercialOffers.id, canonicalOfferId))
+        .limit(1);
+      if (!located) throw new ConflictException({ code: "offer_not_draft" });
+      await acquireBillingWorkflowLocks(tx, located.tenantId, [
+        { kind: "offer_family", id: located.familyId },
+        { kind: "offer", id: canonicalOfferId },
+      ]);
+      const family = await tx
         .select()
         .from(schema.commercialOffers)
-        .where(and(eq(schema.commercialOffers.id, id), eq(schema.commercialOffers.status, "draft")))
+        .where(
+          and(
+            eq(schema.commercialOffers.tenantId, located.tenantId),
+            eq(schema.commercialOffers.familyId, located.familyId),
+          ),
+        )
+        .orderBy(desc(schema.commercialOffers.revision), desc(schema.commercialOffers.id))
         .for("update");
-      if (!draft) throw new ConflictException({ code: "offer_not_draft" });
+      const draft = family.find((candidate) => candidate.id === canonicalOfferId);
+      if (!draft || draft.status !== "draft") {
+        throw new ConflictException({ code: "offer_not_draft" });
+      }
+      if (family[0]?.id !== draft.id) {
+        throw new ConflictException({ code: "offer_version_stale" });
+      }
       const { seller, buyer, sellerAccount, buyerAccount } = await resolveCommercialBillingDetails(
         tx,
         draft.tenantId,
@@ -183,23 +214,39 @@ export class PlatformOffersService {
       const number = latest
         ? `KP-${new Date().getFullYear()}-${draft.id.slice(0, 8).toUpperCase()}`
         : `KP-${new Date().getFullYear()}-${draft.revision.toString().padStart(6, "0")}`;
+      const now = new Date();
+      await tx
+        .update(schema.commercialOffers)
+        .set({ status: "superseded", updatedAt: now })
+        .where(
+          and(
+            eq(schema.commercialOffers.tenantId, draft.tenantId),
+            eq(schema.commercialOffers.familyId, draft.familyId),
+            eq(schema.commercialOffers.status, "published"),
+          ),
+        );
       const [updated] = await tx
         .update(schema.commercialOffers)
         .set({
           status: "published",
           number,
-          publishedAt: new Date(),
+          publishedAt: now,
           publishedByPlatformUserId: actor.userId,
           sellerBankAccountId: sellerAccount.id,
-          updatedAt: new Date(),
+          updatedAt: now,
         })
-        .where(and(eq(schema.commercialOffers.id, id), eq(schema.commercialOffers.status, "draft")))
+        .where(
+          and(
+            eq(schema.commercialOffers.id, canonicalOfferId),
+            eq(schema.commercialOffers.status, "draft"),
+          ),
+        )
         .returning();
       if (!updated) throw new ConflictException({ code: "offer_not_draft" });
       const lines = await tx
         .select()
         .from(schema.commercialOfferLines)
-        .where(eq(schema.commercialOfferLines.offerId, id))
+        .where(eq(schema.commercialOfferLines.offerId, canonicalOfferId))
         .orderBy(asc(schema.commercialOfferLines.position));
       const terms = normalizeOfferTerms(updated.termsMarkdown);
       await tx.insert(schema.commercialOfferPrintSnapshots).values({
@@ -249,13 +296,14 @@ export class PlatformOffersService {
     id: string,
     input: OfferReviseDto,
   ): Promise<OfferServiceDetailSource> {
+    const canonicalOfferId = canonicalBillingUuid(id);
     const [located] = await this.db
       .select({
         tenantId: schema.commercialOffers.tenantId,
         familyId: schema.commercialOffers.familyId,
       })
       .from(schema.commercialOffers)
-      .where(eq(schema.commercialOffers.id, id))
+      .where(eq(schema.commercialOffers.id, canonicalOfferId))
       .limit(1);
     if (!located) throw new NotFoundException({ code: "offer_not_found" });
     return this.db.transaction(async (tx) => {
@@ -263,8 +311,8 @@ export class PlatformOffersService {
         tenantId: located.tenantId,
         idempotencyKey: input.idempotencyKey,
         operation: "billing.offer.revise",
-        targetId: id,
-        payload: { sourceOfferId: id },
+        targetId: canonicalOfferId,
+        payload: { sourceOfferId: canonicalOfferId },
         actorPlatformUserId: actor.userId,
       });
       if (mutation.kind === "committed") {
@@ -282,9 +330,10 @@ export class PlatformOffersService {
       if (mutation.kind === "pending") {
         throw new ConflictException({ code: "billing_mutation_in_progress" });
       }
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`commercial-offer-family:${located.tenantId}:${located.familyId}`}, 0))`,
-      );
+      await acquireBillingWorkflowLocks(tx, located.tenantId, [
+        { kind: "offer_family", id: located.familyId },
+        { kind: "offer", id: canonicalOfferId },
+      ]);
       const family = await tx
         .select()
         .from(schema.commercialOffers)
@@ -296,14 +345,14 @@ export class PlatformOffersService {
         )
         .orderBy(desc(schema.commercialOffers.revision), desc(schema.commercialOffers.id))
         .for("update");
-      const source = family.find((offer) => offer.id === id);
+      const source = family.find((offer) => offer.id === canonicalOfferId);
       if (!source) throw new NotFoundException({ code: "offer_not_found" });
-      const currentPublished = family.find((offer) => offer.status === "published");
-      if (!currentPublished || source.status !== "published") {
-        throw new ConflictException({ code: "offer_not_published" });
-      }
-      if (currentPublished.id !== source.id) {
+      const currentGeneration = family.find((offer) => offer.status !== "draft");
+      if (!currentGeneration || currentGeneration.id !== source.id) {
         throw new ConflictException({ code: "offer_version_stale" });
+      }
+      if (source.status !== "published") {
+        throw new ConflictException({ code: "offer_not_published" });
       }
       if (family.some((offer) => offer.status === "draft")) {
         throw new ConflictException({ code: "offer_revision_draft_exists" });
@@ -331,7 +380,7 @@ export class PlatformOffersService {
         .values({
           tenantId: source.tenantId,
           familyId: source.familyId,
-          revision: source.revision + 1,
+          revision: Math.max(...family.map((offer) => offer.revision)) + 1,
           previousRevisionId: source.id,
           status: "draft",
           sellerBankAccountId: source.sellerBankAccountId,
@@ -399,16 +448,41 @@ export class PlatformOffersService {
     });
   }
 
-  async cancel(actor: PlatformPrincipal, id: string): Promise<OfferServiceDetailSource> {
-    const [offer] = await this.db
-      .update(schema.commercialOffers)
-      .set({ status: "cancelled", updatedAt: new Date() })
-      .where(
-        and(eq(schema.commercialOffers.id, id), eq(schema.commercialOffers.status, "published")),
-      )
-      .returning();
-    if (!offer) throw new ConflictException({ code: "offer_not_published" });
-    return this.detail(actor, id);
+  async cancel(_actor: PlatformPrincipal, id: string): Promise<OfferServiceDetailSource> {
+    const canonicalOfferId = canonicalBillingUuid(id);
+    return this.db.transaction(async (tx) => {
+      const [located] = await tx
+        .select({
+          tenantId: schema.commercialOffers.tenantId,
+          familyId: schema.commercialOffers.familyId,
+        })
+        .from(schema.commercialOffers)
+        .where(eq(schema.commercialOffers.id, canonicalOfferId))
+        .limit(1);
+      if (!located) throw new ConflictException({ code: "offer_not_published" });
+      await acquireBillingWorkflowLocks(tx, located.tenantId, [
+        { kind: "offer_family", id: located.familyId },
+        { kind: "offer", id: canonicalOfferId },
+      ]);
+      const family = await lockCommercialOfferFamily(tx, located.tenantId, located.familyId);
+      const offer = family.find((candidate) => candidate.id === canonicalOfferId);
+      const currentGeneration = family.find((candidate) => candidate.status !== "draft");
+      if (!offer || currentGeneration?.id !== offer.id || offer.status !== "published") {
+        throw new ConflictException({ code: "offer_not_published" });
+      }
+      const [cancelled] = await tx
+        .update(schema.commercialOffers)
+        .set({ status: "cancelled", updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.commercialOffers.id, canonicalOfferId),
+            eq(schema.commercialOffers.status, "published"),
+          ),
+        )
+        .returning();
+      if (!cancelled) throw new ConflictException({ code: "offer_not_published" });
+      return this.detailWith(tx, cancelled.tenantId, cancelled.id);
+    });
   }
 
   async pay(
@@ -418,57 +492,99 @@ export class PlatformOffersService {
     input: PaymentDto,
   ): Promise<OfferPaymentResultSource> {
     if (!key.trim()) throw new ConflictException({ code: "idempotency_key_required" });
+    const canonicalOfferId = canonicalBillingUuid(id);
+    const canonicalKey = canonicalBillingResourceId(key.trim());
     return this.db.transaction(async (tx) => {
-      const [offer] = await tx
-        .select()
+      const [located] = await tx
+        .select({
+          tenantId: schema.commercialOffers.tenantId,
+          familyId: schema.commercialOffers.familyId,
+        })
         .from(schema.commercialOffers)
-        .where(eq(schema.commercialOffers.id, id))
-        .for("update");
+        .where(eq(schema.commercialOffers.id, canonicalOfferId))
+        .limit(1);
+      if (!located) throw new NotFoundException({ code: "offer_not_found" });
+      await acquireBillingWorkflowLocks(tx, located.tenantId, [
+        { kind: "offer_family", id: located.familyId },
+        { kind: "offer", id: canonicalOfferId },
+        { kind: "payment_key", id: canonicalKey },
+      ]);
+      const family = await lockCommercialOfferFamily(tx, located.tenantId, located.familyId);
+      const offer = family.find((candidate) => candidate.id === canonicalOfferId);
       if (!offer) throw new NotFoundException({ code: "offer_not_found" });
+      const currentGeneration = family.find((candidate) => candidate.status !== "draft");
       const [existing] = await tx
         .select()
         .from(schema.payments)
-        .where(eq(schema.payments.idempotencyKey, key))
+        .where(eq(schema.payments.idempotencyKey, canonicalKey))
         .limit(1);
       if (existing) {
         if (
-          existing.offerId !== id ||
+          existing.offerId !== canonicalOfferId ||
           existing.amount !== input.amount ||
           existing.bankReference !== input.bankReference
         )
           throw new ConflictException({ code: "idempotency_key_reused" });
         return { paymentId: existing.id, fulfilments: [] };
       }
+      if (!currentGeneration || currentGeneration.id !== offer.id) {
+        throw new ConflictException({ code: "offer_version_stale" });
+      }
       const [offerPayment] = await tx
         .select({ id: schema.payments.id })
         .from(schema.payments)
-        .where(and(eq(schema.payments.tenantId, offer.tenantId), eq(schema.payments.offerId, id)))
+        .where(
+          and(eq(schema.payments.tenantId, offer.tenantId), eq(schema.payments.offerId, offer.id)),
+        )
         .limit(1);
       if (offerPayment) throw new ConflictException({ code: "offer_already_paid" });
       if (offer.status !== "published" || offer.total !== input.amount)
         throw new ConflictException({ code: "offer_payment_invalid" });
+      const [decision] = await tx
+        .select()
+        .from(schema.commercialOfferDecisions)
+        .where(
+          and(
+            eq(schema.commercialOfferDecisions.tenantId, offer.tenantId),
+            eq(schema.commercialOfferDecisions.offerId, offer.id),
+          ),
+        )
+        .orderBy(
+          desc(schema.commercialOfferDecisions.createdAt),
+          desc(schema.commercialOfferDecisions.id),
+        )
+        .for("update")
+        .limit(1);
+      if (decision?.decision !== "accepted") {
+        throw new ConflictException({ code: "offer_not_accepted" });
+      }
       const [payment] = await tx
         .insert(schema.payments)
         .values({
           tenantId: offer.tenantId,
-          offerId: id,
+          offerId: offer.id,
           paidAt: new Date(),
           amount: input.amount,
           currency: input.currency,
           bankReference: input.bankReference,
           platformUserId: actor.userId,
-          idempotencyKey: key,
+          idempotencyKey: canonicalKey,
         })
         .returning();
       if (!payment) throw new Error("payment insert failed");
       await tx
         .update(schema.commercialOffers)
         .set({ status: "paid", paidAt: payment.paidAt, updatedAt: new Date() })
-        .where(eq(schema.commercialOffers.id, id));
+        .where(
+          and(
+            eq(schema.commercialOffers.id, offer.id),
+            eq(schema.commercialOffers.status, "published"),
+          ),
+        );
       const lines = await tx
         .select()
         .from(schema.commercialOfferLines)
-        .where(eq(schema.commercialOfferLines.offerId, id))
+        .where(eq(schema.commercialOfferLines.offerId, offer.id))
         .orderBy(asc(schema.commercialOfferLines.position));
       const fulfilments: string[] = [];
       let targetSubscriptionId: string | null = null;
@@ -617,4 +733,22 @@ export class PlatformOffersService {
       .orderBy(asc(schema.commercialOfferLines.position));
     return { ...offer, lines };
   }
+}
+
+async function lockCommercialOfferFamily(
+  tx: Pick<Db, "select">,
+  tenantId: string,
+  familyId: string,
+) {
+  return tx
+    .select()
+    .from(schema.commercialOffers)
+    .where(
+      and(
+        eq(schema.commercialOffers.tenantId, tenantId),
+        eq(schema.commercialOffers.familyId, familyId),
+      ),
+    )
+    .orderBy(desc(schema.commercialOffers.revision), desc(schema.commercialOffers.id))
+    .for("update");
 }

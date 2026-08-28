@@ -14,6 +14,11 @@ import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import {
+  acquireBillingWorkflowLocks,
+  canonicalBillingUuid,
+  type BillingWorkflowResource,
+} from "../billing-workflow-locks";
+import {
   beginPlatformBillingMutation,
   commitPlatformBillingMutation,
 } from "../platform-billing-idempotency";
@@ -84,14 +89,15 @@ export class PlatformBillingRequestsService {
     requestId: string,
     input: PlatformBillingRequestCommentDto,
   ): Promise<PlatformBillingRequestEvent> {
-    const located = await this.locate(requestId);
+    const canonicalRequestId = canonicalBillingUuid(requestId);
+    const located = await this.locate(canonicalRequestId);
     const message = input.message.trim();
     return this.db.transaction(async (tx) => {
       const mutation = await beginPlatformBillingMutation(tx, {
         tenantId: located.tenantId,
         idempotencyKey: input.idempotencyKey,
         operation: "billing.request.comment",
-        targetId: requestId,
+        targetId: canonicalRequestId,
         payload: { message },
         actorPlatformUserId: actor.userId,
       });
@@ -99,13 +105,16 @@ export class PlatformBillingRequestsService {
         return platformCommercialContracts.billingRequests.comment.response.parse(mutation.result);
       }
       if (mutation.kind === "pending") mutationInProgress();
-      const request = await lockRequest(tx, located.tenantId, requestId);
+      await acquireBillingWorkflowLocks(tx, located.tenantId, [
+        { kind: "request", id: canonicalRequestId },
+      ]);
+      const request = await lockRequest(tx, located.tenantId, canonicalRequestId);
       await rejectExistingEventKey(tx, located.tenantId, input.idempotencyKey);
       const [event] = await tx
         .insert(schema.tenantBillingRequestEvents)
         .values({
           tenantId: request.tenantId,
-          requestId,
+          requestId: canonicalRequestId,
           kind: "platform_comment",
           actorKind: "platform_user",
           actorPlatformUserId: actor.userId,
@@ -138,14 +147,15 @@ export class PlatformBillingRequestsService {
     requestId: string,
     input: PlatformBillingRequestStatusMutationDto,
   ): Promise<PlatformBillingRequestEvent> {
-    const located = await this.locate(requestId);
+    const canonicalRequestId = canonicalBillingUuid(requestId);
+    const located = await this.locate(canonicalRequestId);
     const message = input.message?.trim() ?? null;
     return this.db.transaction(async (tx) => {
       const mutation = await beginPlatformBillingMutation(tx, {
         tenantId: located.tenantId,
         idempotencyKey: input.idempotencyKey,
         operation: "billing.request.status",
-        targetId: requestId,
+        targetId: canonicalRequestId,
         payload: { status: input.status, message },
         actorPlatformUserId: actor.userId,
       });
@@ -153,7 +163,10 @@ export class PlatformBillingRequestsService {
         return platformCommercialContracts.billingRequests.status.response.parse(mutation.result);
       }
       if (mutation.kind === "pending") mutationInProgress();
-      const request = await lockRequest(tx, located.tenantId, requestId);
+      await acquireBillingWorkflowLocks(tx, located.tenantId, [
+        { kind: "request", id: canonicalRequestId },
+      ]);
+      const request = await lockRequest(tx, located.tenantId, canonicalRequestId);
       await rejectExistingEventKey(tx, located.tenantId, input.idempotencyKey);
       if (!transitions[request.status].includes(input.status)) {
         throw new ConflictException({ code: "billing_request_transition_invalid" });
@@ -176,7 +189,7 @@ export class PlatformBillingRequestsService {
         .insert(schema.tenantBillingRequestEvents)
         .values({
           tenantId: request.tenantId,
-          requestId,
+          requestId: canonicalRequestId,
           kind: "status_changed",
           fromStatus: request.status,
           toStatus: input.status,
@@ -211,47 +224,61 @@ export class PlatformBillingRequestsService {
     requestId: string,
     input: PlatformBillingRequestLinkDto,
   ): Promise<PlatformBillingRequestLink> {
-    const located = await this.locate(requestId);
+    const canonicalRequestId = canonicalBillingUuid(requestId);
+    const canonicalTargetId = canonicalBillingUuid(input.targetId);
+    const located = await this.locate(canonicalRequestId);
     return this.db.transaction(async (tx) => {
       const mutation = await beginPlatformBillingMutation(tx, {
         tenantId: located.tenantId,
         idempotencyKey: input.idempotencyKey,
         operation: "billing.request.link",
-        targetId: requestId,
-        payload: { type: input.type, targetId: input.targetId },
+        targetId: canonicalRequestId,
+        payload: { type: input.type, targetId: canonicalTargetId },
         actorPlatformUserId: actor.userId,
       });
       if (mutation.kind === "committed") {
         return platformCommercialContracts.billingRequests.link.response.parse(mutation.result);
       }
       if (mutation.kind === "pending") mutationInProgress();
-      const request = await lockRequest(tx, located.tenantId, requestId);
+      await acquireBillingWorkflowLocks(tx, located.tenantId, [
+        linkWorkflowResource(input.type, canonicalTargetId),
+        { kind: "request", id: canonicalRequestId },
+      ]);
+      const request = await lockRequest(tx, located.tenantId, canonicalRequestId);
       await rejectExistingEventKey(tx, located.tenantId, input.idempotencyKey);
-      await assertTarget(tx, request.tenantId, input.type, input.targetId);
-      await assertTargetNotLinked(tx, request.tenantId, request.id, input.type, input.targetId);
-      const [link] = await tx
-        .insert(schema.tenantBillingRequestLinks)
-        .values({
-          tenantId: request.tenantId,
-          requestId,
-          ...linkTargetValues(input.type, input.targetId),
-        })
-        .returning();
+      await assertTarget(tx, request.tenantId, input.type, canonicalTargetId);
+      await assertTargetNotLinked(tx, request.tenantId, request.id, input.type, canonicalTargetId);
+      let link: typeof schema.tenantBillingRequestLinks.$inferSelect | undefined;
+      try {
+        [link] = await tx
+          .insert(schema.tenantBillingRequestLinks)
+          .values({
+            tenantId: request.tenantId,
+            requestId: canonicalRequestId,
+            ...linkTargetValues(input.type, canonicalTargetId),
+          })
+          .returning();
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          throw new ConflictException({ code: "billing_target_already_linked" });
+        }
+        throw error;
+      }
       if (!link) throw new Error("platform billing request link insert failed");
       const [event] = await tx
         .insert(schema.tenantBillingRequestEvents)
         .values({
           tenantId: request.tenantId,
-          requestId,
+          requestId: canonicalRequestId,
           kind: linkEventKind(input.type),
           actorKind: "platform_user",
           actorPlatformUserId: actor.userId,
-          metadata: { type: input.type, targetId: input.targetId, linkId: link.id },
+          metadata: { type: input.type, targetId: canonicalTargetId, linkId: link.id },
           idempotencyKey: input.idempotencyKey,
         })
         .returning();
       if (!event) throw new Error("platform billing request link event insert failed");
-      const result = linkSource(link, input.type, input.targetId);
+      const result = linkSource(link, input.type, canonicalTargetId);
       await this.audit.record(tx, {
         actorPlatformUserId: actor.userId,
         actorRole: actor.role,
@@ -262,7 +289,12 @@ export class PlatformBillingRequestsService {
         targetId: request.id,
         reason: null,
         before: { status: request.status },
-        after: { type: input.type, targetId: input.targetId, linkId: link.id, eventId: event.id },
+        after: {
+          type: input.type,
+          targetId: canonicalTargetId,
+          linkId: link.id,
+          eventId: event.id,
+        },
         requestId: null,
       });
       await commitPlatformBillingMutation(tx, mutation.row.id, link.id, result);
@@ -379,19 +411,33 @@ async function assertTargetNotLinked(
   targetId: string,
 ) {
   const column = linkColumn(type);
-  const [existing] = await tx
+  const existing = await tx
     .select({ requestId: schema.tenantBillingRequestLinks.requestId })
     .from(schema.tenantBillingRequestLinks)
-    .where(and(eq(schema.tenantBillingRequestLinks.tenantId, tenantId), eq(column, targetId)))
-    .limit(1);
-  if (existing) {
+    .where(and(eq(schema.tenantBillingRequestLinks.tenantId, tenantId), eq(column, targetId)));
+  if (existing.length > 1) throw new Error("billing request target link ambiguity");
+  if (existing[0]) {
     throw new ConflictException({
       code:
-        existing.requestId === requestId
+        existing[0].requestId === requestId
           ? "billing_request_link_exists"
           : "billing_target_already_linked",
     });
   }
+}
+
+function linkWorkflowResource(type: LinkType, targetId: string): BillingWorkflowResource {
+  if (type === "offer") return { kind: "offer", id: targetId };
+  if (type === "invoice") return { kind: "invoice", id: targetId };
+  if (type === "payment") return { kind: "payment", id: targetId };
+  if (type === "act") return { kind: "act", id: targetId };
+  return { kind: "ordered_service", id: targetId };
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { code?: unknown; cause?: { code?: unknown } };
+  return value.code === "23505" || value.cause?.code === "23505";
 }
 
 function linkTable(type: LinkType) {

@@ -2,6 +2,11 @@ import { ConflictException, Inject, Injectable, NotFoundException } from "@nestj
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
+import {
+  acquireBillingWorkflowLocks,
+  canonicalBillingUuid,
+  type BillingWorkflowResource,
+} from "../billing-workflow-locks";
 import type { OfferChangeRequestDto } from "./dto";
 
 type DecisionKind = "accepted" | "changes_requested";
@@ -33,9 +38,11 @@ export class TenantBillingOffersService {
     message: string | null,
     idempotencyKey: string,
   ) {
+    const canonicalOfferId = canonicalBillingUuid(offerId);
+    const canonicalIdempotencyKey = canonicalBillingUuid(idempotencyKey);
     return this.db.transaction(async (tx) => {
       await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-offer-idempotency:${tenantId}:${idempotencyKey}`}, 0))`,
+        sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-offer-idempotency:${tenantId}:${canonicalIdempotencyKey}`}, 0))`,
       );
       const [discovered] = await tx
         .select({ familyId: schema.commercialOffers.familyId })
@@ -43,7 +50,7 @@ export class TenantBillingOffersService {
         .where(
           and(
             eq(schema.commercialOffers.tenantId, tenantId),
-            eq(schema.commercialOffers.id, offerId),
+            eq(schema.commercialOffers.id, canonicalOfferId),
           ),
         )
         .limit(1);
@@ -55,13 +62,13 @@ export class TenantBillingOffersService {
         .where(
           and(
             eq(schema.commercialOfferDecisionIdempotency.tenantId, tenantId),
-            eq(schema.commercialOfferDecisionIdempotency.idempotencyKey, idempotencyKey),
+            eq(schema.commercialOfferDecisionIdempotency.idempotencyKey, canonicalIdempotencyKey),
           ),
         )
         .limit(1);
       if (idempotent) {
         if (
-          idempotent.offerId !== offerId ||
+          idempotent.offerId !== canonicalOfferId ||
           idempotent.decision !== decision ||
           idempotent.message !== message
         ) {
@@ -81,9 +88,31 @@ export class TenantBillingOffersService {
         return decisionSource(canonical);
       }
 
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-offer:${tenantId}:${discovered.familyId}`}, 0))`,
-      );
+      const resources: BillingWorkflowResource[] = [
+        { kind: "offer_family", id: discovered.familyId },
+        { kind: "offer", id: canonicalOfferId },
+      ];
+      await acquireBillingWorkflowLocks(tx, tenantId, resources);
+      const links = await tx
+        .select({ requestId: schema.tenantBillingRequestLinks.requestId })
+        .from(schema.tenantBillingRequestLinks)
+        .where(
+          and(
+            eq(schema.tenantBillingRequestLinks.tenantId, tenantId),
+            eq(schema.tenantBillingRequestLinks.offerId, canonicalOfferId),
+          ),
+        )
+        .orderBy(
+          asc(schema.tenantBillingRequestLinks.createdAt),
+          asc(schema.tenantBillingRequestLinks.id),
+        );
+      if (links.length > 1) {
+        throw new ConflictException({ code: "offer_request_link_ambiguous" });
+      }
+      const requestId = links[0]?.requestId ?? null;
+      if (requestId) {
+        await acquireBillingWorkflowLocks(tx, tenantId, [{ kind: "request", id: requestId }]);
+      }
       const family = await tx
         .select()
         .from(schema.commercialOffers)
@@ -95,15 +124,15 @@ export class TenantBillingOffersService {
         )
         .orderBy(desc(schema.commercialOffers.revision), desc(schema.commercialOffers.id))
         .for("update");
-      const offer = family.find((candidate) => candidate.id === offerId);
+      const offer = family.find((candidate) => candidate.id === canonicalOfferId);
       if (!offer) offerNotFound();
 
-      const current = family.find((candidate) => candidate.status === "published");
-      if (!current || offer.status !== "published") {
-        throw new ConflictException({ code: "offer_not_published" });
-      }
-      if (current.id !== offerId) {
+      const current = family.find((candidate) => candidate.status !== "draft");
+      if (!current || current.id !== canonicalOfferId) {
         throw new ConflictException({ code: "offer_version_stale" });
+      }
+      if (offer.status !== "published") {
+        throw new ConflictException({ code: "offer_not_published" });
       }
       if (offer.expiresAt && offer.expiresAt <= this.now()) {
         throw new ConflictException({ code: "offer_expired" });
@@ -115,20 +144,21 @@ export class TenantBillingOffersService {
         .where(
           and(
             eq(schema.commercialOfferDecisions.tenantId, tenantId),
-            eq(schema.commercialOfferDecisions.offerId, offerId),
+            eq(schema.commercialOfferDecisions.offerId, canonicalOfferId),
           ),
         )
         .orderBy(
           desc(schema.commercialOfferDecisions.createdAt),
           desc(schema.commercialOfferDecisions.id),
         )
+        .for("update")
         .limit(1);
       if (latestDecision) {
         if (latestDecision.decision === "accepted" && decision === "accepted") {
           await tx.insert(schema.commercialOfferDecisionIdempotency).values({
             tenantId,
-            idempotencyKey,
-            offerId,
+            idempotencyKey: canonicalIdempotencyKey,
+            offerId: canonicalOfferId,
             decision,
             message,
             decisionId: latestDecision.id,
@@ -138,23 +168,6 @@ export class TenantBillingOffersService {
         throw new ConflictException({ code: "offer_already_decided" });
       }
 
-      const links = await tx
-        .select({ requestId: schema.tenantBillingRequestLinks.requestId })
-        .from(schema.tenantBillingRequestLinks)
-        .where(
-          and(
-            eq(schema.tenantBillingRequestLinks.tenantId, tenantId),
-            eq(schema.tenantBillingRequestLinks.offerId, offerId),
-          ),
-        )
-        .orderBy(
-          asc(schema.tenantBillingRequestLinks.createdAt),
-          asc(schema.tenantBillingRequestLinks.id),
-        );
-      if (links.length > 1) {
-        throw new ConflictException({ code: "offer_request_link_ambiguous" });
-      }
-      const requestId = links[0]?.requestId ?? null;
       if (requestId) {
         const [request] = await tx
           .select({ id: schema.tenantBillingRequests.id })
@@ -174,18 +187,18 @@ export class TenantBillingOffersService {
         .insert(schema.commercialOfferDecisions)
         .values({
           tenantId,
-          offerId,
+          offerId: canonicalOfferId,
           decision,
           message,
           actorUserId: userId,
-          idempotencyKey,
+          idempotencyKey: canonicalIdempotencyKey,
         })
         .returning();
       if (!inserted) throw new Error("commercial offer decision insert failed");
       await tx.insert(schema.commercialOfferDecisionIdempotency).values({
         tenantId,
-        idempotencyKey,
-        offerId,
+        idempotencyKey: canonicalIdempotencyKey,
+        offerId: canonicalOfferId,
         decision,
         message,
         decisionId: inserted.id,
@@ -198,8 +211,8 @@ export class TenantBillingOffersService {
           actorKind: "tenant_user",
           actorUserId: userId,
           message,
-          metadata: { offerId },
-          idempotencyKey,
+          metadata: { offerId: canonicalOfferId },
+          idempotencyKey: canonicalIdempotencyKey,
         });
       }
       await tx.insert(schema.tenantAuditEvents).values({
@@ -209,7 +222,7 @@ export class TenantBillingOffersService {
           decision === "accepted" ? "billing.offer.accepted" : "billing.offer.changes_requested",
         outcome: "success",
         targetType: "commercial_offer",
-        targetId: offerId,
+        targetId: canonicalOfferId,
         before: null,
         after: { decision, requestId },
       });

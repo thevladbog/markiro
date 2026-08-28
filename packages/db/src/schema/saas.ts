@@ -47,7 +47,14 @@ export const SUBSCRIPTION_STATUSES = [
 ] as const;
 export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
 
-export const OFFER_STATUSES = ["draft", "published", "paid", "cancelled", "expired"] as const;
+export const OFFER_STATUSES = [
+  "draft",
+  "published",
+  "superseded",
+  "paid",
+  "cancelled",
+  "expired",
+] as const;
 export type OfferStatus = (typeof OFFER_STATUSES)[number];
 
 export const FULFILMENT_KINDS = ["subscription", "subscription_addon", "ordered_service"] as const;

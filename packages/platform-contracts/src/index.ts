@@ -15,6 +15,10 @@ export type {
   PlatformUuid,
 } from "./primitives.js";
 export {
+  parseTenantBillingActObjectKey,
+  tenantBillingActObjectKey,
+} from "./tenant-billing-object-key.js";
+export {
   OPERATIONS_RESTRICTION_WINDOW_DAYS,
   operationsAuditEventSummarySchema,
   operationsDecisionItemSchema,
@@ -119,6 +123,7 @@ export {
   billingActIssueSchema,
   billingActSchema,
   billingActUploadMetadataSchema,
+  billingActUploadTooLargeErrorSchema,
   billingActualAddressInputSchema,
   billingContactSchema,
   billingPostalAddressInputSchema,

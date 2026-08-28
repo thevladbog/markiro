@@ -222,6 +222,37 @@ describe("TenantBillingReadService", () => {
     expect(foreignTenantId).not.toBe(tenantId);
   });
 
+  it("downloads ready acts for safe public tenant IDs containing dots and colons", async () => {
+    const safeTenantId = "factory.eu:primary";
+    const { db } = queryDb((table) => {
+      if (table === schema.billingActs) {
+        return [{ id: actId, tenantId: safeTenantId, status: "issued" }];
+      }
+      if (table === schema.billingActDocuments) {
+        return [
+          {
+            id: actDocumentId,
+            tenantId: safeTenantId,
+            actId,
+            state: "ready",
+            objectKey: `tenant-billing/${safeTenantId}/acts/${actId}/${actDocumentId}.pdf`,
+          },
+        ];
+      }
+      return [];
+    });
+    const storage = { presignRead: vi.fn(async () => "https://private.example.test/document") };
+    const service = new TenantBillingReadService(db, storage as never, {} as never);
+
+    await expect(service.downloadActDocument(safeTenantId, actId, actDocumentId)).resolves.toEqual({
+      url: "https://private.example.test/document",
+    });
+    expect(storage.presignRead).toHaveBeenCalledWith(
+      `tenant-billing/${safeTenantId}/acts/${actId}/${actDocumentId}.pdf`,
+      300,
+    );
+  });
+
   it("does not sign poisoned invoice, offer, or act keys", async () => {
     const { db } = queryDb((table) => {
       if (table === schema.invoiceDocuments) {
@@ -253,7 +284,7 @@ describe("TenantBillingReadService", () => {
             tenantId,
             actId,
             state: "ready",
-            objectKey: `tenant-billing/${tenantId}/acts/${actId}/other-document.pdf`,
+            objectKey: `tenant-billing/${tenantId}/acts/${actId}/${actDocumentId}.pdf.bak`,
           },
         ];
       }

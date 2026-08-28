@@ -197,6 +197,9 @@ describe("ObjectStorageService", () => {
     await expect(
       storage.presignRead(`tenant-billing/acme_2026/acts/${actId}/${documentId}.pdf`, 300),
     ).resolves.toBe("signed-read");
+    await expect(
+      storage.presignRead(`tenant-billing/factory.eu:primary/acts/${actId}/${documentId}.pdf`, 300),
+    ).resolves.toBe("signed-read");
     for (const key of [
       `tenant-billing/acme/../acts/${actId}/${documentId}.pdf`,
       `tenant-billing/acme%2Fother/acts/${actId}/${documentId}.pdf`,

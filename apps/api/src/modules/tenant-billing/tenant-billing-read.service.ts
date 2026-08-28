@@ -1,6 +1,7 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, gt, gte, inArray, lt, lte, notInArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { tenantBillingActObjectKey } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { ObjectStorageService } from "../storage/object-storage.service";
@@ -220,9 +221,11 @@ export class TenantBillingReadService {
             eq(schema.tenantBillingRequestLinks.tenantId, tenantId),
             eq(schema.tenantBillingRequestLinks.invoiceId, id),
           ),
-        )
-        .limit(1),
+        ),
     ]);
+    if (links.length > 1) {
+      throw new ConflictException({ code: "invoice_request_link_ambiguous" });
+    }
     const request = await this.requestForLink(tenantId, links[0]?.requestId);
     return {
       ...this.toInvoice(invoice, payments, this.now()),
@@ -326,9 +329,11 @@ export class TenantBillingReadService {
             eq(schema.tenantBillingRequestLinks.tenantId, tenantId),
             eq(schema.tenantBillingRequestLinks.offerId, id),
           ),
-        )
-        .limit(1),
+        ),
     ]);
+    if (links.length > 1) {
+      throw new ConflictException({ code: "offer_request_link_ambiguous" });
+    }
     return {
       id: offer.id,
       number: offer.number,
@@ -434,11 +439,12 @@ export class TenantBillingReadService {
         ),
       )
       .limit(1);
+    const expectedObjectKey = tenantBillingActObjectKey(tenantId, actId, documentId);
     return this.presigned(
-      document?.objectKey,
+      document?.objectKey === expectedObjectKey ? document.objectKey : undefined,
       document?.state === "ready",
       "act_document_not_found",
-      `tenant-billing/${tenantId}/acts/${actId}/${documentId}.pdf`,
+      expectedObjectKey,
     );
   }
 

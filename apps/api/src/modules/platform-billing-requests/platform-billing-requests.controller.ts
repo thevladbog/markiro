@@ -26,7 +26,10 @@ export class PlatformBillingRequestsController {
   constructor(private readonly requests: PlatformBillingRequestsService) {}
 
   @Get()
-  @PlatformApiProtectedOk({ response: platformCommercialContracts.billingRequests.list.response })
+  @PlatformApiProtectedOk({
+    query: platformCommercialContracts.billingRequests.list.query,
+    response: platformCommercialContracts.billingRequests.list.response,
+  })
   @RequirePlatformCapabilities("billing.read")
   async list(
     @Req() req: RequestWithPlatformPrincipal,

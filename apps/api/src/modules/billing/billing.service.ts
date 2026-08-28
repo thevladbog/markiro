@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import type {
   InvoiceCreateServiceResultSource,
@@ -16,6 +16,11 @@ import type {
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
+import {
+  acquireBillingWorkflowLocks,
+  canonicalBillingUuid,
+  type BillingWorkflowResource,
+} from "../billing-workflow-locks";
 import {
   bankAccountLast4,
   bankAccountSnapshot,
@@ -43,18 +48,50 @@ export class BillingService {
     input: CreateInvoiceDto,
   ): Promise<InvoiceCreateServiceResultSource> {
     return this.db.transaction(async (tx) => {
+      const canonicalSourceRequestId = input.sourceRequestId
+        ? canonicalBillingUuid(input.sourceRequestId)
+        : null;
+      const canonicalSourceOfferId = input.sourceOfferId
+        ? canonicalBillingUuid(input.sourceOfferId)
+        : null;
+      const resources: BillingWorkflowResource[] = [];
+      let sourceOfferFamilyId: string | null = null;
+      if (canonicalSourceRequestId) {
+        resources.push({ kind: "request", id: canonicalSourceRequestId });
+      }
+      if (canonicalSourceOfferId) {
+        sourceOfferFamilyId = await locateInvoiceSourceOffer(
+          tx,
+          input.tenantId,
+          canonicalSourceOfferId,
+        );
+        resources.push(
+          { kind: "offer_family", id: sourceOfferFamilyId },
+          { kind: "offer", id: canonicalSourceOfferId },
+        );
+      }
+      await acquireBillingWorkflowLocks(tx, input.tenantId, resources);
       const [tenant] = await tx
         .select({ id: schema.organization.id })
         .from(schema.organization)
         .where(eq(schema.organization.id, input.tenantId))
         .limit(1);
       if (!tenant) throw new NotFoundException({ code: "tenant_not_found" });
-      const sourceRequestId = input.sourceRequestId
-        ? await lockInvoiceSourceRequest(tx, input.tenantId, input.sourceRequestId)
+      const sourceRequestId = canonicalSourceRequestId
+        ? await lockInvoiceSourceRequest(tx, input.tenantId, canonicalSourceRequestId)
         : null;
-      const sourceOfferId = input.sourceOfferId
-        ? await lockAcceptedInvoiceSourceOffer(tx, input.tenantId, input.sourceOfferId)
-        : null;
+      let sourceOfferId: string | null = null;
+      if (canonicalSourceOfferId) {
+        if (!sourceOfferFamilyId) {
+          throw new Error("invoice source offer family discovery failed");
+        }
+        sourceOfferId = await lockAcceptedInvoiceSourceOffer(
+          tx,
+          input.tenantId,
+          canonicalSourceOfferId,
+          sourceOfferFamilyId,
+        );
+      }
       const [last] = await tx
         .select({ number: schema.invoices.number })
         .from(schema.invoices)
@@ -78,10 +115,56 @@ export class BillingService {
         .returning();
       if (!invoice) throw new BadRequestException({ code: "invoice_create_failed" });
       if (sourceRequestId) {
-        await tx.insert(schema.tenantBillingRequestLinks).values({
+        const [link] = await tx
+          .insert(schema.tenantBillingRequestLinks)
+          .values({
+            tenantId: input.tenantId,
+            requestId: sourceRequestId,
+            invoiceId: invoice.id,
+          })
+          .returning();
+        if (!link) throw new Error("invoice request link insert failed");
+        const [event] = await tx
+          .insert(schema.tenantBillingRequestEvents)
+          .values({
+            tenantId: input.tenantId,
+            requestId: sourceRequestId,
+            kind: "invoice_linked",
+            actorKind: "platform_user",
+            actorPlatformUserId: principal.userId,
+            metadata: { invoiceId: invoice.id, linkId: link.id },
+            idempotencyKey: randomUUID(),
+          })
+          .returning({ id: schema.tenantBillingRequestEvents.id });
+        if (!event) throw new Error("invoice request link event insert failed");
+        const [request] = await tx
+          .select({ status: schema.tenantBillingRequests.status })
+          .from(schema.tenantBillingRequests)
+          .where(
+            and(
+              eq(schema.tenantBillingRequests.tenantId, input.tenantId),
+              eq(schema.tenantBillingRequests.id, sourceRequestId),
+            ),
+          )
+          .limit(1);
+        if (!request) throw new ConflictException({ code: "billing_source_link_invalid" });
+        await this.audit.record(tx, {
+          actorPlatformUserId: principal.userId,
+          actorRole: principal.role,
+          action: "billing.request.invoice_linked",
+          outcome: "success",
           tenantId: input.tenantId,
-          requestId: sourceRequestId,
-          invoiceId: invoice.id,
+          targetType: "tenant_billing_request",
+          targetId: sourceRequestId,
+          reason: null,
+          before: { status: request.status },
+          after: {
+            status: request.status,
+            invoiceId: invoice.id,
+            linkId: link.id,
+            eventId: event.id,
+          },
+          requestId: null,
         });
       }
 
@@ -272,11 +355,36 @@ export class BillingService {
   }
 
   async issue(principal: PlatformPrincipal, id: string): Promise<InvoiceServiceRecordSource> {
+    const canonicalInvoiceId = canonicalBillingUuid(id);
     return this.db.transaction(async (tx) => {
+      const [located] = await tx
+        .select({ tenantId: schema.invoices.tenantId })
+        .from(schema.invoices)
+        .where(eq(schema.invoices.id, canonicalInvoiceId))
+        .limit(1);
+      if (!located) throw new NotFoundException({ code: "invoice_not_found" });
+      await acquireBillingWorkflowLocks(tx, located.tenantId, [
+        { kind: "invoice", id: canonicalInvoiceId },
+      ]);
+      const discoveredLinks = await tx
+        .select({ requestId: schema.tenantBillingRequestLinks.requestId })
+        .from(schema.tenantBillingRequestLinks)
+        .where(
+          and(
+            eq(schema.tenantBillingRequestLinks.tenantId, located.tenantId),
+            eq(schema.tenantBillingRequestLinks.invoiceId, canonicalInvoiceId),
+          ),
+        );
+      if (discoveredLinks.length > 1) throw new Error("invoice request link ambiguity");
+      if (discoveredLinks[0]) {
+        await acquireBillingWorkflowLocks(tx, located.tenantId, [
+          { kind: "request", id: discoveredLinks[0].requestId },
+        ]);
+      }
       const [invoice] = await tx
         .select()
         .from(schema.invoices)
-        .where(eq(schema.invoices.id, id))
+        .where(eq(schema.invoices.id, canonicalInvoiceId))
         .for("update")
         .limit(1);
       if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
@@ -300,10 +408,10 @@ export class BillingService {
           sellerBankAccountSnapshot: bankAccountSnapshot(sellerAccount),
           buyerBankAccountSnapshot: buyerAccount ? bankAccountSnapshot(buyerAccount) : null,
         })
-        .where(and(eq(schema.invoices.id, id), eq(schema.invoices.status, "draft")))
+        .where(and(eq(schema.invoices.id, canonicalInvoiceId), eq(schema.invoices.status, "draft")))
         .returning();
       if (!updated) throw new ConflictException({ code: "invoice_not_draft" });
-      const [sourceLink] = await tx
+      const sourceLinks = await tx
         .select()
         .from(schema.tenantBillingRequestLinks)
         .where(
@@ -312,8 +420,9 @@ export class BillingService {
             eq(schema.tenantBillingRequestLinks.invoiceId, invoice.id),
           ),
         )
-        .for("update")
-        .limit(1);
+        .for("update");
+      if (sourceLinks.length > 1) throw new Error("invoice request link ambiguity");
+      const sourceLink = sourceLinks[0];
       let sourceRequestId: string | null = null;
       if (sourceLink) {
         const [request] = await tx
@@ -329,33 +438,6 @@ export class BillingService {
           .limit(1);
         if (!request) throw new ConflictException({ code: "billing_source_link_invalid" });
         sourceRequestId = request.id;
-        const linkEventIdempotencyKey = randomUUID();
-        const [linkEvent] = await tx
-          .insert(schema.tenantBillingRequestEvents)
-          .values({
-            tenantId: invoice.tenantId,
-            requestId: request.id,
-            kind: "invoice_linked",
-            actorKind: "platform_user",
-            actorPlatformUserId: principal.userId,
-            metadata: { invoiceId: invoice.id, linkId: sourceLink.id },
-            idempotencyKey: linkEventIdempotencyKey,
-          })
-          .returning({ id: schema.tenantBillingRequestEvents.id });
-        if (!linkEvent) throw new Error("invoice request link event insert failed");
-        await this.audit.record(tx, {
-          actorPlatformUserId: principal.userId,
-          actorRole: principal.role,
-          action: "billing.request.invoice_linked",
-          outcome: "success",
-          tenantId: invoice.tenantId,
-          targetType: "tenant_billing_request",
-          targetId: request.id,
-          reason: null,
-          before: { status: request.status },
-          after: { status: request.status, invoiceId: invoice.id, eventId: linkEvent.id },
-          requestId: null,
-        });
         if (request.status === "offer_prepared") {
           await tx
             .update(schema.tenantBillingRequests)
@@ -409,7 +491,7 @@ export class BillingService {
         outcome: "success",
         tenantId: invoice.tenantId,
         targetType: "invoice",
-        targetId: id,
+        targetId: canonicalInvoiceId,
         reason: null,
         before: { status: invoice.status },
         after: {
@@ -427,11 +509,21 @@ export class BillingService {
   }
 
   async cancel(principal: PlatformPrincipal, id: string): Promise<InvoiceServiceRecordSource> {
+    const canonicalInvoiceId = canonicalBillingUuid(id);
     return this.db.transaction(async (tx) => {
+      const [located] = await tx
+        .select({ tenantId: schema.invoices.tenantId })
+        .from(schema.invoices)
+        .where(eq(schema.invoices.id, canonicalInvoiceId))
+        .limit(1);
+      if (!located) throw new NotFoundException({ code: "invoice_not_found" });
+      await acquireBillingWorkflowLocks(tx, located.tenantId, [
+        { kind: "invoice", id: canonicalInvoiceId },
+      ]);
       const [invoice] = await tx
         .select()
         .from(schema.invoices)
-        .where(eq(schema.invoices.id, id))
+        .where(eq(schema.invoices.id, canonicalInvoiceId))
         .for("update")
         .limit(1);
       if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
@@ -441,7 +533,12 @@ export class BillingService {
       const [updated] = await tx
         .update(schema.invoices)
         .set({ status: "cancelled", cancelledAt: new Date() })
-        .where(and(eq(schema.invoices.id, id), eq(schema.invoices.status, invoice.status)))
+        .where(
+          and(
+            eq(schema.invoices.id, canonicalInvoiceId),
+            eq(schema.invoices.status, invoice.status),
+          ),
+        )
         .returning();
       if (!updated) throw new ConflictException({ code: "invoice_cancel_failed" });
       return updated;
@@ -449,7 +546,7 @@ export class BillingService {
   }
 }
 
-type InvoiceSourceExecutor = Pick<Db, "select" | "execute">;
+type InvoiceSourceExecutor = Pick<Db, "select">;
 
 async function lockInvoiceSourceRequest(
   tx: InvoiceSourceExecutor,
@@ -476,41 +573,27 @@ async function lockAcceptedInvoiceSourceOffer(
   tx: InvoiceSourceExecutor,
   tenantId: string,
   offerId: string,
+  familyId: string,
 ): Promise<string> {
-  const [located] = await tx
-    .select({
-      tenantId: schema.commercialOffers.tenantId,
-      familyId: schema.commercialOffers.familyId,
-    })
-    .from(schema.commercialOffers)
-    .where(eq(schema.commercialOffers.id, offerId))
-    .limit(1);
-  if (!located) throw new NotFoundException({ code: "offer_not_found" });
-  if (located.tenantId !== tenantId) {
-    throw new ConflictException({ code: "billing_source_tenant_mismatch" });
-  }
-  await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${`commercial-offer-family:${tenantId}:${located.familyId}`}, 0))`,
-  );
   const family = await tx
     .select()
     .from(schema.commercialOffers)
     .where(
       and(
         eq(schema.commercialOffers.tenantId, tenantId),
-        eq(schema.commercialOffers.familyId, located.familyId),
+        eq(schema.commercialOffers.familyId, familyId),
       ),
     )
     .orderBy(desc(schema.commercialOffers.revision), desc(schema.commercialOffers.id))
     .for("update");
   const source = family.find((offer) => offer.id === offerId);
   if (!source) throw new NotFoundException({ code: "offer_not_found" });
-  const currentPublished = family.find((offer) => offer.status === "published");
+  const currentGeneration = family.find((offer) => offer.status !== "draft");
+  if (!currentGeneration || currentGeneration.id !== source.id) {
+    throw new ConflictException({ code: "offer_version_stale" });
+  }
   if (source.status !== "published") {
     throw new ConflictException({ code: "offer_not_accepted" });
-  }
-  if (!currentPublished || currentPublished.id !== source.id) {
-    throw new ConflictException({ code: "offer_version_stale" });
   }
   const [decision] = await tx
     .select()
@@ -531,6 +614,26 @@ async function lockAcceptedInvoiceSourceOffer(
     throw new ConflictException({ code: "offer_not_accepted" });
   }
   return source.id;
+}
+
+async function locateInvoiceSourceOffer(
+  tx: Pick<Db, "select">,
+  tenantId: string,
+  offerId: string,
+): Promise<string> {
+  const [located] = await tx
+    .select({
+      tenantId: schema.commercialOffers.tenantId,
+      familyId: schema.commercialOffers.familyId,
+    })
+    .from(schema.commercialOffers)
+    .where(eq(schema.commercialOffers.id, offerId))
+    .limit(1);
+  if (!located) throw new NotFoundException({ code: "offer_not_found" });
+  if (located.tenantId !== tenantId) {
+    throw new ConflictException({ code: "billing_source_tenant_mismatch" });
+  }
+  return located.familyId;
 }
 
 function invoicePaymentSummary(

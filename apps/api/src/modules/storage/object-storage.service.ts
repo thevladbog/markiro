@@ -11,6 +11,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
 import type { OnModuleDestroy } from "@nestjs/common";
 import { createHash } from "node:crypto";
+import { parseTenantBillingActObjectKey } from "@markiro/platform-contracts";
 import type { Env } from "../../env";
 
 type S3Boundary = Pick<S3Client, "send"> & { destroy?: () => void };
@@ -273,16 +274,13 @@ function encodeRfc5987Filename(filename: string): string {
 function assertSafeKey(key: string): void {
   const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
   const safeTenant = "[A-Za-z0-9][A-Za-z0-9_-]{0,127}";
-  const tenantBillingActKey = new RegExp(
-    `^tenant-billing\\/${safeTenant}\\/acts\\/${uuid}\\/${uuid}\\.pdf$`,
-  );
   const tenantBillingRequestAttachmentKey = new RegExp(
     `^tenant-billing\\/${safeTenant}\\/requests\\/${uuid}\\/${uuid}$`,
   );
   if (
     (!key.startsWith("users/") &&
       !key.startsWith("tenants/") &&
-      !tenantBillingActKey.test(key) &&
+      !parseTenantBillingActObjectKey(key) &&
       !tenantBillingRequestAttachmentKey.test(key)) ||
     key.includes("..") ||
     key.includes("\\") ||

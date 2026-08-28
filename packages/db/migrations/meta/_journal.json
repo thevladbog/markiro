@@ -498,6 +498,13 @@
       "when": 1787872180376,
       "tag": "0070_tenant_billing_platform_workflow",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1787877614000,
+      "tag": "0071_tenant_billing_target_cardinality",
+      "breakpoints": true
     }
   ]
 }

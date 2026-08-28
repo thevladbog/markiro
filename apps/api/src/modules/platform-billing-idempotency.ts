@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { ConflictException } from "@nestjs/common";
 import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { platformUuidSchema } from "@markiro/platform-contracts";
+import { canonicalBillingResourceId } from "./billing-workflow-locks";
 
 type BillingMutationExecutor = Pick<Db, "execute" | "select" | "insert" | "update">;
 type BillingMutationRow = typeof schema.platformBillingMutationIdempotency.$inferSelect;
@@ -24,8 +26,10 @@ export async function beginPlatformBillingMutation(
   tx: BillingMutationExecutor,
   spec: PlatformBillingMutationSpec,
 ): Promise<PlatformBillingMutationStart> {
+  const idempotencyKey = platformUuidSchema.parse(spec.idempotencyKey);
+  const targetId = canonicalBillingResourceId(spec.targetId);
   await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${`platform-billing:${spec.tenantId}:${spec.idempotencyKey}`}, 0))`,
+    sql`select pg_advisory_xact_lock(hashtextextended(${`platform-billing:${spec.tenantId}:${idempotencyKey}`}, 0))`,
   );
   const payloadHash = platformBillingPayloadHash(spec.payload);
   const [existing] = await tx
@@ -34,14 +38,14 @@ export async function beginPlatformBillingMutation(
     .where(
       and(
         eq(schema.platformBillingMutationIdempotency.tenantId, spec.tenantId),
-        eq(schema.platformBillingMutationIdempotency.idempotencyKey, spec.idempotencyKey),
+        eq(schema.platformBillingMutationIdempotency.idempotencyKey, idempotencyKey),
       ),
     )
     .limit(1);
   if (existing) {
     if (
       existing.operation !== spec.operation ||
-      existing.targetId !== spec.targetId ||
+      existing.targetId !== targetId ||
       existing.payloadHash !== payloadHash
     ) {
       throw new ConflictException({ code: "idempotency_key_reused" });
@@ -54,9 +58,9 @@ export async function beginPlatformBillingMutation(
     .insert(schema.platformBillingMutationIdempotency)
     .values({
       tenantId: spec.tenantId,
-      idempotencyKey: spec.idempotencyKey,
+      idempotencyKey,
       operation: spec.operation,
-      targetId: spec.targetId,
+      targetId,
       payloadHash,
       actorPlatformUserId: spec.actorPlatformUserId,
     })
@@ -94,7 +98,10 @@ export function platformBillingPayloadHash(payload: unknown): string {
 }
 
 function canonicalJson(value: unknown): string {
-  if (value === null || typeof value === "string" || typeof value === "boolean") {
+  if (typeof value === "string") {
+    return JSON.stringify(canonicalBillingResourceId(value));
+  }
+  if (value === null || typeof value === "boolean") {
     return JSON.stringify(value);
   }
   if (typeof value === "number") {

@@ -10,6 +10,7 @@ import {
   type BillingActPdfUpload,
   validateBillingActPdf,
 } from "../src/modules/billing-acts/billing-acts.service";
+import { PlatformBillingRequestsService } from "../src/modules/platform-billing-requests/platform-billing-requests.service";
 import type { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import {
   platformCapabilitiesForRole,
@@ -51,6 +52,7 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
   let tenantUser = "";
   let requestId = "";
   let acts: TestBillingActsService;
+  let requests: PlatformBillingRequestsService;
 
   beforeAll(async () => {
     await maintenance.pool.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`);
@@ -94,6 +96,7 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
       storage as unknown as ObjectStorageService,
       audit,
     );
+    requests = new PlatformBillingRequestsService(connection.db, audit);
   }, 120_000);
 
   beforeEach(() => {
@@ -305,6 +308,205 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
     });
     expect(storage.deleteConfirmed).not.toHaveBeenCalled();
   });
+
+  it("rejects cancellation while a durable upload intent is pending, then preserves the ready PDF", async () => {
+    const act = await acts.create(actor, {
+      tenantId: tenantA,
+      number: `ACT-${randomUUID()}`,
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-27",
+      idempotencyKey: randomUUID(),
+    });
+    let notifyPutStarted!: () => void;
+    let releasePut!: () => void;
+    const putStarted = new Promise<void>((resolve) => {
+      notifyPutStarted = resolve;
+    });
+    const mayFinishPut = new Promise<void>((resolve) => {
+      releasePut = resolve;
+    });
+    storage.putVerified.mockImplementationOnce(async (_key, body, _contentType, sha256) => {
+      notifyPutStarted();
+      await mayFinishPut;
+      return { byteSize: body.byteLength, sha256 };
+    });
+    const file = pdfUpload();
+    const issueOutcome = acts.issue(actor, act.id, { idempotencyKey: randomUUID() }, file).then(
+      (result) => ({ kind: "success" as const, result }),
+      (error: unknown) => ({ kind: "error" as const, error }),
+    );
+    await putStarted;
+    const cancelFailure = await acts
+      .cancel(actor, act.id, { idempotencyKey: randomUUID() })
+      .catch((error: unknown) => error);
+    releasePut();
+    const outcome = await issueOutcome;
+
+    expect(cancelFailure).toMatchObject({
+      response: { code: "act_issue_in_progress" },
+      status: 409,
+    });
+    expect(outcome).toMatchObject({
+      kind: "success",
+      result: { status: "issued", document: { state: "ready" } },
+    });
+    if (outcome.kind !== "success") {
+      throw new Error("act issue did not return a ready document");
+    }
+    const issued = outcome.result;
+    const issuedDocumentId = issued.document?.id;
+    if (!issuedDocumentId) throw new Error("act issue did not return a ready document");
+    const cancelled = await acts.cancel(actor, act.id, { idempotencyKey: randomUUID() });
+    expect(cancelled).toMatchObject({
+      status: "cancelled",
+      document: { id: issuedDocumentId, state: "ready" },
+    });
+    expect(storage.deleteConfirmed).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a cleanup-required upload intent on the same issue key", async () => {
+    const act = await acts.create(actor, {
+      tenantId: tenantA,
+      number: `ACT-${randomUUID()}`,
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-27",
+      idempotencyKey: randomUUID(),
+    });
+    const file = pdfUpload();
+    const idempotencyKey = randomUUID();
+    const uploadFailure = new Error("PUT failed after a possible write");
+    storage.putVerified.mockRejectedValueOnce(uploadFailure);
+    storage.verifyObject.mockResolvedValueOnce("mismatch").mockResolvedValueOnce("verified");
+    storage.deleteConfirmed.mockRejectedValueOnce(new Error("DELETE acknowledgement lost"));
+
+    await expect(acts.issue(actor, act.id, { idempotencyKey }, file)).rejects.toBe(uploadFailure);
+    const [cleanupDocument] = await connection.db
+      .select()
+      .from(schema.billingActDocuments)
+      .where(eq(schema.billingActDocuments.actId, act.id));
+    expect(cleanupDocument).toMatchObject({ state: "cleanup_required" });
+    await expect(
+      acts.cancel(actor, act.id, { idempotencyKey: randomUUID() }),
+    ).rejects.toMatchObject({ response: { code: "act_issue_in_progress" }, status: 409 });
+
+    const issued = await acts.issue(actor, act.id, { idempotencyKey }, file);
+    expect(issued).toMatchObject({ status: "issued", document: { state: "ready" } });
+    expect(storage.putVerified).toHaveBeenCalledTimes(1);
+    expect(storage.verifyObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("issues a pre-linked act without duplicating the tenant event or platform audit fact", async () => {
+    const act = await acts.create(actor, {
+      tenantId: tenantA,
+      requestId,
+      number: `ACT-${randomUUID()}`,
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-27",
+      idempotencyKey: randomUUID(),
+    });
+    await requests.link(actor, requestId, {
+      type: "act",
+      targetId: act.id,
+      idempotencyKey: randomUUID(),
+    });
+
+    await expect(
+      acts.issue(actor, act.id, { idempotencyKey: randomUUID() }, pdfUpload()),
+    ).resolves.toMatchObject({ status: "issued" });
+    const linkEvents = await connection.db
+      .select()
+      .from(schema.tenantBillingRequestEvents)
+      .where(
+        and(
+          eq(schema.tenantBillingRequestEvents.requestId, requestId),
+          eq(schema.tenantBillingRequestEvents.kind, "act_linked"),
+        ),
+      );
+    expect(
+      linkEvents.filter((event) => jsonStringField(event.metadata, "targetId") === act.id),
+    ).toHaveLength(1);
+    const linkAudits = await connection.db
+      .select()
+      .from(schema.platformAuditEvents)
+      .where(eq(schema.platformAuditEvents.targetId, requestId));
+    expect(
+      linkAudits.filter(
+        (event) =>
+          (event.action === "billing.request.linked" &&
+            jsonStringField(event.after, "targetId") === act.id) ||
+          (event.action === "billing.request.act_linked" &&
+            jsonStringField(event.after, "actId") === act.id),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("serializes explicit act linking against issue without a deadlock or duplicate link fact", async () => {
+    const act = await acts.create(actor, {
+      tenantId: tenantA,
+      requestId,
+      number: `ACT-${randomUUID()}`,
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-27",
+      idempotencyKey: randomUUID(),
+    });
+    const [linkOutcome, issueOutcome] = await Promise.allSettled([
+      requests.link(actor, requestId, {
+        type: "act",
+        targetId: act.id,
+        idempotencyKey: randomUUID(),
+      }),
+      acts.issue(actor, act.id, { idempotencyKey: randomUUID() }, pdfUpload()),
+    ]);
+
+    expect(issueOutcome).toMatchObject({ status: "fulfilled", value: { status: "issued" } });
+    if (linkOutcome.status === "rejected") {
+      expect(linkOutcome.reason).toMatchObject({
+        response: { code: "billing_request_link_exists" },
+        status: 409,
+      });
+    }
+    const links = await connection.db
+      .select()
+      .from(schema.tenantBillingRequestLinks)
+      .where(eq(schema.tenantBillingRequestLinks.actId, act.id));
+    expect(links).toHaveLength(1);
+    const events = await connection.db
+      .select()
+      .from(schema.tenantBillingRequestEvents)
+      .where(eq(schema.tenantBillingRequestEvents.kind, "act_linked"));
+    expect(
+      events.filter(
+        (event) =>
+          jsonStringField(event.metadata, "actId") === act.id ||
+          jsonStringField(event.metadata, "targetId") === act.id,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("writes a canonical act key for public tenant IDs containing dots and colons", async () => {
+    const safeTenantId = `factory.${randomUUID().slice(0, 8)}:primary`;
+    await connection.db.insert(schema.organization).values({
+      id: safeTenantId,
+      name: "Dot and colon tenant",
+      slug: `dot-colon-${randomUUID()}`,
+      createdAt: new Date(),
+    });
+    const act = await acts.create(actor, {
+      tenantId: safeTenantId,
+      number: `ACT-${randomUUID()}`,
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-27",
+      idempotencyKey: randomUUID(),
+    });
+    const issued = await acts.issue(actor, act.id, { idempotencyKey: randomUUID() }, pdfUpload());
+
+    expect(storage.putVerified).toHaveBeenCalledWith(
+      `tenant-billing/${safeTenantId}/acts/${act.id}/${issued.document!.id}.pdf`,
+      expect.any(Buffer),
+      "application/pdf",
+      issued.document!.sha256,
+    );
+  });
 });
 
 describe("billing act PDF validation", () => {
@@ -347,6 +549,12 @@ function pdfUpload(): BillingActPdfUpload {
     size: buffer.byteLength,
     buffer,
   };
+}
+
+function jsonStringField(value: unknown, key: string): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const field = Reflect.get(value, key);
+  return typeof field === "string" ? field : undefined;
 }
 
 async function insertOrderedService(

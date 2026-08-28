@@ -16,6 +16,54 @@ import { PlatformAuditService } from "../src/platform-auth/platform-audit.servic
 import { createOrganization } from "./support/subscription-fixtures";
 
 const databaseUrl = process.env.DATABASE_URL;
+type RequestStatus = typeof schema.tenantBillingRequests.$inferSelect.status;
+const targetStatuses = [
+  "under_review",
+  "clarification_required",
+  "offer_prepared",
+  "awaiting_payment",
+  "in_progress",
+  "completed",
+  "cancelled",
+] as const;
+const allowedTransitions = [
+  ["new", "under_review", "markiro"],
+  ["new", "cancelled", "none"],
+  ["under_review", "clarification_required", "tenant"],
+  ["under_review", "offer_prepared", "tenant"],
+  ["under_review", "in_progress", "markiro"],
+  ["under_review", "cancelled", "none"],
+  ["clarification_required", "under_review", "markiro"],
+  ["clarification_required", "cancelled", "none"],
+  ["offer_prepared", "under_review", "markiro"],
+  ["offer_prepared", "awaiting_payment", "tenant"],
+  ["offer_prepared", "cancelled", "none"],
+  ["awaiting_payment", "in_progress", "markiro"],
+  ["awaiting_payment", "cancelled", "none"],
+  ["in_progress", "completed", "none"],
+  ["in_progress", "cancelled", "none"],
+] as const satisfies ReadonlyArray<
+  readonly [RequestStatus, (typeof targetStatuses)[number], string]
+>;
+const allowedTransitionKeys = new Set(
+  allowedTransitions.map(([fromStatus, toStatus]) => `${fromStatus}:${toStatus}`),
+);
+const forbiddenTransitions = (
+  [
+    "new",
+    "under_review",
+    "clarification_required",
+    "offer_prepared",
+    "awaiting_payment",
+    "in_progress",
+    "completed",
+    "cancelled",
+  ] as const
+).flatMap((fromStatus) =>
+  targetStatuses
+    .filter((toStatus) => !allowedTransitionKeys.has(`${fromStatus}:${toStatus}`))
+    .map((toStatus) => [fromStatus, toStatus] as const),
+);
 
 describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", () => {
   const databaseName = `markiro_platform_billing_requests_${randomUUID().replaceAll("-", "_")}`;
@@ -140,54 +188,81 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     ).rejects.toMatchObject({ response: { code: "idempotency_key_reused" }, status: 409 });
   });
 
-  it.each([
-    ["new", "under_review", "markiro"],
-    ["under_review", "clarification_required", "tenant"],
-    ["clarification_required", "under_review", "markiro"],
-    ["under_review", "offer_prepared", "tenant"],
-    ["offer_prepared", "awaiting_payment", "tenant"],
-    ["awaiting_payment", "in_progress", "markiro"],
-    ["in_progress", "completed", "none"],
-  ] as const)(
+  it.each(allowedTransitions)(
     "moves %s to %s with responsibleSide=%s",
-    async (fromStatus, toStatus, responsibleSide) => {
+    async (fromStatus, toStatus, expectedSide) => {
       const request = await insertRequest(connection.db, tenantA, tenantUser, fromStatus);
+      const beforeSide = responsibleSide(fromStatus);
+      const message = `Transition ${fromStatus} to ${toStatus}`;
       const event = await requests.changeStatus(actor, request.id, {
         status: toStatus,
-        message: "Operator decision",
+        message,
         idempotencyKey: randomUUID(),
       });
       const [updated] = await connection.db
         .select()
         .from(schema.tenantBillingRequests)
         .where(eq(schema.tenantBillingRequests.id, request.id));
-      expect(updated).toMatchObject({ status: toStatus, responsibleSide });
+      expect(updated).toMatchObject({ status: toStatus, responsibleSide: expectedSide });
       expect(event).toMatchObject({
         kind: "status_changed",
         fromStatus,
         toStatus,
         actorPlatformUserId: actorId,
+        message,
       });
+      const audits = await connection.db
+        .select()
+        .from(schema.platformAuditEvents)
+        .where(
+          and(
+            eq(schema.platformAuditEvents.targetId, request.id),
+            eq(schema.platformAuditEvents.action, "billing.request.status_changed"),
+          ),
+        );
+      expect(audits).toEqual([
+        expect.objectContaining({
+          actorPlatformUserId: actorId,
+          actorRole: "accountant",
+          outcome: "success",
+          tenantId: tenantA,
+          targetType: "tenant_billing_request",
+          reason: message,
+          before: { status: fromStatus, responsibleSide: beforeSide },
+          after: { status: toStatus, responsibleSide: expectedSide, eventId: event.id },
+        }),
+      ]);
     },
   );
 
-  it("rejects a forbidden transition without an event or audit", async () => {
-    const request = await insertRequest(connection.db, tenantA, tenantUser, "new");
-    const beforeEvents = await countRequestEvents(connection.db, request.id);
-    const beforeAudits = await countRequestAudits(connection.db, request.id);
+  it.each(forbiddenTransitions)(
+    "rejects forbidden %s to %s without state, event, or audit changes",
+    async (fromStatus, toStatus) => {
+      const request = await insertRequest(connection.db, tenantA, tenantUser, fromStatus);
+      const beforeEvents = await countRequestEvents(connection.db, request.id);
+      const beforeAudits = await countRequestAudits(connection.db, request.id);
 
-    await expect(
-      requests.changeStatus(actor, request.id, {
-        status: "completed",
-        idempotencyKey: randomUUID(),
-      }),
-    ).rejects.toMatchObject({
-      response: { code: "billing_request_transition_invalid" },
-      status: 409,
-    });
-    expect(await countRequestEvents(connection.db, request.id)).toBe(beforeEvents);
-    expect(await countRequestAudits(connection.db, request.id)).toBe(beforeAudits);
-  });
+      await expect(
+        requests.changeStatus(actor, request.id, {
+          status: toStatus,
+          idempotencyKey: randomUUID(),
+        }),
+      ).rejects.toMatchObject({
+        response: { code: "billing_request_transition_invalid" },
+        status: 409,
+      });
+      expect(await countRequestEvents(connection.db, request.id)).toBe(beforeEvents);
+      expect(await countRequestAudits(connection.db, request.id)).toBe(beforeAudits);
+      const [unchanged] = await connection.db
+        .select()
+        .from(schema.tenantBillingRequests)
+        .where(eq(schema.tenantBillingRequests.id, request.id));
+      expect(unchanged).toMatchObject({
+        status: fromStatus,
+        responsibleSide: responsibleSide(fromStatus),
+      });
+    },
+  );
 
   it("tenant-scopes every linked entity and returns one typed link on an exact replay", async () => {
     const request = await insertRequest(connection.db, tenantA, tenantUser, "offer_prepared");
@@ -238,6 +313,91 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
       .where(eq(schema.tenantBillingRequestEvents.idempotencyKey, idempotencyKey));
     expect(linkedEvents).toHaveLength(1);
     expect(linkedEvents[0]).toMatchObject({ kind: "offer_linked", actorPlatformUserId: actorId });
+  });
+
+  it("serializes different-request claims for the same target into one link and one exact conflict", async () => {
+    const firstRequest = await insertRequest(connection.db, tenantA, tenantUser, "under_review");
+    const secondRequest = await insertRequest(connection.db, tenantA, tenantUser, "under_review");
+    const [offer] = await connection.db
+      .insert(schema.commercialOffers)
+      .values({
+        tenantId: tenantA,
+        revision: 1,
+        status: "draft",
+        createdByPlatformUserId: actorId,
+      })
+      .returning();
+    const outcomes = await Promise.allSettled([
+      requests.link(actor, firstRequest.id, {
+        type: "offer",
+        targetId: offer!.id,
+        idempotencyKey: randomUUID(),
+      }),
+      requests.link(actor, secondRequest.id, {
+        type: "offer",
+        targetId: offer!.id,
+        idempotencyKey: randomUUID(),
+      }),
+    ]);
+    expect(outcomes.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    const rejected = outcomes.find(({ status }) => status === "rejected");
+    expect(rejected).toMatchObject({
+      status: "rejected",
+      reason: { response: { code: "billing_target_already_linked" }, status: 409 },
+    });
+    const links = await connection.db
+      .select()
+      .from(schema.tenantBillingRequestLinks)
+      .where(eq(schema.tenantBillingRequestLinks.offerId, offer!.id));
+    expect(links).toHaveLength(1);
+    const events = await connection.db
+      .select()
+      .from(schema.tenantBillingRequestEvents)
+      .where(eq(schema.tenantBillingRequestEvents.kind, "offer_linked"));
+    expect(events.filter(({ requestId }) => links[0]?.requestId === requestId)).toHaveLength(1);
+  });
+
+  it("treats upper/lower UUID aliases as one mutation key, entity, fingerprint, and stored link", async () => {
+    const request = await insertRequest(connection.db, tenantA, tenantUser, "under_review");
+    const [firstOffer, secondOffer] = await connection.db
+      .insert(schema.commercialOffers)
+      .values([
+        { tenantId: tenantA, revision: 1, status: "draft", createdByPlatformUserId: actorId },
+        { tenantId: tenantA, revision: 1, status: "draft", createdByPlatformUserId: actorId },
+      ])
+      .returning();
+    const idempotencyKey = randomUUID();
+    const [left, right] = await Promise.all([
+      requests.link(actor, request.id.toUpperCase(), {
+        type: "offer",
+        targetId: firstOffer!.id.toUpperCase(),
+        idempotencyKey: idempotencyKey.toUpperCase(),
+      }),
+      requests.link(actor, request.id, {
+        type: "offer",
+        targetId: firstOffer!.id,
+        idempotencyKey,
+      }),
+    ]);
+    expect(right).toEqual(left);
+    expect(left).toMatchObject({
+      requestId: request.id,
+      targetId: firstOffer!.id,
+    });
+    await expect(
+      requests.link(actor, request.id, {
+        type: "offer",
+        targetId: secondOffer!.id,
+        idempotencyKey,
+      }),
+    ).rejects.toMatchObject({ response: { code: "idempotency_key_reused" }, status: 409 });
+    const stored = await connection.db
+      .select()
+      .from(schema.tenantBillingRequestLinks)
+      .where(eq(schema.tenantBillingRequestLinks.id, left.id));
+    expect(stored).toEqual([
+      expect.objectContaining({ requestId: request.id, offerId: firstOffer!.id }),
+    ]);
   });
 
   it("creates an invoice only from the current accepted published offer and links its source request", async () => {
@@ -323,6 +483,16 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
         }),
       ]),
     );
+    const linkAudits = await connection.db
+      .select()
+      .from(schema.platformAuditEvents)
+      .where(
+        and(
+          eq(schema.platformAuditEvents.targetId, request.id),
+          eq(schema.platformAuditEvents.action, "billing.request.invoice_linked"),
+        ),
+      );
+    expect(linkAudits).toHaveLength(1);
 
     await expect(
       billing.create(actor, {
@@ -349,6 +519,42 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     await expect(
       billing.create(actor, { ...invoiceInput(tenantA), sourceOfferId: published!.id }),
     ).rejects.toMatchObject({ response: { code: "offer_version_stale" }, status: 409 });
+  });
+
+  it("serializes explicit invoice linking against issue without a deadlock or duplicate history", async () => {
+    const request = await insertRequest(connection.db, tenantA, tenantUser, "offer_prepared");
+    const invoice = await billing.create(actor, invoiceInput(tenantA));
+    const [linkOutcome, issueOutcome] = await Promise.allSettled([
+      requests.link(actor, request.id, {
+        type: "invoice",
+        targetId: invoice.id,
+        idempotencyKey: randomUUID(),
+      }),
+      billing.issue(actor, invoice.id),
+    ]);
+
+    expect(linkOutcome).toMatchObject({ status: "fulfilled" });
+    expect(issueOutcome).toMatchObject({ status: "fulfilled", value: { status: "issued" } });
+    const links = await connection.db
+      .select()
+      .from(schema.tenantBillingRequestLinks)
+      .where(eq(schema.tenantBillingRequestLinks.invoiceId, invoice.id));
+    expect(links).toHaveLength(1);
+    const linkEvents = await connection.db
+      .select()
+      .from(schema.tenantBillingRequestEvents)
+      .where(
+        and(
+          eq(schema.tenantBillingRequestEvents.requestId, request.id),
+          eq(schema.tenantBillingRequestEvents.kind, "invoice_linked"),
+        ),
+      );
+    expect(linkEvents).toHaveLength(1);
+    const [storedRequest] = await connection.db
+      .select()
+      .from(schema.tenantBillingRequests)
+      .where(eq(schema.tenantBillingRequests.id, request.id));
+    expect(["offer_prepared", "awaiting_payment"]).toContain(storedRequest!.status);
   });
 });
 
