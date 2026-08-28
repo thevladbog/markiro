@@ -2,9 +2,10 @@ import { EventEmitter } from "node:events";
 import type { IncomingMessage } from "node:http";
 import type { request as httpsRequest } from "node:https";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   downloadImage,
+  IMAGE_DOWNLOAD_TIMEOUT_MS,
   ImageDownloadError,
   isForbiddenAddress,
 } from "../src/modules/exchange/commerceml/image-download";
@@ -221,5 +222,49 @@ describe("downloadImage", () => {
     await expect(downloadImage("https://a.example/dir/1", { request })).resolves.toEqual(
       Buffer.from("ok"),
     );
+  });
+});
+
+describe("downloadImage — абсолютный дедлайн хопа (не продлевается входящими байтами)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("капающий хост (один байт, тело никогда не завершается) — timeout по абсолютному дедлайну, а не зависает вечно", async () => {
+    vi.useFakeTimers();
+    // Фейк намеренно НЕ использует fakeRequestFor: тело нужно оставить
+    // незавершённым (ни `end()`, ни новых чанков после первого) — именно
+    // так выглядит «капель» в 1 байт раз в много секунд, которая держит
+    // idle-таймаут (`timeout:` в опциях запроса) вечно взведённым.
+    const request = ((
+      _url: URL,
+      _options: unknown,
+      onResponse: (res: IncomingMessage) => void,
+    ) => {
+      const source = new PassThrough();
+      const res = source as unknown as IncomingMessage;
+      res.statusCode = 200;
+      res.headers = {};
+      const req = Object.assign(new EventEmitter(), {
+        end() {
+          queueMicrotask(() => {
+            onResponse(res);
+            source.write(Buffer.from("x")); // один байт — и тишина навсегда
+          });
+        },
+        destroy() {
+          /* абсолютный дедлайн должен вызвать это; фейку реально закрывать нечего */
+        },
+      });
+      return req;
+    }) as unknown as typeof httpsRequest;
+
+    const promise = downloadImage("https://a.example/drip", { request });
+    // Подписываемся на рассинхронизированный reject ДО advance, иначе
+    // временное состояние "pending" между advance-тиками может всплыть как
+    // unhandledRejection.
+    const assertion = expect(promise).rejects.toMatchObject({ reason: "timeout" });
+    await vi.advanceTimersByTimeAsync(IMAGE_DOWNLOAD_TIMEOUT_MS);
+    await assertion;
   });
 });

@@ -1,4 +1,5 @@
 import { lookup as dnsLookup, type LookupAddress } from "node:dns";
+import type { IncomingMessage } from "node:http";
 import { isIP } from "node:net";
 import { request as httpsRequest } from "node:https";
 
@@ -189,7 +190,17 @@ export interface ImageDownloadDeps {
  * `Location`, БЕЗ разбора в URL — см. ниже почему).
  *
  * `timeoutMs` — остаток бюджета НА ВЕСЬ downloadImage, не таймаут этого
- * конкретного хопа: считает и передаёт его вызывающий код.
+ * конкретного хопа: считает и передаёт его вызывающий код. Используется
+ * ДВАЖДЫ и по-разному:
+ *  - как `timeout:` в опциях запроса — это IDLE-таймаут сокета (Node
+ *    сбрасывает его на КАЖДОМ полученном байте), полезен, чтобы быстро
+ *    отвалиться от мёртвого соединения, но сам по себе бюджет не бережёт;
+ *  - как задержка ручного `setTimeout` ниже — это АБСОЛЮТНЫЙ дедлайн хопа,
+ *    который ничем не продлевается. Без него хост, капающий по 1 байту
+ *    раз в несколько секунд, держал бы idle-таймаут вечно взведённым и
+ *    тянул скачивание к потолку в 5 МБ сколь угодно долго — что и держит
+ *    сокет (и file-descriptor) занятым при параллельных mode=import
+ *    запросах, вопреки заявленному «таймаут на весь заход».
  */
 function fetchHop(
   url: URL,
@@ -197,6 +208,28 @@ function fetchHop(
   timeoutMs: number,
 ): Promise<{ redirectTo: string } | { body: Buffer }> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let currentRes: IncomingMessage | undefined;
+
+    // `deadlineTimer` объявляется через `const` НИЖЕ, после `req` — но
+    // ссылка на неё здесь легальна и безопасна: `clearDeadline` вызовется
+    // только асинхронно (из колбэков `request`/`req.on(...)`), то есть уже
+    // после того, как `deadlineTimer` будет проинициализирована в этом же
+    // синхронном блоке ниже.
+    const clearDeadline = () => clearTimeout(deadlineTimer);
+    const settleResolve = (value: { redirectTo: string } | { body: Buffer }) => {
+      if (settled) return;
+      settled = true;
+      clearDeadline();
+      resolve(value);
+    };
+    const settleReject = (error: ImageDownloadError) => {
+      if (settled) return;
+      settled = true;
+      clearDeadline();
+      reject(error);
+    };
+
     const req = request(
       url,
       {
@@ -208,6 +241,7 @@ function fetchHop(
         timeout: timeoutMs,
       },
       (res) => {
+        currentRes = res;
         // Этот колбэк вызывается АСИНХРОННО, на событии от сокета — то есть
         // вне тела Promise-экзекьютора выше. Throw отсюда НЕ становится
         // отказом промиса: он либо улетает как uncaughtException и валит
@@ -222,12 +256,12 @@ function fetchHop(
           const location = res.headers.location;
           if (status >= 300 && status < 400 && typeof location === "string") {
             res.resume(); // дочитать и отпустить сокет
-            resolve({ redirectTo: location });
+            settleResolve({ redirectTo: location });
             return;
           }
           if (status < 200 || status >= 300) {
             res.resume();
-            reject(new ImageDownloadError("bad_status", `HTTP ${status}`));
+            settleReject(new ImageDownloadError("bad_status", `HTTP ${status}`));
             return;
           }
           const chunks: Buffer[] = [];
@@ -236,15 +270,17 @@ function fetchHop(
             received += chunk.byteLength;
             if (received > IMAGE_DOWNLOAD_MAX_BYTES) {
               req.destroy();
-              reject(new ImageDownloadError("too_large", `> ${IMAGE_DOWNLOAD_MAX_BYTES} bytes`));
+              settleReject(new ImageDownloadError("too_large", `> ${IMAGE_DOWNLOAD_MAX_BYTES} bytes`));
               return;
             }
             chunks.push(chunk);
           });
-          res.on("end", () => resolve({ body: Buffer.concat(chunks) }));
-          res.on("error", (cause: Error) => reject(new ImageDownloadError("network", cause.message)));
+          res.on("end", () => settleResolve({ body: Buffer.concat(chunks) }));
+          res.on("error", (cause: Error) =>
+            settleReject(new ImageDownloadError("network", cause.message)),
+          );
         } catch (cause) {
-          reject(
+          settleReject(
             cause instanceof ImageDownloadError
               ? cause
               : new ImageDownloadError(
@@ -255,12 +291,20 @@ function fetchHop(
         }
       },
     );
+    // Абсолютный дедлайн хопа — не продлевается входящими байтами (в
+    // отличие от `timeout:` выше). Срабатывает независимо от того, дошли
+    // ли уже заголовки: если да, добивает и `res`, а не только `req`.
+    const deadlineTimer = setTimeout(() => {
+      req.destroy();
+      currentRes?.destroy();
+      settleReject(new ImageDownloadError("timeout", `абсолютный дедлайн хопа ${timeoutMs}ms истёк`));
+    }, timeoutMs);
     req.on("timeout", () => {
       req.destroy();
-      reject(new ImageDownloadError("timeout", `${timeoutMs}ms`));
+      settleReject(new ImageDownloadError("timeout", `${timeoutMs}ms`));
     });
     req.on("error", (cause: NodeJS.ErrnoException) => {
-      reject(
+      settleReject(
         cause.code === "EFORBIDDEN"
           ? new ImageDownloadError("forbidden_address", cause.message)
           : new ImageDownloadError("network", cause.message),
