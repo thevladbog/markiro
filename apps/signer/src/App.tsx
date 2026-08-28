@@ -18,7 +18,6 @@ export function nextSignerView(status: AgentStatus | null): SignerView {
 export function App(): ReactElement {
   const { t } = useTranslation();
   const [status, setStatus] = useState<AgentStatus | null>(null);
-  const [hostname] = useState(() => window.location.hostname || "windows-pc");
 
   useEffect(() => {
     let disposed = false;
@@ -35,10 +34,13 @@ export function App(): ReactElement {
   const view = nextSignerView(status);
   if (view === "loading") return <Spinner label={t("app.loading")} />;
   if (view === "pairing" || !status) {
+    // The hostname is resolved in Rust (never `window.location.hostname`,
+    // which in a Tauri 2 custom-protocol build is the `tauri.localhost`
+    // origin, not the PC name) and travels here through `AgentStatus`.
     return (
       <Pairing
-        hostname={hostname}
-        onPair={(code) => bridge.pair(code, hostname)}
+        hostname={status?.hostname ?? ""}
+        onPair={(code) => bridge.pair(code)}
         onPaired={() => void bridge.status().then(setStatus)}
       />
     );

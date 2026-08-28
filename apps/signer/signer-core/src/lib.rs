@@ -4,6 +4,7 @@
 
 pub mod contracts;
 pub mod cloud;
+pub mod hostname;
 pub mod journal;
 pub mod runtime;
 pub mod signer;

@@ -34,6 +34,11 @@ pub enum AgentPhase {
 #[serde(rename_all = "camelCase")]
 pub struct AgentStatus {
     pub phase: AgentPhase,
+    /// The resolved machine name (never read from the webview — see
+    /// `crate::hostname`), so the pairing screen can show it before pairing
+    /// and it stays correct even if the operating system's idea of the
+    /// computer name is unusual.
+    pub hostname: String,
     pub tenant_name: Option<String>,
     pub cert_thumbprint: Option<String>,
     pub last_token_expires_at: Option<String>,
@@ -71,6 +76,11 @@ pub struct Runtime {
     signer: Arc<dyn Signer>,
     secrets: Arc<dyn SecretStore>,
     app_version: String,
+    /// Resolved once at startup (the machine name does not change while the
+    /// agent runs) via `crate::hostname::resolve_hostname` — never taken from
+    /// the webview, whose origin in a Tauri 2 custom-protocol build is
+    /// `tauri.localhost`, not the PC name.
+    hostname: String,
     journal: Mutex<Journal>,
     /// The two pieces of `AgentStatus` that do not derive from
     /// `AgentConfig` on disk: `status()` used to hard-code both to `None`
@@ -104,6 +114,7 @@ impl Runtime {
             signer,
             secrets,
             app_version,
+            hostname: crate::hostname::resolve_hostname(),
             journal: Mutex::new(Journal::default()),
             last_token_expires_at: Mutex::new(None),
             last_error: Mutex::new(None),
@@ -152,6 +163,7 @@ impl Runtime {
         let config = self.config().unwrap_or_default();
         AgentStatus {
             phase: if config.is_paired() { AgentPhase::Idle } else { AgentPhase::Unpaired },
+            hostname: self.hostname.clone(),
             tenant_name: config.tenant_name,
             cert_thumbprint: config.cert_thumbprint,
             last_token_expires_at: self.last_token_expires_at.lock().ok().and_then(|g| g.clone()),
@@ -160,13 +172,16 @@ impl Runtime {
         }
     }
 
-    /// Redeems a pairing code and persists the DPAPI-protected secret.
-    pub async fn pair(&self, server_url: &str, code: &str, hostname: &str) -> Result<String, PairError> {
+    /// Redeems a pairing code and persists the DPAPI-protected secret. The
+    /// hostname sent is always the one this `Runtime` resolved at startup —
+    /// never something supplied by a caller, so a webview cannot register an
+    /// agent under its own custom-protocol origin.
+    pub async fn pair(&self, server_url: &str, code: &str) -> Result<String, PairError> {
         storage::validate_http_url(server_url)
             .map_err(|e| PairError::Network(e.to_string()))?;
         let client = CloudClient::new(server_url, &self.app_version)
             .map_err(|e| PairError::Network(e.to_string()))?;
-        let paired = client.pair(code, hostname).await?;
+        let paired = client.pair(code, &self.hostname).await?;
         let protected = self
             .secrets
             .protect(&paired.agent_secret)
@@ -627,5 +642,18 @@ mod tests {
         let detail = runtime.status().last_error.expect("last_error must be set");
         assert!(!detail.contains("eyJhbGciOiJIUzI1NiJ9.abc.def"), "got {detail}");
         assert!(detail.contains("[redacted]"), "got {detail}");
+    }
+
+    // --- F2: the pairing screen must show the hostname `Runtime` resolved
+    // itself, not something read from the webview. ---
+
+    #[test]
+    fn status_exposes_a_non_empty_resolved_hostname() {
+        let (_dir, runtime) = test_runtime();
+        // The actual value depends on the machine running the test (or its
+        // `windows-pc` fallback off-Windows); what matters here is that
+        // `AgentStatus` carries *some* resolved name rather than requiring
+        // the caller to supply one.
+        assert!(!runtime.status().hostname.is_empty());
     }
 }

@@ -33,10 +33,13 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
-        ))
+        // Autostart is handled by the NSIS installer's `Run` registry hook
+        // (`windows/installer-hooks.nsh`), which works without the app ever
+        // having run -- the plugin form was registered here too, with its
+        // three `autostart:*` capabilities granted, but `enable()` was never
+        // called from anywhere, so it was a second, permanently-dormant
+        // autostart mechanism. Removed rather than wired up: the NSIS hook
+        // alone is sufficient and needs no webview permission surface.
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
             let version = app.package_info().version.to_string();

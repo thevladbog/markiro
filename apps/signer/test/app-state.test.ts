@@ -10,6 +10,7 @@ describe("nextSignerView", () => {
     expect(
       nextSignerView({
         phase: "unpaired",
+        hostname: "BUH-PC",
         tenantName: null,
         certThumbprint: null,
         lastTokenExpiresAt: null,
@@ -24,6 +25,7 @@ describe("nextSignerView", () => {
       expect(
         nextSignerView({
           phase,
+          hostname: "BUH-PC",
           tenantName: "ООО Ромашка",
           certThumbprint: "AB12",
           lastTokenExpiresAt: null,

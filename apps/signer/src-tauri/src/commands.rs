@@ -18,7 +18,6 @@ pub fn signer_status(state: tauri::State<'_, SignerState>) -> AgentStatus {
 pub async fn signer_pair(
     state: tauri::State<'_, SignerState>,
     code: String,
-    hostname: String,
 ) -> Result<String, String> {
     let config = state.runtime.config().map_err(|e| e.to_string())?;
     let server_url = config
@@ -26,7 +25,7 @@ pub async fn signer_pair(
         .unwrap_or_else(|| crate::default_server_url().to_string());
     state
         .runtime
-        .pair(&server_url, &code, &hostname)
+        .pair(&server_url, &code)
         .await
         .map_err(|error| match error {
             // The cloud deliberately does not distinguish wrong from expired
