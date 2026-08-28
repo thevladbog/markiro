@@ -19,6 +19,7 @@ import { PickupReasonsModule } from "./modules/pickup-reasons/pickup-reasons.mod
 import { DisaggregationReasonsModule } from "./modules/disaggregation-reasons/disaggregation-reasons.module";
 import { DisaggregationModule } from "./modules/disaggregation/disaggregation.module";
 import { IntegrationsModule } from "./modules/integrations/integrations.module";
+import { SignerAgentsModule } from "./modules/signer-agents/signer-agents.module";
 import { ApiKeysModule } from "./modules/api-keys/api-keys.module";
 import { ExchangeModule } from "./modules/exchange/exchange.module";
 import { KioskModule } from "./modules/kiosk/kiosk.module";
@@ -117,6 +118,7 @@ export class AppModule {
         DisaggregationReasonsModule,
         DisaggregationModule,
         IntegrationsModule,
+        SignerAgentsModule.forRoot(env),
         ApiKeysModule,
         ExchangeModule,
         KioskModule,
