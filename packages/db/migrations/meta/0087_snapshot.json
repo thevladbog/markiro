@@ -1,6 +1,6 @@
 {
-  "id": "6d5affd6-fb55-4fc8-b905-73c3b76bd2d7",
-  "prevId": "05346cff-6eae-4579-a146-7702bfd94699",
+  "id": "3789d364-a440-4ed9-9df5-4b239f769857",
+  "prevId": "6d5affd6-fb55-4fc8-b905-73c3b76bd2d7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3707,6 +3707,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "time_zone": {
+          "name": "time_zone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'Europe/Moscow'"
         },
         "logo_asset_id": {
           "name": "logo_asset_id",

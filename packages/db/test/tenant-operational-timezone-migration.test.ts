@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const migrationUrl = new URL("../migrations/0086_keen_silvermane.sql", import.meta.url);
+const migrationUrl = new URL("../migrations/0087_good_infant_terrible.sql", import.meta.url);
 
 describe("tenant operational timezone migration", () => {
   it("adds a non-null Moscow-time default without rewriting organization profiles", () => {

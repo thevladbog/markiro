@@ -527,7 +527,9 @@
           "notReady": "Current documents are not ready or have not been downloaded yet.",
           "notAcknowledged": "Confirm that the downloaded documents were checked.",
           "lateEvents": "Resolve every late inventory event first.",
-          "verifiedProductionDateMissing": "Verified codes do not have a production date. Resume the inventory, correct the dates, and generate the documents again."
+          "verifiedProductionDateMissing": "Verified codes do not have a production date. Resume the inventory, correct the dates, and generate the documents again.",
+          "invalidOrganizationInn": "The organization INN is missing or invalid. Fill it in Settings and retry the generation.",
+          "organizationInnRequired": "GIS MT XML documents require the organization INN. Fill it in Settings."
         }
       },
       "late": {
@@ -2373,6 +2375,7 @@
           "table": {
             "name": "Name",
             "article": "Article",
+            "gtin": "GTIN",
             "externalRef": "1C id",
             "actions": "Actions",
             "suggestion": "Looks like: {{name}}"

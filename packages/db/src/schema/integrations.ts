@@ -114,6 +114,11 @@ export const integrationCandidates = pgTable(
     name: text("name").notNull(),
     article: text("article"),
     unit: text("unit"),
+    /** Нормализованный GTIN-14 из штрихкода файла — для экрана связки и
+     *  автосвязи следующим обменом, когда карточка появится позже позиции.
+     *  Нормализация и контрольная цифра проверены на стороне API
+     *  (@markiro/domain) до записи; NULL — штрихкода не было или он кривой. */
+    gtin: text("gtin"),
     price: numeric("price", { precision: 12, scale: 2 }),
     priceType: text("price_type"),
     firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),

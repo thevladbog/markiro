@@ -10,7 +10,7 @@ import {
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
-import { InventoryDocumentRegistryError } from "@markiro/domain";
+import { InventoryDocumentRegistryError, isParticipantInn } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
 import { PgBossService } from "../../jobs/jobs.module";
@@ -31,7 +31,12 @@ import {
 
 type InventoryDocumentRunRow = typeof schema.inventoryDocumentRuns.$inferSelect;
 type InventoryDocumentTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
-const RETRYABLE_ERRORS = ["QUEUE_FAILED", "STORAGE_FAILED", "GENERATION_FAILED"] as const;
+const RETRYABLE_ERRORS = [
+  "QUEUE_FAILED",
+  "STORAGE_FAILED",
+  "GENERATION_FAILED",
+  "INVALID_ORGANIZATION_INN",
+] as const;
 const MAX_ZIP_INPUT_BYTES = 50 * 1024 * 1024;
 
 @Injectable()
@@ -60,13 +65,7 @@ export class InventoryDocumentsService {
       if (replay.shouldEnqueue) await this.enqueueOrFail(replay.row, actorUserId);
       return this.getById(tenantId, replay.row.id);
     }
-    for (const selected of selectedFormats) {
-      try {
-        this.generators.resolveForSelection(selected.id, selected.version);
-      } catch (error) {
-        throw formatSelectionError(error);
-      }
-    }
+    const resolvedGenerators = this.resolveGeneratorsForFormats(selectedFormats);
 
     let row: InventoryDocumentRunRow;
     let shouldEnqueue = true;
@@ -98,6 +97,7 @@ export class InventoryDocumentsService {
           .where(eq(schema.organization.id, tenantId))
           .limit(1);
         if (!organization) throw new NotFoundException();
+        this.ensureOrganizationInnAvailable(resolvedGenerators, organization.inn);
         const [created] = await tx
           .insert(schema.inventoryDocumentRuns)
           .values({
@@ -107,7 +107,10 @@ export class InventoryDocumentsService {
             selectedFormats,
             requestDigest,
             organizationNameSnapshot: organization.name,
-            organizationInnSnapshot: organization.inn,
+            // Trimmed: the INN gate validates the trimmed value, and the XML
+            // generators reject raw whitespace — a stray space would loop
+            // every retry through INVALID_ORGANIZATION_INN.
+            organizationInnSnapshot: organization.inn?.trim() || null,
             inventoryNumberSnapshot: inventory.number,
             inventoryClosedAtSnapshot: inventory.closedAt,
             createdByUserId: actorUserId,
@@ -178,7 +181,9 @@ export class InventoryDocumentsService {
     if (existing.status !== "failed") {
       throw new ConflictException({ code: "INVENTORY_DOCUMENT_RUN_NOT_RETRYABLE" });
     }
-    const restored = await this.restoreFailed(existing, actorUserId, RETRYABLE_ERRORS);
+    const restored = await this.restoreFailed(existing, actorUserId, RETRYABLE_ERRORS, {
+      refreshOrganizationSnapshot: true,
+    });
     if (!restored) throw new ConflictException({ code: "INVENTORY_DOCUMENT_RUN_NOT_RETRYABLE" });
     await this.enqueueOrFail(restored, actorUserId);
     return this.getById(tenantId, runId);
@@ -481,6 +486,7 @@ export class InventoryDocumentsService {
     existing: InventoryDocumentRunRow,
     actorUserId: string,
     errorCodes: readonly string[],
+    options?: { refreshOrganizationSnapshot?: boolean },
   ): Promise<InventoryDocumentRunRow | undefined> {
     return this.db.transaction(async (tx) => {
       const [inventory] = await tx
@@ -499,9 +505,18 @@ export class InventoryDocumentsService {
       if (inventory?.status !== "closed" || inventory.resultRevision !== existing.resultRevision) {
         throw new ConflictException({ code: "INVENTORY_DOCUMENT_RUN_STALE_REVISION" });
       }
+      const organizationSnapshot = options?.refreshOrganizationSnapshot
+        ? await this.reloadOrganizationSnapshot(tx, existing)
+        : undefined;
       const [restored] = await tx
         .update(schema.inventoryDocumentRuns)
-        .set({ status: "queued", errorCode: null, completedAt: null, updatedAt: new Date() })
+        .set({
+          status: "queued",
+          errorCode: null,
+          completedAt: null,
+          updatedAt: new Date(),
+          ...organizationSnapshot,
+        })
         .where(
           and(
             eq(schema.inventoryDocumentRuns.tenantId, existing.tenantId),
@@ -524,6 +539,84 @@ export class InventoryDocumentsService {
       );
       return restored;
     });
+  }
+
+  /**
+   * Re-reads the tenant's current organization name/INN and re-validates the
+   * INN requirement for the run's already-selected formats, the same way
+   * `create` does. Retries must reflect the issuer's current details rather
+   * than the (possibly stale or invalid) values captured when the run was
+   * first created.
+   *
+   * Formats are resolved with execution semantics here (not selection
+   * semantics): the run's `selectedFormats` were already fixed when it was
+   * first created, so a retry must be able to resolve a format that has since
+   * been superseded in the catalog (e.g. a frozen historical aggregation
+   * version) rather than reject it as if it were a brand-new selection.
+   */
+  private async reloadOrganizationSnapshot(
+    tx: InventoryDocumentTransaction,
+    existing: InventoryDocumentRunRow,
+  ): Promise<{ organizationNameSnapshot: string; organizationInnSnapshot: string | null }> {
+    const [organization] = await tx
+      .select({
+        name: schema.organization.name,
+        inn: schema.orgProfiles.inn,
+      })
+      .from(schema.organization)
+      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
+      .where(eq(schema.organization.id, existing.tenantId))
+      .limit(1);
+    if (!organization) throw new NotFoundException();
+    const resolvedGenerators = this.resolveGeneratorsForFormats(existing.selectedFormats, {
+      mode: "execution",
+    });
+    this.ensureOrganizationInnAvailable(resolvedGenerators, organization.inn);
+    return {
+      organizationNameSnapshot: organization.name,
+      // Same trim as create: keep the snapshot in the exact form the
+      // generators validate.
+      organizationInnSnapshot: organization.inn?.trim() || null,
+    };
+  }
+
+  private resolveGeneratorsForFormats(
+    selectedFormats: readonly { id: string; version: number }[],
+    options?: { mode?: "selection" | "execution" },
+  ): ReturnType<InventoryDocumentGeneratorRegistry["resolveForSelection"]>[] {
+    const mode = options?.mode ?? "selection";
+    return selectedFormats.map((selected) => {
+      try {
+        return mode === "execution"
+          ? this.generators.resolveForExecution(selected.id, selected.version)
+          : this.generators.resolveForSelection(selected.id, selected.version);
+      } catch (error) {
+        throw formatSelectionError(error);
+      }
+    });
+  }
+
+  private ensureOrganizationInnAvailable(
+    resolvedGenerators: readonly ReturnType<
+      InventoryDocumentGeneratorRegistry["resolveForSelection"]
+    >[],
+    inn: string | null,
+  ): void {
+    const needsInn = resolvedGenerators.some(
+      (generator) => generator.descriptor.requiresOrganizationInn === true,
+    );
+    if (!needsInn) return;
+    const trimmed = inn?.trim() ?? "";
+    // Minimum shared validation: non-empty AND shaped like a usable
+    // organization/participant INN (isParticipantInn's 9/10/12-digit forms).
+    // This deliberately does not enforce aggregation's stricter 10-digit-only
+    // requirement, so a 12-digit individual-entrepreneur INN can still pass
+    // this gate and only fail later at generation for aggregation formats —
+    // a pre-existing discrepancy between the aggregation and disaggregation
+    // domain validators, not introduced by this gate.
+    if (trimmed.length === 0 || !isParticipantInn(trimmed)) {
+      throw new ConflictException({ code: "ORGANIZATION_INN_REQUIRED" });
+    }
   }
 
   private async enqueueOrFail(row: InventoryDocumentRunRow, actorUserId: string): Promise<void> {
