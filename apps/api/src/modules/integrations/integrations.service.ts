@@ -594,7 +594,14 @@ export class IntegrationsService {
     const unlinkedProducts = await this.db
       .select({ id: schema.products.id, name: schema.products.name })
       .from(schema.products)
-      .where(and(eq(schema.products.tenantId, tenantId), isNull(schema.products.externalRef)))
+      .where(
+        and(
+          eq(schema.products.tenantId, tenantId),
+          isNull(schema.products.externalRef),
+          // Архивный («не использовать») товар не предлагаем к связыванию.
+          eq(schema.products.archived, false),
+        ),
+      )
       // Review fix (PR #32, item 7): see `UNLINKED_PRODUCTS_LIMIT`'s own comment.
       .limit(UNLINKED_PRODUCTS_LIMIT);
 
