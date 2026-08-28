@@ -2,6 +2,38 @@ body {
   margin: 0;
 }
 
+.mk-app-header__profile-link {
+  box-sizing: border-box;
+  display: none;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  color: var(--fg-2);
+  background: var(--surface-card);
+}
+
+.mk-app-header__profile-link:hover {
+  color: var(--fg-1);
+  background: var(--surface-panel);
+}
+
+.mk-app-header__profile-link:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.mk-app-header__profile-link svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
 @media (max-width: 767px) {
   .mk-app-shell {
     height: 100dvh !important;
@@ -43,5 +75,23 @@ body {
 
   .mk-app-shell__content {
     min-height: 0;
+  }
+
+  .mk-app-header {
+    gap: 8px !important;
+    padding: 10px 16px !important;
+  }
+
+  .mk-app-header__identity {
+    flex: 1;
+  }
+
+  .mk-app-header__actions {
+    gap: 6px !important;
+  }
+
+  .mk-app-header__profile-link {
+    display: inline-flex;
+    flex: 0 0 auto;
   }
 }

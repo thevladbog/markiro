@@ -194,6 +194,9 @@ for (const viewport of [
     await expect(page.getByText("Использовано: 3 из 4")).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Основная навигация" })).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Разделы биллинга" })).toBeVisible();
+    const profileLink = page.getByRole("link", { name: "Открыть профиль Елена Ким" });
+    await expect(profileLink).toHaveCount(1);
+    await expect(profileLink).toBeVisible();
     if (viewport.width >= 768) {
       const sidebarBox = await page
         .getByRole("navigation", { name: "Основная навигация" })
@@ -204,8 +207,6 @@ for (const viewport of [
       expect(sidebarBox).not.toBeNull();
       expect(headingBox).not.toBeNull();
       expect(headingBox!.x).toBeGreaterThanOrEqual(sidebarBox!.x + sidebarBox!.width);
-    } else {
-      await expect(page.getByRole("link", { name: "Открыть профиль Елена Ким" })).toHaveCount(0);
     }
     await assertNoPageOverflow(page);
     expect(unexpected).toEqual([]);
