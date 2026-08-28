@@ -84,6 +84,17 @@ queries show no count and do not break navigation. The query key remains inside 
   the expected glyph boundary and no replacement character or unpaired surrogate in subject,
   HTML, or text.
 
+### Review fix round 3
+
+- **RED:** a real `TenantBillingRequestsService.reply` left the request status at
+  `clarification_required`, so the worker still sent clarification A when it considered only
+  status transitions. **GREEN:** the authoritative action boundary is now the latest exact
+  `status_changed` or `tenant_reply` event, tenant/request scoped and ordered by
+  `created_at DESC, id DESC`; the source must itself remain a transition into
+  `clarification_required`. Real reply tests prove A cancels without a later transition, while a
+  same-timestamp A/reply/B cycle sends only B. A later platform comment and a later foreign-tenant
+  transition do not invalidate B.
+
 ## Changed areas
 
 - `packages/email` — strict typed RU/EN billing notification renderer and escaping/bounds tests.
@@ -110,6 +121,9 @@ queries show no count and do not break navigation. The query key remains inside 
 - PASS — review-fix round 2 complete email suite: 3 files / 23 tests, source/test TypeScript,
   ESLint, and build. Combined API notification/mail/workflow regression: 6 files / 140 tests;
   API TypeScript no-emit, ESLint, and build.
+- PASS — review-fix round 3 notification scratch suite: 1 file / 9 tests. Relevant mail,
+  notification, tenant reply, request, offer, invoice, and act workflow regression: 7 files / 141
+  tests; API TypeScript no-emit, ESLint, and build.
 - PASS — API TypeScript no-emit, ESLint, and Nest build.
 - PASS — admin billing routing 15/15, i18n 4/4, TypeScript, ESLint, and production Vite build. ESLint
   retains five inherited hook warnings outside the changed billing files; the build retains the

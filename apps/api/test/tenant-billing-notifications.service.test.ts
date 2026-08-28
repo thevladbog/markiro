@@ -15,6 +15,8 @@ import {
   TENANT_BILLING_SUBJECT_NAME_MAX,
   tenantBillingNotificationPayloadSchema,
 } from "../src/modules/mail/tenant-billing-notification-payload";
+import type { ObjectStorageService } from "../src/modules/storage/object-storage.service";
+import { TenantBillingRequestsService } from "../src/modules/tenant-billing/tenant-billing-requests.service";
 import { TenantBillingNotificationsService } from "../src/modules/tenant-billing/tenant-billing-notifications.service";
 
 const ready = Boolean(process.env.DATABASE_URL);
@@ -34,6 +36,7 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
   let tenantId: string;
   let foreignTenantId: string;
   let service: TenantBillingNotificationsService;
+  let requestsService: TenantBillingRequestsService;
 
   beforeAll(async () => {
     await maintenance.pool.query(`CREATE DATABASE "${databaseName}"`);
@@ -98,6 +101,7 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
       "https://cabinet.markiro.test",
       () => new Date(fixedNow),
     );
+    requestsService = new TenantBillingRequestsService(db, {} as ObjectStorageService);
   });
 
   afterAll(async () => {
@@ -567,16 +571,14 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
     expect(transport.send).toHaveBeenCalledOnce();
   });
 
-  it("sends only the latest clarification status transition after a reply and re-entry", async () => {
+  it("cancels a clarification after a real tenant reply even while its status remains unchanged", async () => {
     const platformUserId = `platform-${randomUUID()}`;
     const requestId = randomUUID();
     const tiedAt = new Date("2026-08-28T18:00:00.000Z");
-    const firstClarificationId = "11111111-1111-4111-8111-111111111111";
-    const replyId = "22222222-2222-4222-8222-222222222222";
-    const latestClarificationId = "33333333-3333-4333-8333-333333333333";
+    const firstClarificationId = "00000000-0000-4000-8000-000000000001";
     await db.insert(schema.platformUsers).values({
       id: platformUserId,
-      name: "Clarification cycle actor",
+      name: "Clarification reply actor",
       email: `${platformUserId}@example.test`,
       role: "platform_admin",
       status: "active",
@@ -585,10 +587,10 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
     await db.insert(schema.tenantBillingRequests).values({
       id: requestId,
       tenantId,
-      number: `REQ-CYCLE-${randomUUID()}`,
+      number: `REQ-REPLY-${randomUUID()}`,
       type: "other",
       status: "clarification_required",
-      description: "Clarification cycle",
+      description: "Clarification reply",
       responsibleSide: "tenant",
       idempotencyKey: randomUUID(),
       createdByUserId: `${tenantId}:owner`,
@@ -614,19 +616,98 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
         subjectName: "REQ cycle A",
       }),
     );
-    await db.insert(schema.tenantBillingRequestEvents).values([
+    const reply = await requestsService.reply(tenantId, `${tenantId}:owner`, requestId, {
+      message: "Requested facts supplied",
+      idempotencyKey: randomUUID(),
+    });
+    await db
+      .update(schema.tenantBillingRequestEvents)
+      .set({ createdAt: tiedAt })
+      .where(eq(schema.tenantBillingRequestEvents.id, reply.id));
+    const transport = { verify: vi.fn(async () => true), send: vi.fn(async () => undefined) };
+    const jobs = new MailJobsService(connection.pool as unknown as MailPgPool, crypto, transport);
+
+    for (const deliveryId of firstDeliveryIds) await jobs.processDelivery(deliveryId);
+
+    const firstDeliveries = await db
+      .select({ id: schema.emailDeliveries.id, status: schema.emailDeliveries.status })
+      .from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.tenantId, tenantId));
+    expect(
+      firstDeliveries.filter(({ id }) => firstDeliveryIds.includes(id)).map(({ status }) => status),
+    ).toEqual(["canceled", "canceled"]);
+    expect(transport.send).not.toHaveBeenCalled();
+  });
+
+  it("uses the tie-broken latest relevant action while ignoring comments and foreign events", async () => {
+    const platformUserId = `platform-${randomUUID()}`;
+    const requestId = randomUUID();
+    const foreignRequestId = randomUUID();
+    const tiedAt = new Date("2026-08-28T18:00:00.000Z");
+    const firstClarificationId = "00000000-0000-4000-8000-000000000002";
+    const latestClarificationId = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    await db.insert(schema.platformUsers).values({
+      id: platformUserId,
+      name: "Clarification cycle actor",
+      email: `${platformUserId}@example.test`,
+      role: "platform_admin",
+      status: "active",
+      twoFactorEnabled: true,
+    });
+    await db.insert(schema.tenantBillingRequests).values([
       {
-        id: replyId,
+        id: requestId,
         tenantId,
-        requestId,
-        kind: "status_changed",
-        fromStatus: "clarification_required",
-        toStatus: "under_review",
-        actorKind: "platform_user",
-        actorPlatformUserId: platformUserId,
+        number: `REQ-CYCLE-${randomUUID()}`,
+        type: "other",
+        status: "clarification_required",
+        description: "Clarification cycle",
+        responsibleSide: "tenant",
         idempotencyKey: randomUUID(),
-        createdAt: tiedAt,
+        createdByUserId: `${tenantId}:owner`,
       },
+      {
+        id: foreignRequestId,
+        tenantId: foreignTenantId,
+        number: `REQ-FOREIGN-${randomUUID()}`,
+        type: "other",
+        status: "clarification_required",
+        description: "Foreign clarification",
+        responsibleSide: "tenant",
+        idempotencyKey: randomUUID(),
+        createdByUserId: `${tenantId}:owner`,
+      },
+    ]);
+    await db.insert(schema.tenantBillingRequestEvents).values({
+      id: firstClarificationId,
+      tenantId,
+      requestId,
+      kind: "status_changed",
+      fromStatus: "under_review",
+      toStatus: "clarification_required",
+      actorKind: "platform_user",
+      actorPlatformUserId: platformUserId,
+      idempotencyKey: randomUUID(),
+      createdAt: tiedAt,
+    });
+    const firstDeliveryIds = await db.transaction((tx) =>
+      service.enqueueInTransaction(tx, {
+        tenantId,
+        eventKind: "clarification_required",
+        entityId: requestId,
+        revision: firstClarificationId,
+        subjectName: "REQ cycle A",
+      }),
+    );
+    const reply = await requestsService.reply(tenantId, `${tenantId}:owner`, requestId, {
+      message: "Cycle answer",
+      idempotencyKey: randomUUID(),
+    });
+    await db
+      .update(schema.tenantBillingRequestEvents)
+      .set({ createdAt: tiedAt })
+      .where(eq(schema.tenantBillingRequestEvents.id, reply.id));
+    await db.insert(schema.tenantBillingRequestEvents).values([
       {
         id: latestClarificationId,
         tenantId,
@@ -640,15 +721,27 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
         createdAt: tiedAt,
       },
       {
-        id: "44444444-4444-4444-8444-444444444444",
+        id: randomUUID(),
         tenantId,
         requestId,
         kind: "platform_comment",
-        message: "A later non-status event must not replace the status transition",
+        message: "An unrelated event must not replace the action boundary",
         actorKind: "platform_user",
         actorPlatformUserId: platformUserId,
         idempotencyKey: randomUUID(),
-        createdAt: tiedAt,
+        createdAt: new Date(tiedAt.getTime() + 1_000),
+      },
+      {
+        id: randomUUID(),
+        tenantId: foreignTenantId,
+        requestId: foreignRequestId,
+        kind: "status_changed",
+        fromStatus: "under_review",
+        toStatus: "clarification_required",
+        actorKind: "platform_user",
+        actorPlatformUserId: platformUserId,
+        idempotencyKey: randomUUID(),
+        createdAt: new Date(tiedAt.getTime() + 2_000),
       },
     ]);
     const latestDeliveryIds = await db.transaction((tx) =>
