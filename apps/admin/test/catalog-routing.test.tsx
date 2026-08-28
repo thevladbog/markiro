@@ -267,9 +267,12 @@ it("keeps a failed create panel open and retries all required data", async () =>
   await screen.findByRole("dialog", { name: "Новый продукт" });
   expect(await screen.findByText("Не удалось загрузить данные формы продукта.")).toBeDefined();
   const callsBeforeRetry = fetchMock.mock.calls.length;
+  // The catalog page appends filter params to the products path, so match by prefix.
   const requiredPaths = ["/api/products", "/api/counterparties"];
+  const matchesPath = (url: unknown, path: string) =>
+    String(url) === path || String(url).startsWith(`${path}?`);
   const requiredCallsBeforeRetry = requiredPaths.map(
-    (path) => fetchMock.mock.calls.filter(([url]) => String(url) === path).length,
+    (path) => fetchMock.mock.calls.filter(([url]) => matchesPath(url, path)).length,
   );
   failing = false;
   await user.click(screen.getByRole("button", { name: "Повторить" }));
@@ -277,7 +280,7 @@ it("keeps a failed create panel open and retries all required data", async () =>
   expect(await screen.findByLabelText("Название")).toBeDefined();
   expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBeforeRetry);
   requiredPaths.forEach((path, index) => {
-    expect(fetchMock.mock.calls.filter(([url]) => String(url) === path).length).toBe(
+    expect(fetchMock.mock.calls.filter(([url]) => matchesPath(url, path)).length).toBe(
       requiredCallsBeforeRetry[index]! + 1,
     );
   });
@@ -343,7 +346,7 @@ it("releases a busy-only Back block after an unchanged edit request fails", asyn
       if (String(url) === "/api/products/p1" && init?.method === "PATCH") {
         return updateResponse;
       }
-      if (String(url) === "/api/products") return jsonResponse(200, { items: [product] });
+      if (String(url).startsWith("/api/products")) return jsonResponse(200, { items: [product] });
       return jsonResponse(200, { items: [] });
     }),
   );

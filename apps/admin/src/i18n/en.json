@@ -337,6 +337,7 @@
         "requiredError": "Complete all required fields.",
         "dateError": "The end date cannot be earlier than the start date.",
         "dependenciesError": "Could not load products, lines, or templates.",
+        "archivedProductHint": "not in use",
         "next": "Continue to exports"
       },
       "detail": {
@@ -762,11 +763,13 @@
       "statusFilter": {
         "all": "All statuses",
         "draft": "Draft",
-        "active": "Active"
+        "active": "Active",
+        "archived": "Not in use"
       },
       "status": {
         "draft": "Draft",
-        "active": "Active"
+        "active": "Active",
+        "archived": "Not in use"
       },
       "deleteConfirmTitle": "Delete product?",
       "deleteConfirmBody": "Product \"{{name}}\" will be permanently deleted.",
@@ -820,6 +823,8 @@
         "imageRemoveSuccess": "Photo removed",
         "imageError": "Could not change the photo. The current photo was preserved.",
         "draftBanner": "Draft — fill in the group and capacities to run shifts",
+        "archivedLabel": "Do not use",
+        "archivedHint": "The product cannot be selected on kiosks, in shifts, or in integrations. It stays available for inventory and in history.",
         "gtinOwnerHint": "GTIN owner — {{name}}",
         "applyCounterparty": "Apply counterparty",
         "gtinOwnerUnknown": "GTIN owner could not be determined — double check the code before saving.",
@@ -1145,6 +1150,7 @@
         "productSearchPlaceholder": "Search products",
         "productEmpty": "No products found",
         "draftHint": "draft -- unavailable",
+        "archivedHint": "not in use",
         "modeLabel": "Mode",
         "modeValidation": "Validation",
         "modeAggregation": "Aggregation",

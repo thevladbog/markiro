@@ -109,6 +109,7 @@ const CURRENT_PRODUCT_SELECTION = {
   boxCapacity: schema.products.boxCapacity,
   palletCapacity: schema.products.palletCapacity,
   status: schema.products.status,
+  archived: schema.products.archived,
   defaultCounterpartyId: schema.products.defaultCounterpartyId,
   unitPrice: schema.products.unitPrice,
   egaisCode: schema.products.egaisCode,
@@ -274,6 +275,9 @@ export class ShiftsService {
     }
     if (product.status === "draft") {
       throw new UnprocessableEntityException("Product card is incomplete");
+    }
+    if (product.archived) {
+      throw new UnprocessableEntityException("Product is marked as not in use");
     }
 
     const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : product.boxCapacity;
@@ -803,6 +807,7 @@ export class ShiftsService {
       boxCapacity: productRow.boxCapacity,
       palletCapacity: productRow.palletCapacity,
       status: productRow.status,
+      archived: productRow.archived,
       defaultCounterpartyId: productRow.defaultCounterpartyId,
       defaultLabelTemplateId: null,
       unitPrice: productRow.unitPrice,

@@ -259,7 +259,9 @@ export function ShiftsPage() {
     ...(productionFromDate ? { productionFrom: productionFromDate } : {}),
     ...(productionToDate ? { productionTo: productionToDate } : {}),
   });
-  const productsQuery = useProducts();
+  // "all" keeps an archived product's name resolvable when editing an old
+  // shift; the ShiftForm combobox disables archived options for creation.
+  const productsQuery = useProducts({ archived: "all" });
   const linesQuery = useLines();
   const counterpartiesQuery = useCounterparties();
   const labelTemplatesQuery = useLabelTemplates();

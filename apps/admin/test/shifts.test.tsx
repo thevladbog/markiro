@@ -136,6 +136,7 @@ const PRODUCT_A: ProductDto = {
   shelfLifeDays: null,
   externalRef: null,
   status: "active",
+  archived: false,
   defaultCounterpartyId: "cp1",
   createdAt: "2026-01-01T00:00:00.000Z",
 };
@@ -505,7 +506,7 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, { ...activeShift, plannedQty: 1200, boxLabelTemplateId: "lt2" });
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [activeShift] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_B] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
       }
@@ -566,7 +567,7 @@ describe("ShiftsPage", () => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -661,7 +662,7 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, { ...activeShift, plannedQty: 1200 });
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [activeShift] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_B] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
       }
@@ -711,7 +712,7 @@ describe("ShiftsPage", () => {
         });
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [activeShift] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_B] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
       }
@@ -878,7 +879,8 @@ describe("ShiftsPage", () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [DRAFT_PRODUCT, PRODUCT_A] });
+      if (path.startsWith("/api/products"))
+        return jsonResponse(200, { items: [DRAFT_PRODUCT, PRODUCT_A] });
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -899,12 +901,45 @@ describe("ShiftsPage", () => {
     expect((activeOption as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("requests archived products for name resolution but disables them in the product select", async () => {
+    const user = userEvent.setup();
+    const archivedProduct = { ...PRODUCT_A, id: "p9", name: "Снятый продукт", archived: true };
+    const productUrls: string[] = [];
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path.startsWith("/api/products")) {
+        productUrls.push(path);
+        return jsonResponse(200, { items: [archivedProduct, PRODUCT_A] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+
+    // "all" keeps an archived product's name resolvable on historical shifts…
+    expect(productUrls[0]).toBe("/api/products?archived=all");
+
+    // …while the creation combobox refuses to offer it.
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await screen.findByText("Новая смена");
+    await user.click(screen.getByRole("combobox", { name: "Продукт" }));
+    const archivedOption = screen.getByRole("option", {
+      name: `${archivedProduct.name} (не используется)`,
+    });
+    expect((archivedOption as HTMLButtonElement).disabled).toBe(true);
+    const activeOption = screen.getByRole("option", { name: PRODUCT_A.name });
+    expect((activeOption as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("prefills capacity inputs and preselects the counterparty when the product changes (aggregation mode)", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [COUNTERPARTY] });
       return jsonResponse(200, { items: [] });
     });
@@ -936,7 +971,7 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, { defaultBoxLabelTemplateId: null });
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [COUNTERPARTY] });
       return jsonResponse(200, { items: [] });
     });
@@ -982,7 +1017,7 @@ describe("ShiftsPage", () => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_B] });
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1016,7 +1051,7 @@ describe("ShiftsPage", () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
       }
@@ -1043,7 +1078,7 @@ describe("ShiftsPage", () => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") {
+      if (path.startsWith("/api/products")) {
         return jsonResponse(200, { items: [PRODUCT_A, PRODUCT_B_WITH_DEFAULTS] });
       }
       if (path === "/api/counterparties") {
@@ -1098,7 +1133,7 @@ describe("ShiftsPage", () => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
       return jsonResponse(200, { items: [] });
     });
@@ -1132,7 +1167,7 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, { defaultBoxLabelTemplateId: null });
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_B] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
       }
@@ -1180,7 +1215,7 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, SHIFT_PLANNING_CONFIG);
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
       }
@@ -1227,7 +1262,7 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, SHIFT_PLANNING_CONFIG);
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
       }
@@ -1264,7 +1299,7 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, { ...SHIFT_PLANNING_CONFIG, defaultBoxLabelTemplateId: null });
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_B] });
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1296,7 +1331,7 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, { ...SHIFT_PLANNING_CONFIG, defaultBoxLabelTemplateId: null });
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1318,7 +1353,7 @@ describe("ShiftsPage", () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1433,7 +1468,7 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, updated);
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [PLANNED_SHIFT] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
       return jsonResponse(200, { items: [] });
     });
@@ -1667,7 +1702,7 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, SHIFT_PLANNING_CONFIG);
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [snapshottedShift] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
       }
@@ -1714,7 +1749,7 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, SHIFT_PLANNING_CONFIG);
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [snapshottedShift] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
       }
@@ -1753,7 +1788,7 @@ describe("ShiftsPage", () => {
           return jsonResponse(200, SHIFT_PLANNING_CONFIG);
         }
         if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-        if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+        if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
         if (path === "/api/label-templates") {
           return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
         }
@@ -1789,7 +1824,7 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, SHIFT_PLANNING_CONFIG);
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
@@ -1855,7 +1890,7 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, SHIFT_PLANNING_CONFIG);
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
-      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });

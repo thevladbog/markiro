@@ -72,7 +72,9 @@ export function CodeSearchPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
 
-  const { data: productsData } = useProducts();
+  // "all": code search is a reporting surface — codes produced under a
+  // now-archived product must stay findable by that product.
+  const { data: productsData } = useProducts({ archived: "all" });
 
   const { data, isPending, isError } = useCodes({
     page,

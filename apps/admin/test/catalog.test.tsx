@@ -52,6 +52,14 @@ afterEach(async () => {
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
+/**
+ * GET /products in any filter variant. The catalog page always sends an
+ * archived filter ("all" by default), so exact-URL matching would miss it.
+ */
+function isProductsList(path: string): boolean {
+  return path === "/api/products" || path.startsWith("/api/products?");
+}
+
 function jsonResponse(status: number, body: unknown): Response {
   return {
     ok: status >= 200 && status < 300,
@@ -123,6 +131,7 @@ const DRAFT_PRODUCT = {
   egaisCode: null,
   shelfLifeDays: null,
   status: "draft",
+  archived: false,
   defaultCounterpartyId: null,
   createdAt: "2026-01-01T00:00:00.000Z",
 };
@@ -138,6 +147,7 @@ const ACTIVE_PRODUCT = {
   egaisCode: null,
   shelfLifeDays: null,
   status: "active",
+  archived: false,
   defaultCounterpartyId: null,
   createdAt: "2026-01-02T00:00:00.000Z",
 };
@@ -146,7 +156,7 @@ describe("CatalogPage", () => {
   it("does not request integration candidates for a manager without integrations.read", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
-      if (path === "/api/products") return jsonResponse(200, { items: [DRAFT_PRODUCT] });
+      if (isProductsList(path)) return jsonResponse(200, { items: [DRAFT_PRODUCT] });
       if (path.includes("/candidates")) {
         throw new Error("manager must not request integration candidates");
       }
@@ -178,7 +188,7 @@ describe("CatalogPage", () => {
       },
     ]);
     const fetchMock = vi.fn(async (url: string) => {
-      if (String(url) === "/api/products") return jsonResponse(200, { items: [DRAFT_PRODUCT] });
+      if (isProductsList(String(url))) return jsonResponse(200, { items: [DRAFT_PRODUCT] });
       throw new Error(`unexpected fetch: ${String(url)}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -195,7 +205,7 @@ describe("CatalogPage", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const path = String(url);
-        if (path === "/api/products") return jsonResponse(200, { items: [DRAFT_PRODUCT] });
+        if (isProductsList(path)) return jsonResponse(200, { items: [DRAFT_PRODUCT] });
         if (path.includes("/candidates")) return jsonResponse(200, { candidates: [] });
         return jsonResponse(200, { items: [] });
       }),
@@ -227,10 +237,79 @@ describe("CatalogPage", () => {
     const table = within(screen.getByRole("table"));
     expect(table.getByText("Черновик")).toBeDefined();
     expect(table.getByText("Активен")).toBeDefined();
-    expect(fetchMock).toHaveBeenCalledWith("/api/products", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("/api/products?archived=all", expect.any(Object));
     expect(screen.getByTestId("catalog-page").classList.contains("mk-catalog-page")).toBe(true);
     expect(screen.getByRole("group", { name: "Фильтры каталога" })).toBeDefined();
     expect(screen.getByText("2 продукта")).toBeDefined();
+  });
+
+  it("shows the archive chip, filters archived products, and clears the flag from the edit form", async () => {
+    // Complete card + checksum-valid gtin14 (DRAFT_PRODUCT's vector), so the
+    // zod-validated edit form can actually submit the PATCH.
+    const retired = {
+      ...DRAFT_PRODUCT,
+      id: "p7",
+      name: "Снятый товар",
+      status: "active",
+      productGroup: "Молочные продукты",
+      boxCapacity: 12,
+      palletCapacity: 48,
+      archived: true,
+    };
+    const listUrls: string[] = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      if (path === `/api/products/${retired.id}` && init?.method === "PATCH") {
+        return jsonResponse(200, { ...retired, archived: false });
+      }
+      if (isProductsList(path)) {
+        listUrls.push(path);
+        return jsonResponse(200, { items: [ACTIVE_PRODUCT, retired] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    renderPage();
+    await screen.findByText("Снятый товар");
+
+    // «Все статусы» is the default and opts into archived rows server-side.
+    expect(listUrls[0]).toBe("/api/products?archived=all");
+    const table = within(screen.getByRole("table"));
+    expect(table.getByText("Не используется")).toBeDefined();
+
+    // The dedicated filter requests archived rows only, without a status param.
+    await user.click(screen.getByRole("combobox", { name: "Статус" }));
+    await user.click(await screen.findByRole("option", { name: "Не используется" }));
+    await waitFor(() => expect(listUrls).toContain("/api/products?archived=true"));
+
+    // The edit form surfaces the flag as a checked "do not use" checkbox;
+    // clearing it saves through the ordinary PATCH.
+    fireEvent.click(screen.getAllByRole("button", { name: "Изменить" })[1]!);
+    await screen.findByText("Изменить продукт");
+    const archivedCheckbox = screen.getByRole("checkbox", { name: "Не использовать" });
+    expect(archivedCheckbox.getAttribute("data-state")).toBe("checked");
+    await user.click(archivedCheckbox);
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/products/${retired.id}`,
+        expect.objectContaining({
+          method: "PATCH",
+          body: expect.stringContaining('"archived":false'),
+        }),
+      );
+    });
+
+    // The success toast mounts outside the React root, so RTL's cleanup()
+    // leaves it behind; dismiss it before later tests query role="status".
+    await user.click(
+      within(await screen.findByRole("status")).getByRole("button", { name: "Закрыть" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
   });
 
   it("paginates the list with a default page size of 10 and a selectable size", async () => {
@@ -337,7 +416,7 @@ describe("CatalogPage", () => {
       if (String(url) === `/api/products/${DRAFT_PRODUCT.id}` && init?.method === "DELETE") {
         return deleteResponse;
       }
-      if (String(url) === "/api/products") {
+      if (isProductsList(String(url))) {
         return jsonResponse(200, { items: [DRAFT_PRODUCT] });
       }
       return jsonResponse(200, { items: [] });
@@ -389,7 +468,7 @@ describe("CatalogPage", () => {
       if (String(url) === `/api/products/${DRAFT_PRODUCT.id}` && init?.method === "DELETE") {
         return jsonResponse(409, { message: "Продукт используется в смене" });
       }
-      if (String(url) === "/api/products") {
+      if (isProductsList(String(url))) {
         return jsonResponse(200, { items: [DRAFT_PRODUCT] });
       }
       return jsonResponse(200, { items: [] });
@@ -687,7 +766,10 @@ describe("CatalogPage", () => {
 
     await waitFor(
       () => {
-        expect(fetchMock).toHaveBeenCalledWith("/api/products?search=cheese", expect.any(Object));
+        expect(fetchMock).toHaveBeenCalledWith(
+          "/api/products?search=cheese&archived=all",
+          expect.any(Object),
+        );
       },
       { timeout: 1000 },
     );
@@ -911,7 +993,7 @@ describe("CatalogPage", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (String(url) === "/api/products") {
+        if (isProductsList(String(url))) {
           productsGetCount += 1;
           return jsonResponse(200, { items: [serverProduct] });
         }
