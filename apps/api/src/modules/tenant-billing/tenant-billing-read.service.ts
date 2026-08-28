@@ -151,111 +151,125 @@ export class TenantBillingReadService {
       conditions.push(gte(schema.invoices.issueDate, new Date(`${query.from}T00:00:00.000Z`)));
     if (query.to)
       conditions.push(lte(schema.invoices.issueDate, new Date(`${query.to}T23:59:59.999Z`)));
-    const invoices = await this.db
-      .select()
-      .from(schema.invoices)
-      .where(and(...conditions))
-      .orderBy(
-        desc(schema.invoices.issuedAt),
-        desc(schema.invoices.createdAt),
-        desc(schema.invoices.id),
-      )
-      .offset(query.offset)
-      .limit(query.limit);
-    const ids = invoices.map((invoice) => invoice.id);
-    if (ids.length === 0) return { items: [] };
-    const payments = await this.db
-      .select()
-      .from(schema.billingPayments)
-      .where(
-        and(
-          eq(schema.billingPayments.tenantId, tenantId),
-          inArray(schema.billingPayments.invoiceId, ids),
-        ),
-      )
-      .orderBy(schema.billingPayments.paidAt, schema.billingPayments.id);
-    return {
-      items: invoices.map((invoice) =>
-        this.toInvoice(
-          invoices.find((row) => row.id === invoice.id)!,
-          payments.filter((payment) => payment.invoiceId === invoice.id),
-          now,
-        ),
-      ),
-    };
+    return this.db.transaction(
+      async (tx) => {
+        const invoices = await tx
+          .select()
+          .from(schema.invoices)
+          .where(and(...conditions))
+          .orderBy(
+            desc(schema.invoices.issuedAt),
+            desc(schema.invoices.createdAt),
+            desc(schema.invoices.id),
+          )
+          .offset(query.offset)
+          .limit(query.limit);
+        const ids = invoices.map((invoice) => invoice.id);
+        if (ids.length === 0) return { items: [] };
+        const payments = await tx
+          .select()
+          .from(schema.billingPayments)
+          .where(
+            and(
+              eq(schema.billingPayments.tenantId, tenantId),
+              inArray(schema.billingPayments.invoiceId, ids),
+            ),
+          )
+          .orderBy(schema.billingPayments.paidAt, schema.billingPayments.id);
+        return {
+          items: invoices.map((invoice) =>
+            this.toInvoice(
+              invoices.find((row) => row.id === invoice.id)!,
+              payments.filter((payment) => payment.invoiceId === invoice.id),
+              now,
+            ),
+          ),
+        };
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   }
 
   async invoiceDetail(tenantId: string, id: string): Promise<TenantInvoiceDetailDto> {
-    const [invoice] = await this.db
-      .select()
-      .from(schema.invoices)
-      .where(and(eq(schema.invoices.tenantId, tenantId), eq(schema.invoices.id, id)))
-      .limit(1);
-    if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
-    const [lines, documents, payments, links] = await Promise.all([
-      this.db
-        .select()
-        .from(schema.invoiceLines)
-        .where(
-          and(eq(schema.invoiceLines.tenantId, tenantId), eq(schema.invoiceLines.invoiceId, id)),
-        )
-        .orderBy(schema.invoiceLines.position),
-      this.db
-        .select()
-        .from(schema.invoiceDocuments)
-        .where(
-          and(
-            eq(schema.invoiceDocuments.tenantId, tenantId),
-            eq(schema.invoiceDocuments.invoiceId, id),
-          ),
-        )
-        .orderBy(desc(schema.invoiceDocuments.revision)),
-      this.db
-        .select()
-        .from(schema.billingPayments)
-        .where(
-          and(
-            eq(schema.billingPayments.tenantId, tenantId),
-            eq(schema.billingPayments.invoiceId, id),
-          ),
-        )
-        .orderBy(schema.billingPayments.paidAt, schema.billingPayments.id),
-      this.db
-        .select()
-        .from(schema.tenantBillingRequestLinks)
-        .where(
-          and(
-            eq(schema.tenantBillingRequestLinks.tenantId, tenantId),
-            eq(schema.tenantBillingRequestLinks.invoiceId, id),
-          ),
-        ),
-    ]);
-    if (links.length > 1) {
-      throw new ConflictException({ code: "invoice_request_link_ambiguous" });
-    }
-    const request = await this.requestForLink(tenantId, links[0]?.requestId);
-    return {
-      ...this.toInvoice(invoice, payments, this.now()),
-      subtotal: invoice.subtotal,
-      vatTotal: invoice.vatTotal,
-      payments: payments.map((payment) => ({
-        id: payment.id,
-        amount: payment.amount,
-        currency: "RUB",
-        paidAt: iso(payment.paidAt)!,
-      })),
-      lines: lines.map((line) => ({
-        id: line.id,
-        position: line.position,
-        nameRu: line.nameRu,
-        unit: line.unit,
-        quantity: line.quantity,
-        agreedUnitPrice: line.agreedUnitPrice,
-        lineTotal: line.lineTotal,
-      })),
-      documents: documents.map((document) => this.invoiceDocument(document)),
-      request,
-    };
+    const now = this.now();
+    return this.db.transaction(
+      async (tx) => {
+        const [invoice] = await tx
+          .select()
+          .from(schema.invoices)
+          .where(and(eq(schema.invoices.tenantId, tenantId), eq(schema.invoices.id, id)))
+          .limit(1);
+        if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
+        const [lines, documents, payments, links] = await Promise.all([
+          tx
+            .select()
+            .from(schema.invoiceLines)
+            .where(
+              and(
+                eq(schema.invoiceLines.tenantId, tenantId),
+                eq(schema.invoiceLines.invoiceId, id),
+              ),
+            )
+            .orderBy(schema.invoiceLines.position),
+          tx
+            .select()
+            .from(schema.invoiceDocuments)
+            .where(
+              and(
+                eq(schema.invoiceDocuments.tenantId, tenantId),
+                eq(schema.invoiceDocuments.invoiceId, id),
+              ),
+            )
+            .orderBy(desc(schema.invoiceDocuments.revision)),
+          tx
+            .select()
+            .from(schema.billingPayments)
+            .where(
+              and(
+                eq(schema.billingPayments.tenantId, tenantId),
+                eq(schema.billingPayments.invoiceId, id),
+              ),
+            )
+            .orderBy(schema.billingPayments.paidAt, schema.billingPayments.id),
+          tx
+            .select()
+            .from(schema.tenantBillingRequestLinks)
+            .where(
+              and(
+                eq(schema.tenantBillingRequestLinks.tenantId, tenantId),
+                eq(schema.tenantBillingRequestLinks.invoiceId, id),
+              ),
+            ),
+        ]);
+        if (links.length > 1) {
+          throw new ConflictException({ code: "invoice_request_link_ambiguous" });
+        }
+        const request = await this.requestForLink(tenantId, links[0]?.requestId, tx);
+        return {
+          ...this.toInvoice(invoice, payments, now),
+          subtotal: invoice.subtotal,
+          vatTotal: invoice.vatTotal,
+          payments: payments.map((payment) => ({
+            id: payment.id,
+            amount: payment.amount,
+            currency: "RUB",
+            paidAt: iso(payment.paidAt)!,
+          })),
+          lines: lines.map((line) => ({
+            id: line.id,
+            position: line.position,
+            nameRu: line.nameRu,
+            unit: line.unit,
+            quantity: line.quantity,
+            agreedUnitPrice: line.agreedUnitPrice,
+            lineTotal: line.lineTotal,
+          })),
+          documents: documents.map((document) => this.invoiceDocument(document)),
+          request,
+        };
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   }
 
   async listDocuments(
@@ -638,9 +652,13 @@ export class TenantBillingReadService {
     };
   }
 
-  private async requestForLink(tenantId: string, requestId: string | null | undefined) {
+  private async requestForLink(
+    tenantId: string,
+    requestId: string | null | undefined,
+    database: Pick<Db, "select"> = this.db,
+  ) {
     if (!requestId) return null;
-    const [request] = await this.db
+    const [request] = await database
       .select({
         id: schema.tenantBillingRequests.id,
         number: schema.tenantBillingRequests.number,

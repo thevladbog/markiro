@@ -23,38 +23,121 @@ type QueryCall = { table: unknown; where: unknown[]; limit?: number; offset?: nu
 
 function queryDb(rowsFor: (table: unknown) => unknown[]) {
   const calls: QueryCall[] = [];
+  const select = vi.fn(() => {
+    let table: unknown;
+    const where: unknown[] = [];
+    const query = {
+      from: vi.fn((value: unknown) => {
+        table = value;
+        return query;
+      }),
+      where: vi.fn((condition: unknown) => {
+        where.push(condition);
+        return query;
+      }),
+      orderBy: vi.fn(() => query),
+      limit: vi.fn(async (count: number) => {
+        calls.push({ table, where, limit: count });
+        return rowsFor(table).slice(0, count);
+      }),
+      offset: vi.fn((count: number) => {
+        calls.push({ table, where, offset: count });
+        return query;
+      }),
+      then: (resolve: (rows: unknown[]) => unknown) => {
+        calls.push({ table, where });
+        return Promise.resolve(rowsFor(table)).then(resolve);
+      },
+    };
+    return query;
+  });
   const db = {
     execute: vi.fn(async () => ({ rows: [] })),
-    select: vi.fn(() => {
-      let table: unknown;
-      const where: unknown[] = [];
-      const query = {
-        from: vi.fn((value: unknown) => {
-          table = value;
-          return query;
-        }),
-        where: vi.fn((condition: unknown) => {
-          where.push(condition);
-          return query;
-        }),
-        orderBy: vi.fn(() => query),
-        limit: vi.fn(async (count: number) => {
-          calls.push({ table, where, limit: count });
-          return rowsFor(table).slice(0, count);
-        }),
-        offset: vi.fn((count: number) => {
-          calls.push({ table, where, offset: count });
-          return query;
-        }),
-        then: (resolve: (rows: unknown[]) => unknown) => {
-          calls.push({ table, where });
-          return Promise.resolve(rowsFor(table)).then(resolve);
-        },
-      };
-      return query;
-    }),
+    select,
+    transaction: vi.fn(async (run: (tx: { select: typeof select }) => Promise<unknown>) =>
+      run({ select }),
+    ),
   } as unknown as Db;
   return { db, calls };
+}
+
+function concurrentlyPaidInvoiceDb() {
+  const issuedInvoice = {
+    id: invoiceId,
+    tenantId,
+    number: "INV-000001",
+    status: "issued" as const,
+    issueDate: new Date("2026-08-01T00:00:00.000Z"),
+    dueDate: new Date("2030-08-20T00:00:00.000Z"),
+    subtotal: "48000.00",
+    vatTotal: "0.00",
+    total: "48000.00",
+  };
+  const confirmedPayment = {
+    id: "91111111-1111-4111-8111-111111111111",
+    tenantId,
+    invoiceId,
+    amount: "48000.00",
+    paidAt: new Date("2026-08-27T09:00:00.000Z"),
+  };
+  let committed = {
+    invoice: issuedInvoice as Record<string, unknown>,
+    payments: [] as Array<typeof confirmedPayment>,
+  };
+  let paymentCommittedDuringRead = false;
+
+  const makeSelect = (snapshot: typeof committed | undefined, commitAfterInvoiceRead: boolean) => {
+    let table: unknown;
+    let invoiceRead = false;
+    const rows = () => {
+      const state = snapshot ?? committed;
+      if (table === schema.invoices) return [state.invoice];
+      if (table === schema.billingPayments) return state.payments;
+      return [];
+    };
+    const query = {
+      from: vi.fn((value: unknown) => {
+        table = value;
+        return query;
+      }),
+      where: vi.fn(() => query),
+      orderBy: vi.fn(() => query),
+      offset: vi.fn(() => query),
+      limit: vi.fn(async (count: number) => {
+        const result = rows().slice(0, count);
+        if (table === schema.invoices && commitAfterInvoiceRead && !invoiceRead) {
+          invoiceRead = true;
+          paymentCommittedDuringRead = true;
+          committed = {
+            invoice: { ...issuedInvoice, status: "paid" },
+            payments: [confirmedPayment],
+          };
+        }
+        return result;
+      }),
+      then: (resolve: (rows: unknown[]) => unknown, reject?: (reason: unknown) => unknown) =>
+        Promise.resolve(rows()).then(resolve, reject),
+    };
+    return query;
+  };
+  const transaction = vi.fn(
+    async (
+      run: (tx: { select: ReturnType<typeof vi.fn> }) => Promise<unknown>,
+      _config?: { isolationLevel?: string; accessMode?: string },
+    ) => {
+      const snapshot = { invoice: { ...committed.invoice }, payments: [...committed.payments] };
+      return run({ select: vi.fn(() => makeSelect(snapshot, true)) });
+    },
+  );
+  const db = {
+    select: vi.fn(() => makeSelect(undefined, true)),
+    transaction,
+  } as unknown as Db;
+  return {
+    db,
+    transaction,
+    paymentCommittedDuringRead: () => paymentCommittedDuringRead,
+  };
 }
 
 function conditionsFor(calls: QueryCall[], table: unknown) {
@@ -136,6 +219,53 @@ describe("TenantBillingReadService", () => {
         remainingAmount: "28000.00",
         status: "partially_paid",
       },
+    });
+  });
+
+  it("keeps invoice list status and payment summary in one read snapshot", async () => {
+    const { db, transaction, paymentCommittedDuringRead } = concurrentlyPaidInvoiceDb();
+    const service = new TenantBillingReadService(db, {} as never, {} as never);
+
+    const result = await service.listInvoices(tenantId, { limit: 25, offset: 0 });
+
+    expect(paymentCommittedDuringRead()).toBe(true);
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        id: invoiceId,
+        status: "issued",
+        paymentSummary: {
+          confirmedAmount: "0.00",
+          remainingAmount: "48000.00",
+          status: "issued",
+        },
+      }),
+    ]);
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "repeatable read",
+      accessMode: "read only",
+    });
+  });
+
+  it("keeps invoice detail status and payments in one read snapshot", async () => {
+    const { db, transaction, paymentCommittedDuringRead } = concurrentlyPaidInvoiceDb();
+    const service = new TenantBillingReadService(db, {} as never, {} as never);
+
+    const result = await service.invoiceDetail(tenantId, invoiceId);
+
+    expect(paymentCommittedDuringRead()).toBe(true);
+    expect(result).toMatchObject({
+      id: invoiceId,
+      status: "issued",
+      payments: [],
+      paymentSummary: {
+        confirmedAmount: "0.00",
+        remainingAmount: "48000.00",
+        status: "issued",
+      },
+    });
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "repeatable read",
+      accessMode: "read only",
     });
   });
 
