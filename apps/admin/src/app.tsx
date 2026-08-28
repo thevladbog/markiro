@@ -67,6 +67,8 @@ import { ShiftPanelRoute } from "./pages/shifts/ShiftPanelRoute.js";
 import { ShellPage } from "./pages/Shell.js";
 import { TeamPage } from "./pages/team/TeamPage.js";
 import { BillingLayout, BillingRoutePlaceholder } from "./pages/billing/BillingLayout.js";
+import { BillingOverviewPage } from "./pages/billing/BillingOverviewPage.js";
+import { BillingSubscriptionPage } from "./pages/billing/BillingSubscriptionPage.js";
 import { InvoiceDetailPage, InvoicesPage } from "./pages/billing/InvoicesPage.js";
 
 /**
@@ -437,8 +439,8 @@ function appRouteElements() {
             </RequireCapability>
           }
         >
-          <Route index element={<BillingRoutePlaceholder />} />
-          <Route path="subscription" element={<BillingRoutePlaceholder />} />
+          <Route index element={<BillingOverviewPage />} />
+          <Route path="subscription" element={<BillingSubscriptionPage />} />
           <Route path="invoices" element={<InvoicesPage />} />
           <Route path="invoices/:id" element={<InvoiceDetailPage />} />
           <Route path="documents" element={<BillingRoutePlaceholder />} />

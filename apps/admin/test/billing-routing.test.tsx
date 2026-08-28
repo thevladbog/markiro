@@ -96,6 +96,43 @@ const INVOICE_DETAIL = {
   documents: [{ id: "document_1", revision: 1, format: "pdf", status: "ready", byteSize: 123 }],
 };
 
+const BILLING_OVERVIEW = {
+  access: "managed",
+  subscription: {
+    id: "00000000-0000-4000-8000-000000000101",
+    planVersionId: "00000000-0000-4000-8000-000000000102",
+    status: "active",
+    startsAt: "2026-08-01T00:00:00.000Z",
+    endsAt: "2026-09-01T00:00:00.000Z",
+    planName: "Профи",
+    billingPeriod: "month",
+    price: "48000.00",
+  },
+  scheduledSubscription: null,
+  limits: {
+    lines: 2,
+    stations: 2,
+    kiosks: 2,
+    cabinetUsers: 5,
+    labelEditor: true,
+    publicApi: false,
+    pallets: false,
+  },
+  usage: { lines: 0, stations: 0, kiosks: 0, cabinetUsers: 1 },
+  limitPresentation: {
+    lines: { used: 0, assigned: 2, remaining: 2, state: "normal" },
+    stations: { used: 0, assigned: 2, remaining: 2, state: "normal" },
+    kiosks: { used: 0, assigned: 2, remaining: 2, state: "normal" },
+    cabinetUsers: { used: 1, assigned: 5, remaining: 4, state: "normal" },
+  },
+  addons: [],
+  services: [],
+  actionableOffer: null,
+  recentOperations: [],
+  activeRequest: null,
+  attentionCount: 0,
+};
+
 function response(body: unknown): Response {
   return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
 }
@@ -130,6 +167,8 @@ function renderRoute(path: string, access: AccessDocument) {
         });
       }
       if (url.endsWith("/api/access/me")) return response(access);
+      if (url.endsWith("/api/billing/overview")) return response(BILLING_OVERVIEW);
+      if (url.endsWith("/api/billing/subscription")) return response(BILLING_OVERVIEW);
       if (url.includes("/api/pickup-orders")) return response({ items: [] });
       if (url.endsWith("/api/billing/invoices/invoice_1/documents/document_1/download")) {
         return response({ url: "https://example.test/invoice-184.pdf" });

@@ -444,6 +444,134 @@
         "invoices": "Счета и оплаты",
         "documents": "Документы",
         "requests": "Заявки"
+      },
+      "retry": "Повторить",
+      "value": {
+        "notAvailable": "Не указано"
+      },
+      "overview": {
+        "loading": "Загрузка обзора биллинга",
+        "loadError": "Не удалось загрузить обзор биллинга",
+        "unmanagedTitle": "Подписка не назначена",
+        "unmanagedHint": "Обратитесь к администратору сервиса, чтобы подключить тариф.",
+        "currentSubscription": "Текущая подписка",
+        "currentOffer": "Текущее предложение",
+        "offerWithoutNumber": "Коммерческое предложение",
+        "openOffer": "Открыть предложение",
+        "limits": "Лимиты",
+        "recentOperations": "Последние операции",
+        "noOperations": "Операций пока нет.",
+        "activeRequest": "Активная заявка",
+        "noActiveRequest": "Открытых заявок нет.",
+        "openRequest": "Открыть заявку",
+        "attention_one": "Требует внимания: {{count}} пункт",
+        "attention_few": "Требуют внимания: {{count}} пункта",
+        "attention_many": "Требуют внимания: {{count}} пунктов",
+        "attention_other": "Требуют внимания: {{count}} пункта"
+      },
+      "subscription": {
+        "loading": "Загрузка подписки",
+        "loadError": "Не удалось загрузить подписку",
+        "unmanagedTitle": "Подписка не назначена",
+        "unmanagedHint": "Данные о тарифе появятся после его подключения.",
+        "current": "Текущая подписка",
+        "scheduled": "Следующее изменение",
+        "limits": "Лимиты",
+        "addons": "Дополнения",
+        "services": "Услуги",
+        "quantity_one": "{{count}} единица",
+        "quantity_few": "{{count}} единицы",
+        "quantity_many": "{{count}} единиц",
+        "quantity_other": "{{count}} единицы",
+        "serviceMeta": "{{quantity}} {{unit}} · заказано {{date}}",
+        "period": "Период",
+        "startsAt": "Начало",
+        "endsAt": "Окончание",
+        "price": "Стоимость",
+        "periods": {
+          "month": "Ежемесячно",
+          "year": "Ежегодно"
+        }
+      },
+      "limits": {
+        "lines": "Линии",
+        "stations": "Станции",
+        "kiosks": "Киоски",
+        "cabinetUsers": "Пользователи кабинета",
+        "requestNames": {
+          "lines": "линий",
+          "stations": "станций",
+          "kiosks": "киосков",
+          "cabinetUsers": "пользователей кабинета"
+        },
+        "unlimited": "Использовано: {{used}} · без ограничения",
+        "usedOf": "Использовано: {{used}} из {{assigned}}",
+        "progress": "{{name}}: использовано {{used}} из {{assigned}}",
+        "increase": "Увеличить лимит {{name}}"
+      },
+      "status": {
+        "access": {
+          "managed": "Управляется",
+          "read_only": "Только чтение",
+          "unmanaged": "Не подключено"
+        },
+        "subscription": {
+          "pending_activation": "Ожидает активации",
+          "trial": "Демо",
+          "active": "Активна",
+          "scheduled": "Запланирована",
+          "expired": "Срок истёк",
+          "cancelled": "Отменена",
+          "superseded": "Заменена"
+        },
+        "limit": {
+          "normal": "В пределах лимита",
+          "approaching": "Приближение к лимиту",
+          "reached": "Лимит исчерпан",
+          "exceeded": "Лимит превышен"
+        },
+        "addon": {
+          "scheduled": "Запланировано",
+          "active": "Активно",
+          "expired": "Срок истёк",
+          "revoked": "Отключено"
+        },
+        "service": {
+          "ordered": "Заказано",
+          "in_progress": "Выполняется",
+          "completed": "Выполнено",
+          "cancelled": "Отменено"
+        },
+        "operation": {
+          "draft": "Черновик",
+          "issued": "Выставлено",
+          "overdue": "Просрочено",
+          "partially_paid": "Оплачено частично",
+          "paid": "Оплачено",
+          "cancelled": "Отменено",
+          "published": "Опубликовано",
+          "expired": "Срок истёк",
+          "superseded": "Заменено",
+          "new": "Новая",
+          "under_review": "На рассмотрении",
+          "clarification_required": "Нужно уточнение",
+          "offer_prepared": "Предложение готово",
+          "awaiting_payment": "Ожидает оплаты",
+          "in_progress": "Выполняется",
+          "completed": "Выполнено",
+          "ordered": "Заказано",
+          "confirmed": "Подтверждено"
+        },
+        "request": {
+          "new": "Новая",
+          "under_review": "На рассмотрении",
+          "clarification_required": "Нужно уточнение",
+          "offer_prepared": "Предложение готово",
+          "awaiting_payment": "Ожидает оплаты",
+          "in_progress": "Выполняется",
+          "completed": "Выполнено",
+          "cancelled": "Отменена"
+        }
       }
     },
     "catalog": {

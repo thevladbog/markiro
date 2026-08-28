@@ -444,6 +444,134 @@
         "invoices": "Invoices and payments",
         "documents": "Documents",
         "requests": "Requests"
+      },
+      "retry": "Try again",
+      "value": {
+        "notAvailable": "Not specified"
+      },
+      "overview": {
+        "loading": "Loading billing overview",
+        "loadError": "Could not load billing overview",
+        "unmanagedTitle": "No subscription assigned",
+        "unmanagedHint": "Contact the service administrator to connect a plan.",
+        "currentSubscription": "Current subscription",
+        "currentOffer": "Current offer",
+        "offerWithoutNumber": "Commercial offer",
+        "openOffer": "Open offer",
+        "limits": "Limits",
+        "recentOperations": "Recent operations",
+        "noOperations": "There are no operations yet.",
+        "activeRequest": "Active request",
+        "noActiveRequest": "There are no open requests.",
+        "openRequest": "Open request",
+        "attention_one": "Needs attention: {{count}} item",
+        "attention_few": "Needs attention: {{count}} items",
+        "attention_many": "Needs attention: {{count}} items",
+        "attention_other": "Needs attention: {{count}} items"
+      },
+      "subscription": {
+        "loading": "Loading subscription",
+        "loadError": "Could not load subscription",
+        "unmanagedTitle": "No subscription assigned",
+        "unmanagedHint": "Plan details will appear once a plan is connected.",
+        "current": "Current subscription",
+        "scheduled": "Next change",
+        "limits": "Limits",
+        "addons": "Add-ons",
+        "services": "Services",
+        "quantity_one": "{{count}} unit",
+        "quantity_few": "{{count}} units",
+        "quantity_many": "{{count}} units",
+        "quantity_other": "{{count}} units",
+        "serviceMeta": "{{quantity}} {{unit}} · ordered {{date}}",
+        "period": "Billing period",
+        "startsAt": "Starts",
+        "endsAt": "Ends",
+        "price": "Price",
+        "periods": {
+          "month": "Monthly",
+          "year": "Yearly"
+        }
+      },
+      "limits": {
+        "lines": "Lines",
+        "stations": "Stations",
+        "kiosks": "Kiosks",
+        "cabinetUsers": "Cabinet users",
+        "requestNames": {
+          "lines": "lines",
+          "stations": "stations",
+          "kiosks": "kiosks",
+          "cabinetUsers": "cabinet users"
+        },
+        "unlimited": "Used: {{used}} · unlimited",
+        "usedOf": "Used: {{used}} of {{assigned}}",
+        "progress": "{{name}}: {{used}} used of {{assigned}}",
+        "increase": "Increase {{name}} limit"
+      },
+      "status": {
+        "access": {
+          "managed": "Managed",
+          "read_only": "Read-only",
+          "unmanaged": "Not connected"
+        },
+        "subscription": {
+          "pending_activation": "Awaiting activation",
+          "trial": "Demo",
+          "active": "Active",
+          "scheduled": "Scheduled",
+          "expired": "Expired",
+          "cancelled": "Cancelled",
+          "superseded": "Superseded"
+        },
+        "limit": {
+          "normal": "Within limit",
+          "approaching": "Approaching limit",
+          "reached": "Limit reached",
+          "exceeded": "Limit exceeded"
+        },
+        "addon": {
+          "scheduled": "Scheduled",
+          "active": "Active",
+          "expired": "Expired",
+          "revoked": "Revoked"
+        },
+        "service": {
+          "ordered": "Ordered",
+          "in_progress": "In progress",
+          "completed": "Completed",
+          "cancelled": "Cancelled"
+        },
+        "operation": {
+          "draft": "Draft",
+          "issued": "Issued",
+          "overdue": "Overdue",
+          "partially_paid": "Partially paid",
+          "paid": "Paid",
+          "cancelled": "Cancelled",
+          "published": "Published",
+          "expired": "Expired",
+          "superseded": "Superseded",
+          "new": "New",
+          "under_review": "Under review",
+          "clarification_required": "Clarification required",
+          "offer_prepared": "Offer prepared",
+          "awaiting_payment": "Awaiting payment",
+          "in_progress": "In progress",
+          "completed": "Completed",
+          "ordered": "Ordered",
+          "confirmed": "Confirmed"
+        },
+        "request": {
+          "new": "New",
+          "under_review": "Under review",
+          "clarification_required": "Clarification required",
+          "offer_prepared": "Offer prepared",
+          "awaiting_payment": "Awaiting payment",
+          "in_progress": "In progress",
+          "completed": "Completed",
+          "cancelled": "Cancelled"
+        }
       }
     },
     "catalog": {
