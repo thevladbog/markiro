@@ -23,10 +23,12 @@
 ### Task 1: Парсер — `<Штрихкод>` и `<Картинка>`
 
 **Files:**
+
 - Modify: `apps/api/src/modules/exchange/commerceml/parse.ts`
 - Test: `apps/api/test/commerceml-parse.test.ts`
 
 **Interfaces:**
+
 - Consumes: существующие `parseCatalog`/`parseOffers`/`parseCommerceMl`.
 - Produces: `ParsedItem` получает `barcode: string | null` и `images: string[]`; `ParsedOffer` получает `barcode: string | null`. Task 2 читает оба.
 
@@ -136,10 +138,12 @@ git commit -m "feat(exchange): парсер CommerceML читает Штрихк
 ### Task 2: apply.ts — GTIN-нормализация и решения об автосвязи/фото
 
 **Files:**
+
 - Modify: `apps/api/src/modules/exchange/commerceml/apply.ts`
 - Test: `apps/api/test/commerceml-apply.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ParsedItem.barcode/images`, `ParsedOffer.barcode` (Task 1); `isValidGtin`, `normalizeToGtin14` из `@markiro/domain`.
 - Produces (для Task 6):
 
@@ -149,15 +153,32 @@ export interface CatalogProduct {
   gtin14: string;
   externalRef: string | null;
 }
-export interface AutoLink { productId: string; externalRef: string; gtin: string }
-export interface ImageWork { productId: string; source: string }
+export interface AutoLink {
+  productId: string;
+  externalRef: string;
+  gtin: string;
+}
+export interface ImageWork {
+  productId: string;
+  source: string;
+}
 export interface CandidateItem {
-  externalRef: string; name: string; article: string | null; unit: string | null; gtin: string | null;
+  externalRef: string;
+  name: string;
+  article: string | null;
+  unit: string | null;
+  gtin: string | null;
 }
 export interface GtinConflict {
-  externalRef: string; gtin: string; productId: string; productExternalRef: string;
+  externalRef: string;
+  gtin: string;
+  productId: string;
+  productExternalRef: string;
 }
-export interface GtinAmbiguity { gtin: string; externalRefs: string[] }
+export interface GtinAmbiguity {
+  gtin: string;
+  externalRefs: string[];
+}
 export interface ApplicationPlan {
   links: AutoLink[];
   priceUpdates: PriceUpdate[];
@@ -169,7 +190,7 @@ export interface ApplicationPlan {
   invalidBarcodes: number;
 }
 export interface DecideApplicationInput {
-  products: CatalogProduct[];  // ВСЕ карточки тенанта, не только связанные
+  products: CatalogProduct[]; // ВСЕ карточки тенанта, не только связанные
   items: ParsedItem[];
   offers: ParsedOffer[];
   configuredPriceType?: string | undefined;
@@ -185,16 +206,25 @@ export interface DecideApplicationInput {
 ```ts
 describe("автосвязь по GTIN", () => {
   const item = (externalRef: string, barcode: string | null, images: string[] = []) => ({
-    externalRef, name: "Товар", article: null, unit: null, barcode, images,
+    externalRef,
+    name: "Товар",
+    article: null,
+    unit: null,
+    barcode,
+    images,
   });
 
   it("связывает несвязанную карточку по EAN-13 и применяет цену этим же раундом", () => {
     const plan = decideApplication({
       products: [product("p1", "04680089900253", null)],
       items: [item("ref-1", "4680089900253")],
-      offers: [{ externalRef: "ref-1", barcode: null, prices: [
-        { type: "Базовая", value: "9200.00", currency: "руб" },
-      ] }],
+      offers: [
+        {
+          externalRef: "ref-1",
+          barcode: null,
+          prices: [{ type: "Базовая", value: "9200.00", currency: "руб" }],
+        },
+      ],
     });
     expect(plan.links).toEqual([{ productId: "p1", externalRef: "ref-1", gtin: "04680089900253" }]);
     expect(plan.priceUpdates).toEqual([{ productId: "p1", unitPrice: "9200.00" }]);
@@ -209,7 +239,12 @@ describe("автосвязь по GTIN", () => {
     });
     expect(plan.links).toEqual([]);
     expect(plan.gtinConflicts).toEqual([
-      { externalRef: "ref-1", gtin: "04680089900253", productId: "p1", productExternalRef: "other-ref" },
+      {
+        externalRef: "ref-1",
+        gtin: "04680089900253",
+        productId: "p1",
+        productExternalRef: "other-ref",
+      },
     ]);
     expect(plan.candidates[0]).toMatchObject({ externalRef: "ref-1", gtin: "04680089900253" });
   });
@@ -229,7 +264,9 @@ describe("автосвязь по GTIN", () => {
 
   it("невалидный штрихкод считается и не рушит кандидата", () => {
     const plan = decideApplication({
-      products: [], items: [item("ref-1", "4680089900250")], offers: [], // не сошлась контрольная
+      products: [],
+      items: [item("ref-1", "4680089900250")],
+      offers: [], // не сошлась контрольная
     });
     expect(plan.invalidBarcodes).toBe(1);
     expect(plan.candidates[0]).toMatchObject({ externalRef: "ref-1", gtin: null });
@@ -376,7 +413,11 @@ export function decideApplication(input: DecideApplicationInput): ApplicationPla
     if (offer.prices.length === 0) continue;
     const choice = choosePrice(offer.prices, configuredPriceType);
     if (!choice.ok) {
-      skipped.push({ externalRef: offer.externalRef, reason: choice.reason, priceTypes: choice.priceTypes });
+      skipped.push({
+        externalRef: offer.externalRef,
+        reason: choice.reason,
+        priceTypes: choice.priceTypes,
+      });
       continue;
     }
     if (!isHomeCurrency(choice.price.currency)) {
@@ -411,7 +452,16 @@ export function decideApplication(input: DecideApplicationInput): ApplicationPla
       gtin: gtinByRef.get(item.externalRef) ?? null,
     }));
 
-  return { links, priceUpdates, images, candidates, skipped, gtinConflicts, gtinAmbiguities, invalidBarcodes };
+  return {
+    links,
+    priceUpdates,
+    images,
+    candidates,
+    skipped,
+    gtinConflicts,
+    gtinAmbiguities,
+    invalidBarcodes,
+  };
 }
 ```
 
@@ -436,10 +486,12 @@ git commit -m "feat(exchange): decideApplication планирует автосв
 ### Task 3: Схема — `integration_candidates.gtin`
 
 **Files:**
+
 - Modify: `packages/db/src/schema/integrations.ts`
 - Create: `packages/db/migrations/00XX_*.sql` (генерируется)
 
 **Interfaces:**
+
 - Produces: колонка `integrationCandidates.gtin` (`text`, nullable) — Task 6 пишет, Task 7 читает.
 
 - [ ] **Step 1: Поле в схеме**
@@ -478,10 +530,12 @@ git commit -m "feat(db): gtin у кандидатов интеграции"
 ### Task 4: `image-download.ts` — скачивание картинки по URL с SSRF-защитой
 
 **Files:**
+
 - Create: `apps/api/src/modules/exchange/commerceml/image-download.ts`
 - Test: `apps/api/test/commerceml-image-download.test.ts`
 
 **Interfaces:**
+
 - Produces (для Task 6):
 
 ```ts
@@ -490,10 +544,18 @@ export class ImageDownloadError extends Error {
   readonly reason: ImageDownloadReason;
 }
 export type ImageDownloadReason =
-  | "not_https" | "forbidden_address" | "too_large" | "timeout"
-  | "too_many_redirects" | "bad_status" | "network";
+  | "not_https"
+  | "forbidden_address"
+  | "too_large"
+  | "timeout"
+  | "too_many_redirects"
+  | "bad_status"
+  | "network";
 export function isForbiddenAddress(address: string): boolean;
-export function downloadImage(url: string, deps?: { request?: typeof httpsRequest }): Promise<Buffer>;
+export function downloadImage(
+  url: string,
+  deps?: { request?: typeof httpsRequest },
+): Promise<Buffer>;
 ```
 
 - [ ] **Step 1: Failing-тесты**
@@ -512,11 +574,21 @@ import {
 
 describe("isForbiddenAddress", () => {
   it.each([
-    ["10.0.0.1", true], ["127.0.0.1", true], ["169.254.1.1", true],
-    ["172.16.0.1", true], ["172.31.255.255", true], ["192.168.1.1", true],
-    ["0.0.0.0", true], ["100.64.0.1", true],
-    ["::1", true], ["fc00::1", true], ["fe80::1", true], ["::ffff:127.0.0.1", true],
-    ["8.8.8.8", false], ["93.184.216.34", false], ["2606:2800:220:1::1", false],
+    ["10.0.0.1", true],
+    ["127.0.0.1", true],
+    ["169.254.1.1", true],
+    ["172.16.0.1", true],
+    ["172.31.255.255", true],
+    ["192.168.1.1", true],
+    ["0.0.0.0", true],
+    ["100.64.0.1", true],
+    ["::1", true],
+    ["fc00::1", true],
+    ["fe80::1", true],
+    ["::ffff:127.0.0.1", true],
+    ["8.8.8.8", false],
+    ["93.184.216.34", false],
+    ["2606:2800:220:1::1", false],
   ])("%s -> %s", (address, forbidden) => {
     expect(isForbiddenAddress(address)).toBe(forbidden);
   });
@@ -561,8 +633,9 @@ describe("downloadImage", () => {
   });
 
   it("не https — отказ без единого запроса", async () => {
-    await expect(downloadImage("http://disk.sbis.ru/x", { request: fakeRequestFor({}) }))
-      .rejects.toMatchObject({ reason: "not_https" });
+    await expect(
+      downloadImage("http://disk.sbis.ru/x", { request: fakeRequestFor({}) }),
+    ).rejects.toMatchObject({ reason: "not_https" });
   });
 
   it("ходит по редиректу и режет их после третьего", async () => {
@@ -573,30 +646,34 @@ describe("downloadImage", () => {
       "https://a.example/3": hop(3, "https://a.example/4"),
       "https://a.example/4": hop(4, "https://a.example/5"),
     });
-    await expect(downloadImage("https://a.example/1", { request }))
-      .rejects.toMatchObject({ reason: "too_many_redirects" });
+    await expect(downloadImage("https://a.example/1", { request })).rejects.toMatchObject({
+      reason: "too_many_redirects",
+    });
   });
 
   it("редирект на http — отказ", async () => {
     const request = fakeRequestFor({
       "https://a.example/1": { status: 302, headers: { location: "http://a.example/2" } },
     });
-    await expect(downloadImage("https://a.example/1", { request }))
-      .rejects.toMatchObject({ reason: "not_https" });
+    await expect(downloadImage("https://a.example/1", { request })).rejects.toMatchObject({
+      reason: "not_https",
+    });
   });
 
   it("обрывает тело больше лимита", async () => {
     const request = fakeRequestFor({
       "https://a.example/big": { status: 200, chunks: [Buffer.alloc(5 * 1024 * 1024 + 1)] },
     });
-    await expect(downloadImage("https://a.example/big", { request }))
-      .rejects.toMatchObject({ reason: "too_large" });
+    await expect(downloadImage("https://a.example/big", { request })).rejects.toMatchObject({
+      reason: "too_large",
+    });
   });
 
   it("не-2xx без location — bad_status", async () => {
     const request = fakeRequestFor({ "https://a.example/x": { status: 404 } });
-    await expect(downloadImage("https://a.example/x", { request }))
-      .rejects.toMatchObject({ reason: "bad_status" });
+    await expect(downloadImage("https://a.example/x", { request })).rejects.toMatchObject({
+      reason: "bad_status",
+    });
   });
 });
 ```
@@ -798,9 +875,11 @@ git commit -m "feat(exchange): скачивание картинки по URL с
 ### Task 5: `ProductsService.applyExchangeImage` — машинный актор + дедуп
 
 **Files:**
+
 - Modify: `apps/api/src/modules/products/products.service.ts`
 
 **Interfaces:**
+
 - Consumes: существующие `processProductImage`, `findRow`, `imageDescriptor`, аудит-writer'ы.
 - Produces (для Task 6): `applyExchangeImage(tenantId: string, productId: string, source: Buffer): Promise<"applied" | "unchanged">` — кидает те же `NotFoundException`/`BadRequestException`/`ServiceUnavailableException`, что `uploadImage`.
 
@@ -893,11 +972,13 @@ git commit -m "feat(products): applyExchangeImage — фото из обмена
 ### Task 6: Контроллер — worklist link/price/image/candidate и журнал
 
 **Files:**
+
 - Modify: `apps/api/src/modules/exchange/exchange.controller.ts`
 - Modify: `apps/api/src/modules/exchange/exchange.module.ts`
 - Test: `apps/api/test/exchange-import.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ApplicationPlan`/`CatalogProduct` (Task 2), `integrationCandidates.gtin` (Task 3), `downloadImage`/`ImageDownloadError` (Task 4), `ProductsService.applyExchangeImage` (Task 5).
 - Produces: поведение маршрута; новые журнальные события (см. Step 3.5).
 
@@ -912,7 +993,12 @@ const TINY_PNG = Buffer.from(
   "base64",
 );
 
-function catalogWithBarcodeXml(guid: string, name: string, barcode: string, image?: string): string {
+function catalogWithBarcodeXml(
+  guid: string,
+  name: string,
+  barcode: string,
+  image?: string,
+): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <КоммерческаяИнформация ВерсияСхемы="2.05">
  <Каталог><Товары>
@@ -1007,7 +1093,11 @@ const unmatchedOfferRefs = [
 const worklist: ImportWorkItem[] = [
   // Связь раньше цены, цена раньше фото (фото — самый тяжёлый шаг), кандидаты последними.
   ...plan.links.map((link): ImportWorkItem => ({ kind: "link", ...link })),
-  ...plan.priceUpdates.map((u): ImportWorkItem => ({ kind: "price", productId: u.productId, unitPrice: u.unitPrice })),
+  ...plan.priceUpdates.map((u): ImportWorkItem => ({
+    kind: "price",
+    productId: u.productId,
+    unitPrice: u.unitPrice,
+  })),
   ...plan.images.map((img): ImportWorkItem => ({ kind: "image", ...img })),
   ...plan.candidates.map((c): ImportWorkItem => ({ kind: "candidate", ...c })),
 ];
@@ -1018,32 +1108,48 @@ const worklist: ImportWorkItem[] = [
 ```ts
 for (const link of plan.links) {
   await this.journal.append({
-    tenantId: session.tenantId, channelType: session.channelType, sessionId: session.id,
-    direction: "in", outcome: "ok", grain: "item",
+    tenantId: session.tenantId,
+    channelType: session.channelType,
+    sessionId: session.id,
+    direction: "in",
+    outcome: "ok",
+    grain: "item",
     message: `связан автоматически по GTIN: ${link.externalRef}`,
     details: { externalRef: link.externalRef, productId: link.productId, gtin: link.gtin },
   });
 }
 for (const conflict of plan.gtinConflicts) {
   await this.journal.append({
-    tenantId: session.tenantId, channelType: session.channelType, sessionId: session.id,
-    direction: "in", outcome: "warn", grain: "item",
+    tenantId: session.tenantId,
+    channelType: session.channelType,
+    sessionId: session.id,
+    direction: "in",
+    outcome: "warn",
+    grain: "item",
     message: `конфликт GTIN: карточка уже связана с другим Ид: ${conflict.externalRef}`,
     details: { ...conflict },
   });
 }
 for (const ambiguity of plan.gtinAmbiguities) {
   await this.journal.append({
-    tenantId: session.tenantId, channelType: session.channelType, sessionId: session.id,
-    direction: "in", outcome: "warn", grain: "item",
+    tenantId: session.tenantId,
+    channelType: session.channelType,
+    sessionId: session.id,
+    direction: "in",
+    outcome: "warn",
+    grain: "item",
     message: `GTIN у нескольких позиций файла — автосвязь не выполнена: ${ambiguity.gtin}`,
     details: { ...ambiguity },
   });
 }
 if (plan.invalidBarcodes > 0) {
   await this.journal.append({
-    tenantId: session.tenantId, channelType: session.channelType, sessionId: session.id,
-    direction: "in", outcome: "warn", grain: "session",
+    tenantId: session.tenantId,
+    channelType: session.channelType,
+    sessionId: session.id,
+    direction: "in",
+    outcome: "warn",
+    grain: "session",
     message: `штрихкодов отброшено (не GTIN): ${plan.invalidBarcodes}`,
     details: { count: plan.invalidBarcodes },
   });
@@ -1155,6 +1261,7 @@ git commit -m "feat(exchange): автосвязь по GTIN и фото това
 ### Task 7: GTIN в очереди кандидатов (DTO + админка)
 
 **Files:**
+
 - Modify: `apps/api/src/modules/integrations/dto.ts` (в `CandidateDto` после `unit`: `gtin: string | null;`)
 - Modify: `apps/api/src/modules/integrations/integrations.service.ts` (`listCandidates`: в маппинг строки добавить `gtin: row.gtin,`)
 - Modify: `apps/admin/src/pages/integrations/api.ts` (зеркальный `CandidateDto` — то же поле)
@@ -1163,6 +1270,7 @@ git commit -m "feat(exchange): автосвязь по GTIN и фото това
 - Test: `apps/admin/test/integrations-candidates.test.tsx`, api-тест интеграций
 
 **Interfaces:**
+
 - Consumes: `integrationCandidates.gtin` (Task 3, пишется Task 6).
 - Produces: `CandidateDto.gtin: string | null` на обоих концах.
 
@@ -1204,6 +1312,7 @@ git commit -m "feat(integrations): GTIN кандидата в DTO и очере�
 ### Task 8: Приёмочный чек-лист и финальная проверка
 
 **Files:**
+
 - Modify: `docs/1c-exchange-acceptance-checklist.md`
 
 - [ ] **Step 1: Чек-лист**

@@ -12,10 +12,18 @@ import {
 
 describe("isForbiddenAddress", () => {
   it.each([
-    ["10.0.0.1", true], ["127.0.0.1", true], ["169.254.1.1", true],
-    ["172.16.0.1", true], ["172.31.255.255", true], ["192.168.1.1", true],
-    ["0.0.0.0", true], ["100.64.0.1", true],
-    ["::1", true], ["fc00::1", true], ["fe80::1", true], ["::ffff:127.0.0.1", true],
+    ["10.0.0.1", true],
+    ["127.0.0.1", true],
+    ["169.254.1.1", true],
+    ["172.16.0.1", true],
+    ["172.31.255.255", true],
+    ["192.168.1.1", true],
+    ["0.0.0.0", true],
+    ["100.64.0.1", true],
+    ["::1", true],
+    ["fc00::1", true],
+    ["fe80::1", true],
+    ["::ffff:127.0.0.1", true],
     // IPv4-compatible (::a.b.c.d) и NAT64 (64:ff9b::a.b.c.d) — приватный
     // IPv4 спрятан в hex-адресе. Проверка декодирует адрес в группы бит, а не
     // матчит текст, поэтому одинаково ловит и dotted-quad, и hex-хвост
@@ -27,7 +35,9 @@ describe("isForbiddenAddress", () => {
     ["::7f00:1", true], // hex-нормализация ::127.0.0.1
     ["64:ff9b::a00:1", true], // hex-нормализация 64:ff9b::10.0.0.1
     ["64:ff9b::808:808", false], // hex-нормализация 64:ff9b::8.8.8.8 (публичный)
-    ["8.8.8.8", false], ["93.184.216.34", false], ["2606:2800:220:1::1", false],
+    ["8.8.8.8", false],
+    ["93.184.216.34", false],
+    ["2606:2800:220:1::1", false],
     ["::ffff:8.8.8.8", false],
   ])("%s -> %s", (address, forbidden) => {
     expect(isForbiddenAddress(address)).toBe(forbidden);
@@ -78,8 +88,9 @@ describe("downloadImage", () => {
   });
 
   it("не https — отказ без единого запроса", async () => {
-    await expect(downloadImage("http://disk.sbis.ru/x", { request: fakeRequestFor({}) }))
-      .rejects.toMatchObject({ reason: "not_https" });
+    await expect(
+      downloadImage("http://disk.sbis.ru/x", { request: fakeRequestFor({}) }),
+    ).rejects.toMatchObject({ reason: "not_https" });
   });
 
   it("ходит по редиректу и режет их после третьего", async () => {
@@ -90,54 +101,63 @@ describe("downloadImage", () => {
       "https://a.example/3": hop(3, "https://a.example/4"),
       "https://a.example/4": hop(4, "https://a.example/5"),
     });
-    await expect(downloadImage("https://a.example/1", { request }))
-      .rejects.toMatchObject({ reason: "too_many_redirects" });
+    await expect(downloadImage("https://a.example/1", { request })).rejects.toMatchObject({
+      reason: "too_many_redirects",
+    });
   });
 
   it("редирект на http — отказ", async () => {
     const request = fakeRequestFor({
       "https://a.example/1": { status: 302, headers: { location: "http://a.example/2" } },
     });
-    await expect(downloadImage("https://a.example/1", { request }))
-      .rejects.toMatchObject({ reason: "not_https" });
+    await expect(downloadImage("https://a.example/1", { request })).rejects.toMatchObject({
+      reason: "not_https",
+    });
   });
 
   it("обрывает тело больше лимита", async () => {
     const request = fakeRequestFor({
       "https://a.example/big": { status: 200, chunks: [Buffer.alloc(5 * 1024 * 1024 + 1)] },
     });
-    await expect(downloadImage("https://a.example/big", { request }))
-      .rejects.toMatchObject({ reason: "too_large" });
+    await expect(downloadImage("https://a.example/big", { request })).rejects.toMatchObject({
+      reason: "too_large",
+    });
   });
 
   it("не-2xx без location — bad_status", async () => {
     const request = fakeRequestFor({ "https://a.example/x": { status: 404 } });
-    await expect(downloadImage("https://a.example/x", { request }))
-      .rejects.toMatchObject({ reason: "bad_status" });
+    await expect(downloadImage("https://a.example/x", { request })).rejects.toMatchObject({
+      reason: "bad_status",
+    });
   });
 
   it("IP-литерал в хосте — forbidden_address без единого запроса (guardedLookup не вызывается для литералов)", async () => {
     let called = false;
-    const inner = fakeRequestFor({ "https://127.0.0.1/x": { status: 200, chunks: [Buffer.from("x")] } });
+    const inner = fakeRequestFor({
+      "https://127.0.0.1/x": { status: 200, chunks: [Buffer.from("x")] },
+    });
     const request = ((...args: Parameters<typeof httpsRequest>) => {
       called = true;
       return inner(...args);
     }) as typeof httpsRequest;
-    await expect(downloadImage("https://127.0.0.1/x", { request }))
-      .rejects.toMatchObject({ reason: "forbidden_address" });
+    await expect(downloadImage("https://127.0.0.1/x", { request })).rejects.toMatchObject({
+      reason: "forbidden_address",
+    });
     expect(called).toBe(false);
   });
 
   it("числовой обфусцированный IP-литерал (2130706433 = 127.0.0.1) — тоже forbidden_address", async () => {
     const request = fakeRequestFor({});
-    await expect(downloadImage("https://2130706433/x", { request }))
-      .rejects.toMatchObject({ reason: "forbidden_address" });
+    await expect(downloadImage("https://2130706433/x", { request })).rejects.toMatchObject({
+      reason: "forbidden_address",
+    });
   });
 
   it("IPv6-литерал в скобках — тоже forbidden_address", async () => {
     const request = fakeRequestFor({});
-    await expect(downloadImage("https://[fd00::1]/x", { request }))
-      .rejects.toMatchObject({ reason: "forbidden_address" });
+    await expect(downloadImage("https://[fd00::1]/x", { request })).rejects.toMatchObject({
+      reason: "forbidden_address",
+    });
   });
 
   it("IPv4-compatible IPv6-литерал в скобках (WHATWG нормализует в hex до пре-чека) — forbidden_address без запроса", async () => {
@@ -149,8 +169,9 @@ describe("downloadImage", () => {
       called = true;
       return inner(...args);
     }) as typeof httpsRequest;
-    await expect(downloadImage("https://[::127.0.0.1]/x", { request }))
-      .rejects.toMatchObject({ reason: "forbidden_address" });
+    await expect(downloadImage("https://[::127.0.0.1]/x", { request })).rejects.toMatchObject({
+      reason: "forbidden_address",
+    });
     expect(called).toBe(false);
   });
 
@@ -162,8 +183,9 @@ describe("downloadImage", () => {
       called = true;
       return inner(...args);
     }) as typeof httpsRequest;
-    await expect(downloadImage("https://[64:ff9b::10.0.0.1]/x", { request }))
-      .rejects.toMatchObject({ reason: "forbidden_address" });
+    await expect(downloadImage("https://[64:ff9b::10.0.0.1]/x", { request })).rejects.toMatchObject(
+      { reason: "forbidden_address" },
+    );
     expect(called).toBe(false);
   });
 
@@ -174,8 +196,9 @@ describe("downloadImage", () => {
         headers: { location: "https://169.254.169.254/latest/meta-data" },
       },
     });
-    await expect(downloadImage("https://a.example/1", { request }))
-      .rejects.toMatchObject({ reason: "forbidden_address" });
+    await expect(downloadImage("https://a.example/1", { request })).rejects.toMatchObject({
+      reason: "forbidden_address",
+    });
   });
 
   it("публичный IP-литерал в хосте по-прежнему проходит через fake", async () => {
@@ -187,7 +210,7 @@ describe("downloadImage", () => {
     );
   });
 
-  it("битый Location (\"https://\") на редиректе — типизированный отказ, а не краш процесса", async () => {
+  it('битый Location ("https://") на редиректе — типизированный отказ, а не краш процесса', async () => {
     const request = fakeRequestFor({
       "https://a.example/1": { status: 302, headers: { location: "https://" } },
     });
@@ -196,7 +219,7 @@ describe("downloadImage", () => {
     });
   });
 
-  it("битый Location (\"https://[::1\") на редиректе — типизированный отказ", async () => {
+  it('битый Location ("https://[::1") на редиректе — типизированный отказ', async () => {
     const request = fakeRequestFor({
       "https://a.example/1": { status: 302, headers: { location: "https://[::1" } },
     });
@@ -205,7 +228,7 @@ describe("downloadImage", () => {
     );
   });
 
-  it("битый Location (\"https://:80\") на редиректе — типизированный отказ", async () => {
+  it('битый Location ("https://:80") на редиректе — типизированный отказ', async () => {
     const request = fakeRequestFor({
       "https://a.example/1": { status: 302, headers: { location: "https://:80" } },
     });
@@ -236,11 +259,7 @@ describe("downloadImage — абсолютный дедлайн хопа (не �
     // незавершённым (ни `end()`, ни новых чанков после первого) — именно
     // так выглядит «капель» в 1 байт раз в много секунд, которая держит
     // idle-таймаут (`timeout:` в опциях запроса) вечно взведённым.
-    const request = ((
-      _url: URL,
-      _options: unknown,
-      onResponse: (res: IncomingMessage) => void,
-    ) => {
+    const request = ((_url: URL, _options: unknown, onResponse: (res: IncomingMessage) => void) => {
       const source = new PassThrough();
       const res = source as unknown as IncomingMessage;
       res.statusCode = 200;

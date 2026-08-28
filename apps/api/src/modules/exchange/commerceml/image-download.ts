@@ -143,9 +143,7 @@ export function isForbiddenAddress(address: string): boolean {
 
 /** Снимает `[...]`-скобки с IPv6-хоста, как их отдаёт `URL#hostname`. */
 function stripBrackets(hostname: string): string {
-  return hostname.startsWith("[") && hostname.endsWith("]")
-    ? hostname.slice(1, -1)
-    : hostname;
+  return hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
 }
 
 /**
@@ -270,7 +268,9 @@ function fetchHop(
             received += chunk.byteLength;
             if (received > IMAGE_DOWNLOAD_MAX_BYTES) {
               req.destroy();
-              settleReject(new ImageDownloadError("too_large", `> ${IMAGE_DOWNLOAD_MAX_BYTES} bytes`));
+              settleReject(
+                new ImageDownloadError("too_large", `> ${IMAGE_DOWNLOAD_MAX_BYTES} bytes`),
+              );
               return;
             }
             chunks.push(chunk);
@@ -297,7 +297,9 @@ function fetchHop(
     const deadlineTimer = setTimeout(() => {
       req.destroy();
       currentRes?.destroy();
-      settleReject(new ImageDownloadError("timeout", `абсолютный дедлайн хопа ${timeoutMs}ms истёк`));
+      settleReject(
+        new ImageDownloadError("timeout", `абсолютный дедлайн хопа ${timeoutMs}ms истёк`),
+      );
     }, timeoutMs);
     req.on("timeout", () => {
       req.destroy();
