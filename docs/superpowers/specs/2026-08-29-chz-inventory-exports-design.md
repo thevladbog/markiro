@@ -73,6 +73,18 @@ normalising adapter sits between the download and `importEvidence` so any differ
 handled in one place, and the manual runbook carries a step that settles it against the
 sandbox — the same treatment the signature-format question got.
 
+## Prerequisite: the product group dictionary
+
+`productGroupCode` is a **numeric** Chestny ZNAK code carried on the task, not inside
+`params`. Today `products.product_group` is free text (up to 200 characters, no
+validation), so it cannot supply that code — an operator may have typed «Молоко», `milk`,
+or anything else.
+
+A separate slice therefore lands first: a seeded reference table of Chestny ZNAK product
+groups, with the product card's free-text field replaced by a select over it. That slice
+has its own spec; this one assumes the code is available for the inventory's product and
+treats its absence as a pre-flight failure.
+
 ## Components
 
 New module `apps/api/src/modules/chz-exports/`:
@@ -114,14 +126,27 @@ One table, `chz_export_runs`, with one row per (inventory, status) — six per o
 
 ## Job flow
 
-Queue `run-chz-export`, payload `{ runId }` — the same shape as
-`build-inventory-document-run`, including a boot-time reconcile pass that re-enqueues rows
-left in a non-terminal state by a restart.
+Queue `run-chz-export`, payload `{ tenantId, inventoryId }` — **one job per order, not per
+status** — plus a boot-time reconcile pass that re-enqueues orders left with a
+non-terminal run.
 
-The worker performs **one step per invocation** and, when the dispenser task is still
-being prepared, re-enqueues itself with `startAfter` (15 s, growing to 60 s) rather than
-sleeping inside the handler. A dispenser task can take minutes; holding a pg-boss worker
-for that long would starve the queue and lose progress on restart.
+The granularity is dictated by True API's per-method rate limits, which differ sharply:
+creating a task allows 15 requests per minute, but **reading a task's status allows only
+5**, while the batch results endpoint allows 12. Six statuses each polling their own task
+every 15 seconds would be 24 requests per minute against a limit of 5 — the design would
+fail on its own traffic. So the job advances the whole order: it creates whichever tasks
+are still missing, then polls **all six at once** through `GET dispenser/results` with
+`task_ids`, then downloads whatever has become available. At a 30-second cadence that is
+two requests per minute.
+
+The worker performs one pass per invocation and re-enqueues itself with `startAfter` when
+any run is still unfinished, rather than sleeping inside the handler: a dispenser task can
+take minutes, and holding a pg-boss worker for that long would starve the queue and lose
+progress on restart. `startAfter` has no precedent in this repository — every existing
+deferral is cron-driven — so it is introduced here deliberately.
+
+A per-order cap on polling passes turns a task that never completes into a failed run with
+a timeout code, instead of an immortal job.
 
 Idempotency has two layers. `dispenserTaskId` prevents ordering the same export twice —
 which matters because the daily quota is finite. sha256 idempotency inside
@@ -140,7 +165,7 @@ time:
 
 - the organization's INN is present and well-formed (`org_profiles.inn`) — reusing the
   actionable-error pattern already established for GIS MT document generation;
-- the inventory's product has a product group (`products.product_group`), required as the
+- the inventory's product has a Chestny ZNAK product group selected, which supplies the
   dispenser's `productGroupCode`;
 - a signer agent is paired for the tenant;
 - a non-expired token exists.
