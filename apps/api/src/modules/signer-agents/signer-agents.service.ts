@@ -147,29 +147,39 @@ export class SignerAgentsService {
   }
 
   async revoke(tenantId: string, agentId: string): Promise<void> {
-    const [agent] = await this.db
-      .update(schema.chzSignerAgents)
-      .set({ status: "revoked", revokedAt: new Date() })
-      .where(
-        and(
-          eq(schema.chzSignerAgents.tenantId, tenantId),
-          eq(schema.chzSignerAgents.id, agentId),
-          eq(schema.chzSignerAgents.status, "active"),
-        ),
-      )
-      .returning({ id: schema.chzSignerAgents.id, name: schema.chzSignerAgents.name });
-    if (!agent) throw new NotFoundException();
-    // Отзыв агента = отзыв доступа: чистим токен тенанта (спека, §Security).
-    await this.db.delete(schema.chzApiTokens).where(eq(schema.chzApiTokens.tenantId, tenantId));
-    await this.journal.append({
-      tenantId,
-      channelType: CHZ_CHANNEL_TYPE,
-      sessionId: null,
-      direction: "local",
-      outcome: "warn",
-      grain: "session",
-      message: `Signer agent revoked: ${agent.name}`,
+    // Отзыв агента = отзыв доступа: чистим токен тенанта (спека, §Security). The
+    // agent UPDATE and token DELETE must be atomic — otherwise a failure between
+    // them leaves the agent revoked but the tenant's True API token alive, with no
+    // way to retry (the UPDATE's WHERE status='active' no longer matches).
+    const agent = await this.db.transaction(async (tx) => {
+      const [agent] = await tx
+        .update(schema.chzSignerAgents)
+        .set({ status: "revoked", revokedAt: new Date() })
+        .where(
+          and(
+            eq(schema.chzSignerAgents.tenantId, tenantId),
+            eq(schema.chzSignerAgents.id, agentId),
+            eq(schema.chzSignerAgents.status, "active"),
+          ),
+        )
+        .returning({ id: schema.chzSignerAgents.id, name: schema.chzSignerAgents.name });
+      if (!agent) throw new NotFoundException();
+      await tx.delete(schema.chzApiTokens).where(eq(schema.chzApiTokens.tenantId, tenantId));
+      return agent;
     });
+    // Post-commit side effect: the revoke has already been committed, so a journal
+    // failure here must never throw and must never turn into a 500.
+    await this.journal
+      .append({
+        tenantId,
+        channelType: CHZ_CHANNEL_TYPE,
+        sessionId: null,
+        direction: "local",
+        outcome: "warn",
+        grain: "session",
+        message: `Signer agent revoked: ${agent.name}`,
+      })
+      .catch((e) => this.logger.warn(`signer agent revoke journal append failed: ${e}`));
   }
 
   async pair(
@@ -185,15 +195,20 @@ export class SignerAgentsService {
     await this.pairAttempts
       .refundPairAttempt(source, windowStart)
       .catch((e) => this.logger.warn(`pair attempt refund failed: ${e}`));
-    await this.journal.append({
-      tenantId: result.tenantId,
-      channelType: CHZ_CHANNEL_TYPE,
-      sessionId: null,
-      direction: "in",
-      outcome: "ok",
-      grain: "session",
-      message: `Signer agent paired: ${hostname}`,
-    });
+    // Post-commit side effect: the pairing has already been committed (code spent,
+    // agent row inserted) and the one-time agentSecret must reach the caller, so a
+    // journal failure here must never throw and must never turn into a 500.
+    await this.journal
+      .append({
+        tenantId: result.tenantId,
+        channelType: CHZ_CHANNEL_TYPE,
+        sessionId: null,
+        direction: "in",
+        outcome: "ok",
+        grain: "session",
+        message: `Signer agent paired: ${hostname}`,
+      })
+      .catch((e) => this.logger.warn(`signer agent pair journal append failed: ${e}`));
     return result.dto;
   }
 
