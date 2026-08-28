@@ -37,6 +37,7 @@ import {
 type ProductRow = typeof schema.products.$inferSelect;
 type CurrentProductRow = Omit<ProductRow, "defaultLabelTemplateId">;
 type ProductWithImageRow = CurrentProductRow & {
+  productGroupName: string | null;
   imageChecksum: string | null;
   imageByteSize: number | null;
   imageWidth: number | null;
@@ -49,7 +50,7 @@ const CURRENT_PRODUCT_SELECTION = {
   gtin14: schema.products.gtin14,
   name: schema.products.name,
   printName: schema.products.printName,
-  productGroup: schema.products.productGroup,
+  chzProductGroupCode: schema.products.chzProductGroupCode,
   boxCapacity: schema.products.boxCapacity,
   palletCapacity: schema.products.palletCapacity,
   status: schema.products.status,
@@ -64,6 +65,7 @@ const CURRENT_PRODUCT_SELECTION = {
 
 const PRODUCT_WITH_IMAGE_SELECTION = {
   ...CURRENT_PRODUCT_SELECTION,
+  productGroupName: schema.chzProductGroups.name,
   imageChecksum: schema.mediaAssets.checksum,
   imageByteSize: schema.mediaAssets.byteSize,
   imageWidth: schema.mediaAssets.width,
@@ -125,10 +127,10 @@ export class ProductsService {
   /** Create a product. Server computes `status` -- see computeStatus. */
   async createProduct(tenantId: string, data: CreateProductDto): Promise<ProductDto> {
     const gtin14 = this.normalizeOrThrow(data.gtin);
-    const productGroup = data.productGroup ?? null;
+    const chzProductGroupCode = data.chzProductGroupCode ?? null;
     const boxCapacity = data.boxCapacity ?? null;
     const palletCapacity = data.palletCapacity ?? null;
-    const status = this.computeStatus({ productGroup, boxCapacity, palletCapacity });
+    const status = this.computeStatus({ chzProductGroupCode, boxCapacity, palletCapacity });
 
     try {
       const [row] = await this.db
@@ -137,7 +139,7 @@ export class ProductsService {
           tenantId,
           gtin14,
           name: data.name,
-          productGroup,
+          chzProductGroupCode,
           boxCapacity,
           palletCapacity,
           status,
@@ -180,8 +182,10 @@ export class ProductsService {
 
         const gtin14 = normalizedGtin ?? current.gtin14;
         const name = data.name !== undefined ? data.name : current.name;
-        const productGroup =
-          data.productGroup !== undefined ? data.productGroup : current.productGroup;
+        const chzProductGroupCode =
+          data.chzProductGroupCode !== undefined
+            ? data.chzProductGroupCode
+            : current.chzProductGroupCode;
         const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : current.boxCapacity;
         const palletCapacity =
           data.palletCapacity !== undefined ? data.palletCapacity : current.palletCapacity;
@@ -189,11 +193,11 @@ export class ProductsService {
           data.defaultCounterpartyId !== undefined
             ? data.defaultCounterpartyId
             : current.defaultCounterpartyId;
-        const status = this.computeStatus({ productGroup, boxCapacity, palletCapacity });
+        const status = this.computeStatus({ chzProductGroupCode, boxCapacity, palletCapacity });
         const set: Partial<typeof schema.products.$inferInsert> = {
           gtin14,
           name,
-          productGroup,
+          chzProductGroupCode,
           boxCapacity,
           palletCapacity,
           defaultCounterpartyId,
@@ -676,6 +680,10 @@ export class ProductsService {
           eq(schema.mediaAssets.ownerTenantId, schema.products.tenantId),
           eq(schema.mediaAssets.status, "active"),
         ),
+      )
+      .leftJoin(
+        schema.chzProductGroups,
+        eq(schema.chzProductGroups.code, schema.products.chzProductGroupCode),
       );
   }
 
@@ -757,13 +765,13 @@ export class ProductsService {
     }
   }
 
-  /** active iff boxCapacity AND palletCapacity AND productGroup are all set; else draft. */
+  /** active iff boxCapacity AND palletCapacity AND the ChZ group code are all set; else draft. */
   private computeStatus(fields: {
-    productGroup: string | null;
+    chzProductGroupCode: number | null;
     boxCapacity: number | null;
     palletCapacity: number | null;
   }): ProductStatus {
-    return fields.productGroup !== null &&
+    return fields.chzProductGroupCode !== null &&
       fields.boxCapacity !== null &&
       fields.palletCapacity !== null
       ? "active"
@@ -782,6 +790,14 @@ export class ProductsService {
       throw new ConflictException("A product with this GTIN already exists for this tenant");
     }
     if (errorCode === "23503") {
+      const constraint = String(
+        (err as { constraint?: string }).constraint ??
+          (cause as { constraint?: string } | undefined)?.constraint ??
+          "",
+      );
+      if (constraint.includes("chz_product_group")) {
+        throw new BadRequestException("Unknown Chestny ZNAK product group code");
+      }
       throw new BadRequestException("Unknown counterparty for this organization");
     }
     throw error;
@@ -811,7 +827,8 @@ export class ProductsService {
       gtin14: row.gtin14,
       name: row.name,
       printName: row.printName,
-      productGroup: row.productGroup,
+      productGroup: row.productGroupName,
+      chzProductGroupCode: row.chzProductGroupCode,
       boxCapacity: row.boxCapacity,
       palletCapacity: row.palletCapacity,
       status: row.status,

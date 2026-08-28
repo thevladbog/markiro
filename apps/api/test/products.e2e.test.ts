@@ -222,6 +222,7 @@ describe.skipIf(!ready)("products e2e", () => {
       gtin14: GTIN14_CANONICAL,
       name: "Minimal Widget",
       productGroup: null,
+      chzProductGroupCode: null,
       boxCapacity: null,
       palletCapacity: null,
       status: "draft",
@@ -271,7 +272,7 @@ describe.skipIf(!ready)("products e2e", () => {
     expect(res.body.message).toEqual(expect.stringContaining("already exists"));
   });
 
-  it("status flips draft -> active -> draft as capacities/group are patched/cleared", async () => {
+  it("activates a product once the group code and both capacities are set", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
 
@@ -281,14 +282,19 @@ describe.skipIf(!ready)("products e2e", () => {
       .expect(201);
     const id = createRes.body.id as string;
     expect(createRes.body.status).toEqual("draft");
+    expect(createRes.body.chzProductGroupCode).toBeNull();
+    expect(createRes.body.productGroup).toBeNull();
 
     const activateRes = await agent
       .patch(`/products/${id}`)
-      .send({ productGroup: "Beverages", boxCapacity: 12, palletCapacity: 48 })
+      .send({ chzProductGroupCode: 8, boxCapacity: 12, palletCapacity: 48 })
       .expect(200);
     expect(activateRes.body).toMatchObject({
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
+      // The resolved name travels beside the code so the catalogue list needs
+      // no second request.
+      productGroup: "Молочная продукция",
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -299,10 +305,23 @@ describe.skipIf(!ready)("products e2e", () => {
       .expect(200);
     expect(downgradeRes.body).toMatchObject({
       status: "draft",
-      productGroup: "Beverages",
-      boxCapacity: 12,
+      chzProductGroupCode: 8,
       palletCapacity: null,
     });
+  });
+
+  it("rejects a group code that is not in the dictionary", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const created = await agent
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Unknown group" })
+      .expect(201);
+    await agent
+      .patch(`/products/${created.body.id as string}`)
+      .send({ chzProductGroupCode: 9999 })
+      .expect(400);
   });
 
   it("gtin-check: own prefix (org profile) -> owner=own", async () => {
@@ -401,7 +420,7 @@ describe.skipIf(!ready)("products e2e", () => {
 
     await agent
       .patch(`/products/${widgetRes.body.id}`)
-      .send({ productGroup: "Snacks", boxCapacity: 10, palletCapacity: 20 })
+      .send({ chzProductGroupCode: 8, boxCapacity: 10, palletCapacity: 20 })
       .expect(200);
 
     const byName = await agent.get("/products").query({ search: "Widget" }).expect(200);
@@ -437,7 +456,7 @@ describe.skipIf(!ready)("products e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
 
-    const complete = { productGroup: "Snacks", boxCapacity: 10, palletCapacity: 20 };
+    const complete = { chzProductGroupCode: 8, boxCapacity: 10, palletCapacity: 20 };
     await agent
       .post("/products")
       .send({ gtin: EAN13_WIDGET_A, name: "Live Widget", ...complete })
