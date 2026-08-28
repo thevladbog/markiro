@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-27
 
-**Status:** Proposed for implementation planning
+**Status:** Implemented and verified
 
 **Scope:** Replace the tenant Admin overview with a production-control dashboard backed by one
 tenant-scoped server summary. This slice covers trustworthy current output, separate validation

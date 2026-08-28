@@ -79,7 +79,7 @@
 - Produces: `schema.orgProfiles.timeZone: string`, stored in `time_zone`, non-null, default `Europe/Moscow`.
 - Consumes: existing `org_profiles` primary key and migration journal.
 
-- [ ] **Step 1: Add failing schema and migration assertions**
+- [x] **Step 1: Add failing schema and migration assertions**
 
 Add to `packages/db/test/schema.test.ts`:
 
@@ -100,7 +100,7 @@ ADD COLUMN "time_zone" text DEFAULT 'Europe/Moscow' NOT NULL;
 
 The test must also assert that the statement does not update or delete any existing profile row.
 
-- [ ] **Step 2: Run the focused tests and confirm the missing column/migration failure**
+- [x] **Step 2: Run the focused tests and confirm the missing column/migration failure**
 
 Run:
 
@@ -110,7 +110,7 @@ pnpm --filter @markiro/db exec vitest run test/schema.test.ts test/tenant-operat
 
 Expected: FAIL because `orgProfiles.timeZone` and migration `0085` do not exist.
 
-- [ ] **Step 3: Add the Drizzle column and generate the migration**
+- [x] **Step 3: Add the Drizzle column and generate the migration**
 
 Add to `orgProfiles`:
 
@@ -126,7 +126,7 @@ pnpm --filter @markiro/db db:generate --name tenant_operational_timezone
 
 Inspect `0085_tenant_operational_timezone.sql`, the snapshot, and journal. The SQL must use the non-null default in the same statement so existing tenants receive an explicit value without a nullable intermediate state.
 
-- [ ] **Step 4: Run DB verification**
+- [x] **Step 4: Run DB verification**
 
 Run:
 
@@ -138,7 +138,7 @@ pnpm --filter @markiro/db build
 
 Expected: all commands PASS.
 
-- [ ] **Step 5: Commit the persistence slice**
+- [x] **Step 5: Commit the persistence slice**
 
 ```bash
 git add packages/db/src/schema/org-profile.ts packages/db/migrations/0085_tenant_operational_timezone.sql packages/db/migrations/meta/0085_snapshot.json packages/db/migrations/meta/_journal.json packages/db/test/schema.test.ts packages/db/test/tenant-operational-timezone-migration.test.ts
@@ -168,7 +168,7 @@ git commit -m "feat(db): store tenant operational timezone"
 - Produces: `isIanaTimeZone(value: string): boolean`, `OrgProfileDto.timeZone`, and `PutOrgProfileDto.timeZone?: string`.
 - Consumes: `schema.orgProfiles.timeZone` from Task 1 and the existing profile query cache.
 
-- [ ] **Step 1: Add failing API validation and service tests**
+- [x] **Step 1: Add failing API validation and service tests**
 
 Extend the controller schema tests:
 
@@ -186,7 +186,7 @@ timeZone: "Europe/Moscow",
 
 Add an upsert test that expects both insert and conflict-update clauses to carry `Asia/Irkutsk` when supplied and to omit `timeZone` from the update set when the field is absent.
 
-- [ ] **Step 2: Run the focused API tests and confirm contract failures**
+- [x] **Step 2: Run the focused API tests and confirm contract failures**
 
 Run:
 
@@ -196,7 +196,7 @@ pnpm --filter @markiro/api exec vitest run test/org-profile.controller.test.ts t
 
 Expected: FAIL because the DTO and service do not expose `timeZone`.
 
-- [ ] **Step 3: Implement bounded IANA validation and profile persistence**
+- [x] **Step 3: Implement bounded IANA validation and profile persistence**
 
 Create `apps/api/src/lib/time-zone.ts`:
 
@@ -224,7 +224,7 @@ timeZone: string;
 
 Return `row?.timeZone ?? "Europe/Moscow"` from `getProfile`. In `upsertProfile`, add `timeZone` to the insert defaults and to `setClause` only when supplied. Do not infer timezone from the request or process environment.
 
-- [ ] **Step 4: Add failing Admin form coverage**
+- [x] **Step 4: Add failing Admin form coverage**
 
 Update `apps/admin/test/org-profile.test.tsx` with a profile fixture containing `timeZone: "Europe/Moscow"`. Assert that the select labelled `Часовой пояс производства` initially selects `Europe/Moscow`, changing it to `Asia/Yekaterinburg` and saving sends:
 
@@ -234,7 +234,7 @@ Update `apps/admin/test/org-profile.test.tsx` with a profile fixture containing 
 
 alongside the form’s existing submitted profile fields.
 
-- [ ] **Step 5: Run the Admin test and confirm the missing-control failure**
+- [x] **Step 5: Run the Admin test and confirm the missing-control failure**
 
 Run:
 
@@ -244,7 +244,7 @@ pnpm --filter @markiro/admin exec vitest run test/org-profile.test.tsx
 
 Expected: FAIL because the profile does not render the timezone control.
 
-- [ ] **Step 6: Implement the Admin timezone control**
+- [x] **Step 6: Implement the Admin timezone control**
 
 Create `time-zones.ts` exporting a readonly list of IANA values used by Russian production sites:
 
@@ -272,7 +272,7 @@ Add `timeZone` to `OrgProfileDto`, `PutOrgProfileInput`, `ProfileFormValues`, de
 If a stored valid timezone is not in `OPERATIONAL_TIME_ZONES`, append that exact value to the
 options so an imported tenant never renders an invalid empty selection.
 
-- [ ] **Step 7: Run focused and package-level profile checks**
+- [x] **Step 7: Run focused and package-level profile checks**
 
 Run:
 
@@ -285,7 +285,7 @@ pnpm --filter @markiro/admin typecheck
 
 Expected: all commands PASS.
 
-- [ ] **Step 8: Commit the profile slice**
+- [x] **Step 8: Commit the profile slice**
 
 ```bash
 git add apps/api/src/lib/time-zone.ts apps/api/src/modules/org-profile/dto.ts apps/api/src/modules/org-profile/org-profile.service.ts apps/api/test/org-profile.controller.test.ts apps/api/test/org-profile.service.test.ts apps/admin/src/pages/settings/time-zones.ts apps/admin/src/pages/settings/api.ts apps/admin/src/pages/settings/OrgProfilePage.tsx apps/admin/src/i18n/ru.json apps/admin/src/i18n/en.json apps/admin/test/org-profile.test.tsx
@@ -306,7 +306,7 @@ git commit -m "feat: configure tenant operational timezone"
 - Produces: `DashboardPeriod`, `DashboardOverviewDto`, `DashboardWindowDto`, `DashboardBucketDto`, `DashboardActiveShiftDto`, `DashboardReasonDto`, `DashboardDataQualityDto`, `dashboardOverviewQuerySchema`, and `dashboardOverviewOpenApiSchema`.
 - Consumes: the spec’s exact period, unit, verdict, and null-rate semantics.
 
-- [ ] **Step 1: Write failing contract tests**
+- [x] **Step 1: Write failing contract tests**
 
 Create `dashboard-dto.test.ts` asserting:
 
@@ -318,7 +318,7 @@ expect(dashboardOverviewQuerySchema.safeParse({ period: "year" }).success).toBe(
 
 Assert the OpenAPI response requires exactly `generatedAt`, `timeZone`, `metricVersion`, `setup`, `verdict`, `today`, `dynamics`, and `activeShifts`; bucket mode objects must expose separate unit fields and nullable rate fields.
 
-- [ ] **Step 2: Run the DTO test and confirm the missing-module failure**
+- [x] **Step 2: Run the DTO test and confirm the missing-module failure**
 
 Run:
 
@@ -328,7 +328,7 @@ pnpm --filter @markiro/api exec vitest run test/dashboard-dto.test.ts
 
 Expected: FAIL because `modules/dashboard/dto.ts` does not exist.
 
-- [ ] **Step 3: Implement the query and response types**
+- [x] **Step 3: Implement the query and response types**
 
 Use these discriminants and stable reason codes:
 
@@ -360,7 +360,7 @@ export const dashboardOverviewQuerySchema = z.object({
 
 Build explicit Swagger object schemas; do not use broad `additionalProperties` for metric objects.
 
-- [ ] **Step 4: Run DTO tests and typecheck**
+- [x] **Step 4: Run DTO tests and typecheck**
 
 Run:
 
@@ -371,7 +371,7 @@ pnpm --filter @markiro/api typecheck
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the contract**
+- [x] **Step 5: Commit the contract**
 
 ```bash
 git add apps/api/src/modules/dashboard/dto.ts apps/api/test/dashboard-dto.test.ts
@@ -392,7 +392,7 @@ git commit -m "feat(api): define tenant dashboard contract"
 - Consumes: `DashboardPeriod` and response metric shapes from Task 3; `orgProfiles.timeZone` from Task 1.
 - Produces: `DashboardRepository.load(tenantId: string, period: DashboardPeriod, now: Date): Promise<DashboardOverviewFacts>` and injectable `DrizzleDashboardRepository`.
 
-- [ ] **Step 1: Create a database-backed failing fixture**
+- [x] **Step 1: Create a database-backed failing fixture**
 
 Use the repository’s migrated-test-DB pattern. Seed `tenant-a` and `tenant-b`, then seed for `tenant-a`:
 
@@ -420,7 +420,7 @@ expect(facts.activeShifts[0]?.output).toEqual({ mode: "validation", acceptedUnit
 
 Assert every `tenant-b` fact is absent. Assert the current `7d` window and comparison window have equal local-clock shape and each bucket carries only its own mode’s facts.
 
-- [ ] **Step 2: Run the repository test and confirm the missing repository failure**
+- [x] **Step 2: Run the repository test and confirm the missing repository failure**
 
 Run:
 
@@ -431,7 +431,7 @@ pnpm --filter @markiro/api exec vitest run test/dashboard-repository.test.ts
 
 Expected: FAIL because `DashboardRepository` does not exist. If `DATABASE_URL` is absent, the test must report an explicit skip; run it again with the development test database before accepting this task.
 
-- [ ] **Step 3: Implement the repeatable-read repository boundary**
+- [x] **Step 3: Implement the repeatable-read repository boundary**
 
 Define:
 
@@ -476,7 +476,7 @@ transaction. `DashboardService` captures it once immediately before calling the 
 inject the fixed instant. Reject an invalid stored timezone even though the write boundary validates
 it.
 
-- [ ] **Step 4: Implement timezone-safe SQL windows and buckets**
+- [x] **Step 4: Implement timezone-safe SQL windows and buckets**
 
 Build a `window_config` CTE from `generatedAt AT TIME ZONE timeZone`. Use these local starts:
 
@@ -491,7 +491,7 @@ END
 
 Convert local boundaries back with `local_boundary AT TIME ZONE time_zone`. Shift the current local window by exactly `1 day`, `7 days`, `30 days`, or `12 weeks` for its comparison. Generate hourly/daily/weekly buckets with `generate_series`. Convert every bucket edge through the stored timezone so DST days use actual elapsed seconds.
 
-- [ ] **Step 5: Implement authoritative metric queries**
+- [x] **Step 5: Implement authoritative metric queries**
 
 For every count and join, include `tenant_id = tenantId` and join on both tenant and object id.
 
@@ -505,11 +505,11 @@ For every count and join, include `tenant_id = tenantId` and join on both tenant
 
 Map PostgreSQL count/numeric strings explicitly; rates are `null` when shift hours are zero and otherwise rounded to one decimal place.
 
-- [ ] **Step 6: Add DST and cross-tenant regression cases**
+- [x] **Step 6: Add DST and cross-tenant regression cases**
 
 Seed a `Europe/Berlin` profile around `2026-03-29`. Assert the local-day bucket spans 23 elapsed hours while labels and comparison remain civil-day aligned. Seed identical shift UUID-shaped facts in the other tenant where constraints permit and assert no count or join crosses the tenant boundary.
 
-- [ ] **Step 7: Run repository, type, lint, and build checks**
+- [x] **Step 7: Run repository, type, lint, and build checks**
 
 Run:
 
@@ -522,7 +522,7 @@ pnpm --filter @markiro/api build
 
 Expected: PASS, with no database skip in the accepted run.
 
-- [ ] **Step 8: Commit the repository**
+- [x] **Step 8: Commit the repository**
 
 ```bash
 git add apps/api/src/modules/dashboard/dashboard.repository.ts apps/api/test/dashboard-repository.test.ts
@@ -549,7 +549,7 @@ git commit -m "feat(api): aggregate tenant dashboard facts"
 - Consumes: `DashboardRepository.load` from Task 4 and response types from Task 3.
 - Produces: `DashboardService.overview(tenantId, period): Promise<DashboardOverviewDto>` and `GET /dashboard/overview`.
 
-- [ ] **Step 1: Write failing service verdict tests**
+- [x] **Step 1: Write failing service verdict tests**
 
 Use a fake repository and fixed clock. Cover these exact precedence rules:
 
@@ -571,7 +571,7 @@ Also assert:
 - an empty unused mode does not create a reason;
 - `metricVersion` is exactly `operations-dashboard-v1`.
 
-- [ ] **Step 2: Run service tests and confirm the missing-service failure**
+- [x] **Step 2: Run service tests and confirm the missing-service failure**
 
 Run:
 
@@ -581,7 +581,7 @@ pnpm --filter @markiro/api exec vitest run test/dashboard-service.test.ts
 
 Expected: FAIL because the service does not exist.
 
-- [ ] **Step 3: Implement deterministic verdict composition**
+- [x] **Step 3: Implement deterministic verdict composition**
 
 Inject a clock function defaulting to `() => new Date()`. Order reasons by severity then code, with these routes:
 
@@ -595,7 +595,7 @@ const reasonRoutes = {
 
 Return reason counts and affected modes from facts. Determine quality independently from verdict: missing duration is `insufficient`; otherwise active or late facts are `provisional`; otherwise `complete`.
 
-- [ ] **Step 4: Write failing controller, guard, and OpenAPI tests**
+- [x] **Step 4: Write failing controller, guard, and OpenAPI tests**
 
 Assert the controller:
 
@@ -606,7 +606,7 @@ Assert the controller:
 - permits subscription read-only access;
 - documents the period enum and exact 200 response schema.
 
-- [ ] **Step 5: Implement the controller and module**
+- [x] **Step 5: Implement the controller and module**
 
 Use:
 
@@ -629,7 +629,7 @@ export class DashboardController {
 
 Register the repository token, Drizzle implementation, service, and controller in `DashboardModule`, then import it in `AppModule.forRoot()`.
 
-- [ ] **Step 6: Run focused API checks**
+- [x] **Step 6: Run focused API checks**
 
 Run:
 
@@ -642,7 +642,7 @@ pnpm --filter @markiro/api build
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit the endpoint**
+- [x] **Step 7: Commit the endpoint**
 
 ```bash
 git add apps/api/src/modules/dashboard apps/api/src/app.module.ts apps/api/test/dashboard-service.test.ts apps/api/test/dashboard-controller.test.ts apps/api/test/dashboard-openapi.test.ts apps/api/test/authorization-metadata.test.ts
@@ -664,7 +664,7 @@ git commit -m "feat(api): expose tenant production overview"
 - Consumes: `GET /dashboard/overview` from Task 5.
 - Produces: `useDashboardOverview(period: DashboardPeriod): UseQueryResult<DashboardOverviewDto>` and one server-owned page state.
 
-- [ ] **Step 1: Rewrite failing page-state tests around the new endpoint**
+- [x] **Step 1: Rewrite failing page-state tests around the new endpoint**
 
 Replace the four-list default fetch stub with:
 
@@ -676,7 +676,7 @@ if (url.endsWith("/api/dashboard/overview?period=7d")) {
 
 The fixture must include all contract fields and use different values for validation units, boxes, and contained units. Preserve tests for loading, one retry action, and first-shift setup. Assert that the initial render makes only one dashboard overview request.
 
-- [ ] **Step 2: Run the dashboard test and confirm old requests fail**
+- [x] **Step 2: Run the dashboard test and confirm old requests fail**
 
 Run:
 
@@ -686,7 +686,7 @@ pnpm --filter @markiro/admin exec vitest run test/dashboard.test.tsx
 
 Expected: FAIL because the page still requests products, shifts, lines, and conflicts.
 
-- [ ] **Step 3: Implement the typed query hook**
+- [x] **Step 3: Implement the typed query hook**
 
 In `api.ts`, mirror the server DTO without `any` and define:
 
@@ -702,11 +702,11 @@ export function useDashboardOverview(period: DashboardPeriod) {
 }
 ```
 
-- [ ] **Step 4: Move loading, failure, and setup states to the new response**
+- [x] **Step 4: Move loading, failure, and setup states to the new response**
 
 Remove `useProducts`, `useShifts`, `useLines`, and `useConflicts` from the dashboard page. Drive the setup action from `overview.setup.productCount`, `shiftCount`, and `hasRunShift`. Retry only the overview query. Keep the existing access-capability behavior for setup actions.
 
-- [ ] **Step 5: Run focused Admin checks**
+- [x] **Step 5: Run focused Admin checks**
 
 Run:
 
@@ -717,7 +717,7 @@ pnpm --filter @markiro/admin typecheck
 
 Expected: PASS for loading, failure, retry, setup, and single-request behavior.
 
-- [ ] **Step 6: Commit the client data boundary**
+- [x] **Step 6: Commit the client data boundary**
 
 ```bash
 git add apps/admin/src/pages/dashboard/api.ts apps/admin/src/pages/dashboard/index.tsx apps/admin/test/dashboard.test.tsx
@@ -742,7 +742,7 @@ git commit -m "refactor(admin): read dashboard server summary"
 - Consumes: `DashboardOverviewDto`, `DashboardPeriod`, and `useDashboardOverview` from Task 6.
 - Produces: A2 verdict, headline facts, rate/output dynamics, attention signals, and contextual active-shift table.
 
-- [ ] **Step 1: Add failing semantic and interaction tests**
+- [x] **Step 1: Add failing semantic and interaction tests**
 
 With `i18n` set to Russian, assert:
 
@@ -757,7 +757,7 @@ expect(screen.queryByText(/138[\s\u00a0]?789/)).toBeNull();
 
 Assert `Темп` is initially selected, `Выпуск` switches the bar labels without changing period, and selecting `30 дней` requests `/api/dashboard/overview?period=30d` while exposing `aria-pressed="true"`. Assert validation and aggregation charts have distinct region labels and units. Assert a critical conflict reason links to `/conflicts`.
 
-- [ ] **Step 2: Run the test and confirm the A2 elements are absent**
+- [x] **Step 2: Run the test and confirm the A2 elements are absent**
 
 Run:
 
@@ -767,7 +767,7 @@ pnpm --filter @markiro/admin exec vitest run test/dashboard.test.tsx
 
 Expected: FAIL on the new heading, controls, and separate chart regions.
 
-- [ ] **Step 3: Build the page hierarchy**
+- [x] **Step 3: Build the page hierarchy**
 
 In `index.tsx`, render in this order:
 
@@ -782,7 +782,7 @@ For active-shift output, branch on the discriminated union. Render validation as
 Label the headline strip as “active shifts plus shifts completed today” so its complete active-shift
 totals are not mistaken for the occurrence-time buckets below.
 
-- [ ] **Step 4: Implement accessible separate-mode charts**
+- [x] **Step 4: Implement accessible separate-mode charts**
 
 `ProductionDynamics` owns UI-only state `metric: "rate" | "output"`; the parent owns `period`. Compute each chart’s maximum only from its own series. Render zero as a labelled zero bar; render null rate as an em dash with the translated insufficient-data explanation.
 
@@ -796,7 +796,7 @@ Use native buttons:
 
 Render bars as ordinary elements with `aria-label` containing bucket label, exact value, and unit. Provide an adjacent visually-hidden list with the same values so assistive technology receives a table-equivalent sequence. Do not use canvas, SVG paths, or a chart dependency.
 
-- [ ] **Step 5: Implement the compact “Прибор” CSS**
+- [x] **Step 5: Implement the compact “Прибор” CSS**
 
 Use only existing variables such as `--surface-card`, `--surface-panel`, `--line`, `--fg-1`, `--fg-3`, `--ok-solid`, `--warn-solid`, `--err-solid`, `--font-ui`, and `--font-mono`.
 
@@ -809,11 +809,11 @@ Required responsive behavior:
 - focus-visible uses the system focus ring;
 - transitions use the repository’s short utility timing and are disabled under `prefers-reduced-motion`.
 
-- [ ] **Step 6: Add exact Russian and English copy**
+- [x] **Step 6: Add exact Russian and English copy**
 
 Add keys for verdict states/reasons, headline labels, data-quality states, metric/period controls, per-shift-hour units, no-data explanations, comparison labels, and contextual active-shift output. Russian must use `Проверка`, `Агрегация`, `шт./час смены`, and `коробов/час смены`; English must use `Validation`, `Aggregation`, `units/shift hour`, and `boxes/shift hour`.
 
-- [ ] **Step 7: Run Admin tests and static gates**
+- [x] **Step 7: Run Admin tests and static gates**
 
 Run:
 
@@ -827,7 +827,7 @@ pnpm --filter @markiro/admin build
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit the production screen**
+- [x] **Step 8: Commit the production screen**
 
 ```bash
 git add apps/admin/src/pages/dashboard/ProductionDynamics.tsx apps/admin/src/pages/dashboard/index.tsx apps/admin/src/pages/dashboard/dashboard.css apps/admin/src/i18n/ru.json apps/admin/src/i18n/en.json apps/admin/test/dashboard.test.tsx
@@ -849,7 +849,7 @@ git commit -m "feat(admin): add production control dashboard"
 - Consumes: all completed tasks.
 - Produces: verified branch, browser evidence, completed spec/plan status, and updated local graph.
 
-- [ ] **Step 1: Run focused cross-package regression checks**
+- [x] **Step 1: Run focused cross-package regression checks**
 
 Run with the development test database loaded:
 
@@ -862,7 +862,7 @@ pnpm --filter @markiro/admin exec vitest run test/dashboard.test.tsx test/org-pr
 
 Expected: PASS with no dashboard repository database skip.
 
-- [ ] **Step 2: Run package gates**
+- [x] **Step 2: Run package gates**
 
 ```bash
 pnpm --filter @markiro/db typecheck
@@ -882,7 +882,7 @@ git diff --check
 
 Expected: PASS. Report any infrastructure-driven skips separately rather than treating them as coverage.
 
-- [ ] **Step 3: Run desktop and narrow browser validation**
+- [x] **Step 3: Run desktop and narrow browser validation**
 
 Start the repository’s development services and Admin. Seed one validation shift, one aggregation shift, separate outputs, an attention reason, and a previous comparison window. Capture and inspect:
 
@@ -895,7 +895,7 @@ Start the repository’s development services and Admin. Seed one validation shi
 
 The browser pass fails if units share a scale, text clips, controls overflow, a chart relies only on color, or a provisional result lacks its marker.
 
-- [ ] **Step 4: Update documentation status and local graph**
+- [x] **Step 4: Update documentation status and local graph**
 
 Change the spec status to `Implemented and verified` only after Steps 1–3 pass. Mark every completed plan checkbox. Run:
 
@@ -905,7 +905,7 @@ graphify update .
 
 Do not stage `graphify-out/`.
 
-- [ ] **Step 5: Review and commit the final evidence state**
+- [x] **Step 5: Review and commit the final evidence state**
 
 ```bash
 git status --short
