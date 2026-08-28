@@ -485,7 +485,7 @@ export interface SignerAgentsOverview {
   token: SignerTokenStatus;
 }
 
-/** Cache key for the signer agents overview -- flat under `/signer-agents`, not nested under `["integrations", "chestny_znak"]`, matching the endpoint's own flat mount (see `SignerAgentsController`'s `@Controller("signer-agents")`, no `/integrations` prefix). */
+/** Cache key for the signer agents overview. The endpoint is mounted flat (`@Controller("signer-agents")`, no `/integrations` prefix), but the cache key stays nested under the channel so channel-level invalidation covers it. */
 export const signerAgentsQueryKey = ["integrations", "chestny_znak", "agents"] as const;
 
 /** `GET /signer-agents` -- feeds `SignerAgentsPanel`. */
