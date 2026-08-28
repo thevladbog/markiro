@@ -238,6 +238,12 @@
   },
   "shell": {
     "navLabel": "Основная навигация",
+    "mobileNavigation": {
+      "trigger": "Разделы",
+      "openLabel": "Открыть мобильную навигацию",
+      "closeLabel": "Закрыть мобильную навигацию",
+      "navLabel": "Мобильная навигация"
+    },
     "sections": {
       "production": "Производство",
       "reference": "Справочники",

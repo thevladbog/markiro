@@ -670,10 +670,6 @@
 }
 
 @media (max-width: 768px) {
-  body:has(.mk-dashboard-page) .mk-app-sidebar {
-    display: none !important;
-  }
-
   .mk-dashboard-page {
     gap: var(--sp-3);
     padding: var(--sp-5) var(--sp-4) var(--sp-7);

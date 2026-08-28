@@ -238,6 +238,12 @@
   },
   "shell": {
     "navLabel": "Main navigation",
+    "mobileNavigation": {
+      "trigger": "Sections",
+      "openLabel": "Open mobile navigation",
+      "closeLabel": "Close mobile navigation",
+      "navLabel": "Mobile navigation"
+    },
     "sections": {
       "production": "Production",
       "reference": "Reference data",
