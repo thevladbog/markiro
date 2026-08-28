@@ -90,3 +90,32 @@ export const signerAgentsOverviewOpenApiSchema: SchemaObject = {
     token: signerTokenStatusOpenApiSchema,
   },
 };
+
+const signerTaskOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "type", "payload"],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    type: { type: "string", enum: ["true_api_auth"] },
+    payload: {
+      type: "object",
+      additionalProperties: false,
+      required: ["trueApiBaseUrl"],
+      properties: {
+        trueApiBaseUrl: { type: "string", format: "uri" },
+        inn: { type: "string" },
+      },
+    },
+  },
+};
+
+/** `GET /signer-agent/tasks/next` response: no queued task is `{ task: null }`, not a 404. */
+export const nextTaskOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["task"],
+  properties: {
+    task: { ...signerTaskOpenApiSchema, nullable: true },
+  },
+};

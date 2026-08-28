@@ -10,6 +10,7 @@ import { loadEnv } from "./env";
 import {
   CABINET_SESSION_SECURITY,
   KIOSK_TOKEN_SECURITY,
+  SIGNER_AGENT_TOKEN_SECURITY,
   STATION_API_KEY_SECURITY,
 } from "./lib/openapi";
 import { excludeExchangeRoute } from "./modules/exchange/exchange.module";
@@ -103,6 +104,7 @@ async function bootstrap() {
             "- **Cabinet** routes use the Better Auth session cookie issued by `/api/auth/*` (not part of this document).",
             "- **Station** routes use the `x-api-key` header issued once during station pairing.",
             "- **Kiosk** routes use the `x-kiosk-token` header issued once during kiosk pairing.",
+            "- **Signer agent** routes use the `x-signer-token` header issued once during agent pairing.",
             "- **Platform** back-office routes use a separate platform session cookie.",
           ].join("\n"),
         )
@@ -132,6 +134,15 @@ async function bootstrap() {
             description: "Kiosk device token revealed once during kiosk pairing.",
           },
           KIOSK_TOKEN_SECURITY,
+        )
+        .addApiKey(
+          {
+            type: "apiKey",
+            in: "header",
+            name: "x-signer-token",
+            description: "Signer agent secret revealed once during agent pairing.",
+          },
+          SIGNER_AGENT_TOKEN_SECURITY,
         ),
       (await platformSetup.platformAuth.$context).authCookies.sessionToken.name,
     ).build(),
