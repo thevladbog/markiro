@@ -16,6 +16,13 @@ use crate::SignerError;
 const POLL_TIMEOUT_SLACK: Duration = Duration::from_secs(20);
 const REPORT_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The client-side deadline for a long poll: the server holds for at most
+/// `wait_ms` milliseconds (capped at 25 s), plus slack so a healthy idle poll
+/// is never mistaken for a stuck connection.
+fn poll_timeout(wait_ms: u32) -> Duration {
+    Duration::from_millis(u64::from(wait_ms.min(25_000))) + POLL_TIMEOUT_SLACK
+}
+
 /// Pairing has exactly two outcomes worth distinguishing in the UI: the cloud
 /// refused the code (wrong, expired, used, or rate-limited — it deliberately
 /// does not say which), or we never reached it.
@@ -83,7 +90,7 @@ impl CloudClient {
             .http
             .get(&url)
             .header("x-signer-token", secret)
-            .timeout(Duration::from_millis(u64::from(wait_capped)) + POLL_TIMEOUT_SLACK)
+            .timeout(poll_timeout(wait_ms))
             .send()
             .await
             .map_err(|e| SignerError::Network(e.to_string()))?;
@@ -293,6 +300,21 @@ mod tests {
             .await;
         let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
         assert!(client.poll("s3cret", 60_000).await.unwrap().is_none());
+    }
+
+    #[test]
+    fn the_poll_timeout_never_exceeds_the_server_hold_plus_slack() {
+        // Under the cap the deadline tracks the requested wait.
+        assert_eq!(
+            poll_timeout(5_000),
+            Duration::from_millis(5_000) + POLL_TIMEOUT_SLACK
+        );
+        // Over the cap it must clamp to the 25 s the server actually holds --
+        // this is the case the earlier bug got wrong.
+        assert_eq!(
+            poll_timeout(60_000),
+            Duration::from_millis(25_000) + POLL_TIMEOUT_SLACK
+        );
     }
 
     #[tokio::test]
