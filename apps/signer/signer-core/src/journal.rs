@@ -30,7 +30,7 @@ impl JournalEntry {
 /// whitespace: the only untrusted text that reaches the journal is
 /// `error.to_string()`, and `SignerError::TrueApi` embeds up to 1000 chars of
 /// the raw True API JSON response body, where a token sits between
-/// punctuation -- e.g. `{"token":"eyJhbGciOiJIUzI1NiJ9.abc.def"}` -- not
+/// punctuation -- e.g. `{"token":"notarealheader.notarealpayload.notarealsig"}` -- not
 /// between spaces. Any character that cannot appear in a base64url/JWT token
 /// (including `{}"',:;()[]` and whitespace) ends the current run.
 ///
@@ -100,8 +100,8 @@ mod tests {
 
     #[test]
     fn redacts_anything_that_looks_like_a_credential() {
-        let entry = JournalEntry::new("token refreshed", Some("Bearer eyJhbGciOiJIUzI1NiJ9.abc.def"));
-        assert!(!entry.detail.as_deref().unwrap_or_default().contains("eyJ"));
+        let entry = JournalEntry::new("token refreshed", Some("Bearer notarealheader.notarealpayload.notarealsig"));
+        assert!(!entry.detail.as_deref().unwrap_or_default().contains("notarealheader"));
         assert!(entry.detail.as_deref().unwrap_or_default().contains("[redacted]"));
     }
 
@@ -113,10 +113,10 @@ mod tests {
         // through verbatim.
         let entry = JournalEntry::new(
             "True API rejected the request",
-            Some(r#"{"token":"eyJhbGciOiJIUzI1NiJ9.abc.def","status":"ok"}"#),
+            Some(r#"{"token":"notarealheader.notarealpayload.notarealsig","status":"ok"}"#),
         );
         let detail = entry.detail.as_deref().unwrap_or_default();
-        assert!(!detail.contains("eyJhbGciOiJIUzI1NiJ9.abc.def"));
+        assert!(!detail.contains("notarealheader.notarealpayload.notarealsig"));
         assert!(detail.contains("[redacted]"));
         // Surrounding structure and short fields survive untouched.
         assert!(detail.contains(r#""token":"#));

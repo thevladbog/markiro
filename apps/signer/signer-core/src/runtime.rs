@@ -641,11 +641,11 @@ mod tests {
     fn a_true_api_error_lands_redacted_in_status() {
         let (_dir, runtime) = test_runtime();
         let error = SignerError::TrueApi(
-            r#"{"token":"eyJhbGciOiJIUzI1NiJ9.abc.def","status":"ok"}"#.to_string(),
+            r#"{"token":"notarealheader.notarealpayload.notarealsig","status":"ok"}"#.to_string(),
         );
         runtime.set_last_error(Some(error.to_string()));
         let detail = runtime.status().last_error.expect("last_error must be set");
-        assert!(!detail.contains("eyJhbGciOiJIUzI1NiJ9.abc.def"), "got {detail}");
+        assert!(!detail.contains("notarealheader.notarealpayload.notarealsig"), "got {detail}");
         assert!(detail.contains("[redacted]"), "got {detail}");
     }
 
