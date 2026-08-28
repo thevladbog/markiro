@@ -65,7 +65,10 @@ impl CloudClient {
         if !response.status().is_success() {
             // 400 and 401 are both "this code will not work"; the cloud does not
             // distinguish wrong from expired from rate-limited on purpose.
-            return Err(PairError::Rejected);
+            match response.status() {
+                StatusCode::BAD_REQUEST | StatusCode::UNAUTHORIZED => return Err(PairError::Rejected),
+                status => return Err(PairError::Network(format!("server returned {status}"))),
+            }
         }
         response
             .json::<PairResponse>()
@@ -80,7 +83,7 @@ impl CloudClient {
             .http
             .get(&url)
             .header("x-signer-token", secret)
-            .timeout(Duration::from_millis(u64::from(wait_ms)) + POLL_TIMEOUT_SLACK)
+            .timeout(Duration::from_millis(u64::from(wait_capped)) + POLL_TIMEOUT_SLACK)
             .send()
             .await
             .map_err(|e| SignerError::Network(e.to_string()))?;
@@ -277,5 +280,33 @@ mod tests {
         let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
         let body = TaskFail::new(SignerErrorCode::CryptoPinRequired, "  PIN prompt pending  ");
         assert!(client.fail("s", "t1", &body).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn poll_with_large_wait_ms_caps_to_25000_in_query_string() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/signer-agent/tasks/next"))
+            .and(query_param("wait", "25000"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"task":null}"#))
+            .mount(&server)
+            .await;
+        let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
+        assert!(client.poll("s3cret", 60_000).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn pair_against_500_returns_network_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/signer-agent/pair"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        let client = CloudClient::new(&server.uri(), "0.1.0").unwrap();
+        assert!(matches!(
+            client.pair("00000000", "PC").await,
+            Err(PairError::Network(_))
+        ));
     }
 }
