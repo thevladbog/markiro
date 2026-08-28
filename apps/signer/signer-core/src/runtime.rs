@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::cloud::{CloudClient, PairError};
-use crate::contracts::{SignerErrorCode, TaskComplete, TaskFail};
-use crate::journal::{Journal, JournalEntry};
+use crate::contracts::{cap_cert_subject, SignerErrorCode, TaskComplete, TaskFail};
+use crate::journal::{redact, Journal, JournalEntry};
 use crate::signer::Signer;
 use crate::storage::{self, AgentConfig, SecretStore};
 use crate::trueapi::obtain_token;
@@ -72,6 +72,14 @@ pub struct Runtime {
     secrets: Arc<dyn SecretStore>,
     app_version: String,
     journal: Mutex<Journal>,
+    /// The two pieces of `AgentStatus` that do not derive from
+    /// `AgentConfig` on disk: `status()` used to hard-code both to `None`
+    /// and rely on call sites patching a freshly built `AgentStatus`, which
+    /// meant the very next `on_change(self.status())` — the next idle poll,
+    /// at most `POLL_WAIT_MS` later — overwrote the patch and erased it.
+    /// Holding them here makes `status()` read the real, current value.
+    last_token_expires_at: Mutex<Option<String>>,
+    last_error: Mutex<Option<String>>,
     /// Built once and reused for every True API round trip. `Client::new()`
     /// panics if the TLS backend or resolver cannot initialise, which would
     /// abort the agent task with no journal entry and no UI signal; building
@@ -97,8 +105,30 @@ impl Runtime {
             secrets,
             app_version,
             journal: Mutex::new(Journal::default()),
+            last_token_expires_at: Mutex::new(None),
+            last_error: Mutex::new(None),
             http,
         })
+    }
+
+    /// Sets the token-expiry field read by `status()`. Private: the only
+    /// callers are inside the agent loop, which is why this is a plain
+    /// setter rather than something exposed through `AgentStatus` mutation.
+    fn set_last_token_expires_at(&self, value: Option<String>) {
+        if let Ok(mut guard) = self.last_token_expires_at.lock() {
+            *guard = value;
+        }
+    }
+
+    /// Sets the error field read by `status()` and surfaced in a Windows
+    /// notification. Redacts on the way in — not at the read site — so every
+    /// caller gets the scrub for free and a raw True API response body (up
+    /// to 1000 chars, which can itself contain a token) never reaches the UI
+    /// or an OS toast unredacted.
+    fn set_last_error(&self, value: Option<String>) {
+        if let Ok(mut guard) = self.last_error.lock() {
+            *guard = value.map(|v| redact(&v));
+        }
     }
 
     pub fn config(&self) -> Result<AgentConfig, SignerError> {
@@ -124,8 +154,8 @@ impl Runtime {
             phase: if config.is_paired() { AgentPhase::Idle } else { AgentPhase::Unpaired },
             tenant_name: config.tenant_name,
             cert_thumbprint: config.cert_thumbprint,
-            last_token_expires_at: None,
-            last_error: None,
+            last_token_expires_at: self.last_token_expires_at.lock().ok().and_then(|g| g.clone()),
+            last_error: self.last_error.lock().ok().and_then(|g| g.clone()),
             journal: self.journal_entries(),
         }
     }
@@ -161,6 +191,8 @@ impl Runtime {
     /// request.
     pub fn unpair(&self) -> Result<(), SignerError> {
         storage::clear_credential(&self.config_dir)?;
+        self.set_last_token_expires_at(None);
+        self.set_last_error(None);
         self.note("Agent unpaired", None);
         Ok(())
     }
@@ -228,7 +260,7 @@ impl Runtime {
                 Ok(Some(task)) => {
                     failures = 0;
                     self.note("Task received", Some(&task.id));
-                    self.execute(&client, &secret, &config, &task, &on_change).await;
+                    self.execute(&client, &secret, &task, &on_change).await;
                 }
                 Err(SignerError::Revoked) => {
                     self.note("The cabinet revoked this agent", None);
@@ -248,9 +280,9 @@ impl Runtime {
                     self.note("Poll failed", Some(&error.to_string()));
                     tokio::time::sleep(backoff_for(failures)).await;
                     failures = failures.saturating_add(1);
+                    self.set_last_error(Some(error.to_string()));
                     let mut status = self.status();
                     status.phase = AgentPhase::Degraded;
-                    status.last_error = Some(error.to_string());
                     on_change(status);
                 }
             }
@@ -261,7 +293,6 @@ impl Runtime {
         &self,
         client: &CloudClient,
         secret: &str,
-        config: &AgentConfig,
         task: &crate::contracts::SignerTask,
         on_change: &F,
     ) where
@@ -271,7 +302,12 @@ impl Runtime {
         status.phase = AgentPhase::Working;
         on_change(status);
 
-        let Some(thumbprint) = config.cert_thumbprint.clone() else {
+        // Re-read rather than trusting a snapshot taken before the poll that
+        // just returned this task: that poll can hold for up to
+        // `POLL_WAIT_MS` (25 s), and if the operator selects a certificate
+        // while it is in flight, a stale snapshot would fail this task with
+        // "no certificate has been selected" even though one now is.
+        let Some(thumbprint) = self.config().ok().and_then(|c| c.cert_thumbprint) else {
             let body = TaskFail::new(
                 SignerErrorCode::CryptoCertNotFound,
                 "no certificate has been selected in the agent",
@@ -331,7 +367,7 @@ impl Runtime {
                     token: token.token,
                     expires_at: token.expires_at.clone(),
                     cert_thumbprint: thumbprint,
-                    cert_subject: certificate.as_ref().map(|c| c.subject.clone()),
+                    cert_subject: certificate.as_ref().map(|c| cap_cert_subject(&c.subject)),
                     cert_inn: certificate.as_ref().and_then(|c| c.inn.clone()),
                     cert_not_after: certificate.as_ref().map(|c| c.not_after.clone()),
                 };
@@ -363,15 +399,15 @@ impl Runtime {
                 match result {
                     Ok(()) => {
                         self.note("True API token delivered", None);
-                        let mut status = self.status();
-                        status.last_token_expires_at = Some(token.expires_at);
-                        on_change(status);
+                        self.set_last_token_expires_at(Some(token.expires_at));
+                        self.set_last_error(None);
+                        on_change(self.status());
                     }
                     Err(error) => {
                         self.note_report_failure("Could not report the token", &error);
+                        self.set_last_error(Some(error.to_string()));
                         let mut status = self.status();
                         status.phase = AgentPhase::Degraded;
-                        status.last_error = Some(error.to_string());
                         on_change(status);
                     }
                 }
@@ -384,9 +420,9 @@ impl Runtime {
                         self.note_report_failure("Could not report the failure", &fail_error);
                     }
                 }
+                self.set_last_error(Some(error.to_string()));
                 let mut status = self.status();
                 status.phase = AgentPhase::Degraded;
-                status.last_error = Some(error.to_string());
                 on_change(status);
             }
         }
@@ -430,6 +466,43 @@ impl Runtime {
 mod tests {
     use super::*;
     use crate::contracts::SignerErrorCode;
+    use crate::signer::CertificateSummary;
+
+    struct NoSigner;
+    impl Signer for NoSigner {
+        fn list_certificates(&self) -> Result<Vec<CertificateSummary>, SignerError> {
+            Ok(vec![])
+        }
+        fn sign_attached(&self, _t: &str, _p: &[u8]) -> Result<String, SignerError> {
+            Err(SignerError::PinRequired)
+        }
+    }
+
+    struct PlainStore;
+    impl SecretStore for PlainStore {
+        fn protect(&self, plaintext: &str) -> Result<String, SignerError> {
+            Ok(plaintext.to_string())
+        }
+        fn unprotect(&self, protected: &str) -> Result<String, SignerError> {
+            Ok(protected.to_string())
+        }
+    }
+
+    /// A `Runtime` wired to a fresh temp config dir and inert Windows-only
+    /// dependencies, for tests that only exercise the loop's own state
+    /// (status, journal, pairing bookkeeping) rather than real crypto or a
+    /// real cloud.
+    fn test_runtime() -> (tempfile::TempDir, Runtime) {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::new(
+            dir.path().to_path_buf(),
+            Arc::new(NoSigner),
+            Arc::new(PlainStore),
+            "0.1.0".into(),
+        )
+        .unwrap();
+        (dir, runtime)
+    }
 
     #[test]
     fn maps_crypto_failures_onto_wire_error_codes() {
@@ -484,34 +557,75 @@ mod tests {
 
     #[test]
     fn selecting_a_certificate_persists_it() {
-        use crate::signer::CertificateSummary;
-        struct NoSigner;
-        impl Signer for NoSigner {
-            fn list_certificates(&self) -> Result<Vec<CertificateSummary>, SignerError> {
-                Ok(vec![])
-            }
-            fn sign_attached(&self, _t: &str, _p: &[u8]) -> Result<String, SignerError> {
-                Err(SignerError::PinRequired)
-            }
-        }
-        struct PlainStore;
-        impl SecretStore for PlainStore {
-            fn protect(&self, plaintext: &str) -> Result<String, SignerError> {
-                Ok(plaintext.to_string())
-            }
-            fn unprotect(&self, protected: &str) -> Result<String, SignerError> {
-                Ok(protected.to_string())
-            }
-        }
-        let dir = tempfile::tempdir().unwrap();
-        let runtime = Runtime::new(
-            dir.path().to_path_buf(),
-            Arc::new(NoSigner),
-            Arc::new(PlainStore),
-            "0.1.0".into(),
-        )
-        .unwrap();
+        let (_dir, runtime) = test_runtime();
         runtime.select_certificate("AB12").unwrap();
         assert_eq!(runtime.config().unwrap().cert_thumbprint.as_deref(), Some("AB12"));
+    }
+
+    // --- F1: `status()` must reflect the real, current value of the two
+    // fields it used to hard-code to `None` on every call, not just the one
+    // `AgentStatus` a call site happened to patch. ---
+
+    #[test]
+    fn a_token_expiry_survives_more_than_one_status_call() {
+        let (_dir, runtime) = test_runtime();
+        runtime.set_last_token_expires_at(Some("2026-08-28T20:00:00.000Z".into()));
+        // Simulates the next idle poll's `on_change(self.status())`: the
+        // hard-coded-`None` version of `status()` would erase this here.
+        assert_eq!(
+            runtime.status().last_token_expires_at.as_deref(),
+            Some("2026-08-28T20:00:00.000Z")
+        );
+        assert_eq!(
+            runtime.status().last_token_expires_at.as_deref(),
+            Some("2026-08-28T20:00:00.000Z"),
+            "a second status() call must not have erased it"
+        );
+    }
+
+    #[test]
+    fn a_last_error_survives_more_than_one_status_call() {
+        let (_dir, runtime) = test_runtime();
+        runtime.set_last_error(Some("boom".into()));
+        assert_eq!(runtime.status().last_error.as_deref(), Some("boom"));
+        assert_eq!(
+            runtime.status().last_error.as_deref(),
+            Some("boom"),
+            "a second status() call must not have erased it"
+        );
+    }
+
+    #[test]
+    fn a_successful_completion_clears_a_previously_set_last_error() {
+        let (_dir, runtime) = test_runtime();
+        runtime.set_last_error(Some("boom".into()));
+        runtime.set_last_error(None);
+        assert_eq!(runtime.status().last_error, None);
+    }
+
+    #[test]
+    fn unpair_clears_both_the_token_expiry_and_the_last_error() {
+        let (_dir, runtime) = test_runtime();
+        runtime.set_last_token_expires_at(Some("2026-08-28T20:00:00.000Z".into()));
+        runtime.set_last_error(Some("boom".into()));
+        runtime.unpair().unwrap();
+        let status = runtime.status();
+        assert_eq!(status.last_token_expires_at, None);
+        assert_eq!(status.last_error, None);
+    }
+
+    // --- F3: a `TrueApi` error can embed up to 1000 chars of the raw True
+    // API response body, which is exactly where a leaked token would sit. ---
+
+    #[test]
+    fn a_true_api_error_lands_redacted_in_status() {
+        let (_dir, runtime) = test_runtime();
+        let error = SignerError::TrueApi(
+            r#"{"token":"eyJhbGciOiJIUzI1NiJ9.abc.def","status":"ok"}"#.to_string(),
+        );
+        runtime.set_last_error(Some(error.to_string()));
+        let detail = runtime.status().last_error.expect("last_error must be set");
+        assert!(!detail.contains("eyJhbGciOiJIUzI1NiJ9.abc.def"), "got {detail}");
+        assert!(detail.contains("[redacted]"), "got {detail}");
     }
 }

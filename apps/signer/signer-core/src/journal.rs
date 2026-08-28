@@ -33,7 +33,11 @@ impl JournalEntry {
 /// punctuation -- e.g. `{"token":"eyJhbGciOiJIUzI1NiJ9.abc.def"}` -- not
 /// between spaces. Any character that cannot appear in a base64url/JWT token
 /// (including `{}"',:;()[]` and whitespace) ends the current run.
-fn redact(detail: &str) -> String {
+///
+/// `pub(crate)` rather than private: `runtime::Runtime` applies the same
+/// scrub to `AgentStatus.last_error` before it reaches the UI or a Windows
+/// notification, which must never show a raw True API response body either.
+pub(crate) fn redact(detail: &str) -> String {
     const MIN_LEN: usize = 24;
 
     fn flush(run: &mut String, out: &mut String) {

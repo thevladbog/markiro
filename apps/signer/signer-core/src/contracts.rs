@@ -32,12 +32,24 @@ pub struct TrueApiAuthPayload {
     pub inn: Option<String>,
 }
 
+/// The `type` discriminant of a task. Mirrors `z.literal("true_api_auth")` on
+/// the TS side; the spec reserves a future `sign_detached` variant. Modelling
+/// this as an enum rather than a bare `String` means an agent that does not
+/// yet know about a future task type fails to *deserialize* the task at all
+/// (serde rejects the unrecognised string) instead of accepting it and
+/// possibly signing a challenge for a task it does not understand.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskType {
+    TrueApiAuth,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SignerTask {
     pub id: String,
     #[serde(rename = "type")]
-    pub task_type: String,
+    pub task_type: TaskType,
     pub payload: TrueApiAuthPayload,
 }
 
@@ -84,18 +96,37 @@ pub struct TaskFail {
     pub message: String,
 }
 
+/// Trims and caps `s` at `max` **characters**, not bytes — the server's caps
+/// (`message` at 2000, `certSubject` at 1000) are `z.string().max(n)`, which
+/// zod counts in characters, and a Russian X.500 subject is mostly non-ASCII.
+fn cap_chars(s: &str, max: usize) -> String {
+    let trimmed = s.trim();
+    if trimmed.chars().count() > max {
+        trimmed.chars().take(max).collect()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 impl TaskFail {
     /// Builds a fail body with the message already trimmed to the server's cap.
     pub fn new(error_code: SignerErrorCode, message: impl Into<String>) -> Self {
-        let mut message: String = message.into().trim().to_string();
-        if message.chars().count() > 2000 {
-            message = message.chars().take(2000).collect();
-        }
+        let mut message: String = cap_chars(&message.into(), 2000);
         if message.is_empty() {
             message = "unspecified failure".to_string();
         }
         Self { error_code, message }
     }
+}
+
+/// Trims and caps a certificate subject at the server's 1000-char limit
+/// (`certSubject: z.string().trim().max(1000)`). A Russian X.500 subject with
+/// CN/SN/G/T/OU/O/STREET/L/S/ИНН/ОГРН/СНИЛС/E can exceed that; without this,
+/// the cloud answers 400, the client maps it to a terminal `Protocol` error,
+/// and a token that was just successfully minted is discarded every refresh
+/// cycle for as long as that certificate stays selected.
+pub fn cap_cert_subject(subject: &str) -> String {
+    cap_chars(subject, 1000)
 }
 
 #[cfg(test)]
@@ -118,6 +149,7 @@ mod tests {
         let res: PairResponse = serde_json::from_str(&fixture("pair-response.json")).unwrap();
         assert_eq!(res.tenant_name, "ООО Ромашка");
         let task: SignerTask = serde_json::from_str(&fixture("task.json")).unwrap();
+        assert_eq!(task.task_type, TaskType::TrueApiAuth);
         assert_eq!(task.payload.inn.as_deref(), Some("7712345678"));
         let done: TaskComplete = serde_json::from_str(&fixture("task-complete.json")).unwrap();
         assert_eq!(done.cert_inn.as_deref(), Some("7712345678"));
@@ -155,5 +187,39 @@ mod tests {
             serde_json::to_string(&SignerErrorCode::CryptoPinRequired).unwrap(),
             "\"CRYPTO_PIN_REQUIRED\""
         );
+    }
+
+    #[test]
+    fn rejects_a_task_type_the_agent_does_not_understand() {
+        // A future `sign_detached` task type whose payload happens to
+        // deserialize as `TrueApiAuthPayload` must not be silently accepted
+        // and signed by an agent that only knows `true_api_auth`.
+        let err = serde_json::from_str::<SignerTask>(
+            r#"{"id":"3f0e0f5e-8d1c-4d7a-9b1a-222222222222","type":"sign_detached",
+                "payload":{"trueApiBaseUrl":"https://example.test"}}"#,
+        );
+        assert!(err.is_err(), "an unrecognised task type must not deserialize");
+    }
+
+    #[test]
+    fn caps_the_fail_message_at_2000_chars() {
+        let long = "д".repeat(2500);
+        let body = TaskFail::new(SignerErrorCode::TrueApi, long);
+        assert_eq!(body.message.chars().count(), 2000);
+    }
+
+    #[test]
+    fn caps_an_overlong_cert_subject_at_1000_chars_counting_characters_not_bytes() {
+        // Cyrillic is 2 bytes per char in UTF-8; a naive byte-slice would
+        // either panic on a non-char-boundary or under-count the cap.
+        let long_subject = "И".repeat(1500);
+        let capped = cap_cert_subject(&long_subject);
+        assert_eq!(capped.chars().count(), 1000);
+        assert_eq!(capped, "И".repeat(1000));
+    }
+
+    #[test]
+    fn trims_and_leaves_a_short_cert_subject_untouched() {
+        assert_eq!(cap_cert_subject("  CN=ООО Ромашка, ИНН=7712345678  "), "CN=ООО Ромашка, ИНН=7712345678");
     }
 }
