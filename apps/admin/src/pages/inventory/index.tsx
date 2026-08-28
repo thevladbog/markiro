@@ -13,22 +13,14 @@ import {
   StatusChip,
   Table,
 } from "@markiro/ui";
-import type { StatusChipStatus, TableColumn } from "@markiro/ui";
+import type { TableColumn } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
 import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
 import { useInventories } from "./api.js";
 import type { Inventory } from "./schemas.js";
+import { inventoryStatusChipProps } from "./status.js";
 import "./inventory.css";
-
-const STATUS_TONE: Record<Inventory["status"], StatusChipStatus> = {
-  draft: "neutral",
-  preparing: "warn",
-  ready: "info",
-  running: "ok",
-  closed: "info",
-  completed: "neutral",
-};
 
 export function InventoryPage() {
   const { t, i18n } = useTranslation();
@@ -40,12 +32,13 @@ export function InventoryPage() {
       {
         key: "number",
         title: t("pages.inventory.list.number"),
+        width: 240,
         mono: true,
         render: (row) => (
           <div className="mk-inventory-list__identity">
             <Link to={row.id}>{row.number}</Link>
             <StatusChip
-              status={STATUS_TONE[row.status]}
+              {...inventoryStatusChipProps(row.status)}
               label={t(`pages.inventory.status.${row.status}`)}
             />
           </div>
