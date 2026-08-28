@@ -392,6 +392,25 @@ impl Runtime {
         }
     }
 
+    pub fn certificates(&self) -> Result<Vec<crate::signer::CertificateSummary>, SignerError> {
+        self.signer.list_certificates()
+    }
+
+    pub fn select_certificate(&self, thumbprint: &str) -> Result<(), SignerError> {
+        let mut config = self.config()?;
+        config.cert_thumbprint = Some(thumbprint.to_string());
+        storage::write_config(&self.config_dir, &config)?;
+        self.note("Certificate selected", Some(thumbprint));
+        Ok(())
+    }
+
+    pub fn set_server_url(&self, url: &str) -> Result<(), SignerError> {
+        storage::validate_http_url(url)?;
+        let mut config = self.config()?;
+        config.server_url = Some(url.trim_end_matches('/').to_string());
+        storage::write_config(&self.config_dir, &config)
+    }
+
     /// Journals a failed report call (`complete`/`fail`), distinguishing a
     /// revocation from any other failure: a 401 here means the cabinet revoked
     /// this agent mid-task, which is a materially different situation from a
@@ -461,5 +480,38 @@ mod tests {
         // ...while the full one is redacted, which is why we shorten it.
         let full_entry = crate::journal::JournalEntry::new("cert missing", Some(full));
         assert_eq!(full_entry.detail.as_deref(), Some("[redacted]"));
+    }
+
+    #[test]
+    fn selecting_a_certificate_persists_it() {
+        use crate::signer::CertificateSummary;
+        struct NoSigner;
+        impl Signer for NoSigner {
+            fn list_certificates(&self) -> Result<Vec<CertificateSummary>, SignerError> {
+                Ok(vec![])
+            }
+            fn sign_attached(&self, _t: &str, _p: &[u8]) -> Result<String, SignerError> {
+                Err(SignerError::PinRequired)
+            }
+        }
+        struct PlainStore;
+        impl SecretStore for PlainStore {
+            fn protect(&self, plaintext: &str) -> Result<String, SignerError> {
+                Ok(plaintext.to_string())
+            }
+            fn unprotect(&self, protected: &str) -> Result<String, SignerError> {
+                Ok(protected.to_string())
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = Runtime::new(
+            dir.path().to_path_buf(),
+            Arc::new(NoSigner),
+            Arc::new(PlainStore),
+            "0.1.0".into(),
+        )
+        .unwrap();
+        runtime.select_certificate("AB12").unwrap();
+        assert_eq!(runtime.config().unwrap().cert_thumbprint.as_deref(), Some("AB12"));
     }
 }

@@ -1,0 +1,131 @@
+mod commands;
+
+use std::sync::Arc;
+
+use signer_core::runtime::Runtime;
+use signer_core::signer::Signer;
+use signer_core::storage::SecretStore;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri::{Emitter, Manager};
+
+pub const STATUS_EVENT: &str = "signer://status";
+const SIGNER_ICON: tauri::image::Image<'_> = tauri::include_image!("./icons/128x128.png");
+
+/// The deployment this build talks to. Baked in at compile time so a packaged
+/// agent can never infer its API target from the webview origin; the service
+/// screen can still override it into the config file for a self-hosted tenant.
+pub fn default_server_url() -> &'static str {
+    option_env!("SIGNER_API_URL").unwrap_or("https://admin.markiro.app")
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .setup(|app| {
+            let config_dir = app.path().app_config_dir()?;
+            let version = app.package_info().version.to_string();
+
+            #[cfg(windows)]
+            let signer: Arc<dyn Signer> = Arc::new(signer_core::signer_capi::CapiSigner::new());
+            #[cfg(windows)]
+            let secrets: Arc<dyn SecretStore> = Arc::new(signer_core::storage_dpapi::DpapiStore);
+            #[cfg(not(windows))]
+            let (signer, secrets) = commands::unsupported_platform_backends();
+
+            // `Runtime::new` builds its own HTTP client, which is fallible (a
+            // broken TLS backend or resolver), so surface that through `setup`'s
+            // `Result` rather than unwrapping and taking the whole agent down.
+            let runtime = Runtime::new(config_dir, signer, secrets, version)?;
+            let runtime = Arc::new(runtime);
+            app.manage(commands::SignerState { runtime: runtime.clone() });
+
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_icon(SIGNER_ICON.clone())?;
+            }
+
+            let open = MenuItem::with_id(app, "open", "Открыть", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open, &quit])?;
+            TrayIconBuilder::new()
+                .icon(SIGNER_ICON.clone())
+                .tooltip("Markiro Подписант")
+                .menu(&menu)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "open" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .build(app)?;
+
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                runtime
+                    .run(move |status| {
+                        notify_if_actionable(&handle, &status);
+                        let _ = handle.emit(STATUS_EVENT, status);
+                    })
+                    .await;
+            });
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Closing the window parks the agent in the tray; quitting is an
+            // explicit tray action, because a closed window must not stop the
+            // token refresh.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::signer_status,
+            commands::signer_pair,
+            commands::signer_unpair,
+            commands::signer_list_certificates,
+            commands::signer_select_certificate,
+            commands::signer_set_server_url,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running the Markiro signer");
+}
+
+/// A tray notification is the only way the operator learns about a failure
+/// that needs their hands — an absent token, a locked container, a missing
+/// provider. Everything else stays in the window's journal so the tray does
+/// not cry wolf.
+fn notify_if_actionable(app: &tauri::AppHandle, status: &signer_core::runtime::AgentStatus) {
+    use signer_core::runtime::AgentPhase;
+    use tauri_plugin_notification::NotificationExt as _;
+
+    if status.phase != AgentPhase::Degraded {
+        return;
+    }
+    let Some(detail) = status.last_error.as_deref() else {
+        return;
+    };
+    let _ = app
+        .notification()
+        .builder()
+        .title("Markiro Подписант")
+        .body(detail)
+        .show();
+}
