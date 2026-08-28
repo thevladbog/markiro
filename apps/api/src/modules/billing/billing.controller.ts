@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, Req } from "@nestjs/common";
+import { ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { platformCommercialContracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
@@ -23,6 +24,7 @@ const invoiceDocumentDownloadParamsPipe = new ZodValidationPipe(
   platformCommercialContracts.invoices.documents.download.params,
 );
 
+@ApiTags("billing")
 @Controller("platform/invoices")
 export class BillingController {
   constructor(
@@ -32,6 +34,8 @@ export class BillingController {
   ) {}
 
   @Get()
+  @ApiOperation({ summary: "List invoices" })
+  @ApiQuery({ name: "tenantId", required: false, schema: { type: "string" } })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.invoices.list.response })
   @RequirePlatformCapabilities("billing.read")
   async list(@Query("tenantId") tenantId?: string) {
@@ -42,6 +46,7 @@ export class BillingController {
   }
 
   @Get(":id")
+  @ApiOperation({ summary: "Get an invoice" })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.invoices.detail.response })
   @RequirePlatformCapabilities("billing.read")
   async get(@Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
@@ -52,6 +57,7 @@ export class BillingController {
   }
 
   @Post()
+  @ApiOperation({ summary: "Create a draft invoice" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.invoices.create.body,
     response: platformCommercialContracts.invoices.create.response,
@@ -68,6 +74,7 @@ export class BillingController {
   }
 
   @Post(":id/issue")
+  @ApiOperation({ summary: "Issue an invoice" })
   @PlatformApiProtectedCreated({ response: platformCommercialContracts.invoices.issue.response })
   @RequirePlatformCapabilities("billing.write")
   async issue(
@@ -83,6 +90,7 @@ export class BillingController {
   }
 
   @Post(":id/document")
+  @ApiOperation({ summary: "Render and store the invoice document" })
   @PlatformApiProtectedCreated({
     response: platformCommercialContracts.invoices.document.response,
   })
@@ -95,6 +103,7 @@ export class BillingController {
   }
 
   @Get(":id/documents")
+  @ApiOperation({ summary: "List invoice documents" })
   @PlatformApiProtectedOk({
     response: platformCommercialContracts.invoices.documents.list.response,
   })
@@ -107,6 +116,7 @@ export class BillingController {
   }
 
   @Post(":id/documents")
+  @ApiOperation({ summary: "Render invoice documents" })
   @PlatformApiProtectedCreated({
     response: platformCommercialContracts.invoices.documents.render.response,
   })
@@ -119,6 +129,7 @@ export class BillingController {
   }
 
   @Get(":id/document")
+  @ApiOperation({ summary: "Get the invoice document URL" })
   @PlatformApiProtectedOk({ response: platformCommercialContracts.invoices.documentUrl.response })
   @RequirePlatformCapabilities("billing.read")
   async documentUrl(@Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
@@ -129,6 +140,7 @@ export class BillingController {
   }
 
   @Get(":id/documents/:documentId/download")
+  @ApiOperation({ summary: "Get an invoice document download URL" })
   @PlatformApiProtectedOk({
     response: platformCommercialContracts.invoices.documents.download.response,
   })
@@ -149,6 +161,7 @@ export class BillingController {
   }
 
   @Post(":id/apply")
+  @ApiOperation({ summary: "Apply a paid invoice" })
   @PlatformApiProtectedCreated({
     body: platformCommercialContracts.invoices.apply.body,
     response: platformCommercialContracts.invoices.apply.response,
@@ -166,6 +179,7 @@ export class BillingController {
   }
 
   @Post(":id/cancel")
+  @ApiOperation({ summary: "Cancel an invoice" })
   @PlatformApiProtectedCreated({ response: platformCommercialContracts.invoices.cancel.response })
   @RequirePlatformCapabilities("billing.write")
   async cancel(

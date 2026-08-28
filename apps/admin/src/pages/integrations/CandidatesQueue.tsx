@@ -72,7 +72,10 @@ function LinkModal({
   const [productId, setProductId] = useState("");
   const options: SelectOption[] = [
     { value: "", label: t("pages.integrations.channel.candidates.link.choosePlaceholder") },
-    ...products.map((p) => ({ value: p.id, label: `${p.name} (${p.gtin14})` })),
+    // Archived ("do not use") products are not offered as link targets.
+    ...products
+      .filter((p) => !p.archived)
+      .map((p) => ({ value: p.id, label: `${p.name} (${p.gtin14})` })),
   ];
 
   return (
@@ -215,7 +218,10 @@ export function CandidatesQueue({ type }: { type: string }) {
 
   const { data, isPending, isError } = useCandidates(type, hidden);
   const candidates = useMemo(() => data ?? [], [data]);
-  const { data: productsData } = useProducts();
+  // "all" keeps suggestion names resolvable even if the suggested product got
+  // archived after the suggestion was stored; the LinkModal below still
+  // refuses to offer archived products as link targets.
+  const { data: productsData } = useProducts({ archived: "all" });
   const products = useMemo(() => productsData ?? [], [productsData]);
   const productNameById = useMemo(
     () => new Map(products.map((p) => [p.id, p.name] as const)),

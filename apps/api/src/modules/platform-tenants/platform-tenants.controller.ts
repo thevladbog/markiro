@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Query, Req } from "@nestjs/common";
+import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { platformTenantContracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
@@ -21,11 +22,13 @@ import {
 } from "./dto";
 import { PlatformTenantsService } from "./platform-tenants.service";
 
+@ApiTags("platform-tenants")
 @Controller("platform/tenants")
 export class PlatformTenantsController {
   constructor(private readonly tenants: PlatformTenantsService) {}
 
   @Get()
+  @ApiOperation({ summary: "List platform tenants" })
   @PlatformApiProtectedOk({ response: platformTenantContracts.list.response })
   @RequirePlatformCapabilities("tenants.read")
   async list(
@@ -39,6 +42,7 @@ export class PlatformTenantsController {
   }
 
   @Post()
+  @ApiOperation({ summary: "Provision a tenant" })
   @PlatformApiProtectedCreated({
     body: platformTenantContracts.create.body,
     response: platformTenantContracts.create.response,
@@ -55,6 +59,7 @@ export class PlatformTenantsController {
   }
 
   @Get(":id")
+  @ApiOperation({ summary: "Get tenant details" })
   @PlatformApiProtectedOk({ response: platformTenantContracts.detail.response })
   @RequirePlatformCapabilities("tenants.read")
   async get(
@@ -69,6 +74,10 @@ export class PlatformTenantsController {
 
   @Post(":id/owner-activation/renew")
   @HttpCode(200)
+  @ApiOperation({
+    summary: "Renew the tenant owner activation link",
+    description: "Issues a fresh activation token for the tenant owner account.",
+  })
   @PlatformApiProtectedOk({ response: platformTenantContracts.renewActivation.response })
   @RequirePlatformCapabilities("tenants.write")
   async renewActivation(
@@ -82,6 +91,7 @@ export class PlatformTenantsController {
   }
 
   @Post(":id/subscription/plan")
+  @ApiOperation({ summary: "Assign a subscription plan to a tenant" })
   @PlatformApiProtectedCreated({
     body: platformTenantContracts.assignPlan.body,
     response: platformTenantContracts.assignPlan.response,
@@ -99,6 +109,7 @@ export class PlatformTenantsController {
   }
 
   @Post(":id/subscription/addons")
+  @ApiOperation({ summary: "Assign a subscription add-on to a tenant" })
   @PlatformApiProtectedCreated({
     body: platformTenantContracts.assignAddon.body,
     response: platformTenantContracts.assignAddon.response,

@@ -144,7 +144,7 @@ const dpiSchema = z.union([z.literal(203), z.literal(300)]);
  * rooted at `["elements"]` (not a specific index) since the defect is a
  * relationship BETWEEN elements, not a single element's own field.
  */
-const labelTemplateSpecSchema = z
+export const labelTemplateSpecSchema = z
   .object({
     widthMm: z.number().min(10).max(300),
     heightMm: z.number().min(10).max(300),

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SchemaObject } from "@nestjs/swagger";
 
 /** POST /station-devices body. A station exists before it has a credential. */
 export const createStationDeviceSchema = z.object({
@@ -59,3 +60,43 @@ export interface StationDeviceDto {
 export interface ListStationDevicesResponseDto {
   items: StationDeviceDto[];
 }
+
+const nullableDateTimeOpenApiSchema = {
+  type: "string",
+  format: "date-time",
+  nullable: true,
+} as const;
+
+export const stationDeviceOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "name",
+    "lineId",
+    "lineName",
+    "lifecycle",
+    "pairedAt",
+    "revokedAt",
+    "lastSeenAt",
+    "createdAt",
+  ],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    name: { type: "string" },
+    lineId: { type: "string", format: "uuid", nullable: true },
+    lineName: { type: "string", nullable: true },
+    lifecycle: { type: "string", enum: ["awaiting_pairing", "online", "offline", "revoked"] },
+    pairedAt: nullableDateTimeOpenApiSchema,
+    revokedAt: nullableDateTimeOpenApiSchema,
+    lastSeenAt: nullableDateTimeOpenApiSchema,
+    createdAt: { type: "string", format: "date-time" },
+  },
+};
+
+export const listStationDevicesOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: { items: { type: "array", items: stationDeviceOpenApiSchema } },
+};

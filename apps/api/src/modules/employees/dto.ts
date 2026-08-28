@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import type { SchemaObject } from "@nestjs/swagger";
+
 export const createEmployeeSchema = z.object({
   fullName: z.string().trim().min(1).max(200),
   role: z.string().trim().min(1).max(120).nullable().optional(),
@@ -100,3 +102,99 @@ export interface LinkableMemberDto {
 export interface ListLinkableMembersResponseDto {
   items: LinkableMemberDto[];
 }
+
+const uuidSchema = { type: "string", format: "uuid" } as const;
+const dateTimeSchema = { type: "string", format: "date-time" } as const;
+
+const badgeOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "badgeCode", "label", "issuedAt", "revokedAt"],
+  properties: {
+    id: uuidSchema,
+    badgeCode: { type: "string" },
+    label: { type: "string", nullable: true },
+    issuedAt: dateTimeSchema,
+    revokedAt: { ...dateTimeSchema, nullable: true },
+  },
+};
+
+const employeePickupPolicyOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["limitMode", "dayLimit", "canWriteoff"],
+  properties: {
+    limitMode: { type: "string", enum: ["limited", "unlimited"] },
+    dayLimit: { type: "integer", minimum: 1 },
+    canWriteoff: { type: "boolean" },
+  },
+};
+
+export const employeeOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "fullName", "role", "status", "pickupPolicy", "badges", "createdAt"],
+  properties: {
+    id: uuidSchema,
+    fullName: { type: "string" },
+    role: { type: "string", nullable: true },
+    status: { type: "string", enum: ["active", "archived"] },
+    pickupPolicy: employeePickupPolicyOpenApiSchema,
+    badges: { type: "array", items: badgeOpenApiSchema },
+    createdAt: dateTimeSchema,
+  },
+};
+
+export const listEmployeesOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: { items: { type: "array", items: employeeOpenApiSchema } },
+};
+
+export const listLinkableMembersOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["memberId", "email", "firstName", "lastName", "middleName", "position"],
+        properties: {
+          memberId: {
+            type: "string",
+            description: "Opaque better-auth member id, not a UUID.",
+          },
+          email: { type: "string", format: "email" },
+          firstName: { type: "string", nullable: true },
+          lastName: { type: "string", nullable: true },
+          middleName: { type: "string", nullable: true },
+          position: { type: "string", nullable: true },
+        },
+      },
+    },
+  },
+};
+
+export const bulkEmployeePickupPolicyResponseOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["employeeId", "limitMode", "dayLimit", "canWriteoff"],
+        properties: {
+          employeeId: uuidSchema,
+          ...employeePickupPolicyOpenApiSchema.properties,
+        },
+      },
+    },
+  },
+};

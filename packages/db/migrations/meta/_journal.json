@@ -596,6 +596,13 @@
       "when": 1787838007131,
       "tag": "0084_inventory_document_artifact_empty_files",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1787870898879,
+      "tag": "0085_yielding_warbound",
+      "breakpoints": true
     }
   ]
 }

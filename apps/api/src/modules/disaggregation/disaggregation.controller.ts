@@ -18,9 +18,27 @@ import {
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { memoryStorage } from "multer";
-import { ApiConsumes, ApiTags } from "@nestjs/swagger";
+import {
+  ApiBody,
+  ApiConsumes,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiProduces,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from "@nestjs/swagger";
 import type { Response } from "express";
 import { CABINET_CAPABILITY } from "@markiro/domain";
+import {
+  ApiCabinetAuth,
+  ApiHttpErrors,
+  ApiZodBody,
+  ApiZodQuery,
+  ApiZodValidationError,
+} from "../../lib/openapi";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import {
@@ -33,6 +51,14 @@ import { ZodValidationPipe } from "../../zod.pipe";
 import {
   addLinesSchema,
   createDocumentSchema,
+  disaggregationApplyConflictOpenApiSchema,
+  disaggregationDocumentDetailOpenApiSchema,
+  disaggregationDocumentOpenApiSchema,
+  disaggregationImportErrorOpenApiSchema,
+  disaggregationImportFileOpenApiSchema,
+  disaggregationLinesOpenApiSchema,
+  disaggregationNotDraftConflictOpenApiSchema,
+  listDisaggregationDocumentsOpenApiSchema,
   listDocumentsQuerySchema,
   reportQuerySchema,
   updateDocumentSchema,
@@ -47,6 +73,7 @@ import { renderDisaggregationReportHtml } from "./report";
 import { parseSsccImport } from "./import-parser";
 
 @ApiTags("disaggregation")
+@ApiCabinetAuth()
 @Controller("disaggregation")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
@@ -55,6 +82,38 @@ export class DisaggregationController {
 
   @Get()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "List disaggregation documents" })
+  // Manual ApiQuery: `from`/`to` use z.coerce.date()/a transform, which
+  // z.toJSONSchema cannot represent.
+  @ApiQuery({
+    name: "status",
+    required: false,
+    schema: { type: "string", enum: ["draft", "applied", "cancelled"] },
+  })
+  @ApiQuery({ name: "reasonId", required: false, schema: { type: "string", format: "uuid" } })
+  @ApiQuery({
+    name: "from",
+    required: false,
+    schema: { type: "string", format: "date-time" },
+    description: "Inclusive lower bound on createdAt.",
+  })
+  @ApiQuery({
+    name: "to",
+    required: false,
+    schema: { type: "string" },
+    description:
+      "Upper bound on createdAt: an ISO date-time, or a date-only YYYY-MM-DD value covering that whole day.",
+  })
+  @ApiQuery({
+    name: "docNo",
+    required: false,
+    schema: { type: "string", minLength: 1, maxLength: 40 },
+    description: "Substring match on the document number.",
+  })
+  @ApiQuery({ name: "page", required: false, schema: { type: "integer", minimum: 1, default: 1 } })
+  @ApiOkResponse({ schema: listDisaggregationDocumentsOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   list(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(listDocumentsQuerySchema)) query: ListDocumentsQueryDto,
@@ -65,6 +124,15 @@ export class DisaggregationController {
   @Post()
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({
+    summary: "Create a disaggregation document",
+    description:
+      'Creates a draft document. A reasonId unknown to this tenant yields 400 with body { code: "unknown_reason" }.',
+  })
+  @ApiZodBody(createDocumentSchema)
+  @ApiCreatedResponse({ schema: disaggregationDocumentOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
   create(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createDocumentSchema)) body: CreateDocumentDto,
@@ -74,6 +142,10 @@ export class DisaggregationController {
 
   @Get(":id")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "Get a disaggregation document" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiOkResponse({ schema: disaggregationDocumentDetailOpenApiSchema })
+  @ApiHttpErrors(401, 403, 404)
   get(@Req() req: RequestWithTenant, @Param("id", new ParseUUIDPipe()) id: string) {
     return this.service.getDocument(req.tenantId!, id);
   }
@@ -86,6 +158,17 @@ export class DisaggregationController {
    */
   @Get(":id/report")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Render the disaggregation act",
+    description:
+      'Print-ready A4 HTML ("Акт дезагрегации") for opening in a new tab: variant=boxes lists only the box codes (SSCC + Code128); variant=full adds a DataMatrix for every contained code.',
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodQuery(reportQuerySchema)
+  @ApiProduces("text/html")
+  @ApiOkResponse({ schema: { type: "string" }, description: "Print-ready HTML document." })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404)
   async report(
     @Req() req: RequestWithTenant,
     @Param("id", new ParseUUIDPipe()) id: string,
@@ -100,6 +183,21 @@ export class DisaggregationController {
   @Patch(":id")
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({
+    summary: "Update a draft disaggregation document",
+    description:
+      'Only draft documents can be edited. A reasonId unknown to this tenant yields 400 with body { code: "unknown_reason" }.',
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(updateDocumentSchema)
+  @ApiOkResponse({ schema: disaggregationDocumentOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404)
+  @ApiResponse({
+    status: 409,
+    schema: disaggregationNotDraftConflictOpenApiSchema,
+    description: "The document is no longer a draft.",
+  })
   update(
     @Req() req: RequestWithTenant,
     @Param("id", new ParseUUIDPipe()) id: string,
@@ -112,6 +210,15 @@ export class DisaggregationController {
   @HttpCode(200)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Cancel a draft disaggregation document" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiOkResponse({ schema: disaggregationDocumentOpenApiSchema })
+  @ApiHttpErrors(401, 403, 404)
+  @ApiResponse({
+    status: 409,
+    schema: disaggregationNotDraftConflictOpenApiSchema,
+    description: "The document is no longer a draft.",
+  })
   cancel(@Req() req: RequestWithTenant, @Param("id", new ParseUUIDPipe()) id: string) {
     return this.service.cancelDocument(req.tenantId!, id, req.userId!);
   }
@@ -120,6 +227,19 @@ export class DisaggregationController {
   @HttpCode(200)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({
+    summary: "Apply a disaggregation document",
+    description:
+      "Re-validates every line and, only if all are still ok, disassembles their boxes and marks the document applied. Otherwise 409 with a code of not_draft, reason_required, no_lines, or invalid_lines (the latter includes the freshly revalidated lines).",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiOkResponse({ schema: disaggregationDocumentDetailOpenApiSchema })
+  @ApiHttpErrors(401, 403, 404)
+  @ApiResponse({
+    status: 409,
+    schema: disaggregationApplyConflictOpenApiSchema,
+    description: "The document cannot be applied in its current state.",
+  })
   apply(@Req() req: RequestWithTenant, @Param("id", new ParseUUIDPipe()) id: string) {
     return this.service.applyDocument(req.tenantId!, id, req.userId!);
   }
@@ -127,6 +247,21 @@ export class DisaggregationController {
   @Post(":id/lines")
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({
+    summary: "Add lines to a draft disaggregation document",
+    description:
+      "Each SSCC is parsed and validated; unparseable inputs and repeats of already-present lines are stored as not_found/duplicate marker lines rather than rejected.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(addLinesSchema)
+  @ApiCreatedResponse({ schema: disaggregationLinesOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404)
+  @ApiResponse({
+    status: 409,
+    schema: disaggregationNotDraftConflictOpenApiSchema,
+    description: "The document is no longer a draft.",
+  })
   addLines(
     @Req() req: RequestWithTenant,
     @Param("id", new ParseUUIDPipe()) id: string,
@@ -146,6 +281,25 @@ export class DisaggregationController {
     }),
   )
   @ApiConsumes("multipart/form-data")
+  @ApiOperation({
+    summary: "Import lines from a file",
+    description:
+      "Adds every SSCC token found in the uploaded text file to the draft document (same validation as adding lines manually) and marks the document's source as import.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiBody({ schema: disaggregationImportFileOpenApiSchema })
+  @ApiCreatedResponse({ schema: disaggregationLinesOpenApiSchema })
+  @ApiResponse({
+    status: 400,
+    schema: disaggregationImportErrorOpenApiSchema,
+    description: "The file is missing, contains no tokens, or exceeds the token ceiling.",
+  })
+  @ApiHttpErrors(401, 403, 404, 413)
+  @ApiResponse({
+    status: 409,
+    schema: disaggregationNotDraftConflictOpenApiSchema,
+    description: "The document is no longer a draft.",
+  })
   async importLines(
     @Req() req: RequestWithTenant,
     @Param("id", new ParseUUIDPipe()) id: string,
@@ -161,6 +315,16 @@ export class DisaggregationController {
   @HttpCode(204)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @ApiOperation({ summary: "Remove a line from a draft disaggregation document" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiParam({ name: "lineId", schema: { type: "string", format: "uuid" } })
+  @ApiResponse({ status: 204, description: "Line removed." })
+  @ApiHttpErrors(401, 403, 404)
+  @ApiResponse({
+    status: 409,
+    schema: disaggregationNotDraftConflictOpenApiSchema,
+    description: "The document is no longer a draft.",
+  })
   removeLine(
     @Req() req: RequestWithTenant,
     @Param("id", new ParseUUIDPipe()) id: string,

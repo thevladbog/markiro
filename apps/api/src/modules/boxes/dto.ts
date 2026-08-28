@@ -1,4 +1,7 @@
 import { z } from "zod";
+
+import type { SchemaObject } from "@nestjs/swagger";
+
 import { parseScannedSscc } from "@markiro/domain";
 
 /**
@@ -84,3 +87,77 @@ export interface BoxSellCodesDto {
   itemCount: number;
   items: BoxSellCodeItemDto[];
 }
+
+const uuidSchema = { type: "string", format: "uuid" } as const;
+const dateTimeSchema = { type: "string", format: "date-time" } as const;
+const aiSsccSchema = {
+  type: "string",
+  pattern: "^00[0-9]{18}$",
+  description: "AI-00-prefixed 20-digit SSCC, as everywhere cabinet-facing.",
+} as const;
+
+export const boxOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: [
+    "id",
+    "sscc",
+    "terminalId",
+    "lineName",
+    "operatorId",
+    "itemCount",
+    "closedAt",
+    "contentsChangedAfterClose",
+    "disassembledAt",
+  ],
+  properties: {
+    id: uuidSchema,
+    sscc: { ...aiSsccSchema, nullable: true },
+    terminalId: { type: "string", nullable: true },
+    lineName: {
+      type: "string",
+      nullable: true,
+      description: "Assigned production line of the station that reported this box.",
+    },
+    operatorId: { type: "string", nullable: true },
+    itemCount: { type: "integer", minimum: 0 },
+    closedAt: { ...dateTimeSchema, nullable: true },
+    contentsChangedAfterClose: {
+      type: "boolean",
+      description:
+        "True when an item was displaced after the box closed: the taped, labelled box is short a position it can no longer physically correct.",
+    },
+    disassembledAt: { ...dateTimeSchema, nullable: true },
+  },
+};
+
+export const listBoxesOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["items"],
+  properties: { items: { type: "array", items: boxOpenApiSchema } },
+};
+
+export const boxSellCodeItemOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["codeHash", "rawKm", "gtin14", "serial"],
+  properties: {
+    codeHash: { type: "string" },
+    rawKm: {
+      type: "string",
+      description: "Raw KM payload; feeds DataMatrix rendering client-side.",
+    },
+    gtin14: { type: "string", pattern: "^[0-9]{14}$" },
+    serial: { type: "string" },
+  },
+};
+
+export const boxSellCodesOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["boxId", "sscc", "productName", "itemCount", "items"],
+  properties: {
+    boxId: uuidSchema,
+    sscc: aiSsccSchema,
+    productName: { type: "string" },
+    itemCount: { type: "integer", minimum: 1 },
+    items: { type: "array", items: boxSellCodeItemOpenApiSchema },
+  },
+};

@@ -72,6 +72,10 @@ export const products = pgTable(
     boxCapacity: integer("box_capacity"),
     palletCapacity: integer("pallet_capacity"),
     status: productStatus("status").notNull().default("draft"),
+    // Operator-set "do not use" flag, orthogonal to the computed `status`:
+    // an archived product stays for history (orders, shifts, reports) but is
+    // excluded from every selection surface except inventory.
+    archived: boolean("archived").notNull().default(false),
     defaultCounterpartyId: uuid("default_counterparty_id"),
     defaultLabelTemplateId: uuid("default_label_template_id"),
     unitPrice: numeric("unit_price", { precision: 12, scale: 2 }),

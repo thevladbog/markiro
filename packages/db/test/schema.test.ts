@@ -62,6 +62,14 @@ describe("platform schema", () => {
     expect(Object.keys(products)).toContain("gtin14");
   });
 
+  it("lets a product be archived without being deleted", () => {
+    // Archived products stay for history (orders, shifts, reports); the flag
+    // only removes them from selection surfaces. New products start live.
+    expect(Object.keys(products)).toContain("archived");
+    expect(products.archived.default).toBe(false);
+    expect(products.archived.notNull).toBe(true);
+  });
+
   it("keys the sscc counter by tenant, issuer prefix and extension digit", () => {
     const cols = Object.keys(ssccCounters);
     expect(cols).toEqual(

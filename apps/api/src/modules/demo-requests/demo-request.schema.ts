@@ -1,4 +1,7 @@
 import { z } from "zod";
+
+import type { SchemaObject } from "@nestjs/swagger";
+
 import { DEMO_SOURCE_PATHS } from "./demo-request-routes";
 
 const PHONE_INPUT_MAX_LENGTH = 30;
@@ -35,6 +38,25 @@ export const demoRequestSchema = demoRequestInputSchema.transform((input, contex
 });
 
 export type DemoRequestDto = z.infer<typeof demoRequestSchema>;
+
+export const demoRequestAcceptedOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["accepted", "requestId"],
+  properties: {
+    accepted: { type: "boolean", enum: [true] },
+    requestId: { type: "string", format: "uuid" },
+  },
+};
+
+/** `DemoRequestPublicErrorFilter` reduces every error to this one-field body. */
+export function demoRequestErrorOpenApiSchema(...codes: string[]): SchemaObject {
+  return {
+    type: "object",
+    required: ["code"],
+    properties: { code: { type: "string", enum: codes } },
+  };
+}
 
 /** Normalizes only the two locale-specific public phone contracts. */
 export function normalizePhone(

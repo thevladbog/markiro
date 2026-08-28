@@ -12,11 +12,25 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import {
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { SecurityAuditService } from "../../authorization/security-audit.service";
+import {
+  ApiCabinetAuth,
+  ApiHttpErrors,
+  ApiZodBody,
+  ApiZodQuery,
+  ApiZodValidationError,
+} from "../../lib/openapi";
 import {
   AllowSubscriptionReadOnly,
   RequireSubscriptionWrite,
@@ -26,8 +40,14 @@ import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard"
 import { ZodValidationPipe } from "../../zod.pipe";
 import type { IntegrationChannelType } from "./channel-registry";
 import {
+  candidatesPageOpenApiSchema,
+  channelDetailOpenApiSchema,
+  credentialsIssuedOpenApiSchema,
+  INTEGRATION_CHANNEL_TYPES,
+  journalPageOpenApiSchema,
   linkCandidateSchema,
   listCandidatesQuerySchema,
+  listChannelsOpenApiSchema,
   updateChannelSchema,
   type CandidatesPageDto,
   type ChannelDetailDto,
@@ -46,6 +66,7 @@ import { IntegrationsService } from "./integrations.service";
 @Controller("integrations")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
+@ApiCabinetAuth()
 export class IntegrationsController {
   constructor(
     private readonly integrations: IntegrationsService,
@@ -54,12 +75,19 @@ export class IntegrationsController {
 
   @Get()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_READ)
+  @ApiOperation({ summary: "List integration channels" })
+  @ApiOkResponse({ schema: listChannelsOpenApiSchema })
+  @ApiHttpErrors(401, 403)
   async list(@Req() req: RequestWithTenant): Promise<{ channels: ChannelSummaryDto[] }> {
     return this.integrations.listChannels(req.tenantId!, new Date());
   }
 
   @Get(":type")
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_READ)
+  @ApiOperation({ summary: "Get integration channel detail" })
+  @ApiParam({ name: "type", enum: INTEGRATION_CHANNEL_TYPES })
+  @ApiOkResponse({ schema: channelDetailOpenApiSchema })
+  @ApiHttpErrors(401, 403, 404)
   async detail(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -70,6 +98,18 @@ export class IntegrationsController {
   @Patch(":type")
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
+  @ApiOperation({
+    summary: "Update integration channel settings",
+    description:
+      "Partial patch. `silentAfterHours` updates the top-level silence threshold; every other " +
+      "key is validated against the channel's own settings schema and merged into `settings`. " +
+      "Keys absent from the patch are left untouched.",
+  })
+  @ApiParam({ name: "type", enum: INTEGRATION_CHANNEL_TYPES })
+  @ApiZodBody(updateChannelSchema)
+  @ApiOkResponse({ schema: channelDetailOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
   async update(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -92,6 +132,10 @@ export class IntegrationsController {
 
   @Get(":type/journal")
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_READ)
+  @ApiOperation({ summary: "Read integration channel journal" })
+  @ApiParam({ name: "type", enum: INTEGRATION_CHANNEL_TYPES })
+  @ApiOkResponse({ schema: journalPageOpenApiSchema })
+  @ApiHttpErrors(401, 403, 404)
   async journal(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -104,6 +148,15 @@ export class IntegrationsController {
   @Post(":type/credentials")
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE, CABINET_CAPABILITY.CREDENTIALS_MANAGE)
+  @ApiOperation({
+    summary: "Issue exchange credentials",
+    description:
+      "Mints the login/secret pair the 1C exchange presents on `mode=checkauth`. The secret is " +
+      "returned exactly once and never again; only its hash is stored.",
+  })
+  @ApiParam({ name: "type", enum: INTEGRATION_CHANNEL_TYPES })
+  @ApiCreatedResponse({ schema: credentialsIssuedOpenApiSchema })
+  @ApiHttpErrors(401, 403, 404, 409)
   async issueCredentials(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -133,6 +186,16 @@ export class IntegrationsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE, CABINET_CAPABILITY.CREDENTIALS_MANAGE)
+  @ApiOperation({
+    summary: "Delete an integration channel",
+    description:
+      "Fully disables the channel: removes its configuration, exchange credentials, upload " +
+      "sessions, and journal in one transaction. Only channels that authenticate with " +
+      "exchange credentials (1C CommerceML) can be deleted this way.",
+  })
+  @ApiParam({ name: "type", enum: INTEGRATION_CHANNEL_TYPES })
+  @ApiResponse({ status: 204, description: "The channel and all its exchange data were removed." })
+  @ApiHttpErrors(401, 403, 404, 409)
   async deleteChannel(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -149,6 +212,12 @@ export class IntegrationsController {
 
   @Get(":type/candidates")
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_READ)
+  @ApiOperation({ summary: "List integration candidates" })
+  @ApiParam({ name: "type", enum: INTEGRATION_CHANNEL_TYPES })
+  @ApiZodQuery(listCandidatesQuerySchema)
+  @ApiOkResponse({ schema: candidatesPageOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404)
   async listCandidates(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -161,6 +230,18 @@ export class IntegrationsController {
   @HttpCode(HttpStatus.OK)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
+  @ApiOperation({
+    summary: "Link candidate to a product",
+    description:
+      "Sets the product's `external_ref` from the candidate and removes the candidate from the " +
+      "queue. A product that is already linked answers 409.",
+  })
+  @ApiParam({ name: "type", enum: INTEGRATION_CHANNEL_TYPES })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiZodBody(linkCandidateSchema)
+  @ApiResponse({ status: 200, description: "Candidate linked; empty response body.", content: {} })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409)
   async linkCandidate(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -174,6 +255,11 @@ export class IntegrationsController {
   @HttpCode(HttpStatus.OK)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
+  @ApiOperation({ summary: "Hide candidate from the queue" })
+  @ApiParam({ name: "type", enum: INTEGRATION_CHANNEL_TYPES })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiResponse({ status: 200, description: "Candidate hidden; empty response body.", content: {} })
+  @ApiHttpErrors(401, 403, 404)
   async hideCandidate(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -186,6 +272,15 @@ export class IntegrationsController {
   @HttpCode(HttpStatus.OK)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
+  @ApiOperation({ summary: "Restore hidden candidate" })
+  @ApiParam({ name: "type", enum: INTEGRATION_CHANNEL_TYPES })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiResponse({
+    status: 200,
+    description: "Candidate restored; empty response body.",
+    content: {},
+  })
+  @ApiHttpErrors(401, 403, 404)
   async unhideCandidate(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,
@@ -208,12 +303,26 @@ export class IntegrationsController {
 @ApiTags("products")
 @Controller("products")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@ApiCabinetAuth()
 export class ProductExternalLinkController {
   constructor(private readonly integrations: IntegrationsService) {}
 
   @Delete(":id/external-link")
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
+  @ApiOperation({
+    summary: "Remove product's external link",
+    description:
+      "Clears the product's `external_ref` and nothing else — the price stays as is. " +
+      "A product with no external link answers 409.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiResponse({
+    status: 200,
+    description: "External link removed; empty response body.",
+    content: {},
+  })
+  @ApiHttpErrors(401, 403, 404, 409)
   async unlink(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     await this.integrations.unlinkProduct(req.tenantId!, id);
   }

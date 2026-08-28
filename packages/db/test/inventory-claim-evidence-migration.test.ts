@@ -67,12 +67,15 @@ describe.skipIf(!databaseUrl)("inventory claim evidence migration", () => {
       email: `${randomUUID()}@example.invalid`,
       emailVerified: false,
     });
-    await db.insert(schema.products).values({
-      id: productId,
+    // Raw SQL, not `schema.products`: this scratch DB is pinned at migration
+    // 73, while the live schema object keeps gaining columns (e.g. 0085's
+    // `archived`) that drizzle would list in the INSERT but do not exist here.
+    await pool.query(`insert into products (id, tenant_id, gtin14, name) values ($1, $2, $3, $4)`, [
+      productId,
       tenantId,
-      gtin14: "04600000000015",
-      name: "Product",
-    });
+      "04600000000015",
+      "Product",
+    ]);
     await db.insert(schema.lines).values({ id: lineId, tenantId, name: "Line" });
     await db.insert(schema.employees).values({ id: operatorId, tenantId, fullName: "Operator" });
     await db.insert(schema.stationDevices).values([

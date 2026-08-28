@@ -22,6 +22,7 @@ export type { ScanVerdict, ShiftScanContext } from "./scan/validate.js";
 export {
   LABEL_FIELDS,
   labelFieldDisplayValue,
+  labelTemplateSpecSchema,
   mmToDots,
   parseLabelTemplate,
   ptToDots,

@@ -1,6 +1,19 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Req, UseGuards } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import {
+  ApiBody,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
+import {
+  ApiCabinetAuth,
+  ApiHttpErrors,
+  ApiStationAuth,
+  ApiZodValidationError,
+} from "../../lib/openapi";
 import { AllowStationOrPermissions, RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import {
@@ -12,6 +25,9 @@ import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard"
 import { StationOnlyGuard } from "../../tenancy/station-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
+  shiftCloseConflictListOpenApiSchema,
+  stationShiftCloseOpenApiSchema,
+  stationShiftCloseResponseOpenApiSchema,
   stationShiftCloseSchema,
   type ShiftCloseConflictListDto,
   type StationShiftCloseDto,
@@ -31,6 +47,16 @@ export class StationShiftCloseController {
   @UseGuards(StationOnlyGuard)
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({
+    summary: "Record a station shift close",
+    description:
+      "Idempotent by `eventId`; a close raced by another device resolves to the `conflict` outcome instead of an error.",
+  })
+  @ApiStationAuth()
+  @ApiBody({ schema: stationShiftCloseOpenApiSchema })
+  @ApiOkResponse({ schema: stationShiftCloseResponseOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 409, 429)
   close(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(stationShiftCloseSchema)) body: StationShiftCloseDto,
@@ -41,6 +67,10 @@ export class StationShiftCloseController {
 
   @Get("shift-close-conflicts")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "List shift close conflicts" })
+  @ApiCabinetAuth()
+  @ApiOkResponse({ schema: shiftCloseConflictListOpenApiSchema })
+  @ApiHttpErrors(401, 403)
   list(@Req() req: RequestWithTenant): Promise<ShiftCloseConflictListDto> {
     return this.service.listConflicts(req.tenantId!);
   }
@@ -49,6 +79,11 @@ export class StationShiftCloseController {
   @HttpCode(204)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOperation({ summary: "Dismiss a shift close conflict" })
+  @ApiCabinetAuth()
+  @ApiParam({ name: "eventId", format: "uuid" })
+  @ApiResponse({ status: 204, description: "The conflict was dismissed." })
+  @ApiHttpErrors(401, 403, 404)
   async dismiss(@Req() req: RequestWithTenant, @Param("eventId") eventId: string): Promise<void> {
     await this.service.dismissConflict(req.tenantId!, eventId, req.userId!);
   }

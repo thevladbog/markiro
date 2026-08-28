@@ -1,4 +1,7 @@
 import { z } from "zod";
+
+import type { SchemaObject } from "@nestjs/swagger";
+
 import type { ExceptionDto } from "../station-scans/box-exceptions";
 
 /**
@@ -36,3 +39,56 @@ export interface BoxExceptionDto {
 export interface ListBoxExceptionsResponseDto {
   items: BoxExceptionDto[];
 }
+
+const uuidSchema = { type: "string", format: "uuid" } as const;
+const dateTimeSchema = { type: "string", format: "date-time" } as const;
+
+// Mirrors ExceptionDto["kind"] (station-scans/box-exceptions.ts).
+const BOX_EXCEPTION_KINDS = [
+  "undo",
+  "clear",
+  "disassemble",
+  "reprint",
+] as const satisfies readonly ExceptionDto["kind"][];
+
+export const boxExceptionOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: [
+    "id",
+    "kind",
+    "boxId",
+    "codeHash",
+    "targetScannedAt",
+    "terminalId",
+    "operatorId",
+    "reason",
+    "occurredAt",
+    "recordedAt",
+  ],
+  properties: {
+    id: uuidSchema,
+    kind: { type: "string", enum: [...BOX_EXCEPTION_KINDS] },
+    boxId: uuidSchema,
+    codeHash: {
+      type: "string",
+      nullable: true,
+      description: "Set only for `undo` (a single-code action).",
+    },
+    targetScannedAt: { ...dateTimeSchema, nullable: true },
+    terminalId: { type: "string", nullable: true },
+    operatorId: { type: "string", nullable: true },
+    reason: {
+      type: "string",
+      nullable: true,
+      description: "Set for reprint and disassemble.",
+    },
+    occurredAt: dateTimeSchema,
+    recordedAt: dateTimeSchema,
+  },
+};
+
+export const listBoxExceptionsOpenApiSchema: SchemaObject = {
+  type: "object",
+  required: ["items"],
+  properties: { items: { type: "array", items: boxExceptionOpenApiSchema } },
+};

@@ -14,11 +14,19 @@ import {
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { memoryStorage } from "multer";
-import { ApiBody, ApiConsumes, ApiTags } from "@nestjs/swagger";
+import { ApiBody, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from "@nestjs/swagger";
+import {
+  ApiCabinetAuth,
+  ApiHttpErrors,
+  ApiZodBody,
+  ApiZodValidationError,
+} from "../../lib/openapi";
 import type { RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
+  avatarUrlOpenApiSchema,
   updateProfileSchema,
+  userProfileOpenApiSchema,
   type AvatarUrlDto,
   type UpdateProfileDto,
   type UserProfileDto,
@@ -31,15 +39,24 @@ const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 @ApiTags("profile")
 @Controller("profile")
 @UseGuards(ProfileSessionGuard)
+@ApiCabinetAuth()
 export class ProfileController {
   constructor(private readonly profiles: ProfileService) {}
 
   @Get()
+  @ApiOperation({ summary: "Get the signed-in user's profile" })
+  @ApiResponse({ status: 200, schema: userProfileOpenApiSchema })
+  @ApiHttpErrors(401)
   getProfile(@Req() request: RequestWithTenant): Promise<UserProfileDto> {
     return this.profiles.getProfile(request.userId!);
   }
 
   @Patch()
+  @ApiOperation({ summary: "Update the signed-in user's profile" })
+  @ApiZodBody(updateProfileSchema)
+  @ApiResponse({ status: 200, schema: userProfileOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 409)
   updateProfile(
     @Req() request: RequestWithTenant,
     @Body(new ZodValidationPipe(updateProfileSchema)) body: UpdateProfileDto,
@@ -48,6 +65,7 @@ export class ProfileController {
   }
 
   @Post("avatar")
+  @ApiOperation({ summary: "Upload a profile avatar" })
   @ApiConsumes("multipart/form-data")
   @ApiBody({
     schema: {
@@ -56,6 +74,8 @@ export class ProfileController {
       properties: { avatar: { type: "string", format: "binary" } },
     },
   })
+  @ApiResponse({ status: 201, schema: userProfileOpenApiSchema })
+  @ApiHttpErrors(400, 401, 409, 413, 503)
   @UseInterceptors(
     FileInterceptor("avatar", {
       storage: memoryStorage(),
@@ -72,11 +92,17 @@ export class ProfileController {
 
   @Delete("avatar")
   @HttpCode(204)
+  @ApiOperation({ summary: "Delete the profile avatar" })
+  @ApiResponse({ status: 204, description: "The avatar is removed (idempotent)." })
+  @ApiHttpErrors(401, 409)
   deleteAvatar(@Req() request: RequestWithTenant): Promise<void> {
     return this.profiles.deleteAvatar(request.userId!);
   }
 
   @Get("avatar-url")
+  @ApiOperation({ summary: "Get a presigned avatar URL" })
+  @ApiResponse({ status: 200, schema: avatarUrlOpenApiSchema })
+  @ApiHttpErrors(401)
   getAvatarUrl(@Req() request: RequestWithTenant): Promise<AvatarUrlDto> {
     return this.profiles.getAvatarUrl(request.userId!);
   }

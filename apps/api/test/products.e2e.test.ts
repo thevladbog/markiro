@@ -433,6 +433,68 @@ describe.skipIf(!ready)("products e2e", () => {
     expect(draftOnly.body.items[0]).toMatchObject({ name: "Beta Gadget" });
   });
 
+  it("PATCH /products/:id toggles archived and GET /products hides archived by default", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const complete = { productGroup: "Snacks", boxCapacity: 10, palletCapacity: 20 };
+    await agent
+      .post("/products")
+      .send({ gtin: EAN13_WIDGET_A, name: "Live Widget", ...complete })
+      .expect(201);
+    const retiredRes = await agent
+      .post("/products")
+      .send({ gtin: EAN13_WIDGET_B, name: "Retired Widget", ...complete })
+      .expect(201);
+    expect(retiredRes.body.archived).toBe(false);
+
+    const patched = await agent
+      .patch(`/products/${retiredRes.body.id}`)
+      .send({ archived: true })
+      .expect(200);
+    // The card stays fully readable and keeps its computed completeness status.
+    expect(patched.body).toMatchObject({
+      archived: true,
+      status: "active",
+      name: "Retired Widget",
+    });
+
+    // Deny-by-default: without an explicit opt-in the archived card is hidden...
+    const defaultList = await agent.get("/products").expect(200);
+    expect(defaultList.body.items.map((item: { name: string }) => item.name)).toEqual([
+      "Live Widget",
+    ]);
+
+    // ...status filters obey the same default...
+    const activeOnly = await agent.get("/products").query({ status: "active" }).expect(200);
+    expect(activeOnly.body.items.map((item: { name: string }) => item.name)).toEqual([
+      "Live Widget",
+    ]);
+
+    // ...`all` is the history-aware opt-in, `true` the catalog archive filter.
+    const all = await agent.get("/products").query({ archived: "all" }).expect(200);
+    expect(all.body.items.map((item: { name: string }) => item.name).sort()).toEqual([
+      "Live Widget",
+      "Retired Widget",
+    ]);
+    const archivedOnly = await agent.get("/products").query({ archived: "true" }).expect(200);
+    expect(archivedOnly.body.items.map((item: { name: string }) => item.name)).toEqual([
+      "Retired Widget",
+    ]);
+
+    // Re-activation is an ordinary PATCH; a later field edit must not flip the flag back.
+    const unarchived = await agent
+      .patch(`/products/${retiredRes.body.id}`)
+      .send({ archived: false })
+      .expect(200);
+    expect(unarchived.body.archived).toBe(false);
+    const renamed = await agent
+      .patch(`/products/${retiredRes.body.id}`)
+      .send({ name: "Retired Widget v2" })
+      .expect(200);
+    expect(renamed.body.archived).toBe(false);
+  });
+
   it("DELETE /products/:id returns 409 if referenced by a shift", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
