@@ -138,20 +138,30 @@ export const chzSignerTasks = pgTable(
  * на уровне приложения (три bytea-колонки — паттерн mail.ts:45-47); expires_at
  * хранится открыто, чтобы cron и админка читали срок без расшифровки.
  */
-export const chzApiTokens = pgTable("chz_api_tokens", {
-  tenantId: text("tenant_id")
-    .primaryKey()
-    .references(() => organization.id),
-  encryptedToken: bytea("encrypted_token").notNull(),
-  tokenNonce: bytea("token_nonce").notNull(),
-  tokenTag: bytea("token_tag").notNull(),
-  tokenType: text("token_type").notNull().default("jwt"),
-  obtainedAt: timestamp("obtained_at", { withTimezone: true }).notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  agentId: uuid("agent_id"),
-  certThumbprint: text("cert_thumbprint"),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const chzApiTokens = pgTable(
+  "chz_api_tokens",
+  {
+    tenantId: text("tenant_id")
+      .primaryKey()
+      .references(() => organization.id),
+    encryptedToken: bytea("encrypted_token").notNull(),
+    tokenNonce: bytea("token_nonce").notNull(),
+    tokenTag: bytea("token_tag").notNull(),
+    tokenType: text("token_type").notNull().default("jwt"),
+    obtainedAt: timestamp("obtained_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    agentId: uuid("agent_id"),
+    certThumbprint: text("cert_thumbprint"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "chz_api_tokens_tenant_agent_fk",
+      columns: [t.tenantId, t.agentId],
+      foreignColumns: [chzSignerAgents.tenantId, chzSignerAgents.id],
+    }),
+  ],
+);
 
 export type ChzSignerAgentRow = typeof chzSignerAgents.$inferSelect;
 export type ChzSignerTaskRow = typeof chzSignerTasks.$inferSelect;
