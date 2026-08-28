@@ -607,15 +607,22 @@
     {
       "idx": 86,
       "version": "7",
-      "when": 1787899412364,
-      "tag": "0086_chz_signer_agent",
+      "when": 1787894588583,
+      "tag": "0086_unusual_satana",
       "breakpoints": true
     },
     {
       "idx": 87,
       "version": "7",
-      "when": 1787904969030,
-      "tag": "0087_chz_signer_tasks_open_uq",
+      "when": 1787897411901,
+      "tag": "0087_good_infant_terrible",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1787908876694,
+      "tag": "0088_chz_signer_agent",
       "breakpoints": true
     }
   ]

@@ -66,4 +66,5 @@ CREATE INDEX "chz_signer_pairing_codes_hash_idx" ON "chz_signer_pairing_codes" U
 CREATE UNIQUE INDEX "chz_signer_pairing_codes_one_live_uq" ON "chz_signer_pairing_codes" USING btree ("tenant_id") WHERE used_at is null;--> statement-breakpoint
 CREATE UNIQUE INDEX "chz_signer_pairing_codes_code_hash_live_uq" ON "chz_signer_pairing_codes" USING btree ("code_hash") WHERE used_at is null;--> statement-breakpoint
 CREATE INDEX "chz_signer_tasks_tenant_status_idx" ON "chz_signer_tasks" USING btree ("tenant_id","status");--> statement-breakpoint
-CREATE INDEX "chz_signer_tasks_status_created_idx" ON "chz_signer_tasks" USING btree ("status","created_at");
+CREATE INDEX "chz_signer_tasks_status_created_idx" ON "chz_signer_tasks" USING btree ("status","created_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "chz_signer_tasks_open_uq" ON "chz_signer_tasks" USING btree ("tenant_id","type") WHERE status in ('pending', 'claimed');

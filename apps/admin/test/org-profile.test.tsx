@@ -37,6 +37,7 @@ const PROFILE = {
   gln: "4601112222005",
   gs1Prefixes: ["4600000"],
   inn: "7701234567",
+  timeZone: "Europe/Moscow",
   pickupLimitsEnabled: true,
   logoUrl: null as string | null,
   logoRevision: null as string | null,
@@ -95,6 +96,66 @@ async function cardOf(titleText: string): Promise<HTMLElement> {
 }
 
 describe("OrgProfilePage", () => {
+  it("shows and saves the tenant operational timezone with the profile fields", async () => {
+    let profile = PROFILE;
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          profile = { ...profile, timeZone: "Asia/Yekaterinburg" };
+        }
+        return jsonResponse(200, profile);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const timeZone = (await within(profileCard).findByLabelText(
+      "Часовой пояс производства",
+    )) as HTMLSelectElement;
+    expect(timeZone.value).toBe("Europe/Moscow");
+    fireEvent.change(timeZone, { target: { value: "Asia/Yekaterinburg" } });
+    fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/org/profile",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({
+            gln: PROFILE.gln,
+            inn: PROFILE.inn,
+            timeZone: "Asia/Yekaterinburg",
+            gs1Prefixes: PROFILE.gs1Prefixes,
+          }),
+        }),
+      ),
+    );
+    const successToast = await screen.findByText("Профиль сохранён");
+    const toastStatus = successToast.closest("[role=status]");
+    if (!toastStatus) throw new Error("Profile success toast not found");
+    fireEvent.click(within(toastStatus as HTMLElement).getByRole("button", { name: "Закрыть" }));
+  });
+
+  it("preserves a valid stored timezone outside the curated production list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routeFetch({
+        profile: () => jsonResponse(200, { ...PROFILE, timeZone: "Europe/London" }),
+      }),
+    );
+
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const timeZone = (await within(profileCard).findByLabelText(
+      "Часовой пояс производства",
+    )) as HTMLSelectElement;
+    expect(timeZone.value).toBe("Europe/London");
+    expect(within(timeZone).getByRole("option", { name: "Europe/London" })).toBeDefined();
+  });
+
   it("shows the box-label default selector, its tenant templates, and the template library link", async () => {
     vi.stubGlobal("fetch", routeFetch({}));
 
@@ -143,6 +204,7 @@ describe("OrgProfilePage", () => {
           body: JSON.stringify({
             gln: PROFILE.gln,
             inn: PROFILE.inn,
+            timeZone: PROFILE.timeZone,
             gs1Prefixes: PROFILE.gs1Prefixes,
             defaultBoxLabelTemplateId: selectedId,
           }),
@@ -187,6 +249,7 @@ describe("OrgProfilePage", () => {
           body: JSON.stringify({
             gln: PROFILE.gln,
             inn: PROFILE.inn,
+            timeZone: PROFILE.timeZone,
             gs1Prefixes: PROFILE.gs1Prefixes,
             defaultBoxLabelTemplateId: null,
           }),
@@ -639,6 +702,7 @@ describe("OrgProfilePage", () => {
           body: JSON.stringify({
             gln: "6291041500213",
             inn: null,
+            timeZone: PROFILE.timeZone,
             gs1Prefixes: ["4600000", "4600001"],
           }),
         }),

@@ -11,6 +11,7 @@ import { loadEnv } from "../src/env";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
+import { fixtureOrderNo } from "./support/order-no";
 import { excludeExchangeRoute } from "../src/modules/exchange/exchange.module";
 import { checkauthWindowStart } from "../src/modules/exchange/exchange-credentials";
 import { IMPORT_BATCH_SIZE } from "../src/modules/exchange/exchange.controller";
@@ -106,7 +107,7 @@ describe("1c_exchange orders (И-2)", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -198,7 +199,7 @@ describe("1c_exchange orders (И-2)", () => {
     });
 
     const orderId = randomUUID();
-    const orderNo = `ORD-26-${randomUUID().slice(0, 4)}`;
+    const orderNo = fixtureOrderNo();
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
@@ -248,7 +249,7 @@ describe("1c_exchange orders (И-2)", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -408,7 +409,7 @@ describe("1c_exchange orders (И-2)", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -521,7 +522,7 @@ describe("1c_exchange orders (И-2)", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",
@@ -584,7 +585,7 @@ describe("1c_exchange orders (И-2)", () => {
     await db.insert(schema.pickupOrders).values({
       id: orderId,
       tenantId,
-      orderNo: `ORD-26-${randomUUID().slice(0, 4)}`,
+      orderNo: fixtureOrderNo(),
       kioskId,
       employeeId,
       reason: "buy",

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { and, eq, lte, or, sql } from "drizzle-orm";
 import { strToU8, zipSync, type Zippable } from "fflate";
 
@@ -192,6 +192,7 @@ export const INVENTORY_DOCUMENT_SAFE_ERROR_CODES = [
   "INVENTORY_RESULT_NOT_CLOSED",
   "STALE_RESULT_REVISION",
   "VERIFIED_PRODUCTION_DATE_MISSING",
+  "INVALID_ORGANIZATION_INN",
   "GENERATION_FAILED",
   "STORAGE_FAILED",
   "QUEUE_FAILED",
@@ -200,6 +201,8 @@ type InventoryDocumentSafeErrorCode = (typeof INVENTORY_DOCUMENT_SAFE_ERROR_CODE
 
 @Injectable()
 export class InventoryDocumentRunnerService {
+  private readonly logger = new Logger(InventoryDocumentRunnerService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly source: InventoryResultSourceService,
@@ -285,20 +288,39 @@ export class InventoryDocumentRunnerService {
       if (publicationAttempted) {
         try {
           if (await this.hasCommittedPublication(claimed)) return;
-        } catch {
+        } catch (verifyError) {
+          this.logger.error(
+            `inventory document run ${claimed.id} publication verification failed`,
+            this.describeErrorForLog(verifyError),
+          );
           throw error;
         }
       }
       await Promise.allSettled(attemptedObjectKeys.map((key) => this.storage.delete(key)));
       if (error instanceof InventoryDocumentClaimLostError) return;
+      // Logged here, below the two early returns above: a lost claim and a
+      // publication that actually committed are both expected outcomes of
+      // concurrent workers/retries, not failures worth surfacing.
       const safeError = safeDocumentErrorCode(error);
       if (safeError !== null) {
+        this.logger.warn(
+          `inventory document run ${claimed.id} generation failed`,
+          this.describeErrorForLog(error),
+        );
         await this.publishFailed(claimed, safeError);
         return;
       }
       if (attempt.retryCount < attempt.retryLimit) {
+        this.logger.warn(
+          `inventory document run ${claimed.id} generation failed, requeuing for retry`,
+          this.describeErrorForLog(error),
+        );
         await this.requeue(claimed);
       } else {
+        this.logger.error(
+          `inventory document run ${claimed.id} generation failed terminally`,
+          this.describeErrorForLog(error),
+        );
         await this.publishFailed(claimed, infrastructureErrorCode);
       }
       throw error;
@@ -432,6 +454,25 @@ export class InventoryDocumentRunnerService {
     });
   }
 
+  /**
+   * Drizzle embeds the full SQL statement and bound parameters in a query
+   * error's `message`/`stack` (params follow the query on later lines), so
+   * logging either raw can leak row data. Bound to the message's first line,
+   * capped, plus a few real stack frames.
+   */
+  private describeErrorForLog(error: unknown): string {
+    if (!(error instanceof Error)) return String(error);
+    // The message itself carries the query/params for driver errors, so cap
+    // it to its first line; keep only real frames (the stack repeats the
+    // message before the first "at ...").
+    const firstLine = error.message.split("\n", 1)[0]!.slice(0, 300);
+    const frames = (error.stack ?? "")
+      .split("\n")
+      .filter((line) => line.trimStart().startsWith("at "))
+      .slice(0, 5);
+    return [firstLine, ...frames].join("\n");
+  }
+
   private ownedProcessingAttempt(claimed: InventoryDocumentRunRow) {
     return and(
       eq(schema.inventoryDocumentRuns.tenantId, claimed.tenantId),
@@ -513,9 +554,13 @@ function safeDocumentErrorCode(error: unknown): InventoryDocumentSafeErrorCode |
     }
   }
   if (error instanceof InventoryDocumentGenerationError) {
-    return error.code === "VERIFIED_PRODUCTION_DATE_MISSING"
-      ? "VERIFIED_PRODUCTION_DATE_MISSING"
-      : "GENERATION_FAILED";
+    switch (error.code) {
+      case "VERIFIED_PRODUCTION_DATE_MISSING":
+      case "INVALID_ORGANIZATION_INN":
+        return error.code;
+      default:
+        return "GENERATION_FAILED";
+    }
   }
   return null;
 }

@@ -155,6 +155,7 @@ export {
   generateInventoryWriteOffTxt,
   inventoryDocumentFilenamePrefix,
   InventoryDocumentGenerationError,
+  isParticipantInn,
 } from "./inventory/index.js";
 export type {
   InventoryDocumentGeneratedPart,

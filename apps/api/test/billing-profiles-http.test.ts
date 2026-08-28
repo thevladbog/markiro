@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { BillingProfilesController } from "../src/modules/billing-profiles/billing-profiles.controller";
 import { BillingProfilesService } from "../src/modules/billing-profiles/billing-profiles.service";
+import { listenOnLoopback } from "./support/listen-loopback";
 
 describe("billing profiles HTTP contract", () => {
   let app: INestApplication;
@@ -72,6 +73,7 @@ describe("billing profiles HTTP contract", () => {
 
     app = module.createNestApplication();
     await app.init();
+    await listenOnLoopback(app);
   });
 
   afterAll(async () => {

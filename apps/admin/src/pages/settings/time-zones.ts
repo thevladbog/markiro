@@ -1,0 +1,16 @@
+export const OPERATIONAL_TIME_ZONES = [
+  "Europe/Kaliningrad",
+  "Europe/Moscow",
+  "Europe/Samara",
+  "Asia/Yekaterinburg",
+  "Asia/Omsk",
+  "Asia/Novosibirsk",
+  "Asia/Krasnoyarsk",
+  "Asia/Irkutsk",
+  "Asia/Yakutsk",
+  "Asia/Vladivostok",
+  "Asia/Magadan",
+  "Asia/Sakhalin",
+  "Asia/Kamchatka",
+  "Asia/Anadyr",
+] as const;

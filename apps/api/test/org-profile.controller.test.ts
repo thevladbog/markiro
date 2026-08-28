@@ -93,6 +93,12 @@ describe("OrgProfileController logo multipart boundary", () => {
 });
 
 describe("OrgProfileController PUT profile validation", () => {
+  it("accepts IANA timezones and rejects invalid or empty timezone input", () => {
+    expect(putOrgProfileSchema.safeParse({ timeZone: "Asia/Yekaterinburg" }).success).toBe(true);
+    expect(putOrgProfileSchema.safeParse({ timeZone: "Mars/Olympus" }).success).toBe(false);
+    expect(putOrgProfileSchema.safeParse({ timeZone: "" }).success).toBe(false);
+  });
+
   it("accepts a UUID and explicit null for the box label default while preserving omission", () => {
     const templateId = "a0000000-0000-4000-8000-000000000001";
 

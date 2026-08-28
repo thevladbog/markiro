@@ -1,0 +1,1 @@
+ALTER TABLE "org_profiles" ADD COLUMN "time_zone" text DEFAULT 'Europe/Moscow' NOT NULL;

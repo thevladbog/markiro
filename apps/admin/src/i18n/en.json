@@ -238,6 +238,12 @@
   },
   "shell": {
     "navLabel": "Main navigation",
+    "mobileNavigation": {
+      "trigger": "Sections",
+      "openLabel": "Open mobile navigation",
+      "closeLabel": "Close mobile navigation",
+      "navLabel": "Mobile navigation"
+    },
     "sections": {
       "production": "Production",
       "reference": "Reference data",
@@ -521,7 +527,9 @@
           "notReady": "Current documents are not ready or have not been downloaded yet.",
           "notAcknowledged": "Confirm that the downloaded documents were checked.",
           "lateEvents": "Resolve every late inventory event first.",
-          "verifiedProductionDateMissing": "Verified codes do not have a production date. Resume the inventory, correct the dates, and generate the documents again."
+          "verifiedProductionDateMissing": "Verified codes do not have a production date. Resume the inventory, correct the dates, and generate the documents again.",
+          "invalidOrganizationInn": "The organization INN is missing or invalid. Fill it in Settings and retry the generation.",
+          "organizationInnRequired": "GIS MT XML documents require the organization INN. Fill it in Settings."
         }
       },
       "late": {
@@ -675,10 +683,17 @@
       }
     },
     "dashboard": {
-      "title": "Overview",
+      "title": "Production today",
       "loading": "Loading overview",
       "emptyTitle": "No data yet",
       "emptyHint": "A summary of shifts and production will appear here once the first shift runs.",
+      "header": {
+        "generatedAt": "Updated"
+      },
+      "refreshing": {
+        "title": "Updating data",
+        "hint": "The previous summary is shown while the selected period loads."
+      },
       "setup": {
         "title": "Prepare the first shift",
         "hint": "Three actions take a new cabinet to its first production run.",
@@ -694,6 +709,120 @@
         "title": "Could not load the overview",
         "hint": "Some data is unavailable. Retry before making decisions from an incomplete summary.",
         "retry": "Retry"
+      },
+      "verdict": {
+        "eyebrow": "Production control",
+        "status": {
+          "under_control": "Production is under control",
+          "needs_attention": "Needs attention",
+          "critical": "Critical condition"
+        },
+        "reason": {
+          "unreviewed_conflicts_one": "{{count}} unreviewed conflict affects production",
+          "unreviewed_conflicts_few": "{{count}} unreviewed conflicts affect production",
+          "unreviewed_conflicts_many": "{{count}} unreviewed conflicts affect production",
+          "unreviewed_conflicts_other": "{{count}} unreviewed conflicts affect production",
+          "late_data_one": "Late data affected {{count}} shift",
+          "late_data_few": "Late data affected {{count}} shifts",
+          "late_data_many": "Late data affected {{count}} shifts",
+          "late_data_other": "Late data affected {{count}} shifts",
+          "missing_shift_duration_one": "{{count}} output series has no shift duration",
+          "missing_shift_duration_few": "{{count}} output series have no shift duration",
+          "missing_shift_duration_many": "{{count}} output series have no shift duration",
+          "missing_shift_duration_other": "{{count}} output series have no shift duration"
+        },
+        "noReasons": "There are no active reasons for intervention."
+      },
+      "headline": {
+        "scope": "Active shifts and shifts completed today",
+        "validation": "Validated individually",
+        "aggregationBoxes": "Closed boxes",
+        "aggregationUnits": "Units in boxes",
+        "active": "Active shifts",
+        "units": "units",
+        "boxes": "boxes",
+        "shiftUnit_one": "shift",
+        "shiftUnit_few": "shifts",
+        "shiftUnit_many": "shifts",
+        "shiftUnit_other": "shifts",
+        "validationAria": "{{count}} validated units",
+        "aggregationBoxesAria": "{{count}} closed boxes",
+        "aggregationUnitsAria": "{{count}} units in boxes",
+        "activeAria_one": "{{count}} active shift",
+        "activeAria_few": "{{count}} active shifts",
+        "activeAria_many": "{{count}} active shifts",
+        "activeAria_other": "{{count}} active shifts",
+        "includedClosed_one": "The summary also includes {{count}} shift completed today.",
+        "includedClosed_few": "The summary also includes {{count}} shifts completed today.",
+        "includedClosed_many": "The summary also includes {{count}} shifts completed today.",
+        "includedClosed_other": "The summary also includes {{count}} shifts completed today."
+      },
+      "dynamics": {
+        "title": "Production dynamics",
+        "shiftHourNote": "Rate is calculated per shift hour. Validation and aggregation stay separate.",
+        "metricControl": "Dynamics metric",
+        "periodControl": "Dynamics period",
+        "rate": "Rate",
+        "output": "Output",
+        "period": {
+          "today": "Today",
+          "7d": "7 days",
+          "30d": "30 days",
+          "12w": "12 weeks"
+        },
+        "validation": "Validation",
+        "aggregation": "Aggregation",
+        "regionLabel": "{{mode}} — {{metric}}",
+        "series": {
+          "acceptedUnits": "Validated units",
+          "closedBoxes": "Closed boxes",
+          "containedUnits": "Units in boxes"
+        },
+        "units": {
+          "units": "units",
+          "boxes": "boxes",
+          "unitsPerShiftHour": "units/shift hour",
+          "boxesPerShiftHour": "boxes/shift hour"
+        },
+        "current": "Selected period",
+        "comparison": {
+          "up": "up {{value}}% from the previous period",
+          "down": "down {{value}}% from the previous period",
+          "same": "unchanged from the previous period",
+          "unavailable": "no comparable baseline"
+        },
+        "barLabel": "{{label}}: {{value}} {{unit}}",
+        "missingRate": "Shift duration is missing — rate was not calculated.",
+        "empty": {
+          "validation": "No units were validated in the selected period.",
+          "aggregation": "No boxes were closed in the selected period.",
+          "containedUnits": "No units are contained in closed boxes for the selected period."
+        },
+        "provenance": "Calculation {{version}} · sources: {{sources}}"
+      },
+      "signals": {
+        "title": "Control signals",
+        "hint": "States that affect how this summary should be read.",
+        "status": {
+          "complete": "Complete data",
+          "provisional": "Provisional data",
+          "insufficient": "Insufficient data for rate"
+        },
+        "reason": {
+          "active_shifts_one": "Active shift: data may change",
+          "active_shifts_few": "{{count}} active shifts: data may change",
+          "active_shifts_many": "{{count}} active shifts: data may change",
+          "active_shifts_other": "{{count}} active shifts: data may change",
+          "late_data_one": "Late data: {{count}} shift",
+          "late_data_few": "Late data: {{count}} shifts",
+          "late_data_many": "Late data: {{count}} shifts",
+          "late_data_other": "Late data: {{count}} shifts",
+          "missing_shift_duration": "Shift duration is missing for the rate calculation"
+        },
+        "clear": "The selected period has no data limitations.",
+        "rateBasis": "Rate basis",
+        "shiftHour": "shift hour",
+        "lateData": "Shifts with late data"
       },
       "summary": {
         "label": "Summary",
@@ -717,11 +846,18 @@
       },
       "active": {
         "title": "Shifts running now",
+        "tableLabel": "Active production shifts",
+        "number": "Shift",
         "product": "Product",
         "line": "Line",
         "mode": "Mode",
-        "plan": "Plan",
+        "output": "Output",
         "started": "Opened",
+        "data": "Data",
+        "provisional": "Provisional",
+        "late": "Late data",
+        "validationOutput": "{{count}} units",
+        "aggregationOutput": "{{boxes}} boxes · {{units}} units",
         "empty": "No shifts are active now.",
         "openShifts": "Open shifts"
       },
@@ -2239,6 +2375,7 @@
           "table": {
             "name": "Name",
             "article": "Article",
+            "gtin": "GTIN",
             "externalRef": "1C id",
             "actions": "Actions",
             "suggestion": "Looks like: {{name}}"
@@ -2338,6 +2475,8 @@
         "cardTitle": "Organisation profile",
         "glnLabel": "GLN",
         "innLabel": "Tax ID",
+        "timeZoneLabel": "Production timezone",
+        "timeZoneHint": "Controls calendar-day boundaries on production dashboards.",
         "prefixesLabel": "GS1 prefixes",
         "prefixesHint": "Comma-separated, e.g. 4600000, 4600001",
         "defaultBoxLabelTemplateLabel": "Default box label template",

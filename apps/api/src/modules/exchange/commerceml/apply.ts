@@ -1,3 +1,4 @@
+import { isValidGtin, normalizeToGtin14 } from "@markiro/domain";
 import type { ParsedItem, ParsedOffer } from "./parse";
 
 /**
@@ -23,10 +24,63 @@ function isHomeCurrency(currency: string): boolean {
   return HOME_CURRENCY_ALIASES.has(currency.trim().toLowerCase());
 }
 
-/** A product this connection already links to a 1С `<Ид>`, looked up ahead of time by the caller (DB access is its job, not this one). */
-export interface KnownProduct {
+/**
+ * One tenant product, as looked up ahead of time by the caller (DB access is
+ * its job, not this one) -- ALL of them, not just the ones already linked to
+ * a 1С `<Ид>`. GTIN-based auto-link (below) needs the whole catalog: a
+ * product's `gtin14` might match an incoming item's barcode long before that
+ * product ever got an `externalRef` at all.
+ */
+export interface CatalogProduct {
   id: string;
+  gtin14: string;
+  externalRef: string | null;
+}
+
+/** A new `products.external_ref` link this round's GTIN match decided on. */
+export interface AutoLink {
+  productId: string;
   externalRef: string;
+  gtin: string;
+}
+
+/** One `<Картинка>` to fetch and attach to `productId` -- see the loop that builds `ApplicationPlan.images`. */
+export interface ImageWork {
+  productId: string;
+  source: string;
+}
+
+/**
+ * An unmatched `<Товар>`, same shape as the old plain `ParsedItem` candidate
+ * plus its own normalized `gtin` (`null` when the item carried no usable
+ * barcode) -- so a human resolving this candidate can see the GTIN this
+ * round already computed, without recomputing it.
+ */
+export interface CandidateItem {
+  externalRef: string;
+  name: string;
+  article: string | null;
+  unit: string | null;
+  gtin: string | null;
+}
+
+/**
+ * An incoming item's GTIN matched a catalog product that is already linked
+ * to a DIFFERENT `<Ид>` -- see the comment inside `decideApplication` where
+ * this is built. Not auto-resolved: only a human can say which of the two
+ * `<Ид>`s the product actually belongs to.
+ */
+export interface GtinConflict {
+  externalRef: string;
+  gtin: string;
+  productId: string;
+  productExternalRef: string;
+}
+
+/** Two or more incoming items claimed the SAME GTIN this round -- see `decideApplication`'s `claimants` map. Neither is auto-linked. */
+export interface GtinAmbiguity {
+  gtin: string;
+  externalRefs: string[];
 }
 
 export interface PriceUpdate {
@@ -68,14 +122,19 @@ export interface SkippedOffer {
 }
 
 export interface ApplicationPlan {
+  links: AutoLink[];
   priceUpdates: PriceUpdate[];
-  candidates: ParsedItem[];
+  images: ImageWork[];
+  candidates: CandidateItem[];
   skipped: SkippedOffer[];
+  gtinConflicts: GtinConflict[];
+  gtinAmbiguities: GtinAmbiguity[];
+  invalidBarcodes: number;
 }
 
 export interface DecideApplicationInput {
-  /** Products already linked to a 1С GUID for this connection. */
-  known: KnownProduct[];
+  /** ВСЕ карточки тенанта, не только связанные -- GTIN matching needs the whole catalog (see `CatalogProduct`). */
+  products: CatalogProduct[];
   /** `<Товар>` entries from the catalog file -- source of unmatched candidates. */
   items: ParsedItem[];
   /** `<Предложение>` entries from the offers file -- source of price updates. */
@@ -257,21 +316,104 @@ function normalizeUnitPriceValue(value: string): string | null {
 }
 
 /**
- * Pure planning step for the CommerceML intake: given what a connection
- * already knows (`known`) and what 1С just sent (`items`, `offers`), decides
- * which products get a new `unit_price`, which unmatched items become
- * catalog candidates, and which offers were refused and why. No database, no
- * HTTP -- writing the plan out is a later task.
+ * `null` вместо исключения: для обмена невалидный штрихкод — «штрихкода
+ * нет», а не ошибка файла (одна кривая позиция не рушит раунд). Проверка
+ * длины (8/12/13/14) и контрольной цифры — целиком в @markiro/domain,
+ * второй GTIN-валидатор в кодовой базе не заводится.
+ */
+function normalizeGtinOrNull(raw: string): string | null {
+  const digits = raw.trim();
+  return isValidGtin(digits) ? normalizeToGtin14(digits) : null;
+}
+
+/**
+ * Pure planning step for the CommerceML intake: given ALL of a tenant's
+ * catalog products (`products`) and what 1С just sent (`items`, `offers`),
+ * decides which products get a new `unit_price`, which unmatched items
+ * become catalog candidates, which get auto-linked by GTIN, which photos to
+ * fetch, and which offers were refused and why. No database, no HTTP --
+ * writing the plan out is a later task.
  */
 export function decideApplication(input: DecideApplicationInput): ApplicationPlan {
-  const { known, items, offers, configuredPriceType } = input;
-  const knownByRef = new Map(known.map((product) => [product.externalRef, product]));
+  const { products, items, offers, configuredPriceType } = input;
+
+  const knownByRef = new Map<string, CatalogProduct>();
+  for (const product of products) {
+    if (product.externalRef !== null) knownByRef.set(product.externalRef, product);
+  }
+  const productsByGtin = new Map(products.map((p) => [p.gtin14, p]));
+
+  // Штрихкод предложения — запасной источник: некоторые конфигурации кладут
+  // его только в offers-файл. Первый выигрывает — как и везде в этом файле.
+  const offerBarcodeByRef = new Map<string, string>();
+  for (const offer of offers) {
+    if (offer.barcode !== null && !offerBarcodeByRef.has(offer.externalRef)) {
+      offerBarcodeByRef.set(offer.externalRef, offer.barcode);
+    }
+  }
+
+  // GTIN считается только для НЕсвязанных позиций: у связанных он ничего не
+  // решает (связь уже есть), а его расхождение с карточкой — вне среза.
+  let invalidBarcodes = 0;
+  const gtinByRef = new Map<string, string>();
+  const unmatchedItems = items.filter((item) => !knownByRef.has(item.externalRef));
+  for (const item of unmatchedItems) {
+    const raw = item.barcode ?? offerBarcodeByRef.get(item.externalRef) ?? null;
+    if (raw === null) continue;
+    const gtin = normalizeGtinOrNull(raw);
+    if (gtin === null) {
+      invalidBarcodes++;
+      continue;
+    }
+    gtinByRef.set(item.externalRef, gtin);
+  }
+
+  // Претенденты по каждому GTIN, у которого ЕСТЬ карточка. Двое и больше —
+  // не угадываем (та же дисциплина, что ambiguous_price_type): все в
+  // кандидаты, а факт — в журнал. GTIN без карточки в это вообще не входит:
+  // там нечего связывать, дубль в файле — просто два кандидата.
+  const claimants = new Map<string, string[]>();
+  for (const [ref, gtin] of gtinByRef) {
+    if (!productsByGtin.has(gtin)) continue;
+    const list = claimants.get(gtin) ?? [];
+    list.push(ref);
+    claimants.set(gtin, list);
+  }
+
+  const links: AutoLink[] = [];
+  const gtinConflicts: GtinConflict[] = [];
+  const gtinAmbiguities: GtinAmbiguity[] = [];
+  const linkedByRef = new Map<string, CatalogProduct>();
+  for (const [gtin, refs] of claimants) {
+    if (refs.length > 1) {
+      gtinAmbiguities.push({ gtin, externalRefs: refs });
+      continue;
+    }
+    const ref = refs[0]!;
+    const product = productsByGtin.get(gtin)!;
+    if (product.externalRef !== null) {
+      // Карточка уже связана с ДРУГИМ <Ид> (с этим же — была бы в knownByRef,
+      // и позиция не попала бы в unmatchedItems). Решает человек.
+      gtinConflicts.push({
+        externalRef: ref,
+        gtin,
+        productId: product.id,
+        productExternalRef: product.externalRef,
+      });
+      continue;
+    }
+    links.push({ productId: product.id, externalRef: ref, gtin });
+    linkedByRef.set(ref, product);
+  }
+
+  // Цены: давно связанные ПЛЮС связанные этим же раундом — «связь раньше
+  // цены» из спеки §8 начинается уже здесь, в плане.
+  const priceTargetByRef = new Map([...knownByRef, ...linkedByRef]);
 
   const priceUpdates: PriceUpdate[] = [];
   const skipped: SkippedOffer[] = [];
-
   for (const offer of offers) {
-    const product = knownByRef.get(offer.externalRef);
+    const product = priceTargetByRef.get(offer.externalRef);
     if (product === undefined) {
       // Not a linked product. Offers carry no name/article/unit, so unlike
       // catalog items they cannot become a candidate either -- there is
@@ -283,7 +425,6 @@ export function decideApplication(input: DecideApplicationInput): ApplicationPla
       // existing unit_price stands. Not a failure, so not journaled here.
       continue;
     }
-
     const choice = choosePrice(offer.prices, configuredPriceType);
     if (!choice.ok) {
       skipped.push({
@@ -309,9 +450,36 @@ export function decideApplication(input: DecideApplicationInput): ApplicationPla
     priceUpdates.push({ productId: product.id, unitPrice: normalizedPrice });
   }
 
+  // Фото — первая <Картинка> позиции, чья карточка известна (старая или
+  // новая связь). Остальные картинки сознательно игнорируются (спека §1).
+  const images: ImageWork[] = [];
+  for (const item of items) {
+    if (item.images.length === 0) continue;
+    const product = knownByRef.get(item.externalRef) ?? linkedByRef.get(item.externalRef);
+    if (product === undefined) continue;
+    images.push({ productId: product.id, source: item.images[0]! });
+  }
+
   // Catalog owns product creation, not the exchange -- an item without a
   // known link is a candidate for a human to resolve, never an auto-create.
-  const candidates = items.filter((item) => !knownByRef.has(item.externalRef));
+  const candidates: CandidateItem[] = unmatchedItems
+    .filter((item) => !linkedByRef.has(item.externalRef))
+    .map((item) => ({
+      externalRef: item.externalRef,
+      name: item.name,
+      article: item.article,
+      unit: item.unit,
+      gtin: gtinByRef.get(item.externalRef) ?? null,
+    }));
 
-  return { priceUpdates, candidates, skipped };
+  return {
+    links,
+    priceUpdates,
+    images,
+    candidates,
+    skipped,
+    gtinConflicts,
+    gtinAmbiguities,
+    invalidBarcodes,
+  };
 }

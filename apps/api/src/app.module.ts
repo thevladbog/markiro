@@ -54,6 +54,7 @@ import { DemoRequestsModule } from "./modules/demo-requests/demo-requests.module
 import { PlatformHttpModule } from "./platform-http/platform-http.module";
 import { HealthModule } from "./health/health.module";
 import { InventoriesModule } from "./modules/inventories/inventories.module";
+import { DashboardModule } from "./modules/dashboard/dashboard.module";
 
 @Module({})
 export class AppModule {
@@ -103,6 +104,7 @@ export class AppModule {
         ProductsModule,
         LinesModule,
         ShiftsModule,
+        DashboardModule,
         InventoriesModule,
         ShiftExportsModule,
         StationShiftCloseModule,

@@ -590,6 +590,29 @@ describe("inventory document runner", () => {
     expect(xmlArtifacts.every((artifact) => artifact.byteSize === 0)).toBe(true);
   });
 
+  it("fails with INVALID_ORGANIZATION_INN for a closed inventory missing the organization INN snapshot", async () => {
+    const fake = runnerDb(
+      runRow({
+        organizationInnSnapshot: null,
+        selectedFormats: [{ id: "inventory_xml_gismt_aggregation", version: 2 }],
+      }),
+    );
+    const storage = runnerStorage();
+    const runner = new InventoryDocumentRunnerService(
+      fake.db,
+      inventorySource(),
+      storage,
+      productionInventoryDocumentGeneratorRegistry,
+    );
+
+    await runner.run(fake.state.row.id, { retryCount: 0, retryLimit: 5 });
+
+    expect(fake.state.row.status).toBe("failed");
+    expect(fake.state.row.errorCode).toBe("INVALID_ORGANIZATION_INN");
+    expect(fake.state.artifacts).toHaveLength(0);
+    expect(storage.putVerified).not.toHaveBeenCalled();
+  });
+
   it("hashes, stores, and publishes an explicitly valid zero-byte TXT artifact", async () => {
     const fake = runnerDb(runRow({ selectedFormats: [{ id: txtDescriptor.id, version: 1 }] }));
     const storage = runnerStorage();
