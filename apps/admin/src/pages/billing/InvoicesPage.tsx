@@ -5,6 +5,7 @@ import { Link, useParams } from "react-router";
 import { Alert, Button, Card, EmptyState, Input, Select, Spinner, Table } from "@markiro/ui";
 
 import { BillingStatusChip } from "./BillingSections.js";
+import { ApiRequestError } from "../../api/client.js";
 import {
   downloadInvoice,
   type InvoiceFilters,
@@ -56,6 +57,11 @@ function InvoiceFiltersForm({
   filters: InvoiceFilters;
   onChange: (next: InvoiceFilters) => void;
 }) {
+  const clear = (key: keyof InvoiceFilters) => {
+    const next = { ...filters };
+    delete next[key];
+    return next;
+  };
   const setStatus = (status: string) =>
     onChange({
       ...(filters.from ? { from: filters.from } : {}),
@@ -82,7 +88,7 @@ function InvoiceFiltersForm({
         type="date"
         value={filters.from ?? ""}
         onChange={(event) =>
-          onChange({ ...filters, ...(event.target.value ? { from: event.target.value } : {}) })
+          onChange(event.target.value ? { ...filters, from: event.target.value } : clear("from"))
         }
       />
       <Input
@@ -90,7 +96,7 @@ function InvoiceFiltersForm({
         type="date"
         value={filters.to ?? ""}
         onChange={(event) =>
-          onChange({ ...filters, ...(event.target.value ? { to: event.target.value } : {}) })
+          onChange(event.target.value ? { ...filters, to: event.target.value } : clear("to"))
         }
       />
     </div>
@@ -100,9 +106,15 @@ function InvoiceFiltersForm({
 export function InvoicesPage() {
   const { i18n } = useTranslation();
   const [filters, setFilters] = useState<InvoiceFilters>({});
-  const { data, isPending, isError } = useInvoices(filters);
+  const { data, isPending, isError, error, refetch } = useInvoices(filters);
   if (isPending) return <Spinner label="Загрузка счетов" />;
-  if (isError) return <EmptyState title="Не удалось загрузить счета" />;
+  if (isError)
+    return (
+      <EmptyState
+        title="Не удалось загрузить счета"
+        action={<Button onClick={() => void refetch()}>Повторить</Button>}
+      />
+    );
   const items = data?.items ?? [];
   return (
     <section aria-labelledby="billing-invoices-heading" className="mk-billing-invoices">
@@ -183,7 +195,7 @@ export function InvoicesPage() {
 export function InvoiceDetailPage() {
   const { id = "" } = useParams();
   const { i18n } = useTranslation();
-  const { data, isPending, isError } = useInvoice(id);
+  const { data, isPending, isError, error, refetch } = useInvoice(id);
   const [busy, setBusy] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const handleDownload = (documentId: string) =>
@@ -200,7 +212,26 @@ export function InvoiceDetailPage() {
       }
     })();
   if (isPending) return <Spinner label="Загрузка счёта" />;
-  if (isError || !data) return <EmptyState title="Счёт не найден" />;
+  if (isError) {
+    const status = error instanceof ApiRequestError ? error.status : 0;
+    return (
+      <EmptyState
+        title={
+          status === 404
+            ? "Счёт не найден"
+            : status === 403
+              ? "Нет доступа к счёту"
+              : "Не удалось загрузить счёт"
+        }
+        action={
+          status === 404 || status === 403 ? undefined : (
+            <Button onClick={() => void refetch()}>Повторить</Button>
+          )
+        }
+      />
+    );
+  }
+  if (!data) return <EmptyState title="Счёт не найден" />;
   return (
     <section aria-labelledby="billing-invoice-heading" className="mk-billing-invoice-detail">
       <div className="mk-billing-section-intro">

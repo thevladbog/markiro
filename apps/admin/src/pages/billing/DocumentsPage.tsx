@@ -23,6 +23,11 @@ export function DocumentsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const { data, isPending, isError } = useDocuments(filters);
+  const clear = (key: keyof DocumentFilters) => {
+    const next = { ...filters };
+    delete next[key];
+    return next;
+  };
   const documents = useMemo(
     () => (data?.items ?? []).filter((document) => !status || document.status === status),
     [data?.items, status],
@@ -59,7 +64,7 @@ export function DocumentsPage() {
             native
             label="Тип документа"
             value={filters.type ?? ""}
-            onValueChange={(type) => setFilters({ ...filters, ...(type ? { type } : {}) })}
+            onValueChange={(type) => setFilters(type ? { ...filters, type } : clear("type"))}
             options={[
               { value: "", label: "Все типы" },
               { value: "offer", label: "Предложения" },
@@ -83,10 +88,9 @@ export function DocumentsPage() {
             type="date"
             value={filters.from ?? ""}
             onChange={(event) =>
-              setFilters({
-                ...filters,
-                ...(event.target.value ? { from: event.target.value } : {}),
-              })
+              setFilters(
+                event.target.value ? { ...filters, from: event.target.value } : clear("from"),
+              )
             }
           />
           <Input
@@ -94,7 +98,7 @@ export function DocumentsPage() {
             type="date"
             value={filters.to ?? ""}
             onChange={(event) =>
-              setFilters({ ...filters, ...(event.target.value ? { to: event.target.value } : {}) })
+              setFilters(event.target.value ? { ...filters, to: event.target.value } : clear("to"))
             }
           />
         </div>
