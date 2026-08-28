@@ -256,7 +256,15 @@
     "empty": "No offers yet",
     "loadError": "Could not load offers",
     "catalogLink": "Catalog",
-    "terms": { "label": "Terms of cooperation" }
+    "terms": { "label": "Terms of cooperation" },
+    "requestRetry": {
+      "frozen": "The immutable attempt is retained. Inputs and alternative actions stay unavailable until exact retry or request reconciliation.",
+      "sending": "Sending the retained attempt. Items, terms, and operation key are locked.",
+      "ambiguous": "The server outcome is ambiguous. Exact retry uses the same items, terms, and operation key.",
+      "lines": "Lines in the retained attempt: {{count}}",
+      "retry": "Retry this exact attempt",
+      "reconcile": "Do not retry; reconcile request"
+    }
   },
   "billing": {
     "title": "Invoices",
@@ -467,12 +475,14 @@
     "back": "Back to request",
     "forbiddenTitle": "Act issue unavailable",
     "forbiddenBody": "Billing write permission is required to issue an act.",
+    "forbiddenDraft": "Saved draft ID remains available read-only:",
     "submit": "Issue act",
     "retry": "Retry issue",
     "resume": "Continue issuing saved draft",
     "reconcile": "Reconcile saved draft",
     "fields": {
       "number": "Act number",
+      "actId": "Draft ID:",
       "periodStart": "Period start",
       "periodEnd": "Period end",
       "tenant": "Tenant",

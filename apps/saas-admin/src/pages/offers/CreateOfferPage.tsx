@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, SectionHeader, Spinner } from "@markiro/ui";
+import { Alert, Button, SectionHeader, Spinner } from "@markiro/ui";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 
 import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
+import { useNavigationGuard } from "../../layout/NavigationGuard.js";
 import { listCatalogVersions } from "../catalog/api.js";
 import { DocumentComposer } from "../documents/DocumentComposer.js";
 import { toOfferCreateInput, type DocumentDraft } from "../documents/documentDraft.js";
@@ -43,17 +44,21 @@ function OfferEditor() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const client = useQueryClient();
+  const retryNavigation = useNavigationGuard(false, false);
   const { requestId } = useParams();
   const [search] = useSearchParams();
   const [termsMarkdown, setTermsMarkdown] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
+  const retryPending = useRef(false);
   const request = useQuery({
     queryKey: ["platform", "billing", "requests", requestId],
     queryFn: () => getBillingRequest(requestId!),
     enabled: requestId !== undefined,
   });
-  const requestAttempt = useRef<{
+  const [requestAttempt, setRequestAttempt] = useState<{
     input: Parameters<typeof createBillingRequestOffer>[1];
   } | null>(null);
+  const [requestAttemptUncertain, setRequestAttemptUncertain] = useState(false);
   const selectedTenantId =
     request.data?.tenantId ?? tenantIdSchema.safeParse(search.get("tenantId")).data;
   const tenants = useQuery({
@@ -77,8 +82,50 @@ function OfferEditor() {
     queryFn: () => getTenant(selectedTenantId!),
     enabled: needsTenantPrefetch,
   });
+  const invalidateRequestAuthority = async () => {
+    await Promise.all([
+      client.invalidateQueries({ queryKey: ["platform", "billing", "requests"] }),
+      requestId
+        ? client.invalidateQueries({
+            queryKey: ["platform", "billing", "requests", requestId],
+          })
+        : Promise.resolve(),
+    ]);
+  };
   const create = useMutation({
-    mutationFn: async (draft: DocumentDraft) => {
+    mutationFn: async (
+      attempt:
+        | { kind: "draft"; draft: DocumentDraft }
+        | {
+            kind: "request-retry";
+            input: Parameters<typeof createBillingRequestOffer>[1];
+          },
+    ) => {
+      if (attempt.kind === "request-retry") {
+        if (!requestId) throw new Error("Request offer retry requires request identity");
+        setRequestAttemptUncertain(false);
+        try {
+          const result = await createBillingRequestOffer(requestId, attempt.input);
+          setRequestAttempt(null);
+          await invalidateRequestAuthority();
+          return result.offerId;
+        } catch (error) {
+          if (isForbidden(error)) {
+            setForbidden(true);
+            await Promise.all([
+              client.invalidateQueries({ queryKey: ["platform", "me"] }),
+              invalidateRequestAuthority(),
+            ]);
+          } else if (!retryable(error)) {
+            setRequestAttempt(null);
+            await invalidateRequestAuthority();
+          } else {
+            setRequestAttemptUncertain(true);
+          }
+          throw error;
+        }
+      }
+      const { draft } = attempt;
       const refreshedCatalog = await catalog.refetch();
       if (refreshedCatalog.isError) {
         throw new ApiRequestError(503, "Catalog refresh failed", "catalog_refresh_failed");
@@ -97,37 +144,39 @@ function OfferEditor() {
       }
       const input = toOfferCreateInput(draft);
       if (requestId) {
-        const retained = requestAttempt.current;
-        const requestInput =
-          retained?.input ??
-          (() => {
-            const offerInput = {
-              lines: input.lines,
-              ...(input.sellerBankAccountId !== undefined
-                ? { sellerBankAccountId: input.sellerBankAccountId }
-                : {}),
-              ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
-              ...(input.termsMarkdown !== undefined ? { termsMarkdown: input.termsMarkdown } : {}),
-            };
-            return {
-              ...offerInput,
-              ...(termsMarkdown ? { termsMarkdown } : {}),
-              idempotencyKey: crypto.randomUUID(),
-            };
-          })();
-        requestAttempt.current = { input: requestInput };
+        const offerInput = {
+          lines: input.lines,
+          ...(input.sellerBankAccountId !== undefined
+            ? { sellerBankAccountId: input.sellerBankAccountId }
+            : {}),
+          ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
+          ...(input.termsMarkdown !== undefined ? { termsMarkdown: input.termsMarkdown } : {}),
+        };
+        const requestInput = {
+          ...offerInput,
+          ...(termsMarkdown ? { termsMarkdown } : {}),
+          idempotencyKey: crypto.randomUUID(),
+        };
+        setRequestAttempt({ input: requestInput });
+        setRequestAttemptUncertain(false);
         try {
           const result = await createBillingRequestOffer(requestId, requestInput);
-          requestAttempt.current = null;
-          await Promise.all([
-            client.invalidateQueries({ queryKey: ["platform", "billing", "requests"] }),
-            client.invalidateQueries({
-              queryKey: ["platform", "billing", "requests", requestId],
-            }),
-          ]);
+          setRequestAttempt(null);
+          await invalidateRequestAuthority();
           return result.offerId;
         } catch (error) {
-          if (!retryable(error)) requestAttempt.current = null;
+          if (isForbidden(error)) {
+            setForbidden(true);
+            await Promise.all([
+              client.invalidateQueries({ queryKey: ["platform", "me"] }),
+              invalidateRequestAuthority(),
+            ]);
+          } else if (!retryable(error)) {
+            setRequestAttempt(null);
+            await invalidateRequestAuthority();
+          } else {
+            setRequestAttemptUncertain(true);
+          }
           throw error;
         }
       }
@@ -135,6 +184,15 @@ function OfferEditor() {
       return offer.id;
     },
   });
+
+  if (forbidden) {
+    return (
+      <section className="catalog-page">
+        <h1>{t("billingRequests.forbiddenTitle")}</h1>
+        <Alert tone="error">{t("billingRequests.forbiddenBody")}</Alert>
+      </section>
+    );
+  }
 
   if (
     tenants.isPending ||
@@ -195,6 +253,64 @@ function OfferEditor() {
     lines: [],
   };
 
+  if (requestId && requestAttempt) {
+    return (
+      <section className="catalog-page">
+        <SectionHeader
+          eyebrow="COMMERCE / OFFERS / RETRY"
+          title={t("offers.newTitle")}
+          description={t("offers.requestRetry.frozen")}
+        />
+        <Alert tone={requestAttemptUncertain ? "error" : "info"}>
+          {t(
+            requestAttemptUncertain
+              ? "offers.requestRetry.ambiguous"
+              : "offers.requestRetry.sending",
+          )}
+        </Alert>
+        <p>{t("offers.requestRetry.lines", { count: requestAttempt.input.lines.length })}</p>
+        {requestAttemptUncertain ? (
+          <div className="commerce-actions">
+            <Button
+              type="button"
+              loading={create.isPending}
+              disabled={create.isPending}
+              onClick={() => {
+                if (retryPending.current) return;
+                retryPending.current = true;
+                void create
+                  .mutateAsync({ kind: "request-retry", input: requestAttempt.input })
+                  .then((offerId) => {
+                    retryNavigation.allowNextNavigation();
+                    return navigate(`/offers?selected=${offerId}`);
+                  })
+                  .catch(() => undefined)
+                  .finally(() => {
+                    retryPending.current = false;
+                  });
+              }}
+            >
+              {t("offers.requestRetry.retry")}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={create.isPending}
+              onClick={() => {
+                void invalidateRequestAuthority().then(() => {
+                  retryNavigation.allowNextNavigation();
+                  return navigate(`/billing-requests/${requestId}`);
+                });
+              }}
+            >
+              {t("offers.requestRetry.reconcile")}
+            </Button>
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
   return (
     <div className="offer-editor">
       <OfferTermsEditor
@@ -222,7 +338,7 @@ function OfferEditor() {
             }
           : {})}
         onSubmit={async (draft) => {
-          await create.mutateAsync(draft);
+          await create.mutateAsync({ kind: "draft", draft });
         }}
         onSuccess={() => {
           const offerId = create.data;
@@ -237,4 +353,8 @@ function OfferEditor() {
 
 function retryable(error: unknown): boolean {
   return error instanceof ApiRequestError && (error.status === null || error.status >= 500);
+}
+
+function isForbidden(error: unknown): boolean {
+  return error instanceof ApiRequestError && error.status === 403;
 }

@@ -42,6 +42,7 @@ function BillingActForm() {
   const [file, setFile] = useState<File | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress>("idle");
+  const [forbidden, setForbidden] = useState(false);
   const attemptRef = useRef<IssueAttempt | null>(null);
   const [attempt, setAttempt] = useState<IssueAttempt | null>(null);
   const [tenantId, setTenantId] = useState(search.get("tenantId") ?? "");
@@ -51,6 +52,7 @@ function BillingActForm() {
   const invalidateActFamilies = async (current: IssueAttempt) => {
     await Promise.all([
       client.invalidateQueries({ queryKey: ["platform", "billing", "acts"] }),
+      client.invalidateQueries({ queryKey: ["platform", "billing", "requests"] }),
       current.actId
         ? client.invalidateQueries({
             queryKey: ["platform", "billing", "acts", current.actId],
@@ -66,6 +68,13 @@ function BillingActForm() {
             queryKey: ["platform", "billing", "requests", current.create.requestId],
           })
         : Promise.resolve(),
+    ]);
+  };
+  const latchForbidden = async (current: IssueAttempt) => {
+    setForbidden(true);
+    await Promise.all([
+      client.invalidateQueries({ queryKey: ["platform", "me"] }),
+      invalidateActFamilies(current),
     ]);
   };
   const issue = useMutation({
@@ -88,6 +97,8 @@ function BillingActForm() {
     onSuccess: async (act) => {
       if (act.status !== "issued" || act.issuedAt === null || act.document?.state !== "ready") {
         setProgress("draft");
+        const retained = attemptRef.current;
+        if (retained) await invalidateActFamilies(retained);
         return;
       }
       const issuedAttempt = attemptRef.current;
@@ -96,14 +107,22 @@ function BillingActForm() {
       setProgress("issued");
       if (issuedAttempt) await invalidateActFamilies(issuedAttempt);
     },
-    onError: (error) => {
+    onError: async (error) => {
       const retained = attemptRef.current;
+      if (retained && isForbidden(error)) {
+        setAttempt(retained);
+        if (retained.actId) setProgress("draft");
+        await latchForbidden(retained);
+        return;
+      }
       if (retained?.actId) {
         setAttempt(retained);
         setProgress("draft");
+        await invalidateActFamilies(retained);
         return;
       }
       setProgress("idle");
+      if (retained) await invalidateActFamilies(retained);
       if (!retryable(error)) {
         attemptRef.current = null;
         setAttempt(null);
@@ -118,9 +137,20 @@ function BillingActForm() {
       if (act.status === "issued" && act.issuedAt !== null && act.document?.state === "ready") {
         attemptRef.current = null;
         setAttempt(null);
+        issue.reset();
         setProgress("issued");
       } else {
         setProgress("draft");
+      }
+      await invalidateActFamilies(retained);
+    },
+    onError: async (error) => {
+      const retained = attemptRef.current;
+      if (!retained) return;
+      if (isForbidden(error)) {
+        setAttempt(retained);
+        await latchForbidden(retained);
+        return;
       }
       await invalidateActFamilies(retained);
     },
@@ -187,6 +217,19 @@ function BillingActForm() {
     issue.mutate(attempt);
   };
   const frozen = attempt !== null;
+  if (forbidden) {
+    return (
+      <section className="catalog-page">
+        <h1>{t("billingActs.forbiddenTitle")}</h1>
+        <Alert tone="error">{t("billingActs.forbiddenBody")}</Alert>
+        {attempt?.actId ? (
+          <p>
+            {t("billingActs.forbiddenDraft")} <code>{attempt.actId}</code>
+          </p>
+        ) : null}
+      </section>
+    );
+  }
   return (
     <section className="catalog-page billing-act-page">
       <SectionHeader
@@ -298,7 +341,14 @@ function BillingActForm() {
         {progress === "uploading" ? (
           <p role="status">{t("billingActs.progress.uploading")}</p>
         ) : null}
-        {attempt?.actId ? <Alert tone="info">{t("billingActs.progress.draftSaved")}</Alert> : null}
+        {attempt?.actId ? (
+          <>
+            <Alert tone="info">{t("billingActs.progress.draftSaved")}</Alert>
+            <p>
+              {t("billingActs.fields.actId")} <code>{attempt.actId}</code>
+            </p>
+          </>
+        ) : null}
         {progress === "issued" ? <Alert tone="ok">{t("billingActs.progress.issued")}</Alert> : null}
         {attempt?.actId ? (
           <Button
@@ -340,4 +390,8 @@ function optionalLink(value: string): string | undefined {
 
 function retryable(error: unknown): boolean {
   return error instanceof ApiRequestError && (error.status === null || error.status >= 500);
+}
+
+function isForbidden(error: unknown): boolean {
+  return error instanceof ApiRequestError && error.status === 403;
 }

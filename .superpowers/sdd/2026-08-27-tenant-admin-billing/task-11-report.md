@@ -9,6 +9,12 @@ Detail renders server status, responsible side, event and linked-object history,
 transitions returned by the API. A revoked or 403 authority becomes the existing non-actionable
 forbidden surface.
 
+Mutation-time authority loss is latched independently of cached principal data. A 403 from
+request-bound offer creation, accepted-offer invoice creation, or act create/issue/reconcile
+invalidates `platform/me` plus the scoped request/document authority and replaces the editor with a
+read-only forbidden surface. No retry, resume, reconcile, or alternative write remains live. If an
+act draft was already created, its id remains retained and visible read-only.
+
 Request mutations retain one immutable `{ action, payload, idempotencyKey }` after an ambiguous
 network/5xx result. While retained, all fields and alternate actions are frozen; only the exact
 attempt can be retried. Terminal 4xx/409 results clear it and refetch server authority. Pending
@@ -22,6 +28,13 @@ and one exact audit event, and commits one replayable result. A conflict rolls t
 back, so no orphan offer remains. The SaaS route reads `requestId` from the route, loads the request,
 renders its tenant read-only, posts once, and navigates to the returned draft. Direct offer creation
 is unchanged.
+
+An ambiguous request-bound offer attempt is also a stateful immutable client operation. The first
+POST freezes the exact offer lines, terms, and idempotency key. During a network/5xx outcome the
+composer, catalogue picker, terms editor, add/remove controls, and alternative navigation are not
+rendered as editable state. The operator can only repeat that exact retained attempt, with a
+synchronous double-click lock, or decline the retry and return to the refetched request authority.
+Terminal errors clear the retained attempt and refetch authority.
 
 The request offer projection now follows the current family revision and reads the latest structured
 decision for that revision. A real lifecycle test covers original `changes_requested` → revise →
@@ -44,6 +57,17 @@ implied because the API has no such operation. Act list, exact act/document, and
 are invalidated immediately after draft creation, including issue failure. Issued appears only from
 issued API metadata. Only one non-empty PDF up to 5 MiB is accepted; private storage details are not
 rendered.
+
+Every act create, issue, and reconcile outcome invalidates the whole request registry family as
+well as exact request/act/document keys, so registry `latestEvent` cannot stay stale. Reconciliation
+to an issued act with a ready PDF resets the earlier ambiguous issue error before showing success;
+the red failure and green issued states are never rendered together.
+
+The platform request registry is bounded to the newest 100 requests before event selection. Its
+second query uses PostgreSQL `DISTINCT ON (tenant_id, request_id)` with index-compatible reverse
+ordering and exact `(created_at DESC, id DESC)` tie-breaking, tenant and returned-request filters,
+and therefore materializes at most one latest event row for each returned request rather than full
+event histories.
 
 All new visible and accessibility copy is present in RU and EN. Existing SaaS-admin components and
 tokens are reused; no tenant cabinet shell or new visual token layer was introduced.
@@ -74,26 +98,35 @@ provenance column, or privacy model changed.
   the database.
 - **GREEN:** API OpenAPI passes **1 file / 4 tests** and guarded route inventory passes **1 file / 4
   tests**.
+- **Fix round 2 RED:** focused SaaS passed **20 of 29** and failed nine new mutation-403,
+  immutable-offer, act invalidation, and reconcile-state cases. The isolated Postgres suite passed
+  **72 of 73** and returned 101 registry requests, proving the missing bound before implementation.
+- **Fix round 2 GREEN:** focused SaaS passes **3 files / 29 tests**. The complete SaaS suite passes
+  **25 files / 230 tests**. The isolated Postgres service passes **1 file / 73 tests**; the new real
+  query proof creates 101 requests, 44 historical events for the newest two, and a foreign-tenant
+  event, then observes a 100-request result and exactly two rows materialized by the event query.
 
 ## Changed areas
 
 - `packages/platform-contracts` — strict tenant-less atomic offer action and typed response.
 - `apps/api/src/modules/platform-billing-requests` — current-revision projection and atomic
-  request-bound offer transaction/controller.
+  request-bound offer transaction/controller, bounded registry, and one-row latest-event query.
 - `apps/api/src/modules/platform-offers` — transaction-aware draft insertion shared with direct
   offer creation.
 - request, invoice, offer, act, composer, routing, and RU/EN SaaS files — whole-surface retry freeze,
-  locked request tenant, destination authority, exact provenance, and resumable act issue.
+  locked request tenant, mutation-time forbidden latches, destination authority, exact provenance,
+  immutable offer retry, and resumable act issue.
 - focused contract, OpenAPI, real DB service, and SaaS tests.
 
 ## Verification
 
-- PASS — SaaS focused Vitest: **4 files / 28 tests**.
-- PASS — full SaaS Vitest with temporary alias directory excluded: **25 files / 223 tests**.
+- PASS — latest fix-round SaaS focused Vitest: **3 files / 29 tests**.
+- PASS — full SaaS Vitest with temporary alias directory excluded: **25 files / 230 tests**.
 - PASS — SaaS source/test TypeScript no-emit, full ESLint, and production Vite build. The existing
-  >500-kB chunk advisory remains.
+  > 500-kB chunk advisory remains.
 - PASS — platform-contracts Vitest **9 files / 68 tests**, typecheck, ESLint, and build.
-- PASS — isolated Postgres API service **1 file / 72 tests**, no skips.
+- PASS — isolated Postgres API service **1 file / 73 tests**, no skips. The suite creates and drops
+  its unique UUID-named scratch database.
 - PASS — API OpenAPI **4/4** and guarded route inventory **4/4**. Loopback/database access used the
   approved local permission; inventory used localhost-only values for two missing optional `.env`
   URLs.

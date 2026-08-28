@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, SectionHeader, Spinner } from "@markiro/ui";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router";
 import { z } from "zod";
@@ -49,6 +49,7 @@ function InvoiceEditor() {
   const navigate = useNavigate();
   const client = useQueryClient();
   const [search] = useSearchParams();
+  const [mutationForbidden, setMutationForbidden] = useState(false);
   const requestedTenant = tenantIdSchema.safeParse(search.get("tenantId")).data;
   const rawSourceOfferId = (location.state as { sourceOfferId?: unknown } | null)?.sourceOfferId;
   const rawSourceRequestId = (location.state as { sourceRequestId?: unknown } | null)
@@ -135,6 +136,24 @@ function InvoiceEditor() {
       try {
         return await createInvoice(toInvoiceCreateInput(draft));
       } catch (error) {
+        if (error instanceof ApiRequestError && error.status === 403) {
+          setMutationForbidden(true);
+          await Promise.all([
+            client.invalidateQueries({ queryKey: ["platform", "me"] }),
+            sourceRequestId
+              ? client.invalidateQueries({ queryKey: ["platform", "billing", "requests"] })
+              : Promise.resolve(),
+            sourceRequestId
+              ? client.invalidateQueries({
+                  queryKey: ["platform", "billing", "requests", sourceRequestId],
+                })
+              : Promise.resolve(),
+            sourceOfferId
+              ? client.invalidateQueries({ queryKey: ["platform", "offers", sourceOfferId] })
+              : Promise.resolve(),
+          ]);
+          throw error;
+        }
         if (error instanceof ApiRequestError && error.code === "invoice_catalog_version_invalid") {
           await catalog.refetch();
           throw new ApiRequestError(409, "Catalog version unavailable", "catalog_version_stale");
@@ -143,6 +162,15 @@ function InvoiceEditor() {
       }
     },
   });
+
+  if (mutationForbidden) {
+    return (
+      <section className="catalog-page">
+        <h1>{t("billingRequests.forbiddenTitle")}</h1>
+        <Alert tone="error">{t("billingRequests.forbiddenBody")}</Alert>
+      </section>
+    );
+  }
 
   if (
     tenants.isPending ||

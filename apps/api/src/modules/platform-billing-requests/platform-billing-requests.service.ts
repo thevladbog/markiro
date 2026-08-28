@@ -28,6 +28,7 @@ import { createOfferDraft } from "../platform-offers/platform-offer-draft";
 type RequestStatus = typeof schema.tenantBillingRequests.$inferSelect.status;
 type LinkType = PlatformBillingRequestLinkDto["type"];
 type RequestReadExecutor = Pick<Db, "select">;
+const registryLimit = 100;
 
 const transitions: Record<RequestStatus, readonly RequestStatus[]> = {
   new: ["under_review", "cancelled"],
@@ -56,31 +57,44 @@ export class PlatformBillingRequestsService {
       .select()
       .from(schema.tenantBillingRequests)
       .where(conditions.length === 0 ? undefined : and(...conditions))
-      .orderBy(desc(schema.tenantBillingRequests.updatedAt), desc(schema.tenantBillingRequests.id));
+      .orderBy(desc(schema.tenantBillingRequests.updatedAt), desc(schema.tenantBillingRequests.id))
+      .limit(registryLimit);
     if (requests.length === 0) return { items: [] };
     const events = await this.db
-      .select()
+      .selectDistinctOn([
+        schema.tenantBillingRequestEvents.tenantId,
+        schema.tenantBillingRequestEvents.requestId,
+      ])
       .from(schema.tenantBillingRequestEvents)
       .where(
-        inArray(
-          schema.tenantBillingRequestEvents.requestId,
-          requests.map((request) => request.id),
+        and(
+          inArray(schema.tenantBillingRequestEvents.tenantId, [
+            ...new Set(requests.map((request) => request.tenantId)),
+          ]),
+          inArray(
+            schema.tenantBillingRequestEvents.requestId,
+            requests.map((request) => request.id),
+          ),
         ),
       )
       .orderBy(
+        desc(schema.tenantBillingRequestEvents.tenantId),
+        desc(schema.tenantBillingRequestEvents.requestId),
         desc(schema.tenantBillingRequestEvents.createdAt),
         desc(schema.tenantBillingRequestEvents.id),
       );
-    const latest = new Map<string, (typeof events)[number]>();
-    for (const event of events) {
-      if (!latest.has(event.requestId)) latest.set(event.requestId, event);
-    }
+    const latest = new Map(
+      events.map((event) => [`${event.tenantId}:${event.requestId}`, event] as const),
+    );
     return {
-      items: requests.map((request) => ({
-        ...requestSource(request),
-        allowedTransitions: transitions[request.status],
-        latestEvent: latest.has(request.id) ? eventSource(latest.get(request.id)!) : null,
-      })),
+      items: requests.map((request) => {
+        const latestEvent = latest.get(`${request.tenantId}:${request.id}`);
+        return {
+          ...requestSource(request),
+          allowedTransitions: transitions[request.status],
+          latestEvent: latestEvent ? eventSource(latestEvent) : null,
+        };
+      }),
     };
   }
 

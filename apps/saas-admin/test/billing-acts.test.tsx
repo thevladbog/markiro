@@ -139,6 +139,98 @@ describe("platform billing act issue", () => {
     expect(issueBodies[0]?.get("idempotencyKey")).toBe(issueBodies[1]?.get("idempotencyKey"));
   });
 
+  it.each(["create", "issue", "reconcile"] as const)(
+    "latches forbidden after act %s authority is revoked without another write",
+    async (revokedAt) => {
+      let createCount = 0;
+      let issueCount = 0;
+      let reconcileCount = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input);
+          const method = init?.method ?? "GET";
+          if (url.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+          if (url.endsWith("/api/platform/billing/acts") && method === "POST") {
+            createCount += 1;
+            if (revokedAt === "create") return jsonResponse(403, { code: "forbidden" });
+            return jsonResponse(201, act("draft", null));
+          }
+          if (url.endsWith(`/api/platform/billing/acts/${ACT_ID}/issue`)) {
+            issueCount += 1;
+            if (revokedAt === "issue") return jsonResponse(403, { code: "forbidden" });
+            return jsonResponse(503, { code: "storage_unavailable" });
+          }
+          if (url.endsWith(`/api/platform/billing/acts/${ACT_ID}`) && method === "GET") {
+            reconcileCount += 1;
+            return jsonResponse(403, { code: "forbidden" });
+          }
+          throw new Error(`Unexpected request: ${method} ${url}`);
+        }),
+      );
+      const randomUuid = vi.spyOn(crypto, "randomUUID");
+      const user = userEvent.setup();
+      const rendered = renderSaasApp({
+        initialEntry: `/billing-acts/new?tenantId=${TENANT_ID}&requestId=${REQUEST_ID}`,
+      });
+      const invalidate = vi.spyOn(rendered.queryClient, "invalidateQueries");
+
+      await fillActForm(user);
+      await user.click(screen.getByRole("button", { name: "Выпустить акт" }));
+      if (revokedAt === "reconcile") {
+        await user.click(
+          await screen.findByRole("button", { name: "Сверить состояние черновика" }),
+        );
+      }
+      const uuidCount = randomUuid.mock.calls.length;
+
+      expect(await screen.findByRole("heading", { name: "Выпуск акта недоступен" })).toBeDefined();
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["platform", "me"] });
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: ["platform", "billing", "requests"],
+      });
+      if (revokedAt !== "create") expect(screen.getByText(ACT_ID)).toBeDefined();
+      expect(screen.queryByRole("button", { name: /выпуск|Сверить|Продолжить/i })).toBeNull();
+      expect(createCount).toBe(1);
+      expect(issueCount).toBe(revokedAt === "create" ? 0 : 1);
+      expect(reconcileCount).toBe(revokedAt === "reconcile" ? 1 : 0);
+      expect(randomUuid).toHaveBeenCalledTimes(uuidCount);
+    },
+  );
+
+  it("reconciles a lost issue response to issued without retaining the stale failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+        if (url.endsWith("/api/platform/billing/acts") && method === "POST") {
+          return jsonResponse(201, act("draft", null));
+        }
+        if (url.endsWith(`/api/platform/billing/acts/${ACT_ID}/issue`)) {
+          return jsonResponse(503, { code: "lost_response" });
+        }
+        if (url.endsWith(`/api/platform/billing/acts/${ACT_ID}`) && method === "GET") {
+          return jsonResponse(200, act("issued", readyDocument()));
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderSaasApp({
+      initialEntry: `/billing-acts/new?tenantId=${TENANT_ID}&requestId=${REQUEST_ID}`,
+    });
+
+    await fillActForm(user);
+    await user.click(screen.getByRole("button", { name: "Выпустить акт" }));
+    expect(await screen.findByText(/Сеть или сервер недоступны/)).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Сверить состояние черновика" }));
+
+    expect(await screen.findByText("Акт выпущен")).toBeDefined();
+    expect(screen.queryByText(/Сеть или сервер недоступны/)).toBeNull();
+  });
+
   it.each(["billing_act_service_not_completed", "billing_act_period_not_closed"])(
     "retains a terminally rejected draft for %s and resumes without another create",
     async (terminalCode) => {
@@ -186,6 +278,9 @@ describe("platform billing act issue", () => {
       expect(createCount).toBe(1);
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ["platform", "billing", "acts"] });
       expect(invalidate).toHaveBeenCalledWith({
+        queryKey: ["platform", "billing", "requests"],
+      });
+      expect(invalidate).toHaveBeenCalledWith({
         queryKey: ["platform", "billing", "requests", REQUEST_ID],
       });
 
@@ -196,6 +291,16 @@ describe("platform billing act issue", () => {
     },
   );
 });
+
+async function fillActForm(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(await screen.findByLabelText("Номер акта"), "ACT-42");
+  await user.type(screen.getByLabelText("Начало периода"), "2026-08-01");
+  await user.type(screen.getByLabelText("Конец периода"), "2026-08-31");
+  await user.upload(
+    screen.getByLabelText("PDF акта"),
+    new File(["%PDF"], "act.pdf", { type: "application/pdf" }),
+  );
+}
 
 function readyDocument() {
   return {

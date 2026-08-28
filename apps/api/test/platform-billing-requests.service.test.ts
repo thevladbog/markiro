@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { createDb, schema, type Db } from "@markiro/db";
 import type { CreateInvoiceDto } from "@markiro/platform-contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -272,6 +273,116 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     await expect(requests.detail(actor, request.id)).resolves.toMatchObject({
       allowedTransitions: ["clarification_required", "offer_prepared", "in_progress", "cancelled"],
     });
+  });
+
+  it("bounds the registry before loading one tenant-safe latest event per returned request", async () => {
+    const registryTenant = await createOrganization(connection.db);
+    const requestIds: string[] = Array.from({ length: 101 }, () => randomUUID());
+    await connection.db.insert(schema.tenantBillingRequests).values(
+      requestIds.map((id, index) => ({
+        id,
+        tenantId: registryTenant,
+        number: `BR-REGISTRY-${index}`,
+        type: "other" as const,
+        status: "new" as const,
+        description: "Registry cardinality fixture",
+        responsibleSide: "markiro" as const,
+        idempotencyKey: randomUUID(),
+        createdByUserId: tenantUser,
+        createdAt: new Date(`2026-08-28T08:${String(index % 60).padStart(2, "0")}:00.000Z`),
+        updatedAt: new Date(1_800_000_000_000 + index * 1_000),
+      })),
+    );
+    const latestRequestIds = requestIds.slice(-2);
+    const tiedAt = new Date("2030-08-28T08:00:00.000Z");
+    const latestIds = [
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
+      "dddddddd-dddd-4ddd-8ddd-ddddddddddd4",
+    ];
+    for (const [requestIndex, requestId] of latestRequestIds.entries()) {
+      if (!requestId) throw new Error("registry request fixture missing");
+      const latestId = latestIds[requestIndex];
+      if (!latestId) throw new Error("registry latest-event fixture missing");
+      await connection.db.insert(schema.tenantBillingRequestEvents).values([
+        ...Array.from({ length: 20 }, (_, eventIndex) => ({
+          tenantId: registryTenant,
+          requestId,
+          kind: "created" as const,
+          actorKind: "system" as const,
+          message: `history-${requestIndex}-${eventIndex}`,
+          idempotencyKey: randomUUID(),
+          createdAt: new Date(1_700_000_000_000 + eventIndex * 1_000),
+        })),
+        {
+          id:
+            requestIndex === 0
+              ? "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1"
+              : "cccccccc-cccc-4ccc-8ccc-ccccccccccc3",
+          tenantId: registryTenant,
+          requestId,
+          kind: "platform_comment" as const,
+          actorKind: "platform_user" as const,
+          actorPlatformUserId: actorId,
+          message: "same-time-lower-id",
+          idempotencyKey: randomUUID(),
+          createdAt: tiedAt,
+        },
+        {
+          id: latestId,
+          tenantId: registryTenant,
+          requestId,
+          kind: "platform_comment" as const,
+          actorKind: "platform_user" as const,
+          actorPlatformUserId: actorId,
+          message: `latest-${requestIndex}`,
+          idempotencyKey: randomUUID(),
+          createdAt: tiedAt,
+        },
+      ]);
+    }
+    const foreign = await insertRequest(connection.db, tenantB, tenantUser, "new");
+    await connection.db.insert(schema.tenantBillingRequestEvents).values({
+      tenantId: tenantB,
+      requestId: foreign.id,
+      kind: "platform_comment",
+      actorKind: "platform_user",
+      actorPlatformUserId: actorId,
+      message: "foreign-latest",
+      idempotencyKey: randomUUID(),
+      createdAt: new Date("2031-08-28T08:00:00.000Z"),
+    });
+    const queries: Array<{ query: string; params: unknown[] }> = [];
+    const observedDb: Db = drizzle(connection.pool, {
+      logger: {
+        logQuery(query, params) {
+          queries.push({ query, params });
+        },
+      },
+    });
+    const observedRequests = new PlatformBillingRequestsService(observedDb, audit);
+
+    const result = await observedRequests.list(actor, { tenantId: registryTenant });
+
+    expect(result.items).toHaveLength(100);
+    expect(
+      result.items
+        .filter((item) => latestRequestIds.includes(item.id))
+        .map((item) => item.latestEvent?.id)
+        .sort(),
+    ).toEqual([...latestIds].sort());
+    expect(result.items.some((item) => item.latestEvent?.message === "foreign-latest")).toBe(false);
+    const eventQueries = queries.filter((entry) =>
+      entry.query.includes('from "tenant_billing_request_events"'),
+    );
+    expect(eventQueries).toHaveLength(1);
+    const eventQuery = eventQueries[0];
+    if (!eventQuery) throw new Error("registry event query was not observed");
+    const loaded = await connection.pool.query<Record<string, unknown>, unknown[]>(
+      eventQuery.query,
+      eventQuery.params,
+    );
+    expect(loaded.rows).toHaveLength(2);
+    expect(loaded.rows.every((row) => row.tenant_id === registryTenant)).toBe(true);
   });
 
   it("projects linked-offer revision and invoice actions from authoritative offer state", async () => {

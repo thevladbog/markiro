@@ -105,6 +105,9 @@ function installInvoiceEditorApi({
       if (url.endsWith("/api/platform/invoices") && method === "POST") {
         const body = JSON.parse(String(init.body));
         calls.push({ method, path: url, body });
+        if (createStatus === 403) {
+          return jsonResponse(403, { code: "forbidden" });
+        }
         if (createStatus === 400) {
           return jsonResponse(400, { code: "invoice_catalog_version_invalid" });
         }
@@ -234,6 +237,46 @@ describe("invoice editor route", () => {
     ).toBeDefined();
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["platform", "me"] });
     expect(screen.queryByRole("button", { name: "Создать черновик счёта" })).toBeNull();
+  });
+
+  it("latches forbidden when accepted-offer invoice authority is revoked on create", async () => {
+    const offer = publishedOffer({ lines: [] });
+    const api = installInvoiceEditorApi({
+      createStatus: 403,
+      offer,
+      requestAuthority: requestDetail({
+        offerId: OFFER_ID,
+        currentOfferId: OFFER_ID,
+        latestDecision: "accepted",
+        canRevise: false,
+        canCreateInvoice: true,
+      }),
+    });
+    const rendered = renderSaasApp({
+      initialEntry: {
+        pathname: "/invoices/new",
+        state: { sourceOfferId: OFFER_ID, sourceRequestId: REQUEST_ID },
+      },
+    });
+    const invalidate = vi.spyOn(rendered.queryClient, "invalidateQueries");
+    const user = userEvent.setup();
+
+    await screen.findByRole("button", { name: "Создать черновик счёта" });
+    await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
+    await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Доступ к заявкам ограничен" }),
+    ).toBeDefined();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["platform", "me"] });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["platform", "billing", "requests"],
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["platform", "billing", "requests", REQUEST_ID],
+    });
+    expect(screen.queryByRole("button", { name: "Создать черновик счёта" })).toBeNull();
+    expect(api.calls()).toHaveLength(1);
   });
 
   it("redirects a principal without billing write access without loading an editable form", async () => {
