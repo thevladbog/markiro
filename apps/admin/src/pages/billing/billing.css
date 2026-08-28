@@ -82,11 +82,121 @@
 .mk-billing-invoices,
 .mk-billing-invoice-detail,
 .mk-billing-documents,
-.mk-billing-offer-detail {
+.mk-billing-offer-detail,
+.mk-billing-requests,
+.mk-billing-request-create,
+.mk-billing-request-detail {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: var(--sp-4);
+}
+
+.mk-billing-request-filters {
+  grid-template-columns: repeat(2, minmax(132px, 1fr)) auto;
+  align-items: end;
+}
+
+.mk-billing-request-form {
+  display: grid;
+  gap: var(--sp-3);
+  max-width: 680px;
+}
+
+.mk-billing-request-form > .mk-btn {
+  justify-self: start;
+}
+
+.mk-billing-request-context {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--accent);
+  background: var(--surface-panel);
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.mk-billing-field-error,
+.mk-billing-form-errors {
+  margin: 0;
+  color: var(--err-fg);
+  font: var(--text-body-sm);
+}
+
+.mk-billing-form-errors {
+  display: grid;
+  gap: var(--sp-1);
+  padding-left: var(--sp-5);
+}
+
+.mk-billing-request-description {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mk-billing-linked-list,
+.mk-billing-attachment-list,
+.mk-billing-request-events {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-billing-linked-list a {
+  color: var(--accent);
+}
+
+.mk-billing-attachment-list li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.mk-billing-attachment-list li:last-child {
+  border-bottom: 0;
+}
+
+.mk-billing-attachment-list li > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mk-billing-request-events {
+  gap: 0;
+}
+
+.mk-billing-request-events li {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.mk-billing-request-events li:last-child {
+  border-bottom: 0;
+}
+
+.mk-billing-request-events p {
+  margin: 0;
+  color: var(--fg-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mk-billing-request-event__meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  color: var(--fg-3);
+  font: var(--text-caption);
 }
 
 .mk-billing-section-heading {
@@ -435,6 +545,15 @@
   .mk-billing-filters {
     grid-template-columns: minmax(0, 1fr);
     width: 100%;
+  }
+
+  .mk-billing-request-form > .mk-btn {
+    width: 100%;
+  }
+
+  .mk-billing-attachment-list li {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .mk-billing-invoices__desktop {

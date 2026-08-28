@@ -112,8 +112,165 @@ export const tenantBillingKeys = {
   invoice: (id: string) => [...tenantBillingKeys.invoices(), id] as const,
   documents: () => [...tenantBillingKeys.all, "documents"] as const,
   requests: () => [...tenantBillingKeys.all, "requests"] as const,
+  request: (id: string) => [...tenantBillingKeys.requests(), id] as const,
   offers: () => [...tenantBillingKeys.all, "offers"] as const,
 };
+
+export type BillingRequestType =
+  "renewal" | "capacity_change" | "additional_service" | "documents" | "other";
+export type BillingRequestStatus =
+  | "new"
+  | "under_review"
+  | "clarification_required"
+  | "offer_prepared"
+  | "awaiting_payment"
+  | "in_progress"
+  | "completed"
+  | "cancelled";
+export type BillingRequestEventKind =
+  | "created"
+  | "status_changed"
+  | "tenant_reply"
+  | "platform_comment"
+  | "offer_linked"
+  | "offer_accepted"
+  | "offer_changes_requested"
+  | "invoice_linked"
+  | "payment_confirmed"
+  | "service_linked"
+  | "act_linked";
+
+export interface TenantBillingRequest {
+  id: string;
+  number: string;
+  type: BillingRequestType;
+  status: BillingRequestStatus;
+  description: string;
+  desiredAt: string | null;
+  context: { type: string; id: string } | null;
+  responsibleSide: "tenant" | "markiro" | "none";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantBillingRequestEvent {
+  id: string;
+  kind: BillingRequestEventKind;
+  fromStatus: BillingRequestStatus | null;
+  toStatus: BillingRequestStatus | null;
+  actorKind: "tenant_user" | "platform_user" | "system";
+  message: string | null;
+  metadata: unknown;
+  createdAt: string;
+}
+
+export interface TenantBillingRequestAttachment {
+  id: string;
+  fileName: string;
+  contentType: string;
+  byteSize: number;
+  sha256: string;
+  createdAt: string;
+}
+
+export interface TenantBillingRequestLink {
+  id: string;
+  offerId: string | null;
+  invoiceId: string | null;
+  paymentId: string | null;
+  actId: string | null;
+  orderedServiceId: string | null;
+  subscriptionEventId: string | null;
+  createdAt: string;
+}
+
+export interface TenantBillingRequestDetail extends TenantBillingRequest {
+  events: TenantBillingRequestEvent[];
+  attachments: TenantBillingRequestAttachment[];
+  links: TenantBillingRequestLink[];
+}
+
+export interface BillingRequestFilters {
+  status?: BillingRequestStatus;
+  type?: BillingRequestType;
+}
+
+export interface BillingRequestQuery {
+  data: TenantBillingRequestDetail | undefined;
+  isPending: boolean;
+  isError: boolean;
+  error: Error | null;
+  refetch: () => Promise<unknown>;
+}
+
+export interface CreateBillingRequestPayload {
+  type: BillingRequestType;
+  description: string;
+  desiredAt?: string;
+  context?: { type: string; id: string };
+}
+
+export function fetchBillingRequests(filters: BillingRequestFilters = {}) {
+  return apiFetch<{ items: TenantBillingRequest[] }>(
+    `/billing/requests${queryString({ status: filters.status, type: filters.type })}`,
+  );
+}
+
+export function useBillingRequests(filters: BillingRequestFilters = {}) {
+  return useQuery({
+    queryKey: [...tenantBillingKeys.requests(), filters] as const,
+    queryFn: () => fetchBillingRequests(filters),
+    placeholderData: (previous) => previous,
+  });
+}
+
+export function useBillingRequest(id: string): BillingRequestQuery {
+  return useQuery({
+    queryKey: tenantBillingKeys.request(id),
+    queryFn: () => apiFetch<TenantBillingRequestDetail>(`/billing/requests/${id}`),
+    enabled: Boolean(id),
+    staleTime: 5_000,
+  });
+}
+
+export function createBillingRequest(payload: CreateBillingRequestPayload, idempotencyKey: string) {
+  return apiFetch<TenantBillingRequestDetail>("/billing/requests", {
+    method: "POST",
+    body: JSON.stringify({ ...payload, idempotencyKey }),
+  });
+}
+
+export function uploadBillingRequestAttachment(requestId: string, file: File) {
+  const body = new FormData();
+  body.append("file", file);
+  return apiFetch<TenantBillingRequestAttachment>(`/billing/requests/${requestId}/attachments`, {
+    method: "POST",
+    body,
+  });
+}
+
+export function downloadRequestAttachment(requestId: string, attachmentId: string) {
+  return apiFetch<{ url: string }>(
+    `/billing/requests/${requestId}/attachments/${attachmentId}/download`,
+  );
+}
+
+export function replyToBillingRequest(requestId: string, message: string, idempotencyKey: string) {
+  return apiFetch<TenantBillingRequestEvent>(`/billing/requests/${requestId}/replies`, {
+    method: "POST",
+    body: JSON.stringify({ message, idempotencyKey }),
+  });
+}
+
+export async function invalidateTenantBillingRequests(
+  queryClient: QueryClient,
+  _requestId: string,
+): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: tenantBillingKeys.requests() }),
+    queryClient.invalidateQueries({ queryKey: tenantBillingKeys.overview() }),
+  ]);
+}
 
 export function fetchBillingOverview(): Promise<TenantBillingOverviewDto> {
   return apiFetch<TenantBillingOverviewDto>("/billing/overview");

@@ -648,6 +648,149 @@
           "changes_requested": "Changes requested"
         }
       },
+      "requests": {
+        "heading": "Requests",
+        "description": "Structured requests and their history without an external conversation.",
+        "loading": "Loading requests",
+        "loadError": "Could not load requests",
+        "empty": "No requests match the selected filters",
+        "registry": "Request registry",
+        "filters": {
+          "label": "Request filters",
+          "status": "Request status",
+          "allStatuses": "All statuses",
+          "type": "Request type",
+          "allTypes": "All types",
+          "clear": "Clear filters"
+        },
+        "columns": {
+          "number": "Number",
+          "type": "Type",
+          "status": "Status",
+          "responsible": "Responsible side",
+          "updated": "Updated"
+        },
+        "types": {
+          "renewal": "Renewal",
+          "capacity_change": "Limits or capacity change",
+          "additional_service": "Additional service",
+          "documents": "Document request",
+          "other": "Other"
+        },
+        "responsible": {
+          "tenant": "Customer",
+          "markiro": "Markiro",
+          "none": "No one — work is complete"
+        },
+        "contextTypes": {
+          "limit": "Limit",
+          "subscription": "Subscription",
+          "invoice": "Invoice",
+          "offer": "Offer",
+          "document": "Document"
+        },
+        "create": {
+          "heading": "New request",
+          "description": "Describe the required change; Markiro assigns the number and status.",
+          "back": "Back to requests",
+          "formTitle": "Request details",
+          "type": "Request type",
+          "descriptionLabel": "Description",
+          "desiredAt": "Desired date",
+          "files": "Attachments",
+          "context": "Context: {{type}} — {{id}}",
+          "retry": "Retry submission",
+          "uploading": "Uploading {{name}}",
+          "errors": {
+            "description": {
+              "required": "Describe the request using 1 to 4000 characters.",
+              "tooLong": "The description must not exceed 4000 characters."
+            },
+            "desiredAt": "Enter a real date.",
+            "file": {
+              "type": "{{name}}: only PDF, JPEG, and PNG are allowed.",
+              "size": "{{name}}: the file must not exceed 5 MiB."
+            },
+            "retryable": "The request result could not be confirmed. Your data is saved; retry the same submission.",
+            "terminal": "The server rejected the request. Check the data and submit it again."
+          }
+        },
+        "detail": {
+          "loading": "Loading request",
+          "notFound": "Request not found",
+          "forbidden": "You do not have access to this request",
+          "loadError": "Could not load request",
+          "heading": "Request {{number}}",
+          "back": "Back to requests",
+          "summary": "Request state",
+          "status": "Status",
+          "responsible": "Responsible side",
+          "desiredAt": "Desired date",
+          "createdAt": "Created",
+          "context": "Context",
+          "requestText": "Description",
+          "linkedObjects": "Linked objects",
+          "links": {
+            "offer": "Commercial offer",
+            "invoice": "Invoice",
+            "payment": "Confirmed payment",
+            "act": "Act",
+            "service": "Ordered service",
+            "subscription": "Subscription change"
+          },
+          "attachments": "Attachments",
+          "noAttachments": "No attachments.",
+          "download": "Download",
+          "downloadNamed": "Download {{name}}",
+          "downloadError": "Could not download the attachment.",
+          "uploadResult": {
+            "ready": "{{name}}: uploaded",
+            "failed": "{{name}}: not uploaded"
+          },
+          "retryUploadNamed": "Retry upload {{name}}",
+          "history": "Request history",
+          "eventSides": {
+            "tenant": "Customer",
+            "markiro": "Markiro",
+            "system": "System"
+          },
+          "eventKinds": {
+            "created": "Request created",
+            "status_changed": "Status changed",
+            "tenant_reply": "Customer reply",
+            "platform_comment": "Comment",
+            "offer_linked": "Offer linked",
+            "offer_accepted": "Offer accepted",
+            "offer_changes_requested": "Offer changes requested",
+            "invoice_linked": "Invoice linked",
+            "payment_confirmed": "Payment confirmed",
+            "service_linked": "Service linked",
+            "act_linked": "Act linked"
+          },
+          "eventBodies": {
+            "created": "The request was created",
+            "status_changed": "The request status changed",
+            "tenant_reply": "The customer sent a clarification",
+            "platform_comment": "Markiro added a comment",
+            "offer_linked": "An offer was linked to the request",
+            "offer_accepted": "The customer accepted the offer",
+            "offer_changes_requested": "The customer requested offer changes",
+            "invoice_linked": "An invoice was linked to the request",
+            "payment_confirmed": "Markiro confirmed a payment",
+            "service_linked": "A service was linked to the request",
+            "act_linked": "An act was linked to the request"
+          },
+          "eventStatusBody": "{{from}} → {{to}}",
+          "replyTitle": "Clarification reply",
+          "replyLabel": "Clarification reply",
+          "replySubmit": "Send reply",
+          "replyErrors": {
+            "validation": "The reply must contain 1 to 2000 characters.",
+            "retryable": "The submission could not be confirmed. Your reply is saved; retry the same submission.",
+            "terminal": "The request state changed. The data has been refreshed."
+          }
+        }
+      },
       "limits": {
         "lines": "Lines",
         "stations": "Stations",

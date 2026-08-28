@@ -66,12 +66,15 @@ import { ShiftsPage } from "./pages/shifts/index.js";
 import { ShiftPanelRoute } from "./pages/shifts/ShiftPanelRoute.js";
 import { ShellPage } from "./pages/Shell.js";
 import { TeamPage } from "./pages/team/TeamPage.js";
-import { BillingLayout, BillingRoutePlaceholder } from "./pages/billing/BillingLayout.js";
+import { BillingLayout } from "./pages/billing/BillingLayout.js";
 import { BillingOverviewPage } from "./pages/billing/BillingOverviewPage.js";
 import { BillingSubscriptionPage } from "./pages/billing/BillingSubscriptionPage.js";
 import { InvoiceDetailPage, InvoicesPage } from "./pages/billing/InvoicesPage.js";
 import { DocumentsPage } from "./pages/billing/DocumentsPage.js";
 import { OfferDetailPage } from "./pages/billing/OfferDetailPage.js";
+import { RequestsPage } from "./pages/billing/RequestsPage.js";
+import { CreateRequestPage } from "./pages/billing/CreateRequestPage.js";
+import { RequestDetailPage } from "./pages/billing/RequestDetailPage.js";
 
 /**
  * The data router is used even though route data is fetched through React
@@ -447,16 +450,16 @@ function appRouteElements() {
           <Route path="invoices/:id" element={<InvoiceDetailPage />} />
           <Route path="documents" element={<DocumentsPage />} />
           <Route path="offers/:id" element={<OfferDetailPage />} />
-          <Route path="requests" element={<BillingRoutePlaceholder />} />
+          <Route path="requests" element={<RequestsPage />} />
           <Route
             path="requests/new"
             element={
               <RequireCapability capability={C.BILLING_REQUEST}>
-                <BillingRoutePlaceholder />
+                <CreateRequestPage />
               </RequireCapability>
             }
           />
-          <Route path="requests/:id" element={<BillingRoutePlaceholder />} />
+          <Route path="requests/:id" element={<RequestDetailPage />} />
         </Route>
       </Route>
     </>

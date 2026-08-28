@@ -648,6 +648,149 @@
           "changes_requested": "Изменения запрошены"
         }
       },
+      "requests": {
+        "heading": "Заявки",
+        "description": "Структурированные обращения и их история без внешней переписки.",
+        "loading": "Загрузка заявок",
+        "loadError": "Не удалось загрузить заявки",
+        "empty": "Заявок по выбранным фильтрам нет",
+        "registry": "Реестр заявок",
+        "filters": {
+          "label": "Фильтры заявок",
+          "status": "Статус заявки",
+          "allStatuses": "Все статусы",
+          "type": "Тип заявки",
+          "allTypes": "Все типы",
+          "clear": "Очистить фильтры"
+        },
+        "columns": {
+          "number": "Номер",
+          "type": "Тип",
+          "status": "Статус",
+          "responsible": "Ответственная сторона",
+          "updated": "Обновлена"
+        },
+        "types": {
+          "renewal": "Продление",
+          "capacity_change": "Изменение лимитов или мощности",
+          "additional_service": "Дополнительная услуга",
+          "documents": "Запрос документов",
+          "other": "Другое"
+        },
+        "responsible": {
+          "tenant": "Клиент",
+          "markiro": "Markiro",
+          "none": "Никто — работа завершена"
+        },
+        "contextTypes": {
+          "limit": "Лимит",
+          "subscription": "Подписка",
+          "invoice": "Счёт",
+          "offer": "Предложение",
+          "document": "Документ"
+        },
+        "create": {
+          "heading": "Новая заявка",
+          "description": "Опишите требуемое изменение; номер и статус назначит Markiro.",
+          "back": "К списку заявок",
+          "formTitle": "Параметры заявки",
+          "type": "Тип заявки",
+          "descriptionLabel": "Описание",
+          "desiredAt": "Желаемая дата",
+          "files": "Вложения",
+          "context": "Контекст: {{type}} — {{id}}",
+          "retry": "Повторить отправку",
+          "uploading": "Загрузка файла {{name}}",
+          "errors": {
+            "description": {
+              "required": "Опишите запрос: от 1 до 4000 символов.",
+              "tooLong": "Описание не должно превышать 4000 символов."
+            },
+            "desiredAt": "Укажите существующую дату.",
+            "file": {
+              "type": "{{name}}: разрешены PDF, JPEG и PNG.",
+              "size": "{{name}}: размер не должен превышать 5 МиБ."
+            },
+            "retryable": "Не удалось подтвердить создание заявки. Данные сохранены; повторите ту же отправку.",
+            "terminal": "Сервер отклонил заявку. Проверьте данные и отправьте снова."
+          }
+        },
+        "detail": {
+          "loading": "Загрузка заявки",
+          "notFound": "Заявка не найдена",
+          "forbidden": "Нет доступа к заявке",
+          "loadError": "Не удалось загрузить заявку",
+          "heading": "Заявка {{number}}",
+          "back": "К списку заявок",
+          "summary": "Состояние заявки",
+          "status": "Статус",
+          "responsible": "Ответственная сторона",
+          "desiredAt": "Желаемая дата",
+          "createdAt": "Создана",
+          "context": "Контекст",
+          "requestText": "Описание",
+          "linkedObjects": "Связанные объекты",
+          "links": {
+            "offer": "Коммерческое предложение",
+            "invoice": "Счёт",
+            "payment": "Подтверждённая оплата",
+            "act": "Акт",
+            "service": "Заказанная услуга",
+            "subscription": "Изменение подписки"
+          },
+          "attachments": "Вложения",
+          "noAttachments": "Вложений нет.",
+          "download": "Скачать",
+          "downloadNamed": "Скачать {{name}}",
+          "downloadError": "Не удалось скачать вложение.",
+          "uploadResult": {
+            "ready": "{{name}}: загружен",
+            "failed": "{{name}}: не загружен"
+          },
+          "retryUploadNamed": "Повторить загрузку {{name}}",
+          "history": "История заявки",
+          "eventSides": {
+            "tenant": "Клиент",
+            "markiro": "Markiro",
+            "system": "Система"
+          },
+          "eventKinds": {
+            "created": "Заявка создана",
+            "status_changed": "Статус изменён",
+            "tenant_reply": "Ответ клиента",
+            "platform_comment": "Комментарий",
+            "offer_linked": "Предложение связано",
+            "offer_accepted": "Предложение принято",
+            "offer_changes_requested": "Запрошены изменения предложения",
+            "invoice_linked": "Счёт связан",
+            "payment_confirmed": "Оплата подтверждена",
+            "service_linked": "Услуга связана",
+            "act_linked": "Акт связан"
+          },
+          "eventBodies": {
+            "created": "Создана заявка",
+            "status_changed": "Статус заявки изменён",
+            "tenant_reply": "Клиент отправил уточнение",
+            "platform_comment": "Markiro добавил комментарий",
+            "offer_linked": "К заявке добавлено предложение",
+            "offer_accepted": "Предложение принято клиентом",
+            "offer_changes_requested": "Клиент запросил изменения предложения",
+            "invoice_linked": "К заявке добавлен счёт",
+            "payment_confirmed": "Markiro подтвердил оплату",
+            "service_linked": "К заявке добавлена услуга",
+            "act_linked": "К заявке добавлен акт"
+          },
+          "eventStatusBody": "{{from}} → {{to}}",
+          "replyTitle": "Ответ на уточнение",
+          "replyLabel": "Ответ на уточнение",
+          "replySubmit": "Отправить ответ",
+          "replyErrors": {
+            "validation": "Ответ должен содержать от 1 до 2000 символов.",
+            "retryable": "Не удалось подтвердить отправку. Ответ сохранён; повторите ту же отправку.",
+            "terminal": "Состояние заявки изменилось. Данные обновлены."
+          }
+        }
+      },
       "limits": {
         "lines": "Линии",
         "stations": "Станции",
