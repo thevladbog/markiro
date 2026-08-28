@@ -140,7 +140,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     const orgId = await signUpAndActivate(agent);
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -163,7 +163,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     const boxTemplateId = await setDefaultBoxLabelTemplate(agent, orgId, "Bundle Box Template");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
       defaultCounterpartyId: counterpartyId,
@@ -232,7 +232,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     const boxTemplateId = await seedLabelTemplate(orgId, "Box Template");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
       defaultLabelTemplateId: itemTemplateId,
@@ -262,7 +262,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     const replacementTemplateId = await seedLabelTemplate(orgId, "Replacement Box");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -293,7 +293,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     const itemTemplateId = await seedLabelTemplate(orgId, "Item Only Template");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
       defaultLabelTemplateId: itemTemplateId,
@@ -319,7 +319,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     const org1 = await signUpAndActivate(a1);
     const productId = await seedProduct(org1, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -340,7 +340,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     const orgId = await signUpAndActivate(agent);
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -394,7 +394,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
 
       const productId = await seedProduct(orgId, {
         status: "active",
-        productGroup: "Beverages",
+        chzProductGroupCode: 8,
         boxCapacity: 12,
         palletCapacity: 48,
       });
@@ -558,7 +558,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     it("returns a planned aggregation bundle without allocating an SSCC block", async () => {
       const productId = await seedProduct(orgId, {
         status: "active",
-        productGroup: "Beverages",
+        chzProductGroupCode: 8,
         boxCapacity: 12,
         palletCapacity: 48,
       });
@@ -585,7 +585,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       await setDefaultBoxLabelTemplate(tenantAgent, tenantId);
       const productId = await seedProduct(tenantId, {
         status: "active",
-        productGroup: "Beverages",
+        chzProductGroupCode: 8,
         boxCapacity: 12,
         palletCapacity: 48,
       });
@@ -775,7 +775,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       const templateId = await seedLabelTemplate(orgId, "No-GLN Template");
       const productId = await seedProduct(orgId, {
         status: "active",
-        productGroup: "Beverages",
+        chzProductGroupCode: 8,
         boxCapacity: 12,
         palletCapacity: 48,
         defaultLabelTemplateId: templateId,
@@ -833,7 +833,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       await setDefaultBoxLabelTemplate(callerAgent, callerOrgId);
       const productId = await seedProduct(callerOrgId, {
         status: "active",
-        productGroup: "Beverages",
+        chzProductGroupCode: 8,
         boxCapacity: 12,
         palletCapacity: 48,
       });

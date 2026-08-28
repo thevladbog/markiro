@@ -87,16 +87,16 @@ describe.skipIf(!ready)("station-scans e2e", () => {
   const VALID_GTIN14 = "04006381333931";
   const boxedCodeHash = (label: string) => kmHash(canonicalizeKm(`01${VALID_GTIN14}21S-${label}`));
 
-  // productGroup + both capacities are required for the product to come
-  // back "active" (see ProductsService.computeStatus); a "draft" product is
-  // rejected outright by POST /shifts regardless of shift mode.
+  // chzProductGroupCode + both capacities are required for the product to
+  // come back "active" (see ProductsService.computeStatus); a "draft"
+  // product is rejected outright by POST /shifts regardless of shift mode.
   async function createActiveProduct(agent: ReturnType<typeof request.agent>): Promise<string> {
     const product = await agent
       .post("/products")
       .send({
         name: "Cola",
         gtin: VALID_GTIN14,
-        productGroup: "Beverages",
+        chzProductGroupCode: 8,
         boxCapacity: 10,
         palletCapacity: 5,
       })
@@ -1854,7 +1854,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           .send({
             name: "Cola B",
             gtin: "04006382000009",
-            productGroup: "Beverages",
+            chzProductGroupCode: 8,
             boxCapacity: 10,
             palletCapacity: 5,
           })

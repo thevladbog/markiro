@@ -378,7 +378,7 @@ describe.skipIf(!ready)("label-templates e2e", () => {
       gtin14: `${Math.floor(Math.random() * 1e13)}`.padStart(14, "0"),
       name: "Seed Product",
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });

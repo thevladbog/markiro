@@ -90,7 +90,7 @@ const PRODUCT_ROW = {
   tenantId: "tenant-1",
   gtin14: "00000000000000",
   name: "Widget",
-  productGroup: null,
+  chzProductGroupCode: null,
   boxCapacity: 10,
   palletCapacity: null,
   status: "active",

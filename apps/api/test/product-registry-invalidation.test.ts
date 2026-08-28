@@ -84,7 +84,7 @@ describe("ProductsService update registry boundary", () => {
     tenantId,
     gtin14: "04600682000013",
     name: "Before",
-    productGroup: null,
+    chzProductGroupCode: null,
     boxCapacity: null,
     palletCapacity: null,
     status: "draft" as const,

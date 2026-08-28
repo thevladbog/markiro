@@ -80,7 +80,7 @@ describe.skipIf(!ready)("sscc e2e", () => {
       .send({
         name: "Cola",
         gtin: VALID_GTIN14,
-        productGroup: "Beverages",
+        chzProductGroupCode: 8,
         boxCapacity: 10,
         palletCapacity: 5,
       })

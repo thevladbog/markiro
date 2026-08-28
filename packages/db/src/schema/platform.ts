@@ -58,6 +58,27 @@ export const counterparties = pgTable(
   (t) => [unique("counterparties_tenant_id_uq").on(t.tenantId, t.id)],
 );
 
+/**
+ * Chestny ZNAK product groups — global reference data, not tenant-scoped.
+ *
+ * `code` is what the ЧЗ APIs take as `productGroupCode` (dispenser tasks) and
+ * `pg` (most True API methods); `alias` is the latin slug used in СУЗ URLs.
+ * Seeded by migration 0090 from the two published dictionaries — see the plan
+ * and spec for their exact locations, which is where a future group will be
+ * found too.
+ */
+export const chzProductGroups = pgTable(
+  "chz_product_groups",
+  {
+    code: integer("code").primaryKey(),
+    alias: text("alias").notNull(),
+    name: text("name").notNull(),
+  },
+  (t) => [unique("chz_product_groups_alias_uq").on(t.alias)],
+);
+
+export type ChzProductGroupRow = typeof chzProductGroups.$inferSelect;
+
 export const products = pgTable(
   "products",
   {
@@ -68,7 +89,7 @@ export const products = pgTable(
     // Short operator-facing name for the station shift card and, in a
     // follow-up slice, label rendering. Null = use the full `name` everywhere.
     printName: text("print_name"),
-    productGroup: text("product_group"),
+    chzProductGroupCode: integer("chz_product_group_code").references(() => chzProductGroups.code),
     boxCapacity: integer("box_capacity"),
     palletCapacity: integer("pallet_capacity"),
     status: productStatus("status").notNull().default("draft"),

@@ -631,6 +631,13 @@
       "when": 1787913627140,
       "tag": "0089_chz_api_tokens_agent_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1787956349832,
+      "tag": "0090_chz_product_groups",
+      "breakpoints": true
     }
   ]
 }
