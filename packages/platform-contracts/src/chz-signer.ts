@@ -36,11 +36,11 @@ export const chzSignerTaskSchema = z
 export const chzSignerTaskCompleteSchema = z
   .object({
     token: z.string().min(1).max(8192),
-    expiresAt: z.string().datetime({ offset: true }),
+    expiresAt: z.iso.datetime({ offset: true }),
     certThumbprint: z.string().trim().min(1).max(128),
     certSubject: z.string().trim().max(1000).optional(),
     certInn: innSchema.optional(),
-    certNotAfter: z.string().datetime({ offset: true }).optional(),
+    certNotAfter: z.iso.datetime({ offset: true }).optional(),
   })
   .strict();
 
