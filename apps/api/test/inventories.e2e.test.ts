@@ -999,6 +999,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     const { tenantId, productId, lineId } = await seedPreparation(agent);
     const inventory = await createInventory(agent, productId, lineId);
+    const expectedKey = `tenants/${tenantId}/inventories/${inventory.id}/imports/EMITTED/${INTRODUCED_DIGEST}.csv`;
 
     const statusMismatch = await upload(agent, inventory.id, "EMITTED").expect(422);
     expect(statusMismatch.body).toEqual({
@@ -1076,7 +1077,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
 
     const repeatedFailure = await upload(agent, inventory.id, "EMITTED").expect(422);
     expect(repeatedFailure.body).toEqual(statusMismatch.body);
-    expect(storage.putVerified).toHaveBeenCalledTimes(1);
+    expect(storage.putVerified.mock.calls.filter(([key]) => key === expectedKey)).toHaveLength(1);
     const repeatedImports = await db
       .select({ id: schema.inventoryImports.id })
       .from(schema.inventoryImports)

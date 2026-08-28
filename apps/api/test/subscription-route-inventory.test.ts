@@ -62,6 +62,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /counterparties (CounterpartiesController.listCounterparties)",
       "GET /counterparties/:id (CounterpartiesController.getCounterparty)",
       "GET /counterparties/:id/sscc (CounterpartiesController.getSscc)",
+      "GET /dashboard/overview (DashboardController.overview)",
       "GET /disaggregation (DisaggregationController.list)",
       "GET /disaggregation-reasons (DisaggregationReasonsController.listReasons)",
       "GET /disaggregation/:id (DisaggregationController.get)",

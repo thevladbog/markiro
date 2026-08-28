@@ -610,6 +610,13 @@
       "when": 1787894588583,
       "tag": "0086_unusual_satana",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1787897411901,
+      "tag": "0087_good_infant_terrible",
+      "breakpoints": true
     }
   ]
 }

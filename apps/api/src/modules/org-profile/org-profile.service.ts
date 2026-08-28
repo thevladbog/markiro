@@ -25,14 +25,21 @@ import type {
   SsccCounterDto,
 } from "./dto";
 
+export type OrgProfileDatabase = Pick<
+  Db,
+  "select" | "insert" | "transaction" | "update" | "delete"
+>;
+export type OrgProfileStorage = Pick<ObjectStorageService, "put" | "get" | "delete">;
+export type OrgProfileSscc = Pick<SsccService, "counterState" | "seedCounter">;
+
 @Injectable()
 export class OrgProfileService {
   private readonly logger = new Logger(OrgProfileService.name);
 
   constructor(
-    @Inject(DB) private readonly db: Db,
-    private readonly storage: ObjectStorageService,
-    private readonly sscc: SsccService,
+    @Inject(DB) private readonly db: OrgProfileDatabase,
+    @Inject(ObjectStorageService) private readonly storage: OrgProfileStorage,
+    @Inject(SsccService) private readonly sscc: OrgProfileSscc,
   ) {}
 
   /** Returns the tenant's profile, or the empty defaults if no row exists yet. */
@@ -64,6 +71,7 @@ export class OrgProfileService {
       gln: row?.gln ?? null,
       gs1Prefixes: row?.gs1Prefixes ?? [],
       inn: row?.inn ?? null,
+      timeZone: row?.timeZone ?? "Europe/Moscow",
       defaultBoxLabelTemplateId: row?.defaultBoxLabelTemplateId ?? null,
       pickupLimitsEnabled: pickupPolicy.limitsEnabled,
       logoRevision: logo?.revision ?? null,
@@ -86,6 +94,7 @@ export class OrgProfileService {
     if (patch.gln !== undefined) setClause.gln = patch.gln;
     if (patch.gs1Prefixes !== undefined) setClause.gs1Prefixes = patch.gs1Prefixes;
     if (patch.inn !== undefined) setClause.inn = patch.inn;
+    if (patch.timeZone !== undefined) setClause.timeZone = patch.timeZone;
     if (patch.defaultBoxLabelTemplateId !== undefined) {
       setClause.defaultBoxLabelTemplateId = patch.defaultBoxLabelTemplateId;
     }
@@ -99,6 +108,7 @@ export class OrgProfileService {
             gln: patch.gln ?? null,
             gs1Prefixes: patch.gs1Prefixes ?? [],
             inn: patch.inn ?? null,
+            timeZone: patch.timeZone ?? "Europe/Moscow",
             ...(patch.defaultBoxLabelTemplateId !== undefined
               ? { defaultBoxLabelTemplateId: patch.defaultBoxLabelTemplateId }
               : {}),

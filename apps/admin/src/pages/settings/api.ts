@@ -19,6 +19,7 @@ export interface OrgProfileDto {
   gln: string | null;
   gs1Prefixes: string[];
   inn: string | null;
+  timeZone: string;
   pickupLimitsEnabled: boolean;
   logoUrl: string | null;
   logoRevision: string | null;
@@ -27,7 +28,7 @@ export interface OrgProfileDto {
 export type PutOrgProfileInput = Partial<
   Pick<
     OrgProfileDto,
-    "defaultBoxLabelTemplateId" | "gln" | "gs1Prefixes" | "inn" | "pickupLimitsEnabled"
+    "defaultBoxLabelTemplateId" | "gln" | "gs1Prefixes" | "inn" | "pickupLimitsEnabled" | "timeZone"
   >
 >;
 

@@ -238,6 +238,12 @@
   },
   "shell": {
     "navLabel": "Основная навигация",
+    "mobileNavigation": {
+      "trigger": "Разделы",
+      "openLabel": "Открыть мобильную навигацию",
+      "closeLabel": "Закрыть мобильную навигацию",
+      "navLabel": "Мобильная навигация"
+    },
     "sections": {
       "production": "Производство",
       "reference": "Справочники",
@@ -677,10 +683,17 @@
       }
     },
     "dashboard": {
-      "title": "Обзор",
+      "title": "Производство сегодня",
       "loading": "Загрузка обзора",
       "emptyTitle": "Пока нет данных",
       "emptyHint": "Сводка по сменам и производству появится здесь после первых смен.",
+      "header": {
+        "generatedAt": "Обновлено"
+      },
+      "refreshing": {
+        "title": "Обновление данных",
+        "hint": "Показана предыдущая сводка, пока загружается выбранный период."
+      },
       "setup": {
         "title": "Подготовьте первую смену",
         "hint": "Три действия отделяют новый кабинет от первого производственного запуска.",
@@ -696,6 +709,120 @@
         "title": "Не удалось загрузить обзор",
         "hint": "Часть данных недоступна. Повторите запрос, чтобы не принимать решения по неполной сводке.",
         "retry": "Повторить"
+      },
+      "verdict": {
+        "eyebrow": "Контроль производства",
+        "status": {
+          "under_control": "Производство под контролем",
+          "needs_attention": "Требует внимания",
+          "critical": "Критическое состояние"
+        },
+        "reason": {
+          "unreviewed_conflicts_one": "{{count}} конфликт без разбора влияет на производство",
+          "unreviewed_conflicts_few": "{{count}} конфликта без разбора влияют на производство",
+          "unreviewed_conflicts_many": "{{count}} конфликтов без разбора влияют на производство",
+          "unreviewed_conflicts_other": "{{count}} конфликта без разбора влияют на производство",
+          "late_data_one": "Поздние данные затронули {{count}} смену",
+          "late_data_few": "Поздние данные затронули {{count}} смены",
+          "late_data_many": "Поздние данные затронули {{count}} смен",
+          "late_data_other": "Поздние данные затронули {{count}} смены",
+          "missing_shift_duration_one": "Для {{count}} ряда выпуска нет длительности смены",
+          "missing_shift_duration_few": "Для {{count}} рядов выпуска нет длительности смены",
+          "missing_shift_duration_many": "Для {{count}} рядов выпуска нет длительности смены",
+          "missing_shift_duration_other": "Для {{count}} ряда выпуска нет длительности смены"
+        },
+        "noReasons": "Активных причин для вмешательства нет."
+      },
+      "headline": {
+        "scope": "Активные смены и смены, завершённые сегодня",
+        "validation": "Проверено поштучно",
+        "aggregationBoxes": "Закрыто коробов",
+        "aggregationUnits": "Единиц в коробах",
+        "active": "Активные смены",
+        "units": "шт.",
+        "boxes": "кор.",
+        "shiftUnit_one": "смена",
+        "shiftUnit_few": "смены",
+        "shiftUnit_many": "смен",
+        "shiftUnit_other": "смены",
+        "validationAria": "{{count}} проверенных единиц",
+        "aggregationBoxesAria": "{{count}} закрытых коробов",
+        "aggregationUnitsAria": "{{count}} единиц в коробах",
+        "activeAria_one": "{{count}} активная смена",
+        "activeAria_few": "{{count}} активные смены",
+        "activeAria_many": "{{count}} активных смен",
+        "activeAria_other": "{{count}} активной смены",
+        "includedClosed_one": "В сводку также входит {{count}} смена, завершённая сегодня.",
+        "includedClosed_few": "В сводку также входят {{count}} смены, завершённые сегодня.",
+        "includedClosed_many": "В сводку также входят {{count}} смен, завершённых сегодня.",
+        "includedClosed_other": "В сводку также входят {{count}} смены, завершённые сегодня."
+      },
+      "dynamics": {
+        "title": "Динамика производства",
+        "shiftHourNote": "Темп рассчитан на час смены. Проверка и агрегация показаны отдельно.",
+        "metricControl": "Показатель динамики",
+        "periodControl": "Период динамики",
+        "rate": "Темп",
+        "output": "Выпуск",
+        "period": {
+          "today": "Сегодня",
+          "7d": "7 дней",
+          "30d": "30 дней",
+          "12w": "12 недель"
+        },
+        "validation": "Проверка",
+        "aggregation": "Агрегация",
+        "regionLabel": "{{mode}} — {{metric}}",
+        "series": {
+          "acceptedUnits": "Проверенные единицы",
+          "closedBoxes": "Закрытые короба",
+          "containedUnits": "Единицы в коробах"
+        },
+        "units": {
+          "units": "шт.",
+          "boxes": "кор.",
+          "unitsPerShiftHour": "шт./час смены",
+          "boxesPerShiftHour": "коробов/час смены"
+        },
+        "current": "Выбранный период",
+        "comparison": {
+          "up": "выше на {{value}}% к предыдущему периоду",
+          "down": "ниже на {{value}}% к предыдущему периоду",
+          "same": "без изменения к предыдущему периоду",
+          "unavailable": "нет сопоставимой базы"
+        },
+        "barLabel": "{{label}}: {{value}} {{unit}}",
+        "missingRate": "Нет длительности смены — темп не рассчитан.",
+        "empty": {
+          "validation": "За выбранный период проверенных единиц нет.",
+          "aggregation": "За выбранный период закрытых коробов нет.",
+          "containedUnits": "За выбранный период единиц в закрытых коробах нет."
+        },
+        "provenance": "Расчёт {{version}} · источники: {{sources}}"
+      },
+      "signals": {
+        "title": "Сигналы контроля",
+        "hint": "Состояния, влияющие на интерпретацию сводки.",
+        "status": {
+          "complete": "Данные полные",
+          "provisional": "Предварительные данные",
+          "insufficient": "Недостаточно данных для темпа"
+        },
+        "reason": {
+          "active_shifts_one": "Активная смена: данные могут измениться",
+          "active_shifts_few": "{{count}} активные смены: данные могут измениться",
+          "active_shifts_many": "{{count}} активных смен: данные могут измениться",
+          "active_shifts_other": "{{count}} активной смены: данные могут измениться",
+          "late_data_one": "Поздние данные: {{count}} смена",
+          "late_data_few": "Поздние данные: {{count}} смены",
+          "late_data_many": "Поздние данные: {{count}} смен",
+          "late_data_other": "Поздние данные: {{count}} смены",
+          "missing_shift_duration": "Нет длительности смены для расчёта темпа"
+        },
+        "clear": "Ограничений данных для выбранного периода нет.",
+        "rateBasis": "Основа темпа",
+        "shiftHour": "час смены",
+        "lateData": "Смен с поздними данными"
       },
       "summary": {
         "label": "Сводка",
@@ -719,11 +846,18 @@
       },
       "active": {
         "title": "Смены прямо сейчас",
+        "tableLabel": "Активные производственные смены",
+        "number": "Смена",
         "product": "Продукт",
         "line": "Линия",
         "mode": "Режим",
-        "plan": "План",
+        "output": "Выпуск",
         "started": "Открыта",
+        "data": "Данные",
+        "provisional": "Предварительно",
+        "late": "Поздние данные",
+        "validationOutput": "{{count}} шт.",
+        "aggregationOutput": "{{boxes}} кор. · {{units}} шт.",
         "empty": "Сейчас нет активных смен.",
         "openShifts": "Открыть смены"
       },
@@ -2308,6 +2442,8 @@
         "cardTitle": "Профиль организации",
         "glnLabel": "GLN",
         "innLabel": "ИНН",
+        "timeZoneLabel": "Часовой пояс производства",
+        "timeZoneHint": "Определяет границы календарных дней на производственных дашбордах.",
         "prefixesLabel": "Префиксы GS1",
         "prefixesHint": "Через запятую, например 4600000, 4600001",
         "defaultBoxLabelTemplateLabel": "Шаблон этикетки короба по умолчанию",

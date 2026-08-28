@@ -105,15 +105,3 @@
   aspect-ratio: 3 / 4;
   object-fit: cover;
 }
-
-/* The app shell's fixed sidebar (AppShell.tsx's <Sidebar className="mk-app-
-   sidebar">) eats most of a phone-width screen and clips this page's content
-   (the DataMatrix in particular). Scoped to this page only via `:has(.mk-
-   sell)` -- other pages keep the sidebar on mobile. */
-@media (max-width: 767px) {
-  body:has(.mk-sell) .mk-app-sidebar {
-    /* !important: the ui-kit Sidebar sets display:flex inline, which would
-       otherwise beat any stylesheet rule. */
-    display: none !important;
-  }
-}

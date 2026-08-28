@@ -24,6 +24,12 @@ import { codes } from "../src/schema/codes.js";
 import { orgProfiles } from "../src/schema/org-profile.js";
 
 describe("platform schema", () => {
+  it("stores one non-null operational timezone per organization", () => {
+    expect(orgProfiles.timeZone.notNull).toBe(true);
+    expect(orgProfiles.timeZone.hasDefault).toBe(true);
+    expect(orgProfiles.timeZone.default).toBe("Europe/Moscow");
+  });
+
   it("exports inventory preparation persistence", () => {
     expect(getTableName(schema.inventories)).toBe("inventories");
     expect(getTableName(schema.inventoryImports)).toBe("inventory_imports");
