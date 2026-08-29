@@ -4,6 +4,7 @@ import { Link, useLocation } from "react-router";
 import { Alert, SectionHeader, StatusChip, Table } from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { listInvoices, type Invoice } from "./api.js";
+import { invoiceStatusTone } from "./invoice-status.js";
 
 export function BillingPage() {
   const { t } = useTranslation();
@@ -73,21 +74,19 @@ export function BillingPage() {
             {
               key: "tenant",
               title: t("billing.tenant"),
-              render: (invoice: Invoice) => invoice.tenantId,
+              render: (invoice: Invoice) => (
+                <Link className="table-link" to={`/tenants/${invoice.tenantId}`}>
+                  {invoice.tenantName}
+                </Link>
+              ),
             },
             {
               key: "status",
               title: t("billing.status"),
               render: (invoice: Invoice) => (
                 <StatusChip
-                  status={
-                    invoice.status === "paid"
-                      ? "ok"
-                      : invoice.status === "cancelled"
-                        ? "neutral"
-                        : "warn"
-                  }
-                  label={invoice.status}
+                  status={invoiceStatusTone(invoice.status)}
+                  label={t(`billing.statuses.${invoice.status}`)}
                 />
               ),
             },

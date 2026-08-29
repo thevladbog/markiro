@@ -21,6 +21,7 @@ const serviceTimestampSchema = z.date();
 const nullableServiceTimestampSchema = serviceTimestampSchema.nullable();
 const requestDateSchema = z.union([z.iso.date(), z.iso.datetime({ offset: true })]);
 const nullableRequestDateSchema = requestDateSchema.nullable();
+const tenantDisplayNameSchema = z.string().trim().min(1).max(300);
 const billingCivilDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
@@ -1182,6 +1183,14 @@ export const invoiceSchema = z.discriminatedUnion("status", [
   cancelledInvoiceSchema,
 ]);
 
+const invoiceListItemSchema = z.discriminatedUnion("status", [
+  draftInvoiceSchema.extend({ tenantName: tenantDisplayNameSchema }).strict(),
+  issuedInvoiceSchema.extend({ tenantName: tenantDisplayNameSchema }).strict(),
+  partiallyPaidInvoiceSchema.extend({ tenantName: tenantDisplayNameSchema }).strict(),
+  paidInvoiceSchema.extend({ tenantName: tenantDisplayNameSchema }).strict(),
+  cancelledInvoiceSchema.extend({ tenantName: tenantDisplayNameSchema }).strict(),
+]);
+
 export const invoiceServiceRecordSchema = invoiceRecordCommonSchema
   .extend({
     status: z.enum(["draft", "issued", "partially_paid", "paid", "cancelled"]),
@@ -1445,14 +1454,20 @@ const paidInvoiceDetailFields = {
   paymentSummary: invoicePaymentSummarySchema.extend({ status: z.literal("paid") }).strict(),
   application: paidInvoiceApplicationStateSchema,
 };
-const draftInvoiceDetailSchema = draftInvoiceSchema.extend(inactiveInvoiceDetailFields).strict();
-const issuedInvoiceDetailSchema = issuedInvoiceSchema.extend(unpaidInvoiceDetailFields).strict();
-const partiallyPaidInvoiceDetailSchema = partiallyPaidInvoiceSchema
-  .extend(partiallyPaidInvoiceDetailFields)
+const draftInvoiceDetailSchema = draftInvoiceSchema
+  .extend({ ...inactiveInvoiceDetailFields, tenantName: tenantDisplayNameSchema })
   .strict();
-const paidInvoiceDetailSchema = paidInvoiceSchema.extend(paidInvoiceDetailFields).strict();
+const issuedInvoiceDetailSchema = issuedInvoiceSchema
+  .extend({ ...unpaidInvoiceDetailFields, tenantName: tenantDisplayNameSchema })
+  .strict();
+const partiallyPaidInvoiceDetailSchema = partiallyPaidInvoiceSchema
+  .extend({ ...partiallyPaidInvoiceDetailFields, tenantName: tenantDisplayNameSchema })
+  .strict();
+const paidInvoiceDetailSchema = paidInvoiceSchema
+  .extend({ ...paidInvoiceDetailFields, tenantName: tenantDisplayNameSchema })
+  .strict();
 const cancelledInvoiceDetailSchema = cancelledInvoiceSchema
-  .extend(inactiveInvoiceDetailFields)
+  .extend({ ...inactiveInvoiceDetailFields, tenantName: tenantDisplayNameSchema })
   .strict();
 
 export const invoiceDetailSchema = z
@@ -1505,11 +1520,25 @@ function paymentSummaryStateIsValid(
 
 export const invoiceServiceDetailSchema = invoiceServiceRecordSchema
   .extend({
+    tenantName: tenantDisplayNameSchema,
     lines: z.array(invoiceServiceLineSchema),
     documents: z.array(commercialDocumentListItemServiceSchema),
     payments: z.array(billingPaymentServiceSchema),
     paymentSummary: invoicePaymentSummarySchema.nullable(),
     application: invoiceApplicationServiceStateSchema,
+  })
+  .strict();
+
+export const invoiceListServiceRecordSchema = invoiceServiceRecordSchema
+  .extend({ tenantName: tenantDisplayNameSchema })
+  .strict();
+
+const invoiceDeleteResultSchema = z
+  .object({
+    id: platformUuidSchema,
+    tenantId: platformTenantIdSchema,
+    number: z.string().min(1),
+    deleted: z.literal(true),
   })
   .strict();
 
@@ -1729,7 +1758,7 @@ export const platformCommercialContracts = {
     },
   },
   invoices: {
-    list: { response: z.object({ items: z.array(invoiceSchema) }).strict() },
+    list: { response: z.object({ items: z.array(invoiceListItemSchema) }).strict() },
     detail: { params: invoiceIdSchema, response: invoiceDetailSchema },
     create: { body: invoiceCreateSchema, response: draftInvoiceCreateResponseSchema },
     issue: { params: invoiceIdSchema, response: issuedInvoiceWithDocumentsSchema },
@@ -1741,6 +1770,7 @@ export const platformCommercialContracts = {
       response: invoiceApplicationResultSchema,
     },
     cancel: { params: invoiceIdSchema, response: cancelledInvoiceSchema },
+    delete: { params: invoiceIdSchema, response: invoiceDeleteResultSchema },
     documents: {
       list: { params: invoiceIdSchema, response: z.array(commercialDocumentListItemSchema) },
       render: { params: invoiceIdSchema, response: commercialDocumentRenderResultSchema },
@@ -1863,12 +1893,14 @@ export type CreateInvoiceInput = z.input<typeof invoiceCreateSchema>;
 export type CreateInvoiceDto = z.output<typeof invoiceCreateSchema>;
 export type ApplyInvoiceInput = z.input<typeof invoiceApplySchema>;
 export type ApplyInvoiceDto = z.output<typeof invoiceApplySchema>;
-export type Invoice = z.output<typeof invoiceSchema>;
-export type InvoiceSource = z.input<typeof invoiceSchema>;
+export type Invoice = z.output<typeof invoiceListItemSchema>;
+export type InvoiceSource = z.input<typeof invoiceListItemSchema>;
 export type InvoiceServiceRecordSource = z.input<typeof invoiceServiceRecordSchema>;
+export type InvoiceListServiceRecordSource = z.input<typeof invoiceListServiceRecordSchema>;
 export type InvoiceDetail = z.output<typeof invoiceDetailSchema>;
 export type InvoiceDetailSource = z.input<typeof invoiceDetailSchema>;
 export type InvoiceServiceDetailSource = z.input<typeof invoiceServiceDetailSchema>;
+export type InvoiceDeleteResult = z.output<typeof invoiceDeleteResultSchema>;
 export type InvoiceCreateServiceResultSource = z.input<typeof invoiceCreateServiceResultSchema>;
 export type InvoiceApplicationResult = z.output<typeof invoiceApplicationResultSchema>;
 export type InvoiceApplicationResultSource = z.input<typeof invoiceApplicationResultSchema>;

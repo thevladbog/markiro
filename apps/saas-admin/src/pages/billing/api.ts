@@ -45,6 +45,23 @@ export function getInvoice(id: string) {
   });
 }
 
+export function cancelInvoice(id: string) {
+  const validatedId = platformCommercialContracts.invoices.cancel.params.parse(id);
+  return platformApiFetch(`/invoices/${validatedId}/cancel`, {
+    responseSchema: platformCommercialContracts.invoices.cancel.response,
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export function deleteInvoiceDraft(id: string) {
+  const validatedId = platformCommercialContracts.invoices.delete.params.parse(id);
+  return platformApiFetch(`/invoices/${validatedId}`, {
+    responseSchema: platformCommercialContracts.invoices.delete.response,
+    method: "DELETE",
+  });
+}
+
 export function recordInvoicePayment(
   id: string,
   input: RecordInvoicePaymentInput,

@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
-import { Alert, Button, SectionHeader, StatusChip, Table } from "@markiro/ui";
+import { Alert, Button, FileDropZone, SectionHeader, StatusChip, Table } from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import {
@@ -28,6 +28,7 @@ export function PaymentsPage() {
   const payments = useQuery({ queryKey: PAYMENTS_KEY, queryFn: listPayments });
   const matches = useQuery({ queryKey: MATCHES_KEY, queryFn: listPaymentMatches });
   const [file, setFile] = useState<File | null>(null);
+  const [fileRejected, setFileRejected] = useState(false);
   const importMutation = useMutation({
     mutationFn: importPayments,
     onSuccess: async () => {
@@ -41,7 +42,10 @@ export function PaymentsPage() {
   const submitImport = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!file) return;
-    await importMutation.mutateAsync({ fileName: file.name, content: await readFile(file) });
+    await importMutation.mutateAsync({
+      fileName: file.name,
+      content: await readBankStatementFile(file),
+    });
   };
 
   return (
@@ -61,18 +65,28 @@ export function PaymentsPage() {
             </div>
           </header>
           {importMutation.error ? <Alert tone="error">{t("payments.import.error")}</Alert> : null}
+          {fileRejected ? <Alert tone="error">{t("payments.import.unsupportedFile")}</Alert> : null}
           {importMutation.isSuccess ? (
             <Alert tone="ok">{t("payments.import.success")}</Alert>
           ) : null}
           <form className="payment-import-form" onSubmit={(event) => void submitImport(event)}>
-            <label className="payment-file-field">
-              <span>{t("payments.import.file")}</span>
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                onChange={(event) => setFile(event.currentTarget.files?.[0] ?? null)}
-              />
-            </label>
+            <FileDropZone
+              className="payment-import-drop"
+              ariaLabel={t("payments.import.file")}
+              label={file?.name ?? t("payments.import.drop")}
+              hint={t("payments.import.formats")}
+              accept=".csv,.txt,text/csv,text/plain"
+              busy={importMutation.isPending}
+              busyLabel={t("payments.import.reading")}
+              onFile={(selected) => {
+                setFileRejected(false);
+                setFile(selected);
+              }}
+              onRejected={() => {
+                setFile(null);
+                setFileRejected(true);
+              }}
+            />
             <Button type="submit" loading={importMutation.isPending} disabled={!file}>
               {t("payments.import.submit")}
             </Button>
@@ -268,15 +282,24 @@ function accountEvidenceLabel(match: PaymentMatch, t: TFunction) {
   });
 }
 
-function readFile(file: File): Promise<string> {
-  if (typeof file.text === "function") return file.text();
+async function readBankStatementFile(file: File): Promise<string> {
+  const bytes = await readFileBytes(file);
+  const utf8 = new TextDecoder("utf-8").decode(bytes);
+  if (utf8.startsWith("1CClientBankExchange") && utf8.includes("\uFFFD")) {
+    return new TextDecoder("windows-1251").decode(bytes);
+  }
+  return utf8;
+}
+
+function readFileBytes(file: File): Promise<ArrayBuffer> {
+  if (typeof file.arrayBuffer === "function") return file.arrayBuffer();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.addEventListener("load", () => {
-      if (typeof reader.result === "string") resolve(reader.result);
+      if (reader.result instanceof ArrayBuffer) resolve(reader.result);
       else reject(new Error("file_read_failed"));
     });
     reader.addEventListener("error", () => reject(reader.error ?? new Error("file_read_failed")));
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   });
 }

@@ -15,6 +15,7 @@ function queryFor(rowsFor: (table: unknown, ordered: boolean) => unknown[]) {
       table = value;
       return query;
     }),
+    innerJoin: vi.fn(() => query),
     where: vi.fn(() => query),
     for: vi.fn(() => query),
     orderBy: vi.fn(() => {
@@ -29,6 +30,34 @@ function queryFor(rowsFor: (table: unknown, ordered: boolean) => unknown[]) {
 }
 
 describe("BillingService invoice payment detail", () => {
+  const principal: PlatformPrincipal = {
+    userId: "platform-accountant",
+    role: "accountant",
+    capabilities: ["billing.read", "billing.write"],
+    twoFactorReady: true,
+  };
+
+  it("joins tenant display names into the platform invoice registry", async () => {
+    const invoice = {
+      id: "31111111-1111-4111-8111-111111111111",
+      tenantId: "21111111-1111-4111-8111-111111111111",
+      tenantName: "ООО Фабрика",
+      status: "draft" as const,
+    };
+    const select = vi.fn(() => queryFor(() => [invoice]));
+    const db = Object.assign(Object.create(null), { select }) as Db;
+    const service = new BillingService(
+      db,
+      {} as PlatformAuditService,
+      noopTenantBillingNotifications(),
+    );
+
+    await expect(service.list()).resolves.toEqual({ items: [invoice] });
+    expect(select).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantName: schema.organization.name }),
+    );
+  });
+
   it("returns ordered confirmed payments and an exact partial-payment summary", async () => {
     const invoiceId = "31111111-1111-4111-8111-111111111111";
     const tenantId = "21111111-1111-4111-8111-111111111111";
@@ -115,6 +144,178 @@ describe("BillingService invoice payment detail", () => {
     expect(db.update).not.toHaveBeenCalled();
   });
 
+  it("does not turn an unissued draft into a contract-invalid cancelled invoice", async () => {
+    const invoiceId = "31111111-1111-4111-8111-111111111111";
+    const invoice = {
+      id: invoiceId,
+      tenantId: "21111111-1111-4111-8111-111111111111",
+      number: "INV-000021",
+      status: "draft" as const,
+    };
+    const rowsFor = (table: unknown) => (table === schema.invoices ? [invoice] : []);
+    const update = vi.fn(() => ({
+      set: vi.fn(() => ({
+        where: vi.fn(() => ({
+          returning: vi.fn(async () => [{ ...invoice, status: "cancelled" }]),
+        })),
+      })),
+    }));
+    const db = Object.assign(Object.create(null), {
+      transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) =>
+        run({
+          execute: vi.fn(async () => ({ rows: [] })),
+          select: vi.fn(() => queryFor(rowsFor)),
+          update,
+        }),
+      ),
+    }) as Db;
+    const audit = { record: vi.fn() } as unknown as PlatformAuditService;
+    const service = new BillingService(db, audit, noopTenantBillingNotifications());
+
+    await expect(service.cancel(principal, invoiceId)).rejects.toMatchObject({
+      response: { code: "invoice_not_issued" },
+      status: 409,
+    });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("withdraws an issued invoice and records the exact audit transition", async () => {
+    const invoiceId = "31111111-1111-4111-8111-111111111111";
+    const tenantId = "21111111-1111-4111-8111-111111111111";
+    const invoice = { id: invoiceId, tenantId, number: "INV-000021", status: "issued" as const };
+    const rowsFor = (table: unknown) => (table === schema.invoices ? [invoice] : []);
+    const update = vi.fn(() => ({
+      set: vi.fn(() => ({
+        where: vi.fn(() => ({
+          returning: vi.fn(async () => [
+            { ...invoice, status: "cancelled", cancelledAt: new Date() },
+          ]),
+        })),
+      })),
+    }));
+    const audit = { record: vi.fn(async () => undefined) };
+    const db = Object.assign(Object.create(null), {
+      transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) =>
+        run({
+          execute: vi.fn(async () => ({ rows: [] })),
+          select: vi.fn(() => queryFor(rowsFor)),
+          update,
+        }),
+      ),
+    }) as Db;
+    const service = new BillingService(
+      db,
+      audit as unknown as PlatformAuditService,
+      noopTenantBillingNotifications(),
+    );
+
+    await expect(service.cancel(principal, invoiceId)).resolves.toMatchObject({
+      status: "cancelled",
+    });
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "billing.invoice.cancelled",
+        tenantId,
+        targetId: invoiceId,
+        before: { status: "issued", number: invoice.number },
+        after: expect.objectContaining({ status: "cancelled" }),
+      }),
+    );
+  });
+
+  it("deletes only a clean draft with its internal lines and records an audit event", async () => {
+    const invoiceId = "31111111-1111-4111-8111-111111111111";
+    const tenantId = "21111111-1111-4111-8111-111111111111";
+    const invoice = { id: invoiceId, tenantId, number: "INV-000021", status: "draft" as const };
+    const rowsFor = (table: unknown) => (table === schema.invoices ? [invoice] : []);
+    const deletedTables: unknown[] = [];
+    const remove = vi.fn((table: unknown) => {
+      deletedTables.push(table);
+      return {
+        where: vi.fn(() =>
+          table === schema.invoices
+            ? { returning: vi.fn(async () => [invoice]) }
+            : Promise.resolve([]),
+        ),
+      };
+    });
+    const audit = { record: vi.fn(async () => undefined) };
+    const db = Object.assign(Object.create(null), {
+      transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) =>
+        run({
+          execute: vi.fn(async () => ({ rows: [] })),
+          select: vi.fn(() => queryFor(rowsFor)),
+          delete: remove,
+        }),
+      ),
+    }) as Db;
+    const service = new BillingService(
+      db,
+      audit as unknown as PlatformAuditService,
+      noopTenantBillingNotifications(),
+    );
+
+    const result = await (
+      service as BillingService & {
+        deleteDraft: (
+          actor: PlatformPrincipal,
+          id: string,
+        ) => Promise<{ id: string; tenantId: string; number: string; deleted: true }>;
+      }
+    ).deleteDraft(principal, invoiceId);
+
+    expect(result).toEqual({ id: invoiceId, tenantId, number: invoice.number, deleted: true });
+    expect(deletedTables).toEqual([schema.invoiceLines, schema.invoices]);
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "billing.invoice.deleted",
+        tenantId,
+        targetType: "invoice",
+        targetId: invoiceId,
+        before: { status: "draft", number: invoice.number },
+        after: { deleted: true },
+      }),
+    );
+  });
+
+  it("keeps a draft that is linked to a tenant billing request", async () => {
+    const invoiceId = "31111111-1111-4111-8111-111111111111";
+    const invoice = {
+      id: invoiceId,
+      tenantId: "21111111-1111-4111-8111-111111111111",
+      number: "INV-000021",
+      status: "draft" as const,
+    };
+    const rowsFor = (table: unknown) => {
+      if (table === schema.invoices) return [invoice];
+      if (table === schema.tenantBillingRequestLinks) return [{ id: "linked-request" }];
+      return [];
+    };
+    const remove = vi.fn();
+    const db = Object.assign(Object.create(null), {
+      transaction: vi.fn(async (run: (tx: unknown) => Promise<unknown>) =>
+        run({
+          execute: vi.fn(async () => ({ rows: [] })),
+          select: vi.fn(() => queryFor(rowsFor)),
+          delete: remove,
+        }),
+      ),
+    }) as Db;
+    const service = new BillingService(
+      db,
+      {} as PlatformAuditService,
+      noopTenantBillingNotifications(),
+    );
+
+    await expect(service.deleteDraft(principal, invoiceId)).rejects.toMatchObject({
+      response: { code: "invoice_has_dependencies" },
+      status: 409,
+    });
+    expect(remove).not.toHaveBeenCalled();
+  });
+
   it("keeps invoice status and payment aggregate in one read snapshot", async () => {
     const invoiceId = "31111111-1111-4111-8111-111111111111";
     const tenantId = "21111111-1111-4111-8111-111111111111";
@@ -154,6 +355,7 @@ describe("BillingService invoice payment detail", () => {
           table = value;
           return query;
         }),
+        innerJoin: vi.fn(() => query),
         where: vi.fn(() => query),
         orderBy: vi.fn(() => query),
         limit: vi.fn(async () => {

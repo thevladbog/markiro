@@ -4,6 +4,7 @@ import { invoiceApplicationEventSchema, platformCommercialContracts } from "../s
 import { invoiceDocumentRecordSchema } from "../src/commercial.js";
 
 const TENANT_ID = "legacy_better_auth_org";
+const TENANT_NAME = "Factory One";
 const OFFER_ID = "11111111-1111-4111-8111-111111111111";
 const OFFER_LINE_ID = "21111111-1111-4111-8111-111111111111";
 const INVOICE_ID = "31111111-1111-4111-8111-111111111111";
@@ -424,23 +425,26 @@ describe("platform commercial contracts", () => {
   it("parses every invoice success route with exact statuses and invoice activation spelling", () => {
     const list = platformCommercialContracts.invoices.list.response.parse({
       items: [
-        { ...invoiceBase, status: "draft" },
+        { ...invoiceBase, status: "draft", tenantName: TENANT_NAME },
         {
           ...invoiceBase,
           id: "32111111-1111-4111-8111-111111111111",
           status: "issued",
+          tenantName: TENANT_NAME,
           ...issuedInvoiceMetadata,
         },
         {
           ...invoiceBase,
           id: "33111111-1111-4111-8111-111111111112",
           status: "partially_paid",
+          tenantName: TENANT_NAME,
           ...issuedInvoiceMetadata,
         },
         {
           ...invoiceBase,
           id: "33111111-1111-4111-8111-111111111111",
           status: "paid",
+          tenantName: TENANT_NAME,
           ...issuedInvoiceMetadata,
           paidAt: CREATED_AT,
         },
@@ -448,6 +452,7 @@ describe("platform commercial contracts", () => {
           ...invoiceBase,
           id: "34111111-1111-4111-8111-111111111111",
           status: "cancelled",
+          tenantName: TENANT_NAME,
           ...issuedInvoiceMetadata,
           cancelledAt: CREATED_AT,
         },
@@ -464,6 +469,7 @@ describe("platform commercial contracts", () => {
     const detail = platformCommercialContracts.invoices.detail.response.parse({
       ...invoiceBase,
       status: "paid",
+      tenantName: TENANT_NAME,
       ...issuedInvoiceMetadata,
       paidAt: CREATED_AT,
       lines: [
@@ -556,19 +562,64 @@ describe("platform commercial contracts", () => {
     expect(applied.results[0]?.status).toBe("skipped");
   });
 
+  it("requires tenant display names on invoice registry/detail and parses draft deletion", () => {
+    const list = platformCommercialContracts.invoices.list.response.parse({
+      items: [{ ...invoiceBase, status: "draft", tenantName: TENANT_NAME }],
+    });
+    expect(list.items[0]?.tenantName).toBe(TENANT_NAME);
+    expect(
+      platformCommercialContracts.invoices.list.response.safeParse({
+        items: [{ ...invoiceBase, status: "draft" }],
+      }).success,
+    ).toBe(false);
+
+    const detail = platformCommercialContracts.invoices.detail.response.parse({
+      ...invoiceBase,
+      status: "draft",
+      tenantName: TENANT_NAME,
+      lines: [],
+      documents: [],
+      payments: [],
+      paymentSummary: null,
+      application: { status: "not_paid", latestByLine: [], attempts: [] },
+    });
+    expect(detail.tenantName).toBe(TENANT_NAME);
+
+    expect(
+      platformCommercialContracts.invoices.delete.response.parse({
+        id: INVOICE_ID,
+        tenantId: TENANT_ID,
+        number: invoiceBase.number,
+        deleted: true,
+      }),
+    ).toEqual({
+      id: INVOICE_ID,
+      tenantId: TENANT_ID,
+      number: invoiceBase.number,
+      deleted: true,
+    });
+  });
+
   it("rejects invoice lifecycle metadata that contradicts every status", () => {
-    const draft = { ...invoiceBase, status: "draft" } as const;
-    const issued = { ...invoiceBase, ...issuedInvoiceMetadata, status: "issued" } as const;
+    const draft = { ...invoiceBase, status: "draft", tenantName: TENANT_NAME } as const;
+    const issued = {
+      ...invoiceBase,
+      ...issuedInvoiceMetadata,
+      status: "issued",
+      tenantName: TENANT_NAME,
+    } as const;
     const paid = {
       ...invoiceBase,
       ...issuedInvoiceMetadata,
       status: "paid",
+      tenantName: TENANT_NAME,
       paidAt: CREATED_AT,
     } as const;
     const cancelledIssued = {
       ...invoiceBase,
       ...issuedInvoiceMetadata,
       status: "cancelled",
+      tenantName: TENANT_NAME,
       cancelledAt: CREATED_AT,
     } as const;
     const contract = platformCommercialContracts.invoices.list.response;
@@ -578,6 +629,7 @@ describe("platform commercial contracts", () => {
     const cancelledWithoutIssuance = {
       ...invoiceBase,
       status: "cancelled",
+      tenantName: TENANT_NAME,
       cancelledAt: CREATED_AT,
     } as const;
 
@@ -624,6 +676,7 @@ describe("platform commercial contracts", () => {
         ...invoiceBase,
         ...issuedInvoiceMetadata,
         status: "paid",
+        tenantName: TENANT_NAME,
         paidAt: CREATED_AT,
         lines: [invoiceLine],
         documents: [],
@@ -648,6 +701,7 @@ describe("platform commercial contracts", () => {
       ...invoiceBase,
       ...issuedInvoiceMetadata,
       status: "partially_paid",
+      tenantName: TENANT_NAME,
       lines: [invoiceLine],
       documents: [],
       payments: [partialPayment],
@@ -678,6 +732,7 @@ describe("platform commercial contracts", () => {
     const relations = {
       ...invoiceBase,
       ...issuedInvoiceMetadata,
+      tenantName: TENANT_NAME,
       lines: [invoiceLine],
       documents: [],
     } as const;
@@ -782,6 +837,7 @@ describe("platform commercial contracts", () => {
         ...invoiceBase,
         ...issuedInvoiceMetadata,
         status: "paid",
+        tenantName: TENANT_NAME,
         paidAt: CREATED_AT,
         ...relations,
         payments: [billingPayment],
@@ -796,10 +852,18 @@ describe("platform commercial contracts", () => {
     }
 
     const unpaidRecords = [
-      { name: "draft", record: { ...invoiceBase, status: "draft" } },
+      {
+        name: "draft",
+        record: { ...invoiceBase, status: "draft", tenantName: TENANT_NAME },
+      },
       {
         name: "issued",
-        record: { ...invoiceBase, ...issuedInvoiceMetadata, status: "issued" },
+        record: {
+          ...invoiceBase,
+          ...issuedInvoiceMetadata,
+          status: "issued",
+          tenantName: TENANT_NAME,
+        },
       },
       {
         name: "cancelled",
@@ -807,6 +871,7 @@ describe("platform commercial contracts", () => {
           ...invoiceBase,
           ...issuedInvoiceMetadata,
           status: "cancelled",
+          tenantName: TENANT_NAME,
           cancelledAt: CREATED_AT,
         },
       },
@@ -852,6 +917,7 @@ describe("platform commercial contracts", () => {
       ...invoiceBase,
       ...issuedInvoiceMetadata,
       status: "paid",
+      tenantName: TENANT_NAME,
       paidAt: CREATED_AT,
       ...relations,
       payments: [billingPayment],

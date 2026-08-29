@@ -22,6 +22,7 @@ import { BillingApplicationService } from "../billing/billing-application.servic
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import type { ImportBankFileDto, ManualPaymentDto } from "./dto";
+import { parseBankStatement } from "./bank-statement-parser";
 
 @Injectable()
 export class BillingPaymentsService {
@@ -252,6 +253,15 @@ export class BillingPaymentsService {
     principal: PlatformPrincipal,
     input: ImportBankFileDto,
   ): Promise<PaymentImportServiceResultSource> {
+    let parsed: ReturnType<typeof parseBankStatement>;
+    try {
+      parsed = parseBankStatement(input.content);
+    } catch (error) {
+      if (error instanceof Error && error.message === "payment_import_unsupported_format") {
+        throw new BadRequestException({ code: error.message });
+      }
+      throw error;
+    }
     const checksum = createHash("sha256").update(input.content).digest("hex");
     const [existing] = await this.db
       .select()
@@ -265,12 +275,12 @@ export class BillingPaymentsService {
         .values({
           sourceChecksum: checksum,
           fileName: input.fileName,
-          parserVersion: "bank-csv-v1",
+          parserVersion: parsed.parserVersion,
           createdByPlatformUserId: principal.userId,
         })
         .returning();
       if (!record) throw new BadRequestException({ code: "payment_import_failed" });
-      const rows = parseRows(input.content);
+      const rows = parsed.rows;
       let errors = 0;
       for (const row of rows) {
         const [created] = await tx
@@ -571,50 +581,6 @@ export class BillingPaymentsService {
       return matchSource(updated, row, invoice.number);
     });
   }
-}
-
-function parseRows(content: string) {
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const header = (lines.shift() ?? "")
-    .split(/[;,]/)
-    .slice(0, 100)
-    .map((value) => value.trim().toLowerCase().slice(0, 100));
-  return lines.map((line, index) => {
-    const values = line
-      .split(/[;,]/)
-      .slice(0, 100)
-      .map((value) => value.trim().slice(0, 5_000));
-    const get = (...names: string[]) =>
-      values[header.findIndex((key) => names.includes(key))] ?? "";
-    const amount = get("amount", "сумма").slice(0, 100);
-    const operationDate = get("date", "operation_date", "дата").slice(0, 100);
-    const parsedDate = operationDate ? new Date(operationDate) : null;
-    const parseError =
-      amount &&
-      /^\d+\.\d{2}$/.test(amount) &&
-      (!operationDate || !Number.isNaN(parsedDate?.getTime()))
-        ? null
-        : "invalid_amount_or_date";
-    return {
-      sourceRowId: String(index + 1),
-      operationDate: parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null,
-      amount: /^\d+\.\d{2}$/.test(amount) ? amount : null,
-      currency: get("currency", "валюта").slice(0, 10) || "RUB",
-      payerName: get("payer", "payer_name", "плательщик").slice(0, 1_000) || null,
-      paymentPurpose: get("purpose", "payment_purpose", "назначение").slice(0, 5_000) || null,
-      bankReference: get("reference", "bank_reference", "номер").slice(0, 1_000) || null,
-      payerAccount:
-        get("payer_account", "account", "счет_плательщика", "счёт_плательщика").slice(0, 100) ||
-        null,
-      rawFields: Object.fromEntries(
-        header.map((key, i) => [key || `column_${i + 1}`, values[i] ?? ""]),
-      ),
-      parseError,
-    };
-  });
 }
 
 type TenantAccount = typeof schema.tenantBankAccounts.$inferSelect;
