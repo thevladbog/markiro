@@ -87,6 +87,46 @@ interface ChzExportJobData {
   pass?: number;
 }
 
+/**
+ * `MAX_EXPORT_PASSES` bounds one continuous chain of pg-boss jobs, not the
+ * order itself: the count only ever lives in a job's payload, never in
+ * Postgres against the order. pg-boss jobs, unlike that in-memory count, do
+ * survive a restart on their own -- the previous chain's correctly-numbered
+ * next-pass job is still sitting there, `created`, waiting out its
+ * `startAfter` delay. Any code path that unconditionally sends a fresh job
+ * for an order (the initial enqueue, and boot reconciliation below) would
+ * otherwise race that survivor and, on every restart, hand the order a new
+ * 240-pass budget instead of continuing the old one -- reopening exactly the
+ * unbounded path the pass counter exists to close, for a tenant with no
+ * valid token, every time the API restarts.
+ *
+ * Keying every send to `RUN_CHZ_EXPORT_QUEUE` on this makes a duplicate
+ * impossible rather than detected after the fact: `RUN_CHZ_EXPORT_QUEUE`'s
+ * `stately` policy (below) plus this key makes pg-boss itself refuse a
+ * second `created` or `active` job for the same order (pg-boss v12
+ * `dist/plans.js`'s `job_i3` unique index is on `(name, state,
+ * coalesce(singleton_key, ''))` for states `created`/`retry`/`active`) --
+ * `send` then resolves to `null` instead of inserting, which is a normal
+ * dedup outcome here, not a failure. Keying on `state` as well as the order
+ * is what lets the worker's own chain re-enqueue below use the same
+ * mechanism without deadlocking on itself: the job doing the sending is
+ * still `active` while its `created` successor is inserted, and those are
+ * different states, so they never collide.
+ *
+ * That leaves one narrow gap `stately` cannot close: a restart landing in
+ * the window where a pass is actually *running* (not waiting out
+ * `startAfter`) finds no `created` row to conflict with, so reconciliation's
+ * send can still start a second, pass-0 chain alongside the real one. That
+ * is self-limiting rather than the original bug -- whichever of the two
+ * chains re-enqueues its next `created` pass first wins the slot for that
+ * order, and the other's next attempt hits the dedup above -- so a
+ * mistimed restart can cost an order at most one extra pass, never a
+ * repeatedly reset budget.
+ */
+function chzExportSingletonKey(tenantId: string, inventoryId: string): string {
+  return `${tenantId}:${inventoryId}`;
+}
+
 const QUEUE_NAME = "ensure-partitions";
 const QUEUE_CRON = "0 4 * * *";
 
@@ -382,6 +422,10 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       );
 
       await boss.createQueue(RUN_CHZ_EXPORT_QUEUE, {
+        // See `chzExportSingletonKey` above for why this policy plus a
+        // per-order key is what makes a duplicate chain impossible instead
+        // of merely detected.
+        policy: "stately",
         retryLimit: 5,
         retryDelay: 30,
         retryBackoff: true,
@@ -401,6 +445,12 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
                 { retryCount: pass, retryLimit: MAX_EXPORT_PASSES },
               );
               if (!finished) {
+                // A `null` return here would mean another `created` job for
+                // this order already exists (see `chzExportSingletonKey`) --
+                // possible only in the narrow restart-during-an-active-pass
+                // gap described there -- and is harmless to ignore: it means
+                // some chain already holds the next-pass slot for this
+                // order, so this invocation doesn't need to.
                 await boss.send(
                   RUN_CHZ_EXPORT_QUEUE,
                   {
@@ -408,7 +458,10 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
                     inventoryId: job.data.inventoryId,
                     pass: pass + 1,
                   },
-                  { startAfter: CHZ_EXPORT_POLL_INTERVAL_SECONDS },
+                  {
+                    startAfter: CHZ_EXPORT_POLL_INTERVAL_SECONDS,
+                    singletonKey: chzExportSingletonKey(job.data.tenantId, job.data.inventoryId),
+                  },
                 );
               }
             }
@@ -470,12 +523,20 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
    * `pass` is omitted here, defaulting to 0 in the worker: this is always the
    * first pass an order gets, whether it comes from `ChzExportsService.order`
    * or `.retry` (Task 4) or from boot reconciliation below.
+   *
+   * A `null` return means pg-boss deduped this against an already-pending
+   * job for the same order (see `chzExportSingletonKey`) -- e.g. `.order`/
+   * `.retry` called again while a chain is already running -- which is not a
+   * failure: both current call sites discard the id and only care that a
+   * chain is in flight, which it already is.
    */
-  async enqueueChzExportOrder(tenantId: string, inventoryId: string): Promise<string> {
+  async enqueueChzExportOrder(tenantId: string, inventoryId: string): Promise<string | null> {
     if (!this.boss || !this.started) throw new Error("pg-boss is not started");
-    const jobId = await this.boss.send(RUN_CHZ_EXPORT_QUEUE, { tenantId, inventoryId });
-    if (!jobId) throw new Error("chz export enqueue failed");
-    return jobId;
+    return this.boss.send(
+      RUN_CHZ_EXPORT_QUEUE,
+      { tenantId, inventoryId },
+      { singletonKey: chzExportSingletonKey(tenantId, inventoryId) },
+    );
   }
 
   private async reconcileQueuedShiftExports(boss: PgBoss): Promise<void> {
@@ -541,6 +602,15 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
    * order, exactly matching what `enqueueChzExportOrder` sends, since the
    * runner's `run` already re-checks all six of an order's runs on every
    * pass -- one job per run would just be five wasted enqueues per order.
+   *
+   * This is exactly the send site `chzExportSingletonKey` exists to guard:
+   * pg-boss jobs survive a restart on their own, so an order's previous
+   * chain is typically still sitting there, `created`. Sending unconditionally
+   * here (with no `pass`, always defaulting to 0) would otherwise race that
+   * survivor and, on every restart, hand the order a fresh 240-pass budget.
+   * A `null` return below means pg-boss deduped this against that survivor,
+   * which is the expected outcome, not a failure -- see `chzExportSingletonKey`
+   * for the one narrow case this can't catch and why it's self-limiting.
    */
   private async reconcileUnfinishedChzExports(boss: PgBoss): Promise<void> {
     let queued: { tenantId: string; inventoryId: string }[];
@@ -564,11 +634,16 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     }
     for (const row of queued) {
       try {
-        const jobId = await boss.send(RUN_CHZ_EXPORT_QUEUE, {
-          tenantId: row.tenantId,
-          inventoryId: row.inventoryId,
-        });
-        if (!jobId) throw new Error("chz export enqueue returned no job id");
+        const jobId = await boss.send(
+          RUN_CHZ_EXPORT_QUEUE,
+          { tenantId: row.tenantId, inventoryId: row.inventoryId },
+          { singletonKey: chzExportSingletonKey(row.tenantId, row.inventoryId) },
+        );
+        if (jobId === null) {
+          this.logger.log(
+            `chz export reconciliation skipped for tenant ${row.tenantId} inventory ${row.inventoryId}: a chain is already pending`,
+          );
+        }
       } catch (error) {
         this.logger.error(
           `chz export reconciliation failed for tenant ${row.tenantId} inventory ${row.inventoryId}`,

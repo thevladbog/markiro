@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { Logger } from "@nestjs/common";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as MarkiroDb from "@markiro/db";
 import { createDb, schema, type Db } from "@markiro/db";
@@ -200,6 +201,7 @@ describe("PgBossService run-chz-export queue", () => {
     await service.onModuleInit();
 
     expect(boss.createQueue).toHaveBeenCalledWith(RUN_CHZ_EXPORT_QUEUE, {
+      policy: "stately",
       retryLimit: 5,
       retryDelay: 30,
       retryBackoff: true,
@@ -251,7 +253,7 @@ describe("PgBossService run-chz-export queue", () => {
     expect(boss.send).toHaveBeenCalledWith(
       RUN_CHZ_EXPORT_QUEUE,
       { tenantId: "tenant-1", inventoryId: "inventory-1", pass: 4 },
-      expect.objectContaining({ startAfter: 30 }),
+      expect.objectContaining({ startAfter: 30, singletonKey: "tenant-1:inventory-1" }),
     );
   });
 
@@ -295,7 +297,7 @@ describe("PgBossService run-chz-export queue", () => {
     expect(boss.send).toHaveBeenCalledWith(
       RUN_CHZ_EXPORT_QUEUE,
       { tenantId: "tenant-1", inventoryId: "inventory-1", pass: 240 },
-      expect.objectContaining({ startAfter: 30 }),
+      expect.objectContaining({ startAfter: 30, singletonKey: "tenant-1:inventory-1" }),
     );
 
     // Once the runner itself reports the budget exhausted -- exactly what
@@ -323,13 +325,29 @@ describe("PgBossService run-chz-export queue", () => {
     await service.onModuleInit();
     boss.send.mockClear();
 
-    await expect(service.enqueueChzExportOrder("tenant-1", "inventory-1")).resolves.toBe(
-      "job-id",
+    await expect(service.enqueueChzExportOrder("tenant-1", "inventory-1")).resolves.toBe("job-id");
+    expect(boss.send).toHaveBeenCalledWith(
+      RUN_CHZ_EXPORT_QUEUE,
+      { tenantId: "tenant-1", inventoryId: "inventory-1" },
+      { singletonKey: "tenant-1:inventory-1" },
     );
-    expect(boss.send).toHaveBeenCalledWith(RUN_CHZ_EXPORT_QUEUE, {
-      tenantId: "tenant-1",
-      inventoryId: "inventory-1",
-    });
+  });
+
+  it("does not treat a deduped enqueue as a failure: enqueueChzExportOrder resolves to null instead of throwing", async () => {
+    const boss = fakeBoss();
+    const runner = {
+      run: vi.fn(async () => ({ finished: true })),
+    } as unknown as ChzExportRunnerService;
+    const service = serviceWith(boss, runner);
+    await service.onModuleInit();
+    boss.send.mockClear();
+    // pg-boss's own dedup (the `stately` policy plus `chzExportSingletonKey`)
+    // is what produces this in production, when a chain is already pending
+    // for the order -- e.g. `ChzExportsService.order`/`.retry` called again
+    // while the earlier chain is still running.
+    boss.send.mockResolvedValueOnce(null);
+
+    await expect(service.enqueueChzExportOrder("tenant-1", "inventory-1")).resolves.toBeNull();
   });
 
   it("re-enqueues every order left with a non-terminal run at boot, one job per order not per run", async () => {
@@ -354,7 +372,56 @@ describe("PgBossService run-chz-export queue", () => {
       { tenantId: "tenant-1", inventoryId: "inventory-a" },
       { tenantId: "tenant-1", inventoryId: "inventory-b" },
     ]);
+    expect(
+      chzCalls.map(([, , options]) => (options as { singletonKey?: string }).singletonKey),
+    ).toEqual(["tenant-1:inventory-a", "tenant-1:inventory-b"]);
   });
+
+  it(
+    "does not start a second chain at boot for an order that already has a pending job, and " +
+      "does not treat the dedup as a reconciliation failure",
+    async () => {
+      const boss = fakeBoss();
+      const runner = {
+        run: vi.fn(async () => ({ finished: true })),
+      } as unknown as ChzExportRunnerService;
+      const rows = [
+        { tenantId: "tenant-1", inventoryId: "inventory-a" },
+        { tenantId: "tenant-1", inventoryId: "inventory-b" },
+      ];
+      const service = serviceWith(boss, runner, dbWithChzReconcileRows(rows));
+      const errorSpy = vi.spyOn(Logger.prototype, "error");
+      // In production pg-boss itself would produce this `null` (the
+      // `stately` policy plus `chzExportSingletonKey` in jobs.module.ts):
+      // inventory-a's order already has a pending job -- e.g. its previous
+      // chain survived a restart -- so the boot reconciliation send for it
+      // is deduped instead of starting a second, pass-0 chain.
+      boss.send.mockImplementation(async (name: unknown, data: unknown) => {
+        if (
+          name === RUN_CHZ_EXPORT_QUEUE &&
+          (data as { inventoryId?: string })?.inventoryId === "inventory-a"
+        ) {
+          return null;
+        }
+        return "job-id";
+      });
+
+      await service.onModuleInit();
+
+      const chzCalls = boss.send.mock.calls.filter(([queue]) => queue === RUN_CHZ_EXPORT_QUEUE);
+      // Both orders are still attempted -- the dedup happens inside pg-boss,
+      // not by pre-filtering -- but only one job actually lands.
+      expect(chzCalls.map(([, data]) => data)).toEqual([
+        { tenantId: "tenant-1", inventoryId: "inventory-a" },
+        { tenantId: "tenant-1", inventoryId: "inventory-b" },
+      ]);
+      const chzErrorCalls = errorSpy.mock.calls.filter(([message]) =>
+        String(message).includes("chz export reconciliation failed"),
+      );
+      expect(chzErrorCalls).toHaveLength(0);
+      errorSpy.mockRestore();
+    },
+  );
 });
 
 /**
@@ -412,101 +479,95 @@ describe.skipIf(!ready)("PgBossService run-chz-export queue: pass budget (amendm
     return new ChzExportRunnerService(runnerDb, tokens, client, inventories, journal);
   }
 
-  it(
-    "advances the pass counter across re-enqueues and fails a tokenless all-queued order once the budget is spent",
-    async () => {
-      const tenantId = await createOrganization(db);
-      const actorUserId = randomUUID();
-      const productId = randomUUID();
-      const lineId = randomUUID();
-      const inventoryId = randomUUID();
+  it("advances the pass counter across re-enqueues and fails a tokenless all-queued order once the budget is spent", async () => {
+    const tenantId = await createOrganization(db);
+    const actorUserId = randomUUID();
+    const productId = randomUUID();
+    const lineId = randomUUID();
+    const inventoryId = randomUUID();
 
-      await db.insert(schema.user).values({
-        id: actorUserId,
-        name: "Export job fixture operator",
-        email: `${randomUUID()}@example.invalid`,
-        emailVerified: false,
-      });
-      await db.insert(schema.products).values({
-        id: productId,
+    await db.insert(schema.user).values({
+      id: actorUserId,
+      name: "Export job fixture operator",
+      email: `${randomUUID()}@example.invalid`,
+      emailVerified: false,
+    });
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId,
+      gtin14: GTIN,
+      name: "Export job fixture product",
+    });
+    await db.insert(schema.lines).values({ id: lineId, tenantId, name: "Export job fixture line" });
+    await db.insert(schema.inventories).values({
+      id: inventoryId,
+      tenantId,
+      number: `INV-${randomUUID()}`,
+      productId,
+      gtin14Snapshot: GTIN,
+      lineId,
+      mode: "check",
+      productionDateFrom: "2026-08-01",
+      productionDateTo: "2026-08-31",
+      createdByUserId: actorUserId,
+    });
+    await db.insert(schema.chzExportRuns).values(
+      INVENTORY_CHZ_STATUSES.map((status) => ({
         tenantId,
-        gtin14: GTIN,
-        name: "Export job fixture product",
-      });
-      await db
-        .insert(schema.lines)
-        .values({ id: lineId, tenantId, name: "Export job fixture line" });
-      await db.insert(schema.inventories).values({
-        id: inventoryId,
-        tenantId,
-        number: `INV-${randomUUID()}`,
-        productId,
-        gtin14Snapshot: GTIN,
-        lineId,
-        mode: "check",
-        productionDateFrom: "2026-08-01",
-        productionDateTo: "2026-08-31",
-        createdByUserId: actorUserId,
-      });
-      await db.insert(schema.chzExportRuns).values(
-        INVENTORY_CHZ_STATUSES.map((status) => ({
-          tenantId,
-          inventoryId,
-          status,
-          state: "queued" as const,
-          orderedByUserId: actorUserId,
-        })),
+        inventoryId,
+        status,
+        state: "queued" as const,
+        orderedByUserId: actorUserId,
+      })),
+    );
+
+    const boss = fakeBoss();
+    // PgBossService's own `db` only backs its boot reconciliation queries,
+    // never the runner's own state -- an empty mock here keeps this test
+    // from also exercising boot reconciliation noise for this order.
+    const service = serviceWith(boss, realChzExportRunner(db), emptyDb());
+    await service.onModuleInit();
+    const handler = boss.getChzExportHandler();
+    expect(handler).toBeDefined();
+
+    // Pass 0: no token was ever configured, but the budget (240) is not
+    // spent yet, so the order re-enqueues for another pass.
+    boss.send.mockClear();
+    await handler?.([chzExportJob({ tenantId, inventoryId })]);
+    expect(boss.send).toHaveBeenCalledWith(
+      RUN_CHZ_EXPORT_QUEUE,
+      { tenantId, inventoryId, pass: 1 },
+      expect.objectContaining({ startAfter: 30, singletonKey: `${tenantId}:${inventoryId}` }),
+    );
+
+    // Pass 239: one pass short of the cap, still re-enqueues.
+    boss.send.mockClear();
+    await handler?.([chzExportJob({ tenantId, inventoryId, pass: 239 })]);
+    expect(boss.send).toHaveBeenCalledWith(
+      RUN_CHZ_EXPORT_QUEUE,
+      { tenantId, inventoryId, pass: 240 },
+      expect.objectContaining({ startAfter: 30, singletonKey: `${tenantId}:${inventoryId}` }),
+    );
+
+    // Pass 240: `retryCount` (240) now meets `retryLimit` (240,
+    // `MAX_EXPORT_PASSES`), so `giveUpOnToken` fails every still-queued run
+    // instead of asking for a 241st pass -- the job wiring stops for good.
+    boss.send.mockClear();
+    await handler?.([chzExportJob({ tenantId, inventoryId, pass: 240 })]);
+    expect(boss.send).not.toHaveBeenCalled();
+
+    const rows = await db
+      .select()
+      .from(schema.chzExportRuns)
+      .where(
+        and(
+          eq(schema.chzExportRuns.tenantId, tenantId),
+          eq(schema.chzExportRuns.inventoryId, inventoryId),
+        ),
       );
-
-      const boss = fakeBoss();
-      // PgBossService's own `db` only backs its boot reconciliation queries,
-      // never the runner's own state -- an empty mock here keeps this test
-      // from also exercising boot reconciliation noise for this order.
-      const service = serviceWith(boss, realChzExportRunner(db), emptyDb());
-      await service.onModuleInit();
-      const handler = boss.getChzExportHandler();
-      expect(handler).toBeDefined();
-
-      // Pass 0: no token was ever configured, but the budget (240) is not
-      // spent yet, so the order re-enqueues for another pass.
-      boss.send.mockClear();
-      await handler?.([chzExportJob({ tenantId, inventoryId })]);
-      expect(boss.send).toHaveBeenCalledWith(
-        RUN_CHZ_EXPORT_QUEUE,
-        { tenantId, inventoryId, pass: 1 },
-        expect.objectContaining({ startAfter: 30 }),
-      );
-
-      // Pass 239: one pass short of the cap, still re-enqueues.
-      boss.send.mockClear();
-      await handler?.([chzExportJob({ tenantId, inventoryId, pass: 239 })]);
-      expect(boss.send).toHaveBeenCalledWith(
-        RUN_CHZ_EXPORT_QUEUE,
-        { tenantId, inventoryId, pass: 240 },
-        expect.objectContaining({ startAfter: 30 }),
-      );
-
-      // Pass 240: `retryCount` (240) now meets `retryLimit` (240,
-      // `MAX_EXPORT_PASSES`), so `giveUpOnToken` fails every still-queued run
-      // instead of asking for a 241st pass -- the job wiring stops for good.
-      boss.send.mockClear();
-      await handler?.([chzExportJob({ tenantId, inventoryId, pass: 240 })]);
-      expect(boss.send).not.toHaveBeenCalled();
-
-      const rows = await db
-        .select()
-        .from(schema.chzExportRuns)
-        .where(
-          and(
-            eq(schema.chzExportRuns.tenantId, tenantId),
-            eq(schema.chzExportRuns.inventoryId, inventoryId),
-          ),
-        );
-      expect(rows).toHaveLength(6);
-      expect(
-        rows.every((row) => row.state === "failed" && row.errorCode === "CHZ_TOKEN_UNAVAILABLE"),
-      ).toBe(true);
-    },
-    30_000,
-  );
+    expect(rows).toHaveLength(6);
+    expect(
+      rows.every((row) => row.state === "failed" && row.errorCode === "CHZ_TOKEN_UNAVAILABLE"),
+    ).toBe(true);
+  }, 30_000);
 });
