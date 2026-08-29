@@ -642,6 +642,45 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     warn.mockRestore();
   });
 
+  it("fails every queued run on the first pass when the token is unconfigured, without waiting out the retry budget", async () => {
+    // `unconfigured` (no encryption key configured) never self-heals on its
+    // own, unlike `missing`/`expired`, which the signer agent's own scheduler
+    // resolves within about fifteen minutes. `retryCount: 0` here is well
+    // inside `retryLimit: 5` -- if this outcome were treated like `expired`
+    // the runner would report `finished: false` and wait, exactly as the
+    // "keeps runs non-terminal" test above proves for `expired`. It must not:
+    // this reason is terminal on the very first pass.
+    await seedRuns({ state: "queued" });
+    tokens.getActiveToken.mockResolvedValue({ status: "unconfigured" });
+    const { client } = fakeClient();
+    const outcome = await runnerWith(client).run(tenantId, inventoryId, {
+      retryCount: 0,
+      retryLimit: 5,
+    });
+    expect(outcome).toEqual({ finished: true });
+    const rows = await runsFor(inventoryId);
+    expect(rows.every((row) => row.state === "failed")).toBe(true);
+    expect(rows.every((row) => row.errorCode === "CHZ_TOKEN_UNAVAILABLE")).toBe(true);
+  });
+
+  it("fails every queued run on the first pass when the token is undecryptable, without waiting out the retry budget", async () => {
+    // Same reasoning as `unconfigured` above: a rotated encryption key or a
+    // corrupted ciphertext cannot un-rotate or un-corrupt itself, so this
+    // reason must not get the wait-and-retry treatment `missing`/`expired`
+    // get.
+    await seedRuns({ state: "queued" });
+    tokens.getActiveToken.mockResolvedValue({ status: "undecryptable" });
+    const { client } = fakeClient();
+    const outcome = await runnerWith(client).run(tenantId, inventoryId, {
+      retryCount: 0,
+      retryLimit: 5,
+    });
+    expect(outcome).toEqual({ finished: true });
+    const rows = await runsFor(inventoryId);
+    expect(rows.every((row) => row.state === "failed")).toBe(true);
+    expect(rows.every((row) => row.errorCode === "CHZ_TOKEN_UNAVAILABLE")).toBe(true);
+  });
+
   it("unwinds through the token path on a mid-pass unauthorized", async () => {
     await seedRuns({ state: "queued" });
     const warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);

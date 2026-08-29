@@ -486,9 +486,22 @@ export class ChzExportRunnerService {
   }
 
   /**
-   * No token, no pass. While the job still has attempts left this is a wait —
-   * the tenant's agent refreshes the token every quarter of an hour — and only
-   * an exhausted budget turns it into an answer for the operator.
+   * No token, no pass. `missing` and `expired` are a wait while the job still
+   * has attempts left — the tenant's agent refreshes the token on its own
+   * scheduler, within about fifteen minutes — and only an exhausted budget
+   * turns those into an answer for the operator.
+   *
+   * `unconfigured` and `undecryptable` are never self-healing: nothing
+   * un-rotates an encryption key or un-corrupts a ciphertext, so waiting out
+   * the full `MAX_EXPORT_PASSES` budget (240 passes, roughly two hours at the
+   * worker's cadence) would just leave the operator staring at «В очереди»
+   * for that long before the same failure it could have reported on the
+   * first pass. Those two are therefore terminal immediately, regardless of
+   * `attempt.retryCount`. Branching on the two terminal reasons explicitly
+   * (rather than on the two retryable ones) means a reason this runner has
+   * never seen -- a future `ChzTokenResult` variant, or the literal
+   * `"unauthorized"` this method is also called with from `run()`'s catch
+   * branch -- falls on the safe, retryable side instead of failing outright.
    */
   private async giveUpOnToken(
     tenantId: string,
@@ -496,7 +509,8 @@ export class ChzExportRunnerService {
     attempt: AttemptContext,
     reason: string,
   ): Promise<{ finished: boolean }> {
-    if (attempt.retryCount < attempt.retryLimit) {
+    const neverSelfHeals = reason === "unconfigured" || reason === "undecryptable";
+    if (!neverSelfHeals && attempt.retryCount < attempt.retryLimit) {
       this.logger.warn(
         `ChZ token unavailable (${reason}) for tenant ${tenantId}; export order will retry`,
       );

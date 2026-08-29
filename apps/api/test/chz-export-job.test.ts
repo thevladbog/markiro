@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { Logger } from "@nestjs/common";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -496,11 +496,19 @@ describe.skipIf(!ready)("PgBossService run-chz-export queue: pass budget (amendm
     pgBossMock.instances.length = 0;
   });
 
-  /** Never configuring `CHZ_TOKEN_ENCRYPTION_KEY` is the simplest "no token" fixture. */
+  /**
+   * A configured key with no `chz_api_tokens` row: `getActiveToken` reports
+   * `missing`, which is what this suite needs to test the pass budget --
+   * `missing` (like `expired`) is a wait-and-retry outcome, unlike
+   * `unconfigured` (like `undecryptable`), which `giveUpOnToken` now fails
+   * immediately on the first pass instead of granting it the budget. Using
+   * `unconfigured` here would make pass 0 below fail outright instead of
+   * re-enqueuing, defeating the point of this test.
+   */
   function realChzExportRunner(runnerDb: Db): ChzExportRunnerService {
-    const crypto = new ChzCryptoService(undefined);
+    const crypto = new ChzCryptoService(randomBytes(32));
     const tokens = new ChzTokenService(runnerDb, crypto);
-    // Never invoked: the token check returns "unconfigured" before any order
+    // Never invoked: the token check returns "missing" before any order
     // context lookup or True API call happens.
     const client = new TrueApiClient();
     const inventories = {} as InventoriesService;

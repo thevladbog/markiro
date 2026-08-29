@@ -103,9 +103,14 @@ export class ChzExportsService {
     }
     await this.db.transaction(async (tx) => {
       for (const status of INVENTORY_CHZ_STATUSES) {
-        // Insert a queued run, or reset a failed one; never touch a run that is
-        // queued, ordered, ready or imported -- re-ordering an export that has
-        // already arrived burns the finite daily quota for nothing.
+        // Insert a queued run, or reset a failed one that has not hit the
+        // create-attempt cap; never touch a run that is queued, ordered, ready
+        // or imported -- re-ordering an export that has already arrived burns
+        // the finite daily quota for nothing. The cap condition matches
+        // `retry()`'s exactly, on purpose: a run at `MAX_CREATE_ATTEMPTS` is
+        // left alone by both, rather than reset here only for
+        // `ChzExportRunnerService.orderQueuedRuns` to fail it again on the
+        // very next pass.
         await tx
           .insert(schema.chzExportRuns)
           .values({ tenantId, inventoryId, status, state: "queued", orderedByUserId: actorUserId })
@@ -116,7 +121,7 @@ export class ChzExportsService {
               schema.chzExportRuns.status,
             ],
             set: this.resetToQueued(actorUserId),
-            setWhere: eq(schema.chzExportRuns.state, "failed"),
+            setWhere: this.resetEligible(),
           });
       }
     });
@@ -149,8 +154,7 @@ export class ChzExportsService {
           eq(schema.chzExportRuns.tenantId, tenantId),
           eq(schema.chzExportRuns.inventoryId, inventoryId),
           eq(schema.chzExportRuns.status, status),
-          eq(schema.chzExportRuns.state, "failed"),
-          lt(schema.chzExportRuns.attempts, MAX_CREATE_ATTEMPTS),
+          this.resetEligible(),
         ),
       )
       .returning({ id: schema.chzExportRuns.id });
@@ -175,6 +179,26 @@ export class ChzExportsService {
     }
     await this.jobs.enqueueChzExportOrder(tenantId, inventoryId);
     return this.getState(tenantId, inventoryId);
+  }
+
+  /**
+   * `state = 'failed' AND attempts < MAX_CREATE_ATTEMPTS`: the one condition
+   * under which a run may go back to `queued`, shared by `order()`'s
+   * conditional upsert and `retry()`'s conditional update so the two
+   * comparisons cannot drift apart -- see the comment on `retry()` for why a
+   * run at the cap must never be reset.
+   *
+   * The non-null assertion is safe, not a suppressed error: both arguments to
+   * `and()` here are always concrete `SQL` conditions, never `undefined` or
+   * omitted, so this call can only ever produce `SQL<unknown>`. The `|
+   * undefined` in `and()`'s return type exists for its general case of an
+   * arbitrarily short or falsy conditions list, which does not apply here.
+   */
+  private resetEligible() {
+    return and(
+      eq(schema.chzExportRuns.state, "failed"),
+      lt(schema.chzExportRuns.attempts, MAX_CREATE_ATTEMPTS),
+    )!;
   }
 
   /**

@@ -92,10 +92,13 @@ export class ChzTokenService {
    * The trade-off: a token whose ciphertext cannot be decrypted (a rotated
    * encryption key, a corrupted row) still reads as usable here, since that
    * can only be discovered by decrypting. The runner still catches it via
-   * `getActiveToken` on the first pass and fails the order with
-   * `CHZ_TOKEN_UNAVAILABLE` -- one pass later than a preflight check would
-   * have caught it, which is an acceptable cost for never decrypting on a
-   * read-only status poll.
+   * `getActiveToken`, on its first pass over the order -- and, because
+   * `undecryptable` can never self-heal, `ChzExportRunnerService.giveUpOnToken`
+   * fails every queued run with `CHZ_TOKEN_UNAVAILABLE` on that same first
+   * pass rather than waiting out the retry budget it grants `missing` and
+   * `expired`. So the cost of this check missing an undecryptable token is
+   * one preflight round-trip the operator did not need, not an order left
+   * stuck in `queued` for hours.
    */
   async hasUsableToken(tenantId: string): Promise<boolean> {
     if (!this.crypto.isConfigured()) return false;
