@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  char,
   check,
   customType,
   foreignKey,
@@ -8,6 +9,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -16,6 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { organization, user } from "./auth.js";
 import { inventories, inventoryChzStatusEnum, inventoryImports } from "./inventory.js";
+import { chzProductGroups } from "./platform.js";
 
 const tenantId = () =>
   text("tenant_id")
@@ -237,7 +240,64 @@ export const chzExportRuns = pgTable(
   ],
 );
 
+/**
+ * One row per code, not per scan: `codes` is keyed by
+ * `(tenant_id, code_hash, scanned_at)` and a code scanned twice has two rows
+ * there, while ЧЗ has exactly one opinion about it.
+ *
+ * The raw code is deliberately absent — the refresh job joins `codes` for the
+ * batch it is about to send. `codes` is partitioned monthly, so when an old
+ * partition is eventually detached the raw goes with it and the row simply
+ * stops being refreshable. Archived codes fall out of the queue by
+ * construction rather than by a rule someone has to remember to write.
+ */
+export const chzCodeStatuses = pgTable(
+  "chz_code_statuses",
+  {
+    tenantId: tenantId(),
+    codeHash: char("code_hash", { length: 64 }).notNull(),
+    chzProductGroupCode: integer("chz_product_group_code").references(() => chzProductGroups.code),
+    status: text("status"),
+    statusEx: text("status_ex"),
+    ownerInn: text("owner_inn"),
+    withdrawReason: text("withdraw_reason"),
+    unknownAttempts: integer("unknown_attempts").notNull().default(0),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+    nextRefreshAt: timestamp("next_refresh_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.codeHash] }),
+    // The refresh query's shape: due rows for one tenant, oldest first, and
+    // only those that can actually be asked about.
+    index("chz_code_statuses_due_idx")
+      .on(t.tenantId, t.nextRefreshAt)
+      .where(sql`${t.chzProductGroupCode} is not null`),
+    check("chz_code_statuses_hash_check", sql`${t.codeHash} ~ '^[0-9a-f]{64}$'`),
+    check("chz_code_statuses_unknown_attempts_check", sql`${t.unknownAttempts} >= 0`),
+  ],
+);
+
+/**
+ * How far the ingest walk has read `codes` for this tenant.
+ *
+ * Without it, finding codes with no status row is an anti-join across every
+ * monthly partition on every pass. With it the walk is a forward range scan on
+ * `scanned_at`, which prunes to the partitions that can actually contain new
+ * rows — usually just the current month.
+ */
+export const chzCodeStatusCursors = pgTable("chz_code_status_cursors", {
+  tenantId: text("tenant_id")
+    .primaryKey()
+    .references(() => organization.id),
+  lastScannedAt: timestamp("last_scanned_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type ChzSignerAgentRow = typeof chzSignerAgents.$inferSelect;
 export type ChzSignerTaskRow = typeof chzSignerTasks.$inferSelect;
 export type ChzApiTokenRow = typeof chzApiTokens.$inferSelect;
 export type ChzExportRunRow = typeof chzExportRuns.$inferSelect;
+export type ChzCodeStatusRow = typeof chzCodeStatuses.$inferSelect;
+export type ChzCodeStatusCursorRow = typeof chzCodeStatusCursors.$inferSelect;
