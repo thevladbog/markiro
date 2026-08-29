@@ -16,6 +16,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import type * as ChzImportParserModule from "../src/modules/inventories/chz-import-parser";
+import { InventoryDocumentRunnerService } from "../src/modules/inventories/inventory-document-runner.service";
 import { InventoriesService } from "../src/modules/inventories/inventories.service";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import { listenOnLoopback } from "./support/listen-loopback";
@@ -92,6 +93,8 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL, env })],
     })
+      .overrideProvider(InventoryDocumentRunnerService)
+      .useValue({ run: vi.fn().mockResolvedValue(undefined) })
       .overrideProvider(ObjectStorageService)
       .useValue(storage)
       .compile();
