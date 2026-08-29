@@ -99,6 +99,41 @@ test("normalizes merge titles, de-duplicates subjects and excludes unrelated cha
   assert.doesNotMatch(notes, /unrelated parser/);
 });
 
+test("ignores secret-shaped prose in commits outside the Station release scope", () => {
+  const notes = buildStableChangelog(
+    validInput({
+      entries: [
+        {
+          sha: "1".repeat(40),
+          subject: "docs(api): describe authentication",
+          body: "Document the API key header.",
+          files: ["apps/api/README.md"],
+        },
+        validInput().entries[0],
+      ],
+    }),
+  );
+  assert.match(notes, /feat\(station\): add scan queue/);
+  assert.doesNotMatch(notes, /API key/);
+});
+
+test("still rejects secret-shaped prose in Station release entries", () => {
+  assert.throws(
+    () =>
+      buildStableChangelog(
+        validInput({
+          entries: [
+            {
+              ...validInput().entries[0],
+              body: "Document the API key header.",
+            },
+          ],
+        }),
+      ),
+    /invalid station stable changelog/,
+  );
+});
+
 test("recognizes only the reviewed Station release scope", () => {
   for (const path of [
     "apps/station/src/App.tsx",

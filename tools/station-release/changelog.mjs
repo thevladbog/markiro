@@ -34,12 +34,15 @@ function hasExactKeys(value, keys) {
   return isPlainObject(value) && Object.keys(value).sort().join(",") === [...keys].sort().join(",");
 }
 
-function ensureText(value, { allowEmpty = false, maxBytes = MAX_INPUT_BYTES } = {}) {
+function ensureText(
+  value,
+  { allowEmpty = false, allowSecretText = false, maxBytes = MAX_INPUT_BYTES } = {},
+) {
   if (
     typeof value !== "string" ||
     (!allowEmpty && value.length === 0) ||
     Buffer.byteLength(value) > maxBytes ||
-    SECRET_TEXT.test(value) ||
+    (!allowSecretText && SECRET_TEXT.test(value)) ||
     UNSAFE_CONTROL_TEXT.test(value)
   ) {
     invalid();
@@ -116,12 +119,12 @@ function validateMetadata(input) {
   ensureText(input.highlights, { allowEmpty: true, maxBytes: MAX_HIGHLIGHTS_BYTES });
 }
 
-function normalizedEntry(entry) {
+function normalizedEntry(entry, { allowSecretText = false } = {}) {
   if (!hasExactKeys(entry, ["sha", "subject", "body", "files"]) || !SHA.test(entry.sha)) {
     invalid();
   }
-  ensureText(entry.subject, { maxBytes: 16 * 1024 });
-  ensureText(entry.body, { allowEmpty: true, maxBytes: 64 * 1024 });
+  ensureText(entry.subject, { allowSecretText, maxBytes: 16 * 1024 });
+  ensureText(entry.body, { allowEmpty: true, allowSecretText, maxBytes: 64 * 1024 });
   if (
     !Array.isArray(entry.files) ||
     entry.files.length > 10_000 ||
@@ -153,10 +156,11 @@ export function buildStableChangelog(input) {
   const groups = { features: [], fixes: [], other: [] };
 
   for (const rawEntry of input.entries) {
-    const entry = normalizedEntry(rawEntry);
+    const touchesScope = stationChangeTouchesScope(rawEntry.files);
+    const entry = normalizedEntry(rawEntry, { allowSecretText: !touchesScope });
     if (seenShas.has(entry.sha)) invalid();
     seenShas.add(entry.sha);
-    if (!stationChangeTouchesScope(entry.files)) continue;
+    if (!touchesScope) continue;
     if (
       /^chore\(station\):\s*prepare\b/i.test(entry.display) ||
       /station release candidate/i.test(entry.display) ||
