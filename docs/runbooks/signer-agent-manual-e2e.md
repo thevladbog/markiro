@@ -186,9 +186,15 @@ uses the same generator as the cabinet export, but "almost" is not a guarantee.
 the inventory screen exactly as a hand-uploaded one does.
 
 **Fail:** the run lands `failed` carrying the parser's own diagnostic code
-(a header mismatch names the header). The fix belongs in the single adapter in
-`chz-export-runner.service.ts` that names the synthesised file — not in the
-parser, which manual upload also depends on.
+(a header mismatch names the header). The shared parser must stay untouched
+either way — manual upload depends on it too, and a fix that changed what it
+accepts would silently change the manual path's behavior as well. The
+adapter in `chz-export-runner.service.ts` that names the synthesised file
+only selects the container kind (`.zip`); it does not touch the bytes handed
+to `importEvidence`, so renaming the file again would just repeat the same
+diagnostic. If this fails, the fix is for that same adapter to normalise or
+repackage the dispenser's archive bytes into the shape the parser expects
+before handing them to `importEvidence` — not to touch the parser itself.
 
 ### While you are there: can adoption be widened?
 

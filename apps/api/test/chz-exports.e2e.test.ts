@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import express from "express";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { schema, type Db } from "@markiro/db";
 import type { InventoryChzStatus } from "@markiro/domain";
@@ -14,6 +14,7 @@ import { DB } from "../src/auth/auth.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { ChzCryptoService } from "../src/modules/signer-agents/chz-crypto.service";
+import { TrueApiClient } from "../src/modules/chz-exports/true-api.client";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
 
@@ -28,18 +29,53 @@ const FIXTURE_GTIN = "04680089900383";
 
 type Agent = ReturnType<typeof request.agent>;
 
+/**
+ * Stands in for the real `TrueApiClient` in this suite. `ChzExportsService.order`
+ * enqueues the real `run-chz-export` job onto the real `PgBossService` this
+ * suite boots (`AppModule.forRoot`), so without this override the real
+ * runner would fire real HTTPS requests -- carrying the fixture's fake
+ * bearer token -- at ЧЗ's production `true-api` host the moment a worker
+ * picks up an order. Every method answers `unavailable` (the client's own
+ * "transient, try again later" outcome), which is enough to exercise the
+ * ordering flow (a run simply stays `queued`) without ever reaching for a
+ * network call.
+ */
+function fakeTrueApiClient(): TrueApiClient {
+  return {
+    createDispenserTask: async () => ({ status: "unavailable" as const }),
+    listDispenserTasks: async () => ({ status: "unavailable" as const }),
+    listDispenserResults: async () => ({ status: "unavailable" as const }),
+    downloadDispenserResult: async () => ({ status: "unavailable" as const }),
+  } as unknown as TrueApiClient;
+}
+
 describe.skipIf(!ready)("chz-exports cabinet e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
   let db: Db;
   let crypto: ChzCryptoService;
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  const seededTenantIds: string[] = [];
 
   beforeAll(async () => {
+    // Positive proof that no code path in this suite reaches the real
+    // network -- not just that the override below exists, but that nothing
+    // ever calls through to it. `TrueApiClient`'s production dependencies
+    // bind `globalThis.fetch`, so this is the one choke point every possible
+    // outbound request from this app instance would have to pass through.
+    fetchSpy = vi.spyOn(globalThis, "fetch");
     const env = loadEnv();
     setup = setupAuth(env);
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
-    }).compile();
+    })
+      // `TrueApiClient` is registered in both `ChzExportsModule` (the cabinet
+      // HTTP surface) and `JobsModule` (the `run-chz-export` worker); this
+      // override applies to the whole compiled module tree, not just one
+      // import site, so both get the fake.
+      .overrideProvider(TrueApiClient)
+      .useValue(fakeTrueApiClient())
+      .compile();
 
     app = ref.createNestApplication({ bodyParser: false });
     const server = app.getHttpAdapter().getInstance();
@@ -52,11 +88,31 @@ describe.skipIf(!ready)("chz-exports cabinet e2e", () => {
   });
 
   afterAll(async () => {
+    // Rows this suite orders (via the fake client above) stay non-terminal
+    // forever -- `unavailable` never advances a run. Postgres is shared
+    // across every e2e test file (`fileParallelism: false`, one database),
+    // and every other file's own `AppModule.forRoot` boot runs
+    // `PgBossService`'s `reconcileUnfinishedChzExports`, which re-enqueues
+    // *any* non-terminal `chz_export_runs` row against the *real*
+    // `TrueApiClient` those files don't override. Leaving these rows behind
+    // would reopen exactly the production-traffic exposure this override
+    // exists to close, just from a different file's boot. Cleaned up before
+    // `app.close()` tears down the DB pool this `db` handle uses.
+    if (seededTenantIds.length > 0) {
+      await db
+        .delete(schema.chzExportRuns)
+        .where(inArray(schema.chzExportRuns.tenantId, seededTenantIds));
+    }
     await app?.close();
+    // Not just "no longer flakes": a real request would have to pass through
+    // this exact spy, so a zero call count is direct proof nothing escaped.
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   async function seedInventory(agent: Agent): Promise<{ tenantId: string; inventoryId: string }> {
     const tenantId = await signUpAndActivate(agent);
+    seededTenantIds.push(tenantId);
     const productId = randomUUID();
     await db.insert(schema.products).values({
       id: productId,

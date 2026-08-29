@@ -80,9 +80,11 @@ export function ChzExportOrderButton({
 export function ChzExportRunStatus({
   inventoryId,
   status,
+  canMutate,
 }: {
   inventoryId: string;
   status: InventoryChzStatus;
+  canMutate: boolean;
 }) {
   const { t } = useTranslation();
   const state = useChzExportState(inventoryId);
@@ -108,7 +110,7 @@ export function ChzExportRunStatus({
               {t("pages.inventory.chzExports.errorCodeFallback", { code: run.errorCode })}
             </small>
           ) : null}
-          {run.errorCode === RETRY_EXHAUSTED_ERROR_CODE ? null : (
+          {!canMutate || run.errorCode === RETRY_EXHAUSTED_ERROR_CODE ? null : (
             <Button
               type="button"
               variant="secondary"

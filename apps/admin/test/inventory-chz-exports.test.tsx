@@ -145,14 +145,14 @@ function stubChzExports(initial: ChzExportStateFixture): void {
   currentChzState = structuredClone(initial);
 }
 
-function renderPreparation() {
+function renderPreparation(access: AccessDocument = ACCESS) {
   orderCalls = [];
   retryCalls = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input, init) => {
       const url = String(input);
-      if (url.endsWith("/api/access/me")) return response(ACCESS);
+      if (url.endsWith("/api/access/me")) return response(access);
       const dependency = shellDependency(url);
       if (dependency) return dependency;
       if (url === `/api/inventories/${ID.inventory}` && !init?.method) {
@@ -242,6 +242,22 @@ it("retries only the failed status", async () => {
   expect(await screen.findByText("нет действующего договора")).toBeDefined();
   await user.click(screen.getByRole("button", { name: "Повторить" }));
   await waitFor(() => expect(retryCalls).toEqual([{ status: "RETIRED" }]));
+});
+
+it("shows no retry button to a read-only user, even on a failed run", async () => {
+  // `ChzExportRunStatus` used to never receive `canMutate` at all, unlike the
+  // order button and the upload zones -- a read-only user saw a retry button
+  // that the server would refuse (`OPERATIONS_WRITE` required), and the
+  // component doesn't render `retry.isError`, so the click just silently did
+  // nothing.
+  stubChzExports({
+    available: true,
+    blockedBy: [],
+    runs: [run("RETIRED", "failed", { errorMessage: "нет действующего договора" })],
+  });
+  renderPreparation({ roles: ["manager"], capabilities: [CABINET_CAPABILITY.OPERATIONS_READ] });
+  expect(await screen.findByText("нет действующего договора")).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Повторить" })).toBeNull();
 });
 
 it("falls back to the error code when a failed run has no message", async () => {
@@ -372,5 +388,65 @@ it("invalidates the inventory detail query once a poll reports a new imported ru
   await waitFor(() => expect(screen.getByText("Импортировано")).toBeDefined());
   // The detail query must have been invalidated and refetched -- not just
   // the chz-exports poll landing.
+  await waitFor(() => expect(detailFetchCount).toBeGreaterThanOrEqual(2));
+});
+
+it("invalidates the inventory detail query when the very first poll already carries an imported run", async () => {
+  // Regression for a mount-ordering gap: `useInventory` and
+  // `useChzExportState` are independent queries with no ordering between
+  // them, so `useInventory` can resolve first. If that very first
+  // chz-exports response already has an imported run -- and every run is
+  // terminal, so polling stops immediately -- the old code only invalidated
+  // on *growth* against a previous poll (`previous !== undefined && ...`),
+  // never on an already-imported first response, leaving the upload slot
+  // stuck on the stale `imports: []` forever.
+  let detailFetchCount = 0;
+  let pollCount = 0;
+  const chzState: ChzExportStateFixture = {
+    available: true,
+    blockedBy: [],
+    runs: [run("EMITTED", "imported")],
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/access/me")) return response(ACCESS);
+      const dependency = shellDependency(url);
+      if (dependency) return dependency;
+      if (url === `/api/inventories/${ID.inventory}` && !init?.method) {
+        detailFetchCount += 1;
+        const imports = chzState.runs
+          .filter((item) => item.state === "imported")
+          .map((item) => importFixture(item.status));
+        return response(detail({ imports }));
+      }
+      if (url === `/api/inventories/${ID.inventory}/chz-exports` && (!init || !init.method)) {
+        pollCount += 1;
+        return response(chzState);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const router = createMemoryRouter(appRoutes, {
+    initialEntries: [`/inventory/${ID.inventory}`],
+  });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider defaultTheme="light">
+        <AuthClientProvider client={authClient()}>
+          <RouterProvider router={router} />
+        </AuthClientProvider>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+
+  expect(await screen.findByText("Импортировано")).toBeDefined();
+  await waitFor(() => expect(pollCount).toBeGreaterThanOrEqual(1));
+  // Must be invalidated and refetched even though this was the very first
+  // response `useChzExportState` ever saw (`previous === undefined`).
   await waitFor(() => expect(detailFetchCount).toBeGreaterThanOrEqual(2));
 });

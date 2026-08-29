@@ -260,7 +260,11 @@ function ExportsStep({
                   <Badge>{t("pages.inventory.exports.missing")}</Badge>
                 )}
               </div>
-              <ChzExportRunStatus inventoryId={inventory.id} status={status} />
+              <ChzExportRunStatus
+                inventoryId={inventory.id}
+                status={status}
+                canMutate={canMutate}
+              />
               {canMutate ? (
                 <FileDropZone
                   compact

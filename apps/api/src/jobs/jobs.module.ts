@@ -487,11 +487,41 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
           async (jobs: JobWithMetadata<ChzExportJobData>[]) => {
             for (const job of jobs) {
               const pass = job.data.pass ?? 0;
-              const { finished } = await this.chzExportRunner.run(
-                job.data.tenantId,
-                job.data.inventoryId,
-                { retryCount: pass, retryLimit: MAX_EXPORT_PASSES },
-              );
+              let finished: boolean;
+              try {
+                ({ finished } = await this.chzExportRunner.run(
+                  job.data.tenantId,
+                  job.data.inventoryId,
+                  { retryCount: pass, retryLimit: MAX_EXPORT_PASSES },
+                ));
+              } catch (error) {
+                // `run()` rethrows anything that is not a `ChzUnauthorizedError`.
+                // A throw makes pg-boss retry the *job* itself (this queue's own
+                // `retryLimit: 5`), and no `startAfter` successor is ever sent
+                // for a thrown pass -- so once the job's own retry budget is
+                // spent (`job.retryCount >= job.retryLimit`, i.e. this was the
+                // last attempt pg-boss will ever make), nothing would advance
+                // this order again: it would sit non-terminal with no operator
+                // recovery (`ChzExportsService.retry()` requires `state =
+                // "failed"`), reachable again only by boot reconciliation
+                // (capped at `SHIFT_EXPORT_RECONCILE_LIMIT` orders per boot).
+                // Failing the remaining runs here closes that gap instead of
+                // letting the job die silently. A retryable attempt (budget not
+                // yet spent) rethrows unchanged so pg-boss's own retry/backoff
+                // still applies exactly as before.
+                if (job.retryCount < job.retryLimit) throw error;
+                this.logger.error(
+                  `ChZ export pass permanently failed for tenant ${job.data.tenantId} ` +
+                    `inventory ${job.data.inventoryId} after ${job.retryCount} job retries; ` +
+                    `failing remaining runs`,
+                  error instanceof Error ? error.stack : undefined,
+                );
+                await this.chzExportRunner.abandonAfterJobRetriesExhausted(
+                  job.data.tenantId,
+                  job.data.inventoryId,
+                );
+                continue;
+              }
               if (!finished) {
                 // A `null` return here would mean another `created` job for
                 // this order already exists (see `chzExportSingletonKey`) --

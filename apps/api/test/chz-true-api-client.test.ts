@@ -53,6 +53,33 @@ describe("TrueApiClient", () => {
     });
   });
 
+  it("maps 403 to a terminal rejection carrying ChZ's own message, not to unauthorized", async () => {
+    // True API answers 403 for "no active contract for the product group" --
+    // a terminal, operator-actionable refusal that no token refresh can fix.
+    // Folding it into `unauthorized` alongside 401 would send it down the
+    // token-retry path and discard this message entirely.
+    const client = new TrueApiClient(
+      deps(
+        async () =>
+          new Response(
+            JSON.stringify({ error_message: "no active contract for the product group" }),
+            { status: 403 },
+          ),
+      ),
+    );
+    const result = await client.createDispenserTask(auth, {
+      participantInn: "7700000000",
+      productGroupCode: 8,
+      chzStatus: "EMITTED",
+      gtins: [],
+    });
+    expect(result).toEqual({
+      status: "rejected",
+      code: "403",
+      message: "no active contract for the product group",
+    });
+  });
+
   it("maps a 4xx rejection to a terminal result carrying the ChZ message", async () => {
     const client = new TrueApiClient(
       deps(

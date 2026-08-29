@@ -74,6 +74,7 @@ export const CHZ_EXPORT_SAFE_ERROR_CODES = [
   "CHZ_CREATE_ATTEMPTS_EXHAUSTED",
   "CHZ_DOWNLOAD_REJECTED",
   "CHZ_IMPORT_FAILED",
+  "CHZ_JOB_RETRIES_EXHAUSTED",
 ] as const;
 export type ChzExportSafeErrorCode = (typeof CHZ_EXPORT_SAFE_ERROR_CODES)[number];
 
@@ -150,8 +151,11 @@ export class ChzExportRunnerService {
       await this.importReadyRuns(tenantId, inventoryId, token.auth);
     } catch (error) {
       if (!(error instanceof ChzUnauthorizedError)) throw error;
-      // A 401/403 mid-pass is the same condition as a token we could not load:
+      // A 401 mid-pass is the same condition as a token we could not load:
       // the tenant's agent has to sign in again before anything else can move.
+      // A 403 never reaches here: the client maps it to `rejected`, not
+      // `unauthorized`, since it is a terminal contract refusal, not a bad
+      // bearer.
       return this.giveUpOnToken(tenantId, inventoryId, attempt, "unauthorized");
     }
 
@@ -534,6 +538,20 @@ export class ChzExportRunnerService {
     return { finished: after.every(isTerminal) };
   }
 
+  /**
+   * Called by the worker (`jobs.module.ts`) when `run()` threw and pg-boss's
+   * own retry budget for the job (`job.retryLimit`) is spent: no `startAfter`
+   * successor was ever sent for a thrown pass, so once the job's own retries
+   * run out nothing would ever advance this order again. Reuses
+   * `failNonTerminal`, the same helper `giveUpOnToken` uses, rather than a
+   * second failure path — every non-terminal run becomes `failed` with a
+   * stable code the operator can act on (retry, or fall back to manual
+   * upload), instead of the order silently stranding itself.
+   */
+  async abandonAfterJobRetriesExhausted(tenantId: string, inventoryId: string): Promise<void> {
+    await this.failNonTerminal(tenantId, inventoryId, "CHZ_JOB_RETRIES_EXHAUSTED");
+  }
+
   private async failNonTerminal(
     tenantId: string,
     inventoryId: string,
@@ -748,7 +766,12 @@ export class ChzExportRunnerService {
   }
 }
 
-/** A 401/403 anywhere in the pass unwinds to the token branch in `run()`. */
+/**
+ * A 401 anywhere in the pass unwinds to the token branch in `run()`. Never
+ * thrown for a 403: `TrueApiClient` maps that to `rejected` (a terminal
+ * contract refusal, not a bad bearer), which each call site already handles
+ * as a normal non-`ok` result.
+ */
 class ChzUnauthorizedError extends Error {}
 
 function isTerminal(run: ChzExportRunRow): boolean {

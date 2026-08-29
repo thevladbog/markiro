@@ -508,6 +508,28 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     expect(others.every((row) => row.state === "ordered")).toBe(true);
   });
 
+  it("fails a run with CHZ_TASK_REJECTED and the ChZ message on a 403 product-group refusal", async () => {
+    // A 403 ("no active contract for the product group") is a `rejected`
+    // result, not `unauthorized` -- see the client's own test. This proves
+    // the runner treats it as the same terminal, message-carrying refusal as
+    // any other rejection rather than unwinding through the token path.
+    await seedRuns({ state: "queued" });
+    const { client } = fakeClient({
+      rejectStatus: "RETIRED",
+      rejection: { code: "403", message: "no active contract for the product group" },
+    });
+    await runnerWith(client).run(tenantId, inventoryId, { retryCount: 0, retryLimit: 5 });
+
+    const [retired] = await runsFor(inventoryId, "RETIRED");
+    expect(retired).toMatchObject({
+      state: "failed",
+      errorCode: "CHZ_TASK_REJECTED",
+      errorMessage: "no active contract for the product group",
+    });
+    const others = (await runsFor(inventoryId)).filter((row) => row.status !== "RETIRED");
+    expect(others.every((row) => row.state === "ordered")).toBe(true);
+  });
+
   it("resumes an in-flight order instead of paying for a second task", async () => {
     await seedRuns({ state: "ordered", taskIdFor: () => "task-existing" });
     const { client, calls } = fakeClient({ results: [] });

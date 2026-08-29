@@ -405,7 +405,8 @@
           "CHZ_TASK_TIMED_OUT": "Chestny ZNAK did not prepare the report in time. Retry the order or upload the file manually.",
           "CHZ_CREATE_ATTEMPTS_EXHAUSTED": "The retry limit for ordering this status from Chestny ZNAK has been reached. Upload the file for this status manually instead.",
           "CHZ_DOWNLOAD_REJECTED": "Chestny ZNAK refused to hand over the finished file. Upload the file for this status manually instead.",
-          "CHZ_IMPORT_FAILED": "The downloaded file could not be imported. Upload the file for this status manually instead."
+          "CHZ_IMPORT_FAILED": "The downloaded file could not be imported. Upload the file for this status manually instead.",
+          "CHZ_JOB_RETRIES_EXHAUSTED": "This status could not be processed after several attempts. Retry the order or upload the file manually."
         }
       },
       "snapshot": {

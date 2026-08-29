@@ -608,3 +608,157 @@ describe.skipIf(!ready)("PgBossService run-chz-export queue: pass budget (amendm
     ).toBe(true);
   }, 30_000);
 });
+
+/**
+ * Finding 2 (PR review): `run()` rethrows anything that is not a
+ * `ChzUnauthorizedError`. A thrown pass means pg-boss retries the *job*
+ * itself (this queue's own `retryLimit: 5`), and no `startAfter` successor
+ * is ever sent for a thrown pass -- so once the job's own retry budget is
+ * spent, nothing would ever advance a persistently-failing order again: it
+ * would sit non-terminal with no operator recovery
+ * (`ChzExportsService.retry()` requires `state = "failed"`) and no automatic
+ * sweep, reachable again only by boot reconciliation (capped at
+ * `SHIFT_EXPORT_RECONCILE_LIMIT` orders per boot). This drives the real
+ * captured handler with a real `ChzExportRunnerService` (so
+ * `abandonAfterJobRetriesExhausted`'s DB write is exercised for real, not
+ * mocked) whose `run()` is forced to always reject, proving the worker fails
+ * the remaining runs once `job.retryCount >= job.retryLimit` instead of
+ * letting the job die silently -- and that a retryable attempt (budget not
+ * yet spent) still rethrows so pg-boss's own retry/backoff is untouched.
+ */
+describe.skipIf(!ready)(
+  "PgBossService run-chz-export queue: job retries exhausted (amendment)",
+  () => {
+    const databaseName = `markiro_chz_export_job_retries_${randomUUID().replaceAll("-", "_")}`;
+    const maintenanceUrl = process.env.DATABASE_URL ?? "postgres://invalid";
+    const scratchUrl = new URL(maintenanceUrl);
+    scratchUrl.pathname = `/${databaseName}`;
+    scratchUrl.search = "";
+    const maintenance = createDb(maintenanceUrl);
+    let connection: ReturnType<typeof createDb>;
+    let db: Db;
+
+    beforeAll(async () => {
+      await maintenance.pool.query(`CREATE DATABASE "${databaseName}"`);
+      connection = createDb(scratchUrl.toString(), { max: 8 });
+      await migrate(connection.db, {
+        migrationsFolder: join(__dirname, "../../../packages/db/migrations"),
+      });
+      db = connection.db;
+    }, 120_000);
+
+    afterAll(async () => {
+      await connection?.pool.end();
+      await maintenance.pool.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
+      await maintenance.pool.end();
+    });
+
+    beforeEach(() => {
+      pgBossMock.instances.length = 0;
+    });
+
+    /** A real service so `abandonAfterJobRetriesExhausted` really writes to `runnerDb`. */
+    function throwingRunner(runnerDb: Db): ChzExportRunnerService {
+      const crypto = new ChzCryptoService(randomBytes(32));
+      const tokens = new ChzTokenService(runnerDb, crypto);
+      const client = new TrueApiClient();
+      const inventories = {} as InventoriesService;
+      const journal = new JournalService(runnerDb);
+      const runner = new ChzExportRunnerService(runnerDb, tokens, client, inventories, journal);
+      vi.spyOn(runner, "run").mockRejectedValue(new Error("persistent True API failure"));
+      return runner;
+    }
+
+    it("fails every non-terminal run once the job's own retry budget is exhausted, but rethrows while budget remains", async () => {
+      const tenantId = await createOrganization(db);
+      const actorUserId = randomUUID();
+      const productId = randomUUID();
+      const lineId = randomUUID();
+      const inventoryId = randomUUID();
+
+      await db.insert(schema.user).values({
+        id: actorUserId,
+        name: "Job retries fixture operator",
+        email: `${randomUUID()}@example.invalid`,
+        emailVerified: false,
+      });
+      await db.insert(schema.products).values({
+        id: productId,
+        tenantId,
+        gtin14: GTIN,
+        name: "Job retries fixture product",
+      });
+      await db
+        .insert(schema.lines)
+        .values({ id: lineId, tenantId, name: "Job retries fixture line" });
+      await db.insert(schema.inventories).values({
+        id: inventoryId,
+        tenantId,
+        number: `INV-${randomUUID()}`,
+        productId,
+        gtin14Snapshot: GTIN,
+        lineId,
+        mode: "check",
+        productionDateFrom: "2026-08-01",
+        productionDateTo: "2026-08-31",
+        createdByUserId: actorUserId,
+      });
+      await db.insert(schema.chzExportRuns).values(
+        INVENTORY_CHZ_STATUSES.map((status) => ({
+          tenantId,
+          inventoryId,
+          status,
+          state: "queued" as const,
+          orderedByUserId: actorUserId,
+        })),
+      );
+
+      const runner = throwingRunner(db);
+      const boss = fakeBoss();
+      const service = serviceWith(boss, runner, emptyDb());
+      await service.onModuleInit();
+      const handler = boss.getChzExportHandler();
+      expect(handler).toBeDefined();
+
+      async function runsFor(id: string) {
+        return db
+          .select()
+          .from(schema.chzExportRuns)
+          .where(
+            and(
+              eq(schema.chzExportRuns.tenantId, tenantId),
+              eq(schema.chzExportRuns.inventoryId, id),
+            ),
+          );
+      }
+
+      // Still inside the job's own retry budget (retryCount 2 < retryLimit 5):
+      // the error must propagate so pg-boss's normal retry/backoff applies,
+      // and nothing is written to the runs yet.
+      boss.send.mockClear();
+      await expect(handler?.([chzExportJob({ tenantId, inventoryId }, 2, 5)])).rejects.toThrow(
+        "persistent True API failure",
+      );
+      expect(boss.send).not.toHaveBeenCalled();
+      expect((await runsFor(inventoryId)).every((row) => row.state === "queued")).toBe(true);
+
+      // The job's own retry budget is now exhausted (retryCount === retryLimit
+      // -- pg-boss's last attempt for this job). There is no successor pg-boss
+      // retry left to catch a rethrow, so the handler must resolve and fail the
+      // remaining runs instead of leaving them stuck non-terminal forever.
+      boss.send.mockClear();
+      await expect(
+        handler?.([chzExportJob({ tenantId, inventoryId }, 5, 5)]),
+      ).resolves.toBeUndefined();
+      expect(boss.send).not.toHaveBeenCalled();
+
+      const rows = await runsFor(inventoryId);
+      expect(rows).toHaveLength(6);
+      expect(
+        rows.every(
+          (row) => row.state === "failed" && row.errorCode === "CHZ_JOB_RETRIES_EXHAUSTED",
+        ),
+      ).toBe(true);
+    }, 30_000);
+  },
+);

@@ -274,6 +274,7 @@ export const CHZ_EXPORT_SAFE_ERROR_CODES = [
   "CHZ_CREATE_ATTEMPTS_EXHAUSTED",
   "CHZ_DOWNLOAD_REJECTED",
   "CHZ_IMPORT_FAILED",
+  "CHZ_JOB_RETRIES_EXHAUSTED",
 ] as const;
 export type ChzExportSafeErrorCode = (typeof CHZ_EXPORT_SAFE_ERROR_CODES)[number];
 

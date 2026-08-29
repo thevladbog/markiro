@@ -515,14 +515,26 @@ export function useChzExportState(inventoryId: string): UseQueryResult<ChzExport
       // result: the six upload slots render from `useInventory`'s
       // `imports`, and nothing else invalidates that query when a run
       // finishes, so a poll that lands here is the only place that ever
-      // learns a run just became `imported`. Skipped on the very first
-      // fetch (`previous === undefined`) so mounting the page does not
-      // trigger a redundant invalidation of a query that just loaded.
+      // learns a run just became `imported`.
       const previous = queryClient.getQueryData<ChzExportState>(
         chzExportStateQueryKey(inventoryId),
       );
       const next = await getChzExportState(inventoryId);
-      if (previous !== undefined && importedRunCount(next) > importedRunCount(previous)) {
+      // On the very first fetch (`previous === undefined`) this still only
+      // fires when `next` already carries an imported run: `useInventory` can
+      // resolve before this query ever mounts (e.g. `ExportsStep` mounting
+      // after the detail page's own query already settled), and if that first
+      // response already has imported runs -- with the rest terminal, so
+      // polling stops immediately -- nothing would ever invalidate
+      // `useInventory` again, leaving the upload slots stuck on the stale
+      // `imports` list forever. A `previous` fetch with no growth still skips
+      // this, exactly as before, so mounting the page does not trigger a
+      // redundant invalidation of a query that just loaded.
+      const grew =
+        previous === undefined
+          ? importedRunCount(next) > 0
+          : importedRunCount(next) > importedRunCount(previous);
+      if (grew) {
         invalidateInventoryDetail(queryClient, inventoryId);
       }
       return next;

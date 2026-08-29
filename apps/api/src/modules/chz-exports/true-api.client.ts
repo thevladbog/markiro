@@ -151,7 +151,16 @@ export class TrueApiClient {
         },
         signal: controller.signal,
       });
-      if (response.status === 401 || response.status === 403) return { status: "unauthorized" };
+      // 401 alone means the bearer is bad: that is the token path, and the
+      // runner retries once a fresh one is available. 403 is deliberately
+      // NOT folded in here even though it is also an auth-shaped status: True
+      // API answers 403 for "no active contract for the product group",
+      // which no token refresh will ever fix. Treating it as `unauthorized`
+      // would send a terminal, operator-actionable refusal down the
+      // token-retry path, discarding ЧЗ's own message in the process. It
+      // falls through to the generic 4xx branch below instead, which is
+      // `rejected` and carries the message verbatim.
+      if (response.status === 401) return { status: "unauthorized" };
       // 429 is a rate limit signal, not a refusal: the caller retries with backoff
       // (classed as transient alongside network errors and 5xx per the spec).
       if (response.status === 429) return { status: "unavailable" };
