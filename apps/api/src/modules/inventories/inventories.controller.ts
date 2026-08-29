@@ -47,7 +47,7 @@ import {
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
-import { CHZ_MAX_COMPRESSED_BYTES } from "./chz-tabular-reader";
+import { CHZ_MAX_INPUT_BYTES } from "./chz-tabular-reader";
 import {
   createInventoryOpenApiSchema,
   createInventorySchema,
@@ -539,8 +539,9 @@ export class InventoriesController {
   @UseInterceptors(
     FileInterceptor("file", {
       storage: memoryStorage(),
+      defParamCharset: "utf8",
       limits: {
-        fileSize: CHZ_MAX_COMPRESSED_BYTES,
+        fileSize: CHZ_MAX_INPUT_BYTES,
         files: 1,
         fields: 0,
         fieldSize: 0,

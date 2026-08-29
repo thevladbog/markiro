@@ -16,6 +16,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import type * as ChzImportParserModule from "../src/modules/inventories/chz-import-parser";
+import { CHZ_MAX_INPUT_BYTES } from "../src/modules/inventories/chz-tabular-reader";
 import { InventoryDocumentRunnerService } from "../src/modules/inventories/inventory-document-runner.service";
 import { InventoriesService } from "../src/modules/inventories/inventories.service";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
@@ -1394,11 +1395,14 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     const { tenantId, productId, lineId } = await seedPreparation(agent);
     const inventory = await createInventory(agent, productId, lineId);
 
-    await upload(agent, inventory.id, "INTRODUCED", Buffer.alloc(8 * 1024 * 1024 + 1)).expect(413, {
-      message: "File too large",
-      error: "Payload Too Large",
-      statusCode: 413,
-    });
+    await upload(agent, inventory.id, "INTRODUCED", Buffer.alloc(CHZ_MAX_INPUT_BYTES + 1)).expect(
+      413,
+      {
+        message: "File too large",
+        error: "Payload Too Large",
+        statusCode: 413,
+      },
+    );
     expect(storage.putVerified).not.toHaveBeenCalled();
     const attempts = await db
       .select({ id: schema.inventoryImports.id })

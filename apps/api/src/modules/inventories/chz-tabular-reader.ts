@@ -5,14 +5,15 @@ import { XMLParser } from "fast-xml-parser";
 
 import type { InventoryChzStatus } from "@markiro/domain";
 
-export const CHZ_MAX_COMPRESSED_BYTES = 8 * 1024 * 1024;
-export const CHZ_MAX_UNCOMPRESSED_BYTES = 16 * 1024 * 1024;
-export const CHZ_MAX_WORKSHEET_BYTES = 12 * 1024 * 1024;
+export const CHZ_MAX_INPUT_BYTES = 64 * 1024 * 1024;
+export const CHZ_MAX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
+export const CHZ_MAX_WORKSHEET_BYTES = 60 * 1024 * 1024;
 export const CHZ_MAX_ROWS = 50_000;
 export const CHZ_MAX_COLUMNS = 35;
 export const CHZ_MAX_CELLS = 1_750_000;
 export const CHZ_MAX_CELL_UTF8_BYTES = 64 * 1024;
 const CHZ_MAX_ARCHIVE_ENTRIES = 128;
+const CHZ_MAX_ARCHIVE_BYTES = 8 * 1024 * 1024;
 const CHZ_MAX_XML_METADATA_BYTES = 2 * 1024 * 1024;
 
 export type ChzContainerKind = "csv" | "zip" | "xlsx";
@@ -242,7 +243,7 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
 }
 
 function inspectZip(bytes: Uint8Array): ZipEntryMetadata[] {
-  if (bytes.length > CHZ_MAX_COMPRESSED_BYTES) fail("CHZ_INPUT_TOO_LARGE");
+  if (bytes.length > CHZ_MAX_ARCHIVE_BYTES) fail("CHZ_INPUT_TOO_LARGE");
   if (bytes.length < 22) fail("CHZ_ZIP_INVALID");
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const eocd = findEndOfCentralDirectory(bytes);
@@ -676,7 +677,7 @@ export function readChzTabular(input: {
   mimeType: string;
   bytes: Uint8Array;
 }): ChzTabularDocument {
-  if (input.bytes.length > CHZ_MAX_COMPRESSED_BYTES) fail("CHZ_INPUT_TOO_LARGE");
+  if (input.bytes.length > CHZ_MAX_INPUT_BYTES) fail("CHZ_INPUT_TOO_LARGE");
   const kind = containerKind(input.filename, input.mimeType, input.bytes);
   const records =
     kind === "csv"

@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { INVENTORY_CHZ_STATUSES, kmHash, type InventoryChzStatus } from "@markiro/domain";
 
 import { ChzImportError, parseChzImport } from "../src/modules/inventories/chz-import-parser";
+import { CHZ_MAX_UNCOMPRESSED_BYTES } from "../src/modules/inventories/chz-tabular-reader";
 
 const GTIN = "04680089900383";
 const OTHER_GTIN = "04600682000013";
@@ -183,6 +184,7 @@ function xlsxBytes(
   options: {
     formulaCell?: "missing-cache" | "empty-v" | "empty-is";
     sparseDataRow?: boolean;
+    worksheetPaddingBytes?: number;
   } = {},
 ): Uint8Array {
   const rawKm = `01${GTIN}21SYNTHETIC-XLSX${GS}93tail,"punctuation"`;
@@ -215,6 +217,7 @@ function xlsxBytes(
     inlineRow(1, [filter("INTRODUCED")]),
     inlineRow(2, HEADER),
     `<row r="3">${row3Cells}</row>`,
+    `<!--${"x".repeat(options.worksheetPaddingBytes ?? 0)}-->`,
     "</sheetData></worksheet>",
   ].join("");
   const workbook = [
@@ -326,6 +329,16 @@ function understateZipUncompressedSize(bytes: Uint8Array): Uint8Array {
   if (actualSize === 0) throw new Error("ZIP test fixture must not be empty");
   view.setUint32(local + 22, actualSize - 1, true);
   view.setUint32(central + 24, actualSize - 1, true);
+  return result;
+}
+
+function setZipUncompressedSize(bytes: Uint8Array, size: number): Uint8Array {
+  const result = bytes.slice();
+  const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
+  const local = findZipSignature(result, 0x04034b50);
+  const central = findZipSignature(result, 0x02014b50);
+  view.setUint32(local + 22, size, true);
+  view.setUint32(central + 24, size, true);
   return result;
 }
 
@@ -443,6 +456,22 @@ describe("Chestny ZNAK inventory import parser", () => {
     expect(result.emptyResult).toBe(true);
   });
 
+  it("accepts a valid CSV above the former 8 MiB input limit", () => {
+    const rows = Array.from({ length: 30_000 }, (_, index) => {
+      const row = dataRow("INTRODUCED", {
+        rawKm: `01${GTIN}21SYNTHETIC-LARGE-${index.toString().padStart(5, "0")}`,
+      });
+      row[9] = "Товар для инвентаризации ".repeat(8);
+      return row;
+    });
+    const bytes = csvBytes("INTRODUCED", rows);
+    expect(bytes.byteLength).toBeGreaterThan(8 * 1024 * 1024);
+
+    const result = parse(bytes);
+
+    expect(result.rows).toHaveLength(rows.length);
+  });
+
   it("rejects a near-match errors marker fail-closed", () => {
     const text = [
       csvCell(filter("APPLIED")),
@@ -464,6 +493,15 @@ describe("Chestny ZNAK inventory import parser", () => {
       mimeType: MIME_ZIP,
     });
     expect(result.rows).toHaveLength(1);
+  });
+
+  it("keeps the compressed archive input limit below the larger plain CSV limit", () => {
+    const zip = zipSync({ "status.csv": new Uint8Array(8 * 1024 * 1024 + 1) }, { level: 0 });
+
+    expectImportError(
+      () => parse(zip, { filename: "status.zip", mimeType: MIME_ZIP }),
+      "CHZ_INPUT_TOO_LARGE",
+    );
   });
 
   it("rejects a ZIP whose sole non-directory member is not CSV", () => {
@@ -587,7 +625,10 @@ describe("Chestny ZNAK inventory import parser", () => {
       "CHZ_CELL_TOO_LARGE",
       1,
     );
-    const overLimit = zipSync({ "status.csv": new Uint8Array(16 * 1024 * 1024 + 1) });
+    const overLimit = setZipUncompressedSize(
+      zipSync({ "status.csv": new Uint8Array([0]) }),
+      CHZ_MAX_UNCOMPRESSED_BYTES + 1,
+    );
     expectImportError(
       () => parse(overLimit, { filename: "status.zip", mimeType: MIME_ZIP }),
       "CHZ_ZIP_EXPANSION_LIMIT",
@@ -604,6 +645,15 @@ describe("Chestny ZNAK inventory import parser", () => {
       sourceProductionDate: "2026-08-19",
     });
     expect(result.rows[0]!.canonicalKm).toContain(GS);
+  });
+
+  it("accepts a valid CHZ XLSX whose worksheet expands beyond the former 16 MiB archive limit", () => {
+    const result = parse(xlsxBytes({ worksheetPaddingBytes: 17 * 1024 * 1024 }), {
+      filename: "status.xlsx",
+      mimeType: MIME_XLSX,
+    });
+
+    expect(result.rows).toHaveLength(1);
   });
 
   it("reconstructs a genuinely sparse XLSX data row from cell references", () => {

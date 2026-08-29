@@ -448,6 +448,35 @@ it("refreshes persisted failed upload attempts and diagnostics after a 422 respo
   expect(screen.getByText(/ошибок: 2/)).toBeDefined();
 });
 
+it("shows a localized upload error inside the status slot that rejected the file", async () => {
+  const { user } = renderRoute(`/inventory/${ID.inventory}`, async (input, init) => {
+    const url = String(input);
+    const dependency = shellDependency(url);
+    if (dependency) return dependency;
+    if (url === `/api/inventories/${ID.inventory}` && !init?.method) return response(detail());
+    if (url.endsWith("/imports/RETIRED") && init?.method === "POST") {
+      return response(
+        { message: "File too large", error: "Payload Too Large", statusCode: 413 },
+        413,
+      );
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+
+  expect(await screen.findByRole("heading", { name: "Выписки по статусам кодов" })).toBeDefined();
+  await user.upload(
+    fileInput("RETIRED"),
+    new File(["oversized"], "retired.csv", { type: "text/csv" }),
+  );
+
+  const slot = document.getElementById("inventory-slot-RETIRED");
+  if (!slot) throw new Error("Missing RETIRED inventory slot");
+  const alert = await within(slot).findByRole("alert");
+  expect(alert.textContent).toContain("Файл слишком большой. Максимальный размер — 64 МБ.");
+  expect(alert.textContent).not.toMatch(/HTTP|File too large/i);
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+});
+
 it("updates editable parameters through PATCH and returns to exports", async () => {
   let currentDetail = detail();
   let patchBody: unknown;
