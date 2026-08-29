@@ -465,8 +465,11 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       await boss.createQueue(RUN_CHZ_EXPORT_QUEUE, {
         // See `chzExportSingletonKey` above for why this policy plus a
         // per-order key is what makes a duplicate chain impossible instead
-        // of merely detected.
-        policy: "stately",
+        // of merely detected. The constant is shared with
+        // `assertChzExportQueuePolicy` on purpose: two literals that happened
+        // to agree would let one drift and leave the assertion checking a
+        // policy nothing sets.
+        policy: RUN_CHZ_EXPORT_QUEUE_POLICY,
         retryLimit: 5,
         retryDelay: 30,
         retryBackoff: true,
