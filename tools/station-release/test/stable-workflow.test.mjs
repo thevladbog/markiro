@@ -173,6 +173,14 @@ test("normal stable modes validate the exact beta at both origins before rebuild
   assert.ok(steps.indexOf(accepted) < steps.indexOf(prepare));
   assert.ok(steps.indexOf(prepare) < steps.indexOf(build));
   assert.ok(steps.indexOf(build) < steps.indexOf(signing));
+  assert.match(
+    build.run,
+    /cargo test --manifest-path apps\/station\/src-tauri\/Cargo\.toml --no-run/,
+  );
+  assert.doesNotMatch(
+    build.run,
+    /cargo test --manifest-path apps\/station\/src-tauri\/Cargo\.toml(?:\s|$)(?![^\n]*--no-run)/,
+  );
   assert.match(accepted.run, /gh release view "\$source_beta_tag"/);
   assert.match(
     accepted.run,
