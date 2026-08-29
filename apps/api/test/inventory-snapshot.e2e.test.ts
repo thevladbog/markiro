@@ -15,6 +15,7 @@ import { buildSscc, INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@mar
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { CHZ_MAX_INPUT_BYTES } from "../src/modules/inventories/chz-tabular-reader";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
@@ -288,7 +289,7 @@ describe.skipIf(!ready)("inventory immutable snapshot fixation e2e", () => {
     expect(JSON.stringify(snapshot)).not.toMatch(/objectKey|fileName|canonicalRaw|SYNTHETIC/i);
     expect(storage.get).toHaveBeenCalledTimes(6);
     expect(
-      storage.get.mock.calls.every(([, options]) => options?.maxBytes === 8 * 1024 * 1024),
+      storage.get.mock.calls.every(([, options]) => options?.maxBytes === CHZ_MAX_INPUT_BYTES),
     ).toBe(true);
 
     const [storedSnapshot] = await db

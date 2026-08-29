@@ -23,7 +23,7 @@ import {
 import { DB } from "../../auth/auth.module";
 import { isMissingObjectError, ObjectStorageService } from "../storage/object-storage.service";
 import { ChzImportError, parseChzImport } from "./chz-import-parser";
-import { CHZ_MAX_COMPRESSED_BYTES, type ChzContainerKind } from "./chz-tabular-reader";
+import { CHZ_MAX_INPUT_BYTES, type ChzContainerKind } from "./chz-tabular-reader";
 import type {
   FixInventorySnapshotDto,
   InventorySnapshotCountsDto,
@@ -377,7 +377,7 @@ export class InventorySnapshotService {
     let stored: Awaited<ReturnType<ObjectStorageService["get"]>>;
     try {
       stored = await this.storage.get(evidence.objectKey, {
-        maxBytes: CHZ_MAX_COMPRESSED_BYTES,
+        maxBytes: CHZ_MAX_INPUT_BYTES,
       });
     } catch (error) {
       if (isMissingObjectError(error)) {
