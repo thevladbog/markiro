@@ -211,6 +211,15 @@ test("normal stable modes validate the exact beta at both origins before rebuild
   assert.doesNotMatch(accepted.run, /gh release list[^\n]*targetCommitish/);
   assert.equal(prepare.if, "inputs.mode == 'publish'");
   assert.match(prepare.run, /git checkout --detach "\$base_sha"/);
+  assert.match(
+    prepare.run,
+    /git restore --source="\$GITHUB_SHA" --worktree tools\/station-release/,
+  );
+  assert.doesNotMatch(prepare.run, /git restore[^\n]*--staged/);
+  assert.ok(
+    prepare.run.indexOf('git restore --source="$GITHUB_SHA"') <
+      prepare.run.indexOf("node tools/station-release/version.mjs set-stable"),
+  );
   assert.match(prepare.run, /git rev-parse HEAD\^/);
   assert.equal(build.if, "inputs.mode == 'publish'");
 });
