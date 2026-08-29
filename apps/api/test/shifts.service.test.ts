@@ -91,6 +91,7 @@ const PRODUCT_ROW = {
   gtin14: "00000000000000",
   name: "Widget",
   chzProductGroupCode: null,
+  productGroupName: null,
   boxCapacity: 10,
   palletCapacity: null,
   status: "active",
@@ -134,6 +135,27 @@ describe("ShiftsService.getBundle's bundleSscc degrade path (Task 7 correction)"
 
     await expect(service.getBundle("tenant-1", "shift-1", "device-1")).rejects.toBe(boom);
     expect(lockedTables).toEqual([schema.shifts]);
+  });
+});
+
+describe("ShiftsService.getReferenceBundle product-group mapping", () => {
+  it("maps a product with no dictionary group to a null productGroup, not undefined", async () => {
+    const { db } = fakeDb(
+      new Map<unknown, unknown[]>([
+        [schema.shifts, [SHIFT_ROW]],
+        [schema.products, [PRODUCT_ROW]],
+      ]),
+    );
+    const service = new ShiftsService(
+      db,
+      fakeOperatorsService(),
+      {} as SsccService,
+      {} as EntitlementsService,
+    );
+
+    const bundle = await service.getReferenceBundle("tenant-1", "shift-1");
+
+    expect(bundle.product.productGroup).toBeNull();
   });
 });
 
