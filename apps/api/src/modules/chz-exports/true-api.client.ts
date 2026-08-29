@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 
 import {
   productionTrueApiClientDependencies,
+  type CisInfo,
   type CreateDispenserTaskInput,
   type DispenserResult,
   type DispenserTaskSummary,
@@ -27,6 +28,9 @@ const DOWNLOAD_TIMEOUT_MS = 60_000;
  * the sandbox rejects it, only this constant changes.
  */
 const PACKAGE_TYPE = "UNIT";
+
+/** True API's documented ceiling for one `cises/info` call. */
+export const CISES_INFO_BATCH_LIMIT = 1000;
 
 @Injectable()
 export class TrueApiClient {
@@ -129,6 +133,48 @@ export class TrueApiClient {
       DOWNLOAD_TIMEOUT_MS,
       {},
       async (response) => new Uint8Array(await response.arrayBuffer()),
+    );
+  }
+
+  async cisesInfo(
+    auth: TrueApiAuth,
+    productGroupCode: number,
+    cises: string[],
+  ): Promise<TrueApiResult<CisInfo[]>> {
+    // A RangeError rather than a silent slice: the caller batches, and a
+    // truncated request would look like ЧЗ having no opinion about the codes
+    // that were dropped.
+    if (cises.length > CISES_INFO_BATCH_LIMIT) {
+      throw new RangeError(`cises/info accepts at most ${CISES_INFO_BATCH_LIMIT} codes`);
+    }
+    const query = new URLSearchParams({ pg: String(productGroupCode) });
+    return this.request(
+      auth,
+      `/cises/info?${query.toString()}`,
+      REQUEST_TIMEOUT_MS,
+      { method: "POST", body: JSON.stringify(cises) },
+      async (response) => {
+        const payload: unknown = await response.json();
+        const rows = Array.isArray(payload) ? payload : [];
+        return rows.flatMap((row) => {
+          const record = row as Record<string, unknown>;
+          const cis = typeof record.cis === "string" ? record.cis : "";
+          // A row we cannot attribute to a code we asked about is worse than
+          // absent: the caller matches on `cis`, and an empty string would
+          // match nothing while looking like an answer.
+          if (cis.length === 0) return [];
+          return [
+            {
+              cis,
+              status: stringOrEmpty(record.status),
+              statusEx: typeof record.statusEx === "string" ? record.statusEx : null,
+              ownerInn: typeof record.ownerInn === "string" ? record.ownerInn : null,
+              withdrawReason:
+                typeof record.withdrawReason === "string" ? record.withdrawReason : null,
+            },
+          ];
+        });
+      },
     );
   }
 

@@ -159,4 +159,78 @@ describe("TrueApiClient", () => {
     await client.listDispenserTasks(auth, 8);
     expect(seen.join("|")).not.toContain("t0ken");
   });
+
+  it("posts the codes as a body and the product group as a query parameter", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const client = new TrueApiClient(
+      deps(async (url, init) => {
+        calls.push({ url: String(url), init: init as RequestInit });
+        return new Response(
+          JSON.stringify([
+            {
+              cis: "01046000000000172150",
+              status: "INTRODUCED",
+              statusEx: "MOVING_BY_UD",
+              ownerInn: "7700000000",
+            },
+          ]),
+          { status: 200 },
+        );
+      }),
+    );
+
+    const result = await client.cisesInfo(auth, 8, ["01046000000000172150"]);
+
+    expect(calls[0]!.url).toBe(`${auth.baseUrl}/cises/info?pg=8`);
+    expect(calls[0]!.init.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual(["01046000000000172150"]);
+    expect(result).toEqual({
+      status: "ok",
+      value: [
+        {
+          cis: "01046000000000172150",
+          status: "INTRODUCED",
+          statusEx: "MOVING_BY_UD",
+          ownerInn: "7700000000",
+          withdrawReason: null,
+        },
+      ],
+    });
+  });
+
+  it("drops a row with no usable cis rather than inventing one", async () => {
+    const client = new TrueApiClient(
+      deps(async () => new Response(JSON.stringify([{ status: "INTRODUCED" }]), { status: 200 })),
+    );
+    // A row we cannot attribute to a code we asked about is worse than absent:
+    // the caller matches on `cis`, and an empty string would match nothing
+    // while looking like an answer.
+    await expect(client.cisesInfo(auth, 8, ["01046000000000172150"])).resolves.toEqual({
+      status: "ok",
+      value: [],
+    });
+  });
+
+  it("refuses to send more than the documented batch size", async () => {
+    const client = new TrueApiClient(deps(async () => new Response("[]", { status: 200 })));
+    await expect(
+      client.cisesInfo(
+        auth,
+        8,
+        Array.from({ length: 1001 }, (_, index) => `cis-${index}`),
+      ),
+    ).rejects.toThrow(RangeError);
+  });
+
+  it("does not put the token anywhere but the Authorization header", async () => {
+    const seen: string[] = [];
+    const client = new TrueApiClient(
+      deps(async (url, init) => {
+        seen.push(String(url), String((init as RequestInit).body ?? ""));
+        return new Response("[]", { status: 200 });
+      }),
+    );
+    await client.cisesInfo(auth, 8, ["01046000000000172150"]);
+    expect(seen.join("|")).not.toContain("t0ken");
+  });
 });
