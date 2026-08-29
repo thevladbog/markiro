@@ -111,7 +111,10 @@ function fakeBoss() {
       },
     ),
     send: vi.fn(async () => "shift-export-job-id" as string | null),
-    getDb: vi.fn(() => ({ executeSql: vi.fn(async () => undefined) })),
+    // `checkReady`'s probe ignores the result; `assertChzExportQueuePolicy`
+    // (jobs.module.ts) needs a row reporting the expected "stately" policy
+    // so `onModuleInit` doesn't throw on the boot-time policy check.
+    getDb: vi.fn(() => ({ executeSql: vi.fn(async () => ({ rows: [{ policy: "stately" }] })) })),
     getWipData: vi.fn(() => []),
     getShiftExportHandler: () => shiftExportHandler,
     getInventoryDocumentHandler: () => inventoryDocumentHandler,

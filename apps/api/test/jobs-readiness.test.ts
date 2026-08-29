@@ -76,9 +76,14 @@ function fakeBoss(options: { workIds?: string[]; failWorkAt?: number } = {}) {
       return id;
     }),
     send: vi.fn(async () => "job-id"),
+    // `assertChzExportQueuePolicy` (jobs.module.ts) queries this during
+    // `onModuleInit` and expects a row reporting the "stately" policy --
+    // without it, every test in this suite would fail the boot-time policy
+    // check before readiness is even reachable.
     getDb: vi.fn(() => ({
       executeSql: vi.fn(async () => {
         if (sqlError) throw sqlError;
+        return { rows: [{ policy: "stately" }] };
       }),
     })),
     getWipData: vi.fn(() => wipData),

@@ -127,6 +127,47 @@ function chzExportSingletonKey(tenantId: string, inventoryId: string): string {
   return `${tenantId}:${inventoryId}`;
 }
 
+const RUN_CHZ_EXPORT_QUEUE_POLICY = "stately";
+
+/**
+ * `boss.createQueue(RUN_CHZ_EXPORT_QUEUE, { policy: "stately", ... })` above
+ * is a no-op the moment the queue row already exists: pg-boss v12's
+ * `create_queue()` SQL function inserts with `ON CONFLICT DO NOTHING`, and
+ * `updateQueue` has no support for changing an existing queue's `policy` at
+ * all. Every job insert reads `policy` from the *current* `queue.policy` row
+ * at send time, so a queue that was ever created under `standard` (pg-boss's
+ * own default) silently keeps that policy forever, no matter what this file
+ * asks for on later boots -- `chzExportSingletonKey` above is accepted on
+ * every `send` but never deduplicated, with no error. This happened for real
+ * on this repo's dev database on an earlier version of this branch.
+ *
+ * There is no safe automatic repair here: dropping and recreating the queue
+ * row is only safe when it has no jobs (verified by hand for this repo's dev
+ * database), and this boot path has no business making that judgment call or
+ * deleting rows out from under in-flight export chains. The only environments
+ * that can currently have the wrong policy are ones that already ran this
+ * unreleased branch, so failing loudly here -- instead of quietly limping
+ * along with a budget-reset bug this whole file exists to close -- costs
+ * those environments one clear, actionable boot failure instead of costing
+ * every environment a silent one.
+ */
+async function assertChzExportQueuePolicy(boss: PgBoss): Promise<void> {
+  const { rows } = await boss
+    .getDb()
+    .executeSql("select policy from pgboss.queue where name = $1", [RUN_CHZ_EXPORT_QUEUE]);
+  const actual = (rows[0] as { policy?: string } | undefined)?.policy;
+  if (actual !== RUN_CHZ_EXPORT_QUEUE_POLICY) {
+    throw new Error(
+      `${RUN_CHZ_EXPORT_QUEUE} queue policy is "${actual ?? "unknown"}", expected ` +
+        `"${RUN_CHZ_EXPORT_QUEUE_POLICY}". createQueue cannot change an existing queue's ` +
+        `policy, so the export dedup (chzExportSingletonKey) is silently inert on this ` +
+        `database. Fix by confirming the queue has no jobs, then running: ` +
+        `delete from pgboss.queue where name = '${RUN_CHZ_EXPORT_QUEUE}'; -- createQueue ` +
+        `will recreate it under the right policy on the next boot.`,
+    );
+  }
+}
+
 const QUEUE_NAME = "ensure-partitions";
 const QUEUE_CRON = "0 4 * * *";
 
@@ -432,6 +473,10 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         retryDelayMax: 900,
         expireInSeconds: 900,
       });
+      // `createQueue` above is a no-op if this queue already existed under a
+      // different policy -- see `assertChzExportQueuePolicy` for why that
+      // makes the dedup above silently inert instead of merely absent.
+      await assertChzExportQueuePolicy(boss);
       this.workerIds.push(
         await boss.work(
           RUN_CHZ_EXPORT_QUEUE,

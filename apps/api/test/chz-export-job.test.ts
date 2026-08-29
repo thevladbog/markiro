@@ -121,7 +121,10 @@ function fakeBoss() {
     send: vi.fn(
       async (_name?: string, _data?: unknown, _options?: unknown) => "job-id" as string | null,
     ),
-    getDb: vi.fn(() => ({ executeSql: vi.fn(async () => undefined) })),
+    // `checkReady`'s probe ignores the result; `assertChzExportQueuePolicy`
+    // (jobs.module.ts) needs a row reporting the expected "stately" policy
+    // so `onModuleInit` doesn't throw on the boot-time policy check.
+    getDb: vi.fn(() => ({ executeSql: vi.fn(async () => ({ rows: [{ policy: "stately" }] })) })),
     getWipData: vi.fn(() => []),
     getChzExportHandler: () => chzExportHandler,
   };
@@ -215,6 +218,32 @@ describe("PgBossService run-chz-export queue", () => {
     );
     expect(boss.schedule.mock.calls.map(([queue]) => queue)).not.toContain(RUN_CHZ_EXPORT_QUEUE);
   });
+
+  it(
+    "fails boot when run-chz-export's actual queue policy is not stately -- createQueue is a " +
+      "no-op on an existing queue, so this is the only thing that can catch a stale policy",
+    async () => {
+      const boss = fakeBoss();
+      // Simulates exactly what this repo's dev database had: a queue row
+      // that was created under `standard` before commit 02bc713ba, which
+      // `createQueue(RUN_CHZ_EXPORT_QUEUE, { policy: "stately", ... })`
+      // above cannot change.
+      boss.getDb = vi.fn(() => ({
+        executeSql: vi.fn(async () => ({ rows: [{ policy: "standard" }] })),
+      }));
+      const runner = {
+        run: vi.fn(async () => ({ finished: true })),
+      } as unknown as ChzExportRunnerService;
+      const service = serviceWith(boss, runner);
+
+      await expect(service.onModuleInit()).rejects.toThrow(
+        /run-chz-export queue policy is "standard", expected "stately"/,
+      );
+      // Bootstrap failure handling (existing behavior): a failed init stops
+      // whatever pg-boss managed to start rather than leaking it.
+      expect(boss.stop).toHaveBeenCalledWith({ graceful: false });
+    },
+  );
 
   it("defaults a job with no pass field to pass 0 and hands the runner a 240-pass budget", async () => {
     const boss = fakeBoss();
