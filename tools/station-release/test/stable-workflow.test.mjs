@@ -213,13 +213,18 @@ test("normal stable modes validate the exact beta at both origins before rebuild
   assert.match(prepare.run, /git checkout --detach "\$base_sha"/);
   assert.match(
     prepare.run,
-    /git restore --source="\$GITHUB_SHA" --worktree tools\/station-release/,
+    /git restore --source="\$GITHUB_SHA" --worktree \\\n+\s+\.github\/workflows\/station-stable-release\.yml \\\n+\s+tools\/station-release/,
+  );
+  assert.match(
+    prepare.run,
+    /git diff --quiet "\$GITHUB_SHA" -- \\\n+\s+\.github\/workflows\/station-stable-release\.yml \\\n+\s+tools\/station-release/,
   );
   assert.doesNotMatch(prepare.run, /git restore[^\n]*--staged/);
   assert.ok(
     prepare.run.indexOf('git restore --source="$GITHUB_SHA"') <
       prepare.run.indexOf("node tools/station-release/version.mjs set-stable"),
   );
+  assert.match(prepare.run, /':\(exclude\)\.github\/workflows\/station-stable-release\.yml'/);
   assert.match(prepare.run, /git rev-parse HEAD\^/);
   assert.equal(build.if, "inputs.mode == 'publish'");
 });
