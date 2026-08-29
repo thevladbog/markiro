@@ -1,4 +1,4 @@
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -16,8 +16,10 @@ import {
 } from "./render.js";
 
 const OFFER_ID = "81111111-1111-4111-8111-111111111111";
+const REQUEST_ID = "71111111-1111-4111-8111-111111111111";
 const CREATED_INVOICE_ID = "91111111-1111-4111-8111-111111111111";
 const CREATED_AT = "2026-08-21T10:00:00.000Z";
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 function publishedOffer(overrides: Record<string, unknown> = {}) {
   return {
     id: OFFER_ID,
@@ -47,13 +49,17 @@ afterEach(() => {
 
 function installInvoiceEditorApi({
   createStatus = 201,
+  loseFirstCreateResponse = false,
   tenantItems = [TENANT_LIST_ITEM],
   offer = null,
+  requestAuthority,
   me = ACCOUNTANT_ME,
 }: {
   createStatus?: number;
+  loseFirstCreateResponse?: boolean;
   tenantItems?: Array<Record<string, unknown>>;
   offer?: Record<string, unknown> | null;
+  requestAuthority?: Record<string, unknown> | { status: 403 };
   me?: Record<string, unknown>;
 } = {}) {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
@@ -89,9 +95,25 @@ function installInvoiceEditorApi({
       if (url.endsWith(`/api/platform/offers/${OFFER_ID}`) && method === "GET" && offer) {
         return jsonResponse(200, offer);
       }
+      if (
+        url.endsWith(`/api/platform/billing/requests/${REQUEST_ID}`) &&
+        method === "GET" &&
+        requestAuthority
+      ) {
+        if ("status" in requestAuthority && requestAuthority.status === 403) {
+          return jsonResponse(403, { code: "forbidden" });
+        }
+        return jsonResponse(200, requestAuthority);
+      }
       if (url.endsWith("/api/platform/invoices") && method === "POST") {
         const body = JSON.parse(String(init.body));
         calls.push({ method, path: url, body });
+        if (loseFirstCreateResponse && calls.length === 1) {
+          throw new TypeError("response lost after commit");
+        }
+        if (createStatus === 403) {
+          return jsonResponse(403, { code: "forbidden" });
+        }
         if (createStatus === 400) {
           return jsonResponse(400, { code: "invoice_catalog_version_invalid" });
         }
@@ -143,7 +165,8 @@ function installInvoiceEditorApi({
           updatedAt: CREATED_AT,
           lines: [],
           documents: [],
-          payment: null,
+          payments: [],
+          paymentSummary: null,
           application: { status: "not_paid", latestByLine: [], attempts: [] },
         });
       }
@@ -164,6 +187,125 @@ async function addPosition(
 }
 
 describe("invoice editor route", () => {
+  it("reuses one invoice idempotency key after a lost successful response", async () => {
+    const api = installInvoiceEditorApi({
+      loseFirstCreateResponse: true,
+    });
+    renderSaasApp({ initialEntry: `/billing/new?tenantId=${TENANT_ID}` });
+    const user = userEvent.setup();
+
+    const submit = await screen.findByRole("button", { name: "Создать черновик счёта" });
+    await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
+    await user.click(submit);
+    expect((await screen.findByRole("alert")).textContent).toContain("Не удалось создать счёт");
+    await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
+
+    await waitFor(() => expect(api.calls()).toHaveLength(2));
+    expect(api.calls()).toHaveLength(2);
+    const firstKey = (api.calls()[0]?.body as { idempotencyKey?: unknown }).idempotencyKey;
+    const secondKey = (api.calls()[1]?.body as { idempotencyKey?: unknown }).idempotencyKey;
+    expect(firstKey).toMatch(UUID_V4);
+    expect(secondKey).toBe(firstKey);
+  });
+
+  it("rejects crafted accepted state when request authority is stale", async () => {
+    const offer = publishedOffer({ lines: [] });
+    installInvoiceEditorApi({ offer, requestAuthority: requestDetail(null) });
+
+    renderSaasApp({
+      initialEntry: {
+        pathname: "/invoices/new",
+        state: { sourceOfferId: OFFER_ID, sourceRequestId: REQUEST_ID, sourceAccepted: true },
+      },
+    });
+
+    expect(await screen.findByText("Источник счёта больше не доступен")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Создать черновик счёта" })).toBeNull();
+  });
+
+  it("rejects a mismatched current offer before rendering the invoice composer", async () => {
+    const offer = publishedOffer({ lines: [] });
+    installInvoiceEditorApi({
+      offer,
+      requestAuthority: requestDetail({
+        offerId: "81111111-1111-4111-8111-111111111112",
+        currentOfferId: "81111111-1111-4111-8111-111111111112",
+        latestDecision: "accepted",
+        canRevise: false,
+        canCreateInvoice: true,
+      }),
+    });
+
+    renderSaasApp({
+      initialEntry: {
+        pathname: "/invoices/new",
+        state: { sourceOfferId: OFFER_ID, sourceRequestId: REQUEST_ID },
+      },
+    });
+
+    expect(await screen.findByText("Источник счёта больше не доступен")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Создать черновик счёта" })).toBeNull();
+  });
+
+  it("invalidates principal authority and renders forbidden on request 403", async () => {
+    const offer = publishedOffer({ lines: [] });
+    installInvoiceEditorApi({ offer, requestAuthority: { status: 403 } });
+
+    const rendered = renderSaasApp({
+      initialEntry: {
+        pathname: "/invoices/new",
+        state: { sourceOfferId: OFFER_ID, sourceRequestId: REQUEST_ID },
+      },
+    });
+    const invalidate = vi.spyOn(rendered.queryClient, "invalidateQueries");
+
+    expect(
+      await screen.findByRole("heading", { name: "Доступ к заявкам ограничен" }),
+    ).toBeDefined();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["platform", "me"] });
+    expect(screen.queryByRole("button", { name: "Создать черновик счёта" })).toBeNull();
+  });
+
+  it("latches forbidden when accepted-offer invoice authority is revoked on create", async () => {
+    const offer = publishedOffer({ lines: [] });
+    const api = installInvoiceEditorApi({
+      createStatus: 403,
+      offer,
+      requestAuthority: requestDetail({
+        offerId: OFFER_ID,
+        currentOfferId: OFFER_ID,
+        latestDecision: "accepted",
+        canRevise: false,
+        canCreateInvoice: true,
+      }),
+    });
+    const rendered = renderSaasApp({
+      initialEntry: {
+        pathname: "/invoices/new",
+        state: { sourceOfferId: OFFER_ID, sourceRequestId: REQUEST_ID },
+      },
+    });
+    const invalidate = vi.spyOn(rendered.queryClient, "invalidateQueries");
+    const user = userEvent.setup();
+
+    await screen.findByRole("button", { name: "Создать черновик счёта" });
+    await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
+    await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Доступ к заявкам ограничен" }),
+    ).toBeDefined();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["platform", "me"] });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["platform", "billing", "requests"],
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["platform", "billing", "requests", REQUEST_ID],
+    });
+    expect(screen.queryByRole("button", { name: "Создать черновик счёта" })).toBeNull();
+    expect(api.calls()).toHaveLength(1);
+  });
+
   it("redirects a principal without billing write access without loading an editable form", async () => {
     installInvoiceEditorApi({ me: SUPPORT_ME });
     renderSaasApp({ initialEntry: "/billing/new" });
@@ -202,6 +344,7 @@ describe("invoice editor route", () => {
         path: "/api/platform/invoices",
         body: {
           tenantId: TENANT_ID,
+          idempotencyKey: expect.stringMatching(UUID_V4),
           dueDate: "2026-09-01",
           applicationMode: "automatic",
           lines: [
@@ -350,14 +493,23 @@ describe("invoice editor route", () => {
         },
       ],
     });
-    const api = installInvoiceEditorApi({ offer });
-    renderSaasApp({ initialEntry: "/offers" });
+    const api = installInvoiceEditorApi({
+      offer,
+      requestAuthority: requestDetail({
+        offerId: OFFER_ID,
+        currentOfferId: OFFER_ID,
+        latestDecision: "accepted",
+        canRevise: false,
+        canCreateInvoice: true,
+      }),
+    });
+    renderSaasApp({
+      initialEntry: {
+        pathname: "/invoices/new",
+        state: { sourceOfferId: OFFER_ID, sourceRequestId: REQUEST_ID },
+      },
+    });
     const user = userEvent.setup();
-
-    await screen.findByRole("heading", { name: "Коммерческие предложения" });
-    await user.click(await screen.findByRole("button", { name: TENANT_ID }));
-    expect(await screen.findByText("Выбранное предложение")).toBeDefined();
-    await user.click(await screen.findByRole("button", { name: "Создать счёт по предложению" }));
 
     expect(await screen.findByDisplayValue("321.00")).toBeDefined();
     expect(screen.getByDisplayValue("3")).toBeDefined();
@@ -368,6 +520,9 @@ describe("invoice editor route", () => {
 
     expect(api.calls()[0]?.body).toEqual({
       tenantId: TENANT_ID,
+      idempotencyKey: expect.stringMatching(UUID_V4),
+      sourceOfferId: OFFER_ID,
+      sourceRequestId: REQUEST_ID,
       dueDate: null,
       applicationMode: "automatic",
       lines: [
@@ -420,3 +575,23 @@ describe("invoice editor route", () => {
     });
   });
 });
+
+function requestDetail(offerAction: Record<string, unknown> | null) {
+  return {
+    id: REQUEST_ID,
+    tenantId: TENANT_ID,
+    number: "BR-42",
+    type: "renewal",
+    status: "offer_prepared",
+    description: "Renew",
+    desiredAt: null,
+    context: null,
+    responsibleSide: "tenant",
+    createdAt: CREATED_AT,
+    updatedAt: CREATED_AT,
+    allowedTransitions: [],
+    offerAction,
+    events: [],
+    links: [],
+  };
+}

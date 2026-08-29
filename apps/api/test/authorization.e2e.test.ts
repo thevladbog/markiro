@@ -33,6 +33,8 @@ const OWNER_CAPABILITIES = [
   "integrations.read",
   "integrations.write",
   "tenant.settings.manage",
+  "billing.read",
+  "billing.request",
   "credentials.manage",
   "members.manage",
 ];
@@ -43,6 +45,8 @@ const ADMIN_CAPABILITIES = [
   "integrations.read",
   "integrations.write",
   "tenant.settings.manage",
+  "billing.read",
+  "billing.request",
   "credentials.manage",
   "members.manage",
 ];

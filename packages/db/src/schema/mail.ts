@@ -70,6 +70,11 @@ export const emailDeliveries = pgTable(
     uniqueIndex("email_deliveries_public_request_kind_uq")
       .on(table.publicRequestId, table.kind)
       .where(sql`${table.publicRequestId} is not null`),
+    uniqueIndex("email_deliveries_tenant_billing_recipient_uq")
+      .on(table.tenantId, table.kind, table.sourceId, table.recipient)
+      .where(
+        sql`${table.kind} = 'tenant-billing-notification' and ${table.tenantId} is not null and ${table.sourceId} is not null`,
+      ),
   ],
 );
 

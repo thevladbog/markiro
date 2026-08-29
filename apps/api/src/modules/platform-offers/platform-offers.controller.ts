@@ -13,8 +13,10 @@ import {
   createOfferSchema,
   offerIdSchema,
   paymentSchema,
+  reviseOfferSchema,
   type CreateOfferDto,
   type PaymentDto,
+  type ReviseOfferDto,
 } from "./dto";
 import { PlatformOffersService } from "./platform-offers.service";
 import { OfferDocumentsService } from "./offer-documents.service";
@@ -92,6 +94,24 @@ export class PlatformOffersController {
       ...offer,
       documents,
     });
+  }
+
+  @Post(":id/revise")
+  @ApiOperation({ summary: "Create a revised commercial offer" })
+  @PlatformApiProtectedCreated({
+    body: platformCommercialContracts.offers.revise.body,
+    response: platformCommercialContracts.offers.revise.response,
+  })
+  @RequirePlatformCapabilities("billing.write")
+  async revise(
+    @Req() req: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
+    @Body(new ZodValidationPipe(reviseOfferSchema)) body: ReviseOfferDto,
+  ) {
+    return parsePlatformResponse(
+      platformCommercialContracts.offers.revise.response,
+      await this.offers.revise(req.platformPrincipal!, id, body),
+    );
   }
 
   @Get(":id/documents")

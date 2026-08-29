@@ -210,7 +210,8 @@
       "trial": "Демо закончится через {{days}} дн.",
       "expired": "Подписка истекла: запись отключена.",
       "overLimit": "Лимит превышен: новые записи заблокированы.",
-      "link": "Посмотреть лимиты"
+      "link": "Посмотреть лимиты",
+      "noBillingAccess": "Обратитесь к администратору кабинета."
     },
     "page": {
       "title": "Подписка и лимиты",
@@ -234,10 +235,12 @@
     "devices": "Устройства",
     "integrations": "Интеграции",
     "team": "Доступ в кабинет",
+    "billing": "Биллинг",
     "settings": "Настройки"
   },
   "shell": {
     "navLabel": "Основная навигация",
+    "billingAttention": "Биллинг, требуется внимание: {{count}}",
     "mobileNavigation": {
       "trigger": "Разделы",
       "openLabel": "Открыть мобильную навигацию",
@@ -873,6 +876,452 @@
       },
       "viewAll": "Все смены",
       "notSpecified": "Не указано"
+    },
+    "billing": {
+      "title": "Биллинг",
+      "description": "Подписка, расчёты, документы и обращения в Markiro",
+      "createRequest": "Создать заявку",
+      "loading": "Загрузка раздела биллинга",
+      "tabs": {
+        "label": "Разделы биллинга",
+        "overview": "Обзор",
+        "subscription": "Подписка и лимиты",
+        "invoices": "Счета и оплаты",
+        "documents": "Документы",
+        "requests": "Заявки"
+      },
+      "retry": "Повторить",
+      "value": {
+        "notAvailable": "Не указано"
+      },
+      "overview": {
+        "loading": "Загрузка обзора биллинга",
+        "loadError": "Не удалось загрузить обзор биллинга",
+        "unmanagedTitle": "Подписка не назначена",
+        "unmanagedHint": "Обратитесь к администратору сервиса, чтобы подключить тариф.",
+        "currentSubscription": "Текущая подписка",
+        "scheduledOnlySubscription": "Запланированная подписка",
+        "currentOffer": "Текущее предложение",
+        "offerWithoutNumber": "Коммерческое предложение",
+        "openOffer": "Открыть предложение",
+        "limits": "Лимиты",
+        "recentOperations": "Последние операции",
+        "noOperations": "Операций пока нет.",
+        "activeRequest": "Активная заявка",
+        "noActiveRequest": "Открытых заявок нет.",
+        "openRequest": "Открыть заявку",
+        "attention_one": "Требует внимания: {{count}} пункт",
+        "attention_few": "Требуют внимания: {{count}} пункта",
+        "attention_many": "Требуют внимания: {{count}} пунктов",
+        "attention_other": "Требуют внимания: {{count}} пункта"
+      },
+      "subscription": {
+        "loading": "Загрузка подписки",
+        "loadError": "Не удалось загрузить подписку",
+        "unmanagedTitle": "Подписка не назначена",
+        "unmanagedHint": "Данные о тарифе появятся после его подключения.",
+        "current": "Текущая подписка",
+        "scheduled": "Следующее изменение",
+        "limits": "Лимиты",
+        "addons": "Дополнения",
+        "services": "Услуги",
+        "quantity_one": "{{count}} единица",
+        "quantity_few": "{{count}} единицы",
+        "quantity_many": "{{count}} единиц",
+        "quantity_other": "{{count}} единицы",
+        "serviceMeta": "{{quantity}} {{unit}} · заказано {{date}}",
+        "period": "Период",
+        "startsAt": "Начало",
+        "endsAt": "Окончание",
+        "price": "Стоимость",
+        "periods": {
+          "month": "Ежемесячно",
+          "year": "Ежегодно"
+        }
+      },
+      "invoices": {
+        "loading": "Загрузка счетов",
+        "loadError": "Не удалось загрузить счета",
+        "heading": "Счета и оплаты",
+        "description": "Показаны только подтверждённые Markiro оплаты.",
+        "empty": "Счетов по выбранным фильтрам нет",
+        "registry": "Реестр счетов",
+        "cardsLabel": "Счета",
+        "filters": {
+          "label": "Фильтры счетов",
+          "status": "Статус счёта",
+          "allStatuses": "Все статусы",
+          "from": "С даты",
+          "to": "По дату"
+        },
+        "columns": {
+          "number": "Номер",
+          "issued": "Выставлен",
+          "dueDate": "Срок оплаты",
+          "status": "Статус счёта",
+          "total": "Сумма",
+          "confirmedPayment": "Подтверждённая оплата"
+        },
+        "payment": {
+          "confirmed": "Подтверждено: {{amount}}",
+          "remaining": "Остаток: {{amount}}"
+        },
+        "detail": {
+          "loading": "Загрузка счёта",
+          "notFound": "Счёт не найден",
+          "forbidden": "Нет доступа к счёту",
+          "loadError": "Не удалось загрузить счёт",
+          "heading": "Счёт {{number}}",
+          "description": "Неоплаченный счёт сам по себе не ограничивает работу производства.",
+          "back": "К списку счетов",
+          "summary": "Статус и сумма",
+          "invoiceStatus": "Статус счёта",
+          "paymentStatus": "Статус оплаты",
+          "invoiceTotal": "Сумма счёта",
+          "confirmed": "Подтверждено",
+          "remaining": "Остаток",
+          "payments": "Подтверждённые оплаты",
+          "noPayments": "Подтверждённых оплат пока нет.",
+          "lines": "Позиции",
+          "linesRegistry": "Позиции счёта",
+          "documents": "Документы",
+          "documentMeta": "{{format}} · ревизия {{revision}} · {{status}}"
+        },
+        "lineColumns": {
+          "position": "№",
+          "name": "Позиция",
+          "unit": "Ед.",
+          "quantity": "Количество",
+          "total": "Сумма"
+        },
+        "download": "Скачать",
+        "downloadError": "Не удалось скачать документ. Повторите попытку позже."
+      },
+      "documents": {
+        "loading": "Загрузка документов",
+        "loadError": "Не удалось загрузить документы",
+        "heading": "Документы",
+        "description": "Акты и коммерческие предложения доступны, когда Markiro подготовил файл.",
+        "empty": "Документы по выбранным фильтрам не найдены",
+        "registry": "Реестр документов",
+        "filters": {
+          "label": "Фильтры документов",
+          "type": "Тип документа",
+          "allTypes": "Все типы",
+          "offer": "Предложения",
+          "act": "Акты",
+          "status": "Статус документа",
+          "allStatuses": "Все статусы",
+          "from": "С даты",
+          "to": "По дату"
+        },
+        "types": {
+          "offer": "Коммерческое предложение",
+          "act": "Акт"
+        },
+        "status": {
+          "ready": "Готов",
+          "pending": "Подготавливается",
+          "failed": "Не удалось подготовить"
+        },
+        "columns": {
+          "type": "Тип",
+          "date": "Дата",
+          "revision": "Ревизия",
+          "status": "Состояние",
+          "file": "Файл"
+        },
+        "download": "Скачать",
+        "downloadError": "Не удалось скачать документ. Повторите попытку позже."
+      },
+      "offer": {
+        "loading": "Загрузка предложения",
+        "notFound": "Предложение не найдено",
+        "forbidden": "Нет доступа к предложению",
+        "loadError": "Не удалось загрузить предложение",
+        "heading": "Предложение {{number}}",
+        "withoutNumber": "без номера",
+        "conditions": "Условия",
+        "lifecycleStatus": "Статус предложения",
+        "currentnessLabel": "Версия предложения",
+        "latestDecisionLabel": "Решение клиента",
+        "expiresAt": "Действует до",
+        "publishedAt": "Опубликовано",
+        "total": "Сумма",
+        "lines": "Позиции",
+        "linesRegistry": "Позиции предложения",
+        "documents": "Документы",
+        "documentMeta": "{{format}} · ревизия {{revision}} · {{status}}",
+        "decision": "Ваше решение",
+        "accept": "Принять",
+        "requestChanges": "Запросить изменения",
+        "changeLabel": "Что нужно изменить",
+        "changeHelp": "От 1 до 2000 символов.",
+        "submitChanges": "Отправить запрос",
+        "validationError": "Опишите изменения: от 1 до 2000 символов.",
+        "actionErrors": {
+          "retryable": "Не удалось подтвердить результат. Введённые данные сохранены; повторите попытку.",
+          "offer_version_stale": "Предложение заменено новой версией. Данные обновлены.",
+          "offer_expired": "Срок действия предложения истёк. Данные обновлены.",
+          "offer_not_published": "Предложение больше нельзя принять. Данные обновлены.",
+          "offer_already_decided": "Решение по предложению уже зафиксировано. Данные обновлены.",
+          "idempotency_key_reused": "Повтор запроса не совпал с исходным решением. Данные обновлены.",
+          "conflict": "Состояние предложения изменилось. Данные обновлены.",
+          "rejected": "Не удалось отправить решение. Обновите данные и попробуйте снова."
+        },
+        "download": "Скачать",
+        "downloadError": "Не удалось скачать документ. Повторите попытку позже.",
+        "confirmTitle": "Принять предложение?",
+        "confirmDescription": "Markiro получит подтверждение.",
+        "confirmAccept": "Подтвердить принятие",
+        "cancel": "Отмена",
+        "status": {
+          "draft": "Черновик",
+          "published": "Действует",
+          "expired": "Срок действия истёк",
+          "superseded": "Заменено новой версией",
+          "paid": "Оплачено",
+          "cancelled": "Отменено"
+        },
+        "currentness": {
+          "current": "Текущая версия",
+          "notCurrent": "Не текущая версия"
+        },
+        "latestDecision": {
+          "none": "Решение не отправлено",
+          "accepted": "Принято",
+          "changes_requested": "Изменения запрошены"
+        }
+      },
+      "requests": {
+        "heading": "Заявки",
+        "description": "Структурированные обращения и их история без внешней переписки.",
+        "loading": "Загрузка заявок",
+        "loadError": "Не удалось загрузить заявки",
+        "forbidden": "Нет доступа к заявкам",
+        "notFound": "Реестр заявок не найден",
+        "empty": "Заявок по выбранным фильтрам нет",
+        "registry": "Реестр заявок",
+        "filters": {
+          "label": "Фильтры заявок",
+          "status": "Статус заявки",
+          "allStatuses": "Все статусы",
+          "type": "Тип заявки",
+          "allTypes": "Все типы",
+          "clear": "Очистить фильтры"
+        },
+        "columns": {
+          "number": "Номер",
+          "type": "Тип",
+          "status": "Статус",
+          "responsible": "Ответственная сторона",
+          "updated": "Обновлена"
+        },
+        "types": {
+          "renewal": "Продление",
+          "capacity_change": "Изменение лимитов или мощности",
+          "additional_service": "Дополнительная услуга",
+          "documents": "Запрос документов",
+          "other": "Другое"
+        },
+        "responsible": {
+          "tenant": "Клиент",
+          "markiro": "Markiro",
+          "none": "Никто — работа завершена"
+        },
+        "contextTypes": {
+          "limit": "Лимит",
+          "subscription": "Подписка",
+          "invoice": "Счёт",
+          "offer": "Предложение",
+          "document": "Документ"
+        },
+        "create": {
+          "heading": "Новая заявка",
+          "description": "Опишите требуемое изменение; номер и статус назначит Markiro.",
+          "back": "К списку заявок",
+          "formTitle": "Параметры заявки",
+          "type": "Тип заявки",
+          "descriptionLabel": "Описание",
+          "desiredAt": "Желаемая дата",
+          "files": "Вложения",
+          "context": "Контекст: {{type}} — {{id}}",
+          "retry": "Повторить отправку",
+          "uploading": "Загрузка файла {{name}}",
+          "errors": {
+            "description": {
+              "required": "Опишите запрос: от 1 до 4000 символов.",
+              "tooLong": "Описание не должно превышать 4000 символов."
+            },
+            "desiredAt": "Укажите существующую дату.",
+            "file": {
+              "type": "{{name}}: разрешены PDF, JPEG, PNG и TXT.",
+              "size": "{{name}}: размер не должен превышать 5 МиБ."
+            },
+            "retryable": "Не удалось подтвердить создание заявки. Данные сохранены; повторите ту же отправку.",
+            "forbidden": "Доступ к созданию заявок отозван. Вернитесь к списку заявок.",
+            "validation": "Сервер отклонил данные заявки. Проверьте поля и отправьте снова.",
+            "conflict": "Ключ отправки уже использован для другой заявки. Отправьте форму заново.",
+            "terminal": "Сервер отклонил заявку. Проверьте данные и отправьте снова."
+          }
+        },
+        "detail": {
+          "loading": "Загрузка заявки",
+          "notFound": "Заявка не найдена",
+          "forbidden": "Нет доступа к заявке",
+          "loadError": "Не удалось загрузить заявку",
+          "heading": "Заявка {{number}}",
+          "back": "К списку заявок",
+          "summary": "Состояние заявки",
+          "status": "Статус",
+          "responsible": "Ответственная сторона",
+          "desiredAt": "Желаемая дата",
+          "createdAt": "Создана",
+          "context": "Контекст",
+          "requestText": "Описание",
+          "linkedObjects": "Связанные объекты",
+          "links": {
+            "offer": "Коммерческое предложение",
+            "invoice": "Счёт",
+            "payment": "Подтверждённая оплата",
+            "act": "Акт",
+            "service": "Заказанная услуга",
+            "subscription": "Изменение подписки"
+          },
+          "attachments": "Вложения",
+          "noAttachments": "Вложений нет.",
+          "download": "Скачать",
+          "downloadNamed": "Скачать {{name}}",
+          "downloadError": "Не удалось скачать вложение.",
+          "uploadResult": {
+            "uploading": "{{name}}: загружается",
+            "failed_retryable": "{{name}}: не загружен — можно повторить",
+            "failed_terminal": "{{name}}: сервер отклонил файл"
+          },
+          "retryUploadNamed": "Повторить загрузку {{name}}",
+          "history": "История заявки",
+          "eventSides": {
+            "tenant": "Клиент",
+            "markiro": "Markiro",
+            "system": "Система"
+          },
+          "eventKinds": {
+            "created": "Заявка создана",
+            "status_changed": "Статус изменён",
+            "tenant_reply": "Ответ клиента",
+            "platform_comment": "Комментарий",
+            "offer_linked": "Предложение связано",
+            "offer_accepted": "Предложение принято",
+            "offer_changes_requested": "Запрошены изменения предложения",
+            "invoice_linked": "Счёт связан",
+            "payment_confirmed": "Оплата подтверждена",
+            "service_linked": "Услуга связана",
+            "act_linked": "Акт связан"
+          },
+          "eventBodies": {
+            "created": "Создана заявка",
+            "status_changed": "Статус заявки изменён",
+            "tenant_reply": "Клиент отправил уточнение",
+            "platform_comment": "Markiro добавил комментарий",
+            "offer_linked": "К заявке добавлено предложение",
+            "offer_accepted": "Предложение принято клиентом",
+            "offer_changes_requested": "Клиент запросил изменения предложения",
+            "invoice_linked": "К заявке добавлен счёт",
+            "payment_confirmed": "Markiro подтвердил оплату",
+            "service_linked": "К заявке добавлена услуга",
+            "act_linked": "К заявке добавлен акт"
+          },
+          "eventStatusBody": "{{from}} → {{to}}",
+          "replyTitle": "Ответ на уточнение",
+          "replyLabel": "Ответ на уточнение",
+          "replySubmit": "Отправить ответ",
+          "replyErrors": {
+            "validation": "Ответ должен содержать от 1 до 2000 символов.",
+            "retryable": "Не удалось подтвердить отправку. Ответ сохранён; повторите ту же отправку.",
+            "terminal": "Состояние заявки изменилось. Данные обновлены."
+          }
+        }
+      },
+      "limits": {
+        "lines": "Линии",
+        "stations": "Станции",
+        "kiosks": "Киоски",
+        "cabinetUsers": "Пользователи кабинета",
+        "requestNames": {
+          "lines": "линий",
+          "stations": "станций",
+          "kiosks": "киосков",
+          "cabinetUsers": "пользователей кабинета"
+        },
+        "unlimited": "Использовано: {{used}} · без ограничения",
+        "usedOf": "Использовано: {{used}} из {{assigned}}",
+        "progress": "{{name}}: использовано {{used}} из {{assigned}}",
+        "increase": "Увеличить лимит {{name}}"
+      },
+      "status": {
+        "access": {
+          "managed": "Управляется",
+          "read_only": "Только чтение",
+          "unmanaged": "Не подключено"
+        },
+        "subscription": {
+          "pending_activation": "Ожидает активации",
+          "trial": "Демо",
+          "active": "Активна",
+          "scheduled": "Запланирована",
+          "expired": "Срок истёк",
+          "cancelled": "Отменена",
+          "superseded": "Заменена"
+        },
+        "limit": {
+          "normal": "В пределах лимита",
+          "approaching": "Приближение к лимиту",
+          "reached": "Лимит исчерпан",
+          "exceeded": "Лимит превышен"
+        },
+        "addon": {
+          "scheduled": "Запланировано",
+          "active": "Активно",
+          "expired": "Срок истёк",
+          "revoked": "Отключено"
+        },
+        "service": {
+          "ordered": "Заказано",
+          "in_progress": "Выполняется",
+          "completed": "Выполнено",
+          "cancelled": "Отменено"
+        },
+        "operation": {
+          "draft": "Черновик",
+          "issued": "Выставлено",
+          "overdue": "Просрочено",
+          "partially_paid": "Оплачено частично",
+          "paid": "Оплачено",
+          "cancelled": "Отменено",
+          "published": "Опубликовано",
+          "expired": "Срок истёк",
+          "superseded": "Заменено",
+          "new": "Новая",
+          "under_review": "На рассмотрении",
+          "clarification_required": "Нужно уточнение",
+          "offer_prepared": "Предложение готово",
+          "awaiting_payment": "Ожидает оплаты",
+          "in_progress": "Выполняется",
+          "completed": "Выполнено",
+          "ordered": "Заказано",
+          "confirmed": "Подтверждено"
+        },
+        "request": {
+          "new": "Новая",
+          "under_review": "На рассмотрении",
+          "clarification_required": "Нужно уточнение",
+          "offer_prepared": "Предложение готово",
+          "awaiting_payment": "Ожидает оплаты",
+          "in_progress": "Выполняется",
+          "completed": "Выполнено",
+          "cancelled": "Отменена"
+        }
+      }
     },
     "catalog": {
       "title": "Каталог продукции",

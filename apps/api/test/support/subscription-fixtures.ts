@@ -8,7 +8,7 @@ export interface ManagedSubscriptionFixture {
   subscriptionId: string;
 }
 
-export async function createOrganization(db: Db, tenantId = randomUUID()): Promise<string> {
+export async function createOrganization(db: Db, tenantId: string = randomUUID()): Promise<string> {
   await db.insert(schema.organization).values({
     id: tenantId,
     name: `Subscription fixture ${tenantId}`,

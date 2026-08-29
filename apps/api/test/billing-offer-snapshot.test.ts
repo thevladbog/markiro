@@ -9,6 +9,7 @@ import { BillingDocumentsService } from "../src/modules/billing/billing-document
 import type { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import type { PlatformPrincipal } from "../src/platform-auth/platform-access-policy";
 import type { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
+import { noopTenantBillingNotifications } from "./support/tenant-billing-notifications";
 
 function testDouble<T>() {
   return <K extends keyof T>(value: Pick<T, K>): T => value as T;
@@ -49,9 +50,16 @@ describe("BillingService offer snapshots", () => {
     let transactionSelect = 0;
     let insertCount = 0;
     const tx = {
+      execute: vi.fn(async () => ({ rows: [] })),
       select: vi.fn(() => {
         transactionSelect += 1;
-        return resolvedQuery(transactionSelect === 1 ? [{ number: "INV-000001" }] : []);
+        return resolvedQuery(
+          transactionSelect === 1
+            ? [{ id: invoice.tenantId }]
+            : transactionSelect === 2
+              ? [{ number: "INV-000001" }]
+              : [],
+        );
       }),
       insert: vi.fn(() => ({
         values: (values: unknown) => {
@@ -79,7 +87,11 @@ describe("BillingService offer snapshots", () => {
       twoFactorReady: true,
     };
 
-    await new BillingService(db, {} as PlatformAuditService).create(principal, {
+    await new BillingService(
+      db,
+      {} as PlatformAuditService,
+      noopTenantBillingNotifications(),
+    ).create(principal, {
       tenantId: invoice.tenantId,
       dueDate: null,
       applicationMode: "automatic",
@@ -142,14 +154,17 @@ describe("BillingService offer snapshots", () => {
     let transactionSelect = 0;
     let insertCount = 0;
     const tx = {
+      execute: vi.fn(async () => ({ rows: [] })),
       select: vi.fn(() => {
         transactionSelect += 1;
         return resolvedQuery<unknown>(
           transactionSelect === 1
-            ? [{ number: "INV-000001" }]
+            ? [{ id: invoice.tenantId }]
             : transactionSelect === 2
-              ? [catalogVersion]
-              : [],
+              ? [{ number: "INV-000001" }]
+              : transactionSelect === 3
+                ? [catalogVersion]
+                : [],
         );
       }),
       insert: vi.fn(() => ({
@@ -178,7 +193,11 @@ describe("BillingService offer snapshots", () => {
       twoFactorReady: true,
     };
 
-    await new BillingService(db, {} as PlatformAuditService).create(principal, {
+    await new BillingService(
+      db,
+      {} as PlatformAuditService,
+      noopTenantBillingNotifications(),
+    ).create(principal, {
       tenantId: invoice.tenantId,
       dueDate: null,
       applicationMode: "automatic",

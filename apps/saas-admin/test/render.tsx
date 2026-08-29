@@ -95,11 +95,15 @@ export function renderSaasApp({
   client = fakeAuthClient(state),
   extra,
 }: {
-  initialEntry?: string;
+  initialEntry?: string | { pathname: string; state?: unknown };
   state?: MutableAuthState;
   client?: AuthClientLike;
   extra?: ReactNode;
-} = {}): RenderResult & { state: MutableAuthState; queryClient: QueryClient } {
+} = {}): RenderResult & {
+  state: MutableAuthState;
+  queryClient: QueryClient;
+  router: ReturnType<typeof createMemoryRouter>;
+} {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -107,6 +111,7 @@ export function renderSaasApp({
   return {
     state,
     queryClient,
+    router,
     ...render(
       <ThemeProvider defaultTheme="light">
         <QueryClientProvider client={queryClient}>

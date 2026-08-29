@@ -1,0 +1,579 @@
+.mk-billing-page {
+  min-width: 0;
+}
+
+.mk-billing-page__heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.mk-billing-page__heading p {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.mk-billing-page__create-request {
+  display: inline-flex;
+  min-height: var(--control-md);
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--sp-4);
+  border: 1px solid var(--surface-inverse);
+  border-radius: var(--r-2);
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+  font: 600 14px/1 var(--font-ui);
+  text-decoration: none;
+}
+
+.mk-billing-page__create-request:hover {
+  filter: brightness(1.08);
+}
+
+.mk-billing-page__create-request:focus-visible,
+.mk-billing-tabs a:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.mk-billing-tabs {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.mk-billing-tabs a {
+  display: inline-flex;
+  min-height: var(--control-md);
+  align-items: center;
+  padding: 0 var(--sp-3);
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+  text-decoration: none;
+}
+
+.mk-billing-tabs a:hover {
+  color: var(--fg-1);
+}
+
+.mk-billing-tabs a[aria-current="page"] {
+  color: var(--fg-1);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  font-weight: 600;
+}
+
+.mk-billing-route-placeholder {
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-6);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-card);
+}
+
+.mk-billing-invoices,
+.mk-billing-invoice-detail,
+.mk-billing-documents,
+.mk-billing-offer-detail,
+.mk-billing-requests,
+.mk-billing-request-create,
+.mk-billing-request-detail {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.mk-billing-request-filters {
+  grid-template-columns: repeat(2, minmax(132px, 1fr)) auto;
+  align-items: end;
+}
+
+.mk-billing-request-form {
+  display: grid;
+  gap: var(--sp-3);
+  max-width: 680px;
+}
+
+.mk-billing-request-form > .mk-btn {
+  justify-self: start;
+}
+
+.mk-billing-request-context {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--accent);
+  background: var(--surface-panel);
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.mk-billing-field-error,
+.mk-billing-form-errors {
+  margin: 0;
+  color: var(--err-fg);
+  font: var(--text-body-sm);
+}
+
+.mk-billing-form-errors {
+  display: grid;
+  gap: var(--sp-1);
+  padding-left: var(--sp-5);
+}
+
+.mk-billing-request-description {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mk-billing-linked-list,
+.mk-billing-attachment-list,
+.mk-billing-request-events {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-billing-linked-list a {
+  color: var(--accent);
+}
+
+.mk-billing-attachment-list li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.mk-billing-attachment-list li:last-child {
+  border-bottom: 0;
+}
+
+.mk-billing-attachment-list li > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mk-billing-request-events {
+  gap: 0;
+}
+
+.mk-billing-request-events li {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.mk-billing-request-events li:last-child {
+  border-bottom: 0;
+}
+
+.mk-billing-request-events p {
+  margin: 0;
+  color: var(--fg-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mk-billing-request-event__meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.mk-billing-section-heading {
+  margin: 0;
+  color: var(--fg-1);
+  font: var(--text-h2);
+}
+
+.mk-billing-section-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.mk-billing-section-intro p,
+.mk-billing-change-form p {
+  margin: var(--sp-1) 0 0;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.mk-billing-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(132px, 1fr));
+  gap: var(--sp-2);
+  width: min(100%, 680px);
+}
+
+.mk-billing-payment-summary {
+  display: grid;
+  gap: var(--sp-1);
+  font: var(--text-caption);
+}
+
+.mk-billing-invoice-cards {
+  display: none;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-billing-invoice-card {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-1);
+  text-decoration: none;
+}
+
+.mk-billing-invoice-card:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.mk-billing-payments-list {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding-left: var(--sp-5);
+}
+
+.mk-billing-payments-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.mk-billing-offer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.mk-billing-change-form {
+  display: grid;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+}
+
+.mk-billing-offer-terms {
+  margin: var(--sp-4) 0 0;
+  white-space: pre-wrap;
+}
+
+.mk-billing-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.mk-billing-invoice-document {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+}
+
+.mk-billing-invoice-document span {
+  min-width: 0;
+}
+
+.mk-billing-overview,
+.mk-billing-subscription {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.mk-billing-overview__top,
+.mk-billing-overview__lower {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.mk-billing-state {
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+}
+
+.mk-billing-subscription-summary,
+.mk-billing-offer-summary,
+.mk-billing-request-summary,
+.mk-billing-limit-card__header,
+.mk-billing-item-list li,
+.mk-billing-operations-list li {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.mk-billing-subscription-summary strong,
+.mk-billing-offer-summary strong,
+.mk-billing-request-summary strong,
+.mk-billing-item-list strong,
+.mk-billing-operations-list strong {
+  display: block;
+  color: var(--fg-1);
+  font: var(--text-h3);
+}
+
+.mk-billing-chip-stack {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.mk-billing-definition-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3) var(--sp-5);
+  margin: var(--sp-4) 0 0;
+}
+
+.mk-billing-definition-list div {
+  min-width: 0;
+}
+
+.mk-billing-definition-list dt,
+.mk-billing-definition-list dd {
+  margin: 0;
+}
+
+.mk-billing-definition-list dt,
+.mk-billing-item-list span,
+.mk-billing-operations-list span {
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.mk-billing-definition-list dd {
+  margin-top: var(--sp-1);
+  color: var(--fg-1);
+  font: var(--text-body-sm);
+}
+
+.mk-billing-money {
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-billing-limit-list,
+.mk-billing-item-list,
+.mk-billing-operations-list {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-billing-limit-list {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.mk-billing-limit-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+}
+
+.mk-billing-limit-card__header strong,
+.mk-billing-limit-card__value {
+  color: var(--fg-1);
+  font: var(--text-body-sm);
+}
+
+.mk-billing-limit-card progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--accent);
+}
+
+.mk-billing-inline-link,
+.mk-billing-action-link {
+  color: var(--accent);
+  font: 600 14px/1.2 var(--font-ui);
+  text-decoration: none;
+}
+
+.mk-billing-action-link {
+  display: inline-flex;
+  min-height: var(--control-md);
+  align-items: center;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+}
+
+.mk-billing-inline-link:hover,
+.mk-billing-action-link:hover {
+  text-decoration: underline;
+}
+
+.mk-billing-inline-link:focus-visible,
+.mk-billing-action-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.mk-billing-offer-summary > div,
+.mk-billing-request-summary > div,
+.mk-billing-item-list li > div,
+.mk-billing-operations-list li > div {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-1);
+}
+
+.mk-billing-request-summary {
+  flex-direction: column;
+}
+
+.mk-billing-request-summary > div {
+  justify-items: start;
+}
+
+.mk-billing-muted,
+.mk-billing-attention {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.mk-billing-attention {
+  margin-top: var(--sp-3);
+}
+
+/* Child pages use this grid contract for compact billing cards. */
+.mk-billing-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+@media (max-width: 960px) {
+  .mk-billing-limit-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .mk-billing-page .mk-page-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .mk-billing-page__create-request {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .mk-billing-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mk-billing-overview__top,
+  .mk-billing-overview__lower {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mk-billing-limit-list,
+  .mk-billing-definition-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mk-billing-subscription-summary,
+  .mk-billing-offer-summary,
+  .mk-billing-item-list li,
+  .mk-billing-operations-list li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .mk-billing-chip-stack {
+    justify-content: flex-start;
+  }
+
+  .mk-billing-invoice-document {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .mk-billing-section-intro {
+    flex-direction: column;
+  }
+
+  .mk-billing-filters {
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .mk-billing-request-form > .mk-btn {
+    width: 100%;
+  }
+
+  .mk-billing-attachment-list li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .mk-billing-invoices__desktop {
+    display: none;
+  }
+
+  .mk-billing-invoice-cards {
+    display: grid;
+  }
+}
+
+@media (max-width: 767px) {
+  .mk-billing-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+
+  .mk-billing-tabs a {
+    flex: 0 0 auto;
+  }
+}

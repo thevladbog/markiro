@@ -1,4 +1,5 @@
 import {
+  billingActUploadTooLargeErrorSchema,
   platformAuditContracts,
   platformAuthContracts,
   platformCatalogContracts,
@@ -18,6 +19,9 @@ export interface PlatformRouteContract {
   status: PlatformSuccessStatus;
   response: ZodType;
   body?: ZodType;
+  query?: ZodType;
+  errors?: ReadonlyArray<{ status: string; schema: ZodType }>;
+  multipart?: true;
   public?: true;
 }
 
@@ -26,7 +30,7 @@ const route = (
   path: string,
   status: PlatformSuccessStatus,
   response: ZodType,
-  options: Pick<PlatformRouteContract, "body" | "public"> = {},
+  options: Pick<PlatformRouteContract, "body" | "query" | "errors" | "multipart" | "public"> = {},
 ): PlatformRouteContract => ({ method, path, status, response, ...options });
 
 export const CURRENT_SAAS_ROUTES = [
@@ -161,6 +165,13 @@ export const CURRENT_SAAS_ROUTES = [
   }),
   route(
     "post",
+    "/platform/offers/{id}/revise",
+    "201",
+    platformCommercialContracts.offers.revise.response,
+    { body: platformCommercialContracts.offers.revise.body },
+  ),
+  route(
+    "post",
     "/platform/offers/{id}/publish",
     "200",
     platformCommercialContracts.offers.publish.response,
@@ -254,6 +265,87 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/invoices/{id}/cancel",
     "201",
     platformCommercialContracts.invoices.cancel.response,
+  ),
+  route(
+    "get",
+    "/platform/billing/requests",
+    "200",
+    platformCommercialContracts.billingRequests.list.response,
+    { query: platformCommercialContracts.billingRequests.list.query },
+  ),
+  route(
+    "get",
+    "/platform/billing/requests/{id}",
+    "200",
+    platformCommercialContracts.billingRequests.detail.response,
+  ),
+  route(
+    "post",
+    "/platform/billing/requests/{id}/offer",
+    "201",
+    platformCommercialContracts.billingRequests.createOffer.response,
+    { body: platformCommercialContracts.billingRequests.createOffer.body },
+  ),
+  route(
+    "post",
+    "/platform/billing/requests/{id}/comments",
+    "201",
+    platformCommercialContracts.billingRequests.comment.response,
+    { body: platformCommercialContracts.billingRequests.comment.body },
+  ),
+  route(
+    "post",
+    "/platform/billing/requests/{id}/status",
+    "201",
+    platformCommercialContracts.billingRequests.status.response,
+    { body: platformCommercialContracts.billingRequests.status.body },
+  ),
+  route(
+    "post",
+    "/platform/billing/requests/{id}/links",
+    "201",
+    platformCommercialContracts.billingRequests.link.response,
+    { body: platformCommercialContracts.billingRequests.link.body },
+  ),
+  route(
+    "get",
+    "/platform/billing/acts",
+    "200",
+    platformCommercialContracts.billingActs.list.response,
+    { query: platformCommercialContracts.billingActs.list.query },
+  ),
+  route(
+    "get",
+    "/platform/billing/acts/{id}",
+    "200",
+    platformCommercialContracts.billingActs.detail.response,
+  ),
+  route(
+    "post",
+    "/platform/billing/acts",
+    "201",
+    platformCommercialContracts.billingActs.create.response,
+    {
+      body: platformCommercialContracts.billingActs.create.body,
+    },
+  ),
+  route(
+    "post",
+    "/platform/billing/acts/{id}/issue",
+    "201",
+    platformCommercialContracts.billingActs.issue.response,
+    {
+      body: platformCommercialContracts.billingActs.issue.body,
+      multipart: true,
+      errors: [{ status: "413", schema: billingActUploadTooLargeErrorSchema }],
+    },
+  ),
+  route(
+    "post",
+    "/platform/billing/acts/{id}/cancel",
+    "201",
+    platformCommercialContracts.billingActs.cancel.response,
+    { body: platformCommercialContracts.billingActs.cancel.body },
   ),
   route("get", "/platform/payments", "200", platformCommercialContracts.payments.list.response),
   route(

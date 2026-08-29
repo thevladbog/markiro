@@ -13,6 +13,19 @@ describe("resolveCabinetAccess", () => {
     });
   });
 
+  it("grants billing only to tenant owners and admins", () => {
+    for (const role of ["owner", "admin"] as const) {
+      expect(resolveCabinetAccess(role).capabilities).toEqual(
+        expect.arrayContaining([C.BILLING_READ, C.BILLING_REQUEST]),
+      );
+    }
+    for (const role of ["manager", "member"] as const) {
+      expect(resolveCabinetAccess(role).capabilities).not.toEqual(
+        expect.arrayContaining([C.BILLING_READ, C.BILLING_REQUEST]),
+      );
+    }
+  });
+
   it("makes admin a superset of manager and owner a superset of admin", () => {
     expect(resolveCabinetAccess("admin").capabilities).toEqual([
       C.OPERATIONS_READ,
@@ -20,6 +33,8 @@ describe("resolveCabinetAccess", () => {
       C.INTEGRATIONS_READ,
       C.INTEGRATIONS_WRITE,
       C.TENANT_SETTINGS_MANAGE,
+      C.BILLING_READ,
+      C.BILLING_REQUEST,
       C.CREDENTIALS_MANAGE,
       C.MEMBERS_MANAGE,
     ]);
@@ -29,6 +44,8 @@ describe("resolveCabinetAccess", () => {
       C.INTEGRATIONS_READ,
       C.INTEGRATIONS_WRITE,
       C.TENANT_SETTINGS_MANAGE,
+      C.BILLING_READ,
+      C.BILLING_REQUEST,
       C.CREDENTIALS_MANAGE,
       C.MEMBERS_MANAGE,
     ]);
@@ -48,6 +65,8 @@ describe("resolveCabinetAccess", () => {
         C.INTEGRATIONS_READ,
         C.INTEGRATIONS_WRITE,
         C.TENANT_SETTINGS_MANAGE,
+        C.BILLING_READ,
+        C.BILLING_REQUEST,
         C.CREDENTIALS_MANAGE,
         C.MEMBERS_MANAGE,
       ],

@@ -31,6 +31,7 @@ describe("mail and media schema", () => {
       expect.arrayContaining([
         "email_deliveries_public_request_status_idx",
         "email_deliveries_public_request_kind_uq",
+        "email_deliveries_tenant_billing_recipient_uq",
       ]),
     );
     const platformUserForeignKey = deliveryConfig.foreignKeys.find(

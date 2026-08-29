@@ -101,7 +101,12 @@ const issuedDetail = {
     },
   ],
   documents: readyDocuments,
-  payment: null,
+  payments: [],
+  paymentSummary: {
+    confirmedAmount: "0.00",
+    remainingAmount: "15000.00",
+    status: "issued",
+  },
   application: { status: "not_paid", latestByLine: [], attempts: [] },
 };
 
@@ -157,19 +162,26 @@ function installApi({
                 documents,
                 status: "paid",
                 paidAt: "2026-08-21T12:00:00.000Z",
-                payment: {
-                  id: "93111111-1111-4111-8111-111111111111",
-                  tenantId: TENANT_ID,
-                  invoiceId: INVOICE_ID,
-                  source: "manual",
-                  paidAt: "2026-08-21T12:00:00.000Z",
-                  amount: "15000.00",
-                  currency: "RUB",
-                  bankReference: "BANK-42",
-                  importRowId: null,
-                  platformUserId: "platform-accountant",
-                  idempotencyKey: "invoice-payment-42",
-                  createdAt: "2026-08-21T12:00:00.000Z",
+                payments: [
+                  {
+                    id: "93111111-1111-4111-8111-111111111111",
+                    tenantId: TENANT_ID,
+                    invoiceId: INVOICE_ID,
+                    source: "manual",
+                    paidAt: "2026-08-21T12:00:00.000Z",
+                    amount: "15000.00",
+                    currency: "RUB",
+                    bankReference: "BANK-42",
+                    importRowId: null,
+                    platformUserId: "platform-accountant",
+                    idempotencyKey: "invoice-payment-42",
+                    createdAt: "2026-08-21T12:00:00.000Z",
+                  },
+                ],
+                paymentSummary: {
+                  confirmedAmount: "15000.00",
+                  remainingAmount: "0.00",
+                  status: "paid",
                 },
                 application: {
                   status: "pending",
@@ -240,6 +252,9 @@ function installApi({
           platformUserId: "platform-accountant",
           idempotencyKey: body.idempotencyKey,
           createdAt: "2026-08-21T12:00:00.000Z",
+          invoiceStatus: "paid",
+          confirmedAmount: "15000.00",
+          remainingAmount: "0.00",
         });
       }
       if (path.endsWith(`/api/platform/invoices/${INVOICE_ID}/apply`) && method === "POST") {
@@ -309,6 +324,75 @@ describe("invoice commercial lifecycle", () => {
     expect(link.getAttribute("href")).toBe(`/invoices/${INVOICE_ID}`);
     await user.click(link);
     expect(await screen.findByRole("heading", { name: "Счёт INV-000021" })).toBeDefined();
+  });
+
+  it("records only the remaining balance for a partially-paid invoice", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        const path = String(input);
+        const method = init.method ?? "GET";
+        if (path.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (path.endsWith(`/api/platform/invoices/${INVOICE_ID}`) && method === "GET") {
+          return jsonResponse(200, {
+            ...issuedDetail,
+            status: "partially_paid",
+            payments: [
+              {
+                id: "93111111-1111-4111-8111-111111111111",
+                tenantId: TENANT_ID,
+                invoiceId: INVOICE_ID,
+                source: "bank_import",
+                paidAt: "2026-08-21T12:00:00.000Z",
+                amount: "5000.00",
+                currency: "RUB",
+                bankReference: "BANK-PARTIAL",
+                importRowId: "94111111-1111-4111-8111-111111111111",
+                platformUserId: "platform-accountant",
+                idempotencyKey: "bank-import:partial",
+                createdAt: "2026-08-21T12:00:00.000Z",
+              },
+            ],
+            paymentSummary: {
+              confirmedAmount: "5000.00",
+              remainingAmount: "10000.00",
+              status: "partially_paid",
+            },
+          });
+        }
+        if (path.endsWith(`/api/platform/payments/invoices/${INVOICE_ID}`) && method === "POST") {
+          const body = JSON.parse(String(init.body));
+          calls.push(body);
+          return jsonResponse(201, {
+            id: "95111111-1111-4111-8111-111111111111",
+            tenantId: TENANT_ID,
+            invoiceId: INVOICE_ID,
+            source: "manual",
+            paidAt: body.paidAt,
+            amount: body.amount,
+            currency: "RUB",
+            bankReference: body.bankReference,
+            importRowId: null,
+            platformUserId: "platform-accountant",
+            idempotencyKey: body.idempotencyKey,
+            createdAt: "2026-08-21T12:00:00.000Z",
+            invoiceStatus: "paid",
+            confirmedAmount: "15000.00",
+            remainingAmount: "0.00",
+          });
+        }
+        throw new Error(`Unexpected request: ${method} ${path}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/invoices/${INVOICE_ID}` });
+
+    await user.type(await screen.findByLabelText("Банковский референс"), "BANK-FINAL");
+    await user.click(screen.getByRole("button", { name: "Подтвердить оплату" }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toMatchObject({ amount: "10000.00", bankReference: "BANK-FINAL" });
   });
 
   it("keeps payment retries idempotent and requires an explicit manual activation decision", async () => {

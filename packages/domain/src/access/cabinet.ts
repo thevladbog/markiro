@@ -4,6 +4,8 @@ export const CABINET_CAPABILITY = {
   INTEGRATIONS_READ: "integrations.read",
   INTEGRATIONS_WRITE: "integrations.write",
   TENANT_SETTINGS_MANAGE: "tenant.settings.manage",
+  BILLING_READ: "billing.read",
+  BILLING_REQUEST: "billing.request",
   CREDENTIALS_MANAGE: "credentials.manage",
   MEMBERS_MANAGE: "members.manage",
 } as const;
@@ -23,6 +25,8 @@ const CAPABILITY_ORDER: CabinetCapability[] = [
   C.INTEGRATIONS_READ,
   C.INTEGRATIONS_WRITE,
   C.TENANT_SETTINGS_MANAGE,
+  C.BILLING_READ,
+  C.BILLING_REQUEST,
   C.CREDENTIALS_MANAGE,
   C.MEMBERS_MANAGE,
 ];
@@ -36,6 +40,8 @@ const ROLE_CAPABILITIES: Record<CabinetRole, readonly CabinetCapability[]> = {
     C.INTEGRATIONS_READ,
     C.INTEGRATIONS_WRITE,
     C.TENANT_SETTINGS_MANAGE,
+    C.BILLING_READ,
+    C.BILLING_REQUEST,
     C.CREDENTIALS_MANAGE,
     C.MEMBERS_MANAGE,
   ],

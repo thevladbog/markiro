@@ -1,5 +1,5 @@
 {
-  "id": "95749123-525f-4f2a-bf18-5ee76f44f8ab",
+  "id": "0da77153-4bf3-4c00-b453-d4ed36203fbf",
   "prevId": "adc2c5c8-ea7b-45a2-a9c2-d75fe27b6546",
   "version": "7",
   "dialect": "postgresql",
@@ -1459,45 +1459,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.chz_product_groups": {
-      "name": "chz_product_groups",
-      "schema": "",
-      "columns": {
-        "code": {
-          "name": "code",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "alias": {
-          "name": "alias",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "chz_product_groups_alias_uq": {
-          "name": "chz_product_groups_alias_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "alias"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.code_conflicts": {
       "name": "code_conflicts",
       "schema": "",
@@ -2053,9 +2014,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "chz_product_group_code": {
-          "name": "chz_product_group_code",
-          "type": "integer",
+        "product_group": {
+          "name": "product_group",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -2163,19 +2124,6 @@
           ],
           "columnsTo": [
             "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "products_chz_product_group_code_chz_product_groups_code_fk": {
-          "name": "products_chz_product_group_code_chz_product_groups_code_fk",
-          "tableFrom": "products",
-          "tableTo": "chz_product_groups",
-          "columnsFrom": [
-            "chz_product_group_code"
-          ],
-          "columnsTo": [
-            "code"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -10434,7 +10382,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "subscription_events_tenant_id_uq": {
+          "name": "subscription_events_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -10756,7 +10713,41 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "billing_payments_tenant_invoice_paid_idx": {
+          "name": "billing_payments_tenant_invoice_paid_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "invoice_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "paid_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "billing_payments_platform_user_id_platform_users_id_fk": {
           "name": "billing_payments_platform_user_id_platform_users_id_fk",
@@ -10808,14 +10799,6 @@
           "columns": [
             "tenant_id",
             "id"
-          ]
-        },
-        "billing_payments_invoice_uq": {
-          "name": "billing_payments_invoice_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "invoice_id"
           ]
         },
         "billing_payments_tenant_invoice_id_uq": {
@@ -11542,6 +11525,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "source_offer_id": {
+          "name": "source_offer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -11621,6 +11610,21 @@
             "issued_by_platform_user_id"
           ],
           "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "invoices_tenant_source_offer_fk": {
+          "name": "invoices_tenant_source_offer_fk",
+          "tableFrom": "invoices",
+          "tableTo": "commercial_offers",
+          "columnsFrom": [
+            "tenant_id",
+            "source_offer_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
             "id"
           ],
           "onDelete": "no action",
@@ -19058,6 +19062,1495 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
+    },
+    "public.billing_act_documents": {
+      "name": "billing_act_documents",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "act_id": {
+          "name": "act_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_current": {
+          "name": "is_current",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "object_key": {
+          "name": "object_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_type": {
+          "name": "content_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "byte_size": {
+          "name": "byte_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "uploaded_by_platform_user_id": {
+          "name": "uploaded_by_platform_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "billing_act_documents_current_act_uq": {
+          "name": "billing_act_documents_current_act_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "act_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"billing_act_documents\".\"is_current\" = true",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "billing_act_documents_uploaded_by_platform_user_id_platform_users_id_fk": {
+          "name": "billing_act_documents_uploaded_by_platform_user_id_platform_users_id_fk",
+          "tableFrom": "billing_act_documents",
+          "tableTo": "platform_users",
+          "columnsFrom": [
+            "uploaded_by_platform_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "billing_act_documents_tenant_act_fk": {
+          "name": "billing_act_documents_tenant_act_fk",
+          "tableFrom": "billing_act_documents",
+          "tableTo": "billing_acts",
+          "columnsFrom": [
+            "tenant_id",
+            "act_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "billing_act_documents_tenant_id_uq": {
+          "name": "billing_act_documents_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "billing_act_documents_act_revision_uq": {
+          "name": "billing_act_documents_act_revision_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "act_id",
+            "revision"
+          ]
+        },
+        "billing_act_documents_object_key_uq": {
+          "name": "billing_act_documents_object_key_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "object_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "billing_act_documents_revision_positive": {
+          "name": "billing_act_documents_revision_positive",
+          "value": "\"billing_act_documents\".\"revision\" > 0"
+        },
+        "billing_act_documents_byte_size_positive": {
+          "name": "billing_act_documents_byte_size_positive",
+          "value": "\"billing_act_documents\".\"byte_size\" > 0"
+        },
+        "billing_act_documents_content_type_pdf": {
+          "name": "billing_act_documents_content_type_pdf",
+          "value": "\"billing_act_documents\".\"content_type\" = 'application/pdf'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.billing_acts": {
+      "name": "billing_acts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "invoice_id": {
+          "name": "invoice_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ordered_service_id": {
+          "name": "ordered_service_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "number": {
+          "name": "number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "billing_act_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "period_start": {
+          "name": "period_start",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "period_end": {
+          "name": "period_end",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_platform_user_id": {
+          "name": "created_by_platform_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "issued_by_platform_user_id": {
+          "name": "issued_by_platform_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "issued_at": {
+          "name": "issued_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancelled_by_platform_user_id": {
+          "name": "cancelled_by_platform_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancelled_at": {
+          "name": "cancelled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "billing_acts_tenant_status_created_idx": {
+          "name": "billing_acts_tenant_status_created_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "billing_acts_tenant_id_organization_id_fk": {
+          "name": "billing_acts_tenant_id_organization_id_fk",
+          "tableFrom": "billing_acts",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "billing_acts_created_by_platform_user_id_platform_users_id_fk": {
+          "name": "billing_acts_created_by_platform_user_id_platform_users_id_fk",
+          "tableFrom": "billing_acts",
+          "tableTo": "platform_users",
+          "columnsFrom": [
+            "created_by_platform_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "billing_acts_issued_by_platform_user_id_platform_users_id_fk": {
+          "name": "billing_acts_issued_by_platform_user_id_platform_users_id_fk",
+          "tableFrom": "billing_acts",
+          "tableTo": "platform_users",
+          "columnsFrom": [
+            "issued_by_platform_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "billing_acts_cancelled_by_platform_user_id_platform_users_id_fk": {
+          "name": "billing_acts_cancelled_by_platform_user_id_platform_users_id_fk",
+          "tableFrom": "billing_acts",
+          "tableTo": "platform_users",
+          "columnsFrom": [
+            "cancelled_by_platform_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "billing_acts_tenant_request_fk": {
+          "name": "billing_acts_tenant_request_fk",
+          "tableFrom": "billing_acts",
+          "tableTo": "tenant_billing_requests",
+          "columnsFrom": [
+            "tenant_id",
+            "request_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "billing_acts_tenant_invoice_fk": {
+          "name": "billing_acts_tenant_invoice_fk",
+          "tableFrom": "billing_acts",
+          "tableTo": "invoices",
+          "columnsFrom": [
+            "tenant_id",
+            "invoice_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "billing_acts_tenant_service_fk": {
+          "name": "billing_acts_tenant_service_fk",
+          "tableFrom": "billing_acts",
+          "tableTo": "ordered_services",
+          "columnsFrom": [
+            "tenant_id",
+            "ordered_service_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "billing_acts_number_uq": {
+          "name": "billing_acts_number_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "number"
+          ]
+        },
+        "billing_acts_tenant_id_uq": {
+          "name": "billing_acts_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "billing_acts_period_order_check": {
+          "name": "billing_acts_period_order_check",
+          "value": "\"billing_acts\".\"period_end\" >= \"billing_acts\".\"period_start\""
+        },
+        "billing_acts_issue_shape_check": {
+          "name": "billing_acts_issue_shape_check",
+          "value": "((\"billing_acts\".\"issued_by_platform_user_id\" is null and \"billing_acts\".\"issued_at\" is null)\n        or (\"billing_acts\".\"issued_by_platform_user_id\" is not null and \"billing_acts\".\"issued_at\" is not null))\n        and ((\"billing_acts\".\"status\" = 'draft' and \"billing_acts\".\"issued_by_platform_user_id\" is null and \"billing_acts\".\"cancelled_by_platform_user_id\" is null and \"billing_acts\".\"cancelled_at\" is null)\n          or (\"billing_acts\".\"status\" = 'issued' and \"billing_acts\".\"issued_by_platform_user_id\" is not null and \"billing_acts\".\"cancelled_by_platform_user_id\" is null and \"billing_acts\".\"cancelled_at\" is null)\n          or (\"billing_acts\".\"status\" = 'cancelled' and \"billing_acts\".\"cancelled_by_platform_user_id\" is not null and \"billing_acts\".\"cancelled_at\" is not null))"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.commercial_offer_decisions": {
+      "name": "commercial_offer_decisions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "offer_id": {
+          "name": "offer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decision": {
+          "name": "decision",
+          "type": "offer_decision_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message": {
+          "name": "message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actor_user_id": {
+          "name": "actor_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "commercial_offer_decisions_accepted_offer_uq": {
+          "name": "commercial_offer_decisions_accepted_offer_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "offer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"commercial_offer_decisions\".\"decision\" = 'accepted'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "commercial_offer_decisions_tenant_offer_created_idx": {
+          "name": "commercial_offer_decisions_tenant_offer_created_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "offer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "commercial_offer_decisions_actor_user_id_user_id_fk": {
+          "name": "commercial_offer_decisions_actor_user_id_user_id_fk",
+          "tableFrom": "commercial_offer_decisions",
+          "tableTo": "user",
+          "columnsFrom": [
+            "actor_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "commercial_offer_decisions_tenant_offer_fk": {
+          "name": "commercial_offer_decisions_tenant_offer_fk",
+          "tableFrom": "commercial_offer_decisions",
+          "tableTo": "commercial_offers",
+          "columnsFrom": [
+            "tenant_id",
+            "offer_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "commercial_offer_decisions_tenant_id_uq": {
+          "name": "commercial_offer_decisions_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "commercial_offer_decisions_tenant_idempotency_uq": {
+          "name": "commercial_offer_decisions_tenant_idempotency_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "idempotency_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "commercial_offer_decisions_message_shape_check": {
+          "name": "commercial_offer_decisions_message_shape_check",
+          "value": "\"commercial_offer_decisions\".\"decision\" <> 'changes_requested' or nullif(btrim(\"commercial_offer_decisions\".\"message\"), '') is not null"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.tenant_billing_request_attachments": {
+      "name": "tenant_billing_request_attachments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_name": {
+          "name": "file_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_type": {
+          "name": "content_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "byte_size": {
+          "name": "byte_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "object_key": {
+          "name": "object_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "uploaded_by_user_id": {
+          "name": "uploaded_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "tenant_billing_request_attachments_uploaded_by_user_id_user_id_fk": {
+          "name": "tenant_billing_request_attachments_uploaded_by_user_id_user_id_fk",
+          "tableFrom": "tenant_billing_request_attachments",
+          "tableTo": "user",
+          "columnsFrom": [
+            "uploaded_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tenant_billing_request_attachments_tenant_request_fk": {
+          "name": "tenant_billing_request_attachments_tenant_request_fk",
+          "tableFrom": "tenant_billing_request_attachments",
+          "tableTo": "tenant_billing_requests",
+          "columnsFrom": [
+            "tenant_id",
+            "request_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tenant_billing_request_attachments_tenant_id_uq": {
+          "name": "tenant_billing_request_attachments_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "tenant_billing_request_attachments_object_key_uq": {
+          "name": "tenant_billing_request_attachments_object_key_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "object_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "tenant_billing_request_attachments_byte_size_positive": {
+          "name": "tenant_billing_request_attachments_byte_size_positive",
+          "value": "\"tenant_billing_request_attachments\".\"byte_size\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.tenant_billing_request_events": {
+      "name": "tenant_billing_request_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "billing_request_event_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_status": {
+          "name": "from_status",
+          "type": "billing_request_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "to_status": {
+          "name": "to_status",
+          "type": "billing_request_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actor_kind": {
+          "name": "actor_kind",
+          "type": "billing_actor_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_user_id": {
+          "name": "actor_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actor_platform_user_id": {
+          "name": "actor_platform_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "message": {
+          "name": "message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "tenant_billing_request_events_tenant_request_created_idx": {
+          "name": "tenant_billing_request_events_tenant_request_created_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tenant_billing_request_events_actor_user_id_user_id_fk": {
+          "name": "tenant_billing_request_events_actor_user_id_user_id_fk",
+          "tableFrom": "tenant_billing_request_events",
+          "tableTo": "user",
+          "columnsFrom": [
+            "actor_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tenant_billing_request_events_actor_platform_user_id_platform_users_id_fk": {
+          "name": "tenant_billing_request_events_actor_platform_user_id_platform_users_id_fk",
+          "tableFrom": "tenant_billing_request_events",
+          "tableTo": "platform_users",
+          "columnsFrom": [
+            "actor_platform_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tenant_billing_request_events_tenant_request_fk": {
+          "name": "tenant_billing_request_events_tenant_request_fk",
+          "tableFrom": "tenant_billing_request_events",
+          "tableTo": "tenant_billing_requests",
+          "columnsFrom": [
+            "tenant_id",
+            "request_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tenant_billing_request_events_tenant_id_uq": {
+          "name": "tenant_billing_request_events_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "tenant_billing_request_events_tenant_idempotency_uq": {
+          "name": "tenant_billing_request_events_tenant_idempotency_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "idempotency_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "tenant_billing_request_events_actor_shape_check": {
+          "name": "tenant_billing_request_events_actor_shape_check",
+          "value": "(\"tenant_billing_request_events\".\"actor_kind\" = 'tenant_user' and \"tenant_billing_request_events\".\"actor_user_id\" is not null and \"tenant_billing_request_events\".\"actor_platform_user_id\" is null)\n        or (\"tenant_billing_request_events\".\"actor_kind\" = 'platform_user' and \"tenant_billing_request_events\".\"actor_user_id\" is null and \"tenant_billing_request_events\".\"actor_platform_user_id\" is not null)\n        or (\"tenant_billing_request_events\".\"actor_kind\" = 'system' and \"tenant_billing_request_events\".\"actor_user_id\" is null and \"tenant_billing_request_events\".\"actor_platform_user_id\" is null)"
+        },
+        "tenant_billing_request_events_status_shape_check": {
+          "name": "tenant_billing_request_events_status_shape_check",
+          "value": "\"tenant_billing_request_events\".\"kind\" <> 'status_changed' or (\"tenant_billing_request_events\".\"from_status\" is not null and \"tenant_billing_request_events\".\"to_status\" is not null and \"tenant_billing_request_events\".\"from_status\" <> \"tenant_billing_request_events\".\"to_status\")"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.tenant_billing_request_links": {
+      "name": "tenant_billing_request_links",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "offer_id": {
+          "name": "offer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "invoice_id": {
+          "name": "invoice_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payment_id": {
+          "name": "payment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "act_id": {
+          "name": "act_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ordered_service_id": {
+          "name": "ordered_service_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subscription_event_id": {
+          "name": "subscription_event_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "tenant_billing_request_links_offer_uq": {
+          "name": "tenant_billing_request_links_offer_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "offer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"tenant_billing_request_links\".\"offer_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tenant_billing_request_links_invoice_uq": {
+          "name": "tenant_billing_request_links_invoice_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "invoice_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"tenant_billing_request_links\".\"invoice_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tenant_billing_request_links_payment_uq": {
+          "name": "tenant_billing_request_links_payment_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "payment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"tenant_billing_request_links\".\"payment_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tenant_billing_request_links_act_uq": {
+          "name": "tenant_billing_request_links_act_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "act_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"tenant_billing_request_links\".\"act_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tenant_billing_request_links_service_uq": {
+          "name": "tenant_billing_request_links_service_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ordered_service_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"tenant_billing_request_links\".\"ordered_service_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tenant_billing_request_links_subscription_event_uq": {
+          "name": "tenant_billing_request_links_subscription_event_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "subscription_event_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"tenant_billing_request_links\".\"subscription_event_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tenant_billing_request_links_tenant_request_fk": {
+          "name": "tenant_billing_request_links_tenant_request_fk",
+          "tableFrom": "tenant_billing_request_links",
+          "tableTo": "tenant_billing_requests",
+          "columnsFrom": [
+            "tenant_id",
+            "request_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tenant_billing_request_links_tenant_offer_fk": {
+          "name": "tenant_billing_request_links_tenant_offer_fk",
+          "tableFrom": "tenant_billing_request_links",
+          "tableTo": "commercial_offers",
+          "columnsFrom": [
+            "tenant_id",
+            "offer_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tenant_billing_request_links_tenant_invoice_fk": {
+          "name": "tenant_billing_request_links_tenant_invoice_fk",
+          "tableFrom": "tenant_billing_request_links",
+          "tableTo": "invoices",
+          "columnsFrom": [
+            "tenant_id",
+            "invoice_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tenant_billing_request_links_tenant_payment_fk": {
+          "name": "tenant_billing_request_links_tenant_payment_fk",
+          "tableFrom": "tenant_billing_request_links",
+          "tableTo": "billing_payments",
+          "columnsFrom": [
+            "tenant_id",
+            "payment_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tenant_billing_request_links_tenant_act_fk": {
+          "name": "tenant_billing_request_links_tenant_act_fk",
+          "tableFrom": "tenant_billing_request_links",
+          "tableTo": "billing_acts",
+          "columnsFrom": [
+            "tenant_id",
+            "act_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tenant_billing_request_links_tenant_service_fk": {
+          "name": "tenant_billing_request_links_tenant_service_fk",
+          "tableFrom": "tenant_billing_request_links",
+          "tableTo": "ordered_services",
+          "columnsFrom": [
+            "tenant_id",
+            "ordered_service_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tenant_billing_request_links_tenant_subscription_event_fk": {
+          "name": "tenant_billing_request_links_tenant_subscription_event_fk",
+          "tableFrom": "tenant_billing_request_links",
+          "tableTo": "subscription_events",
+          "columnsFrom": [
+            "tenant_id",
+            "subscription_event_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tenant_billing_request_links_tenant_id_uq": {
+          "name": "tenant_billing_request_links_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "tenant_billing_request_links_one_target_check": {
+          "name": "tenant_billing_request_links_one_target_check",
+          "value": "num_nonnulls(\"tenant_billing_request_links\".\"offer_id\", \"tenant_billing_request_links\".\"invoice_id\", \"tenant_billing_request_links\".\"payment_id\", \"tenant_billing_request_links\".\"act_id\", \"tenant_billing_request_links\".\"ordered_service_id\", \"tenant_billing_request_links\".\"subscription_event_id\") = 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.tenant_billing_requests": {
+      "name": "tenant_billing_requests",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "number": {
+          "name": "number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "billing_request_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "billing_request_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'new'"
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "desired_at": {
+          "name": "desired_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "context_type": {
+          "name": "context_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "context_id": {
+          "name": "context_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "responsible_side": {
+          "name": "responsible_side",
+          "type": "billing_responsible_side",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'markiro'"
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "tenant_billing_requests_tenant_status_updated_idx": {
+          "name": "tenant_billing_requests_tenant_status_updated_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tenant_billing_requests_tenant_id_organization_id_fk": {
+          "name": "tenant_billing_requests_tenant_id_organization_id_fk",
+          "tableFrom": "tenant_billing_requests",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tenant_billing_requests_created_by_user_id_user_id_fk": {
+          "name": "tenant_billing_requests_created_by_user_id_user_id_fk",
+          "tableFrom": "tenant_billing_requests",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tenant_billing_requests_number_uq": {
+          "name": "tenant_billing_requests_number_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "number"
+          ]
+        },
+        "tenant_billing_requests_tenant_id_uq": {
+          "name": "tenant_billing_requests_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "tenant_billing_requests_tenant_idempotency_uq": {
+          "name": "tenant_billing_requests_tenant_idempotency_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "idempotency_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "tenant_billing_requests_context_shape_check": {
+          "name": "tenant_billing_requests_context_shape_check",
+          "value": "(\"tenant_billing_requests\".\"context_type\" is null) = (\"tenant_billing_requests\".\"context_id\" is null)"
+        },
+        "tenant_billing_requests_description_nonempty": {
+          "name": "tenant_billing_requests_description_nonempty",
+          "value": "nullif(btrim(\"tenant_billing_requests\".\"description\"), '') is not null"
+        }
+      },
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -19380,6 +20873,7 @@
       "values": [
         "draft",
         "issued",
+        "partially_paid",
         "paid",
         "cancelled"
       ]
@@ -19597,10 +21091,98 @@
         "old_box",
         "repack_action"
       ]
+    },
+    "public.billing_act_status": {
+      "name": "billing_act_status",
+      "schema": "public",
+      "values": [
+        "draft",
+        "issued",
+        "cancelled"
+      ]
+    },
+    "public.billing_actor_kind": {
+      "name": "billing_actor_kind",
+      "schema": "public",
+      "values": [
+        "tenant_user",
+        "platform_user",
+        "system"
+      ]
+    },
+    "public.billing_request_event_kind": {
+      "name": "billing_request_event_kind",
+      "schema": "public",
+      "values": [
+        "created",
+        "status_changed",
+        "tenant_reply",
+        "platform_comment",
+        "offer_linked",
+        "offer_accepted",
+        "offer_changes_requested",
+        "invoice_linked",
+        "payment_confirmed",
+        "service_linked",
+        "act_linked"
+      ]
+    },
+    "public.billing_request_status": {
+      "name": "billing_request_status",
+      "schema": "public",
+      "values": [
+        "new",
+        "under_review",
+        "clarification_required",
+        "offer_prepared",
+        "awaiting_payment",
+        "in_progress",
+        "completed",
+        "cancelled"
+      ]
+    },
+    "public.billing_request_type": {
+      "name": "billing_request_type",
+      "schema": "public",
+      "values": [
+        "renewal",
+        "capacity_change",
+        "additional_service",
+        "documents",
+        "other"
+      ]
+    },
+    "public.billing_responsible_side": {
+      "name": "billing_responsible_side",
+      "schema": "public",
+      "values": [
+        "tenant",
+        "markiro",
+        "none"
+      ]
+    },
+    "public.offer_decision_kind": {
+      "name": "offer_decision_kind",
+      "schema": "public",
+      "values": [
+        "accepted",
+        "changes_requested"
+      ]
     }
   },
   "schemas": {},
-  "sequences": {},
+  "sequences": {
+    "public.tenant_billing_request_number_seq": {
+      "name": "tenant_billing_request_number_seq",
+      "schema": "public",
+      "increment": "1",
+      "startWith": "1",
+      "minValue": "1",
+      "maxValue": "9223372036854775807",
+      "cache": "1",
+      "cycle": false
+    }
+  },
   "roles": {},
   "policies": {},
   "views": {},

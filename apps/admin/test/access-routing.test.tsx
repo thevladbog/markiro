@@ -342,7 +342,7 @@ it("shows integrations and settings navigation to administrators", async () => {
   expect(await screen.findByRole("link", { name: "Интеграции" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Настройки" })).toBeDefined();
   expect(screen.getByRole("link", { name: "Доступ в кабинет" })).toBeDefined();
-  expect(screen.getByRole("link", { name: "Открыть профиль Елена Ким" })).toBeDefined();
+  expect(screen.getAllByRole("link", { name: "Открыть профиль Елена Ким" })).toHaveLength(2);
 });
 
 it("redirects legacy signed-in users to global profile completion and preserves the requested route", async () => {

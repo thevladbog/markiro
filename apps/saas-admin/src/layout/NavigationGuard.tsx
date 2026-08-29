@@ -76,8 +76,8 @@ export function NavigationGuardProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (dirty) allowNavigation.current = false;
-  }, [dirty]);
+    if (dirty || busy) allowNavigation.current = false;
+  }, [busy, dirty]);
 
   useEffect(() => {
     if (!busy) setBusyNotice(false);

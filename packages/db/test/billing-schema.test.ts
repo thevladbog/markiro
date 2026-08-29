@@ -22,7 +22,13 @@ describe("tenant billing schema", () => {
       "sole_proprietor",
       "legal_entity",
     ]);
-    expect(schema.INVOICE_STATUSES).toEqual(["draft", "issued", "paid", "cancelled"]);
+    expect(schema.INVOICE_STATUSES).toEqual([
+      "draft",
+      "issued",
+      "partially_paid",
+      "paid",
+      "cancelled",
+    ]);
     expect(schema.INVOICE_LINE_KINDS).toEqual(["plan", "addon", "service", "custom"]);
     expect(schema.INVOICE_APPLICATION_MODES).toEqual(["manual", "automatic"]);
   });
