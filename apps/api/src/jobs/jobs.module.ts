@@ -45,6 +45,11 @@ import {
 export const PG_CONNECTION_STRING = "JOBS_PG_CONNECTION_STRING";
 export const BUILD_SHIFT_EXPORT_QUEUE = "build-shift-export";
 export const BUILD_INVENTORY_DOCUMENT_QUEUE = "build-inventory-document-run";
+// Queue name only, for now: `ChzExportsService.order`/`retry` (Task 4) need a
+// place to send the job, but the queue itself -- `createQueue`, its worker
+// and boot reconciliation -- is Task 6's to build, the same way Task 5's
+// runner will consume it.
+export const CHZ_EXPORT_ORDER_QUEUE = "chz-export-order";
 
 const QUEUE_NAME = "ensure-partitions";
 const QUEUE_CRON = "0 4 * * *";
@@ -382,6 +387,18 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     if (!this.boss || !this.started) throw new Error("pg-boss is not started");
     const jobId = await this.boss.send(BUILD_INVENTORY_DOCUMENT_QUEUE, { runId });
     if (!jobId) throw new Error("inventory document run enqueue failed");
+    return jobId;
+  }
+
+  /**
+   * Minimal `send` wrapper, deliberately matching `enqueueInventoryDocumentRun`
+   * above -- the queue itself (creation, worker, retry policy, boot
+   * reconciliation) is Task 6's responsibility, not this one's.
+   */
+  async enqueueChzExportOrder(tenantId: string, inventoryId: string): Promise<string> {
+    if (!this.boss || !this.started) throw new Error("pg-boss is not started");
+    const jobId = await this.boss.send(CHZ_EXPORT_ORDER_QUEUE, { tenantId, inventoryId });
+    if (!jobId) throw new Error("chz export order enqueue failed");
     return jobId;
   }
 
