@@ -245,6 +245,34 @@ export const inventoryDetailSchema = inventorySchema.safeExtend({
 
 export const listInventoriesSchema = z.strictObject({ items: z.array(inventorySchema) });
 
+export const CHZ_EXPORT_PREFLIGHT_CODES = [
+  "INN_MISSING",
+  "PRODUCT_GROUP_MISSING",
+  "AGENT_NOT_PAIRED",
+  "TOKEN_UNAVAILABLE",
+] as const;
+export type ChzExportPreflightCode = (typeof CHZ_EXPORT_PREFLIGHT_CODES)[number];
+
+export const CHZ_EXPORT_RUN_STATES = ["queued", "ordered", "ready", "imported", "failed"] as const;
+export type ChzExportRunState = (typeof CHZ_EXPORT_RUN_STATES)[number];
+
+export const chzExportRunSchema = z.strictObject({
+  status: z.enum(INVENTORY_CHZ_STATUSES),
+  state: z.enum(CHZ_EXPORT_RUN_STATES),
+  attempts: nonnegativeInteger,
+  errorCode: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+  importId: uuid.nullable(),
+  orderedAt: dateTime.nullable(),
+  completedAt: dateTime.nullable(),
+});
+
+export const chzExportStateSchema = z.strictObject({
+  available: z.boolean(),
+  blockedBy: z.array(z.enum(CHZ_EXPORT_PREFLIGHT_CODES)),
+  runs: z.array(chzExportRunSchema),
+});
+
 const inventoryParticipantSchema = z.strictObject({
   deviceId: uuid,
   terminalName: z.string().min(1),
@@ -640,4 +668,6 @@ export type InventoryRecentEvent = z.infer<typeof inventoryRecentEventSchema>;
 export type InventoryEvidenceEvent = z.infer<typeof inventoryEvidenceEventSchema>;
 export type InventoryEvidenceResponse = z.infer<typeof inventoryEvidenceResponseSchema>;
 export type CreateInventoryCorrectionInput = z.infer<typeof createInventoryCorrectionInputSchema>;
+export type ChzExportRun = z.infer<typeof chzExportRunSchema>;
+export type ChzExportState = z.infer<typeof chzExportStateSchema>;
 export type InventoryCorrection = z.infer<typeof inventoryCorrectionSchema>;

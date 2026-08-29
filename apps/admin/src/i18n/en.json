@@ -379,6 +379,24 @@
         "backToParameters": "Back to parameters",
         "review": "Review snapshot"
       },
+      "chzExports": {
+        "order": "Order from Chestny ZNAK",
+        "ordering": "Ordering exports…",
+        "retry": "Retry",
+        "state": {
+          "queued": "Queued",
+          "ordered": "Ordered",
+          "ready": "File ready",
+          "imported": "Imported",
+          "failed": "Failed"
+        },
+        "blocked": {
+          "INN_MISSING": "Enter the organization's INN in company details",
+          "PRODUCT_GROUP_MISSING": "Set the Chestny ZNAK product group on the product card",
+          "AGENT_NOT_PAIRED": "Pair a signer agent under Integrations",
+          "TOKEN_UNAVAILABLE": "Refresh the True API token under Integrations"
+        }
+      },
       "snapshot": {
         "title": "Snapshot review",
         "description": "Review the exact six selected uploads before fixing the immutable snapshot.",
