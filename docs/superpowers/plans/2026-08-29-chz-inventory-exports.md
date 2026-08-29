@@ -1768,7 +1768,11 @@ it("leaves manual upload available regardless of the export state", async () => 
   stubChzExports({ available: false, blockedBy: ["AGENT_NOT_PAIRED"], runs: [] });
   renderPreparation();
   // Manual upload is the fallback and the path for tenants with no agent.
-  expect((await screen.findAllByTestId("inventory-upload-slot")).length).toBe(6);
+  // Assert on the FileDropZone itself (by its per-status accessible name),
+  // not on the always-rendered outer `<section data-testid="inventory-upload-slot">`
+  // — a testid on the section proves nothing if `FileDropZone` later becomes
+  // conditional on export state.
+  expect((await screen.findAllByRole("button", { name: /Выбрать файл/ })).length).toBe(6);
 });
 ```
 

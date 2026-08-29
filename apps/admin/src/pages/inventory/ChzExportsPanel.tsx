@@ -84,6 +84,10 @@ export function ChzExportRunStatus({
         <>
           {run.errorMessage ? (
             <small className="mk-inventory-error">{run.errorMessage}</small>
+          ) : run.errorCode ? (
+            <small className="mk-inventory-error">
+              {t("pages.inventory.chzExports.errorCodeFallback", { code: run.errorCode })}
+            </small>
           ) : null}
           <Button
             type="button"

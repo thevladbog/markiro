@@ -170,10 +170,7 @@ function renderPreparation() {
         };
         return response(currentChzState, 201);
       }
-      if (
-        url === `/api/inventories/${ID.inventory}/chz-exports/retry` &&
-        init?.method === "POST"
-      ) {
+      if (url === `/api/inventories/${ID.inventory}/chz-exports/retry` && init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as { status: string };
         retryCalls.push({ status: body.status });
         currentChzState = {
@@ -246,9 +243,22 @@ it("retries only the failed status", async () => {
   await waitFor(() => expect(retryCalls).toEqual([{ status: "RETIRED" }]));
 });
 
+it("falls back to the error code when a failed run has no message", async () => {
+  stubChzExports({
+    available: true,
+    blockedBy: [],
+    runs: [run("RETIRED", "failed", { errorCode: "TIMEOUT", errorMessage: null })],
+  });
+  renderPreparation();
+  expect(await screen.findByText("Код ошибки: TIMEOUT")).toBeDefined();
+});
+
 it("leaves manual upload available regardless of the export state", async () => {
   stubChzExports({ available: false, blockedBy: ["AGENT_NOT_PAIRED"], runs: [] });
   renderPreparation();
   // Manual upload is the fallback and the path for tenants with no agent.
-  expect((await screen.findAllByTestId("inventory-upload-slot")).length).toBe(6);
+  // Querying the FileDropZone itself (by its per-status accessible name)
+  // means this fails if the drop zone is ever made conditional — unlike
+  // counting the always-rendered outer <section data-testid="inventory-upload-slot">.
+  expect((await screen.findAllByRole("button", { name: /Выбрать файл/ })).length).toBe(6);
 });

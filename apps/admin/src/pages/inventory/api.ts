@@ -493,9 +493,7 @@ export function useOrderChzExports(): UseMutationResult<ChzExportState, Error, s
     mutationFn: orderChzExports,
     onSuccess: (_result, inventoryId) => {
       void queryClient.invalidateQueries({ queryKey: chzExportStateQueryKey(inventoryId) });
-      void queryClient.invalidateQueries({
-        queryKey: [...INVENTORIES_QUERY_KEY, inventoryId],
-      });
+      invalidateInventory(queryClient, inventoryId);
     },
   });
 }
@@ -510,9 +508,7 @@ export function useRetryChzExport(): UseMutationResult<
     mutationFn: retryChzExport,
     onSuccess: (_result, input) => {
       void queryClient.invalidateQueries({ queryKey: chzExportStateQueryKey(input.inventoryId) });
-      void queryClient.invalidateQueries({
-        queryKey: [...INVENTORIES_QUERY_KEY, input.inventoryId],
-      });
+      invalidateInventory(queryClient, input.inventoryId);
     },
   });
 }

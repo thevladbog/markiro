@@ -383,6 +383,7 @@
         "order": "Order from Chestny ZNAK",
         "ordering": "Ordering exports…",
         "retry": "Retry",
+        "errorCodeFallback": "Error code: {{code}}",
         "state": {
           "queued": "Queued",
           "ordered": "Ordered",
