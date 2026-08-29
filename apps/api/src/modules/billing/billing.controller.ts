@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query, Req } from "@nestjs/common";
 import { ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { platformCommercialContracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
@@ -189,6 +189,20 @@ export class BillingController {
     return parsePlatformResponse(
       platformCommercialContracts.invoices.cancel.response,
       await this.billing.cancel(req.platformPrincipal!, id),
+    );
+  }
+
+  @Delete(":id")
+  @ApiOperation({ summary: "Delete a draft invoice" })
+  @PlatformApiProtectedOk({ response: platformCommercialContracts.invoices.delete.response })
+  @RequirePlatformCapabilities("billing.write")
+  async deleteDraft(
+    @Req() req: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string,
+  ) {
+    return parsePlatformResponse(
+      platformCommercialContracts.invoices.delete.response,
+      await this.billing.deleteDraft(req.platformPrincipal!, id),
     );
   }
 }

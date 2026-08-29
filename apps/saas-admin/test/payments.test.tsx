@@ -73,13 +73,16 @@ describe("payments registry", () => {
     expect(screen.getByRole("link", { name: "Юридические данные" }).getAttribute("href")).toBe(
       `/tenants/${TENANT_ID}?tab=legal`,
     );
+    expect(screen.getByRole("button", { name: "Файл банковской выписки" }).className).toContain(
+      "mk-file-drop",
+    );
 
     const file = new File(
       ["amount,payer_account,purpose\n100.00,40702810900000009999,INV-700003"],
       "bank.csv",
       { type: "text/csv" },
     );
-    await user.upload(screen.getByLabelText("Файл банковской выписки"), file);
+    await user.upload(screen.getByTestId("file-drop-input"), file);
     await user.click(screen.getByRole("button", { name: "Импортировать" }));
     await waitFor(() => expect(calls.some((call) => call.method === "POST")).toBe(true));
 
@@ -102,7 +105,85 @@ describe("payments registry", () => {
       }),
     );
   });
+
+  it("accepts and decodes a Windows-1251 1C TXT statement before import", async () => {
+    const calls: Array<{ fileName: string; content: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        const path = String(input);
+        const method = init.method ?? "GET";
+        if (path.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (path.endsWith("/api/platform/payments") && method === "GET") {
+          return jsonResponse(200, { items: [] });
+        }
+        if (path.endsWith("/api/platform/payments/matches") && method === "GET") {
+          return jsonResponse(200, { items: [] });
+        }
+        if (path.endsWith("/api/platform/payments/imports") && method === "POST") {
+          calls.push(JSON.parse(String(init.body)) as { fileName: string; content: string });
+          return jsonResponse(201, {
+            id: IMPORT_ID,
+            source: "bank_import",
+            sourceChecksum: "b".repeat(64),
+            fileName: "1c-bank.txt",
+            parserVersion: "bank-1c-client-bank-exchange-v1",
+            status: "ready",
+            rowCount: 1,
+            errorCount: 0,
+            createdByPlatformUserId: "user-1",
+            createdAt: CREATED_AT,
+          });
+        }
+        throw new Error(`Unexpected request: ${method} ${path}`);
+      }),
+    );
+    const statement = [
+      "1CClientBankExchange",
+      "ВерсияФормата=1.03",
+      "Кодировка=Windows",
+      "СекцияДокумент=Платежное поручение",
+      "Номер=42",
+      "Дата=29.08.2026",
+      "Сумма=15000.00",
+      "Плательщик=ООО Фабрика",
+      "ПлательщикСчет=40702810900000000001",
+      "НазначениеПлатежа=Оплата по счету INV-000021",
+      "КонецДокумента",
+      "КонецФайла",
+    ].join("\r\n");
+    const file = new File([encodeWindows1251(statement)], "1c-bank.txt", {
+      type: "text/plain",
+    });
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: "/payments" });
+
+    await screen.findByRole("heading", { name: "Платежи" });
+    await user.upload(screen.getByTestId("file-drop-input"), file);
+    expect(screen.getByText("1c-bank.txt")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Импортировать" }));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toMatchObject({ fileName: "1c-bank.txt" });
+    expect(calls[0]?.content).toContain("Плательщик=ООО Фабрика");
+    expect(calls[0]?.content).not.toContain("�");
+  });
 });
+
+function encodeWindows1251(value: string): ArrayBuffer {
+  const bytes = Uint8Array.from(
+    [...value].map((character) => {
+      const code = character.codePointAt(0) ?? 0x3f;
+      if (code <= 0x7f) return code;
+      if (code === 0x401) return 0xa8;
+      if (code === 0x451) return 0xb8;
+      if (code >= 0x410 && code <= 0x42f) return 0xc0 + code - 0x410;
+      if (code >= 0x430 && code <= 0x44f) return 0xe0 + code - 0x430;
+      return 0x3f;
+    }),
+  );
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
 
 function unknownMatch() {
   return {

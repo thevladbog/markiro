@@ -288,6 +288,25 @@
     "empty": "No invoices yet",
     "detail": "Invoice",
     "issue": "Issue",
+    "draftActions": "Draft actions",
+    "draftActionsHelp": "Issue a ready invoice or delete a draft created by mistake.",
+    "withdraw": {
+      "action": "Withdraw invoice",
+      "help": "Withdrawal is available until the first payment is recorded.",
+      "title": "Withdraw the issued invoice?",
+      "description": "The invoice remains in financial history with a Withdrawn status. It can no longer be paid or applied.",
+      "confirm": "Confirm withdrawal",
+      "keep": "Keep issued",
+      "error": "Could not withdraw the invoice. Check that no payment has been recorded."
+    },
+    "delete": {
+      "action": "Delete draft",
+      "title": "Delete the invoice draft?",
+      "description": "A deleted draft cannot be restored. An invoice linked to a request or financial records cannot be deleted.",
+      "confirm": "Delete",
+      "keep": "Keep draft",
+      "error": "Could not delete the draft. It may already be issued or linked to another record."
+    },
     "pay": "Record payment",
     "document": "Generate document",
     "back": "Back to invoice register",
@@ -344,7 +363,7 @@
       "issued": "Issued",
       "partially_paid": "Partially paid",
       "paid": "Paid",
-      "cancelled": "Cancelled"
+      "cancelled": "Withdrawn"
     },
     "modes": { "manual": "After operator decision", "automatic": "Automatically after payment" },
     "policies": {
@@ -372,6 +391,11 @@
         "eyebrow": "DRAFT",
         "title": "Invoice has not been issued",
         "body": "Review the items and total, then issue the invoice to freeze its terms."
+      },
+      "cancelled": {
+        "eyebrow": "WITHDRAWN",
+        "title": "Invoice withdrawn",
+        "body": "The invoice remains in financial history but can no longer be paid or applied."
       },
       "waiting_payment": {
         "eyebrow": "WAITING FOR PAYMENT",
@@ -520,8 +544,12 @@
     "loading": "Loading payments",
     "import": {
       "title": "Import bank statement",
-      "help": "Upload a CSV file. Invoice and account matches stay in review until payment is recorded.",
+      "help": "Upload CSV or a 1C TXT statement. Invoice and account matches stay in review until payment is recorded.",
       "file": "Bank statement file",
+      "drop": "Drop a statement or choose a file",
+      "formats": "CSV or 1CClientBankExchange TXT, up to 5 MB",
+      "reading": "Reading statement…",
+      "unsupportedFile": "Choose a CSV or TXT bank statement",
       "submit": "Import",
       "success": "Statement imported. Review the suggested matches.",
       "error": "Could not import the statement"

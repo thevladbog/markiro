@@ -6,11 +6,13 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   platformCommercialContracts,
   type InvoiceCreateServiceResultSource,
+  type InvoiceDeleteResult,
+  type InvoiceListServiceRecordSource,
   type InvoiceServiceDetailSource,
   type InvoiceServiceRecordSource,
 } from "@markiro/platform-contracts";
@@ -307,8 +309,12 @@ export class BillingService {
     });
   }
 
-  async list(tenantId?: string): Promise<{ items: InvoiceServiceRecordSource[] }> {
-    const query = this.db.select().from(schema.invoices).orderBy(desc(schema.invoices.createdAt));
+  async list(tenantId?: string): Promise<{ items: InvoiceListServiceRecordSource[] }> {
+    const query = this.db
+      .select({ ...getTableColumns(schema.invoices), tenantName: schema.organization.name })
+      .from(schema.invoices)
+      .innerJoin(schema.organization, eq(schema.organization.id, schema.invoices.tenantId))
+      .orderBy(desc(schema.invoices.createdAt));
     return {
       items: tenantId ? await query.where(eq(schema.invoices.tenantId, tenantId)) : await query,
     };
@@ -318,8 +324,9 @@ export class BillingService {
     return this.db.transaction(
       async (tx) => {
         const [invoice] = await tx
-          .select()
+          .select({ ...getTableColumns(schema.invoices), tenantName: schema.organization.name })
           .from(schema.invoices)
+          .innerJoin(schema.organization, eq(schema.organization.id, schema.invoices.tenantId))
           .where(eq(schema.invoices.id, id))
           .limit(1);
         if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
@@ -584,21 +591,139 @@ export class BillingService {
         .for("update")
         .limit(1);
       if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
-      if (invoice.status === "paid" || invoice.status === "partially_paid") {
-        throw new ConflictException({ code: "invoice_paid" });
-      }
+      if (invoice.status !== "issued")
+        throw new ConflictException({
+          code:
+            invoice.status === "paid" || invoice.status === "partially_paid"
+              ? "invoice_paid"
+              : "invoice_not_issued",
+        });
+      const now = new Date();
       const [updated] = await tx
         .update(schema.invoices)
-        .set({ status: "cancelled", cancelledAt: new Date() })
+        .set({ status: "cancelled", cancelledAt: now, updatedAt: now })
         .where(
-          and(
-            eq(schema.invoices.id, canonicalInvoiceId),
-            eq(schema.invoices.status, invoice.status),
-          ),
+          and(eq(schema.invoices.id, canonicalInvoiceId), eq(schema.invoices.status, "issued")),
         )
         .returning();
       if (!updated) throw new ConflictException({ code: "invoice_cancel_failed" });
+      await this.audit.record(tx, {
+        actorPlatformUserId: principal.userId,
+        actorRole: principal.role,
+        action: "billing.invoice.cancelled",
+        outcome: "success",
+        tenantId: invoice.tenantId,
+        targetType: "invoice",
+        targetId: canonicalInvoiceId,
+        reason: null,
+        before: { status: "issued", number: invoice.number },
+        after: { status: "cancelled", cancelledAt: now.toISOString() },
+        requestId: null,
+      });
       return updated;
+    });
+  }
+
+  async deleteDraft(principal: PlatformPrincipal, id: string): Promise<InvoiceDeleteResult> {
+    const canonicalInvoiceId = canonicalBillingUuid(id);
+    return this.db.transaction(async (tx) => {
+      const [located] = await tx
+        .select({ tenantId: schema.invoices.tenantId })
+        .from(schema.invoices)
+        .where(eq(schema.invoices.id, canonicalInvoiceId))
+        .limit(1);
+      if (!located) throw new NotFoundException({ code: "invoice_not_found" });
+      await acquireBillingWorkflowLocks(tx, located.tenantId, [
+        { kind: "invoice", id: canonicalInvoiceId },
+      ]);
+      const [invoice] = await tx
+        .select()
+        .from(schema.invoices)
+        .where(eq(schema.invoices.id, canonicalInvoiceId))
+        .for("update")
+        .limit(1);
+      if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
+      if (invoice.status !== "draft") {
+        throw new ConflictException({ code: "invoice_not_draft" });
+      }
+
+      const dependencies = [
+        await tx
+          .select({ id: schema.invoiceDocuments.id })
+          .from(schema.invoiceDocuments)
+          .where(eq(schema.invoiceDocuments.invoiceId, canonicalInvoiceId))
+          .limit(1),
+        await tx
+          .select({ id: schema.billingPayments.id })
+          .from(schema.billingPayments)
+          .where(eq(schema.billingPayments.invoiceId, canonicalInvoiceId))
+          .limit(1),
+        await tx
+          .select({ id: schema.paymentMatches.id })
+          .from(schema.paymentMatches)
+          .where(eq(schema.paymentMatches.invoiceId, canonicalInvoiceId))
+          .limit(1),
+        await tx
+          .select({ invoiceId: schema.invoicePaymentCompletions.invoiceId })
+          .from(schema.invoicePaymentCompletions)
+          .where(eq(schema.invoicePaymentCompletions.invoiceId, canonicalInvoiceId))
+          .limit(1),
+        await tx
+          .select({ id: schema.invoiceApplicationEvents.id })
+          .from(schema.invoiceApplicationEvents)
+          .where(eq(schema.invoiceApplicationEvents.invoiceId, canonicalInvoiceId))
+          .limit(1),
+        await tx
+          .select({ id: schema.billingActs.id })
+          .from(schema.billingActs)
+          .where(eq(schema.billingActs.invoiceId, canonicalInvoiceId))
+          .limit(1),
+        await tx
+          .select({ id: schema.tenantBillingRequestLinks.id })
+          .from(schema.tenantBillingRequestLinks)
+          .where(eq(schema.tenantBillingRequestLinks.invoiceId, canonicalInvoiceId))
+          .limit(1),
+        await tx
+          .select({ id: schema.orderedServices.id })
+          .from(schema.orderedServices)
+          .where(eq(schema.orderedServices.invoiceId, canonicalInvoiceId))
+          .limit(1),
+      ];
+      if (dependencies.some((rows) => rows.length > 0)) {
+        throw new ConflictException({ code: "invoice_has_dependencies" });
+      }
+
+      await tx
+        .delete(schema.invoiceLines)
+        .where(eq(schema.invoiceLines.invoiceId, canonicalInvoiceId));
+      const [deleted] = await tx
+        .delete(schema.invoices)
+        .where(and(eq(schema.invoices.id, canonicalInvoiceId), eq(schema.invoices.status, "draft")))
+        .returning({
+          id: schema.invoices.id,
+          tenantId: schema.invoices.tenantId,
+          number: schema.invoices.number,
+        });
+      if (!deleted) throw new ConflictException({ code: "invoice_delete_failed" });
+      await this.audit.record(tx, {
+        actorPlatformUserId: principal.userId,
+        actorRole: principal.role,
+        action: "billing.invoice.deleted",
+        outcome: "success",
+        tenantId: deleted.tenantId,
+        targetType: "invoice",
+        targetId: deleted.id,
+        reason: null,
+        before: { status: "draft", number: deleted.number },
+        after: { deleted: true },
+        requestId: null,
+      });
+      return {
+        id: deleted.id,
+        tenantId: deleted.tenantId,
+        number: deleted.number,
+        deleted: true,
+      };
     });
   }
 }

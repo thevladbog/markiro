@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { Alert, Button, ConfirmDialog, SectionHeader, StatusChip } from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import {
   applyInvoice,
+  cancelInvoice,
+  deleteInvoiceDraft,
   getInvoiceDocumentDownload,
   getInvoice,
   issueInvoice,
@@ -15,12 +17,14 @@ import {
   type RecordInvoicePaymentInput,
 } from "./api.js";
 import { InvoiceFlowSteps, type FlowState } from "./InvoiceFlowSteps.js";
+import { invoiceStatusTone } from "./invoice-status.js";
 
 const DOCUMENT_PENDING_TIMEOUT_MS = 5 * 60 * 1000;
 const DOCUMENT_REFRESH_INTERVAL_MS = 2_000;
 
 function flowState(invoice: InvoiceDetail): FlowState {
   if (invoice.status === "draft") return "draft";
+  if (invoice.status === "cancelled") return "cancelled";
   if (invoice.paymentSummary?.status !== "paid") return "waiting_payment";
   if (invoice.application.status === "applied") return "applied";
   if (invoice.application.status === "partial_failure") return "partial_failure";
@@ -43,6 +47,7 @@ export function InvoiceDetailPage() {
   const { t } = useTranslation();
   const { invoiceId = "" } = useParams();
   const principal = usePlatformPrincipal();
+  const navigate = useNavigate();
   const canWrite = principal.capabilities.includes("billing.write");
   const client = useQueryClient();
   const detail = useQuery({
@@ -56,6 +61,8 @@ export function InvoiceDetailPage() {
   const [reason, setReason] = useState("");
   const [decisions, setDecisions] = useState<Record<string, "immediate" | "after_current">>({});
   const [confirmDocumentRender, setConfirmDocumentRender] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [downloadBlocked, setDownloadBlocked] = useState(false);
   const [documentsNow, setDocumentsNow] = useState(() => Date.now());
 
@@ -78,6 +85,20 @@ export function InvoiceDetailPage() {
     onSuccess: refresh,
   });
   const issue = useMutation({ mutationFn: () => issueInvoice(invoiceId), onSuccess: refresh });
+  const withdraw = useMutation({
+    mutationFn: () => cancelInvoice(invoiceId),
+    onSuccess: async () => {
+      await refresh();
+      setConfirmCancel(false);
+    },
+  });
+  const deleteDraft = useMutation({
+    mutationFn: () => deleteInvoiceDraft(invoiceId),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: ["platform", "invoices"] });
+      void navigate("/invoices", { replace: true });
+    },
+  });
   const document = useMutation({
     mutationFn: () => renderInvoice(invoiceId),
     onSuccess: async () => {
@@ -211,13 +232,14 @@ export function InvoiceDetailPage() {
         actionsLabel={t("billing.detailActionsLabel")}
         actions={
           <StatusChip
-            status={invoice.status === "paid" ? "ok" : "warn"}
+            status={invoiceStatusTone(invoice.status)}
             label={t(`billing.statuses.${invoice.status}`)}
           />
         }
       />
-      <p className="invoice-coordinate mono">
-        {invoice.id} · {invoice.tenantId}
+      <p className="invoice-tenant-link">
+        <span>{t("billing.tenant")}</span>
+        <Link to={`/tenants/${invoice.tenantId}`}>{invoice.tenantName}</Link>
       </p>
 
       <InvoiceFlowSteps state={state} />
@@ -401,11 +423,59 @@ export function InvoiceDetailPage() {
         onConfirm={() => document.mutate()}
       />
 
+      <ConfirmDialog
+        open={confirmCancel}
+        title={t("billing.withdraw.title")}
+        description={t("billing.withdraw.description")}
+        entity={invoice.number}
+        confirmLabel={t("billing.withdraw.confirm")}
+        cancelLabel={t("billing.withdraw.keep")}
+        tone="destructive"
+        busy={withdraw.isPending}
+        error={withdraw.isError ? t("billing.withdraw.error") : undefined}
+        onCancel={() => setConfirmCancel(false)}
+        onConfirm={() => withdraw.mutate()}
+      />
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title={t("billing.delete.title")}
+        description={t("billing.delete.description")}
+        entity={invoice.number}
+        confirmLabel={t("billing.delete.confirm")}
+        cancelLabel={t("billing.delete.keep")}
+        tone="destructive"
+        busy={deleteDraft.isPending}
+        error={deleteDraft.isError ? t("billing.delete.error") : undefined}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => deleteDraft.mutate()}
+      />
+
       {invoice.status === "draft" && canWrite ? (
         <section className="invoice-action-panel">
-          <h2>{t("billing.issue")}</h2>
-          <Button loading={issue.isPending} onClick={() => issue.mutate()}>
-            {t("billing.issue")}
+          <div>
+            <h2>{t("billing.draftActions")}</h2>
+            <p>{t("billing.draftActionsHelp")}</p>
+          </div>
+          <div className="invoice-action-buttons">
+            <Button loading={issue.isPending} onClick={() => issue.mutate()}>
+              {t("billing.issue")}
+            </Button>
+            <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
+              {t("billing.delete.action")}
+            </Button>
+          </div>
+        </section>
+      ) : null}
+
+      {invoice.status === "issued" && canWrite ? (
+        <section className="invoice-action-panel invoice-action-panel--danger">
+          <div>
+            <h2>{t("billing.withdraw.action")}</h2>
+            <p>{t("billing.withdraw.help")}</p>
+          </div>
+          <Button variant="destructive" onClick={() => setConfirmCancel(true)}>
+            {t("billing.withdraw.action")}
           </Button>
         </section>
       ) : null}

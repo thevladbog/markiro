@@ -391,6 +391,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "BillingController.cancel": platform(
     "platform invoice cancellation is guarded by platform billing capabilities",
   ),
+  "BillingController.deleteDraft": platform(
+    "platform draft invoice deletion is guarded by platform billing capabilities",
+  ),
   "BillingPaymentsController.record": platform(
     "platform payment recording is guarded by platform billing capabilities",
   ),
