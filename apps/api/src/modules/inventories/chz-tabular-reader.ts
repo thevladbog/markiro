@@ -13,7 +13,23 @@ export const CHZ_MAX_COLUMNS = 35;
 export const CHZ_MAX_CELLS = 1_750_000;
 export const CHZ_MAX_CELL_UTF8_BYTES = 64 * 1024;
 const CHZ_MAX_ARCHIVE_ENTRIES = 128;
-const CHZ_MAX_ARCHIVE_BYTES = 8 * 1024 * 1024;
+/**
+ * Deliberately equal to `CHZ_MAX_INPUT_BYTES` rather than a tighter bound.
+ *
+ * `unzipBounded` serves both `.zip` and `.xlsx`, so a smaller archive cap held
+ * every zip-based container to its own limit while an identically-sized plain
+ * `.csv` was accepted. That is backwards for how the file actually arrives: a
+ * cabinet export is routinely an `.xlsx`, and an export ordered over True API
+ * is always a `.zip`. Raising `CHZ_MAX_INPUT_BYTES` alone therefore only ever
+ * helped raw CSV.
+ *
+ * Zip bombs are not stopped here. `CHZ_MAX_UNCOMPRESSED_BYTES` stops them, and
+ * it is enforced twice: against the central directory's declared total before
+ * anything is inflated, and against the running total while inflating. Capping
+ * the *compressed* size only caps the download, which the outer
+ * `CHZ_MAX_INPUT_BYTES` check already does.
+ */
+const CHZ_MAX_ARCHIVE_BYTES = CHZ_MAX_INPUT_BYTES;
 const CHZ_MAX_XML_METADATA_BYTES = 2 * 1024 * 1024;
 
 export type ChzContainerKind = "csv" | "zip" | "xlsx";
