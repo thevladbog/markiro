@@ -307,7 +307,11 @@ jobs:
           pnpm --filter @markiro/station lint
           pnpm --filter @markiro/station build
           pnpm test:station-release:contract
-          cargo test --manifest-path apps/station/src-tauri/Cargo.toml
+          # Main CI executes the Rust tests on Linux and separately compiles the
+          # Windows Tauri app. On Windows Server 2025 the Tauri test harness can
+          # fail before main() with STATUS_ENTRYPOINT_NOT_FOUND, so this release
+          # gate compiles every Rust test target without launching the GUI binary.
+          cargo test --manifest-path apps/station/src-tauri/Cargo.toml --no-run
           git diff --check
 
       - name: Verify production station CORS
