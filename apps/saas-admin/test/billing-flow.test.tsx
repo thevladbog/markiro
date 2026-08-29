@@ -8,6 +8,7 @@ const LINE_ID = "92111111-1111-4111-8111-111111111111";
 const CREATED_AT = "2026-08-21T10:00:00.000Z";
 const HTML_DOCUMENT_ID = "96111111-1111-4111-8111-111111111111";
 const PDF_DOCUMENT_ID = "97111111-1111-4111-8111-111111111111";
+const TENANT_NAME = "ООО Фабрика";
 
 const readyDocuments = [
   {
@@ -53,6 +54,7 @@ const invoiceBase = {
   id: INVOICE_ID,
   number: "INV-000021",
   tenantId: TENANT_ID,
+  tenantName: TENANT_NAME,
   issueDate: "2026-08-21T10:00:00.000Z",
   dueDate: "2026-08-28T10:00:00.000Z",
   currency: "RUB",
@@ -130,6 +132,7 @@ function installApi({
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
   let paymentAttempts = 0;
   let paid = false;
+  let cancelled = false;
   let documents: readonly Record<string, unknown>[] = initialDocuments;
   let detailRequests = 0;
   const downloadResolvers: Array<() => void> = [];
@@ -156,57 +159,78 @@ function installApi({
         }
         return jsonResponse(
           200,
-          paid
+          cancelled
             ? {
                 ...issuedDetail,
                 documents,
-                status: "paid",
-                paidAt: "2026-08-21T12:00:00.000Z",
-                payments: [
-                  {
-                    id: "93111111-1111-4111-8111-111111111111",
-                    tenantId: TENANT_ID,
-                    invoiceId: INVOICE_ID,
-                    source: "manual",
-                    paidAt: "2026-08-21T12:00:00.000Z",
-                    amount: "15000.00",
-                    currency: "RUB",
-                    bankReference: "BANK-42",
-                    importRowId: null,
-                    platformUserId: "platform-accountant",
-                    idempotencyKey: "invoice-payment-42",
-                    createdAt: "2026-08-21T12:00:00.000Z",
-                  },
-                ],
-                paymentSummary: {
-                  confirmedAmount: "15000.00",
-                  remainingAmount: "0.00",
+                status: "cancelled",
+                cancelledAt: "2026-08-21T12:00:00.000Z",
+                payments: [],
+                paymentSummary: null,
+                application: { status: "not_paid", latestByLine: [], attempts: [] },
+              }
+            : paid
+              ? {
+                  ...issuedDetail,
+                  documents,
                   status: "paid",
-                },
-                application: {
-                  status: "pending",
-                  latestByLine: [
+                  paidAt: "2026-08-21T12:00:00.000Z",
+                  payments: [
                     {
-                      id: "94111111-1111-4111-8111-111111111111",
+                      id: "93111111-1111-4111-8111-111111111111",
                       tenantId: TENANT_ID,
                       invoiceId: INVOICE_ID,
-                      invoiceLineId: LINE_ID,
-                      attempt: 1,
-                      status: "pending",
-                      kind: "plan",
-                      source: "payment",
-                      beforeSnapshot: null,
-                      afterSnapshot: null,
-                      errorCode: null,
-                      actorPlatformUserId: "platform-accountant",
+                      source: "manual",
+                      paidAt: "2026-08-21T12:00:00.000Z",
+                      amount: "15000.00",
+                      currency: "RUB",
+                      bankReference: "BANK-42",
+                      importRowId: null,
+                      platformUserId: "platform-accountant",
+                      idempotencyKey: "invoice-payment-42",
                       createdAt: "2026-08-21T12:00:00.000Z",
                     },
                   ],
-                  attempts: [],
-                },
-              }
-            : { ...issuedDetail, documents },
+                  paymentSummary: {
+                    confirmedAmount: "15000.00",
+                    remainingAmount: "0.00",
+                    status: "paid",
+                  },
+                  application: {
+                    status: "pending",
+                    latestByLine: [
+                      {
+                        id: "94111111-1111-4111-8111-111111111111",
+                        tenantId: TENANT_ID,
+                        invoiceId: INVOICE_ID,
+                        invoiceLineId: LINE_ID,
+                        attempt: 1,
+                        status: "pending",
+                        kind: "plan",
+                        source: "payment",
+                        beforeSnapshot: null,
+                        afterSnapshot: null,
+                        errorCode: null,
+                        actorPlatformUserId: "platform-accountant",
+                        createdAt: "2026-08-21T12:00:00.000Z",
+                      },
+                    ],
+                    attempts: [],
+                  },
+                }
+              : { ...issuedDetail, documents },
         );
+      }
+      if (path.endsWith(`/api/platform/invoices/${INVOICE_ID}/cancel`) && method === "POST") {
+        calls.push({ method, path, body: {} });
+        cancelled = true;
+        const { tenantName, ...cancelledInvoice } = invoiceBase;
+        void tenantName;
+        return jsonResponse(201, {
+          ...cancelledInvoice,
+          status: "cancelled",
+          cancelledAt: "2026-08-21T12:00:00.000Z",
+        });
       }
       if (path.endsWith(`/api/platform/invoices/${INVOICE_ID}/documents`) && method === "POST") {
         calls.push({ method, path, body: {} });
@@ -324,6 +348,128 @@ describe("invoice commercial lifecycle", () => {
     expect(link.getAttribute("href")).toBe(`/invoices/${INVOICE_ID}`);
     await user.click(link);
     expect(await screen.findByRole("heading", { name: "Счёт INV-000021" })).toBeDefined();
+  });
+
+  it("shows tenant names and translated, visually distinct invoice statuses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (path.endsWith("/api/platform/invoices")) {
+          return jsonResponse(200, {
+            items: [
+              { ...invoiceBase, status: "issued" },
+              {
+                ...invoiceBase,
+                id: "90111111-1111-4111-8111-111111111111",
+                number: "INV-000020",
+                status: "draft",
+                issueDate: null,
+                sellerSnapshot: null,
+                buyerSnapshot: null,
+                issuedByPlatformUserId: null,
+                issuedAt: null,
+              },
+            ],
+          });
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      }),
+    );
+
+    renderSaasApp({ initialEntry: "/billing" });
+
+    const tenantLinks = await screen.findAllByRole("link", { name: TENANT_NAME });
+    expect(tenantLinks[0]?.getAttribute("href")).toBe(`/tenants/${TENANT_ID}`);
+    expect(screen.getByText("Выставлен").closest(".mk-chip")?.className).toContain("mk-chip--info");
+    expect(screen.getByText("Черновик").closest(".mk-chip")?.className).toContain(
+      "mk-chip--neutral",
+    );
+    expect(document.body.textContent).not.toContain(TENANT_ID);
+  });
+
+  it("withdraws an issued invoice only after destructive confirmation", async () => {
+    const api = installApi();
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/invoices/${INVOICE_ID}` });
+
+    expect(await screen.findByRole("link", { name: TENANT_NAME })).toBeDefined();
+    expect(document.body.textContent).not.toContain(INVOICE_ID);
+    await user.click(screen.getByRole("button", { name: "Отозвать счёт" }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog.textContent).toContain("Счёт останется в финансовой истории");
+    await user.click(screen.getByRole("button", { name: "Подтвердить отзыв" }));
+
+    await waitFor(() =>
+      expect(api.calls()).toContainEqual({
+        method: "POST",
+        path: `/api/platform/invoices/${INVOICE_ID}/cancel`,
+        body: {},
+      }),
+    );
+    expect(await screen.findByText("Отозван")).toBeDefined();
+  });
+
+  it("deletes a draft after confirmation and returns to the invoice register", async () => {
+    let deleted = false;
+    const calls: Array<{ method: string; path: string }> = [];
+    const draftDetail = {
+      ...issuedDetail,
+      status: "draft",
+      issueDate: null,
+      sellerSnapshot: null,
+      buyerSnapshot: null,
+      issuedByPlatformUserId: null,
+      issuedAt: null,
+      documents: [],
+      payments: [],
+      paymentSummary: null,
+      application: { status: "not_paid", latestByLine: [], attempts: [] },
+    } as const;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        const path = String(input);
+        const method = init.method ?? "GET";
+        if (path.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (path.endsWith(`/api/platform/invoices/${INVOICE_ID}`) && method === "GET") {
+          return jsonResponse(200, draftDetail);
+        }
+        if (path.endsWith(`/api/platform/invoices/${INVOICE_ID}`) && method === "DELETE") {
+          calls.push({ method, path });
+          deleted = true;
+          return jsonResponse(200, {
+            id: INVOICE_ID,
+            tenantId: TENANT_ID,
+            number: invoiceBase.number,
+            deleted: true,
+          });
+        }
+        if (path.endsWith("/api/platform/invoices") && method === "GET") {
+          return jsonResponse(200, {
+            items: deleted ? [] : [{ ...invoiceBase, status: "issued" }],
+          });
+        }
+        throw new Error(`Unexpected request: ${method} ${path}`);
+      }),
+    );
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/invoices/${INVOICE_ID}` });
+
+    await user.click(await screen.findByRole("button", { name: "Удалить черновик" }));
+    expect(screen.getByRole("alertdialog").textContent).toContain(
+      "Удалённый черновик нельзя восстановить",
+    );
+    await user.click(screen.getByRole("button", { name: "Удалить" }));
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "DELETE",
+        path: `/api/platform/invoices/${INVOICE_ID}`,
+      }),
+    );
+    expect(await screen.findByRole("heading", { name: "Счета" })).toBeDefined();
   });
 
   it("records only the remaining balance for a partially-paid invoice", async () => {

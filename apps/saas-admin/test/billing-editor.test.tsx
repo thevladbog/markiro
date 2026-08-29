@@ -146,6 +146,7 @@ function installInvoiceEditorApi({
           id: CREATED_INVOICE_ID,
           number: "INV-000001",
           tenantId: TENANT_ID,
+          tenantName: "Первый завод",
           status: "draft",
           issueDate: null,
           dueDate: "2026-09-01T00:00:00.000Z",

@@ -1,12 +1,12 @@
 import { useTranslation } from "react-i18next";
 
 type FlowState =
-  "draft" | "waiting_payment" | "waiting_application" | "partial_failure" | "applied";
+  "draft" | "waiting_payment" | "waiting_application" | "partial_failure" | "applied" | "cancelled";
 
 export function InvoiceFlowSteps({ state }: { state: FlowState }) {
   const { t } = useTranslation();
   const issuedDone = state !== "draft";
-  const paymentDone = state !== "draft" && state !== "waiting_payment";
+  const paymentDone = state !== "draft" && state !== "waiting_payment" && state !== "cancelled";
   const applicationDone = state === "applied";
   const applicationFailed = state === "partial_failure";
 
@@ -21,7 +21,9 @@ export function InvoiceFlowSteps({ state }: { state: FlowState }) {
           <small>{t("billing.flow.issuedHint")}</small>
         </span>
       </li>
-      <li data-state={paymentDone ? "done" : issuedDone ? "current" : "next"}>
+      <li
+        data-state={paymentDone ? "done" : issuedDone && state !== "cancelled" ? "current" : "next"}
+      >
         <span className="invoice-flow__index" aria-hidden="true">
           02
         </span>

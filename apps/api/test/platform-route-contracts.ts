@@ -10,7 +10,7 @@ import {
 } from "@markiro/platform-contracts";
 import type { ZodType } from "zod";
 
-export type PlatformHttpMethod = "get" | "post" | "patch";
+export type PlatformHttpMethod = "delete" | "get" | "post" | "patch";
 export type PlatformSuccessStatus = "200" | "201";
 
 export interface PlatformRouteContract {
@@ -265,6 +265,12 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/invoices/{id}/cancel",
     "201",
     platformCommercialContracts.invoices.cancel.response,
+  ),
+  route(
+    "delete",
+    "/platform/invoices/{id}",
+    "200",
+    platformCommercialContracts.invoices.delete.response,
   ),
   route(
     "get",
