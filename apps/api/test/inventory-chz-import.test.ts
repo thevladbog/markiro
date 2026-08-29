@@ -7,7 +7,10 @@ import { describe, expect, it } from "vitest";
 import { INVENTORY_CHZ_STATUSES, kmHash, type InventoryChzStatus } from "@markiro/domain";
 
 import { ChzImportError, parseChzImport } from "../src/modules/inventories/chz-import-parser";
-import { CHZ_MAX_UNCOMPRESSED_BYTES } from "../src/modules/inventories/chz-tabular-reader";
+import {
+  CHZ_MAX_INPUT_BYTES,
+  CHZ_MAX_UNCOMPRESSED_BYTES,
+} from "../src/modules/inventories/chz-tabular-reader";
 
 const GTIN = "04680089900383";
 const OTHER_GTIN = "04600682000013";
@@ -495,8 +498,28 @@ describe("Chestny ZNAK inventory import parser", () => {
     expect(result.rows).toHaveLength(1);
   });
 
-  it("keeps the compressed archive input limit below the larger plain CSV limit", () => {
+  it("holds an archive to the same input limit as a plain CSV, not a tighter one", () => {
+    // A zip-based container is the normal case, not the exception: the cabinet
+    // exports .xlsx and an export ordered over True API is always .zip. An
+    // archive that would have been accepted as a bare .csv of the same size
+    // must not be refused for being packaged.
     const zip = zipSync({ "status.csv": new Uint8Array(8 * 1024 * 1024 + 1) }, { level: 0 });
+    expect(zip.length).toBeGreaterThan(8 * 1024 * 1024);
+
+    // It still fails -- the payload is 8 MiB of NUL bytes, not a ChZ export --
+    // but it must fail on its contents rather than its size. Asserting the
+    // absence of the size code rather than the presence of one particular
+    // content code keeps this pinned to the thing that changed.
+    const error = expectImportError(
+      () => parse(zip, { filename: "status.zip", mimeType: MIME_ZIP }),
+      "CHZ_CELL_TOO_LARGE",
+      1,
+    );
+    expect(error.code).not.toBe("CHZ_INPUT_TOO_LARGE");
+  });
+
+  it("still refuses an archive past the shared input limit", () => {
+    const zip = zipSync({ "status.csv": new Uint8Array(CHZ_MAX_INPUT_BYTES + 1024) }, { level: 0 });
 
     expectImportError(
       () => parse(zip, { filename: "status.zip", mimeType: MIME_ZIP }),
