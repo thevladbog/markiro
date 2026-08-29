@@ -19,6 +19,7 @@ import {
 } from "@markiro/ui";
 
 import { useCan } from "../../access/context.js";
+import { ApiRequestError } from "../../api/client.js";
 import { useLinePresence } from "../shifts/api.js";
 import {
   useFixInventorySnapshot,
@@ -242,6 +243,14 @@ function ExportsStep({
       <div className="mk-inventory-upload-grid">
         {INVENTORY_CHZ_STATUSES.map((status) => {
           const attempts = inventory.imports.filter((attempt) => attempt.declaredStatus === status);
+          const uploadError =
+            upload.isError && upload.variables?.status === status ? upload.error : null;
+          const uploadErrorMessage =
+            uploadError instanceof ApiRequestError && uploadError.status === 413
+              ? t("pages.inventory.exports.uploadTooLarge")
+              : uploadError instanceof ApiRequestError && uploadError.status === 422
+                ? t("pages.inventory.exports.uploadInvalid")
+                : t("pages.inventory.exports.uploadError");
           return (
             <section
               className="mk-inventory-upload-slot"
@@ -278,6 +287,11 @@ function ExportsStep({
                   onFile={(file) => upload.mutate({ inventoryId: inventory.id, status, file })}
                 />
               ) : null}
+              {uploadError ? (
+                <Alert className="mk-inventory-upload-slot__error" tone="error">
+                  {uploadErrorMessage}
+                </Alert>
+              ) : null}
               {attempts.length === 0 ? (
                 <small>{t("pages.inventory.exports.noAttempts")}</small>
               ) : (
@@ -298,7 +312,6 @@ function ExportsStep({
           );
         })}
       </div>
-      {upload.isError ? <Alert tone="error">{upload.error.message}</Alert> : null}
       <div className="mk-inventory-actions">
         {onBack ? (
           <Button variant="secondary" type="button" onClick={onBack}>

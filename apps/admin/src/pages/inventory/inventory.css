@@ -270,6 +270,9 @@
 .mk-inventory-upload-slot__file-drop {
   margin: 12px 0;
 }
+.mk-inventory-upload-slot__error {
+  margin-bottom: 12px;
+}
 .mk-chz-exports-order {
   display: flex;
   flex-direction: column;
