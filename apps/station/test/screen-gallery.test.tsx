@@ -121,6 +121,25 @@ describe("development screen gallery", () => {
     }
   });
 
+  it("restores the production header controls on the real warehouse task selector", async () => {
+    // TaskSelection's warehouse category is the exact same App.tsx mount as
+    // plain shift selection, which unconditionally receives
+    // operatorControl/windowControl/update once authenticated -- this state
+    // used to render without them (Task 1 audit finding).
+    render(<StationScreenGallery request={{ state: "inventory-task-selection", locale: "ru" }} />);
+
+    const header = screen.getByRole("banner", { name: "Состояние станции" });
+    expect(
+      within(header).getByRole("button", {
+        name: "! Доступно критическое обновление 0.1.0-beta.123",
+      }),
+    ).toBeDefined();
+    expect(within(header).getByRole("button", { name: "Сменить оператора" })).toBeDefined();
+    expect(
+      await within(header).findByRole("button", { name: "Выйти из полноэкранного режима" }),
+    ).toBeDefined();
+  });
+
   it("renders approved inventory verdicts through production inventory instruments", async () => {
     const cases = [
       ["inventory-simple-box-accepted", "Короб принят: 20 кодов", "inventory-scan-instrument"],

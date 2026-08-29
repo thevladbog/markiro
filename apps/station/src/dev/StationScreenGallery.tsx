@@ -139,7 +139,13 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
   // active) and unconditionally passes `operatorControl`/`windowControl`
   // whenever authenticated -- the latter is also true during plain shift
   // selection (no WorkFixture yet), which is why `withActiveShiftControls`
-  // below still ORs in `fixture.kind === "shift"` on top of this.
+  // below still ORs in `fixture.kind === "shift"` on top of this. The same
+  // holds for "inventory": `task-selection` renders the real `TaskSelection`
+  // component, the exact same mount App.tsx uses for shift selection (just
+  // switched to its warehouse category), so it gets the same unconditional
+  // header controls; `other-line-confirmation` renders `InventoryTaskConfirmation`,
+  // a `FullScreenDialog` that covers the header regardless, but is included
+  // here too for consistency with how production always mounts it.
   const rendersActiveShiftWorkScreen =
     fixture.kind === "work" ||
     (fixture.kind === "box" && fixture.variant === "full") ||
@@ -148,7 +154,10 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
       fixture.variant !== "task-selection" &&
       fixture.variant !== "other-line-confirmation");
   const withActiveShiftControls =
-    headerVariant !== null || fixture.kind === "shift" || rendersActiveShiftWorkScreen;
+    headerVariant !== null ||
+    fixture.kind === "shift" ||
+    fixture.kind === "inventory" ||
+    rendersActiveShiftWorkScreen;
   const headerControls = !withActiveShiftControls
     ? null
     : {
