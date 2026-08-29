@@ -53,33 +53,29 @@ describe.skipIf(!databaseUrl)("stale commercial family after a real 0094 to 0096
     temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-offer-stale-runtime-"));
     const migrationsThrough0094 = join(temporaryRoot, "migrations");
     await cp(migrationsFolder, migrationsThrough0094, { recursive: true });
-    await rm(join(migrationsThrough0094, "0095_tenant_billing_target_cardinality.sql"), {
-      force: true,
-    });
-    await rm(join(migrationsThrough0094, "0096_tenant_billing_stale_family_repair.sql"), {
-      force: true,
-    });
-    await rm(join(migrationsThrough0094, "0097_tenant_billing_notification_delivery.sql"), {
-      force: true,
-    });
-    await rm(join(migrationsThrough0094, "0098_tenant_billing_attachment_idempotency.sql"), {
-      force: true,
-    });
-    await rm(join(migrationsThrough0094, "meta", "0095_snapshot.json"), { force: true });
-    await rm(join(migrationsThrough0094, "meta", "0096_snapshot.json"), { force: true });
-    await rm(join(migrationsThrough0094, "meta", "0097_snapshot.json"), { force: true });
-    await rm(join(migrationsThrough0094, "meta", "0098_snapshot.json"), { force: true });
+    // Strip everything after 0094 by index rather than by name. Drizzle's
+    // migrator applies a migration only when the last applied row's timestamp
+    // is older than the candidate's `when`, so leaving ANY later migration in
+    // this folder makes the second `migrate()` skip 0095-0098 entirely and the
+    // 0096 repair never runs. Naming the four files individually meant the next
+    // migration to land in the repo silently broke this test.
     const journalPath = join(migrationsThrough0094, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
-      entries: Array<{ tag: string }>;
+      entries: Array<{ idx: number; tag: string }>;
     };
-    journal.entries = journal.entries.filter(
-      ({ tag }) =>
-        tag !== "0095_tenant_billing_target_cardinality" &&
-        tag !== "0096_tenant_billing_stale_family_repair" &&
-        tag !== "0097_tenant_billing_notification_delivery" &&
-        tag !== "0098_tenant_billing_attachment_idempotency",
-    );
+    const after0094 = journal.entries.filter(({ idx }) => idx > 94);
+    for (const { tag } of after0094) {
+      await rm(join(migrationsThrough0094, `${tag}.sql`), { force: true });
+    }
+    for (const { idx } of after0094) {
+      await rm(
+        join(migrationsThrough0094, "meta", `${String(idx).padStart(4, "0")}_snapshot.json`),
+        {
+          force: true,
+        },
+      );
+    }
+    journal.entries = journal.entries.filter(({ idx }) => idx <= 94);
     await writeFile(journalPath, JSON.stringify(journal));
     await migrate(connection.db, { migrationsFolder: migrationsThrough0094 });
 
