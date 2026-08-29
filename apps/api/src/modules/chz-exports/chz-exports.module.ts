@@ -4,6 +4,7 @@ import { InventoriesModule } from "../inventories/inventories.module";
 import { JournalService } from "../integrations/journal.service";
 import { ChzCryptoService } from "../signer-agents/chz-crypto.service";
 import { ChzExportRunnerService } from "./chz-export-runner.service";
+import { ChzExportsController } from "./chz-exports.controller";
 import { ChzExportsService } from "./chz-exports.service";
 import { ChzTokenService } from "./chz-token.service";
 import { TrueApiClient } from "./true-api.client";
@@ -22,9 +23,8 @@ function provideTrueApiClient() {
 
 /**
  * Assembles the ChZ export cabinet stack: `ChzExportsService` (pre-flight,
- * ordering and retry, Task 4) and `ChzExportRunnerService` (the queue
- * consumer, Task 5), ready for Task 7's controller to be added to
- * `controllers` here.
+ * ordering and retry, Task 4), `ChzExportRunnerService` (the queue consumer,
+ * Task 5) and `ChzExportsController` (the cabinet HTTP surface, Task 7).
  *
  * `PgBossService`'s own `run-chz-export` worker (`jobs.module.ts`) does
  * *not* import this module to reach `ChzExportRunnerService` -- it declares
@@ -40,6 +40,7 @@ export class ChzExportsModule {
     return {
       module: ChzExportsModule,
       imports: [InventoriesModule],
+      controllers: [ChzExportsController],
       providers: [
         provideTrueApiClient(),
         ChzTokenService,
