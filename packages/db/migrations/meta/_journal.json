@@ -694,6 +694,13 @@
       "when": 1787913627149,
       "tag": "0098_tenant_billing_attachment_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1787913627150,
+      "tag": "0099_chz_product_groups",
+      "breakpoints": true
     }
   ]
 }

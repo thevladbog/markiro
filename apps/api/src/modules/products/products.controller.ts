@@ -135,7 +135,7 @@ export class ProductsController {
   @ApiOperation({
     summary: "Create a product",
     description:
-      "`status` is server-computed: active when productGroup, boxCapacity, and palletCapacity are all set, draft otherwise.",
+      "`status` is server-computed: active when chzProductGroupCode, boxCapacity, and palletCapacity are all set, draft otherwise.",
   })
   @ApiZodBody(createProductSchema)
   @ApiCreatedResponse({ schema: productOpenApiSchema })

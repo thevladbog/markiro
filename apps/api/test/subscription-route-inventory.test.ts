@@ -53,6 +53,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   {
     contract: customerContract(CABINET_GUARDS, { mode: "read_only_allowed", reason: "read" }),
     routes: [
+      "GET /chz-product-groups (ProductGroupsController.list)",
       "GET /code-search (CodeSearchController.classify)",
       "GET /code-search/codes (CodeSearchController.listCodes)",
       "GET /code-search/codes/:codeHash (CodeSearchController.getCodeCard)",

@@ -15,6 +15,7 @@ import { errorProp } from "../../lib/form-error.js";
 import { toast } from "../../lib/toast.js";
 import type { CounterpartyDto } from "../counterparties/api.js";
 import {
+  useChzProductGroups,
   useGtinCheck,
   useUnlinkProduct,
   type CreateProductInput,
@@ -49,11 +50,7 @@ const productFormSchema = z.object({
     .min(1, "pages.catalog.form.errors.nameRequired")
     .max(200, "pages.catalog.form.errors.nameTooLong"),
   printName: z.string().trim().max(200, "pages.catalog.form.errors.printNameTooLong").optional(),
-  productGroup: z
-    .string()
-    .trim()
-    .max(200, "pages.catalog.form.errors.productGroupTooLong")
-    .optional(),
+  chzProductGroupCode: z.string().trim().optional(),
   boxCapacity: z
     .string()
     .trim()
@@ -123,7 +120,7 @@ const EMPTY_VALUES: ProductFormValues = {
   gtin: "",
   name: "",
   printName: "",
-  productGroup: "",
+  chzProductGroupCode: "",
   boxCapacity: "",
   palletCapacity: "",
   unitPrice: "",
@@ -197,6 +194,11 @@ export function ProductForm({
 }: ProductFormProps) {
   const { t } = useTranslation();
   const canUnlinkIntegrations = useCan(CABINET_CAPABILITY.INTEGRATIONS_WRITE);
+  const {
+    data: productGroups = [],
+    isPending: productGroupsPending,
+    isError: productGroupsError,
+  } = useChzProductGroups();
   const gtinCheckMutation = useGtinCheck();
   const [ownerHint, setOwnerHint] = useState<GtinCheckResult | null>(null);
   const lastCheckedGtinRef = useRef<string | null>(null);
@@ -226,6 +228,7 @@ export function ProductForm({
 
   const gtinValue = watch("gtin");
   const defaultCounterpartyId = watch("defaultCounterpartyId");
+  const chzProductGroupCode = watch("chzProductGroupCode");
   const archivedValue = watch("archived");
 
   // Re-seed clean forms when their server values change. A background refetch
@@ -323,6 +326,34 @@ export function ProductForm({
     { value: "", label: t("pages.catalog.form.noCounterparty") },
     ...counterparties.map((c) => ({ value: c.id, label: c.name })),
   ];
+
+  // While the dictionary is loading, the empty option's label doubles as the
+  // Select's placeholder (see packages/ui/src/components/Select.tsx), so it
+  // must not claim "no group" until we actually know that -- otherwise a
+  // product whose code just hasn't loaded yet reads as unset.
+  const productGroupOptions: SelectOption[] = [
+    {
+      value: "",
+      label: productGroupsPending
+        ? t("pages.catalog.form.productGroupLoading")
+        : t("pages.catalog.form.noProductGroup"),
+    },
+    ...productGroups.map((group) => ({ value: String(group.code), label: group.name })),
+  ];
+  // A code the form already holds but that isn't in the loaded (or not-yet-
+  // loaded, or permanently failed) dictionary must still be shown -- as the
+  // raw code -- rather than silently falling back to the "no group"
+  // placeholder, which would misrepresent a set value as unset.
+  const trimmedProductGroupCode = (chzProductGroupCode ?? "").trim();
+  if (
+    trimmedProductGroupCode &&
+    !productGroups.some((group) => String(group.code) === trimmedProductGroupCode)
+  ) {
+    productGroupOptions.push({
+      value: trimmedProductGroupCode,
+      label: t("pages.catalog.form.productGroupUnknownCode", { code: trimmedProductGroupCode }),
+    });
+  }
 
   const applyCounterpartyHint = () => {
     if (ownerHint?.counterpartyId) {
@@ -442,10 +473,19 @@ export function ProductForm({
             {...errorProp(translateFieldError(t, errors.printName?.message))}
             {...register("printName")}
           />
-          <Input
+          <Select
             label={t("pages.catalog.form.productGroupLabel")}
-            {...errorProp(translateFieldError(t, errors.productGroup?.message))}
-            {...register("productGroup")}
+            options={productGroupOptions}
+            value={chzProductGroupCode ?? ""}
+            disabled={productGroupsPending}
+            searchable
+            searchLabel={t("pages.catalog.form.productGroupSearchLabel")}
+            {...errorProp(
+              productGroupsError ? t("pages.catalog.form.productGroupLoadError") : undefined,
+            )}
+            onValueChange={(value) =>
+              setValue("chzProductGroupCode", value, { shouldDirty: true, shouldValidate: true })
+            }
           />
         </section>
         <section className="mk-catalog-panel-section" aria-labelledby="product-form-aggregation">
@@ -551,7 +591,7 @@ export function ProductForm({
  */
 function toCreateInput(values: ProductFormValues, mode: "create" | "edit"): CreateProductInput {
   const printName = values.printName?.trim();
-  const productGroup = values.productGroup?.trim();
+  const chzProductGroupCode = values.chzProductGroupCode?.trim();
   const boxCapacity = values.boxCapacity?.trim();
   const palletCapacity = values.palletCapacity?.trim();
   const unitPrice = values.unitPrice?.trim();
@@ -562,7 +602,7 @@ function toCreateInput(values: ProductFormValues, mode: "create" | "edit"): Crea
     gtin: values.gtin.trim(),
     name: values.name.trim(),
     printName: printName ? printName : null,
-    productGroup: productGroup ? productGroup : null,
+    chzProductGroupCode: chzProductGroupCode ? Number(chzProductGroupCode) : null,
     boxCapacity: boxCapacity ? Number(boxCapacity) : null,
     palletCapacity: palletCapacity ? Number(palletCapacity) : null,
     unitPrice: unitPrice ? unitPrice.replace(",", ".") : null,

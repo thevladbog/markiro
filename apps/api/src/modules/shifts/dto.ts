@@ -187,8 +187,15 @@ export interface ShiftBoxLabelTemplatesDto {
   defaultBoxLabelTemplateId: string | null;
 }
 
-/** Legacy fields retained only on station bundles during a rolling deployment. */
-export type StationBundleProductDto = ProductDto & {
+/**
+ * Legacy fields retained only on station bundles during a rolling deployment.
+ *
+ * `chzProductGroupCode` is deliberately omitted: the Station stores the group
+ * as text in its SQLite mirror and has no use for the code, and
+ * `stationBundleProductOpenApiSchema` is `additionalProperties: false`, so
+ * adding it here would break bundle validation for no gain.
+ */
+export type StationBundleProductDto = Omit<ProductDto, "chzProductGroupCode"> & {
   defaultLabelTemplateId: null;
 };
 
@@ -463,6 +470,7 @@ const stationBundleProductOpenApiSchema = {
     "boxCapacity",
     "palletCapacity",
     "status",
+    "archived",
     "defaultCounterpartyId",
     "defaultLabelTemplateId",
     "unitPrice",
@@ -481,6 +489,7 @@ const stationBundleProductOpenApiSchema = {
     boxCapacity: nullablePositiveIntegerOpenApiSchema,
     palletCapacity: nullablePositiveIntegerOpenApiSchema,
     status: { type: "string", enum: ["draft", "active"] },
+    archived: { type: "boolean" },
     defaultCounterpartyId: nullableUuidOpenApiSchema,
     defaultLabelTemplateId: { type: "string", nullable: true, enum: [null] },
     unitPrice: { type: "string", nullable: true },

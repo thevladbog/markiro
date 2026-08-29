@@ -15,7 +15,7 @@ export const createProductSchema = z.object({
   gtin: z.string().min(1),
   name: z.string().min(1).max(200),
   printName: z.string().trim().min(1).max(200).nullable().optional(),
-  productGroup: z.string().min(1).max(200).nullable().optional(),
+  chzProductGroupCode: z.number().int().positive().nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
   palletCapacity: z.number().int().min(1).nullable().optional(),
   defaultCounterpartyId: z.string().uuid().nullable().optional(),
@@ -36,7 +36,7 @@ export const updateProductSchema = z.object({
   gtin: z.string().min(1).optional(),
   name: z.string().min(1).max(200).optional(),
   printName: z.string().trim().min(1).max(200).nullable().optional(),
-  productGroup: z.string().min(1).max(200).nullable().optional(),
+  chzProductGroupCode: z.number().int().positive().nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
   palletCapacity: z.number().int().min(1).nullable().optional(),
   defaultCounterpartyId: z.string().uuid().nullable().optional(),
@@ -87,7 +87,10 @@ export interface ProductDto {
   name: string;
   /** Short operator-facing name for the station shift card; null = use `name`. */
   printName: string | null;
+  /** Resolved name of `chzProductGroupCode`; null when no group is selected. */
   productGroup: string | null;
+  /** Chestny ZNAK product group code — what the ЧЗ APIs take as `productGroupCode`/`pg`. */
+  chzProductGroupCode: number | null;
   boxCapacity: number | null;
   palletCapacity: number | null;
   status: ProductStatus;
@@ -141,6 +144,7 @@ export const productOpenApiSchema: SchemaObject = {
     "name",
     "printName",
     "productGroup",
+    "chzProductGroupCode",
     "boxCapacity",
     "palletCapacity",
     "status",
@@ -161,7 +165,13 @@ export const productOpenApiSchema: SchemaObject = {
       nullable: true,
       description: "Short operator-facing name for the station shift card; null = use `name`.",
     },
-    productGroup: { type: "string", nullable: true },
+    productGroup: {
+      type: "string",
+      nullable: true,
+      description:
+        "Read-only: the resolved name of chzProductGroupCode. Not accepted on write — set chzProductGroupCode instead.",
+    },
+    chzProductGroupCode: { type: "integer", nullable: true },
     boxCapacity: { type: "integer", minimum: 1, nullable: true },
     palletCapacity: { type: "integer", minimum: 1, nullable: true },
     status: { type: "string", enum: [...PRODUCT_STATUSES] },

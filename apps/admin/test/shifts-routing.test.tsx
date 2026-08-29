@@ -21,6 +21,7 @@ const PRODUCT = {
   gtin14: "04006381333931",
   name: "Молоко 1л",
   productGroup: null,
+  chzProductGroupCode: null,
   boxCapacity: 12,
   palletCapacity: 48,
   status: "active",

@@ -219,7 +219,7 @@ function renderProductCard({
           initialValues={{
             gtin: "04600000000018",
             name: externalName,
-            productGroup: "",
+            chzProductGroupCode: "",
             boxCapacity: "",
             palletCapacity: "",
             unitPrice: "",

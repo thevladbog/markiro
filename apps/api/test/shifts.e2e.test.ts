@@ -250,7 +250,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
 
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 10,
       palletCapacity: 5,
     });
@@ -285,7 +285,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const counterpartyId = await seedCounterparty(orgId, "Default Buyer");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
       defaultCounterpartyId: counterpartyId,
@@ -312,7 +312,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const orgId = await signUpAndActivate(agent);
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -358,7 +358,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const orgId = await signUpAndActivate(agent);
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -380,7 +380,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       const orgId = await signUpAndActivate(agent);
       const productId = await seedProduct(orgId, {
         status: "active",
-        productGroup: "Beverages",
+        chzProductGroupCode: 8,
         boxCapacity: 12,
         palletCapacity: 48,
       });
@@ -397,7 +397,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const orgId = await signUpAndActivate(agent);
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -421,7 +421,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const actorUserId = await tenantOwnerUserId(orgId);
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -541,7 +541,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const actorUserId = await tenantOwnerUserId(orgId);
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -556,7 +556,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const foreignOrgId = await signUpAndActivate(foreignAgent);
     const foreignProductId = await seedProduct(foreignOrgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -626,7 +626,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const actorUserId = await tenantOwnerUserId(orgId);
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -670,7 +670,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const counterpartyId = await seedCounterparty(orgId, "Default Buyer");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
       defaultCounterpartyId: counterpartyId,
@@ -696,7 +696,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const templateId = await seedLabelTemplate(orgId, "Product Default Template");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
       defaultLabelTemplateId: templateId,
@@ -732,7 +732,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     // Complete card (active), but operator-flagged "do not use".
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Snacks",
+      chzProductGroupCode: 8,
       boxCapacity: 10,
       palletCapacity: 20,
       archived: true,
@@ -750,7 +750,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
 
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -771,7 +771,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
 
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -806,7 +806,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const org1 = await signUpAndActivate(agent1);
     const productId = await seedProduct(org1, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -829,7 +829,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const org2 = await signUpAndActivate(agent2);
     const productId = await seedProduct(org2, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -851,7 +851,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const org2 = await signUpAndActivate(agent2);
     const productId = await seedProduct(org2, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -870,7 +870,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const templateId = await seedLabelTemplate(orgId, "Legacy Item Template");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -920,7 +920,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const brandOwnerId = await seedCounterparty(orgId, "Brand Owner");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -945,7 +945,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
 
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -964,7 +964,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const org2 = await signUpAndActivate(agent2);
     const productId = await seedProduct(org2, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -988,7 +988,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const boxTemplateId = await seedLabelTemplate(orgId, "Box Template");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1014,7 +1014,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const replacementTemplateId = await seedLabelTemplate(orgId, "Replacement Default");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1042,7 +1042,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const overrideTemplateId = await seedLabelTemplate(orgId, "Explicit Override");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1065,7 +1065,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       const orgId = await signUpAndActivate(agent);
       const productId = await seedProduct(orgId, {
         status: "active",
-        productGroup: "Beverages",
+        chzProductGroupCode: 8,
         boxCapacity: 12,
         palletCapacity: 48,
       });
@@ -1092,7 +1092,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     await setDefaultBoxLabelTemplate(agent, orgId);
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1114,7 +1114,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const org2 = await signUpAndActivate(agent2);
     const productId = await seedProduct(org2, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1141,7 +1141,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const boxTemplateId = await seedLabelTemplate(orgId, "Box Template");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1177,7 +1177,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const currentDefaultId = await seedLabelTemplate(orgId, "Current Default");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1202,7 +1202,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const orgId = await signUpAndActivate(agent);
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1229,7 +1229,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const boxTemplateId = await seedLabelTemplate(orgId, "Adopted Box Template");
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1254,7 +1254,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const orgId = await signUpAndActivate(agent);
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1302,7 +1302,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
 
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1331,7 +1331,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const org1 = await signUpAndActivate(agent1);
     const productId = await seedProduct(org1, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1359,7 +1359,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
 
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1404,7 +1404,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const productId = await seedProduct(orgId, {
       name: "Joined Product",
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
       defaultCounterpartyId: counterpartyId,
@@ -1493,7 +1493,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const orgId = await signUpAndActivate(agent);
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1554,7 +1554,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const orgId = await signUpAndActivate(agent);
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
@@ -1619,7 +1619,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
 
     const productId = await seedProduct(orgId, {
       status: "active",
-      productGroup: "Beverages",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
     });
