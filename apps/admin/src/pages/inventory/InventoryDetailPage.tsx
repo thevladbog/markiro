@@ -28,6 +28,7 @@ import {
   useUpdateInventory,
   useUploadInventoryImport,
 } from "./api.js";
+import { ChzExportOrderButton, ChzExportRunStatus } from "./ChzExportsPanel.js";
 import { InventoryParametersForm } from "./InventoryParametersForm.js";
 import { InventoryLivePage } from "./InventoryLivePage.js";
 import { PreparationSteps } from "./PreparationSteps.js";
@@ -238,6 +239,7 @@ function ExportsStep({
   return (
     <Card title={t("pages.inventory.exports.title")} titleAs="h2">
       <p className="mk-inventory-section-description">{t("pages.inventory.exports.description")}</p>
+      <ChzExportOrderButton inventoryId={inventory.id} canMutate={canMutate} />
       <div className="mk-inventory-upload-grid">
         {INVENTORY_CHZ_STATUSES.map((status) => {
           const attempts = inventory.imports.filter((attempt) => attempt.declaredStatus === status);
@@ -267,6 +269,11 @@ function ExportsStep({
                   <Badge>{t("pages.inventory.exports.missing")}</Badge>
                 )}
               </div>
+              <ChzExportRunStatus
+                inventoryId={inventory.id}
+                status={status}
+                canMutate={canMutate}
+              />
               {canMutate ? (
                 <FileDropZone
                   compact

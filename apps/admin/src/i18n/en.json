@@ -382,6 +382,36 @@
         "backToParameters": "Back to parameters",
         "review": "Review snapshot"
       },
+      "chzExports": {
+        "order": "Order from Chestny ZNAK",
+        "ordering": "Ordering exports…",
+        "retry": "Retry",
+        "errorCodeFallback": "Error code: {{code}}",
+        "state": {
+          "queued": "Queued",
+          "ordered": "Ordered",
+          "ready": "File ready",
+          "imported": "Imported",
+          "failed": "Failed"
+        },
+        "blocked": {
+          "INN_MISSING": "Enter the organization's INN in company details",
+          "PRODUCT_GROUP_MISSING": "Set the Chestny ZNAK product group on the product card",
+          "AGENT_NOT_PAIRED": "Pair a signer agent under Integrations",
+          "TOKEN_UNAVAILABLE": "Refresh the True API token under Integrations"
+        },
+        "error": {
+          "CHZ_TOKEN_UNAVAILABLE": "The Chestny ZNAK token became unavailable while ordering. Refresh the True API token under Integrations and order again.",
+          "CHZ_ORDER_CONTEXT_MISSING": "Company details or the product's group changed after ordering. Check the product card and the organization's INN, then order again.",
+          "CHZ_TASK_REJECTED": "Chestny ZNAK rejected the order for this status. Upload the file for this status manually instead.",
+          "CHZ_TASK_FAILED": "Chestny ZNAK could not prepare the report for this status. Retry the order or upload the file manually.",
+          "CHZ_TASK_TIMED_OUT": "Chestny ZNAK did not prepare the report in time. Retry the order or upload the file manually.",
+          "CHZ_CREATE_ATTEMPTS_EXHAUSTED": "The retry limit for ordering this status from Chestny ZNAK has been reached. Upload the file for this status manually instead.",
+          "CHZ_DOWNLOAD_REJECTED": "Chestny ZNAK refused to hand over the finished file. Upload the file for this status manually instead.",
+          "CHZ_IMPORT_FAILED": "The downloaded file could not be imported. Upload the file for this status manually instead.",
+          "CHZ_JOB_RETRIES_EXHAUSTED": "This status could not be processed after several attempts. Retry the order or upload the file manually."
+        }
+      },
       "snapshot": {
         "title": "Snapshot review",
         "description": "Review the exact six selected uploads before fixing the immutable snapshot.",

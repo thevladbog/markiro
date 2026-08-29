@@ -273,6 +273,24 @@
 .mk-inventory-upload-slot__error {
   margin-bottom: 12px;
 }
+.mk-chz-exports-order {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 12px 0;
+}
+.mk-chz-exports-blockers {
+  margin: 0;
+  padding-left: 18px;
+}
+.mk-chz-export-run {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
 .mk-inventory-import-history {
   display: grid;
   gap: 8px;

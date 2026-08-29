@@ -57,6 +57,7 @@ import { DemoRequestsModule } from "./modules/demo-requests/demo-requests.module
 import { PlatformHttpModule } from "./platform-http/platform-http.module";
 import { HealthModule } from "./health/health.module";
 import { InventoriesModule } from "./modules/inventories/inventories.module";
+import { ChzExportsModule } from "./modules/chz-exports/chz-exports.module";
 import { DashboardModule } from "./modules/dashboard/dashboard.module";
 
 @Module({})
@@ -112,6 +113,7 @@ export class AppModule {
         ShiftsModule,
         DashboardModule,
         InventoriesModule,
+        ChzExportsModule.forRoot(env),
         ShiftExportsModule,
         StationShiftCloseModule,
         LabelTemplatesModule,
