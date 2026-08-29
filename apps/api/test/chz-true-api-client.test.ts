@@ -73,6 +73,13 @@ describe("TrueApiClient", () => {
     });
   });
 
+  it("maps 429 to unavailable so the job retries with backoff", async () => {
+    const client = new TrueApiClient(deps(async () => new Response("", { status: 429 })));
+    await expect(client.listDispenserResults(auth, ["task-1"])).resolves.toEqual({
+      status: "unavailable",
+    });
+  });
+
   it("maps a 5xx and a thrown fetch to unavailable so the job retries", async () => {
     const server = new TrueApiClient(deps(async () => new Response("", { status: 503 })));
     await expect(server.listDispenserResults(auth, ["t"])).resolves.toEqual({

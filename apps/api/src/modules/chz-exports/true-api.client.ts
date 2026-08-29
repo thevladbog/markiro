@@ -152,6 +152,9 @@ export class TrueApiClient {
         signal: controller.signal,
       });
       if (response.status === 401 || response.status === 403) return { status: "unauthorized" };
+      // 429 is a rate limit signal, not a refusal: the caller retries with backoff
+      // (classed as transient alongside network errors and 5xx per the spec).
+      if (response.status === 429) return { status: "unavailable" };
       if (response.status >= 400 && response.status < 500) {
         return {
           status: "rejected",
