@@ -572,14 +572,21 @@ Expected: FAIL — the module does not exist.
 export const CHZ_CODE_STATUS_INGEST_LIMIT = 50_000;
 ```
 
-The pass:
+The pass spends one shared per-pass row budget across three phases, in this order:
 
-1. Read the tenant's cursor (`lastScannedAt`, null on the first pass).
-2. Select from `codes` where `tenantId` matches and `scannedAt > lastScannedAt` (or no lower bound on the first pass), ordered by `scannedAt` ascending, limited to `CHZ_CODE_STATUS_INGEST_LIMIT`, selecting `codeHash`, `gtin14`, `scannedAt`. **Order by `scannedAt` and bound on it**, not on `codeHash` — that is what lets Postgres prune the monthly partitions.
-3. Resolve product groups for the distinct GTINs in one query joining `products` on `(tenantId, gtin14)`.
-4. Insert the rows with `onConflictDoNothing` on `(tenantId, codeHash)`, `nextRefreshAt` = now, `chzProductGroupCode` from the map or null.
-5. Upsert the cursor to the largest `scannedAt` in the batch. Do **not** advance it when the batch was empty.
-6. Return `{ inserted, watermark, caughtUp: rows.length < CHZ_CODE_STATUS_INGEST_LIMIT }`.
+1. **The full sweep, if due.** Skip to step 2 if the budget is exhausted or the sweep is not due yet.
+2. **The cursor walk on `codes`.** Skip to step 3 if the budget is exhausted.
+3. **The snapshot anti-join on `inventory_snapshot_codes`.** Skip if the budget is exhausted.
+
+**Step 1 — The full sweep (if due):** Full anti-join over `codes` for this tenant, every hash with no status row, regardless of `scanned_at`. Run at most once per `CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS` (24 hours). The sweep catches codes committed with a `scanned_at` behind the cursor — normal for a Station syncing after an outage (see `WINDOW_PAST_MS` in `station-scans.service.ts`). A tenant backfilling from deep history can fill the cursor walk's entire budget on consecutive passes, starving the sweep during exactly the backfill it is meant to protect. Giving the sweep first claim on the budget costs the steady state almost nothing, while the cursor walk absorbs what is left.
+
+**Step 2 — The cursor walk:** Select from `codes` where `tenantId` matches and `scannedAt > lastScannedAt` (or no lower bound on the first pass), ordered by `scannedAt` ascending, selecting `codeHash`, `gtin14`, `scannedAt`. **Order by `scannedAt` and bound on it**, not on `codeHash` — that is what lets Postgres prune the monthly partitions. This is the cheap, steady-state path. Resolve product groups for the distinct GTINs in one query joining `products` on `(tenantId, gtin14)`. Insert the rows with `onConflictDoNothing` on `(tenantId, codeHash)`, `nextRefreshAt` = now, `chzProductGroupCode` from the map or null. Upsert the cursor to the largest `scannedAt` in the batch. Do **not** advance it when the batch was empty.
+
+**Step 3 — The snapshot anti-join:** Codes that reached the tenant through an ordered export live in `inventory_snapshot_codes`, not in `codes`, and that is precisely the population a tenant with history predating Markiro is bootstrapped from. Run an anti-join pass over `inventory_snapshot_codes` for this tenant, inserting any hash with no status row — same `onConflictDoNothing`, same product-group resolution. That table is not partitioned and does not grow per scan, so an anti-join over it is affordable and needs no cursor of its own. Both sources insert on the same `(tenantId, codeHash)` key, so a code that was scanned _and_ exported yields exactly one row.
+
+**One subtlety to handle explicitly:** Several `codes` rows can share the same `scannedAt`. Advancing the cursor to that exact timestamp with a strict `>` on the next pass would skip any sibling rows that fell outside the limit. Take the largest `scannedAt` **only when the batch was smaller than the limit**; when the batch filled the limit, advance to the largest `scannedAt` that is strictly less than the last row's, so no timestamp is ever half-walked. If that leaves no progress (every row in the batch shares one timestamp), raise the limit for that pass rather than looping forever — forward progress on the cursor takes priority over the pass's nominal budget when the two conflict, because a cursor that never advances is a worse failure than one pass running a little long.
+
+Return `{ inserted, watermark, caughtUp: all three phases fit within the budget }`.
 
 **A second source, walked the same way.** Codes that reached the tenant through an ordered export live in `inventory_snapshot_codes`, not in `codes`, and that is precisely the population a tenant with history predating Markiro is bootstrapped from. After the `codes` walk, run a second anti-join pass over `inventory_snapshot_codes` for this tenant, inserting any hash with no status row — same `onConflictDoNothing`, same product-group resolution, same per-pass limit shared with the first phase.
 

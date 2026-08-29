@@ -337,10 +337,20 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
     // every row in a limit-filling batch shares one `scanned_at`, so there
     // is no timestamp in the batch a cursor could safely stop at. Without
     // the loop this would never advance and the pass would spin forever.
+    // The sweep runs first on the initial pass and will consume budget,
+    // so we force it to not be due by giving the tenant an old lastFullSweepAt.
     const sharedScannedAt = t(0);
     for (let index = 0; index < CHZ_CODE_STATUS_INGEST_LIMIT + 1; index += 1) {
       await seedCode({ codeHash: hash(index), gtin14: PRODUCT_GTIN, scannedAt: sharedScannedAt });
     }
+
+    // Pre-populate the cursor so the sweep doesn't run.
+    await db
+      .insert(schema.chzCodeStatusCursors)
+      .values({
+        tenantId,
+        lastFullSweepAt: new Date(),
+      });
 
     const result = await service.run(tenantId);
 
@@ -362,4 +372,60 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
     expect(second.inserted).toBe(1);
     expect((await rowsFor(tenantId)).map((row) => row.codeHash)).toContain(HASH_A);
   }, 180_000);
+
+  it("runs the due sweep even when the cursor walk fills the budget on consecutive passes", async () => {
+    // A tenant backfilling from deep history can fill the cursor walk's
+    // entire budget on every pass. The sweep is the correctness backstop
+    // that catches codes that arrived behind the cursor (normal for a
+    // Station syncing after an outage), and it must not starve for the
+    // entire backfill. The sweep runs first so it gets first claim on the
+    // budget, cost-free in the steady state because it is rare.
+
+    // Prime the cursor, marking the first sweep as done and cursor at t(-1).
+    // Use t(-1) so that the walk starts from before all the codes.
+    for (let index = 0; index < CHZ_CODE_STATUS_INGEST_LIMIT; index += 1) {
+      await seedCode({ codeHash: hash(index), gtin14: PRODUCT_GTIN, scannedAt: t(index) });
+    }
+
+    // Pre-populate the cursor to prevent the sweep from running on first pass.
+    await db
+      .insert(schema.chzCodeStatusCursors)
+      .values({
+        tenantId,
+        lastScannedAt: new Date(BASE_SCANNED_AT.getTime() - 1000),
+        lastFullSweepAt: new Date(),
+      });
+
+    const first = await service.run(tenantId);
+    expect(first.inserted).toBe(CHZ_CODE_STATUS_INGEST_LIMIT);
+
+    // Simulate an offline-then-sync device: a code committed with a
+    // `scanned_at` behind the cursor. The cursor walk's strict `>` would
+    // skip it forever, but the sweep (if it runs) will find it.
+    await seedCode({ codeHash: HASH_A, gtin14: PRODUCT_GTIN, scannedAt: t(0) });
+
+    // Add more codes after the cursor to fill the walk budget again.
+    for (
+      let index = CHZ_CODE_STATUS_INGEST_LIMIT;
+      index < 2 * CHZ_CODE_STATUS_INGEST_LIMIT;
+      index += 1
+    ) {
+      await seedCode({ codeHash: hash(index), gtin14: PRODUCT_GTIN, scannedAt: t(index) });
+    }
+
+    // The second pass: the cursor walk fills the budget on its own, the
+    // sweep is still hot, so it should not run. HASH_A stays undetected.
+    const second = await service.run(tenantId);
+    expect((await rowsFor(tenantId)).map((row) => row.codeHash)).not.toContain(HASH_A);
+
+    // Force the sweep to be due.
+    await forceFullSweepDue();
+
+    // The third pass: the cursor walk would fill the budget, but the sweep
+    // is now due. Because the sweep runs first, it gets budget and executes
+    // before the walk could fill everything. The sweep runs and finds HASH_A.
+    const third = await service.run(tenantId);
+    expect(third.inserted).toBeGreaterThanOrEqual(1);
+    expect((await rowsFor(tenantId)).map((row) => row.codeHash)).toContain(HASH_A);
+  }, 300_000);
 });

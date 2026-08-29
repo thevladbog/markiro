@@ -102,12 +102,25 @@ export class ChzCodeStatusIngestService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   /**
-   * Spends the pass's one shared row budget in order -- cursor walk, then
-   * the full sweep if it is due, then the snapshot anti-join -- passing what
+   * Spends the pass's one shared row budget in order: the full sweep if it is
+   * due, then the cursor walk, then the snapshot anti-join, passing what
    * remains of the budget to each phase and skipping a phase entirely once
    * the budget hits zero. See the class doc for why three phases exist and
    * `CHZ_CODE_STATUS_INGEST_LIMIT` for why they share one budget rather than
    * each carrying its own.
+   *
+   * The sweep runs first despite being rare (at most once per day per tenant)
+   * because it is the only phase that can find codes that arrived behind the
+   * cursor -- a normal occurrence for a Station syncing after an outage. A
+   * tenant backfilling from deep history (the case the per-pass limit exists
+   * for) can fill the cursor walk's entire budget on consecutive passes,
+   * starving the sweep and leaving its correctness backstop inactive during
+   * the very backfill it is meant to protect. Giving the sweep first claim on
+   * the budget costs the steady state almost nothing, while the cursor walk
+   * absorbs what is left. A sweep skipped because the budget ran out is not
+   * retried that pass (a skipped sweep leaves `lastFullSweepAt` stale so it
+   * is retried the next one), but this order ensures it is not skipped for
+   * the duration of a multi-pass backfill.
    *
    * A phase skipped because the budget ran out is conservatively counted as
    * "not caught up": with zero budget left there is no way to check whether
@@ -126,28 +139,26 @@ export class ChzCodeStatusIngestService {
 
     let remaining = CHZ_CODE_STATUS_INGEST_LIMIT;
 
-    const scanned = await this.walkCodes(tenantId, cursor?.lastScannedAt ?? null, remaining);
-    remaining = Math.max(0, remaining - scanned.rowsFetched);
-
     const sweepIsDue =
       !cursor?.lastFullSweepAt ||
       Date.now() - cursor.lastFullSweepAt.getTime() >= CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS;
 
     let sweepInserted = 0;
     let sweepCaughtUp = true;
-    if (sweepIsDue) {
-      if (remaining > 0) {
-        const sweep = await this.sweepCodes(tenantId, remaining);
-        sweepInserted = sweep.inserted;
-        sweepCaughtUp = sweep.caughtUp;
-        remaining = Math.max(0, remaining - sweep.rowsFetched);
-        await this.markFullSweepRan(tenantId);
-      } else {
-        // Due, but the cursor walk alone already spent the whole budget.
-        // Left for the next pass rather than run unbounded.
-        sweepCaughtUp = false;
-      }
+    if (sweepIsDue && remaining > 0) {
+      const sweep = await this.sweepCodes(tenantId, remaining);
+      sweepInserted = sweep.inserted;
+      sweepCaughtUp = sweep.caughtUp;
+      remaining = Math.max(0, remaining - sweep.rowsFetched);
+      await this.markFullSweepRan(tenantId);
+    } else if (sweepIsDue) {
+      // Due, but the budget is exhausted before we could run it.
+      // Left for the next pass rather than run unbounded.
+      sweepCaughtUp = false;
     }
+
+    const scanned = await this.walkCodes(tenantId, cursor?.lastScannedAt ?? null, remaining);
+    remaining = Math.max(0, remaining - scanned.rowsFetched);
 
     let exportedInserted = 0;
     let exportedCaughtUp = true;
@@ -201,9 +212,10 @@ export class ChzCodeStatusIngestService {
     // one `scanned_at`, so there is no timestamp in it a cursor could safely
     // stop at (see the method doc). Raising the limit is the only way to
     // find out whether the table truly ends here or just at the fetch
-    // boundary.
+    // boundary. Skip this if the limit was zero or the batch is empty.
     while (
       rows.length === effectiveLimit &&
+      rows.length > 0 &&
       rows[0]!.scannedAt.getTime() === rows[rows.length - 1]!.scannedAt.getTime()
     ) {
       effectiveLimit *= 2;
