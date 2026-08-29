@@ -18,11 +18,12 @@ type ChzExportRunRow = typeof schema.chzExportRuns.$inferSelect;
 const STALE_CLAIM_MS = 5 * 60_000;
 /**
  * No `finished: false` order gets more than this much wall-clock time in
- * `ordered`. A pass counter would need a new column; the deadline needs none,
- * since `markOrdered` already stamps `orderedAt` and an operator cares about
- * elapsed time, not how many polls it took. Six hours is comfortably longer
- * than any legitimate dispenser task and shorter than the token's ten-hour
- * life, so a timeout here is never mistaken for a token problem.
+ * `ordered` or `ready`. A pass counter would need a new column; the deadline
+ * needs none, since `markOrdered` stamps `orderedAt` and `markReady`
+ * preserves it, and an operator cares about elapsed time, not how many polls
+ * it took. Six hours is comfortably longer than any legitimate dispenser task
+ * and shorter than the token's ten-hour life, so a timeout here is never
+ * mistaken for a token problem.
  */
 const MAX_ORDER_WAIT_MS = 6 * 60 * 60_000;
 /**
@@ -89,7 +90,12 @@ interface OrderContext {
  * a pass that dies halfway is resumed by the next one rather than restarted.
  *
  * `finished` is false while any run is still non-terminal, which is how the
- * worker decides whether to re-enqueue itself with a delay.
+ * worker decides whether to re-enqueue itself with a delay. The timeout sweep
+ * (`sweepExpiredOrders`) runs before anything else that could return early —
+ * in particular before the token gate — because it needs only `orderedAt`,
+ * not a token or a network call, and it is what stops a `finished: false`
+ * order from being an immortal job when the token can never be obtained
+ * again.
  */
 @Injectable()
 export class ChzExportRunnerService {
@@ -111,6 +117,16 @@ export class ChzExportRunnerService {
     const runs = await this.loadRuns(tenantId, inventoryId);
     // Terminal order: not one request, not even a token lookup.
     if (runs.every(isTerminal)) return { finished: true };
+
+    // No token needed, no network call: only `orderedAt` matters, so this
+    // runs on every pass regardless of token state. Without it, a tenant
+    // whose signing agent never comes back (a certificate expiring is
+    // routine) would fail every `queued` run in `giveUpOnToken` and then loop
+    // forever on the `ordered`/`ready` runs it deliberately leaves alone —
+    // this is what bounds those instead. See `MAX_ORDER_WAIT_MS`.
+    await this.sweepExpiredOrders(tenantId, inventoryId);
+    const afterSweep = await this.loadRuns(tenantId, inventoryId);
+    if (afterSweep.every(isTerminal)) return { finished: true };
 
     const token = await this.tokens.getActiveToken(tenantId);
     if (token.status !== "ok") {
@@ -137,6 +153,26 @@ export class ChzExportRunnerService {
 
     const after = await this.loadRuns(tenantId, inventoryId);
     return { finished: after.every(isTerminal) };
+  }
+
+  /**
+   * A run stuck non-terminal past the deadline is failed here, independently
+   * of everything else in the pass: it needs only `orderedAt`, which
+   * `markOrdered` stamps and `markReady` preserves, so it costs no token and
+   * no request. Both `ordered` (a task stuck in `PREPARATION` forever, or a
+   * poll that keeps coming back `unavailable`/`rejected`) and `ready` (a
+   * result that never becomes downloadable, so `importReadyRuns` logs and
+   * moves on every pass) are the same failure class: a state this runner can
+   * re-enter indefinitely without ever reaching a terminal one. Without this
+   * sweep either would retry forever. See `MAX_ORDER_WAIT_MS`.
+   */
+  private async sweepExpiredOrders(tenantId: string, inventoryId: string): Promise<void> {
+    const deadline = new Date(Date.now() - MAX_ORDER_WAIT_MS);
+    for (const run of await this.loadRuns(tenantId, inventoryId)) {
+      if (run.state !== "ordered" && run.state !== "ready") continue;
+      if (run.orderedAt === null || run.orderedAt >= deadline) continue;
+      await this.failRun(run, "CHZ_TASK_TIMED_OUT", null);
+    }
   }
 
   /**
@@ -333,21 +369,13 @@ export class ChzExportRunnerService {
     inventoryId: string,
     auth: TrueApiAuth,
   ): Promise<void> {
-    // A run that has been `ordered` longer than a legitimate dispenser task
-    // could ever take is failed here, before the batch poll, regardless of
-    // what that poll would say: a task stuck in `PREPARATION` forever, or a
-    // poll that keeps coming back `unavailable`/`rejected`, would otherwise
-    // never produce a terminal state and the order would retry forever. See
-    // `MAX_ORDER_WAIT_MS`.
-    const deadline = new Date(Date.now() - MAX_ORDER_WAIT_MS);
+    // A run past the timeout deadline was already failed by
+    // `sweepExpiredOrders` earlier in this same pass, before the token gate,
+    // so nothing here needs to re-check `orderedAt`.
     const byTaskId = new Map<string, ChzExportRunRow>();
     for (const run of await this.loadRuns(tenantId, inventoryId)) {
       if (run.state !== "ordered") continue;
       if (run.dispenserTaskId === null || run.dispenserTaskId.length === 0) continue;
-      if (run.orderedAt !== null && run.orderedAt < deadline) {
-        await this.failRun(run, "CHZ_TASK_TIMED_OUT", null);
-        continue;
-      }
       byTaskId.set(run.dispenserTaskId, run);
     }
     if (byTaskId.size === 0) return;

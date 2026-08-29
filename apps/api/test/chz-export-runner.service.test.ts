@@ -362,6 +362,68 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     expect(others.every((row) => row.state === "ordered")).toBe(true);
   });
 
+  it("fails a ready run whose orderedAt is older than the deadline with CHZ_TASK_TIMED_OUT", async () => {
+    const staleOrderedAt = new Date(Date.now() - 7 * 60 * 60_000); // past MAX_ORDER_WAIT_MS (6h)
+    await seedRuns({
+      state: "ordered",
+      taskIdFor: (status) => `task-${status}`,
+      orderedAtFor: (status) => (status === "EMITTED" ? staleOrderedAt : new Date()),
+    });
+    // `markReady` preserves `orderedAt`, so a run that reached `ready` and then
+    // never became downloadable (`downloadDispenserResult` returning
+    // `unavailable` forever) is still anchored on the same timestamp the
+    // `ordered` deadline uses.
+    await db
+      .update(schema.chzExportRuns)
+      .set({ state: "ready", resultId: "r1" })
+      .where(
+        and(
+          eq(schema.chzExportRuns.inventoryId, inventoryId),
+          eq(schema.chzExportRuns.status, "EMITTED"),
+        ),
+      );
+    const { client } = fakeClient({ results: [] });
+    await runnerWith(client).run(tenantId, inventoryId, { retryCount: 0, retryLimit: 5 });
+
+    const [emitted] = await runsFor(inventoryId, "EMITTED");
+    expect(emitted).toMatchObject({ state: "failed", errorCode: "CHZ_TASK_TIMED_OUT" });
+    // The other five statuses stay ordered -- one status's deadline does not
+    // disturb the rest of the order.
+    const others = (await runsFor(inventoryId)).filter((row) => row.status !== "EMITTED");
+    expect(others.every((row) => row.state === "ordered")).toBe(true);
+  });
+
+  it("terminates an order stuck without a token once orderedAt passes the deadline", async () => {
+    // All six runs ordered and stuck long enough to be past the deadline, and
+    // the tenant's signing agent never comes back (its certificate expiring is
+    // routine). Before the fix, the timeout sweep lived inside `pollOrderedRuns`,
+    // which a tokenless pass never reaches -- `getActiveToken` fails, nothing is
+    // `queued` for `giveUpOnToken` to fail, and the order would report
+    // `finished: false` forever. The sweep must reach these runs before the
+    // token is ever requested.
+    const staleOrderedAt = new Date(Date.now() - 7 * 60 * 60_000); // past MAX_ORDER_WAIT_MS (6h)
+    await seedRuns({
+      state: "ordered",
+      taskIdFor: (status) => `task-${status}`,
+      orderedAtFor: () => staleOrderedAt,
+    });
+    tokens.getActiveToken.mockResolvedValue({ status: "expired" });
+    const { client, calls } = fakeClient();
+    const outcome = await runnerWith(client).run(tenantId, inventoryId, {
+      retryCount: 0,
+      retryLimit: 5,
+    });
+
+    expect(outcome).toEqual({ finished: true });
+    // The deadline needs only `orderedAt`, never a token: the token was never
+    // even asked for.
+    expect(tokens.getActiveToken).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(0);
+    const rows = await runsFor(inventoryId);
+    expect(rows.every((row) => row.state === "failed")).toBe(true);
+    expect(rows.every((row) => row.errorCode === "CHZ_TASK_TIMED_OUT")).toBe(true);
+  });
+
   it("hands the downloaded archive to importEvidence untouched and as a .zip", async () => {
     await seedRuns({ state: "ordered", taskIdFor: (status) => `task-${status}` });
     const archive = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x99]);
