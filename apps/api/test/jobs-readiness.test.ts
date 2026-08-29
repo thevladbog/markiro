@@ -14,6 +14,7 @@ import type { ShiftExportRunnerService } from "../src/modules/shift-exports/shif
 import type { InventoryDocumentRunnerService } from "../src/modules/inventories/inventory-document-runner.service";
 import type { SignerScheduler } from "../src/modules/signer-agents/signer-scheduler.service";
 import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
+import type { ChzExportRunnerService } from "../src/modules/chz-exports/chz-export-runner.service";
 
 const pgBossMock = vi.hoisted(() => ({
   instances: [] as unknown[],
@@ -35,7 +36,7 @@ vi.mock("@markiro/db", async (importOriginal) => {
   };
 });
 
-const WORKER_IDS = Array.from({ length: 13 }, (_, index) => `worker-${index + 1}`);
+const WORKER_IDS = Array.from({ length: 14 }, (_, index) => `worker-${index + 1}`);
 
 function wip(id: string, state: WorkerState = "active"): WipData {
   return {
@@ -93,10 +94,16 @@ function fakeBoss(options: { workIds?: string[]; failWorkAt?: number } = {}) {
 
 function serviceWith(boss: ReturnType<typeof fakeBoss>) {
   pgBossMock.instances.push(boss);
+  // `.orderBy().limit()` (shift export / inventory document reconciliation)
+  // and `.groupBy().orderBy().limit()` (chz export reconciliation) both
+  // resolve to no rows -- this suite only cares about worker registration
+  // and readiness, not what any reconciliation pass finds.
+  const limit = vi.fn(async () => []);
+  const orderBy = vi.fn(() => ({ limit }));
+  const groupBy = vi.fn(() => ({ orderBy }));
+  const where = vi.fn(() => ({ orderBy, groupBy }));
   const db = {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({ where: vi.fn(async () => []) })),
-    })),
+    select: vi.fn(() => ({ from: vi.fn(() => ({ where })) })),
     delete: vi.fn(() => ({
       where: vi.fn(async () => ({ rowCount: 0 })),
     })),
@@ -123,6 +130,9 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
   const signerScheduler = {
     run: vi.fn(async () => undefined),
   } satisfies SignerScheduler;
+  const chzExportRunner = {
+    run: vi.fn(async () => ({ finished: true })),
+  } as unknown as ChzExportRunnerService;
   return {
     service: new PgBossService(
       db,
@@ -135,6 +145,7 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
       shiftExportRunner,
       inventoryDocumentRunner,
       signerScheduler,
+      chzExportRunner,
     ),
     subscriptionStatus,
     signerScheduler,
@@ -146,14 +157,14 @@ describe("PgBossService readiness", () => {
     pgBossMock.instances.length = 0;
   });
 
-  it("accepts the exact thirteen successfully registered active workers including document jobs", async () => {
+  it("accepts the exact fourteen successfully registered active workers including document jobs", async () => {
     const boss = fakeBoss();
     const { service, subscriptionStatus, signerScheduler } = serviceWith(boss);
 
     await service.onModuleInit();
 
     await expect(service.checkReady()).resolves.toBeUndefined();
-    expect(boss.work).toHaveBeenCalledTimes(13);
+    expect(boss.work).toHaveBeenCalledTimes(14);
     expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(BUILD_SHIFT_EXPORT_QUEUE);
     expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(BUILD_INVENTORY_DOCUMENT_QUEUE);
     expect(subscriptionStatus.run).toHaveBeenCalledTimes(1);

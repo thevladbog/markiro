@@ -1445,6 +1445,8 @@ git commit -m "feat(api): the Chestny ZNAK export order state machine"
 - Consumes: `ChzExportRunnerService.run` (Task 5), `chzExportRuns` (Task 1).
 - Produces: `RUN_CHZ_EXPORT_QUEUE = "run-chz-export"` exported from `jobs.module.ts`, and `PgBossService.enqueueChzExportOrder(tenantId: string, inventoryId: string): Promise<string>` used by Task 4.
 
+**Amendment (post-review):** the job payload is `{ tenantId: string; inventoryId: string; pass?: number }`, not `{ tenantId, inventoryId }`. `startAfter` re-enqueues create a brand-new pg-boss job every pass, so `job.retryCount`/`job.retryLimit` reset to zero each time — they bound failures inside one invocation, never how many passes an order gets. Neither of the runner's own two caps (`chz_export_runs.attempts`, the six-hour `ordered`/`ready` deadline) reaches an order whose six runs are all still `queued` for a tenant whose token never becomes available, so without a payload-carried pass count such an order re-enqueues forever. The worker now passes `{ retryCount: pass, retryLimit: MAX_EXPORT_PASSES }` (`MAX_EXPORT_PASSES = 240`, i.e. two hours of 30-second polls) into `run()` instead of the job's own attempt metadata, and re-enqueues with `pass + 1`.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `apps/api/test/chz-export-job.test.ts`:
@@ -1494,6 +1496,25 @@ export const RUN_CHZ_EXPORT_QUEUE = "run-chz-export";
  * requests per minute against its limit of twelve.
  */
 const CHZ_EXPORT_POLL_INTERVAL_SECONDS = 30;
+/**
+ * Every `startAfter` re-enqueue below creates a brand-new pg-boss job, so
+ * `job.retryCount`/`job.retryLimit` reset to zero each pass and cannot bound
+ * how many passes an order gets. Carrying the pass count in the job payload
+ * instead gives the runner's own "budget exhausted" branch (`giveUpOnToken`)
+ * a budget that actually advances across re-enqueues — the firm stop for an
+ * order whose runs are all still `queued` for a tenant whose token never
+ * becomes available, which neither of the runner's own two caps
+ * (`chz_export_runs.attempts`, the six-hour `ordered`/`ready` deadline)
+ * reaches. At the 30-second poll interval this is two hours of passes.
+ */
+const MAX_EXPORT_PASSES = 240;
+
+interface ChzExportJobData {
+  tenantId: string;
+  inventoryId: string;
+  /** Defaults to 0: the initial enqueue from `ChzExportsService` omits it. */
+  pass?: number;
+}
 ```
 
 ```ts
@@ -1508,17 +1529,20 @@ this.workerIds.push(
   await boss.work(
     RUN_CHZ_EXPORT_QUEUE,
     { includeMetadata: true },
-    async (jobs: JobWithMetadata<{ tenantId: string; inventoryId: string }>[]) => {
+    async (jobs: JobWithMetadata<ChzExportJobData>[]) => {
       for (const job of jobs) {
+        const pass = job.data.pass ?? 0;
         const { finished } = await this.chzExportRunner.run(
           job.data.tenantId,
           job.data.inventoryId,
-          { retryCount: job.retryCount, retryLimit: job.retryLimit },
+          { retryCount: pass, retryLimit: MAX_EXPORT_PASSES },
         );
         if (!finished) {
-          await boss.send(RUN_CHZ_EXPORT_QUEUE, job.data, {
-            startAfter: CHZ_EXPORT_POLL_INTERVAL_SECONDS,
-          });
+          await boss.send(
+            RUN_CHZ_EXPORT_QUEUE,
+            { tenantId: job.data.tenantId, inventoryId: job.data.inventoryId, pass: pass + 1 },
+            { startAfter: CHZ_EXPORT_POLL_INTERVAL_SECONDS },
+          );
         }
       }
     },
@@ -1527,7 +1551,7 @@ this.workerIds.push(
 await this.reconcileUnfinishedChzExports(boss);
 ```
 
-`startAfter` has no precedent in this repository — every existing deferral is cron-driven — so it is introduced here deliberately, and the comment above says why.
+`startAfter` has no precedent in this repository — every existing deferral is cron-driven — so it is introduced here deliberately, and the comment above says why. `job.retryCount`/`job.retryLimit` (pg-boss's own per-job attempt metadata) are deliberately **not** read here, for the reason `MAX_EXPORT_PASSES` explains above.
 
 Add `enqueueChzExportOrder` beside `enqueueInventoryDocumentRun`:
 

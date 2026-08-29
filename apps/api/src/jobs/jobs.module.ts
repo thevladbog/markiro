@@ -9,7 +9,7 @@ import {
   type OnModuleInit,
 } from "@nestjs/common";
 import { PgBoss, type JobWithMetadata } from "pg-boss";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
 import type { Env } from "../env";
@@ -35,6 +35,11 @@ import {
   productionInventoryDocumentGeneratorRegistry,
 } from "../modules/inventories/inventory-document-runner.service";
 import { InventoryResultSourceService } from "../modules/inventories/inventory-result-source.service";
+import { InventoriesService } from "../modules/inventories/inventories.service";
+import { InventorySnapshotService } from "../modules/inventories/inventory-snapshot.service";
+import { ChzExportRunnerService } from "../modules/chz-exports/chz-export-runner.service";
+import { ChzTokenService } from "../modules/chz-exports/chz-token.service";
+import { TrueApiClient } from "../modules/chz-exports/true-api.client";
 import { currentMonthUTC, nextMonthUTC } from "./months";
 import {
   MATERIALIZE_SUBSCRIPTION_STATUSES_CRON,
@@ -45,11 +50,42 @@ import {
 export const PG_CONNECTION_STRING = "JOBS_PG_CONNECTION_STRING";
 export const BUILD_SHIFT_EXPORT_QUEUE = "build-shift-export";
 export const BUILD_INVENTORY_DOCUMENT_QUEUE = "build-inventory-document-run";
-// Queue name only, for now: `ChzExportsService.order`/`retry` (Task 4) need a
-// place to send the job, but the queue itself -- `createQueue`, its worker
-// and boot reconciliation -- is Task 6's to build, the same way Task 5's
-// runner will consume it.
-export const CHZ_EXPORT_ORDER_QUEUE = "chz-export-order";
+export const RUN_CHZ_EXPORT_QUEUE = "run-chz-export";
+/**
+ * One pass per invocation, then re-enqueue: a dispenser task can take minutes,
+ * and holding a pg-boss worker that long would starve the queue and lose
+ * progress across a restart. 30 seconds keeps the batch results endpoint at two
+ * requests per minute against its limit of twelve.
+ */
+const CHZ_EXPORT_POLL_INTERVAL_SECONDS = 30;
+/**
+ * Every `startAfter` re-enqueue below creates a brand-new pg-boss job, so
+ * `job.retryCount`/`job.retryLimit` reset to zero each pass -- they bound
+ * failures inside one invocation, never how many passes an order gets. The
+ * runner has its own two caps (`chz_export_runs.attempts` for creation
+ * attempts, a six-hour wall-clock deadline for `ordered`/`ready` runs), but
+ * neither reaches an order whose six runs are all still `queued` for a tenant
+ * whose token never becomes available: the deadline needs `orderedAt`, which
+ * a `queued` run never gets, and `attempts` only increments on a claim, which
+ * happens after the token check. Such an order would otherwise re-enqueue
+ * forever.
+ *
+ * Carrying the pass count in the job payload instead closes that gap: it is
+ * passed to the runner as `retryCount` against this cap as `retryLimit`, so
+ * its existing "budget exhausted" branch (`giveUpOnToken`) finally has a
+ * budget that advances across re-enqueues. At the 30-second poll interval
+ * this is two hours of passes -- comfortably inside the runner's own
+ * six-hour deadline for orders that did reach `ordered`, and a firm stop for
+ * ones that never could.
+ */
+const MAX_EXPORT_PASSES = 240;
+
+interface ChzExportJobData {
+  tenantId: string;
+  inventoryId: string;
+  /** Defaults to 0: the initial enqueue from `ChzExportsService` omits it. */
+  pass?: number;
+}
 
 const QUEUE_NAME = "ensure-partitions";
 const QUEUE_CRON = "0 4 * * *";
@@ -114,7 +150,7 @@ const CHZ_SIGNER_SCHEDULER_QUEUE_CRON = "*/15 * * * *";
 
 /**
  * Boots a dedicated pg-boss instance (its own `pgboss` schema, same
- * database as the app), three request-driven workers, and ten schedules on it:
+ * database as the app), four request-driven workers, and ten schedules on it:
  *  - keeps the `codes`/`scan_events` monthly partitions ahead of traffic:
  *    ensures the current + next month exist once at startup, then again
  *    every day at 04:00 UTC.
@@ -143,6 +179,9 @@ const CHZ_SIGNER_SCHEDULER_QUEUE_CRON = "*/15 * * * *";
  *    queue is deliberately not scheduled because export requests enqueue it.
  *  - generates inventory document artifacts on demand with the same bounded
  *    retry and boot-reconciliation guarantees.
+ *  - orders and imports the six Chestny ZNAK code-status exports for an
+ *    inventory on demand, one pass per invocation, re-enqueuing itself with a
+ *    delay until every run is terminal or `MAX_EXPORT_PASSES` is reached.
  *
  * pg-boss v12 requires a queue to be created (`createQueue`) before it can
  * be scheduled or worked -- scheduling against a queue that doesn't exist
@@ -169,6 +208,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     private readonly shiftExportRunner: ShiftExportRunnerService,
     private readonly inventoryDocumentRunner: InventoryDocumentRunnerService,
     @Inject(SignerSchedulerService) private readonly signerScheduler: SignerScheduler,
+    private readonly chzExportRunner: ChzExportRunnerService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -341,6 +381,42 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         }),
       );
 
+      await boss.createQueue(RUN_CHZ_EXPORT_QUEUE, {
+        retryLimit: 5,
+        retryDelay: 30,
+        retryBackoff: true,
+        retryDelayMax: 900,
+        expireInSeconds: 900,
+      });
+      this.workerIds.push(
+        await boss.work(
+          RUN_CHZ_EXPORT_QUEUE,
+          { includeMetadata: true },
+          async (jobs: JobWithMetadata<ChzExportJobData>[]) => {
+            for (const job of jobs) {
+              const pass = job.data.pass ?? 0;
+              const { finished } = await this.chzExportRunner.run(
+                job.data.tenantId,
+                job.data.inventoryId,
+                { retryCount: pass, retryLimit: MAX_EXPORT_PASSES },
+              );
+              if (!finished) {
+                await boss.send(
+                  RUN_CHZ_EXPORT_QUEUE,
+                  {
+                    tenantId: job.data.tenantId,
+                    inventoryId: job.data.inventoryId,
+                    pass: pass + 1,
+                  },
+                  { startAfter: CHZ_EXPORT_POLL_INTERVAL_SECONDS },
+                );
+              }
+            }
+          },
+        ),
+      );
+      await this.reconcileUnfinishedChzExports(boss);
+
       // Also run all ten maintenance paths once immediately at boot rather
       // than waiting for the first tick of any schedule.
       await this.runEnsurePartitions();
@@ -391,14 +467,14 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Minimal `send` wrapper, deliberately matching `enqueueInventoryDocumentRun`
-   * above -- the queue itself (creation, worker, retry policy, boot
-   * reconciliation) is Task 6's responsibility, not this one's.
+   * `pass` is omitted here, defaulting to 0 in the worker: this is always the
+   * first pass an order gets, whether it comes from `ChzExportsService.order`
+   * or `.retry` (Task 4) or from boot reconciliation below.
    */
   async enqueueChzExportOrder(tenantId: string, inventoryId: string): Promise<string> {
     if (!this.boss || !this.started) throw new Error("pg-boss is not started");
-    const jobId = await this.boss.send(CHZ_EXPORT_ORDER_QUEUE, { tenantId, inventoryId });
-    if (!jobId) throw new Error("chz export order enqueue failed");
+    const jobId = await this.boss.send(RUN_CHZ_EXPORT_QUEUE, { tenantId, inventoryId });
+    if (!jobId) throw new Error("chz export enqueue failed");
     return jobId;
   }
 
@@ -460,6 +536,48 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Distinct `(tenantId, inventoryId)` pairs, not runs: one boot job per
+   * order, exactly matching what `enqueueChzExportOrder` sends, since the
+   * runner's `run` already re-checks all six of an order's runs on every
+   * pass -- one job per run would just be five wasted enqueues per order.
+   */
+  private async reconcileUnfinishedChzExports(boss: PgBoss): Promise<void> {
+    let queued: { tenantId: string; inventoryId: string }[];
+    try {
+      queued = await this.db
+        .select({
+          tenantId: schema.chzExportRuns.tenantId,
+          inventoryId: schema.chzExportRuns.inventoryId,
+        })
+        .from(schema.chzExportRuns)
+        .where(inArray(schema.chzExportRuns.state, ["queued", "ordered", "ready"]))
+        .groupBy(schema.chzExportRuns.tenantId, schema.chzExportRuns.inventoryId)
+        .orderBy(sql`min(${schema.chzExportRuns.createdAt})`)
+        .limit(SHIFT_EXPORT_RECONCILE_LIMIT);
+    } catch (error) {
+      this.logger.error(
+        "chz export reconciliation query failed",
+        error instanceof Error ? error.stack : undefined,
+      );
+      return;
+    }
+    for (const row of queued) {
+      try {
+        const jobId = await boss.send(RUN_CHZ_EXPORT_QUEUE, {
+          tenantId: row.tenantId,
+          inventoryId: row.inventoryId,
+        });
+        if (!jobId) throw new Error("chz export enqueue returned no job id");
+      } catch (error) {
+        this.logger.error(
+          `chz export reconciliation failed for tenant ${row.tenantId} inventory ${row.inventoryId}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+    }
+  }
+
   async checkReady(): Promise<void> {
     if (!this.started || !this.boss) throw new Error("pg-boss is not started");
     try {
@@ -468,7 +586,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 13 ||
+      this.workerIds.length !== 14 ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {
@@ -586,6 +704,24 @@ export class JobsModule {
           useFactory: () => new ChzCryptoService(env.CHZ_TOKEN_ENCRYPTION_KEY),
         },
         SignerSchedulerService,
+        // `ChzExportRunnerService` (this module's `run-chz-export` worker) needs its
+        // own `InventoriesService`/`InventorySnapshotService` and True API stack for
+        // the same reason `ChzCryptoService` above gets its own factory instead of
+        // importing `ChzExportsModule`: that module's `ChzExportsService` needs
+        // `PgBossService`, which lives here, so importing it back would be
+        // circular. `ChzCryptoService` above is reused rather than duplicated again
+        // since both consumers live in this same `forRoot` call.
+        InventorySnapshotService,
+        InventoriesService,
+        // `TrueApiClient`'s constructor parameter is typed as an interface
+        // (`TrueApiClientDependencies`), which TypeScript erases to `Object`
+        // in `design:paramtypes` -- registering the bare class makes Nest try
+        // to resolve a provider for `Object` and fail. A factory sidesteps
+        // constructor injection and just takes the class's own default (the
+        // real `fetch`).
+        { provide: TrueApiClient, useFactory: () => new TrueApiClient() },
+        ChzTokenService,
+        ChzExportRunnerService,
       ],
       exports: [PgBossService, INVENTORY_DOCUMENT_GENERATOR_REGISTRY],
     };
