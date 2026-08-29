@@ -65,9 +65,17 @@
 
 - Produces:
   - `chzCodeStatuses` — `tenantId`, `codeHash` (char 64), `chzProductGroupCode` (integer, nullable, FK → `chzProductGroups.code`), `status` (text, nullable), `statusEx` (text, nullable), `ownerInn` (text, nullable), `withdrawReason` (text, nullable), `unknownAttempts` (integer, default 0), `firstSeenAt`, `checkedAt` (nullable), `nextRefreshAt`, `updatedAt`. Primary key `(tenantId, codeHash)`.
-  - `chzCodeStatusCursors` — `tenantId` (text, primary key), `lastScannedAt` (timestamptz, nullable), `updatedAt`.
+  - `chzCodeStatusCursors` — `tenantId` (text, primary key), `lastScannedAt` (timestamptz, nullable), `lastFullSweepAt` (timestamptz, nullable), `updatedAt`.
 
 Tasks 3–6 all read these.
+
+**Addendum, added during Task 3's review:** `lastFullSweepAt` was not part of the
+original design below — it was added by a follow-up migration,
+`packages/db/migrations/0102_chz_code_status_full_sweep_cursor.sql`, once Task 3's
+review found the cursor-only design insufficient (see Task 3's addendum for why).
+The column is a single nullable `timestamp with time zone`, added with a plain
+`ALTER TABLE ... ADD COLUMN`; nothing about `chzCodeStatuses` or the existing
+`lastScannedAt` cursor changed.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -173,6 +181,9 @@ export const chzCodeStatusCursors = pgTable("chz_code_status_cursors", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 ```
+
+(`lastFullSweepAt` is not shown here — see the addendum above and Task 3's addendum for
+why it was added afterward, by a separate migration, rather than folded into this one.)
 
 If `tenantId()` cannot be both a helper and `.primaryKey()` in this codebase's helper shape, declare the cursor's `tenantId` explicitly as `text("tenant_id").primaryKey().references(() => organization.id)` and match how other tenant-keyed singleton tables in this repo do it (`chzApiTokens` is one — read it first).
 
@@ -445,6 +456,12 @@ git commit -m "feat(api): cises/info on the True API client"
   `run(tenantId: string): Promise<{ inserted: number; watermark: Date | null; caughtUp: boolean }>`.
   Task 5 calls it once per pass before the refresh phase.
 
+**Addendum, added during this task's review — see below the commit step for the
+full account:** the design described in this task's steps turned out to have two
+defects, both fixed before the task was considered done. `run()` now also
+consumes `chzCodeStatusCursors.lastFullSweepAt` (Task 1's addendum) and produces
+`CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS` alongside `CHZ_CODE_STATUS_INGEST_LIMIT`.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `apps/api/test/chz-code-status-ingest.service.test.ts` against a real scratch database, following `apps/api/test/chz-exports.service.test.ts`'s setup:
@@ -580,6 +597,51 @@ Expected: PASS, all six cases.
 ```bash
 git add apps/api/src/modules/chz-code-statuses apps/api/test/chz-code-status-ingest.service.test.ts
 git commit -m "feat(api): ingest walk for Chestny ZNAK code statuses"
+```
+
+**Addendum, added during this task's review:** two defects in the design above
+were found and fixed in a follow-up commit, before Task 4 began.
+
+1. **The cursor can permanently miss codes, and it is not an edge case.**
+   `codes.scanned_at` is the Station's own clock, not a commit timestamp, and
+   the station-scans ingest endpoint accepts a `scannedAt` up to three years in
+   the past (`WINDOW_PAST_MS` in `station-scans.service.ts`) because a device's
+   queue can legitimately carry weeks-to-months of backlog after an outage, a
+   warehoused spare being redeployed, or repeated dead-RTC reboots. A code can
+   therefore be committed with a `scanned_at` the cursor has already passed,
+   and the cursor's strict `>` skips it forever — offline-then-sync is the
+   Station's normal operating mode, not a corner case.
+
+   Fix: the cursor walk stays as designed above for the steady state, and a
+   **full anti-join sweep** over `codes` was added alongside it — the same
+   shape as the existing `inventory_snapshot_codes` anti-join, but against
+   `codes`, ignoring `scanned_at` entirely. It runs at most once per tenant
+   per `CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS` (24 hours — the same cadence a
+   code already in the store refreshes at, so a late arrival joins the store
+   within the period it would have been refreshed in anyway). How recently it
+   last ran is tracked in `chzCodeStatusCursors.lastFullSweepAt` (Task 1's
+   addendum).
+
+2. **The two (now three) sources did not share one per-pass limit.** As
+   designed above, `run()` bounded the `codes` walk and the snapshot anti-join
+   by `CHZ_CODE_STATUS_INGEST_LIMIT` independently, so one pass could insert up
+   to twice the intended bound — more once the escalation loop enlarges the
+   first phase's own limit. Fixed by giving the pass one shared budget, spent
+   in order (cursor walk, then the sweep if due, then the snapshot anti-join),
+   each phase receiving whatever the previous phases left of it and being
+   skipped once it hits zero. A phase skipped this way is counted as "not
+   caught up", since with no budget left there is no way to check whether it
+   had more rows waiting without spending more than the pass is allowed.
+
+The degenerate-cursor escalation loop (this task's Step 3, "One subtlety to
+handle explicitly") also gained a dedicated test: `CHZ_CODE_STATUS_INGEST_LIMIT
+
+- 1`rows sharing one`scanned_at`, asserting the pass terminates and that a
+  later-timestamped row added afterward is not skipped.
+
+```bash
+git add apps/api/src/modules/chz-code-statuses apps/api/test/chz-code-status-ingest.service.test.ts packages/db
+git commit -m "fix(chz): add a full sweep and a shared ingest budget"
 ```
 
 ---

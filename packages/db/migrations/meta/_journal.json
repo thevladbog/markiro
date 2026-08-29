@@ -715,6 +715,13 @@
       "when": 1788042820803,
       "tag": "0101_chz_code_statuses",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1788045627369,
+      "tag": "0102_chz_code_status_full_sweep_cursor",
+      "breakpoints": true
     }
   ]
 }

@@ -286,12 +286,25 @@ export const chzCodeStatuses = pgTable(
  * monthly partition on every pass. With it the walk is a forward range scan on
  * `scanned_at`, which prunes to the partitions that can actually contain new
  * rows — usually just the current month.
+ *
+ * `lastScannedAt` is a cursor, not a correctness guarantee: `codes.scanned_at`
+ * is the Station's own clock, not a commit timestamp, and the ingest endpoint
+ * accepts anything up to three years in the past (see `WINDOW_PAST_MS` in
+ * `station-scans.service.ts`) precisely because a device's queue can carry
+ * weeks-to-months of backlog after an outage. A code can therefore be
+ * inserted with a `scanned_at` the cursor has already passed, and a strict
+ * forward scan would skip it forever. `lastFullSweepAt` tracks the last time
+ * a full anti-join swept `codes` for anything the cursor missed, independent
+ * of `scanned_at` — the backstop that makes the cursor a pure optimisation
+ * for the common case rather than the only path a code can take into
+ * `chz_code_statuses`.
  */
 export const chzCodeStatusCursors = pgTable("chz_code_status_cursors", {
   tenantId: text("tenant_id")
     .primaryKey()
     .references(() => organization.id),
   lastScannedAt: timestamp("last_scanned_at", { withTimezone: true }),
+  lastFullSweepAt: timestamp("last_full_sweep_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

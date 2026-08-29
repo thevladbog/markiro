@@ -7,6 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
   ChzCodeStatusIngestService,
+  CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS,
   CHZ_CODE_STATUS_INGEST_LIMIT,
 } from "../src/modules/chz-code-statuses/chz-code-status-ingest.service";
 
@@ -270,4 +271,95 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
 
     expect(await rowsFor(tenantId)).toHaveLength(1);
   });
+
+  async function forceFullSweepDue(): Promise<void> {
+    await db
+      .update(schema.chzCodeStatusCursors)
+      .set({ lastFullSweepAt: new Date(Date.now() - CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS - 1) })
+      .where(eq(schema.chzCodeStatusCursors.tenantId, tenantId));
+  }
+
+  it("misses a code committed behind the cursor via the cursor walk, but the full sweep catches it", async () => {
+    // Advance the cursor with an ordinary scan. The first pass also runs the
+    // full sweep (nothing has run yet for this tenant), so it starts primed.
+    await seedCode({ codeHash: HASH_A, gtin14: PRODUCT_GTIN, scannedAt: t(5) });
+    await service.run(tenantId);
+
+    // Simulate an offline-then-sync device: a code committed with a
+    // `scanned_at` behind the cursor. That is normal Station behaviour, not
+    // corrupt input -- see `WINDOW_PAST_MS` in `station-scans.service.ts`,
+    // which accepts a `scannedAt` up to three years in the past for exactly
+    // this reason.
+    await seedCode({ codeHash: HASH_B, gtin14: PRODUCT_GTIN, scannedAt: t(1) });
+
+    // The very next pass: the sweep just ran, so it is not due, and the
+    // cursor walk's `scannedAt > t(5)` misses B outright.
+    const missed = await service.run(tenantId);
+    expect(missed.inserted).toBe(0);
+    expect((await rowsFor(tenantId)).map((row) => row.codeHash)).not.toContain(HASH_B);
+
+    // Once the sweep is due, the full anti-join finds B with no help from
+    // the cursor at all.
+    await forceFullSweepDue();
+    const caught = await service.run(tenantId);
+    expect(caught.inserted).toBe(1);
+    expect((await rowsFor(tenantId)).map((row) => row.codeHash).sort()).toEqual(
+      [HASH_A, HASH_B].sort(),
+    );
+  });
+
+  it("does not run the full sweep twice within its interval", async () => {
+    await seedCode({ codeHash: HASH_A, gtin14: PRODUCT_GTIN, scannedAt: t(5) });
+    await service.run(tenantId); // first pass: nothing has swept yet, so it runs
+
+    const [afterFirst] = await db
+      .select({ lastFullSweepAt: schema.chzCodeStatusCursors.lastFullSweepAt })
+      .from(schema.chzCodeStatusCursors)
+      .where(eq(schema.chzCodeStatusCursors.tenantId, tenantId));
+    expect(afterFirst?.lastFullSweepAt).not.toBeNull();
+
+    // A code behind the cursor, added right after: only a sweep could find
+    // it, and the sweep should not be due again yet.
+    await seedCode({ codeHash: HASH_B, gtin14: PRODUCT_GTIN, scannedAt: t(1) });
+    await service.run(tenantId);
+
+    const [afterSecond] = await db
+      .select({ lastFullSweepAt: schema.chzCodeStatusCursors.lastFullSweepAt })
+      .from(schema.chzCodeStatusCursors)
+      .where(eq(schema.chzCodeStatusCursors.tenantId, tenantId));
+
+    expect(afterSecond?.lastFullSweepAt?.getTime()).toBe(afterFirst?.lastFullSweepAt?.getTime());
+    expect((await rowsFor(tenantId)).map((row) => row.codeHash)).not.toContain(HASH_B);
+  });
+
+  it("terminates when a limit-filling batch shares one scanned_at, and does not skip a later row afterward", async () => {
+    // The degenerate case the escalation loop in `walkCodes` exists for:
+    // every row in a limit-filling batch shares one `scanned_at`, so there
+    // is no timestamp in the batch a cursor could safely stop at. Without
+    // the loop this would never advance and the pass would spin forever.
+    const sharedScannedAt = t(0);
+    for (let index = 0; index < CHZ_CODE_STATUS_INGEST_LIMIT + 1; index += 1) {
+      await seedCode({ codeHash: hash(index), gtin14: PRODUCT_GTIN, scannedAt: sharedScannedAt });
+    }
+
+    const result = await service.run(tenantId);
+
+    // The loop drains the whole degenerate batch rather than looping
+    // forever -- forward progress on the cursor takes priority over the
+    // pass's nominal budget when the two conflict (see walkCodes's doc).
+    expect(result.inserted).toBe(CHZ_CODE_STATUS_INGEST_LIMIT + 1);
+    expect(result.watermark?.getTime()).toBe(sharedScannedAt.getTime());
+    // The escalation spent more than the pass's nominal budget on the
+    // cursor walk alone, so the other two phases correctly report
+    // themselves unable to run this pass.
+    expect(result.caughtUp).toBe(false);
+
+    // A later-timestamped row must not be skipped by wherever the cursor
+    // landed.
+    await seedCode({ codeHash: HASH_A, gtin14: PRODUCT_GTIN, scannedAt: t(1) });
+    const second = await service.run(tenantId);
+
+    expect(second.inserted).toBe(1);
+    expect((await rowsFor(tenantId)).map((row) => row.codeHash)).toContain(HASH_A);
+  }, 180_000);
 });
