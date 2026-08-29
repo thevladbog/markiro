@@ -154,8 +154,145 @@ describe.skipIf(!databaseUrl)("chz export runs migration", () => {
     });
     await db
       .update(schema.chzExportRuns)
-      .set({ state: "imported", importId, completedAt: new Date() })
+      .set({
+        state: "imported",
+        dispenserTaskId: "task-queued-to-imported",
+        resultId: "result-queued-to-imported",
+        importId,
+        completedAt: new Date(),
+      })
       .where(eq(schema.chzExportRuns.tenantId, tenantId));
+  });
+
+  it("rejects a queued run that already has a completion timestamp", async () => {
+    await expect(
+      db.insert(schema.chzExportRuns).values({
+        tenantId,
+        inventoryId,
+        status: "EMITTED",
+        state: "queued",
+        orderedByUserId: userId,
+        completedAt: new Date(),
+      }),
+    ).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringMatching(/chz_export_runs_state_consistency_check/),
+      }),
+    });
+  });
+
+  it("rejects an ordered run that already has a completion timestamp", async () => {
+    await expect(
+      db.insert(schema.chzExportRuns).values({
+        tenantId,
+        inventoryId,
+        status: "EMITTED",
+        state: "ordered",
+        orderedByUserId: userId,
+        dispenserTaskId: "task-ordered-completed",
+        completedAt: new Date(),
+      }),
+    ).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringMatching(/chz_export_runs_state_consistency_check/),
+      }),
+    });
+  });
+
+  it("rejects a ready run that already has a completion timestamp", async () => {
+    await expect(
+      db.insert(schema.chzExportRuns).values({
+        tenantId,
+        inventoryId,
+        status: "EMITTED",
+        state: "ready",
+        orderedByUserId: userId,
+        dispenserTaskId: "task-ready-completed",
+        resultId: "result-ready-completed",
+        completedAt: new Date(),
+      }),
+    ).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringMatching(/chz_export_runs_state_consistency_check/),
+      }),
+    });
+  });
+
+  it("rejects an imported run missing the dispenser task id", async () => {
+    await expect(
+      db.insert(schema.chzExportRuns).values({
+        tenantId,
+        inventoryId,
+        status: "EMITTED",
+        state: "imported",
+        orderedByUserId: userId,
+        resultId: "result-imported-no-task",
+        importId,
+        completedAt: new Date(),
+      }),
+    ).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringMatching(/chz_export_runs_state_consistency_check/),
+      }),
+    });
+  });
+
+  it("rejects an imported run missing the result id", async () => {
+    await expect(
+      db.insert(schema.chzExportRuns).values({
+        tenantId,
+        inventoryId,
+        status: "EMITTED",
+        state: "imported",
+        orderedByUserId: userId,
+        dispenserTaskId: "task-imported-no-result",
+        importId,
+        completedAt: new Date(),
+      }),
+    ).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringMatching(/chz_export_runs_state_consistency_check/),
+      }),
+    });
+  });
+
+  it("accepts a ready run carrying both ChZ identifiers", async () => {
+    await db.insert(schema.chzExportRuns).values({
+      tenantId,
+      inventoryId,
+      status: "INTRODUCED",
+      state: "ready",
+      orderedByUserId: userId,
+      dispenserTaskId: "task-ready-legit",
+      resultId: "result-ready-legit",
+    });
+  });
+
+  it("accepts an imported run carrying both ChZ identifiers", async () => {
+    await db.insert(schema.chzExportRuns).values({
+      tenantId,
+      inventoryId,
+      status: "APPLIED",
+      state: "imported",
+      orderedByUserId: userId,
+      dispenserTaskId: "task-imported-legit",
+      resultId: "result-imported-legit",
+      importId,
+      completedAt: new Date(),
+    });
+  });
+
+  it("accepts a failed run that never had a dispenser task", async () => {
+    await db.insert(schema.chzExportRuns).values({
+      tenantId,
+      inventoryId,
+      status: "RETIRED",
+      state: "failed",
+      orderedByUserId: userId,
+      errorCode: "dispenser_unreachable",
+      errorMessage: "timed out before a task was ever created",
+      completedAt: new Date(),
+    });
   });
 });
 

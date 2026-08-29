@@ -19,10 +19,10 @@ CREATE TABLE "chz_export_runs" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "chz_export_runs_tenant_inventory_status_uq" UNIQUE("tenant_id","inventory_id","status"),
 	CONSTRAINT "chz_export_runs_attempts_nonnegative_check" CHECK ("chz_export_runs"."attempts" >= 0),
-	CONSTRAINT "chz_export_runs_state_consistency_check" CHECK (("chz_export_runs"."state" = 'queued' and "chz_export_runs"."dispenser_task_id" is null and "chz_export_runs"."result_id" is null and "chz_export_runs"."import_id" is null and "chz_export_runs"."error_code" is null)
-        or ("chz_export_runs"."state" = 'ordered' and "chz_export_runs"."dispenser_task_id" is not null and "chz_export_runs"."result_id" is null and "chz_export_runs"."import_id" is null and "chz_export_runs"."error_code" is null)
-        or ("chz_export_runs"."state" = 'ready' and "chz_export_runs"."dispenser_task_id" is not null and "chz_export_runs"."result_id" is not null and "chz_export_runs"."import_id" is null and "chz_export_runs"."error_code" is null)
-        or ("chz_export_runs"."state" = 'imported' and "chz_export_runs"."import_id" is not null and "chz_export_runs"."error_code" is null and "chz_export_runs"."completed_at" is not null)
+	CONSTRAINT "chz_export_runs_state_consistency_check" CHECK (("chz_export_runs"."state" = 'queued' and "chz_export_runs"."dispenser_task_id" is null and "chz_export_runs"."result_id" is null and "chz_export_runs"."import_id" is null and "chz_export_runs"."error_code" is null and "chz_export_runs"."completed_at" is null)
+        or ("chz_export_runs"."state" = 'ordered' and "chz_export_runs"."dispenser_task_id" is not null and "chz_export_runs"."result_id" is null and "chz_export_runs"."import_id" is null and "chz_export_runs"."error_code" is null and "chz_export_runs"."completed_at" is null)
+        or ("chz_export_runs"."state" = 'ready' and "chz_export_runs"."dispenser_task_id" is not null and "chz_export_runs"."result_id" is not null and "chz_export_runs"."import_id" is null and "chz_export_runs"."error_code" is null and "chz_export_runs"."completed_at" is null)
+        or ("chz_export_runs"."state" = 'imported' and "chz_export_runs"."dispenser_task_id" is not null and "chz_export_runs"."result_id" is not null and "chz_export_runs"."import_id" is not null and "chz_export_runs"."error_code" is null and "chz_export_runs"."completed_at" is not null)
         or ("chz_export_runs"."state" = 'failed' and "chz_export_runs"."error_code" is not null and "chz_export_runs"."completed_at" is not null))
 );
 --> statement-breakpoint

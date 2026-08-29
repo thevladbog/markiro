@@ -170,10 +170,10 @@ export const chzExportRuns = pgTable(
     // run silently. Modelled on `inventory_document_runs_status_consistency_check`.
     check(
       "chz_export_runs_state_consistency_check",
-      sql`(${table.state} = 'queued' and ${table.dispenserTaskId} is null and ${table.resultId} is null and ${table.importId} is null and ${table.errorCode} is null)
-        or (${table.state} = 'ordered' and ${table.dispenserTaskId} is not null and ${table.resultId} is null and ${table.importId} is null and ${table.errorCode} is null)
-        or (${table.state} = 'ready' and ${table.dispenserTaskId} is not null and ${table.resultId} is not null and ${table.importId} is null and ${table.errorCode} is null)
-        or (${table.state} = 'imported' and ${table.importId} is not null and ${table.errorCode} is null and ${table.completedAt} is not null)
+      sql`(${table.state} = 'queued' and ${table.dispenserTaskId} is null and ${table.resultId} is null and ${table.importId} is null and ${table.errorCode} is null and ${table.completedAt} is null)
+        or (${table.state} = 'ordered' and ${table.dispenserTaskId} is not null and ${table.resultId} is null and ${table.importId} is null and ${table.errorCode} is null and ${table.completedAt} is null)
+        or (${table.state} = 'ready' and ${table.dispenserTaskId} is not null and ${table.resultId} is not null and ${table.importId} is null and ${table.errorCode} is null and ${table.completedAt} is null)
+        or (${table.state} = 'imported' and ${table.dispenserTaskId} is not null and ${table.resultId} is not null and ${table.importId} is not null and ${table.errorCode} is null and ${table.completedAt} is not null)
         or (${table.state} = 'failed' and ${table.errorCode} is not null and ${table.completedAt} is not null)`,
     ),
   ],
