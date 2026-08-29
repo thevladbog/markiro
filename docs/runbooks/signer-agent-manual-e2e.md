@@ -150,3 +150,57 @@ Record the date, the CryptoPro version, and the verdict below.
   no longer contain `agentSecretProtected`.
 - Stop the API: the agent must back off and recover on its own once the API
   returns, without failing the claimed task.
+
+## Chestny ZNAK inventory exports — two questions only the sandbox can settle
+
+Both are unverifiable from the repository, and each is isolated to one place
+so that settling it changes one line rather than a design.
+
+### 1. Is `PACKAGE_TYPE` the value `FILTERED_CIS_REPORT` expects?
+
+`apps/api/src/modules/chz-exports/true-api.client.ts` sends
+`packageType: "UNIT"` inside the string-encoded `params` of a dispenser task.
+`packageType` is required, and it selects the packaging level the report
+covers; the cabinet export operators use today is the unit-level one, which is
+what an inventory counts. The exact enum spelling is not published in a form we
+could verify.
+
+**Do:** order one export for a real inventory against the sandbox.
+
+**Pass:** `POST dispenser/tasks` returns a task id.
+
+**Fail:** ЧЗ answers 4xx and its message names the field. The run lands in
+`chz_export_runs` as `failed` with `errorCode = 'CHZ_TASK_REJECTED'` and the ЧЗ
+text in `errorMessage`, which the inventory screen shows verbatim. Change the
+`PACKAGE_TYPE` constant and nothing else.
+
+### 2. Is the dispenser's CSV byte-identical to the cabinet export?
+
+The importer is shared with manual upload deliberately, and its parser compares
+the 35-column header character by character. The dispenser almost certainly
+uses the same generator as the cabinet export, but "almost" is not a guarantee.
+
+**Do:** let a successful export run through to import.
+
+**Pass:** the run reaches `imported` and its file appears in the status slot on
+the inventory screen exactly as a hand-uploaded one does.
+
+**Fail:** the run lands `failed` carrying the parser's own diagnostic code
+(a header mismatch names the header). The fix belongs in the single adapter in
+`chz-export-runner.service.ts` that names the synthesised file — not in the
+parser, which manual upload also depends on.
+
+### While you are there: can adoption be widened?
+
+`resolveAdoption` in `chz-export-runner.service.ts` recovers a dispenser task
+whose create response was lost, but only when the pairing is forced — exactly
+one waiting run and exactly one candidate task — because `GET dispenser/tasks`
+gives us no filter data to match a task to the status that requested it. The
+cost is that a pass with two runs simultaneously awaiting a task id pays for one
+task twice.
+
+**Do:** call `GET dispenser/tasks` and record the full response shape.
+
+If it carries the report filter (product group, status, or the `params` the task
+was created with), the rule can widen to match on it and the double-pay case
+disappears. Note the answer here either way.
