@@ -1,0 +1,185 @@
+import { Injectable } from "@nestjs/common";
+
+import {
+  productionTrueApiClientDependencies,
+  type CreateDispenserTaskInput,
+  type DispenserResult,
+  type DispenserTaskSummary,
+  type TrueApiAuth,
+  type TrueApiClientDependencies,
+  type TrueApiResult,
+} from "./true-api.types";
+
+// Re-exported because the test file (per the brief) imports this type from
+// the client module rather than from true-api.types directly.
+export type { TrueApiClientDependencies } from "./true-api.types";
+
+const REQUEST_TIMEOUT_MS = 15_000;
+const DOWNLOAD_TIMEOUT_MS = 60_000;
+
+/**
+ * `packageType` is required by `FILTERED_CIS_REPORT` and selects the packaging
+ * level the report covers. The cabinet export the operators use today is the
+ * unit-level one, which is what an inventory counts.
+ *
+ * KNOWN UNKNOWN: the exact enum spelling is not verifiable from here. It is
+ * settled against the sandbox by the runbook step this plan's Task 9 adds; if
+ * the sandbox rejects it, only this constant changes.
+ */
+const PACKAGE_TYPE = "UNIT";
+
+@Injectable()
+export class TrueApiClient {
+  constructor(
+    private readonly dependencies: TrueApiClientDependencies = productionTrueApiClientDependencies,
+  ) {}
+
+  async createDispenserTask(
+    auth: TrueApiAuth,
+    input: CreateDispenserTaskInput,
+  ): Promise<TrueApiResult<{ taskId: string }>> {
+    // `params` is a STRING-encoded object, not a nested one. This is the
+    // dispenser's contract, and getting it wrong is silent: ЧЗ accepts the task
+    // and returns an unfiltered report.
+    const params = JSON.stringify({
+      participantInn: input.participantInn,
+      packageType: PACKAGE_TYPE,
+      status: input.chzStatus,
+      ...(input.gtins.length > 0 ? { includeGtin: input.gtins } : {}),
+    });
+    return this.request(
+      auth,
+      "/dispenser/tasks",
+      REQUEST_TIMEOUT_MS,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          reportId: "FILTERED_CIS_REPORT",
+          productGroupCode: input.productGroupCode,
+          periodicity: "SINGLE",
+          params,
+        }),
+      },
+      async (response) => {
+        const payload = (await response.json()) as { taskId?: unknown; id?: unknown };
+        const taskId = payload.taskId ?? payload.id;
+        return typeof taskId === "string" && taskId.length > 0 ? { taskId } : null;
+      },
+    );
+  }
+
+  async listDispenserTasks(
+    auth: TrueApiAuth,
+    productGroupCode: number,
+  ): Promise<TrueApiResult<DispenserTaskSummary[]>> {
+    const query = new URLSearchParams({ productGroupCode: String(productGroupCode) });
+    return this.request(
+      auth,
+      `/dispenser/tasks?${query.toString()}`,
+      REQUEST_TIMEOUT_MS,
+      {},
+      async (response) => {
+        const payload: unknown = await response.json();
+        const rows = Array.isArray(payload) ? payload : [];
+        return rows.map((row) => {
+          const record = row as Record<string, unknown>;
+          return {
+            taskId: typeof record.taskId === "string" ? record.taskId : stringOrEmpty(record.id),
+            status: stringOrEmpty(record.status),
+            createdAt: typeof record.createdAt === "string" ? record.createdAt : null,
+          };
+        });
+      },
+    );
+  }
+
+  async listDispenserResults(
+    auth: TrueApiAuth,
+    taskIds: string[],
+  ): Promise<TrueApiResult<DispenserResult[]>> {
+    const query = new URLSearchParams();
+    for (const taskId of taskIds) query.append("task_ids", taskId);
+    return this.request(
+      auth,
+      `/dispenser/results?${query.toString()}`,
+      REQUEST_TIMEOUT_MS,
+      {},
+      async (response) => {
+        const payload: unknown = await response.json();
+        const rows = Array.isArray(payload) ? payload : [];
+        return rows.map((row) => {
+          const record = row as Record<string, unknown>;
+          return {
+            taskId: stringOrEmpty(record.taskId),
+            resultId: typeof record.resultId === "string" ? record.resultId : null,
+            status: stringOrEmpty(record.status),
+          };
+        });
+      },
+    );
+  }
+
+  async downloadDispenserResult(
+    auth: TrueApiAuth,
+    resultId: string,
+  ): Promise<TrueApiResult<Uint8Array>> {
+    return this.request(
+      auth,
+      `/dispenser/results/${encodeURIComponent(resultId)}/file`,
+      DOWNLOAD_TIMEOUT_MS,
+      {},
+      async (response) => new Uint8Array(await response.arrayBuffer()),
+    );
+  }
+
+  private async request<T>(
+    auth: TrueApiAuth,
+    path: string,
+    timeoutMs: number,
+    init: RequestInit,
+    parse: (response: Response) => Promise<T | null>,
+  ): Promise<TrueApiResult<T>> {
+    const controller = new AbortController();
+    const cancelAbort = this.dependencies.scheduleAbort(controller, timeoutMs);
+    try {
+      const response = await this.dependencies.fetch(`${auth.baseUrl}${path}`, {
+        ...init,
+        headers: {
+          Accept: "application/json",
+          ...(init.body ? { "Content-Type": "application/json" } : {}),
+          Authorization: `Bearer ${auth.token}`,
+        },
+        signal: controller.signal,
+      });
+      if (response.status === 401 || response.status === 403) return { status: "unauthorized" };
+      if (response.status >= 400 && response.status < 500) {
+        return {
+          status: "rejected",
+          code: String(response.status),
+          message: await this.rejectionMessage(response),
+        };
+      }
+      if (!response.ok) return { status: "unavailable" };
+      const value = await parse(response);
+      return value === null ? { status: "unavailable" } : { status: "ok", value };
+    } catch {
+      return { status: "unavailable" };
+    } finally {
+      cancelAbort();
+    }
+  }
+
+  private async rejectionMessage(response: Response): Promise<string> {
+    try {
+      const payload = (await response.json()) as Record<string, unknown>;
+      const message = payload.error_message ?? payload.errorMessage ?? payload.message;
+      return typeof message === "string" && message.length > 0 ? message.slice(0, 500) : "";
+    } catch {
+      return "";
+    }
+  }
+}
+
+function stringOrEmpty(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
