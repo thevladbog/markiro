@@ -14,6 +14,7 @@ import type { ShiftExportRunnerService } from "../src/modules/shift-exports/shif
 import type { InventoryDocumentRunnerService } from "../src/modules/inventories/inventory-document-runner.service";
 import type { SignerScheduler } from "../src/modules/signer-agents/signer-scheduler.service";
 import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
+import type { ChzExportRunnerService } from "../src/modules/chz-exports/chz-export-runner.service";
 
 interface ShiftExportJobData {
   exportId: string;
@@ -110,7 +111,10 @@ function fakeBoss() {
       },
     ),
     send: vi.fn(async () => "shift-export-job-id" as string | null),
-    getDb: vi.fn(() => ({ executeSql: vi.fn(async () => undefined) })),
+    // `checkReady`'s probe ignores the result; `assertChzExportQueuePolicy`
+    // (jobs.module.ts) needs a row reporting the expected "stately" policy
+    // so `onModuleInit` doesn't throw on the boot-time policy check.
+    getDb: vi.fn(() => ({ executeSql: vi.fn(async () => ({ rows: [{ policy: "stately" }] })) })),
     getWipData: vi.fn(() => []),
     getShiftExportHandler: () => shiftExportHandler,
     getInventoryDocumentHandler: () => inventoryDocumentHandler,
@@ -120,12 +124,16 @@ function fakeBoss() {
 
 function serviceWith(boss: ReturnType<typeof fakeBoss>) {
   pgBossMock.instances.push(boss);
+  // `.orderBy().limit()` (shift export / inventory document reconciliation)
+  // and `.groupBy().orderBy().limit()` (chz export reconciliation) both
+  // resolve to no rows.
+  const limit = vi.fn(async () => []);
+  const orderBy = vi.fn(() => ({ limit }));
+  const groupBy = vi.fn(() => ({ orderBy }));
   const db = {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          orderBy: vi.fn(() => ({ limit: vi.fn(async () => []) })),
-        })),
+        where: vi.fn(() => ({ orderBy, groupBy })),
       })),
     })),
     delete: vi.fn(() => ({
@@ -138,6 +146,9 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
   const inventoryRunner = {
     run: vi.fn(async () => undefined),
   } as unknown as InventoryDocumentRunnerService;
+  const chzExportRunner = {
+    run: vi.fn(async () => ({ finished: true })),
+  } as unknown as ChzExportRunnerService;
   return {
     runner,
     service: new PgBossService(
@@ -155,6 +166,7 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
       runner,
       inventoryRunner,
       { run: vi.fn(async () => undefined) } satisfies SignerScheduler,
+      chzExportRunner,
     ),
     inventoryRunner,
   };

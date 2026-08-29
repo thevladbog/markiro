@@ -9,7 +9,7 @@ import {
   type OnModuleInit,
 } from "@nestjs/common";
 import { PgBoss, type JobWithMetadata } from "pg-boss";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
 import type { Env } from "../env";
@@ -35,6 +35,11 @@ import {
   productionInventoryDocumentGeneratorRegistry,
 } from "../modules/inventories/inventory-document-runner.service";
 import { InventoryResultSourceService } from "../modules/inventories/inventory-result-source.service";
+import { InventoriesService } from "../modules/inventories/inventories.service";
+import { InventorySnapshotService } from "../modules/inventories/inventory-snapshot.service";
+import { ChzExportRunnerService } from "../modules/chz-exports/chz-export-runner.service";
+import { ChzTokenService } from "../modules/chz-exports/chz-token.service";
+import { TrueApiClient } from "../modules/chz-exports/true-api.client";
 import { currentMonthUTC, nextMonthUTC } from "./months";
 import {
   MATERIALIZE_SUBSCRIPTION_STATUSES_CRON,
@@ -45,6 +50,123 @@ import {
 export const PG_CONNECTION_STRING = "JOBS_PG_CONNECTION_STRING";
 export const BUILD_SHIFT_EXPORT_QUEUE = "build-shift-export";
 export const BUILD_INVENTORY_DOCUMENT_QUEUE = "build-inventory-document-run";
+export const RUN_CHZ_EXPORT_QUEUE = "run-chz-export";
+/**
+ * One pass per invocation, then re-enqueue: a dispenser task can take minutes,
+ * and holding a pg-boss worker that long would starve the queue and lose
+ * progress across a restart. 30 seconds keeps the batch results endpoint at two
+ * requests per minute against its limit of twelve.
+ */
+const CHZ_EXPORT_POLL_INTERVAL_SECONDS = 30;
+/**
+ * Every `startAfter` re-enqueue below creates a brand-new pg-boss job, so
+ * `job.retryCount`/`job.retryLimit` reset to zero each pass -- they bound
+ * failures inside one invocation, never how many passes an order gets. The
+ * runner has its own two caps (`chz_export_runs.attempts` for creation
+ * attempts, a six-hour wall-clock deadline for `ordered`/`ready` runs), but
+ * neither reaches an order whose six runs are all still `queued` for a tenant
+ * whose token never becomes available: the deadline needs `orderedAt`, which
+ * a `queued` run never gets, and `attempts` only increments on a claim, which
+ * happens after the token check. Such an order would otherwise re-enqueue
+ * forever.
+ *
+ * Carrying the pass count in the job payload instead closes that gap: it is
+ * passed to the runner as `retryCount` against this cap as `retryLimit`, so
+ * its existing "budget exhausted" branch (`giveUpOnToken`) finally has a
+ * budget that advances across re-enqueues. At the 30-second poll interval
+ * this is two hours of passes -- comfortably inside the runner's own
+ * six-hour deadline for orders that did reach `ordered`, and a firm stop for
+ * ones that never could.
+ */
+const MAX_EXPORT_PASSES = 240;
+
+interface ChzExportJobData {
+  tenantId: string;
+  inventoryId: string;
+  /** Defaults to 0: the initial enqueue from `ChzExportsService` omits it. */
+  pass?: number;
+}
+
+/**
+ * `MAX_EXPORT_PASSES` bounds one continuous chain of pg-boss jobs, not the
+ * order itself: the count only ever lives in a job's payload, never in
+ * Postgres against the order. pg-boss jobs, unlike that in-memory count, do
+ * survive a restart on their own -- the previous chain's correctly-numbered
+ * next-pass job is still sitting there, `created`, waiting out its
+ * `startAfter` delay. Any code path that unconditionally sends a fresh job
+ * for an order (the initial enqueue, and boot reconciliation below) would
+ * otherwise race that survivor and, on every restart, hand the order a new
+ * 240-pass budget instead of continuing the old one -- reopening exactly the
+ * unbounded path the pass counter exists to close, for a tenant with no
+ * valid token, every time the API restarts.
+ *
+ * Keying every send to `RUN_CHZ_EXPORT_QUEUE` on this makes a duplicate
+ * impossible rather than detected after the fact: `RUN_CHZ_EXPORT_QUEUE`'s
+ * `stately` policy (below) plus this key makes pg-boss itself refuse a
+ * second `created` or `active` job for the same order (pg-boss v12
+ * `dist/plans.js`'s `job_i3` unique index is on `(name, state,
+ * coalesce(singleton_key, ''))` for states `created`/`retry`/`active`) --
+ * `send` then resolves to `null` instead of inserting, which is a normal
+ * dedup outcome here, not a failure. Keying on `state` as well as the order
+ * is what lets the worker's own chain re-enqueue below use the same
+ * mechanism without deadlocking on itself: the job doing the sending is
+ * still `active` while its `created` successor is inserted, and those are
+ * different states, so they never collide.
+ *
+ * That leaves one narrow gap `stately` cannot close: a restart landing in
+ * the window where a pass is actually *running* (not waiting out
+ * `startAfter`) finds no `created` row to conflict with, so reconciliation's
+ * send can still start a second, pass-0 chain alongside the real one. That
+ * is self-limiting rather than the original bug -- whichever of the two
+ * chains re-enqueues its next `created` pass first wins the slot for that
+ * order, and the other's next attempt hits the dedup above -- so a
+ * mistimed restart can cost an order at most one extra pass, never a
+ * repeatedly reset budget.
+ */
+function chzExportSingletonKey(tenantId: string, inventoryId: string): string {
+  return `${tenantId}:${inventoryId}`;
+}
+
+const RUN_CHZ_EXPORT_QUEUE_POLICY = "stately";
+
+/**
+ * `boss.createQueue(RUN_CHZ_EXPORT_QUEUE, { policy: "stately", ... })` above
+ * is a no-op the moment the queue row already exists: pg-boss v12's
+ * `create_queue()` SQL function inserts with `ON CONFLICT DO NOTHING`, and
+ * `updateQueue` has no support for changing an existing queue's `policy` at
+ * all. Every job insert reads `policy` from the *current* `queue.policy` row
+ * at send time, so a queue that was ever created under `standard` (pg-boss's
+ * own default) silently keeps that policy forever, no matter what this file
+ * asks for on later boots -- `chzExportSingletonKey` above is accepted on
+ * every `send` but never deduplicated, with no error. This happened for real
+ * on this repo's dev database on an earlier version of this branch.
+ *
+ * There is no safe automatic repair here: dropping and recreating the queue
+ * row is only safe when it has no jobs (verified by hand for this repo's dev
+ * database), and this boot path has no business making that judgment call or
+ * deleting rows out from under in-flight export chains. The only environments
+ * that can currently have the wrong policy are ones that already ran this
+ * unreleased branch, so failing loudly here -- instead of quietly limping
+ * along with a budget-reset bug this whole file exists to close -- costs
+ * those environments one clear, actionable boot failure instead of costing
+ * every environment a silent one.
+ */
+async function assertChzExportQueuePolicy(boss: PgBoss): Promise<void> {
+  const { rows } = await boss
+    .getDb()
+    .executeSql("select policy from pgboss.queue where name = $1", [RUN_CHZ_EXPORT_QUEUE]);
+  const actual = (rows[0] as { policy?: string } | undefined)?.policy;
+  if (actual !== RUN_CHZ_EXPORT_QUEUE_POLICY) {
+    throw new Error(
+      `${RUN_CHZ_EXPORT_QUEUE} queue policy is "${actual ?? "unknown"}", expected ` +
+        `"${RUN_CHZ_EXPORT_QUEUE_POLICY}". createQueue cannot change an existing queue's ` +
+        `policy, so the export dedup (chzExportSingletonKey) is silently inert on this ` +
+        `database. Fix by confirming the queue has no jobs, then running: ` +
+        `delete from pgboss.queue where name = '${RUN_CHZ_EXPORT_QUEUE}'; -- createQueue ` +
+        `will recreate it under the right policy on the next boot.`,
+    );
+  }
+}
 
 const QUEUE_NAME = "ensure-partitions";
 const QUEUE_CRON = "0 4 * * *";
@@ -109,7 +231,7 @@ const CHZ_SIGNER_SCHEDULER_QUEUE_CRON = "*/15 * * * *";
 
 /**
  * Boots a dedicated pg-boss instance (its own `pgboss` schema, same
- * database as the app), three request-driven workers, and ten schedules on it:
+ * database as the app), four request-driven workers, and ten schedules on it:
  *  - keeps the `codes`/`scan_events` monthly partitions ahead of traffic:
  *    ensures the current + next month exist once at startup, then again
  *    every day at 04:00 UTC.
@@ -138,6 +260,9 @@ const CHZ_SIGNER_SCHEDULER_QUEUE_CRON = "*/15 * * * *";
  *    queue is deliberately not scheduled because export requests enqueue it.
  *  - generates inventory document artifacts on demand with the same bounded
  *    retry and boot-reconciliation guarantees.
+ *  - orders and imports the six Chestny ZNAK code-status exports for an
+ *    inventory on demand, one pass per invocation, re-enqueuing itself with a
+ *    delay until every run is terminal or `MAX_EXPORT_PASSES` is reached.
  *
  * pg-boss v12 requires a queue to be created (`createQueue`) before it can
  * be scheduled or worked -- scheduling against a queue that doesn't exist
@@ -164,6 +289,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     private readonly shiftExportRunner: ShiftExportRunnerService,
     private readonly inventoryDocumentRunner: InventoryDocumentRunnerService,
     @Inject(SignerSchedulerService) private readonly signerScheduler: SignerScheduler,
+    private readonly chzExportRunner: ChzExportRunnerService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -336,6 +462,92 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         }),
       );
 
+      await boss.createQueue(RUN_CHZ_EXPORT_QUEUE, {
+        // See `chzExportSingletonKey` above for why this policy plus a
+        // per-order key is what makes a duplicate chain impossible instead
+        // of merely detected. The constant is shared with
+        // `assertChzExportQueuePolicy` on purpose: two literals that happened
+        // to agree would let one drift and leave the assertion checking a
+        // policy nothing sets.
+        policy: RUN_CHZ_EXPORT_QUEUE_POLICY,
+        retryLimit: 5,
+        retryDelay: 30,
+        retryBackoff: true,
+        retryDelayMax: 900,
+        expireInSeconds: 900,
+      });
+      // `createQueue` above is a no-op if this queue already existed under a
+      // different policy -- see `assertChzExportQueuePolicy` for why that
+      // makes the dedup above silently inert instead of merely absent.
+      await assertChzExportQueuePolicy(boss);
+      this.workerIds.push(
+        await boss.work(
+          RUN_CHZ_EXPORT_QUEUE,
+          { includeMetadata: true },
+          async (jobs: JobWithMetadata<ChzExportJobData>[]) => {
+            for (const job of jobs) {
+              const pass = job.data.pass ?? 0;
+              let finished: boolean;
+              try {
+                ({ finished } = await this.chzExportRunner.run(
+                  job.data.tenantId,
+                  job.data.inventoryId,
+                  { retryCount: pass, retryLimit: MAX_EXPORT_PASSES },
+                ));
+              } catch (error) {
+                // `run()` rethrows anything that is not a `ChzUnauthorizedError`.
+                // A throw makes pg-boss retry the *job* itself (this queue's own
+                // `retryLimit: 5`), and no `startAfter` successor is ever sent
+                // for a thrown pass -- so once the job's own retry budget is
+                // spent (`job.retryCount >= job.retryLimit`, i.e. this was the
+                // last attempt pg-boss will ever make), nothing would advance
+                // this order again: it would sit non-terminal with no operator
+                // recovery (`ChzExportsService.retry()` requires `state =
+                // "failed"`), reachable again only by boot reconciliation
+                // (capped at `SHIFT_EXPORT_RECONCILE_LIMIT` orders per boot).
+                // Failing the remaining runs here closes that gap instead of
+                // letting the job die silently. A retryable attempt (budget not
+                // yet spent) rethrows unchanged so pg-boss's own retry/backoff
+                // still applies exactly as before.
+                if (job.retryCount < job.retryLimit) throw error;
+                this.logger.error(
+                  `ChZ export pass permanently failed for tenant ${job.data.tenantId} ` +
+                    `inventory ${job.data.inventoryId} after ${job.retryCount} job retries; ` +
+                    `failing remaining runs`,
+                  error instanceof Error ? error.stack : undefined,
+                );
+                await this.chzExportRunner.abandonAfterJobRetriesExhausted(
+                  job.data.tenantId,
+                  job.data.inventoryId,
+                );
+                continue;
+              }
+              if (!finished) {
+                // A `null` return here would mean another `created` job for
+                // this order already exists (see `chzExportSingletonKey`) --
+                // possible only in the narrow restart-during-an-active-pass
+                // gap described there -- and is harmless to ignore: it means
+                // some chain already holds the next-pass slot for this
+                // order, so this invocation doesn't need to.
+                await boss.send(
+                  RUN_CHZ_EXPORT_QUEUE,
+                  {
+                    tenantId: job.data.tenantId,
+                    inventoryId: job.data.inventoryId,
+                    pass: pass + 1,
+                  },
+                  {
+                    startAfter: CHZ_EXPORT_POLL_INTERVAL_SECONDS,
+                    singletonKey: chzExportSingletonKey(job.data.tenantId, job.data.inventoryId),
+                  },
+                );
+              }
+            }
+          },
+        ),
+      );
+      await this.reconcileUnfinishedChzExports(boss);
+
       // Also run all ten maintenance paths once immediately at boot rather
       // than waiting for the first tick of any schedule.
       await this.runEnsurePartitions();
@@ -383,6 +595,26 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     const jobId = await this.boss.send(BUILD_INVENTORY_DOCUMENT_QUEUE, { runId });
     if (!jobId) throw new Error("inventory document run enqueue failed");
     return jobId;
+  }
+
+  /**
+   * `pass` is omitted here, defaulting to 0 in the worker: this is always the
+   * first pass an order gets, whether it comes from `ChzExportsService.order`
+   * or `.retry` (Task 4) or from boot reconciliation below.
+   *
+   * A `null` return means pg-boss deduped this against an already-pending
+   * job for the same order (see `chzExportSingletonKey`) -- e.g. `.order`/
+   * `.retry` called again while a chain is already running -- which is not a
+   * failure: both current call sites discard the id and only care that a
+   * chain is in flight, which it already is.
+   */
+  async enqueueChzExportOrder(tenantId: string, inventoryId: string): Promise<string | null> {
+    if (!this.boss || !this.started) throw new Error("pg-boss is not started");
+    return this.boss.send(
+      RUN_CHZ_EXPORT_QUEUE,
+      { tenantId, inventoryId },
+      { singletonKey: chzExportSingletonKey(tenantId, inventoryId) },
+    );
   }
 
   private async reconcileQueuedShiftExports(boss: PgBoss): Promise<void> {
@@ -443,6 +675,62 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Distinct `(tenantId, inventoryId)` pairs, not runs: one boot job per
+   * order, exactly matching what `enqueueChzExportOrder` sends, since the
+   * runner's `run` already re-checks all six of an order's runs on every
+   * pass -- one job per run would just be five wasted enqueues per order.
+   *
+   * This is exactly the send site `chzExportSingletonKey` exists to guard:
+   * pg-boss jobs survive a restart on their own, so an order's previous
+   * chain is typically still sitting there, `created`. Sending unconditionally
+   * here (with no `pass`, always defaulting to 0) would otherwise race that
+   * survivor and, on every restart, hand the order a fresh 240-pass budget.
+   * A `null` return below means pg-boss deduped this against that survivor,
+   * which is the expected outcome, not a failure -- see `chzExportSingletonKey`
+   * for the one narrow case this can't catch and why it's self-limiting.
+   */
+  private async reconcileUnfinishedChzExports(boss: PgBoss): Promise<void> {
+    let queued: { tenantId: string; inventoryId: string }[];
+    try {
+      queued = await this.db
+        .select({
+          tenantId: schema.chzExportRuns.tenantId,
+          inventoryId: schema.chzExportRuns.inventoryId,
+        })
+        .from(schema.chzExportRuns)
+        .where(inArray(schema.chzExportRuns.state, ["queued", "ordered", "ready"]))
+        .groupBy(schema.chzExportRuns.tenantId, schema.chzExportRuns.inventoryId)
+        .orderBy(sql`min(${schema.chzExportRuns.createdAt})`)
+        .limit(SHIFT_EXPORT_RECONCILE_LIMIT);
+    } catch (error) {
+      this.logger.error(
+        "chz export reconciliation query failed",
+        error instanceof Error ? error.stack : undefined,
+      );
+      return;
+    }
+    for (const row of queued) {
+      try {
+        const jobId = await boss.send(
+          RUN_CHZ_EXPORT_QUEUE,
+          { tenantId: row.tenantId, inventoryId: row.inventoryId },
+          { singletonKey: chzExportSingletonKey(row.tenantId, row.inventoryId) },
+        );
+        if (jobId === null) {
+          this.logger.log(
+            `chz export reconciliation skipped for tenant ${row.tenantId} inventory ${row.inventoryId}: a chain is already pending`,
+          );
+        }
+      } catch (error) {
+        this.logger.error(
+          `chz export reconciliation failed for tenant ${row.tenantId} inventory ${row.inventoryId}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+    }
+  }
+
   async checkReady(): Promise<void> {
     if (!this.started || !this.boss) throw new Error("pg-boss is not started");
     try {
@@ -451,7 +739,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 13 ||
+      this.workerIds.length !== 14 ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {
@@ -569,6 +857,24 @@ export class JobsModule {
           useFactory: () => new ChzCryptoService(env.CHZ_TOKEN_ENCRYPTION_KEY),
         },
         SignerSchedulerService,
+        // `ChzExportRunnerService` (this module's `run-chz-export` worker) needs its
+        // own `InventoriesService`/`InventorySnapshotService` and True API stack for
+        // the same reason `ChzCryptoService` above gets its own factory instead of
+        // importing `ChzExportsModule`: that module's `ChzExportsService` needs
+        // `PgBossService`, which lives here, so importing it back would be
+        // circular. `ChzCryptoService` above is reused rather than duplicated again
+        // since both consumers live in this same `forRoot` call.
+        InventorySnapshotService,
+        InventoriesService,
+        // `TrueApiClient`'s constructor parameter is typed as an interface
+        // (`TrueApiClientDependencies`), which TypeScript erases to `Object`
+        // in `design:paramtypes` -- registering the bare class makes Nest try
+        // to resolve a provider for `Object` and fail. A factory sidesteps
+        // constructor injection and just takes the class's own default (the
+        // real `fetch`).
+        { provide: TrueApiClient, useFactory: () => new TrueApiClient() },
+        ChzTokenService,
+        ChzExportRunnerService,
       ],
       exports: [PgBossService, INVENTORY_DOCUMENT_GENERATOR_REGISTRY],
     };

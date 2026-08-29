@@ -6,6 +6,7 @@ import {
   createInventoryInputSchema,
   createInventoryDocumentRunInputSchema,
   createInventoryCorrectionInputSchema,
+  chzExportStateSchema,
   inventoryCorrectionSchema,
   inventoryCloseResponseSchema,
   inventoryClosePreviewResponseSchema,
@@ -29,6 +30,7 @@ import {
   stationInventoryManifestSchema,
   type CreateInventoryInput,
   type CreateInventoryCorrectionInput,
+  type ChzExportState,
   type Inventory,
   type InventoryCorrection,
   type InventoryCloseResponse,
@@ -72,6 +74,10 @@ export function inventoryLateEventsQueryKey(id: string, page?: number) {
 
 export function inventoryClosePreviewQueryKey(id: string) {
   return [...INVENTORIES_QUERY_KEY, id, "close-preview"] as const;
+}
+
+export function chzExportStateQueryKey(id: string) {
+  return [...INVENTORIES_QUERY_KEY, id, "chz-exports"] as const;
 }
 
 export interface InventoryEvidenceQuery {
@@ -202,6 +208,30 @@ async function getInventoryClosePreview(
   return inventoryClosePreviewResponseSchema.parse(value);
 }
 
+async function getChzExportState(inventoryId: string): Promise<ChzExportState> {
+  const value = await apiFetch<unknown>(`/inventories/${inventoryId}/chz-exports`);
+  return chzExportStateSchema.parse(value);
+}
+
+async function orderChzExports(inventoryId: string): Promise<ChzExportState> {
+  const value = await apiFetch<unknown>(`/inventories/${inventoryId}/chz-exports`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return chzExportStateSchema.parse(value);
+}
+
+async function retryChzExport(input: {
+  inventoryId: string;
+  status: InventoryChzStatus;
+}): Promise<ChzExportState> {
+  const value = await apiFetch<unknown>(`/inventories/${input.inventoryId}/chz-exports/retry`, {
+    method: "POST",
+    body: JSON.stringify({ status: input.status }),
+  });
+  return chzExportStateSchema.parse(value);
+}
+
 async function reopenInventory(inventoryId: string): Promise<InventoryReopenResponse> {
   const value = await apiFetch<unknown>(`/inventories/${inventoryId}/reopen`, {
     method: "POST",
@@ -306,6 +336,37 @@ function invalidateInventory(queryClient: ReturnType<typeof useQueryClient>, inv
   void queryClient.invalidateQueries({ queryKey: INVENTORIES_QUERY_KEY });
   void queryClient.invalidateQueries({ queryKey: [...INVENTORIES_QUERY_KEY, inventoryId] });
 }
+
+/**
+ * An exact match, unlike `invalidateInventory`: that helper's second call is a
+ * prefix match that also catches `chzExportStateQueryKey` (it starts with
+ * `[...INVENTORIES_QUERY_KEY, inventoryId]`). Calling it from inside
+ * `useChzExportState`'s own `queryFn` would invalidate that very query while
+ * it is still resolving, forcing an extra self-triggered poll. This only ever
+ * needs to refill `useInventory`'s upload slots.
+ */
+function invalidateInventoryDetail(
+  queryClient: ReturnType<typeof useQueryClient>,
+  inventoryId: string,
+) {
+  void queryClient.invalidateQueries({
+    queryKey: [...INVENTORIES_QUERY_KEY, inventoryId],
+    exact: true,
+  });
+}
+
+function importedRunCount(state: ChzExportState | undefined): number {
+  return state?.runs.filter((run) => run.state === "imported").length ?? 0;
+}
+
+/**
+ * The worker (`run-chz-export` in apps/api/src/jobs/jobs.module.ts) advances
+ * an order roughly every `CHZ_EXPORT_POLL_INTERVAL_SECONDS` (30s) there, so
+ * polling substantially faster than that cannot observe anything new. This is
+ * still a few times faster than the worker's cadence, which keeps the badges
+ * feeling live without hammering the endpoint nine times for every update.
+ */
+const CHZ_EXPORT_POLL_INTERVAL_MS = 10_000;
 
 export function useInventories(): UseQueryResult<Inventory[]> {
   return useQuery({ queryKey: INVENTORIES_QUERY_KEY, queryFn: listInventories });
@@ -442,6 +503,73 @@ export function useInventoryClosePreview(
     queryKey: inventoryClosePreviewQueryKey(inventoryId),
     queryFn: () => getInventoryClosePreview(inventoryId),
     enabled: enabled && inventoryId.length > 0,
+  });
+}
+
+export function useChzExportState(inventoryId: string): UseQueryResult<ChzExportState> {
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: chzExportStateQueryKey(inventoryId),
+    queryFn: async () => {
+      // Compared against the cache, not a `useEffect` on the query's own
+      // result: the six upload slots render from `useInventory`'s
+      // `imports`, and nothing else invalidates that query when a run
+      // finishes, so a poll that lands here is the only place that ever
+      // learns a run just became `imported`.
+      const previous = queryClient.getQueryData<ChzExportState>(
+        chzExportStateQueryKey(inventoryId),
+      );
+      const next = await getChzExportState(inventoryId);
+      // On the very first fetch (`previous === undefined`) this still only
+      // fires when `next` already carries an imported run: `useInventory` can
+      // resolve before this query ever mounts (e.g. `ExportsStep` mounting
+      // after the detail page's own query already settled), and if that first
+      // response already has imported runs -- with the rest terminal, so
+      // polling stops immediately -- nothing would ever invalidate
+      // `useInventory` again, leaving the upload slots stuck on the stale
+      // `imports` list forever. A `previous` fetch with no growth still skips
+      // this, exactly as before, so mounting the page does not trigger a
+      // redundant invalidation of a query that just loaded.
+      const grew =
+        previous === undefined
+          ? importedRunCount(next) > 0
+          : importedRunCount(next) > importedRunCount(previous);
+      if (grew) {
+        invalidateInventoryDetail(queryClient, inventoryId);
+      }
+      return next;
+    },
+    enabled: inventoryId.length > 0,
+    refetchInterval: (query) =>
+      query.state.data?.runs.some((run) => run.state !== "imported" && run.state !== "failed")
+        ? CHZ_EXPORT_POLL_INTERVAL_MS
+        : false,
+  });
+}
+
+export function useOrderChzExports(): UseMutationResult<ChzExportState, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: orderChzExports,
+    onSuccess: (_result, inventoryId) => {
+      void queryClient.invalidateQueries({ queryKey: chzExportStateQueryKey(inventoryId) });
+      invalidateInventory(queryClient, inventoryId);
+    },
+  });
+}
+
+export function useRetryChzExport(): UseMutationResult<
+  ChzExportState,
+  Error,
+  { inventoryId: string; status: InventoryChzStatus }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: retryChzExport,
+    onSuccess: (_result, input) => {
+      void queryClient.invalidateQueries({ queryKey: chzExportStateQueryKey(input.inventoryId) });
+      invalidateInventory(queryClient, input.inventoryId);
+    },
   });
 }
 
