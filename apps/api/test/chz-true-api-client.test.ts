@@ -211,6 +211,21 @@ describe("TrueApiClient", () => {
     });
   });
 
+  it("treats a non-array 200 response as a parse failure and retries", async () => {
+    // A non-array response (object, null, string, etc.) is malformed and must
+    // not be treated as an empty answer. Silently converting it to an empty
+    // array would mark every code in the batch unknown, potentially backing
+    // off a whole product group on a single malformed response.
+    for (const payload of [{ result: [] }, null, "not an array"]) {
+      const client = new TrueApiClient(
+        deps(async () => new Response(JSON.stringify(payload), { status: 200 })),
+      );
+      await expect(client.cisesInfo(auth, 8, ["01046000000000172150"])).resolves.toEqual({
+        status: "unavailable",
+      });
+    }
+  });
+
   it("refuses to send more than the documented batch size", async () => {
     const client = new TrueApiClient(deps(async () => new Response("[]", { status: 200 })));
     await expect(

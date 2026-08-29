@@ -155,8 +155,13 @@ export class TrueApiClient {
       { method: "POST", body: JSON.stringify(cises) },
       async (response) => {
         const payload: unknown = await response.json();
-        const rows = Array.isArray(payload) ? payload : [];
-        return rows.flatMap((row) => {
+        // A non-array response is a parse failure. Treating it as an empty
+        // answer would mark every code in the batch unknown, potentially
+        // backing off a whole product group on a single malformed response.
+        if (!Array.isArray(payload)) {
+          return null;
+        }
+        return payload.flatMap((row) => {
           const record = row as Record<string, unknown>;
           const cis = typeof record.cis === "string" ? record.cis : "";
           // A row we cannot attribute to a code we asked about is worse than

@@ -390,15 +390,20 @@ export const CISES_INFO_BATCH_LIMIT = 1000;
       { method: "POST", body: JSON.stringify(cises) },
       async (response) => {
         const payload: unknown = await response.json();
-        const rows = Array.isArray(payload) ? payload : [];
-        return rows.flatMap((row) => {
+        // A non-array response is a parse failure. Treating it as an empty
+        // answer would mark every code in the batch unknown, potentially
+        // backing off a whole product group on a single malformed response.
+        if (!Array.isArray(payload)) {
+          return null;
+        }
+        return payload.flatMap((row) => {
           const record = row as Record<string, unknown>;
           const cis = typeof record.cis === "string" ? record.cis : "";
           if (cis.length === 0) return [];
           return [
             {
               cis,
-              status: typeof record.status === "string" ? record.status : "",
+              status: stringOrEmpty(record.status),
               statusEx: typeof record.statusEx === "string" ? record.statusEx : null,
               ownerInn: typeof record.ownerInn === "string" ? record.ownerInn : null,
               withdrawReason:
