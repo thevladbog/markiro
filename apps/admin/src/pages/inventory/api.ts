@@ -337,6 +337,37 @@ function invalidateInventory(queryClient: ReturnType<typeof useQueryClient>, inv
   void queryClient.invalidateQueries({ queryKey: [...INVENTORIES_QUERY_KEY, inventoryId] });
 }
 
+/**
+ * An exact match, unlike `invalidateInventory`: that helper's second call is a
+ * prefix match that also catches `chzExportStateQueryKey` (it starts with
+ * `[...INVENTORIES_QUERY_KEY, inventoryId]`). Calling it from inside
+ * `useChzExportState`'s own `queryFn` would invalidate that very query while
+ * it is still resolving, forcing an extra self-triggered poll. This only ever
+ * needs to refill `useInventory`'s upload slots.
+ */
+function invalidateInventoryDetail(
+  queryClient: ReturnType<typeof useQueryClient>,
+  inventoryId: string,
+) {
+  void queryClient.invalidateQueries({
+    queryKey: [...INVENTORIES_QUERY_KEY, inventoryId],
+    exact: true,
+  });
+}
+
+function importedRunCount(state: ChzExportState | undefined): number {
+  return state?.runs.filter((run) => run.state === "imported").length ?? 0;
+}
+
+/**
+ * The worker (`run-chz-export` in apps/api/src/jobs/jobs.module.ts) advances
+ * an order roughly every `CHZ_EXPORT_POLL_INTERVAL_SECONDS` (30s) there, so
+ * polling substantially faster than that cannot observe anything new. This is
+ * still a few times faster than the worker's cadence, which keeps the badges
+ * feeling live without hammering the endpoint nine times for every update.
+ */
+const CHZ_EXPORT_POLL_INTERVAL_MS = 10_000;
+
 export function useInventories(): UseQueryResult<Inventory[]> {
   return useQuery({ queryKey: INVENTORIES_QUERY_KEY, queryFn: listInventories });
 }
@@ -476,13 +507,30 @@ export function useInventoryClosePreview(
 }
 
 export function useChzExportState(inventoryId: string): UseQueryResult<ChzExportState> {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: chzExportStateQueryKey(inventoryId),
-    queryFn: () => getChzExportState(inventoryId),
+    queryFn: async () => {
+      // Compared against the cache, not a `useEffect` on the query's own
+      // result: the six upload slots render from `useInventory`'s
+      // `imports`, and nothing else invalidates that query when a run
+      // finishes, so a poll that lands here is the only place that ever
+      // learns a run just became `imported`. Skipped on the very first
+      // fetch (`previous === undefined`) so mounting the page does not
+      // trigger a redundant invalidation of a query that just loaded.
+      const previous = queryClient.getQueryData<ChzExportState>(
+        chzExportStateQueryKey(inventoryId),
+      );
+      const next = await getChzExportState(inventoryId);
+      if (previous !== undefined && importedRunCount(next) > importedRunCount(previous)) {
+        invalidateInventoryDetail(queryClient, inventoryId);
+      }
+      return next;
+    },
     enabled: inventoryId.length > 0,
     refetchInterval: (query) =>
       query.state.data?.runs.some((run) => run.state !== "imported" && run.state !== "failed")
-        ? 3_000
+        ? CHZ_EXPORT_POLL_INTERVAL_MS
         : false,
   });
 }

@@ -80,4 +80,31 @@ export class ChzTokenService {
       },
     };
   }
+
+  /**
+   * A presence-and-expiry check that never decrypts the ciphertext. Callers
+   * that only need a boolean -- `ChzExportsService.preflight()`, polled by
+   * the admin UI while any run is non-terminal -- have no use for the
+   * plaintext token, so materialising it on every poll would be needless
+   * exposure. `getActiveToken` above stays the one path that decrypts, for
+   * the runner, which genuinely has to send the token to True API.
+   *
+   * The trade-off: a token whose ciphertext cannot be decrypted (a rotated
+   * encryption key, a corrupted row) still reads as usable here, since that
+   * can only be discovered by decrypting. The runner still catches it via
+   * `getActiveToken` on the first pass and fails the order with
+   * `CHZ_TOKEN_UNAVAILABLE` -- one pass later than a preflight check would
+   * have caught it, which is an acceptable cost for never decrypting on a
+   * read-only status poll.
+   */
+  async hasUsableToken(tenantId: string): Promise<boolean> {
+    if (!this.crypto.isConfigured()) return false;
+
+    const [row] = await this.db
+      .select({ expiresAt: schema.chzApiTokens.expiresAt })
+      .from(schema.chzApiTokens)
+      .where(eq(schema.chzApiTokens.tenantId, tenantId));
+    if (!row) return false;
+    return row.expiresAt.getTime() > Date.now();
+  }
 }

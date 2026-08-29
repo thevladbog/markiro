@@ -6,13 +6,20 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, lt } from "drizzle-orm";
 import { INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
 import { PgBossService } from "../../jobs/jobs.module";
+import { MAX_CREATE_ATTEMPTS } from "./chz-export-runner.service";
 import { ChzTokenService } from "./chz-token.service";
-import type { ChzExportPreflightCode, ChzExportRunDto, ChzExportStateDto } from "./dto";
+import {
+  CHZ_EXPORT_NOT_FAILED_CODE,
+  CHZ_EXPORT_RETRY_EXHAUSTED_CODE,
+  type ChzExportPreflightCode,
+  type ChzExportRunDto,
+  type ChzExportStateDto,
+} from "./dto";
 
 @Injectable()
 export class ChzExportsService {
@@ -76,8 +83,11 @@ export class ChzExportsService {
       .limit(1);
     if (!agent) blocked.push("AGENT_NOT_PAIRED");
 
-    const token = await this.tokens.getActiveToken(tenantId);
-    if (token.status !== "ok") blocked.push("TOKEN_UNAVAILABLE");
+    // A presence-and-expiry check, not `getActiveToken`: this runs on every
+    // poll of a read-only endpoint while any run is non-terminal, and has no
+    // use for the decrypted token -- see `ChzTokenService.hasUsableToken`.
+    const hasToken = await this.tokens.hasUsableToken(tenantId);
+    if (!hasToken) blocked.push("TOKEN_UNAVAILABLE");
 
     return blocked;
   }
@@ -114,6 +124,17 @@ export class ChzExportsService {
     return this.getState(tenantId, inventoryId);
   }
 
+  /**
+   * The `attempts < MAX_CREATE_ATTEMPTS` guard is part of the same
+   * conditional `UPDATE` as the `state = 'failed'` one, not a separate
+   * read-then-write: a run already at the cap must never be reset to
+   * `queued`, because `ChzExportRunnerService.orderQueuedRuns` fails any
+   * `queued` run at the cap outright, before it is claimed -- resetting it
+   * here would only buy the operator one more pass that ends the same way.
+   * `resetToQueued` deliberately preserves `attempts` (it is the record of
+   * how much quota this status has already cost), so a run at the cap stays
+   * at the cap forever unless this refuses first.
+   */
   async retry(
     tenantId: string,
     actorUserId: string,
@@ -129,10 +150,29 @@ export class ChzExportsService {
           eq(schema.chzExportRuns.inventoryId, inventoryId),
           eq(schema.chzExportRuns.status, status),
           eq(schema.chzExportRuns.state, "failed"),
+          lt(schema.chzExportRuns.attempts, MAX_CREATE_ATTEMPTS),
         ),
       )
       .returning({ id: schema.chzExportRuns.id });
-    if (updated.length === 0) throw new ConflictException({ code: "CHZ_EXPORT_NOT_FAILED" });
+    if (updated.length === 0) {
+      // The `UPDATE` matched nothing; find out which of the two conditions it
+      // was, so the operator sees a code that tells them what to do next
+      // rather than one generic refusal.
+      const [existing] = await this.db
+        .select({ state: schema.chzExportRuns.state, attempts: schema.chzExportRuns.attempts })
+        .from(schema.chzExportRuns)
+        .where(
+          and(
+            eq(schema.chzExportRuns.tenantId, tenantId),
+            eq(schema.chzExportRuns.inventoryId, inventoryId),
+            eq(schema.chzExportRuns.status, status),
+          ),
+        );
+      if (existing?.state === "failed" && existing.attempts >= MAX_CREATE_ATTEMPTS) {
+        throw new ConflictException({ code: CHZ_EXPORT_RETRY_EXHAUSTED_CODE });
+      }
+      throw new ConflictException({ code: CHZ_EXPORT_NOT_FAILED_CODE });
+    }
     await this.jobs.enqueueChzExportOrder(tenantId, inventoryId);
     return this.getState(tenantId, inventoryId);
   }

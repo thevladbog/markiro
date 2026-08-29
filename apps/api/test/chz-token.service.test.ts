@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { createDb, schema, type Db } from "@markiro/db";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChzCryptoService } from "../src/modules/signer-agents/chz-crypto.service";
 import { ChzTokenService } from "../src/modules/chz-exports/chz-token.service";
@@ -126,5 +126,64 @@ describe.skipIf(!ready)("ChzTokenService", () => {
     await expect(serviceWithDifferentKey.getActiveToken(tenantId)).resolves.toEqual({
       status: "undecryptable",
     });
+  });
+
+  it("reports a usable token present and unexpired without decrypting it", async () => {
+    const encrypted = crypto.encrypt(tenantId, "the-bearer-token");
+    await db.insert(schema.chzApiTokens).values({
+      tenantId,
+      ...encrypted,
+      obtainedAt: new Date(),
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+    const decryptSpy = vi.spyOn(crypto, "decrypt");
+
+    await expect(service.hasUsableToken(tenantId)).resolves.toBe(true);
+    // The whole point of this check: `preflight()` polls it while any run is
+    // non-terminal, and has no use for the plaintext.
+    expect(decryptSpy).not.toHaveBeenCalled();
+    decryptSpy.mockRestore();
+  });
+
+  it("reports no usable token when none exists", async () => {
+    await expect(service.hasUsableToken(tenantId)).resolves.toBe(false);
+  });
+
+  it("reports no usable token once it has expired", async () => {
+    const encrypted = crypto.encrypt(tenantId, "the-bearer-token");
+    await db.insert(schema.chzApiTokens).values({
+      tenantId,
+      ...encrypted,
+      obtainedAt: new Date(Date.now() - 11 * 3_600_000),
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+
+    await expect(service.hasUsableToken(tenantId)).resolves.toBe(false);
+  });
+
+  it("reports no usable token when the encryption key is unconfigured", async () => {
+    const unconfigured = new ChzTokenService(db, new ChzCryptoService(undefined));
+    await expect(unconfigured.hasUsableToken(tenantId)).resolves.toBe(false);
+  });
+
+  it("reports a usable token even when it cannot be decrypted with the configured key", async () => {
+    // The honest trade-off documented on `hasUsableToken`: a presence-and-
+    // expiry check cannot see a rotated key or corrupted ciphertext, only
+    // `getActiveToken` can. Confirms preflight will read this token as
+    // present; the runner still catches it downstream via `getActiveToken`.
+    const encryptionKey1 = randomBytes(32);
+    const encryptionKey2 = randomBytes(32);
+    const crypto1 = new ChzCryptoService(encryptionKey1);
+    const serviceWithDifferentKey = new ChzTokenService(db, new ChzCryptoService(encryptionKey2));
+
+    const encrypted = crypto1.encrypt(tenantId, "the-bearer-token");
+    await db.insert(schema.chzApiTokens).values({
+      tenantId,
+      ...encrypted,
+      obtainedAt: new Date(),
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+
+    await expect(serviceWithDifferentKey.hasUsableToken(tenantId)).resolves.toBe(true);
   });
 });

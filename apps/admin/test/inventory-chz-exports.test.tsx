@@ -205,6 +205,7 @@ function renderPreparation() {
 
 afterEach(async () => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   await i18n.changeLanguage("ru");
 });
@@ -261,4 +262,115 @@ it("leaves manual upload available regardless of the export state", async () => 
   // means this fails if the drop zone is ever made conditional — unlike
   // counting the always-rendered outer <section data-testid="inventory-upload-slot">.
   expect((await screen.findAllByRole("button", { name: /Выбрать файл/ })).length).toBe(6);
+});
+
+it("translates a known safe error code into operator guidance instead of the raw code", async () => {
+  stubChzExports({
+    available: true,
+    blockedBy: [],
+    runs: [run("RETIRED", "failed", { errorCode: "CHZ_TASK_TIMED_OUT", errorMessage: null })],
+  });
+  renderPreparation();
+  expect(
+    await screen.findByText(/Честный Знак не подготовил отчёт за отведённое время/),
+  ).toBeDefined();
+  expect(screen.queryByText(/Код ошибки: CHZ_TASK_TIMED_OUT/)).toBeNull();
+});
+
+it("hides retry and points to manual upload once creation attempts are exhausted", async () => {
+  stubChzExports({
+    available: true,
+    blockedBy: [],
+    runs: [run("RETIRED", "failed", { errorCode: "CHZ_CREATE_ATTEMPTS_EXHAUSTED", attempts: 10 })],
+  });
+  renderPreparation();
+  expect(await screen.findByText(/Достигнут предел попыток заказа этого статуса/)).toBeDefined();
+  // The button would only be reset to `queued` and failed again on the very
+  // next worker pass -- see ChzExportsService.retry's CHZ_EXPORT_RETRY_EXHAUSTED.
+  expect(screen.queryByRole("button", { name: "Повторить" })).toBeNull();
+});
+
+function importFixture(status: string): Record<string, unknown> {
+  return {
+    id: "55555555-5555-4555-8555-555555555555",
+    declaredStatus: status,
+    parsedStatus: status,
+    result: "succeeded",
+    rowCount: 1,
+    errorCount: 0,
+    duplicateCount: 0,
+    sha256: "0".repeat(64),
+    diagnostics: [],
+    fileName: `${status.toLowerCase()}.zip`,
+    createdAt: "2026-08-26T09:05:00.000Z",
+  };
+}
+
+it("invalidates the inventory detail query once a poll reports a new imported run", async () => {
+  // Regression for the finished-export-never-refills-the-slot bug: nothing
+  // used to invalidate `useInventory` when a run flipped to `imported`
+  // outside a mutation, so the six upload slots (rendered from
+  // `inventory.imports`) stayed empty under a green "Импортировано" badge
+  // until the operator reloaded. This stub is extended (unlike the fixed
+  // `imports: []` the other tests use) so the detail response can actually
+  // reflect the import once it exists.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  let detailFetchCount = 0;
+  let pollCount = 0;
+  let chzState: ChzExportStateFixture = {
+    available: true,
+    blockedBy: [],
+    runs: [run("EMITTED", "ordered")],
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/access/me")) return response(ACCESS);
+      const dependency = shellDependency(url);
+      if (dependency) return dependency;
+      if (url === `/api/inventories/${ID.inventory}` && !init?.method) {
+        detailFetchCount += 1;
+        const imports = chzState.runs
+          .filter((item) => item.state === "imported")
+          .map((item) => importFixture(item.status));
+        return response(detail({ imports }));
+      }
+      if (url === `/api/inventories/${ID.inventory}/chz-exports` && (!init || !init.method)) {
+        pollCount += 1;
+        if (pollCount === 2) {
+          chzState = { ...chzState, runs: [run("EMITTED", "imported")] };
+        }
+        return response(chzState);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const router = createMemoryRouter(appRoutes, {
+    initialEntries: [`/inventory/${ID.inventory}`],
+  });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider defaultTheme="light">
+        <AuthClientProvider client={authClient()}>
+          <RouterProvider router={router} />
+        </AuthClientProvider>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+
+  expect(await screen.findByText("Заказано")).toBeDefined();
+  await waitFor(() => expect(detailFetchCount).toBe(1));
+
+  // The worker's own cadence is 30s (CHZ_EXPORT_POLL_INTERVAL_SECONDS in
+  // apps/api/src/jobs/jobs.module.ts); the panel polls at 10s.
+  await vi.advanceTimersByTimeAsync(10_000);
+  await waitFor(() => expect(pollCount).toBe(2));
+  await waitFor(() => expect(screen.getByText("Импортировано")).toBeDefined());
+  // The detail query must have been invalidated and refetched -- not just
+  // the chz-exports poll landing.
+  await waitFor(() => expect(detailFetchCount).toBeGreaterThanOrEqual(2));
 });

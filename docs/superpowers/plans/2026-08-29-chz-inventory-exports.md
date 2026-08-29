@@ -682,7 +682,9 @@ git commit -m "feat(api): True API dispenser client"
 - Consumes: `ChzCryptoService` from `apps/api/src/modules/signer-agents/chz-crypto.service` (has `configured: boolean` and `decrypt(tenantId, { encryptedToken, tokenNonce, tokenTag }): string`), `CHZ_TRUE_API_BASE_URLS` and `CHZ_CHANNEL_TYPE` from `apps/api/src/modules/signer-agents/chz-constants`, `chzSignerSettingsSchema` from `apps/api/src/modules/integrations/channel-registry`.
 - Produces: `class ChzTokenService` with `getActiveToken(tenantId: string): Promise<ChzTokenResult>` where
   `type ChzTokenResult = { status: "ok"; auth: { baseUrl: string; token: string } } | { status: "unconfigured" } | { status: "missing" } | { status: "expired" } | { status: "undecryptable" }`.
-  Task 4 uses it for a pre-flight check; Task 5 uses it per pass.
+  Task 5 uses it per pass.
+
+**Amendment (final-review fix):** also produces `hasUsableToken(tenantId: string): Promise<boolean>`, a presence-and-expiry check that never calls `crypto.decrypt`. Task 4's pre-flight now calls this instead of `getActiveToken` — the cabinet's `GET /chz-exports` is a read-only endpoint the admin UI polls while any run is non-terminal, and it only ever needed a boolean, so decrypting the token on every poll to immediately discard the plaintext was needless exposure. The trade-off is explicit: a token whose ciphertext cannot be decrypted (rotated key, corrupted row) still reads as usable here, since only decrypting can discover that. `getActiveToken` remains the one path that decrypts, for Task 5's runner, which genuinely has to send the token to True API; a pass against an undecryptable token is still caught there and fails with `CHZ_TOKEN_UNAVAILABLE`, one pass later than a preflight check would have caught it.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -843,7 +845,7 @@ git commit -m "feat(api): resolve the active Chestny ZNAK token per tenant"
 
 **Interfaces:**
 
-- Consumes: `chzExportRuns` (Task 1), `ChzTokenService.getActiveToken` (Task 3).
+- Consumes: `chzExportRuns` (Task 1), `ChzTokenService.hasUsableToken` (Task 3; see that task's amendment — pre-flight does not decrypt).
 - Produces:
   - `type ChzExportPreflightCode = "INN_MISSING" | "PRODUCT_GROUP_MISSING" | "AGENT_NOT_PAIRED" | "TOKEN_UNAVAILABLE"`
   - `interface ChzExportRunDto { status: InventoryChzStatus; state: "queued" | "ordered" | "ready" | "imported" | "failed"; attempts: number; errorCode: string | null; errorMessage: string | null; importId: string | null; orderedAt: string | null; completedAt: string | null }`
@@ -852,6 +854,8 @@ git commit -m "feat(api): resolve the active Chestny ZNAK token per tenant"
   - `chzExportStateOpenApiSchema` and `retryChzExportSchema` in `dto.ts`.
 
 Task 6 calls `order`'s enqueue path; Task 7 exposes all three; Task 8 renders `ChzExportStateDto`.
+
+**Amendment (final-review fix):** `retry()` also refuses — distinctly from `CHZ_EXPORT_NOT_FAILED` — a run that is `failed` but already at Task 5's `MAX_CREATE_ATTEMPTS` cap (now exported from `chz-export-runner.service.ts`), with `ConflictException({ code: "CHZ_EXPORT_RETRY_EXHAUSTED" })` (`CHZ_EXPORT_NOT_FAILED_CODE` / `CHZ_EXPORT_RETRY_EXHAUSTED_CODE` in `dto.ts`). Before this fix, `retry()` reset such a run straight back to `queued`: `resetToQueued` deliberately preserves `attempts` (it is the record of how much ЧЗ quota the status has already cost), and Task 5's runner fails any `queued` run at the cap outright, before it is even claimed — so the operator's retry button reset the row only for the very next worker pass to fail it again with the same code, forever, with no indication that manual upload was now the only route. The conditional `UPDATE` that resets to `queued` now also requires `attempts < MAX_CREATE_ATTEMPTS`; when it matches nothing, a follow-up `select` distinguishes "not failed" from "failed but exhausted" so the two error codes are never conflated. Task 8's admin panel disables the retry button and shows manual-upload copy once a run's own `errorCode` is `CHZ_CREATE_ATTEMPTS_EXHAUSTED`, so the endpoint refusal is a backstop, not the primary UX.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1226,6 +1230,9 @@ git commit -m "feat(api): order, track and retry Chestny ZNAK export runs"
 - Produces: `class ChzExportRunnerService` with
   `run(tenantId: string, inventoryId: string, attempt: { retryCount: number; retryLimit: number }): Promise<{ finished: boolean }>`.
   `finished` is `false` when at least one run is still non-terminal, which is how Task 6 decides whether to re-enqueue with `startAfter`.
+  Also produces `export const MAX_CREATE_ATTEMPTS = 10` (Task 4's `retry()` amendment consumes it) and `CHZ_EXPORT_SAFE_ERROR_CODES` (Task 8's admin panel consumes it to translate every closed-set `errorCode`, not just the two that carry ЧЗ's own text).
+
+**Amendment (final-review fix, test coverage):** the claim in step 6 below (`UPDATE ... WHERE state = 'queued' AND (claimedAt IS NULL OR claimedAt < staleCutoff)`) is what serialises two workers racing the same order, but the original test suite only ever exercised it via a pre-seeded _stale_ `claimedAt` (the lost-create-response tests) — never via genuine contention on a _fresh_ claim. `chz-export-runner.service.test.ts` gained a test that runs two `ChzExportRunnerService` instances' `run()` concurrently (`Promise.all`) against the same seeded `queued` order and asserts exactly one `createDispenserTask` call per status; real concurrency against the scratch Postgres database is what proves the guard, since simulating it by pre-setting timestamps never exercises the row-lock path at all.
 
 **Read before you start:** `apps/api/src/modules/inventories/inventory-document-runner.service.ts`. It is the same shape of service and you should follow its structure — `claim`, attempt-aware failure (`if (attempt.retryCount < attempt.retryLimit)`), and its separation of a safe error code from the raw error.
 
@@ -1724,6 +1731,12 @@ git commit -m "feat(api): cabinet endpoints for Chestny ZNAK exports"
 
 - Consumes: `GET/POST /inventories/:id/chz-exports`, `POST /inventories/:id/chz-exports/retry` (Task 7).
 - Produces: `useChzExportState(inventoryId)`, `useOrderChzExports()`, `useRetryChzExport()` in `apps/admin/src/pages/inventory/api.ts`.
+
+**Amendment (final-review fix, correcting Step 3 below):** Step 3's original claim — that invalidating the inventory key in the order/retry mutations' `onSuccess` is what makes "a finished run's import appear in the upload slot without a reload" — is wrong and was shipped wrong. Both mutations fire once, at the start of an order; a run only becomes `imported` many polls later, with no mutation in flight, so nothing invalidated `useInventory` (the six upload slots render from its `imports`) when that happened. An operator watching the screen saw six green «Импортировано» badges over six empty upload zones until they blurred/refocused the window or reloaded. The fix: `useChzExportState`'s own `queryFn` compares the freshly-fetched state against what `queryClient.getQueryData` still holds from the previous poll, and when the count of `imported` runs has grown, it invalidates the inventory-detail query key _exactly_ (not the whole `[...INVENTORIES_QUERY_KEY, inventoryId]` prefix that `invalidateInventory` uses elsewhere — that prefix also matches `chzExportStateQueryKey` itself, which would invalidate this very query from inside its own `queryFn` and force an extra self-triggered poll). The mutations' own `onSuccess` invalidation is still correct and unchanged; it just was never the mechanism that could fix this bug.
+
+**Amendment (final-review fix, poll interval):** the query's `refetchInterval` was 3 seconds against a worker (`run-chz-export`, Task 6) that only advances an order roughly every `CHZ_EXPORT_POLL_INTERVAL_SECONDS = 30` seconds — nine of every ten polls could not possibly observe anything new. Raised to 10 seconds (`CHZ_EXPORT_POLL_INTERVAL_MS` in `api.ts`, with a comment pointing at the worker constant), which stays a few times faster than the worker's own cadence without hammering the endpoint for nothing.
+
+**Amendment (final-review fix, error copy and the exhausted-attempts retry):** `ChzExportsPanel.tsx` used to render the raw `errorCode` for every failed run except the two whose `errorMessage` carries ЧЗ's own text (`CHZ_TASK_REJECTED`, `CHZ_DOWNLOAD_REJECTED`) — an operator saw an uppercase machine identifier for `CHZ_TASK_TIMED_OUT`, `CHZ_TOKEN_UNAVAILABLE`, `CHZ_ORDER_CONTEXT_MISSING`, `CHZ_CREATE_ATTEMPTS_EXHAUSTED`, `CHZ_TASK_FAILED` and `CHZ_IMPORT_FAILED`, even though `CHZ_EXPORT_SAFE_ERROR_CODES` (Task 5) exists precisely as the closed set the UI can translate. Every code in that set now has a `pages.inventory.chzExports.error.<CODE>` key in both `ru.json` and `en.json` (a `CHZ_EXPORT_SAFE_ERROR_CODES` constant is duplicated into `schemas.ts` the same way `CHZ_EXPORT_PREFLIGHT_CODES` already is); `errorCodeFallback` remains for open-ended parser diagnostic codes outside that set. Separately, when a run's `errorCode` is `CHZ_CREATE_ATTEMPTS_EXHAUSTED` the panel no longer renders the «Повторить» button at all — see Task 4's amendment for why that button could never have worked — and its translated copy tells the operator to upload that status manually instead.
 
 - [ ] **Step 1: Write the failing test**
 

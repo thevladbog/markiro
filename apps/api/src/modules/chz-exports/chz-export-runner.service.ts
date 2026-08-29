@@ -38,8 +38,12 @@ const MAX_ORDER_WAIT_MS = 6 * 60 * 60_000;
  * already cost, not a per-attempt scratch value — so a run that is retried
  * while already at this cap must fail fast here rather than clear the counter
  * and loop again. Do not "fix" that by resetting `attempts` on retry.
+ *
+ * Exported so `ChzExportsService.retry()` can refuse an operator retry
+ * outright once a run is already at the cap, instead of resetting it to
+ * `queued` only for this same runner to fail it again on the very next pass.
  */
-const MAX_CREATE_ATTEMPTS = 10;
+export const MAX_CREATE_ATTEMPTS = 10;
 const ERROR_MESSAGE_LIMIT = 500;
 /** Codes we write into `error_code`: constants below, or a parser diagnostic. */
 const DIAGNOSTIC_CODE = /^[A-Z][A-Z0-9_]{0,63}$/;

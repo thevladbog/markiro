@@ -13,6 +13,22 @@ export type ChzExportPreflightCode = (typeof CHZ_EXPORT_PREFLIGHT_CODES)[number]
 export const CHZ_EXPORT_RUN_STATES = ["queued", "ordered", "ready", "imported", "failed"] as const;
 export type ChzExportRunState = (typeof CHZ_EXPORT_RUN_STATES)[number];
 
+/** `POST /chz-exports/retry`'s 409 error surface: named rather than inline. */
+export const CHZ_EXPORT_NOT_FAILED_CODE = "CHZ_EXPORT_NOT_FAILED" as const;
+/**
+ * Distinct from the run's own `errorCode` (`CHZ_CREATE_ATTEMPTS_EXHAUSTED`,
+ * set by `ChzExportRunnerService`): this is what `retry()` itself answers
+ * when it refuses to reset a run that is already at the creation-attempt cap,
+ * so the caller never mistakes "retry accepted, will fail again" for a real
+ * retry.
+ */
+export const CHZ_EXPORT_RETRY_EXHAUSTED_CODE = "CHZ_EXPORT_RETRY_EXHAUSTED" as const;
+export const CHZ_EXPORT_RETRY_REJECTION_CODES = [
+  CHZ_EXPORT_NOT_FAILED_CODE,
+  CHZ_EXPORT_RETRY_EXHAUSTED_CODE,
+] as const;
+export type ChzExportRetryRejectionCode = (typeof CHZ_EXPORT_RETRY_REJECTION_CODES)[number];
+
 export interface ChzExportRunDto {
   status: InventoryChzStatus;
   state: ChzExportRunState;

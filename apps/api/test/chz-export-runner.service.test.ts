@@ -515,6 +515,40 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     expect(calls.filter((call) => call.op === "createDispenserTask")).toHaveLength(0);
   });
 
+  it("lets exactly one of two racing workers create the dispenser task per status", async () => {
+    // The claim in `claim()` is a conditional `UPDATE ... WHERE state =
+    // 'queued' AND (claimedAt IS NULL OR claimedAt < staleCutoff)`, which only
+    // Postgres's own row locking can actually prove serialises two workers --
+    // pre-seeding a stale `claimedAt` (as the lost-create tests above do)
+    // never exercises genuine contention on a *fresh* claim. Two real
+    // concurrent passes over the same order are the only way to exercise it.
+    await seedRuns({ state: "queued" });
+    const { client, calls } = fakeClient({ createTaskId: (status) => `task-${status}` });
+    const runnerA = runnerWith(client);
+    const runnerB = runnerWith(client);
+
+    const [outcomeA, outcomeB] = await Promise.all([
+      runnerA.run(tenantId, inventoryId, { retryCount: 0, retryLimit: 5 }),
+      runnerB.run(tenantId, inventoryId, { retryCount: 0, retryLimit: 5 }),
+    ]);
+
+    // Ordered, not yet polled to a result -- not terminal either way.
+    expect(outcomeA).toEqual({ finished: false });
+    expect(outcomeB).toEqual({ finished: false });
+    const rows = await runsFor(inventoryId);
+    expect(rows).toHaveLength(INVENTORY_CHZ_STATUSES.length);
+    expect(rows.every((row) => row.state === "ordered")).toBe(true);
+    for (const status of INVENTORY_CHZ_STATUSES) {
+      // Exactly one create per status: the loser of the claim race must skip
+      // `createDispenserTask` entirely rather than both workers paying for a
+      // task the tenant's finite daily quota only owes once.
+      expect(
+        calls.filter((call) => call.op === "createDispenserTask" && call.chzStatus === status),
+      ).toHaveLength(1);
+    }
+    expect(rows.map((row) => row.attempts)).toEqual(rows.map(() => 1));
+  });
+
   it("reconciles a lost create response against the task list rather than re-creating", async () => {
     // A run claimed long enough ago to be stale, still queued, no task id. Only
     // EMITTED is in that state, which is what makes the pairing unambiguous --

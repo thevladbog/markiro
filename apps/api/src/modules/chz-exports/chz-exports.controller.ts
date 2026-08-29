@@ -80,7 +80,7 @@ export class ChzExportsController {
   @ApiBody({ schema: retryChzExportOpenApiSchema })
   @ApiOkResponse({ schema: chzExportStateOpenApiSchema })
   @ApiZodValidationError()
-  @ApiHttpErrors(401, 403)
+  @ApiHttpErrors(401, 403, 409)
   retry(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,

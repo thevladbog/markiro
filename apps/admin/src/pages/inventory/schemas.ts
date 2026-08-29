@@ -256,6 +256,27 @@ export type ChzExportPreflightCode = (typeof CHZ_EXPORT_PREFLIGHT_CODES)[number]
 export const CHZ_EXPORT_RUN_STATES = ["queued", "ordered", "ready", "imported", "failed"] as const;
 export type ChzExportRunState = (typeof CHZ_EXPORT_RUN_STATES)[number];
 
+/**
+ * Mirrors `CHZ_EXPORT_SAFE_ERROR_CODES` in
+ * apps/api/src/modules/chz-exports/chz-export-runner.service.ts: the closed
+ * set of `errorCode` values the runner writes that carry no ЧЗ-specific text,
+ * so each one gets its own operator-facing copy under
+ * `pages.inventory.chzExports.error.*` instead of falling back to the raw
+ * code. Anything outside this set is an open-ended parser diagnostic code and
+ * keeps using `errorCodeFallback`.
+ */
+export const CHZ_EXPORT_SAFE_ERROR_CODES = [
+  "CHZ_TOKEN_UNAVAILABLE",
+  "CHZ_ORDER_CONTEXT_MISSING",
+  "CHZ_TASK_REJECTED",
+  "CHZ_TASK_FAILED",
+  "CHZ_TASK_TIMED_OUT",
+  "CHZ_CREATE_ATTEMPTS_EXHAUSTED",
+  "CHZ_DOWNLOAD_REJECTED",
+  "CHZ_IMPORT_FAILED",
+] as const;
+export type ChzExportSafeErrorCode = (typeof CHZ_EXPORT_SAFE_ERROR_CODES)[number];
+
 export const chzExportRunSchema = z.strictObject({
   status: z.enum(INVENTORY_CHZ_STATUSES),
   state: z.enum(CHZ_EXPORT_RUN_STATES),

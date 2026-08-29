@@ -252,6 +252,49 @@ describe.skipIf(!ready)("ChzExportsService", () => {
       service.retry(tenantId, actorUserId, inventoryId, "RETIRED"),
     ).rejects.toMatchObject({
       status: 409,
+      response: { code: "CHZ_EXPORT_NOT_FAILED" },
     });
+  });
+
+  it("refuses to retry a run already at the creation-attempt cap, distinctly from a plain conflict", async () => {
+    await satisfyPreflight();
+    await service.order(tenantId, actorUserId, inventoryId);
+    // Mirrors what `ChzExportRunnerService.orderQueuedRuns` writes once a
+    // `queued` run hits `MAX_CREATE_ATTEMPTS` (10): failed, with that same
+    // errorCode, and `attempts` left at the cap.
+    await db
+      .update(schema.chzExportRuns)
+      .set({
+        state: "failed",
+        errorCode: "CHZ_CREATE_ATTEMPTS_EXHAUSTED",
+        attempts: 10,
+        completedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.chzExportRuns.inventoryId, inventoryId),
+          eq(schema.chzExportRuns.status, "RETIRED"),
+        ),
+      );
+
+    await expect(
+      service.retry(tenantId, actorUserId, inventoryId, "RETIRED"),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: { code: "CHZ_EXPORT_RETRY_EXHAUSTED" },
+    });
+
+    // Refused, not reset: a `queued` run at the cap would only be failed
+    // again on the very next pass, so the row must stay exactly as it was.
+    const [row] = await db
+      .select()
+      .from(schema.chzExportRuns)
+      .where(
+        and(
+          eq(schema.chzExportRuns.inventoryId, inventoryId),
+          eq(schema.chzExportRuns.status, "RETIRED"),
+        ),
+      );
+    expect(row).toMatchObject({ state: "failed", errorCode: "CHZ_CREATE_ATTEMPTS_EXHAUSTED" });
   });
 });
