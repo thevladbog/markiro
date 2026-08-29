@@ -326,6 +326,7 @@ it("releases a busy-only Back block after an unchanged edit request fails", asyn
     gtin14: "04006381333931",
     name: "Milk",
     productGroup: null,
+    chzProductGroupCode: null,
     boxCapacity: null,
     palletCapacity: null,
     unitPrice: null,

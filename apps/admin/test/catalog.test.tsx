@@ -125,6 +125,7 @@ const DRAFT_PRODUCT = {
   gtin14: "04006381333931",
   name: "Молоко 1л",
   productGroup: null,
+  chzProductGroupCode: null,
   boxCapacity: null,
   palletCapacity: null,
   unitPrice: null,
@@ -140,7 +141,8 @@ const ACTIVE_PRODUCT = {
   id: "p2",
   gtin14: "04600000000018",
   name: "Сыр Российский",
-  productGroup: "Молочные продукты",
+  productGroup: "Молочная продукция",
+  chzProductGroupCode: 8,
   boxCapacity: 12,
   palletCapacity: 48,
   unitPrice: null,
@@ -251,7 +253,8 @@ describe("CatalogPage", () => {
       id: "p7",
       name: "Снятый товар",
       status: "active",
-      productGroup: "Молочные продукты",
+      productGroup: "Молочная продукция",
+      chzProductGroupCode: 8,
       boxCapacity: 12,
       palletCapacity: 48,
       archived: true,
@@ -624,7 +627,7 @@ describe("CatalogPage", () => {
             gtin: "4006381333931",
             name: "Молоко 1л",
             printName: null,
-            productGroup: null,
+            chzProductGroupCode: null,
             boxCapacity: null,
             palletCapacity: null,
             unitPrice: null,
@@ -816,7 +819,7 @@ describe("CatalogPage", () => {
         gtin: "4006381333931",
         name: "Йогурт",
         printName: null,
-        productGroup: null,
+        chzProductGroupCode: null,
         boxCapacity: null,
         palletCapacity: null,
         unitPrice: null,
@@ -880,7 +883,7 @@ describe("CatalogPage", () => {
             gtin: "4006381333931",
             name: "Напиток",
             printName: "Дикий Крест Особый 5%",
-            productGroup: null,
+            chzProductGroupCode: null,
             boxCapacity: null,
             palletCapacity: null,
             unitPrice: "52.00",
@@ -891,6 +894,45 @@ describe("CatalogPage", () => {
         }),
       );
     });
+  });
+
+  it("submits the selected group code rather than free text", async () => {
+    let lastCreateBody: Record<string, unknown> | null = null;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      if (path === "/api/chz-product-groups") {
+        return jsonResponse(200, {
+          items: [{ code: 8, alias: "milk", name: "Молочная продукция" }],
+        });
+      }
+      if (path === "/api/products" && init?.method === "POST") {
+        lastCreateBody = JSON.parse((init.body as string | undefined) ?? "{}") as Record<
+          string,
+          unknown
+        >;
+        return jsonResponse(201, { ...DRAFT_PRODUCT, id: "p9" });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    renderPage();
+    await screen.findByText("Каталог пуст");
+
+    await user.click((await screen.findAllByRole("button", { name: "Добавить продукт" }))[0]!);
+    await screen.findByText("Новый продукт");
+    await user.type(screen.getByLabelText("Название"), "Молоко 1л");
+    await user.type(screen.getByLabelText("ГТИН"), "4006381333931");
+    await user.click(screen.getByRole("combobox", { name: "Группа продукции" }));
+    await user.click(await screen.findByRole("option", { name: "Молочная продукция" }));
+    await user.click(screen.getByRole("button", { name: "Создать" }));
+
+    await waitFor(() => {
+      expect(lastCreateBody?.chzProductGroupCode).toBe(8);
+    });
+    expect("productGroup" in (lastCreateBody ?? {})).toBe(false);
   });
 
   it("blocks submit and shows a range error when shelfLifeDays exceeds the API's 3650-day bound", async () => {

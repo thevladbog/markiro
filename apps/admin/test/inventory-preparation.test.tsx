@@ -198,6 +198,7 @@ function parameterDependency(url: string): Response | null {
           gtin14: "04680089900383",
           name: "Пиво светлое 0,45 л",
           productGroup: "beer",
+          chzProductGroupCode: 15,
           boxCapacity: 20,
           palletCapacity: 60,
           unitPrice: null,

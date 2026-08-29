@@ -21,12 +21,21 @@ export interface ProductImageDescriptor {
   height: number;
 }
 
+/** Mirrors `apps/api/src/modules/products/product-groups.service.ts`. */
+export interface ChzProductGroupDto {
+  code: number;
+  alias: string;
+  name: string;
+}
+
 /** Mirrors `apps/api/src/modules/products/dto.ts`'s `ProductDto`. */
 export interface ProductDto {
   id: string;
   gtin14: string;
   name: string;
+  /** Resolved name of `chzProductGroupCode`; null when no group is selected. */
   productGroup: string | null;
+  chzProductGroupCode: number | null;
   boxCapacity: number | null;
   palletCapacity: number | null;
   unitPrice: string | null;
@@ -54,13 +63,14 @@ export interface ProductDto {
 
 /**
  * `status` is deliberately absent -- it's server-computed from
- * productGroup/boxCapacity/palletCapacity (see ProductsService.computeStatus)
+ * chzProductGroupCode/boxCapacity/palletCapacity (see ProductsService.computeStatus)
  * and must never be sent by the client.
  */
 export interface CreateProductInput {
   gtin: string;
   name: string;
-  productGroup?: string | null;
+  /** FK into `chz_product_groups`; null clears the product's group. */
+  chzProductGroupCode?: number | null;
   boxCapacity?: number | null;
   palletCapacity?: number | null;
   unitPrice?: string | null;
@@ -96,6 +106,13 @@ export interface GtinCheckResult {
 
 interface ListProductsResponse {
   items: ProductDto[];
+}
+
+export const CHZ_PRODUCT_GROUPS_QUERY_KEY = ["chz-product-groups"] as const;
+
+async function fetchChzProductGroups(): Promise<ChzProductGroupDto[]> {
+  const value = await apiFetch<{ items: ChzProductGroupDto[] }>("/chz-product-groups");
+  return value.items;
 }
 
 /** Shared TanStack Query cache key prefix for the products list (all filter variants). */
@@ -166,6 +183,15 @@ export function useProducts(params: ListProductsParams = {}): UseQueryResult<Pro
   return useQuery({
     queryKey: productsQueryKey(params),
     queryFn: () => fetchProducts(params),
+  });
+}
+
+/** `GET /chz-product-groups` -- global reference data, safe to cache for the session. */
+export function useChzProductGroups(): UseQueryResult<ChzProductGroupDto[]> {
+  return useQuery({
+    queryKey: CHZ_PRODUCT_GROUPS_QUERY_KEY,
+    queryFn: fetchChzProductGroups,
+    staleTime: Infinity,
   });
 }
 
