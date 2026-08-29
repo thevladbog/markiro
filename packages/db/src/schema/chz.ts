@@ -1,10 +1,12 @@
 import { sql } from "drizzle-orm";
 import {
+  check,
   customType,
   foreignKey,
   index,
   integer,
   jsonb,
+  pgEnum,
   pgTable,
   text,
   timestamp,
@@ -12,7 +14,8 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { organization } from "./auth.js";
+import { organization, user } from "./auth.js";
+import { inventories, inventoryChzStatusEnum, inventoryImports } from "./inventory.js";
 
 const tenantId = () =>
   text("tenant_id")
@@ -163,6 +166,78 @@ export const chzApiTokens = pgTable(
   ],
 );
 
+export const chzExportRunStateEnum = pgEnum("chz_export_run_state", [
+  "queued",
+  "ordered",
+  "ready",
+  "imported",
+  "failed",
+]);
+
+/**
+ * One row per (inventory, ChZ status) — six per order. A retry reuses the row
+ * rather than accumulating history, so the table stays one row per thing the
+ * operator can see; `attempts` is what records how much quota a status has
+ * already cost.
+ */
+export const chzExportRuns = pgTable(
+  "chz_export_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    inventoryId: uuid("inventory_id").notNull(),
+    status: inventoryChzStatusEnum("status").notNull(),
+    state: chzExportRunStateEnum("state").notNull().default("queued"),
+    dispenserTaskId: text("dispenser_task_id"),
+    resultId: text("result_id"),
+    orderedByUserId: text("ordered_by_user_id")
+      .notNull()
+      .references(() => user.id),
+    importId: uuid("import_id"),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    attempts: integer("attempts").notNull().default(0),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    orderedAt: timestamp("ordered_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("chz_export_runs_tenant_inventory_status_uq").on(
+      table.tenantId,
+      table.inventoryId,
+      table.status,
+    ),
+    foreignKey({
+      name: "chz_export_runs_tenant_inventory_fk",
+      columns: [table.tenantId, table.inventoryId],
+      foreignColumns: [inventories.tenantId, inventories.id],
+    }),
+    foreignKey({
+      name: "chz_export_runs_tenant_import_fk",
+      columns: [table.tenantId, table.importId],
+      foreignColumns: [inventoryImports.tenantId, inventoryImports.id],
+    }),
+    index("chz_export_runs_unfinished_idx")
+      .on(table.tenantId, table.inventoryId)
+      .where(sql`${table.state} in ('queued', 'ordered', 'ready')`),
+    check("chz_export_runs_attempts_nonnegative_check", sql`${table.attempts} >= 0`),
+    // Every state, not just the terminal ones: a row must never sit in
+    // `ordered` with no task to poll, which is the state that would strand a
+    // run silently. Modelled on `inventory_document_runs_status_consistency_check`.
+    check(
+      "chz_export_runs_state_consistency_check",
+      sql`(${table.state} = 'queued' and ${table.dispenserTaskId} is null and ${table.resultId} is null and ${table.importId} is null and ${table.errorCode} is null)
+        or (${table.state} = 'ordered' and ${table.dispenserTaskId} is not null and ${table.resultId} is null and ${table.importId} is null and ${table.errorCode} is null)
+        or (${table.state} = 'ready' and ${table.dispenserTaskId} is not null and ${table.resultId} is not null and ${table.importId} is null and ${table.errorCode} is null)
+        or (${table.state} = 'imported' and ${table.importId} is not null and ${table.errorCode} is null and ${table.completedAt} is not null)
+        or (${table.state} = 'failed' and ${table.errorCode} is not null and ${table.completedAt} is not null)`,
+    ),
+  ],
+);
+
 export type ChzSignerAgentRow = typeof chzSignerAgents.$inferSelect;
 export type ChzSignerTaskRow = typeof chzSignerTasks.$inferSelect;
 export type ChzApiTokenRow = typeof chzApiTokens.$inferSelect;
+export type ChzExportRunRow = typeof chzExportRuns.$inferSelect;
