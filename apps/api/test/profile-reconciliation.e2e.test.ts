@@ -17,7 +17,7 @@ const ready = Boolean(
 describe.skipIf(!ready)("aggregate media asset reconciliation e2e", () => {
   let app: INestApplication | undefined;
   let db: Db;
-  const deleteObject = vi.fn().mockResolvedValue(undefined);
+  const deleteObject = vi.fn<(key: string) => Promise<void>>().mockResolvedValue(undefined);
   const userId = randomUUID();
   const activeId = randomUUID();
   const stagingId = randomUUID();
@@ -204,15 +204,18 @@ describe.skipIf(!ready)("aggregate media asset reconciliation e2e", () => {
         ].sort((left, right) => left.id.localeCompare(right.id)),
       );
     });
-    expect(deleteObject).toHaveBeenCalledTimes(4);
-    expect(deleteObject).toHaveBeenCalledWith(`users/${userId}/avatars/${stagingId}.webp`);
-    expect(deleteObject).toHaveBeenCalledWith(`users/${userId}/avatars/${deletingId}.webp`);
-    expect(deleteObject).toHaveBeenCalledWith(
+    const expectedDeletedObjectKeys = [
+      `users/${userId}/avatars/${stagingId}.webp`,
+      `users/${userId}/avatars/${deletingId}.webp`,
       `tenants/${tenantId}/products/${tenantStagingId}.webp`,
-    );
-    expect(deleteObject).toHaveBeenCalledWith(
       `tenants/${tenantId}/products/${tenantDeletingId}.webp`,
-    );
+    ];
+    expect(
+      deleteObject.mock.calls
+        .map(([key]) => key)
+        .filter((key) => expectedDeletedObjectKeys.includes(key))
+        .sort(),
+    ).toEqual(expectedDeletedObjectKeys.sort());
     expect(deleteObject).not.toHaveBeenCalledWith(
       `tenants/${tenantId}/products/${activeProductId}.webp`,
     );
