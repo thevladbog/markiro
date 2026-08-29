@@ -118,17 +118,47 @@ One table, `chz_export_runs`, with one row per (inventory, status) — six per o
 - `state`: `queued` → `ordered` → `ready` → `imported`, or `failed`;
 - `dispenserTaskId`, `resultId` — the ЧЗ-side identifiers, persisted so a restart resumes
   an in-flight order instead of paying for a new one;
+- `orderedByUserId` — the operator who pressed the button (see below);
 - `importId` — the resulting `inventory_imports` row, via a composite tenant-scoped
   foreign key;
-- `errorCode`, `errorMessage`, `attempts`, `orderedAt`, `completedAt`, `createdAt`;
-- a check constraint mirroring `inventory_document_runs`: `imported` requires `importId`,
-  `failed` requires `errorCode`, and neither is set in the earlier states.
+- `errorCode`, `errorMessage`, `attempts`, `claimedAt`, `orderedAt`, `completedAt`,
+  `createdAt` — `claimedAt` is the durable claim described under idempotency below;
+- a check constraint mirroring `inventory_document_runs`, covering **every** state rather
+  than only the terminal ones: `ordered` requires `dispenserTaskId`; `ready` requires both
+  `dispenserTaskId` and `resultId`; `imported` requires `importId`; `failed` requires
+  `errorCode`; and none of those columns is set in `queued`. Writing the constraint this
+  way means a row can never sit in `ordered` with no task to poll — the state that would
+  otherwise strand a run silently.
+
+**Retry is one atomic transition, and it is subtractive.** Retrying a failed status resets
+the row to `queued` and clears `dispenserTaskId`, `resultId`, `errorCode`, `errorMessage`
+and `completedAt` in the same statement that flips `state`, so a crash cannot leave a
+half-cleared row that the check constraint would reject or that would resume against a
+stale ЧЗ task. `attempts` is deliberately **not** cleared — it is the record of how much
+quota this status has already cost.
+
+What a retry must not touch is the import history: `importEvidence` records parser
+failures as append-only `inventory_imports` rows and snapshot selection accepts only
+successful ones, so the failed attempts stay exactly where they are. Clearing `importId`
+on retry is therefore safe — it points at the run's own successful import, and a failed
+run has none.
 
 ## Job flow
 
 Queue `run-chz-export`, payload `{ tenantId, inventoryId }` — **one job per order, not per
 status** — plus a boot-time reconcile pass that re-enqueues orders left with a
 non-terminal run.
+
+The payload deliberately carries no user: the actor lives in
+`chz_export_runs.orderedByUserId`, written when the runs are created. The boot-time
+reconcile pass enqueues jobs with no HTTP request behind them, so a payload-carried actor
+would be unavailable exactly when the work resumes; reading it from the row means a
+restart, a retry and the original order all attribute the import to the same operator.
+That matters because `inventory_imports.createdByUserId` is `NOT NULL` and references a
+real user, and the inventory's creator is not necessarily the operator who pressed the
+button. Retry preserves `orderedByUserId` — it is not among the fields a retry clears —
+unless a different operator presses retry, in which case it is overwritten with theirs,
+since they are the one who spent the quota.
 
 The granularity is dictated by True API's per-method rate limits, which differ sharply:
 creating a task allows 15 requests per minute, but **reading a task's status allows only
@@ -145,17 +175,39 @@ take minutes, and holding a pg-boss worker for that long would starve the queue 
 progress on restart. `startAfter` has no precedent in this repository — every existing
 deferral is cron-driven — so it is introduced here deliberately.
 
-A per-order cap on polling passes turns a task that never completes into a failed run with
-a timeout code, instead of an immortal job.
+Two independent caps, because two different things can fail forever:
 
-Idempotency has two layers. `dispenserTaskId` prevents ordering the same export twice —
-which matters because the daily quota is finite. sha256 idempotency inside
-`importEvidence` prevents a duplicate import row if the worker dies between download and
-commit.
+- a per-order cap on **polling passes**, which turns a task that never completes into a
+  failed run with a timeout code instead of an immortal job;
+- a per-run cap on **task-creation attempts**, counted in `attempts`. Transient create
+  failures — network errors, 5xx, or the 15-per-minute limit — leave the run in `queued`
+  and are retried with backoff, so without a second cap a permanently failing create (a
+  filter ЧЗ will never accept, an INN that stays rejected) would re-enqueue the job
+  forever. On reaching the cap the run becomes `failed` with a stable error code, and only
+  an explicit operator retry starts it again.
 
-The import is attributed to the operator who pressed the button:
-`inventory_imports.createdByUserId` is `NOT NULL` and references a real user, and ordering
-is always operator-initiated, so no synthetic system actor is needed.
+Idempotency has three layers, because losing a response is not the same as crashing.
+
+- **`dispenserTaskId` prevents re-ordering an export we know about.** This matters because
+  the daily quota per product group is finite.
+- **A durable claim covers the window where we do not yet know.** If `POST
+dispenser/tasks` succeeds but its response is lost — or two workers reach the same run
+  at once — retrying blindly would create a second task that consumes quota and is linked
+  to nothing. So the run is claimed in the database _before_ the request goes out: a
+  conditional update that stamps `claimedAt` and increments `attempts` **only if the row
+  is still `queued` and unclaimed**, which is what serialises two concurrent workers. The
+  state stays `queued` — it becomes `ordered` only once `dispenserTaskId` is known, which
+  is what keeps the check constraint above true at every instant. A claim that is stale
+  (older than one poll cycle) with no `dispenserTaskId` is the ambiguous case, and it is
+  resolved by **listing the participant's recent dispenser tasks and matching on the
+  filter** rather than by issuing another create. Only when that finds no matching task is
+  a new one ordered. True API exposes no client-supplied idempotency key on this endpoint,
+  which is why the reconciliation step exists instead of a key.
+- **sha256 idempotency inside `importEvidence`** prevents a duplicate import row if the
+  worker dies between download and commit.
+
+Both ambiguous cases — a lost create response, and two workers racing the same run — need
+their own tests; neither is reachable through the happy path.
 
 ## Pre-flight checks
 
@@ -179,10 +231,13 @@ Three classes, each visible per status:
 - **Pre-flight** — the four conditions above. Never ordered, nothing to retry until the
   underlying data is fixed.
 - **Transient** — network failure, 5xx, or the 15-per-minute create limit. Retried with
-  backoff; the run stays in `ordered` and the operator sees "in progress", not a failure.
-- **Terminal** — ЧЗ rejected the filter, the task finished in an error state, or the
-  downloaded CSV failed the parser. The run becomes `failed` with the parser's own error
-  code where applicable, and only an explicit retry re-orders it.
+  backoff; the run stays in `queued` (before a task exists) or `ordered` (after one does),
+  and the operator sees "in progress", not a failure. Bounded by the task-creation cap
+  above, so "transient" cannot mean "forever".
+- **Terminal** — ЧЗ rejected the filter, the task finished in an error state, the
+  downloaded CSV failed the parser, or a transient failure exhausted its cap. The run
+  becomes `failed` with the parser's own error code where applicable, and only an explicit
+  retry re-orders it.
 
 Every ordering, completion and failure is written to the existing integrations journal
 under `channelType: "chestny_znak"`, so export activity sits in the same feed as token
@@ -202,6 +257,18 @@ operator does not have to know which route a file took.
   poll → download → import), partial success across the six statuses, an expired token, a
   rejected filter, a task that finishes in error, and resumption after a simulated restart
   with a persisted `dispenserTaskId`.
+- The two ambiguous ordering cases, neither reachable from the happy path: a create whose
+  response is lost (the task exists at ЧЗ, the row has no `dispenserTaskId`) must be
+  reconciled to the existing task rather than ordering a second one; and two workers
+  reaching the same `queued` run concurrently must produce exactly one task.
+- Retry as a transition: a failed run reset to `queued` clears the ЧЗ identifiers and the
+  error, keeps `attempts`, keeps the failed `inventory_imports` rows, and — with the
+  check constraint in place — cannot land in a state that violates it.
+- The task-creation cap: a create that fails permanently ends as `failed` with a stable
+  code instead of re-enqueueing forever.
+- Actor attribution: the import is created by `orderedByUserId`, preserved across a
+  restart and across a retry by the same operator, and overwritten when a different
+  operator retries.
 - `chz-token.service.ts`: decryption round-trip, refusal when the encryption key is
   unconfigured, refusal when the stored token has expired.
 - Cabinet endpoints: e2e following the existing inventory test setup, covering pre-flight

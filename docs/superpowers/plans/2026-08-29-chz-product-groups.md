@@ -527,12 +527,24 @@ export class ProductGroupsService {
         alias: schema.chzProductGroups.alias,
         name: schema.chzProductGroups.name,
       })
-      .from(schema.chzProductGroups)
-      .orderBy(asc(schema.chzProductGroups.name));
+      .from(schema.chzProductGroups);
+    // Ordered in Node, not with SQL `ORDER BY`: the database collation is not
+    // guaranteed to order Cyrillic correctly (under "C" the letter «ё» sorts
+    // after «я»), and an explicit `COLLATE "ru-x-icu"` depends on an ICU
+    // collation that may not be installed on every deployment image. Fifty-one
+    // rows are free to sort here.
+    items.sort((left, right) => left.name.localeCompare(right.name, "ru"));
     return { items };
   }
 }
 ```
+
+The test for this must not re-derive its expected order by running `localeCompare` over
+the response — that passes for whatever comparator the service happens to use. Pin a
+hand-authored order instead, including «Лёгкая промышленность» before «Лекарственные
+препараты для медицинского применения»: that is the only pair among the fifty-one names
+where a `"C"`-collation sort and a correct Russian sort disagree, so it is what would
+actually catch a regression to SQL-side ordering.
 
 Match the exact `schema` / `DB` / `Db` import style used by `apps/api/src/modules/products/products.service.ts` — copy its import lines rather than the ones above if they differ.
 

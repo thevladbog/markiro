@@ -66,9 +66,13 @@ any dictionary entry and would be guesswork to convert.
 
 Consequence, stated plainly: `products.status` is computed as `active` only when the group,
 box capacity and pallet capacity are all set, so every product that had a free-text group
-falls back to `draft` until an operator picks its group. Nothing is deleted and no history
-breaks — a `draft` product simply stops appearing in selection surfaces until it is
-completed. Operators must be told before this ships.
+falls back to `draft` until an operator picks its group. The migration performs that reset
+explicitly rather than leaving it to the next edit of each product, so the catalogue is
+never in a state where a product is `active` with no group.
+
+No product rows are deleted and no history breaks; the free-text group values themselves
+are discarded with the column. A `draft` product simply stops appearing in selection
+surfaces until it is completed. Operators must be told before this ships.
 
 ## Blast radius, and what stays untouched
 
