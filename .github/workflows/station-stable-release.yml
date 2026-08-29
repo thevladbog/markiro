@@ -274,11 +274,16 @@ jobs:
         run: |
           set -euo pipefail
           git checkout --detach "$base_sha"
+          # Build the accepted beta source, but execute the release tooling from
+          # the reviewed workflow dispatch SHA. The tooling stays unstaged and
+          # is therefore excluded from the immutable stable source commit.
+          git restore --source="$GITHUB_SHA" --worktree tools/station-release
+          git diff --quiet "$GITHUB_SHA" -- tools/station-release
           version_output="$RUNNER_TEMP/station-stable-version.txt"
           node tools/station-release/version.mjs set-stable "$version" "$version_output"
           test "$(sed -n 's/^version=//p' "$version_output")" = "$version"
           test "$(sed -n 's/^tag=//p' "$version_output")" = "$tag"
-          test "$(git diff --name-only)" = $'apps/station/src-tauri/Cargo.toml\napps/station/src-tauri/tauri.conf.json'
+          test "$(git diff --name-only -- . ':(exclude)tools/station-release/**')" = $'apps/station/src-tauri/Cargo.toml\napps/station/src-tauri/tauri.conf.json'
           git diff --check
           git config user.name "markiro-release-bot"
           git config user.email "release-bot@markiro.local"
