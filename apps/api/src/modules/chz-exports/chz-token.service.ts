@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
 import { and, eq } from "drizzle-orm";
 
@@ -12,10 +12,13 @@ export type ChzTokenResult =
   | { status: "ok"; auth: TrueApiAuth }
   | { status: "unconfigured" }
   | { status: "missing" }
-  | { status: "expired" };
+  | { status: "expired" }
+  | { status: "undecryptable" };
 
 @Injectable()
 export class ChzTokenService {
+  private readonly logger = new Logger(ChzTokenService.name);
+
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly crypto: ChzCryptoService,
@@ -54,15 +57,26 @@ export class ChzTokenService {
     const parsed = chzSignerSettingsSchema.safeParse(channel?.settings ?? {});
     const environment = parsed.success ? parsed.data.environment : "production";
 
+    let token: string;
+    try {
+      token = this.crypto.decrypt(tenantId, {
+        encryptedToken: row.encryptedToken,
+        tokenNonce: row.tokenNonce,
+        tokenTag: row.tokenTag,
+      });
+    } catch {
+      // A rotated encryption key or corrupted ciphertext is an operator-fixable
+      // condition, not a bug. The caller needs to be able to report it rather
+      // than crash.
+      this.logger.warn(`Failed to decrypt ChZ token for tenant: ${tenantId}`);
+      return { status: "undecryptable" };
+    }
+
     return {
       status: "ok",
       auth: {
         baseUrl: CHZ_TRUE_API_BASE_URLS[environment],
-        token: this.crypto.decrypt(tenantId, {
-          encryptedToken: row.encryptedToken,
-          tokenNonce: row.tokenNonce,
-          tokenTag: row.tokenTag,
-        }),
+        token,
       },
     };
   }

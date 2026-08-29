@@ -104,4 +104,27 @@ describe.skipIf(!ready)("ChzTokenService", () => {
       status: "unconfigured",
     });
   });
+
+  it("refuses when the stored ciphertext cannot be decrypted with the configured key", async () => {
+    // Encrypt with one key, but construct the service with a different one.
+    const encryptionKey1 = randomBytes(32);
+    const encryptionKey2 = randomBytes(32);
+    const crypto1 = new ChzCryptoService(encryptionKey1);
+    const crypto2 = new ChzCryptoService(encryptionKey2);
+    const serviceWithDifferentKey = new ChzTokenService(db, crypto2);
+
+    const encrypted = crypto1.encrypt(tenantId, "the-bearer-token");
+    await db.insert(schema.chzApiTokens).values({
+      tenantId,
+      ...encrypted,
+      obtainedAt: new Date(),
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+
+    // The service should catch the decryption error and return the undecryptable
+    // variant rather than rejecting the promise.
+    await expect(serviceWithDifferentKey.getActiveToken(tenantId)).resolves.toEqual({
+      status: "undecryptable",
+    });
+  });
 });

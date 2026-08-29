@@ -681,7 +681,7 @@ git commit -m "feat(api): True API dispenser client"
 
 - Consumes: `ChzCryptoService` from `apps/api/src/modules/signer-agents/chz-crypto.service` (has `configured: boolean` and `decrypt(tenantId, { encryptedToken, tokenNonce, tokenTag }): string`), `CHZ_TRUE_API_BASE_URLS` and `CHZ_CHANNEL_TYPE` from `apps/api/src/modules/signer-agents/chz-constants`, `chzSignerSettingsSchema` from `apps/api/src/modules/integrations/channel-registry`.
 - Produces: `class ChzTokenService` with `getActiveToken(tenantId: string): Promise<ChzTokenResult>` where
-  `type ChzTokenResult = { status: "ok"; auth: { baseUrl: string; token: string } } | { status: "unconfigured" } | { status: "missing" } | { status: "expired" }`.
+  `type ChzTokenResult = { status: "ok"; auth: { baseUrl: string; token: string } } | { status: "unconfigured" } | { status: "missing" } | { status: "expired" } | { status: "undecryptable" }`.
   Task 4 uses it for a pre-flight check; Task 5 uses it per pass.
 
 - [ ] **Step 1: Write the failing test**
@@ -759,7 +759,8 @@ export type ChzTokenResult =
   | { status: "ok"; auth: TrueApiAuth }
   | { status: "unconfigured" }
   | { status: "missing" }
-  | { status: "expired" };
+  | { status: "expired" }
+  | { status: "undecryptable" };
 
 @Injectable()
 export class ChzTokenService {
