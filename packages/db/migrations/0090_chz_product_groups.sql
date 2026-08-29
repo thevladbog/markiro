@@ -59,5 +59,6 @@ INSERT INTO "chz_product_groups" ("code", "alias", "name") VALUES
   (59, 'pyrotechnics', 'Пиротехнические изделия')
 ON CONFLICT ("code") DO NOTHING;--> statement-breakpoint
 ALTER TABLE "products" ADD COLUMN "chz_product_group_code" integer;--> statement-breakpoint
+UPDATE "products" SET "status" = 'draft' WHERE "chz_product_group_code" IS NULL;--> statement-breakpoint
 ALTER TABLE "products" ADD CONSTRAINT "products_chz_product_group_code_chz_product_groups_code_fk" FOREIGN KEY ("chz_product_group_code") REFERENCES "public"."chz_product_groups"("code") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "products" DROP COLUMN "product_group";

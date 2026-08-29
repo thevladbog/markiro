@@ -935,6 +935,31 @@ describe("CatalogPage", () => {
     expect("productGroup" in (lastCreateBody ?? {})).toBe(false);
   });
 
+  it("shows the raw code, not 'not selected', for a set group while the dictionary is still loading", async () => {
+    // The dictionary request hangs forever -- the form must never render the
+    // "no group" placeholder for a product that does have a group code just
+    // because the dictionary hasn't resolved yet.
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      if (path === "/api/chz-product-groups") return new Promise<Response>(() => {});
+      if (isProductsList(path)) return jsonResponse(200, { items: [ACTIVE_PRODUCT] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText(ACTIVE_PRODUCT.name);
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить продукт");
+
+    const groupSelect = screen.getByRole("combobox", { name: "Группа продукции" });
+    expect(within(groupSelect).queryByText("Не выбрана")).toBeNull();
+    expect(within(groupSelect).getByText("Код 8 (нет в справочнике)")).toBeDefined();
+    expect((groupSelect as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("blocks submit and shows a range error when shelfLifeDays exceeds the API's 3650-day bound", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);

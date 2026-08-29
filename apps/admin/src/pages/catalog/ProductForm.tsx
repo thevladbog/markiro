@@ -194,7 +194,11 @@ export function ProductForm({
 }: ProductFormProps) {
   const { t } = useTranslation();
   const canUnlinkIntegrations = useCan(CABINET_CAPABILITY.INTEGRATIONS_WRITE);
-  const { data: productGroups = [] } = useChzProductGroups();
+  const {
+    data: productGroups = [],
+    isPending: productGroupsPending,
+    isError: productGroupsError,
+  } = useChzProductGroups();
   const gtinCheckMutation = useGtinCheck();
   const [ownerHint, setOwnerHint] = useState<GtinCheckResult | null>(null);
   const lastCheckedGtinRef = useRef<string | null>(null);
@@ -323,10 +327,33 @@ export function ProductForm({
     ...counterparties.map((c) => ({ value: c.id, label: c.name })),
   ];
 
+  // While the dictionary is loading, the empty option's label doubles as the
+  // Select's placeholder (see packages/ui/src/components/Select.tsx), so it
+  // must not claim "no group" until we actually know that -- otherwise a
+  // product whose code just hasn't loaded yet reads as unset.
   const productGroupOptions: SelectOption[] = [
-    { value: "", label: t("pages.catalog.form.noProductGroup") },
+    {
+      value: "",
+      label: productGroupsPending
+        ? t("pages.catalog.form.productGroupLoading")
+        : t("pages.catalog.form.noProductGroup"),
+    },
     ...productGroups.map((group) => ({ value: String(group.code), label: group.name })),
   ];
+  // A code the form already holds but that isn't in the loaded (or not-yet-
+  // loaded, or permanently failed) dictionary must still be shown -- as the
+  // raw code -- rather than silently falling back to the "no group"
+  // placeholder, which would misrepresent a set value as unset.
+  const trimmedProductGroupCode = (chzProductGroupCode ?? "").trim();
+  if (
+    trimmedProductGroupCode &&
+    !productGroups.some((group) => String(group.code) === trimmedProductGroupCode)
+  ) {
+    productGroupOptions.push({
+      value: trimmedProductGroupCode,
+      label: t("pages.catalog.form.productGroupUnknownCode", { code: trimmedProductGroupCode }),
+    });
+  }
 
   const applyCounterpartyHint = () => {
     if (ownerHint?.counterpartyId) {
@@ -450,8 +477,12 @@ export function ProductForm({
             label={t("pages.catalog.form.productGroupLabel")}
             options={productGroupOptions}
             value={chzProductGroupCode ?? ""}
+            disabled={productGroupsPending}
             searchable
             searchLabel={t("pages.catalog.form.productGroupSearchLabel")}
+            {...errorProp(
+              productGroupsError ? t("pages.catalog.form.productGroupLoadError") : undefined,
+            )}
             onValueChange={(value) =>
               setValue("chzProductGroupCode", value, { shouldDirty: true, shouldValidate: true })
             }

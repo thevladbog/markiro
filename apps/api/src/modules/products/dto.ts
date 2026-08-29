@@ -165,7 +165,12 @@ export const productOpenApiSchema: SchemaObject = {
       nullable: true,
       description: "Short operator-facing name for the station shift card; null = use `name`.",
     },
-    productGroup: { type: "string", nullable: true },
+    productGroup: {
+      type: "string",
+      nullable: true,
+      description:
+        "Read-only: the resolved name of chzProductGroupCode. Not accepted on write — set chzProductGroupCode instead.",
+    },
     chzProductGroupCode: { type: "integer", nullable: true },
     boxCapacity: { type: "integer", minimum: 1, nullable: true },
     palletCapacity: { type: "integer", minimum: 1, nullable: true },

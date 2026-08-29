@@ -306,6 +306,7 @@ describe.skipIf(!ready)("products e2e", () => {
     expect(downgradeRes.body).toMatchObject({
       status: "draft",
       chzProductGroupCode: 8,
+      boxCapacity: 12,
       palletCapacity: null,
     });
   });
@@ -318,10 +319,15 @@ describe.skipIf(!ready)("products e2e", () => {
       .post("/products")
       .send({ gtin: EAN13_CANONICAL, name: "Unknown group" })
       .expect(201);
-    await agent
+    const res = await agent
       .patch(`/products/${created.body.id as string}`)
       .send({ chzProductGroupCode: 9999 })
       .expect(400);
+    // Pins the FK branch: both the counterparty and the product-group foreign
+    // keys resolve to 400, so without this the test would still pass if the
+    // constraint-name check were dropped or renamed and the endpoint fell
+    // through to the wrong ("Unknown counterparty...") message.
+    expect(res.body.message).toMatch(/product group/i);
   });
 
   it("gtin-check: own prefix (org profile) -> owner=own", async () => {
