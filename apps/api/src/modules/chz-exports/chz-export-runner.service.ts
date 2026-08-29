@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 
 import { DB } from "../../auth/auth.module";
+import { describeErrorForLog } from "../../lib/error-log";
 import { JournalService } from "../integrations/journal.service";
 import type { InventoryImportDto } from "../inventories/dto";
 import { InventoriesService } from "../inventories/inventories.service";
@@ -15,6 +16,29 @@ type ChzExportRunRow = typeof schema.chzExportRuns.$inferSelect;
 
 /** A claim older than this belonged to a worker that is no longer running. */
 const STALE_CLAIM_MS = 5 * 60_000;
+/**
+ * No `finished: false` order gets more than this much wall-clock time in
+ * `ordered`. A pass counter would need a new column; the deadline needs none,
+ * since `markOrdered` already stamps `orderedAt` and an operator cares about
+ * elapsed time, not how many polls it took. Six hours is comfortably longer
+ * than any legitimate dispenser task and shorter than the token's ten-hour
+ * life, so a timeout here is never mistaken for a token problem.
+ */
+const MAX_ORDER_WAIT_MS = 6 * 60 * 60_000;
+/**
+ * A per-run cap on task-creation attempts. `attempts` is incremented once per
+ * claim in `claim()`, so this bounds how many times a `queued` run may be
+ * claimed and sent to `createDispenserTask` before it is failed outright
+ * instead of looping forever against a dispenser that keeps saying
+ * `unavailable`.
+ *
+ * `ChzExportsService.retry()` deliberately preserves `attempts` across an
+ * operator retry — `attempts` is the record of how much quota this status has
+ * already cost, not a per-attempt scratch value — so a run that is retried
+ * while already at this cap must fail fast here rather than clear the counter
+ * and loop again. Do not "fix" that by resetting `attempts` on retry.
+ */
+const MAX_CREATE_ATTEMPTS = 10;
 const ERROR_MESSAGE_LIMIT = 500;
 /** Codes we write into `error_code`: constants below, or a parser diagnostic. */
 const DIAGNOSTIC_CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
@@ -41,6 +65,8 @@ export const CHZ_EXPORT_SAFE_ERROR_CODES = [
   "CHZ_ORDER_CONTEXT_MISSING",
   "CHZ_TASK_REJECTED",
   "CHZ_TASK_FAILED",
+  "CHZ_TASK_TIMED_OUT",
+  "CHZ_CREATE_ATTEMPTS_EXHAUSTED",
   "CHZ_DOWNLOAD_REJECTED",
   "CHZ_IMPORT_FAILED",
 ] as const;
@@ -124,9 +150,19 @@ export class ChzExportRunnerService {
     auth: TrueApiAuth,
     context: OrderContext,
   ): Promise<void> {
-    const queued = (await this.loadRuns(tenantId, inventoryId)).filter(
+    const allQueued = (await this.loadRuns(tenantId, inventoryId)).filter(
       (run) => run.state === "queued",
     );
+    if (allQueued.length === 0) return;
+
+    // A run at the cap is failed outright, before it is claimed again: claiming
+    // would push `attempts` past the cap and cost another create call for an
+    // answer we already know. See `MAX_CREATE_ATTEMPTS`.
+    const exhausted = allQueued.filter((run) => run.attempts >= MAX_CREATE_ATTEMPTS);
+    for (const run of exhausted) {
+      await this.failRun(run, "CHZ_CREATE_ATTEMPTS_EXHAUSTED", null);
+    }
+    const queued = allQueued.filter((run) => run.attempts < MAX_CREATE_ATTEMPTS);
     if (queued.length === 0) return;
 
     const staleCutoff = new Date(Date.now() - STALE_CLAIM_MS);
@@ -186,14 +222,27 @@ export class ChzExportRunnerService {
    * have had its create response lost in flight — the task exists and has
    * already cost the tenant a slot of a finite daily quota.
    *
-   * Adoption is deliberately narrow. ЧЗ's task list reports an id, a state and
-   * a creation time, but not the report filter the task was created with, so a
-   * task cannot be matched to the status that asked for it. What can be
-   * established is that the pairing is forced: exactly one run of this order is
-   * waiting, and exactly one listed task of this product group is not already
-   * held by a run of this tenant and is not older than the waiting run. Anything
-   * less certain creates a second task instead — paying twice is recoverable,
-   * importing another status's (or another inventory's) codes is not.
+   * Adoption is deliberately narrow, but not because a wrong pairing would
+   * corrupt an import: `importEvidence` passes `expectedStatus` and
+   * `expectedGtin14` into `parseChzImport` (`inventories.service.ts`), so an
+   * adopted task for the wrong status fails the parse instead of importing
+   * foreign codes. That risk is already closed downstream.
+   *
+   * The real constraint is that `DispenserTaskSummary` carries no report
+   * filter — no status, no GTIN — so a listed task cannot be matched to the
+   * status that requested it. What can be established without guessing is
+   * that the pairing is forced: exactly one run of this order is waiting, and
+   * exactly one listed task of this product group is not already held by a
+   * run of this tenant and is not older than the waiting run. Anything less
+   * certain would be a guess about a shape of `GET dispenser/tasks`'s response
+   * that nobody has verified against the real API (this plan's runbook has a
+   * sandbox step for that); until it is verified, this stays narrow.
+   *
+   * The honest cost of staying narrow: a pass in which two runs are
+   * simultaneously awaiting a task id creates two tasks even when only one of
+   * them was actually lost, paying twice for what may be the recoverable
+   * case. If the sandbox step finds that `GET dispenser/tasks` does return
+   * enough to match a task to a status, this rule can widen.
    */
   private async resolveAdoption(
     tenantId: string,
@@ -284,10 +333,21 @@ export class ChzExportRunnerService {
     inventoryId: string,
     auth: TrueApiAuth,
   ): Promise<void> {
+    // A run that has been `ordered` longer than a legitimate dispenser task
+    // could ever take is failed here, before the batch poll, regardless of
+    // what that poll would say: a task stuck in `PREPARATION` forever, or a
+    // poll that keeps coming back `unavailable`/`rejected`, would otherwise
+    // never produce a terminal state and the order would retry forever. See
+    // `MAX_ORDER_WAIT_MS`.
+    const deadline = new Date(Date.now() - MAX_ORDER_WAIT_MS);
     const byTaskId = new Map<string, ChzExportRunRow>();
     for (const run of await this.loadRuns(tenantId, inventoryId)) {
       if (run.state !== "ordered") continue;
       if (run.dispenserTaskId === null || run.dispenserTaskId.length === 0) continue;
+      if (run.orderedAt !== null && run.orderedAt < deadline) {
+        await this.failRun(run, "CHZ_TASK_TIMED_OUT", null);
+        continue;
+      }
       byTaskId.set(run.dispenserTaskId, run);
     }
     if (byTaskId.size === 0) return;
@@ -416,17 +476,26 @@ export class ChzExportRunnerService {
       );
       return { finished: false };
     }
-    await this.failNonTerminal(tenantId, inventoryId, "CHZ_TOKEN_UNAVAILABLE");
-    return { finished: true };
+    // Only `queued` runs need a token to make any progress at all. `ordered`
+    // and `ready` runs already paid ЧЗ's finite daily quota for a task or a
+    // report; failing them here would throw that work away for nothing, and an
+    // operator retry would then re-create tasks the tenant already has. Leave
+    // them non-terminal so a later pass, once the tenant's agent refreshes the
+    // token, can still poll or download them. Do not "simplify" this back to
+    // failing every non-terminal run.
+    await this.failNonTerminal(tenantId, inventoryId, "CHZ_TOKEN_UNAVAILABLE", ["queued"]);
+    const after = await this.loadRuns(tenantId, inventoryId);
+    return { finished: after.every(isTerminal) };
   }
 
   private async failNonTerminal(
     tenantId: string,
     inventoryId: string,
     errorCode: ChzExportSafeErrorCode,
+    states: readonly ChzExportRunRow["state"][] = ["queued", "ordered", "ready"],
   ): Promise<void> {
     for (const run of await this.loadRuns(tenantId, inventoryId)) {
-      if (isTerminal(run)) continue;
+      if (!states.includes(run.state)) continue;
       await this.failRun(run, errorCode, null);
     }
   }
@@ -678,19 +747,4 @@ function fileNamePart(taskId: string | null): string {
 /** A result id is not a secret, but it is not worth a full line in a log. */
 function maskId(value: string): string {
   return value.length <= 8 ? value : `${value.slice(0, 8)}…`;
-}
-
-/**
- * Drizzle embeds the failing statement and its bound parameters in a query
- * error's message and stack, so neither is logged raw — same reasoning as
- * `InventoryDocumentRunnerService.describeErrorForLog`.
- */
-function describeErrorForLog(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  const firstLine = error.message.split("\n", 1)[0]!.slice(0, 300);
-  const frames = (error.stack ?? "")
-    .split("\n")
-    .filter((line) => line.trimStart().startsWith("at "))
-    .slice(0, 5);
-  return [firstLine, ...frames].join("\n");
 }

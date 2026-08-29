@@ -1359,9 +1359,10 @@ Expected: FAIL — the module does not exist.
 One pass over one order, in this order:
 
 1. Load the order's runs. If every run is terminal (`imported` or `failed`), return `{ finished: true }` without spending a request.
-2. `getActiveToken`. On anything but `ok`: if `attempt.retryCount < attempt.retryLimit`, journal a warning and return `{ finished: false }` so the job retries; otherwise mark every non-terminal run `failed` with `CHZ_TOKEN_UNAVAILABLE` and return `{ finished: true }`.
+2. `getActiveToken`. On anything but `ok`: if `attempt.retryCount < attempt.retryLimit`, journal a warning and return `{ finished: false }` so the job retries; otherwise fail only the still-`queued` runs with `CHZ_TOKEN_UNAVAILABLE` and return `{ finished: <every run is imported or failed> }`. A `queued` run cannot make progress without a token at all; an `ordered` or `ready` run has already paid ЧЗ's finite daily quota for a task or a report, so it is left non-terminal — a later pass, once the tenant's agent refreshes the token, can still poll or download it.
 3. Read the inventory's `participantInn` (`org_profiles.inn`), the product's `chzProductGroupCode` and its `gtin14` once, for all six.
-4. For each `queued` run, claim it before the request goes out. The claim is what serialises two workers and what makes a lost create response recoverable, so it is one conditional statement:
+4. Before claiming, fail any `queued` run whose `attempts` has already reached `const MAX_CREATE_ATTEMPTS = 10;` with `CHZ_CREATE_ATTEMPTS_EXHAUSTED`, without calling `createDispenserTask`. `attempts` survives an operator retry on purpose (`ChzExportsService.retry()` preserves it), so a run that is retried while already at the cap must fail fast here rather than loop through claim/create again.
+5. For each remaining `queued` run, claim it before the request goes out. The claim is what serialises two workers and what makes a lost create response recoverable, so it is one conditional statement:
 
 ```ts
 const [claimed] = await this.db
@@ -1389,7 +1390,11 @@ The state stays `queued` here — it becomes `ordered` only once a `dispenserTas
 
 If the row already had a claim (`run.claimedAt !== null`) and still has no `dispenserTaskId`, its previous create may have succeeded with the response lost. Do **not** create a second task: call `listDispenserTasks` **once for the whole pass**, cache the result, and adopt a task whose filter matches this run (same product group, same status, not already adopted by another run in this order). Only when no match is found do you `createDispenserTask`.
 
-On `ok`, transition to `ordered` with the id; on `rejected`, `failed` with `CHZ_TASK_REJECTED` and the ЧЗ message; on `unauthorized`, treat as the token case in step 2; on `unavailable`, leave it `queued` for the next pass. 5. Collect every `ordered` run's `dispenserTaskId` and call `listDispenserResults` **once**. For each result reporting completion with a `resultId`, transition to `ready`. A result in a failed/cancelled ЧЗ state becomes `failed` with `CHZ_TASK_FAILED`. 6. For each `ready` run: `downloadDispenserResult`, then
+On `ok`, transition to `ordered` with the id; on `rejected`, `failed` with `CHZ_TASK_REJECTED` and the ЧЗ message; on `unauthorized`, treat as the token case in step 2; on `unavailable`, leave it `queued` for the next pass.
+
+6. Before polling, fail any `ordered` run whose `orderedAt` is older than `const MAX_ORDER_WAIT_MS = 6 * 60 * 60_000;` (six hours — comfortably longer than any legitimate dispenser task, shorter than the token's ten-hour life) with `CHZ_TASK_TIMED_OUT`, and exclude it from the batch poll. Without this, a task stuck in `PREPARATION` forever, or a poll that keeps coming back `unavailable`/`rejected`, would never reach a terminal state and the order would retry forever.
+7. Collect every remaining `ordered` run's `dispenserTaskId` and call `listDispenserResults` **once**. For each result reporting completion with a `resultId`, transition to `ready`. A result in a failed/cancelled ЧЗ state becomes `failed` with `CHZ_TASK_FAILED`.
+8. For each `ready` run: `downloadDispenserResult`, then
 
 ```ts
 const imported = await this.inventories.importEvidence(
@@ -1408,7 +1413,10 @@ const imported = await this.inventories.importEvidence(
 );
 ```
 
-On success transition to `imported` with `importId` and `completedAt`. If `importEvidence` throws, map it to `failed` with the parser's own error code where the exception carries one, and a generic `CHZ_IMPORT_FAILED` otherwise — never put the raw exception message in `errorMessage` without checking it for a token, and prefer the structured code. 7. Journal each ordering, completion and failure via `JournalService.append` with `channelType: CHZ_CHANNEL_TYPE`, `grain: "item"`, and `details` limited to `{ inventoryId, status, dispenserTaskId }`. Wrap each append in its own `try/catch` that logs and continues — a failed journal write is audit noise, not a reason to abandon an order mid-pass, exactly as `signer-scheduler.service.ts:59-75` does. 8. Return `{ finished: <every run is imported or failed> }`.
+On success transition to `imported` with `importId` and `completedAt`. If `importEvidence` throws, map it to `failed` with the parser's own error code where the exception carries one, and a generic `CHZ_IMPORT_FAILED` otherwise — never put the raw exception message in `errorMessage` without checking it for a token, and prefer the structured code.
+
+9. Journal each ordering, completion and failure via `JournalService.append` with `channelType: CHZ_CHANNEL_TYPE`, `grain: "item"`, and `details` limited to `{ inventoryId, status, dispenserTaskId }`. Wrap each append in its own `try/catch` that logs and continues — a failed journal write is audit noise, not a reason to abandon an order mid-pass, exactly as `signer-scheduler.service.ts:59-75` does.
+10. Return `{ finished: <every run is imported or failed> }`.
 
 - [ ] **Step 4: Run the tests**
 

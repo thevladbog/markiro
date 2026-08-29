@@ -24,6 +24,7 @@ import {
 } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
+import { describeErrorForLog } from "../../lib/error-log";
 import { ObjectStorageService } from "../storage/object-storage.service";
 import {
   InventoryResultSourceError,
@@ -291,7 +292,7 @@ export class InventoryDocumentRunnerService {
         } catch (verifyError) {
           this.logger.error(
             `inventory document run ${claimed.id} publication verification failed`,
-            this.describeErrorForLog(verifyError),
+            describeErrorForLog(verifyError),
           );
           throw error;
         }
@@ -305,7 +306,7 @@ export class InventoryDocumentRunnerService {
       if (safeError !== null) {
         this.logger.warn(
           `inventory document run ${claimed.id} generation failed`,
-          this.describeErrorForLog(error),
+          describeErrorForLog(error),
         );
         await this.publishFailed(claimed, safeError);
         return;
@@ -313,13 +314,13 @@ export class InventoryDocumentRunnerService {
       if (attempt.retryCount < attempt.retryLimit) {
         this.logger.warn(
           `inventory document run ${claimed.id} generation failed, requeuing for retry`,
-          this.describeErrorForLog(error),
+          describeErrorForLog(error),
         );
         await this.requeue(claimed);
       } else {
         this.logger.error(
           `inventory document run ${claimed.id} generation failed terminally`,
-          this.describeErrorForLog(error),
+          describeErrorForLog(error),
         );
         await this.publishFailed(claimed, infrastructureErrorCode);
       }
@@ -452,25 +453,6 @@ export class InventoryDocumentRunnerService {
         attemptCount: claimed.attemptCount,
       });
     });
-  }
-
-  /**
-   * Drizzle embeds the full SQL statement and bound parameters in a query
-   * error's `message`/`stack` (params follow the query on later lines), so
-   * logging either raw can leak row data. Bound to the message's first line,
-   * capped, plus a few real stack frames.
-   */
-  private describeErrorForLog(error: unknown): string {
-    if (!(error instanceof Error)) return String(error);
-    // The message itself carries the query/params for driver errors, so cap
-    // it to its first line; keep only real frames (the stack repeats the
-    // message before the first "at ...").
-    const firstLine = error.message.split("\n", 1)[0]!.slice(0, 300);
-    const frames = (error.stack ?? "")
-      .split("\n")
-      .filter((line) => line.trimStart().startsWith("at "))
-      .slice(0, 5);
-    return [firstLine, ...frames].join("\n");
   }
 
   private ownedProcessingAttempt(claimed: InventoryDocumentRunRow) {

@@ -40,6 +40,12 @@ interface FakeClientConfig {
   file?: Uint8Array;
   rejectStatus?: InventoryChzStatus;
   rejection?: { code: string; message: string };
+  /** `createDispenserTask` returns `unavailable` for this status instead of creating a task. */
+  unavailableStatus?: InventoryChzStatus;
+  /** `createDispenserTask` returns `unauthorized` for this status instead of creating a task. */
+  unauthorizedStatus?: InventoryChzStatus;
+  /** `listDispenserResults` returns this status instead of `ok` with `results`. */
+  resultsStatus?: "rejected" | "unavailable";
 }
 
 interface FakeClient {
@@ -68,6 +74,18 @@ function fakeClient(config: FakeClientConfig = {}): FakeClient {
             message: config.rejection?.message ?? "",
           };
         }
+        if (
+          config.unavailableStatus !== undefined &&
+          input.chzStatus === config.unavailableStatus
+        ) {
+          return { status: "unavailable" as const };
+        }
+        if (
+          config.unauthorizedStatus !== undefined &&
+          input.chzStatus === config.unauthorizedStatus
+        ) {
+          return { status: "unauthorized" as const };
+        }
         const taskId = (config.createTaskId ?? ((status: string) => `task-${status}`))(
           input.chzStatus as InventoryChzStatus,
         );
@@ -80,6 +98,12 @@ function fakeClient(config: FakeClientConfig = {}): FakeClient {
     }),
     listDispenserResults: vi.fn(async (_auth: unknown, taskIds: string[]) => {
       calls.push({ op: "listDispenserResults", taskIds: [...taskIds] });
+      if (config.resultsStatus === "rejected") {
+        return { status: "rejected" as const, code: "400", message: "" };
+      }
+      if (config.resultsStatus === "unavailable") {
+        return { status: "unavailable" as const };
+      }
       return { status: "ok" as const, value: config.results ?? [] };
     }),
     downloadDispenserResult: vi.fn(async (_auth: unknown, resultId: string) => {
@@ -222,6 +246,8 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     state: "queued" | "ordered";
     taskIdFor?: (status: InventoryChzStatus) => string;
     claimedAtFor?: (status: InventoryChzStatus) => Date | null;
+    orderedAtFor?: (status: InventoryChzStatus) => Date;
+    attemptsFor?: (status: InventoryChzStatus) => number;
   }): Promise<void> {
     for (const status of INVENTORY_CHZ_STATUSES) {
       const taskId = options.taskIdFor ? options.taskIdFor(status) : null;
@@ -233,7 +259,10 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
         dispenserTaskId: options.state === "ordered" ? (taskId ?? `task-${status}`) : taskId,
         orderedByUserId,
         claimedAt: options.claimedAtFor ? options.claimedAtFor(status) : null,
-        ...(options.state === "ordered" ? { orderedAt: new Date() } : {}),
+        attempts: options.attemptsFor ? options.attemptsFor(status) : 0,
+        ...(options.state === "ordered"
+          ? { orderedAt: options.orderedAtFor ? options.orderedAtFor(status) : new Date() }
+          : {}),
       });
     }
   }
@@ -268,6 +297,25 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     expect(calls.filter((call) => call.op === "listDispenserResults")).toHaveLength(1);
   });
 
+  it("fails a run at the creation-attempt cap without calling createDispenserTask", async () => {
+    await seedRuns({ state: "queued", attemptsFor: (status) => (status === "EMITTED" ? 10 : 0) });
+    const { client, calls } = fakeClient();
+    await runnerWith(client).run(tenantId, inventoryId, { retryCount: 0, retryLimit: 5 });
+
+    const [emitted] = await runsFor(inventoryId, "EMITTED");
+    expect(emitted).toMatchObject({
+      state: "failed",
+      errorCode: "CHZ_CREATE_ATTEMPTS_EXHAUSTED",
+      attempts: 10,
+    });
+    expect(
+      calls.filter((call) => call.op === "createDispenserTask" && call.chzStatus === "EMITTED"),
+    ).toHaveLength(0);
+    // The other five statuses are unaffected by one status's exhausted cap.
+    const others = (await runsFor(inventoryId)).filter((row) => row.status !== "EMITTED");
+    expect(others.every((row) => row.state === "ordered")).toBe(true);
+  });
+
   it("polls all six tasks in one batch request", async () => {
     await seedRuns({ state: "ordered", taskIdFor: (status) => `task-${status}` });
     const { client, calls } = fakeClient({ results: [] });
@@ -277,6 +325,41 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     expect([...(poll.taskIds ?? [])].sort()).toEqual(
       INVENTORY_CHZ_STATUSES.map((status) => `task-${status}`).sort(),
     );
+  });
+
+  it("leaves ordered runs untouched and the order unfinished on an unavailable batch poll", async () => {
+    await seedRuns({ state: "ordered", taskIdFor: (status) => `task-${status}` });
+    const warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+    const { client } = fakeClient({ resultsStatus: "unavailable" });
+    const outcome = await runnerWith(client).run(tenantId, inventoryId, {
+      retryCount: 0,
+      retryLimit: 5,
+    });
+    // A batch poll that fails says nothing about any individual task, so every
+    // run stays exactly as it was -- not failed, not readvanced.
+    expect(outcome).toEqual({ finished: false });
+    expect((await runsFor(inventoryId)).every((row) => row.state === "ordered")).toBe(true);
+    warn.mockRestore();
+  });
+
+  it("fails an order whose orderedAt is older than the deadline with CHZ_TASK_TIMED_OUT", async () => {
+    const staleOrderedAt = new Date(Date.now() - 7 * 60 * 60_000); // past MAX_ORDER_WAIT_MS (6h)
+    await seedRuns({
+      state: "ordered",
+      taskIdFor: (status) => `task-${status}`,
+      orderedAtFor: (status) => (status === "EMITTED" ? staleOrderedAt : new Date()),
+    });
+    const { client, calls } = fakeClient({ results: [] });
+    await runnerWith(client).run(tenantId, inventoryId, { retryCount: 0, retryLimit: 5 });
+
+    const [emitted] = await runsFor(inventoryId, "EMITTED");
+    expect(emitted).toMatchObject({ state: "failed", errorCode: "CHZ_TASK_TIMED_OUT" });
+    // The timed-out task is excluded from the batch poll -- it is already
+    // decided, not still awaiting an answer.
+    const poll = calls.find((call) => call.op === "listDispenserResults")!;
+    expect(poll.taskIds).not.toContain("task-EMITTED");
+    const others = (await runsFor(inventoryId)).filter((row) => row.status !== "EMITTED");
+    expect(others.every((row) => row.state === "ordered")).toBe(true);
   });
 
   it("hands the downloaded archive to importEvidence untouched and as a .zip", async () => {
@@ -411,6 +494,43 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     ).toHaveLength(1);
   });
 
+  it("leaves a run queued, not failed, when task creation is unavailable", async () => {
+    await seedRuns({ state: "queued" });
+    const { client } = fakeClient({ unavailableStatus: "EMITTED" });
+    await runnerWith(client).run(tenantId, inventoryId, { retryCount: 0, retryLimit: 5 });
+
+    const [row] = await runsFor(inventoryId, "EMITTED");
+    // `unavailable` (including a 429) is a wait, not a refusal: the run stays
+    // queued for the next pass to claim again rather than being failed.
+    expect(row).toMatchObject({ state: "queued", errorCode: null });
+    const others = (await runsFor(inventoryId)).filter((run) => run.status !== "EMITTED");
+    expect(others.every((run) => run.state === "ordered")).toBe(true);
+  });
+
+  it("refuses adoption when two runs are simultaneously awaiting a task id", async () => {
+    // Two runs claimed long enough ago to be stale, both still queued with no
+    // task id. The pairing is no longer forced, so adoption must refuse rather
+    // than guess which orphan belongs to which run -- `listDispenserTasks` is
+    // not even called.
+    await seedRuns({
+      state: "queued",
+      claimedAtFor: (status) =>
+        status === "EMITTED" || status === "RETIRED" ? new Date(Date.now() - STALE_CLAIM) : null,
+    });
+    const { client, calls } = fakeClient({
+      existingTasks: [{ taskId: "task-orphan", status: "PREPARATION", createdAt: null }],
+    });
+    await runnerWith(client).run(tenantId, inventoryId, { retryCount: 0, retryLimit: 5 });
+
+    expect(calls.filter((call) => call.op === "listDispenserTasks")).toHaveLength(0);
+    const [emitted] = await runsFor(inventoryId, "EMITTED");
+    const [retired] = await runsFor(inventoryId, "RETIRED");
+    // Each pays for its own new task instead of one adopting the orphan --
+    // the honest cost of a rule too narrow to arbitrate between two claimants.
+    expect(emitted).toMatchObject({ state: "ordered", dispenserTaskId: "task-EMITTED" });
+    expect(retired).toMatchObject({ state: "ordered", dispenserTaskId: "task-RETIRED" });
+  });
+
   it("keeps runs non-terminal and reports unfinished when a token is unavailable", async () => {
     await seedRuns({ state: "queued" });
     tokens.getActiveToken.mockResolvedValue({ status: "expired" });
@@ -426,6 +546,22 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     warn.mockRestore();
   });
 
+  it("unwinds through the token path on a mid-pass unauthorized", async () => {
+    await seedRuns({ state: "queued" });
+    const warn = vi.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+    const { client } = fakeClient({ unauthorizedStatus: "EMITTED" });
+    const outcome = await runnerWith(client).run(tenantId, inventoryId, {
+      retryCount: 0,
+      retryLimit: 5,
+    });
+    // A 401/403 anywhere in the pass is the same condition as a token that
+    // failed to load: the job retries rather than failing runs outright.
+    expect(outcome).toEqual({ finished: false });
+    const [emitted] = await runsFor(inventoryId, "EMITTED");
+    expect(emitted).toMatchObject({ state: "queued", errorCode: null });
+    warn.mockRestore();
+  });
+
   it("fails the remaining runs when the attempt budget is exhausted", async () => {
     await seedRuns({ state: "queued" });
     tokens.getActiveToken.mockResolvedValue({ status: "expired" });
@@ -438,6 +574,45 @@ describe.skipIf(!ready)("ChzExportRunnerService", () => {
     const rows = await runsFor(inventoryId);
     expect(rows.every((row) => row.state === "failed")).toBe(true);
     expect(rows.every((row) => row.errorCode === "CHZ_TOKEN_UNAVAILABLE")).toBe(true);
+  });
+
+  it("leaves ordered and ready runs alone when the token budget is exhausted", async () => {
+    // Five runs already ordered (ЧЗ-side work already paid for), one still
+    // queued. An exhausted token budget must not throw the five in-flight
+    // tasks away -- only the queued run, which cannot make progress without a
+    // token at all, is failed.
+    await seedRuns({
+      state: "ordered",
+      taskIdFor: (status) => `task-${status}`,
+    });
+    await db
+      .update(schema.chzExportRuns)
+      .set({
+        state: "queued",
+        dispenserTaskId: null,
+        resultId: null,
+        importId: null,
+        errorCode: null,
+        completedAt: null,
+        orderedAt: null,
+      })
+      .where(
+        and(
+          eq(schema.chzExportRuns.inventoryId, inventoryId),
+          eq(schema.chzExportRuns.status, "EMITTED"),
+        ),
+      );
+    tokens.getActiveToken.mockResolvedValue({ status: "expired" });
+    const { client } = fakeClient();
+    const outcome = await runnerWith(client).run(tenantId, inventoryId, {
+      retryCount: 5,
+      retryLimit: 5,
+    });
+    expect(outcome).toEqual({ finished: false });
+    const [emitted] = await runsFor(inventoryId, "EMITTED");
+    expect(emitted).toMatchObject({ state: "failed", errorCode: "CHZ_TOKEN_UNAVAILABLE" });
+    const others = (await runsFor(inventoryId)).filter((run) => run.status !== "EMITTED");
+    expect(others.every((run) => run.state === "ordered")).toBe(true);
   });
 
   it("reports finished without spending a request once every run is terminal", async () => {
