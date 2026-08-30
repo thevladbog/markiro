@@ -88,11 +88,14 @@ export function PrinterSetupPanel({
 
   return (
     <div className="setup-split">
-      <section className="setup-card" aria-label={t("setup.printerTransport")}>
+      <section
+        className="setup-card setup-card--printer-config"
+        aria-label={t("setup.printerTransport")}
+      >
         <h2 className="setup-card__title">{t("setup.connectionTitle")}</h2>
-        <fieldset className="setup-choice-group">
+        <fieldset className="setup-choice-group setup-choice-group--printer-transport">
           <legend>{t("setup.printerTransport")}</legend>
-          <div className="setup-choice-group__options">
+          <div className="setup-choice-group__options setup-choice-group__options--transport">
             {transportChoices.map((choice) => (
               <label className="setup-touch-choice" key={choice.value}>
                 <input
@@ -172,7 +175,7 @@ export function PrinterSetupPanel({
           )}
         </div>
 
-        <fieldset className="setup-choice-group">
+        <fieldset className="setup-choice-group setup-choice-group--printer-language">
           <legend>{t("setup.printerLanguage")}</legend>
           <div className="setup-choice-group__options setup-choice-group__options--compact">
             {(["zpl", "tspl"] as const).map((value) => (

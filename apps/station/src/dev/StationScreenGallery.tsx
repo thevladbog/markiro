@@ -475,7 +475,10 @@ function SimpleInventoryFixture({ variant }: { variant: string }) {
             ? {
                 outcome: "date-mismatch",
                 activeDate: GALLERY_INVENTORY_DATE,
-                codeDate: "2026-08-18",
+                // Must stay inside [productionDateFrom, productionDateTo]; an
+                // out-of-range date suppresses the adopt button and renders the
+                // degenerate "date is outside the task range" branch instead.
+                codeDate: "2026-08-20",
                 mixed: false,
                 raw: "gallery-held-scan",
               }

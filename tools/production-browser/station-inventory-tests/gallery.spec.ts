@@ -183,11 +183,12 @@ test("all inventory gallery fixtures satisfy the bilingual floor viewport contra
         await expect(gallery).toHaveAttribute("data-gallery-state", state);
         await expect(gallery).toHaveAttribute("data-gallery-locale", locale);
         if (state === "inventory-task-selection") {
-          const warehouseLabel = locale === "ru" ? /Складские операции/ : /Warehouse operations/;
-          await expect(page.getByRole("tab", { name: warehouseLabel })).toHaveAttribute(
-            "aria-selected",
-            "true",
-          );
+          // The floor screen has no tablist: #324 replaced it with a category-specific
+          // title plus a single header action. The warehouse category is active when the
+          // title is the warehouse one and the action offers the way back to production.
+          const warehouseTitle = locale === "ru" ? "Складские операции" : "Warehouse operations";
+          await expect(page.getByRole("heading", { level: 1, name: warehouseTitle })).toBeVisible();
+          await expect(gallery.locator("button[data-floor-category='production']")).toBeVisible();
           await expect(
             page.getByRole("button", {
               name: locale === "ru" ? "Продолжить INV-00047" : "Continue INV-00047",

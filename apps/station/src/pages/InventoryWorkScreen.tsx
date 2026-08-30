@@ -618,6 +618,8 @@ function CheckInventoryWorkScreen({
                 unknown: t("inventory.work.verdict.unknown"),
                 duplicateHere: t("inventory.work.verdict.duplicateHere"),
                 duplicateOther: t("inventory.work.verdict.duplicateOther"),
+                terminalHere: t("inventory.work.verdict.terminalHere"),
+                terminalOther: t("inventory.work.verdict.terminalOther"),
                 invalid: t("inventory.work.verdict.invalid"),
                 writeFailed: t("inventory.work.verdict.writeFailed"),
                 boxAccepted: (count) => t("inventory.work.verdict.boxAccepted", { count }),

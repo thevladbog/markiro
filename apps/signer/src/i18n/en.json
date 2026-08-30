@@ -31,5 +31,11 @@
     "expiring": "The certificate expires {{at}}. Issue a new one, or token refresh will stop working.",
     "expired": "The certificate expired {{at}}. Signing is not possible."
   },
+  "updates": {
+    "available": "Version {{version}} is available. Updating restarts the agent.",
+    "install": "Update and restart",
+    "installing": "Updating…",
+    "failed": "Could not install the update. Check the connection and try again."
+  },
   "journal": { "empty": "No events yet" }
 }

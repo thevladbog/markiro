@@ -15,11 +15,13 @@ discover the same failure by hand.
 
 ## Known limitations (as built, not as originally specced)
 
-- **No auto-update check yet.** The updater plugin is registered and the release
-  workflow produces signed artifacts, but nothing in the app calls the updater's
-  check/download/install APIs. Today "auto-update" only means the artifacts exist —
-  getting a fix onto a customer machine still requires manually shipping a new
-  installer, not a self-triggered update.
+- **Updates never install themselves.** The agent checks the mirror at startup
+  and once a day, announces an available version in the tray once, and then
+  waits: nothing downloads or installs until the operator presses the button in
+  the window. This is by design — installing restarts the agent, and the agent
+  is what keeps the tenant's token fresh. See
+  [`signer-release.md`](signer-release.md) for cutting a release and for
+  verifying the update path end to end.
 - **The local journal is in-memory, not a rolling file.** It holds the last 200 entries
   and is empty again after any restart (crash, update, reboot, `Отвязать агента`). If an
   incident happened overnight and the process restarted since, the journal cannot answer
@@ -35,47 +37,22 @@ discover the same failure by hand.
 - `CHZ_TOKEN_ENCRYPTION_KEY` configured on the API instance, otherwise the
   scheduler pauses and no task is ever enqueued.
 
-## One-time setup: the updater signing key
+## The updater signing key
 
-The app ships with a placeholder `plugins.updater.pubkey` value
-(`REPLACE_WITH_SIGNER_MINISIGN_PUBLIC_KEY`) in
-`apps/signer/src-tauri/tauri.conf.json`. This is intentional: generating and
-holding the updater's private key is a product-owner action, not something an
-agent session should do, because whoever runs the keygen command ends up
-holding (even briefly) the private key material and must be the one who
-stores it as a repository secret. Do this once, before the first signed
-release build (it is not required for the manual sandbox verification below,
-which only needs `tauri build`, not a signed updater artifact):
+Done, and not to be redone. The minisign keypair exists: the public half is
+committed as `plugins.updater.pubkey` in
+`apps/signer/src-tauri/tauri.conf.json`, and the private half and its password
+are secrets in the `station-release` GitHub environment
+(`SIGNER_TAURI_SIGNING_PRIVATE_KEY`, `SIGNER_TAURI_SIGNING_PRIVATE_KEY_PASSWORD`).
 
-1. Run, on a trusted machine, from the repo root:
+Regenerating the keypair strands every already-installed agent — an agent only
+accepts updates signed by the key it shipped with — so treat the committed
+public key as fixed. Rotating it is a migration, not a config change.
 
-   ```bash
-   pnpm --filter @markiro/signer exec tauri signer generate -w ~/.markiro/signer-updater.key
-   ```
-
-   This prints a public key and writes the private key + password to
-   `~/.markiro/signer-updater.key` (and prompts for or generates a password —
-   keep it).
-
-2. Replace `REPLACE_WITH_SIGNER_MINISIGN_PUBLIC_KEY` in
-   `apps/signer/src-tauri/tauri.conf.json` (`plugins.updater.pubkey`) with the
-   printed public key, and commit that change on its own.
-
-3. Store the private key file's contents and its password as two GitHub
-   repository secrets, never committed:
-   - `SIGNER_TAURI_SIGNING_PRIVATE_KEY` — the contents of
-     `~/.markiro/signer-updater.key`.
-   - `SIGNER_TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — the password chosen in
-     step 1.
-
-4. Delete the local private key file once it is safely stored, or keep it in
-   a password manager — do not leave it on disk on a shared machine.
-
-Until this is done, `tauri.stable.conf.json` and `tauri.conf.json` correctly
-have no working updater signature, and
-`apps/signer/test/tauri-release-config.test.ts` is written to pass either way
-(it only asserts that a pubkey string is present in the base config, not that
-it is real).
+None of this is needed for the manual sandbox verification below, which builds
+with plain `tauri build` and never produces a signed updater artifact. It
+matters only for the release workflow; see
+[`signer-release.md`](signer-release.md).
 
 ## Steps
 

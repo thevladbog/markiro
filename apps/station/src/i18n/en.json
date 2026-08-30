@@ -298,6 +298,8 @@
         "unknown": "Code is absent from the source snapshot",
         "duplicateHere": "Code was already checked on this terminal",
         "duplicateOther": "Code was already checked on another terminal",
+        "terminalHere": "This terminal",
+        "terminalOther": "Another terminal",
         "invalid": "Code not recognized",
         "writeFailed": "Scan was not saved — scan again"
       },
