@@ -243,6 +243,30 @@ it("renders approved live evidence with stale participants and local pending wor
   ).toBeDefined();
 });
 
+it("labels a scan that has no code result with the localized verdict", async () => {
+  // An `old_box` scan never produces an `inventory_code_results` row, so the
+  // API sends `classification: null` and the chip has nothing but
+  // `authoritativeVerdict` to show -- which is a raw server token.
+  const boxScan = {
+    ...progress,
+    recentEvents: [
+      {
+        ...progress.recentEvents[0],
+        codeResultId: null,
+        kind: "old_box",
+        displayIdentity: "(00)046012345600000016",
+        authoritativeVerdict: "applied",
+        classification: null,
+        observedProductionDate: null,
+      },
+    ],
+  };
+  renderLive([boxScan]);
+  expect(await screen.findByRole("heading", { level: 1, name: "IVN-26-0042" })).toBeDefined();
+  expect(screen.getByText("Принят")).toBeDefined();
+  expect(screen.queryByText("applied")).toBeNull();
+});
+
 it("polls at the bounded interval while running and stops after the server reports closed", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const closed = { ...progress, status: "closed" };

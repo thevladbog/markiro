@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { formatInventoryEventIdentity } from "../src/modules/inventories/inventory-event-display.js";
+import {
+  formatInventoryBoxIdentity,
+  formatInventoryEventIdentity,
+  formatKmHri,
+} from "../src/modules/inventories/inventory-event-display.js";
 
 describe("formatInventoryEventIdentity", () => {
   it("renders an item as a readable GTIN and serial without exposing crypto tails", () => {
@@ -27,5 +31,29 @@ describe("formatInventoryEventIdentity", () => {
     const fallback = `item:${"b".repeat(64)}`;
     expect(formatInventoryEventIdentity("item", null, fallback)).toBe(fallback);
     expect(formatInventoryEventIdentity("item", "not-a-km", fallback)).toBe(fallback);
+  });
+});
+
+describe("formatKmHri", () => {
+  it("renders parts the snapshot already holds, with no raw payload to parse", () => {
+    // Discrepancy rows carry `gtin14`/`serial` columns rather than a scan, so
+    // they format the same identity without going through `canonicalizeKm`.
+    expect(formatKmHri("04600000000015", "PROTECTED-FOUND")).toBe(
+      "(01)04600000000015 (21)PROTECTED-FOUND",
+    );
+  });
+});
+
+describe("formatInventoryBoxIdentity", () => {
+  it("renders a bare SSCC in GS1 human-readable form", () => {
+    expect(formatInventoryBoxIdentity("146000000000000012", "new_box:146000000000000012")).toBe(
+      "(00)146000000000000012",
+    );
+  });
+
+  it("keeps the stored identity rather than throwing on an unusable SSCC", () => {
+    // A discrepancy list must not 500 on one malformed row.
+    expect(formatInventoryBoxIdentity("146000000000000011", "new_box:bad")).toBe("new_box:bad");
+    expect(formatInventoryBoxIdentity("", "new_box:bad")).toBe("new_box:bad");
   });
 });

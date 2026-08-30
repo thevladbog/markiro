@@ -1,16 +1,44 @@
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
-import { AdminPage, Alert, Card, Spinner, StatusChip } from "@markiro/ui";
+import { AdminPage, Alert, Card, Spinner, StatusChip, type StatusChipStatus } from "@markiro/ui";
 
 import { useInventoryProgress } from "./api.js";
 import { InventoryClosePanel } from "./InventoryClosePanel.js";
 import { InventoryDocuments } from "./InventoryDocuments.js";
-import type { InventoryDetail } from "./schemas.js";
-import { inventoryStatusChipProps } from "./status.js";
+import type { InventoryDetail, InventoryRecentEvent } from "./schemas.js";
+import {
+  INVENTORY_EVENT_VERDICT_CHIP,
+  inventoryStatusChipProps,
+  isInventoryEventVerdict,
+} from "./status.js";
 
 function formatCount(value: number, locale: string): string {
   return new Intl.NumberFormat(locale).format(value);
+}
+
+/**
+ * Чип скана: классификация, если у события есть строка результата, иначе —
+ * вердикт синхронизации. Неизвестный вердикт остаётся как есть: показать сырой
+ * токен честнее, чем упасть на отсутствующем ключе перевода.
+ */
+function recentEventChipProps(
+  event: InventoryRecentEvent,
+  t: (key: string) => string,
+): { status: StatusChipStatus; label: string } {
+  if (event.classification !== null) {
+    return {
+      status: event.classification === "expected" ? "ok" : "warn",
+      label: t(`pages.inventory.live.classification.${event.classification}`),
+    };
+  }
+  if (isInventoryEventVerdict(event.authoritativeVerdict)) {
+    return {
+      status: INVENTORY_EVENT_VERDICT_CHIP[event.authoritativeVerdict],
+      label: t(`pages.inventory.live.verdict.${event.authoritativeVerdict}`),
+    };
+  }
+  return { status: "neutral", label: event.authoritativeVerdict };
 }
 
 export function InventoryLivePage({
@@ -162,7 +190,9 @@ export function InventoryLivePage({
               {data.boxes.map((box) => (
                 <li key={box.id}>
                   <span>
-                    <strong className="mk-inventory-mono">{box.sscc}</strong>
+                    <strong className="mk-inventory-mono mk-inventory-mono--sscc">
+                      {box.sscc}
+                    </strong>
                     <small>{box.terminalName}</small>
                   </span>
                   <span className="mk-inventory-evidence-list__state">
@@ -190,14 +220,7 @@ export function InventoryLivePage({
                   <strong className="mk-inventory-mono">{event.displayIdentity}</strong>
                   <small>{event.terminalName}</small>
                 </span>
-                <StatusChip
-                  status={event.classification === "expected" ? "ok" : "warn"}
-                  label={
-                    event.classification
-                      ? t(`pages.inventory.live.classification.${event.classification}`)
-                      : event.authoritativeVerdict
-                  }
-                />
+                <StatusChip {...recentEventChipProps(event, t)} />
               </li>
             ))}
           </ul>

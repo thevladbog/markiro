@@ -490,6 +490,12 @@
           "ineligible": "Ineligible",
           "unknown": "Unknown",
           "voided": "Voided"
+        },
+        "verdict": {
+          "pending": "Pending",
+          "applied": "Applied",
+          "duplicate": "Duplicate",
+          "rejected": "Rejected"
         }
       },
       "close": {

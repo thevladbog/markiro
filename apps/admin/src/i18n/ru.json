@@ -490,6 +490,12 @@
           "ineligible": "Не учитывается",
           "unknown": "Неизвестный",
           "voided": "Отменён"
+        },
+        "verdict": {
+          "pending": "В обработке",
+          "applied": "Принят",
+          "duplicate": "Дубль",
+          "rejected": "Отклонён"
         }
       },
       "close": {

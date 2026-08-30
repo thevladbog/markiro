@@ -2,6 +2,20 @@ import { canonicalizeKm, formatSsccHri, parseScannedSscc } from "@markiro/domain
 
 export type InventoryEventKind = "item" | "known_box" | "old_box";
 
+/** The GS1 human-readable pair every cabinet list prints for a marking code. */
+export function formatKmHri(gtin14: string, serial: string): string {
+  return `(01)${gtin14} (21)${serial}`;
+}
+
+/**
+ * The box form of the same identity. Never throws: one unusable SSCC must cost
+ * its own row's readability, not the whole list.
+ */
+export function formatInventoryBoxIdentity(sscc: string, fallback: string): string {
+  const parsed = parseScannedSscc(sscc);
+  return parsed === null ? fallback : formatSsccHri(parsed);
+}
+
 /** Converts retained scan evidence into a readable, non-secret admin identity. */
 export function formatInventoryEventIdentity(
   kind: InventoryEventKind,
@@ -13,12 +27,11 @@ export function formatInventoryEventIdentity(
   if (kind === "item") {
     try {
       const km = canonicalizeKm(rawPayload);
-      return `(01)${km.gtin14} (21)${km.serial}`;
+      return formatKmHri(km.gtin14, km.serial);
     } catch {
       return fallback;
     }
   }
 
-  const sscc = parseScannedSscc(rawPayload);
-  return sscc === null ? fallback : formatSsccHri(sscc);
+  return formatInventoryBoxIdentity(rawPayload, fallback);
 }

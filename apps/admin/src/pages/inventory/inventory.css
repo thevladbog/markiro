@@ -446,8 +446,14 @@
   gap: 12px;
 }
 
+/**
+ * The box column's minimum is the widest action it can hold: «Поставить
+ * перепечать в очередь» measures 241px, and the card spends 42px of the
+ * column on its own padding. Below ~283px the button had to give the caption
+ * a second line, so 300px keeps a caption's worth of headroom.
+ */
 .mk-inventory-correction-layout--repack {
-  grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr);
+  grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);
 }
 
 .mk-inventory-evidence-list,
@@ -490,9 +496,11 @@
 }
 
 /**
- * Scan identities are the API's raw `normalized_identity`
- * (`item:<64 hex chars>`), a 69-character string with no break opportunity in
- * it. Without `anywhere` its min-content width (662px) becomes the minimum
+ * Scan identities normally arrive human-readable (`(01)… (21)…`, `(00)…`,
+ * `inventory-event-display.ts`), but an event whose `raw_payload` is missing
+ * or unparseable still falls back to the stored `normalized_identity`
+ * (`item:<64 hex chars>`) — a 69-character string with no break opportunity
+ * in it. Without `anywhere` its min-content width (662px) becomes the minimum
  * width of the whole row, which pushes the corrections list's action buttons
  * out of their card and under the neighbouring one. `anywhere` (not
  * `break-word`) is required: only it lets the intrinsic minimum collapse.
@@ -500,6 +508,15 @@
 .mk-inventory-mono {
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
+}
+
+/**
+ * An SSCC is 18 digits that mean nothing split in half, and it is short enough
+ * (173px) that no column has to break it. Opt it back out of the rule above,
+ * which would otherwise wrap it between two arbitrary digits.
+ */
+.mk-inventory-mono--sscc {
+  overflow-wrap: normal;
 }
 
 .mk-inventory-correction-list__actions {
@@ -521,6 +538,15 @@
 
 .mk-inventory-correction-list__actions {
   justify-content: flex-start;
+}
+
+/**
+ * The buttons are flex items, so a column narrower than a caption shrinks them
+ * down to it and the caption wraps out of the 32px button box. Wrapping is the
+ * container's job (`flex-wrap: wrap` above) — a caption stays whole.
+ */
+.mk-inventory-correction-list__actions .mk-btn {
+  white-space: nowrap;
 }
 
 .mk-inventory-correction-filters {
