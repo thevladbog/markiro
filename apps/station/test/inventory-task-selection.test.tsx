@@ -994,6 +994,56 @@ describe("TaskSelection inventory entry", () => {
     expect(screen.getByRole("button", { name: "New shift" })).toBeDefined();
   });
 
+  it("shows three warehouse tasks per page at the compact 1024 viewport", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 768 });
+    const exec = executor();
+    await applyMigrations(exec);
+    const scan = scanner();
+    const tasks = [
+      task,
+      {
+        ...task,
+        inventoryId: "11111111-1111-4111-8111-111111111112",
+        inventoryNumber: "INV-00048",
+      },
+      {
+        ...task,
+        inventoryId: "11111111-1111-4111-8111-111111111113",
+        inventoryNumber: "INV-00049",
+      },
+      {
+        ...task,
+        inventoryId: "11111111-1111-4111-8111-111111111114",
+        inventoryNumber: "INV-00050",
+      },
+    ];
+    const { api } = client({ inventoryLists: [{ items: tasks }] });
+    render(
+      <TaskSelection
+        client={api}
+        exec={exec}
+        source={scan.source}
+        operatorId="66666666-6666-4666-8666-666666666666"
+        currentLineName="Розлив №2"
+        onShiftSelected={() => {}}
+        onInventorySelected={() => {}}
+        onNew={() => {}}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Warehouse operations 4" }));
+    expect(await screen.findByRole("button", { name: "Continue INV-00047" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Continue INV-00048" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Continue INV-00049" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Continue INV-00050" })).toBeNull();
+    expect(screen.getByText("1 of 2")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next task" }));
+    expect(screen.getByRole("button", { name: "Continue INV-00050" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Continue INV-00047" })).toBeNull();
+  });
+
   it("does not refetch task lists when App replaces only its generation-check callback", async () => {
     const exec = executor();
     await applyMigrations(exec);
