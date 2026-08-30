@@ -419,6 +419,27 @@
   font-family: var(--font-mono);
 }
 
+.mk-inventory-live-metric--link {
+  text-decoration: none;
+  transition:
+    border-color 120ms,
+    filter 120ms,
+    transform 60ms;
+}
+
+.mk-inventory-live-metric--link:hover {
+  filter: brightness(1.06);
+}
+
+.mk-inventory-live-metric--link:active {
+  transform: translateY(1px);
+}
+
+.mk-inventory-live-metric--link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 .mk-inventory-live-metric--ok {
   border-color: var(--ok-border);
   background: var(--ok-bg);

@@ -462,7 +462,8 @@
         "pending_many": "{{count}} events on stations have not synced yet",
         "pending_other": "{{count}} events on stations have not synced yet",
         "participants": "Participants",
-        "boxes": "Boxes",
+        "verifiedBoxes": "Verified boxes",
+        "newBoxes": "New boxes",
         "boxesTruncated": "Showing the latest {{shown}} of {{total}} boxes",
         "recentEvents": "Recent events",
         "none": "No data yet",
@@ -483,6 +484,20 @@
           "open": "Open",
           "closed": "Closed",
           "invalidated": "Invalidated"
+        },
+        "printState": {
+          "not_ready": "Not ready to print",
+          "pending": "Queued for printing",
+          "printing": "Printing",
+          "printed": "Printed",
+          "failed": "Print failed"
+        },
+        "verdict": {
+          "applied": "Applied",
+          "duplicate": "Repeated scan",
+          "replay": "Reprocessed",
+          "rejected": "Rejected",
+          "quarantined": "Needs review"
         },
         "classification": {
           "expected": "Expected",

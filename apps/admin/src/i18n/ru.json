@@ -462,7 +462,8 @@
         "pending_many": "{{count}} событий на терминалах ещё не синхронизированы",
         "pending_other": "{{count}} события на терминалах ещё не синхронизированы",
         "participants": "Участники",
-        "boxes": "Короба",
+        "verifiedBoxes": "Проверенные короба",
+        "newBoxes": "Новые короба",
         "boxesTruncated": "Показаны последние {{shown}} из {{total}} коробов",
         "recentEvents": "Последние события",
         "none": "Пока нет данных",
@@ -483,6 +484,20 @@
           "open": "Открыт",
           "closed": "Закрыт",
           "invalidated": "Аннулирован"
+        },
+        "printState": {
+          "not_ready": "Не готова к печати",
+          "pending": "В очереди на печать",
+          "printing": "Печатается",
+          "printed": "Напечатана",
+          "failed": "Ошибка печати"
+        },
+        "verdict": {
+          "applied": "Учтён",
+          "duplicate": "Повторный скан",
+          "replay": "Повторно обработан",
+          "rejected": "Отклонён",
+          "quarantined": "Требует проверки"
         },
         "classification": {
           "expected": "Ожидаемый",

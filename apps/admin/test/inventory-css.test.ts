@@ -36,4 +36,10 @@ describe("inventory.css contracts", () => {
     // Only `@media (max-width: ...)` preludes may mention it -- no declaration.
     expect(css).not.toMatch(/^\s*max-width:/m);
   });
+
+  it("gives linked inventory metrics a visible keyboard focus", () => {
+    expect(css).toMatch(
+      /\.mk-inventory-live-metric--link:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\);[^}]*outline-offset:\s*2px;/s,
+    );
+  });
 });
