@@ -1,4 +1,12 @@
-import { useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import type { DashboardOverviewDto, DashboardPeriod } from "./api.js";
@@ -12,6 +20,7 @@ interface ProductionDynamicsProps {
   overview: DashboardOverviewDto;
   period: DashboardPeriod;
   onPeriodChange: (period: DashboardPeriod) => void;
+  refreshing: boolean;
 }
 
 interface SeriesPoint {
@@ -38,11 +47,35 @@ interface SeriesDefinition {
   emptyText?: string;
 }
 
+interface BarTooltipState {
+  owner: string;
+  index: number;
+  text: string;
+  left: number;
+  top: number;
+}
+
+interface BarTooltipProps {
+  tooltip: BarTooltipState | null;
+  tooltipId: string;
+  onTooltipShow: (owner: string, index: number, text: string, target: HTMLElement) => void;
+  onTooltipHide: (owner: string) => void;
+  onTooltipDismiss: (owner: string) => void;
+}
+
 const PERIODS: DashboardPeriod[] = ["today", "7d", "30d", "12w"];
 
-export function ProductionDynamics({ overview, period, onPeriodChange }: ProductionDynamicsProps) {
+export function ProductionDynamics({
+  overview,
+  period,
+  onPeriodChange,
+  refreshing,
+}: ProductionDynamicsProps) {
   const { t, i18n } = useTranslation();
   const [metric, setMetric] = useState<DashboardMetric>("rate");
+  const [barTooltip, setBarTooltip] = useState<BarTooltipState | null>(null);
+  const tooltipHideTimer = useRef<number | undefined>(undefined);
+  const barTooltipId = useId();
   const dynamics = overview.dynamics;
   const number = new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 1 });
   const metricLabel = t(`pages.dashboard.dynamics.${metric}`);
@@ -55,6 +88,69 @@ export function ProductionDynamics({ overview, period, onPeriodChange }: Product
   const validationSeries = getValidationSeries(overview, metric, bucketLabels, t);
   const aggregationSeries = getAggregationSeries(overview, metric, bucketLabels, t);
 
+  useEffect(
+    () => () => {
+      if (tooltipHideTimer.current !== undefined) {
+        window.clearTimeout(tooltipHideTimer.current);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (barTooltip === null) return;
+
+    function dismissTooltipOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      if (tooltipHideTimer.current !== undefined) {
+        window.clearTimeout(tooltipHideTimer.current);
+        tooltipHideTimer.current = undefined;
+      }
+      setBarTooltip(null);
+    }
+
+    document.addEventListener("keydown", dismissTooltipOnEscape);
+    return () => document.removeEventListener("keydown", dismissTooltipOnEscape);
+  }, [barTooltip]);
+
+  function keepBarTooltipOpen() {
+    if (tooltipHideTimer.current !== undefined) {
+      window.clearTimeout(tooltipHideTimer.current);
+      tooltipHideTimer.current = undefined;
+    }
+  }
+
+  function showBarTooltip(owner: string, index: number, text: string, target: HTMLElement) {
+    keepBarTooltipOpen();
+    const bounds = target.getBoundingClientRect();
+    const tooltipHalfWidth = Math.min(140, Math.max(80, window.innerWidth / 2 - 12));
+    const left = Math.min(
+      Math.max(bounds.left + bounds.width / 2, tooltipHalfWidth + 12),
+      window.innerWidth - tooltipHalfWidth - 12,
+    );
+    setBarTooltip({
+      owner,
+      index,
+      text,
+      left,
+      top: Math.max(12, bounds.top - 8),
+    });
+  }
+
+  function dismissBarTooltip(owner: string) {
+    keepBarTooltipOpen();
+    setBarTooltip((current) => (current?.owner === owner ? null : current));
+  }
+
+  function hideBarTooltip(owner: string) {
+    keepBarTooltipOpen();
+    tooltipHideTimer.current = window.setTimeout(() => {
+      tooltipHideTimer.current = undefined;
+      setBarTooltip((current) => (current?.owner === owner ? null : current));
+    }, 120);
+  }
+
   return (
     <section aria-labelledby="dashboard-dynamics-title" className="mk-dashboard-dynamics">
       <div className="mk-dashboard-panel-header mk-dashboard-dynamics__header">
@@ -63,6 +159,16 @@ export function ProductionDynamics({ overview, period, onPeriodChange }: Product
           <p>{t("pages.dashboard.dynamics.shiftHourNote")}</p>
         </div>
         <div className="mk-dashboard-dynamics__controls">
+          <span className="mk-dashboard-dynamics__refresh-slot">
+            {refreshing ? (
+              <span
+                className="mk-dashboard-refreshing"
+                role="status"
+                aria-label={t("pages.dashboard.refreshing.title")}
+                title={t("pages.dashboard.refreshing.hint")}
+              />
+            ) : null}
+          </span>
           <div
             className="mk-dashboard-segmented"
             role="group"
@@ -107,6 +213,12 @@ export function ProductionDynamics({ overview, period, onPeriodChange }: Product
           })}
           series={[validationSeries]}
           number={number}
+          refreshing={refreshing}
+          tooltip={barTooltip}
+          tooltipId={barTooltipId}
+          onTooltipShow={showBarTooltip}
+          onTooltipHide={hideBarTooltip}
+          onTooltipDismiss={dismissBarTooltip}
           missingRate={
             metric === "rate" &&
             validationSeries.points.some((point) => point.value === null && point.hasOutput)
@@ -120,6 +232,12 @@ export function ProductionDynamics({ overview, period, onPeriodChange }: Product
           })}
           series={aggregationSeries}
           number={number}
+          refreshing={refreshing}
+          tooltip={barTooltip}
+          tooltipId={barTooltipId}
+          onTooltipShow={showBarTooltip}
+          onTooltipHide={hideBarTooltip}
+          onTooltipDismiss={dismissBarTooltip}
           missingRate={
             metric === "rate" &&
             aggregationSeries.some((series) =>
@@ -135,6 +253,21 @@ export function ProductionDynamics({ overview, period, onPeriodChange }: Product
           sources: dynamics.quality.sources.join(", "),
         })}
       </p>
+      {barTooltip && typeof document !== "undefined"
+        ? createPortal(
+            <span
+              id={barTooltipId}
+              className="mk-dashboard-bar-tooltip"
+              role="tooltip"
+              style={{ left: barTooltip.left, top: barTooltip.top }}
+              onMouseEnter={keepBarTooltipOpen}
+              onMouseLeave={() => hideBarTooltip(barTooltip.owner)}
+            >
+              {barTooltip.text}
+            </span>,
+            document.body,
+          )
+        : null}
     </section>
   );
 }
@@ -238,22 +371,43 @@ function ModeChart({
   regionLabel,
   series,
   number,
+  refreshing,
+  tooltip,
+  tooltipId,
+  onTooltipShow,
+  onTooltipHide,
+  onTooltipDismiss,
   missingRate,
 }: {
   title: string;
   regionLabel: string;
   series: SeriesDefinition[];
   number: Intl.NumberFormat;
+  refreshing: boolean;
   missingRate: boolean;
-}) {
+} & BarTooltipProps) {
   const { t } = useTranslation();
 
   return (
-    <section className="mk-dashboard-mode-chart" role="region" aria-label={regionLabel}>
+    <section
+      className="mk-dashboard-mode-chart"
+      role="region"
+      aria-label={regionLabel}
+      aria-busy={refreshing}
+    >
       <h3>{title}</h3>
       <div className="mk-dashboard-mode-chart__series">
         {series.map((item) => (
-          <SeriesChart key={item.key} series={item} number={number} />
+          <SeriesChart
+            key={item.key}
+            series={item}
+            number={number}
+            tooltip={tooltip}
+            tooltipId={tooltipId}
+            onTooltipShow={onTooltipShow}
+            onTooltipHide={onTooltipHide}
+            onTooltipDismiss={onTooltipDismiss}
+          />
         ))}
       </div>
       {missingRate ? (
@@ -265,13 +419,51 @@ function ModeChart({
   );
 }
 
-function SeriesChart({ series, number }: { series: SeriesDefinition; number: Intl.NumberFormat }) {
+function SeriesChart({
+  series,
+  number,
+  tooltip,
+  tooltipId,
+  onTooltipShow,
+  onTooltipHide,
+  onTooltipDismiss,
+}: { series: SeriesDefinition; number: Intl.NumberFormat } & BarTooltipProps) {
   const { t } = useTranslation();
+  const barRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const [keyboardIndex, setKeyboardIndex] = useState(0);
   const numericValues = series.points.flatMap((point) =>
     point.value === null ? [] : [point.value],
   );
   const maximum = Math.max(0, ...numericValues);
   const hasProduction = series.points.some((point) => point.hasOutput);
+  const showStaticValues = series.points.length <= 7;
+  const activeKeyboardIndex = Math.min(keyboardIndex, Math.max(0, series.points.length - 1));
+
+  function moveKeyboardFocus(event: ReactKeyboardEvent<HTMLElement>, index: number) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onTooltipDismiss(series.key);
+      return;
+    }
+
+    const lastIndex = series.points.length - 1;
+    let nextIndex: number | undefined;
+
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = index === lastIndex ? 0 : index + 1;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = index === 0 ? lastIndex : index - 1;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = lastIndex;
+    }
+
+    if (nextIndex === undefined || nextIndex < 0) return;
+    event.preventDefault();
+    setKeyboardIndex(nextIndex);
+    barRefs.current[nextIndex]?.focus();
+  }
 
   return (
     <div className="mk-dashboard-series">
@@ -307,11 +499,34 @@ function SeriesChart({ series, number }: { series: SeriesDefinition; number: Int
 
             return (
               <li key={`${point.label}-${index}`}>
-                <span className="mk-dashboard-bars__value">{formattedValue}</span>
+                {showStaticValues ? (
+                  <span className="mk-dashboard-bars__value">{formattedValue}</span>
+                ) : null}
                 <span
+                  ref={(element) => {
+                    barRefs.current[index] = element;
+                  }}
                   className={`mk-dashboard-bars__track${point.value === null ? " mk-dashboard-bars__track--missing" : ""}`}
                   role="img"
                   aria-label={ariaLabel}
+                  aria-describedby={
+                    tooltip?.owner === series.key && tooltip.index === index ? tooltipId : undefined
+                  }
+                  tabIndex={index === activeKeyboardIndex ? 0 : -1}
+                  onMouseEnter={(event) =>
+                    onTooltipShow(series.key, index, ariaLabel, event.currentTarget)
+                  }
+                  onMouseLeave={(event) => {
+                    if (document.activeElement !== event.currentTarget) {
+                      onTooltipHide(series.key);
+                    }
+                  }}
+                  onFocus={(event) => {
+                    setKeyboardIndex(index);
+                    onTooltipShow(series.key, index, ariaLabel, event.currentTarget);
+                  }}
+                  onBlur={() => onTooltipDismiss(series.key)}
+                  onKeyDown={(event) => moveKeyboardFocus(event, index)}
                 >
                   <span className="mk-dashboard-bars__bar" style={style} />
                 </span>
@@ -426,9 +641,14 @@ function formatBucketLabels(
       : new Intl.DateTimeFormat(locale, {
           day: "2-digit",
           ...(sameMonth ? {} : { month: "2-digit" as const }),
-          ...(sameYear ? {} : { year: "numeric" as const }),
           timeZone,
         });
+  const compactYearFormatter = new Intl.DateTimeFormat(locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone,
+  });
   const completeFormatter = new Intl.DateTimeFormat(locale, {
     day: "2-digit",
     month: "2-digit",
@@ -437,23 +657,46 @@ function formatBucketLabels(
     timeZone,
   });
   const labelStride = Math.max(1, Math.ceil((buckets.length - 1) / 6));
+  const lastIndex = buckets.length - 1;
+  const denseLabels = buckets.length > 7 || (!sameYear && buckets.length > 2);
+  const visibleLabelIndexes = new Set<number>();
+
+  if (lastIndex >= 0) {
+    visibleLabelIndexes.add(0);
+    visibleLabelIndexes.add(lastIndex);
+  }
+
+  if (denseLabels) {
+    calendarParts.forEach((current, index) => {
+      const previous = calendarParts[index - 1];
+      const startsNewMonth =
+        previous !== undefined &&
+        current !== undefined &&
+        (previous.year !== current.year || previous.month !== current.month);
+      if (startsNewMonth && index >= 2 && lastIndex - index >= 2) {
+        visibleLabelIndexes.add(index);
+      }
+    });
+
+    for (let index = 0; index <= lastIndex; index += labelStride) {
+      if ([...visibleLabelIndexes].every((visibleIndex) => Math.abs(visibleIndex - index) >= 2)) {
+        visibleLabelIndexes.add(index);
+      }
+    }
+  }
 
   return dates.map((date, index) => {
     const previous = calendarParts[index - 1];
     const current = calendarParts[index];
-    const startsNewMonth =
-      previous !== undefined &&
-      current !== undefined &&
-      (previous.year !== current.year || previous.month !== current.month);
+    const startsNewYear =
+      previous !== undefined && current !== undefined && previous.year !== current.year;
+    const includesContextualYear =
+      grain !== "hour" && !sameYear && (index === 0 || index === lastIndex || startsNewYear);
+
     return {
-      compact: compactFormatter.format(date),
+      compact: (includesContextualYear ? compactYearFormatter : compactFormatter).format(date),
       complete: completeFormatter.format(date),
-      show:
-        buckets.length <= 12 ||
-        index === 0 ||
-        index === buckets.length - 1 ||
-        index % labelStride === 0 ||
-        startsNewMonth,
+      show: !denseLabels || visibleLabelIndexes.has(index),
     };
   });
 }
