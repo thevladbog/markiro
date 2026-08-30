@@ -26,7 +26,9 @@ The Station is a fleet of terminals where a bad build strands a production line,
 
 `releases.markiro.app` is the existing Yandex Object Storage mirror the Station already publishes to under `station/`. The signer publishes under `signer/stable/` in the same bucket, reusing `YANDEX_STATION_RELEASE_ACCESS_KEY_ID` and `YANDEX_STATION_RELEASE_SECRET_ACCESS_KEY` — this is the owner's decision, on the grounds that a separate service account would draw a boundary nobody needs between two artifacts of the same product.
 
-`tauri.conf.json`'s updater endpoint currently reads `https://releases.markiro.app/signer/beta/latest.json`. It changes to `signer/stable/latest.json`, because there is no beta channel.
+**The channel split already exists in the app and is left alone.** `apps/signer/src-tauri/tauri.conf.json` carries the beta endpoint and the pubkey; `tauri.stable.conf.json` is an overlay that only overrides the endpoint to `signer/stable/latest.json`, and `apps/signer/test/tauri-release-config.test.ts` pins both. The release builds with `--config src-tauri/tauri.stable.conf.json`, exactly as the Station's stable workflow does.
+
+"One channel" therefore means one release workflow, not one config: nothing publishes to `signer/beta/` and no agent is configured to read it, but the two-file arrangement the agent already ships costs nothing to keep and is what a future beta channel would need.
 
 Two targets:
 
