@@ -40,16 +40,18 @@
 ### Task 1: Make voided scans non-blocking at safe close
 
 **Files:**
+
 - Modify: apps/api/test/inventory-close.e2e.test.ts
 - Modify: apps/api/src/modules/inventories/inventory-close.service.ts
 
 **Interfaces:**
+
 - Consumes: existing InventoryCloseService.preview() and close().
 - Produces: discrepancy blockers for unknown, ineligible, and date_mismatch only; voidedCount remains available.
 
 - [ ] **Step 1: Write the failing regression test**
 
-~~~ts
+```ts
 it("does not treat an audited voided scan as a safe-close blocker", async () => {
   const fixture = await seedRunningInventory();
   await db
@@ -66,21 +68,24 @@ it("does not treat an audited voided scan as a safe-close blocker", async () => 
       discrepancyCategory: "voided",
     }),
   );
-  await fixture.agent.post("/inventories/" + fixture.inventoryId + "/close").send({}).expect(201);
+  await fixture.agent
+    .post("/inventories/" + fixture.inventoryId + "/close")
+    .send({})
+    .expect(201);
 });
-~~~
+```
 
 - [ ] **Step 2: Run the test and confirm the current failure**
 
-~~~bash
+```bash
 pnpm --filter @markiro/api exec vitest run test/inventory-close.e2e.test.ts
-~~~
+```
 
 Expected: FAIL because preview emits a voided blocker or safe close returns 409.
 
 - [ ] **Step 3: Remove only the voided blocker emission**
 
-~~~ts
+```ts
 for (const [category, count] of [
   ["unknown", closeState.unknownCount],
   ["ineligible", closeState.ineligibleCount],
@@ -90,7 +95,7 @@ for (const [category, count] of [
     blockers.push(blocker("UNRESOLVED_DISCREPANCY", { count, discrepancyCategory: category }));
   }
 }
-~~~
+```
 
 - [ ] **Step 4: Run the focused close suite**
 
@@ -98,14 +103,15 @@ Run the command from Step 2. Expected: PASS, including existing blocker assertio
 
 - [ ] **Step 5: Commit**
 
-~~~bash
+```bash
 git add apps/api/src/modules/inventories/inventory-close.service.ts apps/api/test/inventory-close.e2e.test.ts
 git commit -m "fix(inventory): allow safe close after voiding scans"
-~~~
+```
 
 ### Task 2: Add batch audit persistence
 
 **Files:**
+
 - Modify: packages/db/src/schema/inventory.ts
 - Create: packages/db/migrations/0104_inventory_correction_batches.sql
 - Create: packages/db/migrations/meta/0104_snapshot.json
@@ -114,6 +120,7 @@ git commit -m "fix(inventory): allow safe close after voiding scans"
 - Modify: packages/db/test/schema.test.ts
 
 **Interfaces:**
+
 - Produces: schema.inventoryCorrectionBatches, inferred batch types, and nullable inventoryCorrections.batchId.
 - Consumed by: InventoryCorrectionBatchesService in Task 5.
 
@@ -121,7 +128,7 @@ git commit -m "fix(inventory): allow safe close after voiding scans"
 
 Migrate a scratch database through index 103, insert a legacy correction, apply all migrations, and assert:
 
-~~~ts
+```ts
 expect(schema.inventoryCorrectionBatches).toBeDefined();
 expect(schema.inventoryCorrections.batchId).toBeDefined();
 expect(
@@ -132,13 +139,13 @@ expect(
 await expect(insertForeignTenantBatchReference(pool)).rejects.toThrow(
   /inventory_corrections_tenant_batch_fk/,
 );
-~~~
+```
 
 - [ ] **Step 2: Run the tests and confirm failure**
 
-~~~bash
+```bash
 pnpm --filter @markiro/db exec vitest run test/schema.test.ts test/inventory-correction-batches-migration.test.ts
-~~~
+```
 
 Expected: FAIL because the table, column, and migration do not exist.
 
@@ -146,7 +153,7 @@ Expected: FAIL because the table, column, and migration do not exist.
 
 Define inventoryCorrectionBatches before inventoryCorrections:
 
-~~~ts
+```ts
 export const inventoryCorrectionBatches = pgTable(
   "inventory_correction_batches",
   {
@@ -156,7 +163,9 @@ export const inventoryCorrectionBatches = pgTable(
     action: inventoryCorrectionActionEnum("action").notNull(),
     reason: text("reason").notNull(),
     requestDigest: char("request_digest", { length: 64 }).notNull(),
-    actorUserId: text("actor_user_id").notNull().references(() => user.id),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => user.id),
     selectedEventCount: integer("selected_event_count").notNull(),
     affectedCodeCount: integer("affected_code_count").notNull(),
     resultRevision: integer("result_revision").notNull(),
@@ -189,17 +198,14 @@ export const inventoryCorrectionBatches = pgTable(
       "inventory_correction_batches_digest_check",
       sql`${table.requestDigest} ~ '^[0-9a-f]{64}$'`,
     ),
-    check(
-      "inventory_correction_batches_revision_check",
-      sql`${table.resultRevision} > 0`,
-    ),
+    check("inventory_correction_batches_revision_check", sql`${table.resultRevision} > 0`),
   ],
 );
-~~~
+```
 
 Add:
 
-~~~ts
+```ts
 batchId: uuid("batch_id"),
 foreignKey({
   name: "inventory_corrections_tenant_batch_fk",
@@ -216,39 +222,40 @@ index("inventory_corrections_batch_idx").on(
   table.batchId,
   table.id,
 ),
-~~~
+```
 
 Export InventoryCorrectionBatch and NewInventoryCorrectionBatch.
 
 - [ ] **Step 4: Generate and inspect migration 0104**
 
-~~~bash
+```bash
 pnpm --filter @markiro/db db:generate --name inventory_correction_batches
-~~~
+```
 
 It must create only this table/column/constraints/indexes and leave legacy rows nullable. If Drizzle chooses another 0104 filename, use that exact generated filename.
 
 - [ ] **Step 5: Run DB verification**
 
-~~~bash
+```bash
 pnpm --filter @markiro/db exec vitest run test/schema.test.ts test/inventory-correction-batches-migration.test.ts
 pnpm --filter @markiro/db typecheck
 pnpm --filter @markiro/db lint
 pnpm --filter @markiro/db build
-~~~
+```
 
 Expected: PASS. Report an explicit migration-test skip if DATABASE_URL is absent.
 
 - [ ] **Step 6: Commit**
 
-~~~bash
+```bash
 git add packages/db/src/schema/inventory.ts packages/db/migrations packages/db/test/schema.test.ts packages/db/test/inventory-correction-batches-migration.test.ts
 git commit -m "feat(db): add inventory correction batches"
-~~~
+```
 
 ### Task 3: Build one event-level evidence query and copy identity
 
 **Files:**
+
 - Create: apps/api/src/modules/inventories/inventory-evidence-query.ts
 - Modify: apps/api/src/modules/inventories/inventory-event-display.ts
 - Modify: apps/api/src/modules/inventories/inventory-reconciliation.service.ts
@@ -258,12 +265,13 @@ git commit -m "feat(db): add inventory correction batches"
 - Create: apps/api/test/inventory-event-display.test.ts
 
 **Interfaces:**
+
 - Produces: InventoryEvidenceFilter, buildInventoryEvidenceRowsSql(), resolveInventoryEvidenceEvents(), formatInventoryEventCopyIdentity(), grouped DTO fields, and list metadata.
 - Consumed by: batch service in Task 5 and Admin contracts in Task 6.
 
 - [ ] **Step 1: Write failing identity and evidence tests**
 
-~~~ts
+```ts
 expect(formatInventoryEventCopyIdentity("item", "]d2010468008990038321SERIAL")).toBe(
   "010468008990038321SERIAL",
 );
@@ -272,11 +280,11 @@ expect(formatInventoryEventCopyIdentity("known_box", "(00)046800899000600163")).
 );
 expect(formatInventoryEventCopyIdentity("item", null)).toBeNull();
 expect(formatInventoryEventCopyIdentity("item", "invalid")).toBeNull();
-~~~
+```
 
 Seed one known-box event with twenty results and assert:
 
-~~~ts
+```ts
 expect(response.body.items).toHaveLength(1);
 expect(response.body.items[0]).toMatchObject({
   eventId: boxEventId,
@@ -291,19 +299,19 @@ expect(response.body).toMatchObject({
   allMatchingActions: ["void_scan"],
   allMatchingAffectedCodeCount: 20,
 });
-~~~
+```
 
 Also cover scope=discrepancies, category=date_mismatch, classification=unknown, search, pagination, and rawPayload=null.
 
 - [ ] **Step 2: Run focused tests and confirm failure**
 
-~~~bash
+```bash
 pnpm --filter @markiro/api exec vitest run test/inventory-event-display.test.ts test/inventory-reconciliation.e2e.test.ts
-~~~
+```
 
 - [ ] **Step 3: Implement canonical copy identity**
 
-~~~ts
+```ts
 export function formatInventoryEventCopyIdentity(
   kind: InventoryEventKind,
   rawPayload: string | null,
@@ -319,7 +327,7 @@ export function formatInventoryEventCopyIdentity(
   const sscc = parseScannedSscc(rawPayload);
   return sscc === null ? null : "00" + sscc;
 }
-~~~
+```
 
 - [ ] **Step 4: Add strict query and response contracts**
 
@@ -329,7 +337,7 @@ Extend the query with scope defaulting to all and optional actionable discrepanc
 
 Export:
 
-~~~ts
+```ts
 export interface InventoryEvidenceFilter {
   scope: "all" | "discrepancies";
   search?: string;
@@ -338,10 +346,7 @@ export interface InventoryEvidenceFilter {
   discrepancyCategory?: InventoryActionableDiscrepancyCategory;
 }
 
-export type InventoryActionableDiscrepancyCategory =
-  | "ineligible"
-  | "unknown"
-  | "date_mismatch";
+export type InventoryActionableDiscrepancyCategory = "ineligible" | "unknown" | "date_mismatch";
 
 export type InventoryEvidenceTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -378,32 +383,34 @@ export async function resolveInventoryEvidenceEvents(
   tx: InventoryEvidenceTransaction,
   input: ResolveInventoryEvidenceInput,
 ): Promise<InventoryEvidenceSelectionEvent[]>;
-~~~
+```
 
 The SQL must be tenant/inventory scoped, group by scan event, compute date mismatch only for non-voided rows, return stable distinct arrays, use EXISTS semantics for classification/category/scope, apply explicit IDs/exclusions in the same query, and order by scannedAt desc/eventId desc. InventoryReconciliationService must use this query for total, page rows, allMatchingActions, and allMatchingAffectedCodeCount.
 
 - [ ] **Step 6: Run tests and commit**
 
-~~~bash
+```bash
 pnpm --filter @markiro/api exec vitest run test/inventory-event-display.test.ts test/inventory-reconciliation.e2e.test.ts
 git add apps/api/src/modules/inventories/inventory-evidence-query.ts apps/api/src/modules/inventories/inventory-event-display.ts apps/api/src/modules/inventories/inventory-reconciliation.service.ts apps/api/src/modules/inventories/dto.ts apps/api/src/modules/inventories/inventories.controller.ts apps/api/test/inventory-event-display.test.ts apps/api/test/inventory-reconciliation.e2e.test.ts
 git commit -m "feat(inventory): expose actionable event evidence"
-~~~
+```
 
 ### Task 4: Return the correct live box projection
 
 **Files:**
+
 - Modify: apps/api/src/modules/inventories/dto.ts
 - Modify: apps/api/src/modules/inventories/inventory-reconciliation.service.ts
 - Modify: apps/api/test/inventory-reconciliation.e2e.test.ts
 
 **Interfaces:**
+
 - Produces: InventoryVerifiedBoxDto and verifiedBoxTotal, verifiedBoxesTruncated, verifiedBoxes.
 - Consumed by: InventoryLivePage in Task 7.
 
 - [ ] **Step 1: Write failing progress tests**
 
-~~~ts
+```ts
 expect(progress.body).toMatchObject({
   verifiedBoxTotal: 1,
   verifiedBoxesTruncated: false,
@@ -419,19 +426,19 @@ expect(progress.body.verifiedBoxes).toEqual([
 expect(progress.body.recentEvents).toContainEqual(
   expect.objectContaining({ eventId: duplicateEventId, authoritativeVerdict: "duplicate" }),
 );
-~~~
+```
 
 Add 101 unique applied boxes and assert the first 100 are returned, total is 101, and truncation is true.
 
 - [ ] **Step 2: Run the suite and confirm failure**
 
-~~~bash
+```bash
 pnpm --filter @markiro/api exec vitest run test/inventory-reconciliation.e2e.test.ts
-~~~
+```
 
 - [ ] **Step 3: Add DTO/OpenAPI fields and query**
 
-~~~ts
+```ts
 export interface InventoryVerifiedBoxDto {
   eventId: string;
   sscc: string;
@@ -440,21 +447,22 @@ export interface InventoryVerifiedBoxDto {
   scannedAt: string;
   affectedCodeCount: number;
 }
-~~~
+```
 
 Use row_number() partitioned by normalized_identity over applied known_box events, keep row 1, join child results for affectedCodeCount, fetch 101 rows, and exclude duplicate verdicts. Keep existing repack boxes fields.
 
 - [ ] **Step 4: Run tests and commit**
 
-~~~bash
+```bash
 pnpm --filter @markiro/api exec vitest run test/inventory-reconciliation.e2e.test.ts
 git add apps/api/src/modules/inventories/dto.ts apps/api/src/modules/inventories/inventory-reconciliation.service.ts apps/api/test/inventory-reconciliation.e2e.test.ts
 git commit -m "feat(inventory): report verified existing boxes"
-~~~
+```
 
 ### Task 5: Implement atomic bulk corrections
 
 **Files:**
+
 - Create: apps/api/src/modules/inventories/inventory-correction-batches.service.ts
 - Create: apps/api/src/modules/inventories/inventory-correction-common.ts
 - Create: apps/api/test/inventory-correction-batches.e2e.test.ts
@@ -465,6 +473,7 @@ git commit -m "feat(inventory): report verified existing boxes"
 - Modify: apps/api/test/inventory-corrections.e2e.test.ts
 
 **Interfaces:**
+
 - Consumes: schema.inventoryCorrectionBatches, inventoryCorrections.batchId, and resolveInventoryEvidenceEvents().
 - Produces: POST /inventories/:id/corrections/batch and strict batch request/response types.
 
@@ -472,7 +481,7 @@ git commit -m "feat(inventory): report verified existing boxes"
 
 Cover explicit selection, all_matching plus exclusions, known-box fan-out, both actions, one revision increment, per-code audit/progress, replay/mismatch, stale/empty/changed selection, active-box date conflict, total rollback, cross-tenant denial, read-only subscription, closed inventory, and unknown fields.
 
-~~~ts
+```ts
 expect(response.body).toMatchObject({
   action: "void_scan",
   selectedEventCount: 2,
@@ -486,20 +495,20 @@ expect(corrections).toHaveLength(21);
 expect(new Set(corrections.map((row) => row.resultRevision))).toEqual(new Set([5]));
 expect(corrections.every((row) => row.batchId === batches[0]?.id)).toBe(true);
 expect((await progressChangeRows(fixture)).every((row) => row.resultRevision === 5)).toBe(true);
-~~~
+```
 
 - [ ] **Step 2: Run batch tests and confirm failure**
 
-~~~bash
+```bash
 pnpm --filter @markiro/db build
 pnpm --filter @markiro/api exec vitest run test/inventory-correction-batches.e2e.test.ts
-~~~
+```
 
 Expected: FAIL because the route and DTO do not exist.
 
 - [ ] **Step 3: Add strict DTO and OpenAPI schemas**
 
-~~~ts
+```ts
 const uniqueUuidArray = z
   .array(z.string().uuid())
   .min(1)
@@ -510,11 +519,9 @@ const batchFilterSchema = z.strictObject({
   search: z.string().trim().min(1).max(128).optional(),
   kind: z.enum(INVENTORY_EVIDENCE_KINDS).optional(),
   classification: z.enum(INVENTORY_EVIDENCE_CLASSIFICATIONS).optional(),
-  discrepancyCategory: z
-    .enum(["ineligible", "unknown", "date_mismatch"])
-    .optional(),
+  discrepancyCategory: z.enum(["ineligible", "unknown", "date_mismatch"]).optional(),
 });
-~~~
+```
 
 Build strict explicit/all_matching selection branches and the strict void_scan/change_date union exactly as the spec. The response requires id, action, selectedEventCount, affectedCodeCount, resultRevision, and createdAt.
 
@@ -522,7 +529,7 @@ Build strict explicit/all_matching selection branches and the strict void_scan/c
 
 Move the existing SHA-256 digest, deterministic UUID builder, codeResultProjection, database timestamp reader, and progress-change row construction into inventory-correction-common.ts. Preserve the single endpoint’s v1 UUID namespace and request digest. Run inventory-corrections.e2e.test.ts before adding batch behavior.
 
-~~~ts
+```ts
 export function inventoryCorrectionUuid(
   namespace: "single" | "batch" | "batch-child",
   ...parts: readonly string[]
@@ -538,18 +545,18 @@ interface CodeResultProjectionInput {
   observedProductionDate: string | null;
   updatedAt: Date;
 }
-~~~
+```
 
 - [ ] **Step 5: Implement the batch transaction**
 
-~~~ts
+```ts
 correct(
   tenantId: string,
   actorUserId: string,
   inventoryId: string,
   input: CreateInventoryCorrectionBatchDto,
 ): Promise<InventoryCorrectionBatchDto>
-~~~
+```
 
 Inside one transaction:
 
@@ -569,7 +576,7 @@ Inside one transaction:
 
 Use only these stable errors:
 
-~~~text
+```text
 INVENTORY_CORRECTION_NOT_RUNNING
 INVENTORY_CORRECTION_STALE_REVISION
 INVENTORY_CORRECTION_SNAPSHOT_MISSING
@@ -577,7 +584,7 @@ INVENTORY_CORRECTION_IDEMPOTENCY_MISMATCH
 INVENTORY_CORRECTION_BATCH_EMPTY
 INVENTORY_CORRECTION_BATCH_SELECTION_CHANGED
 INVENTORY_CORRECTION_ACTIVE_BOX_CONFLICT
-~~~
+```
 
 No error or log may contain raw codes.
 
@@ -587,22 +594,23 @@ Add POST :id/corrections/batch with OPERATIONS_WRITE, RequireSubscriptionWrite, 
 
 - [ ] **Step 7: Run batch and single suites**
 
-~~~bash
+```bash
 pnpm --filter @markiro/api exec vitest run test/inventory-correction-batches.e2e.test.ts test/inventory-corrections.e2e.test.ts
-~~~
+```
 
 Expected: PASS.
 
 - [ ] **Step 8: Commit**
 
-~~~bash
+```bash
 git add apps/api/src/modules/inventories/inventory-correction-batches.service.ts apps/api/src/modules/inventories/inventory-correction-common.ts apps/api/src/modules/inventories/inventory-corrections.service.ts apps/api/src/modules/inventories/dto.ts apps/api/src/modules/inventories/inventories.controller.ts apps/api/src/modules/inventories/inventories.module.ts apps/api/test/inventory-correction-batches.e2e.test.ts apps/api/test/inventory-corrections.e2e.test.ts
 git commit -m "feat(inventory): add atomic bulk corrections"
-~~~
+```
 
 ### Task 6: Add strict Admin contracts and selection state
 
 **Files:**
+
 - Modify: apps/admin/src/pages/inventory/schemas.ts
 - Modify: apps/admin/src/pages/inventory/api.ts
 - Create: apps/admin/src/pages/inventory/inventory-correction-selection.ts
@@ -610,12 +618,13 @@ git commit -m "feat(inventory): add atomic bulk corrections"
 - Modify: apps/admin/test/inventory-corrections.test.tsx
 
 **Interfaces:**
+
 - Produces: CreateInventoryCorrectionBatchInput, InventoryCorrectionSelectionState, serializeSelection(), and useCreateInventoryCorrectionBatch().
 - Consumed by: InventoryCorrections and InventoryCorrectionBatchPanel in Task 8.
 
 - [ ] **Step 1: Write failing schema, request, and selection tests**
 
-~~~ts
+```ts
 const selected = selectAllMatching({
   filter,
   total: 2582,
@@ -635,33 +644,33 @@ expect(serializeSelection(selected)).toEqual({
   filter,
   excludedEventIds: [],
 });
-~~~
+```
 
 Assert one POST to /corrections/batch contains the exact filter snapshot, exclusions, reason, optional date, revision, and idempotency key.
 
 - [ ] **Step 2: Run focused tests and confirm failure**
 
-~~~bash
+```bash
 pnpm --filter @markiro/admin exec vitest run test/inventory-correction-selection.test.ts test/inventory-corrections.test.tsx
-~~~
+```
 
 - [ ] **Step 3: Add strict schemas and mutation hook**
 
 Mirror every API field, including nullable copyIdentity, grouped arrays/counts, allMatchingActions, allMatchingAffectedCodeCount, verified box fields, selection union, action union, and batch response.
 
-~~~ts
+```ts
 export function useCreateInventoryCorrectionBatch(): UseMutationResult<
   InventoryCorrectionBatch,
   Error,
   { inventoryId: string; correction: CreateInventoryCorrectionBatchInput }
->
-~~~
+>;
+```
 
 On success invalidate inventory detail, progress, and all evidence queries under the inventory key.
 
 - [ ] **Step 4: Implement pure selection helpers**
 
-~~~ts
+```ts
 export function createExplicitSelection(): ExplicitSelectionState;
 export function toggleVisiblePage(
   state: InventoryCorrectionSelectionState,
@@ -676,13 +685,13 @@ export function clearSelection(): ExplicitSelectionState;
 export function serializeSelection(
   state: InventoryCorrectionSelectionState,
 ): InventoryCorrectionBatchSelection;
-~~~
+```
 
 Use Set only in UI state, return new objects, and store the exact filter snapshot in all_matching mode.
 
 Define the state types in the same module:
 
-~~~ts
+```ts
 export interface SelectableEvidenceEvent {
   eventId: string;
   affectedCodeCount: number;
@@ -711,22 +720,21 @@ export interface AllMatchingSelectionState {
   selectedCodeCount: number;
 }
 
-export type InventoryCorrectionSelectionState =
-  | ExplicitSelectionState
-  | AllMatchingSelectionState;
-~~~
+export type InventoryCorrectionSelectionState = ExplicitSelectionState | AllMatchingSelectionState;
+```
 
 - [ ] **Step 5: Run tests and commit**
 
-~~~bash
+```bash
 pnpm --filter @markiro/admin exec vitest run test/inventory-correction-selection.test.ts test/inventory-corrections.test.tsx
 git add apps/admin/src/pages/inventory/schemas.ts apps/admin/src/pages/inventory/api.ts apps/admin/src/pages/inventory/inventory-correction-selection.ts apps/admin/test/inventory-correction-selection.test.ts apps/admin/test/inventory-corrections.test.tsx
 git commit -m "feat(admin): add inventory batch correction contracts"
-~~~
+```
 
 ### Task 7: Make discrepancies and boxes clear on the live page
 
 **Files:**
+
 - Modify: apps/admin/src/pages/inventory/InventoryLivePage.tsx
 - Modify: apps/admin/src/pages/inventory/inventory.css
 - Modify: apps/admin/src/i18n/ru.json
@@ -735,12 +743,13 @@ git commit -m "feat(admin): add inventory batch correction contracts"
 - Modify: apps/admin/test/inventory-css.test.ts
 
 **Interfaces:**
+
 - Consumes: verifiedBoxes progress fields from Task 4.
 - Produces: direct discrepancy link and mode-specific box card.
 
 - [ ] **Step 1: Write failing live-page tests**
 
-~~~ts
+```ts
 expect(screen.getByRole("link", { name: /Расхождения 6/ })).toHaveAttribute(
   "href",
   "/inventory/" + INVENTORY_ID + "/corrections?view=discrepancies",
@@ -748,15 +757,15 @@ expect(screen.getByRole("link", { name: /Расхождения 6/ })).toHaveAtt
 expect(screen.getByRole("heading", { name: "Проверенные короба" })).toBeInTheDocument();
 expect(screen.queryByRole("heading", { name: "Новые короба" })).not.toBeInTheDocument();
 expect(screen.getByText("Повторный скан")).toBeInTheDocument();
-~~~
+```
 
 Render repack mode and assert only “Новые короба”. Render read-only/non-running variants and assert the metric is not a link.
 
 - [ ] **Step 2: Run tests and confirm failure**
 
-~~~bash
+```bash
 pnpm --filter @markiro/admin exec vitest run test/inventory-live.test.tsx test/inventory-css.test.ts
-~~~
+```
 
 - [ ] **Step 3: Implement navigation and mode-specific cards**
 
@@ -766,15 +775,16 @@ Map technical verdicts through translations, including duplicate -> “Повт�
 
 - [ ] **Step 4: Add accessible styles/translations, run tests, and commit**
 
-~~~bash
+```bash
 pnpm --filter @markiro/admin exec vitest run test/inventory-live.test.tsx test/inventory-css.test.ts
 git add apps/admin/src/pages/inventory/InventoryLivePage.tsx apps/admin/src/pages/inventory/inventory.css apps/admin/src/i18n/ru.json apps/admin/src/i18n/en.json apps/admin/test/inventory-live.test.tsx apps/admin/test/inventory-css.test.ts
 git commit -m "feat(admin): clarify inventory discrepancies and boxes"
-~~~
+```
 
 ### Task 8: Build the bulk corrections interface
 
 **Files:**
+
 - Create: apps/admin/src/pages/inventory/InventoryCorrectionBatchPanel.tsx
 - Modify: apps/admin/src/pages/inventory/InventoryCorrections.tsx
 - Modify: apps/admin/src/pages/inventory/inventory.css
@@ -785,6 +795,7 @@ git commit -m "feat(admin): clarify inventory discrepancies and boxes"
 - Modify: apps/admin/test/inventory-css.test.ts
 
 **Interfaces:**
+
 - Consumes: evidence metadata, selection helpers, and batch mutation.
 - Produces: complete deep-link, selection, confirmation, and recovery workflow.
 
@@ -792,7 +803,7 @@ git commit -m "feat(admin): clarify inventory discrepancies and boxes"
 
 Cover the discrepancy query-param view, all-scans switch, exact clipboard value, null-copy state, page selection, all_matching, exclusions, selection reset on every filter, one batch request, stale recovery, network retry with the same key, and success refresh.
 
-~~~ts
+```ts
 expect(JSON.parse(String(requestInit?.body))).toEqual({
   action: "void_scan",
   selection: {
@@ -804,13 +815,13 @@ expect(JSON.parse(String(requestInit?.body))).toEqual({
   expectedResultRevision: 8,
   idempotencyKey: expect.any(String),
 });
-~~~
+```
 
 - [ ] **Step 2: Run focused tests and confirm failure**
 
-~~~bash
+```bash
 pnpm --filter @markiro/admin exec vitest run test/inventory-corrections.test.tsx test/inventory-routing.test.tsx test/inventory-css.test.ts
-~~~
+```
 
 - [ ] **Step 3: Implement URL-backed views and filters**
 
@@ -826,7 +837,7 @@ The header checkbox selects the page. When the full page is selected and total i
 
 - [ ] **Step 6: Implement the confirmation panel**
 
-~~~ts
+```ts
 interface InventoryCorrectionBatchPanelProps {
   action: "void_scan" | "change_date";
   selectedEventCount: number;
@@ -836,7 +847,7 @@ interface InventoryCorrectionBatchPanelProps {
   onCancel(): void;
   onConfirm(input: { reason: string; observedProductionDate?: string }): void;
 }
-~~~
+```
 
 Require a trimmed reason of 1–1024 UTF-8 bytes and a civil date for change_date. Mention both counts and per-code audit in the confirmation.
 
@@ -846,25 +857,27 @@ Create one idempotency key when confirmation opens; reuse it through network ret
 
 - [ ] **Step 8: Run tests and commit**
 
-~~~bash
+```bash
 pnpm --filter @markiro/admin exec vitest run test/inventory-corrections.test.tsx test/inventory-routing.test.tsx test/inventory-css.test.ts
 git add apps/admin/src/pages/inventory/InventoryCorrectionBatchPanel.tsx apps/admin/src/pages/inventory/InventoryCorrections.tsx apps/admin/src/pages/inventory/inventory.css apps/admin/src/i18n/ru.json apps/admin/src/i18n/en.json apps/admin/test/inventory-corrections.test.tsx apps/admin/test/inventory-routing.test.tsx apps/admin/test/inventory-css.test.ts
 git commit -m "feat(admin): add bulk inventory correction workflow"
-~~~
+```
 
 ### Task 9: Run cross-package verification
 
 **Files:**
+
 - Modify only when a gate reveals a defect within this scope.
 - Regenerate graphify-out only if the ignored local graph exists.
 
 **Interfaces:**
+
 - Consumes: all earlier tasks.
 - Produces: release-quality automated evidence without claiming browser/hardware validation.
 
 - [ ] **Step 1: Run package gates in dependency order**
 
-~~~bash
+```bash
 pnpm --filter @markiro/db test
 pnpm --filter @markiro/db typecheck
 pnpm --filter @markiro/db lint
@@ -877,18 +890,18 @@ pnpm --filter @markiro/admin test
 pnpm --filter @markiro/admin typecheck
 pnpm --filter @markiro/admin lint
 pnpm --filter @markiro/admin build
-~~~
+```
 
 Record database-backed skips separately.
 
 - [ ] **Step 2: Run hygiene and update the local graph**
 
-~~~bash
+```bash
 pnpm format:check
 git diff --check
 git status --short
 test ! -f graphify-out/graph.json || graphify update .
-~~~
+```
 
 Do not add graphify-out to Git.
 
@@ -900,9 +913,9 @@ Map passing tests to navigation, copy identity, one-row box events, filter-wide 
 
 If no files changed, do not create an empty commit. Otherwise stage exact files and use:
 
-~~~bash
+```bash
 git commit -m "fix(inventory): satisfy bulk correction verification"
-~~~
+```
 
 - [ ] **Step 5: Prepare delivery evidence**
 
