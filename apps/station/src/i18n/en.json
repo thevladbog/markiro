@@ -286,7 +286,7 @@
         "codeLabel": "In the code",
         "activeLabel": "Active",
         "mixedTitle": "The box holds several production dates",
-        "mixedBody": "The active date is {{active}}. No single date can be adopted.",
+        "mixedBody": "No single date can be adopted — count as is or set the code aside.",
         "apply": "Set {{date}} and count",
         "accept": "Count as is",
         "skip": "Skip the code",
