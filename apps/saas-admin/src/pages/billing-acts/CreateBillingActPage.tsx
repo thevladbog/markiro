@@ -25,6 +25,7 @@ import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { useNavigationGuard } from "../../layout/NavigationGuard.js";
 import { getInvoice, listInvoices } from "../billing/api.js";
 import { invoiceStatusTone } from "../billing/invoice-status.js";
+import { sellerTaxId } from "../billing/seller-snapshot.js";
 import { createBillingAct, getBillingAct, issueBillingAct } from "./api.js";
 
 type Progress = "idle" | "creating" | "generating" | "draft" | "issued";
@@ -453,11 +454,6 @@ function actNumberFromInvoice(invoiceNumber: string): string {
   return /^(?:MRK-)?INV-/i.test(invoiceNumber)
     ? invoiceNumber.replace(/^(?:MRK-)?INV-/i, "MRK-ACT-")
     : `MRK-ACT-${invoiceNumber}`;
-}
-
-function sellerTaxId(snapshot: unknown): string | null {
-  if (!snapshot || typeof snapshot !== "object" || !("taxId" in snapshot)) return null;
-  return typeof snapshot.taxId === "string" ? snapshot.taxId : null;
 }
 
 function formatMoney(value: string, locale: string): string {
