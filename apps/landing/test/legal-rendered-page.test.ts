@@ -95,6 +95,7 @@ describe("rendered legal pages", () => {
               "MKR-INS-02",
               "MKR-INS-03",
               "MKR-INS-04",
+              "MKR-INS-05",
             ]
           : ["MKR-PD-01", "MKR-PD-02", "MKR-DPA-01", "MKR-BRD-01"];
       expect(codes).toEqual(expectedCodes);
