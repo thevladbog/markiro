@@ -447,6 +447,16 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
     expect(row).toMatchObject({ status: "INTRODUCED", checkedAt: null, unknownAttempts: 0 });
     expect(row!.nextRefreshAt.getTime()).toBeLessThanOrEqual(Date.now());
     expect(result.caughtUp).toBe(false);
+    // The batch touched nothing, so this pass is not journalled as a
+    // success: `ok` here is exactly the lie an operator's channel card would
+    // repeat while ЧЗ stays unreachable for a day.
+    expect(result.batches).toBe(0);
+    expect(journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "warn",
+        details: expect.objectContaining({ batches: 0, updated: 0, stopReason: "unavailable" }),
+      }),
+    );
   });
 
   it("stops the pass on a transient failure instead of working through the other groups", async () => {
@@ -507,6 +517,22 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
     const [row] = await rowsFor(tenantId);
     expect(row).toMatchObject({ status: "INTRODUCED", checkedAt: null, unknownAttempts: 0 });
     expect(row!.nextRefreshAt.getTime()).toBeLessThanOrEqual(Date.now());
+    // Its own warn, distinct from the pass summary: the tenant's agent has to
+    // sign in again, and that is the operator's to act on.
+    expect(journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "warn",
+        message: "Статусы кодов Честного Знака не обновлены: нет токена",
+        details: expect.objectContaining({ tokenStatus: "unauthorized" }),
+      }),
+    );
+    // And the pass summary itself must not paper over the stoppage with `ok`.
+    expect(journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "warn",
+        details: expect.objectContaining({ stopReason: "unauthorized" }),
+      }),
+    );
   });
 
   it("never writes the token into the journal", async () => {
@@ -572,6 +598,63 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
     expect(rows[0]).toMatchObject({ codeHash: HASH_A, status: "INTRODUCED" });
     // B was not in the batch, so ЧЗ's row about it is not ours to write down.
     expect(rows[1]).toMatchObject({ codeHash: HASH_B, status: null, checkedAt: null });
+    // The mismatch is journalled, not silently dropped: the request and the
+    // answer disagreeing about what was asked is the operator's to notice.
+    expect(journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "warn",
+        message: "Честный Знак ответил о кодах, о которых не спрашивали",
+        details: expect.objectContaining({ productGroupCode: 8, unexpected: 1 }),
+      }),
+    );
+  });
+
+  it("splits a mixed answer within one batch: the answered row and the silent one each get their own outcome", async () => {
+    // Both rows share a group, so both land in the same `cises/info` call --
+    // unlike the "ignores an answer" case above, where the second row sits
+    // outside the batch entirely. This exercises the disjoint partition of
+    // one batch's own hashes into found and unknown, not the unexpected-cis
+    // path.
+    await seedStatus({
+      codeHash: HASH_A,
+      group: 8,
+      status: "SOMETHING_OLD",
+      nextRefreshAt: past(2),
+    });
+    await seedStatus({
+      codeHash: HASH_B,
+      group: 8,
+      status: "SOMETHING_OLD",
+      nextRefreshAt: past(1),
+    });
+    client.answer([
+      {
+        cis: RAW_A,
+        status: "INTRODUCED",
+        statusEx: "MOVING_BY_UD",
+        ownerInn: null,
+        withdrawReason: null,
+      },
+    ]);
+
+    await service.run(tenantId);
+
+    expect(client.calls).toHaveLength(1);
+    expect(client.calls[0]!.cises).toEqual([RAW_A, RAW_B]);
+
+    const rows = await rowsFor(tenantId);
+    const rowA = rows.find((row) => row.codeHash === HASH_A);
+    const rowB = rows.find((row) => row.codeHash === HASH_B);
+
+    // Answered: ЧЗ's facts are written down and the daily interval applies.
+    expect(rowA).toMatchObject({ status: "INTRODUCED", statusEx: "MOVING_BY_UD" });
+    expect(rowA!.checkedAt).not.toBeNull();
+    expect(hoursUntil(rowA!.nextRefreshAt)).toBeCloseTo(24, 0);
+
+    // Unanswered: silence is counted, facts and status are left alone.
+    expect(rowB).toMatchObject({ status: "SOMETHING_OLD", unknownAttempts: 1 });
+    expect(rowB!.checkedAt).toBeNull();
+    expect(hoursUntil(rowB!.nextRefreshAt)).toBeCloseTo(24, 0);
   });
 
   it("stops after the per-pass batch cap and reports itself not caught up", async () => {

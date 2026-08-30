@@ -54,11 +54,19 @@ interface FoundRow {
   info: CisInfo;
 }
 
+/**
+ * Why a batch asked the pass to stop. Carried out of `refreshBatch` rather
+ * than collapsed to a boolean so the end-of-pass summary can say the pass
+ * did not finish instead of quietly reporting `ok` for a batch that touched
+ * no rows.
+ */
+type StopReason = "unavailable" | "unauthorized";
+
 interface BatchOutcome {
   updated: number;
   unknown: number;
-  /** Stop the pass here: the next batch would fail for the same reason. */
-  stop: boolean;
+  /** Set when the next batch would fail for the same reason; null otherwise. */
+  stopReason: StopReason | null;
 }
 
 /**
@@ -110,6 +118,7 @@ export class ChzCodeStatusRefreshService {
     let unknown = 0;
     let unresolved = 0;
     let caughtUp = false;
+    let stopReason: StopReason | null = null;
 
     for (let iteration = 0; iteration < CHZ_STATUS_MAX_BATCHES_PER_PASS; iteration += 1) {
       const productGroupCode = await this.nextDueProductGroup(tenantId);
@@ -129,22 +138,32 @@ export class ChzCodeStatusRefreshService {
       if (hashByRaw.size === 0) continue;
 
       const outcome = await this.refreshBatch(tenantId, token.auth, productGroupCode, hashByRaw);
+      if (outcome.stopReason !== null) {
+        // The batch touched no rows -- it does not belong in `batches`,
+        // which counts calls that did work.
+        stopReason = outcome.stopReason;
+        break;
+      }
       batches += 1;
       updated += outcome.updated;
       unknown += outcome.unknown;
-      if (outcome.stop) break;
     }
 
     // Only when the pass actually did something: a cron tick over a tenant
     // with nothing due is not an event, and journalling it would bury the
-    // ones that are.
-    if (batches > 0 || unresolved > 0) {
+    // ones that are. A pass that stopped early is always something, even if
+    // it managed zero batches -- reporting `ok` there would tell the
+    // operator's channel card that codes were refreshed when none were.
+    if (batches > 0 || unresolved > 0 || stopReason !== null) {
       await this.append(tenantId, {
-        outcome: "ok",
+        outcome: stopReason !== null ? "warn" : "ok",
         direction: "out",
         grain: "session",
-        message: "Обновлены статусы кодов Честного Знака",
-        details: { batches, updated, unknown, unresolved },
+        message:
+          stopReason !== null
+            ? "Обновление статусов кодов Честного Знака остановлено раньше срока"
+            : "Обновлены статусы кодов Честного Знака",
+        details: { batches, updated, unknown, unresolved, stopReason },
       });
     }
     return { batches, updated, caughtUp };
@@ -262,8 +281,10 @@ export class ChzCodeStatusRefreshService {
 
     if (result.status === "unavailable") {
       // Not one row of this batch is touched, and the pass stops rather than
-      // walking the remaining groups into the same unreachable ЧЗ.
-      return { updated: 0, unknown: 0, stop: true };
+      // walking the remaining groups into the same unreachable ЧЗ. The
+      // end-of-pass summary is what tells the operator this happened -- see
+      // `stopReason` there -- so no item/session entry is duplicated here.
+      return { updated: 0, unknown: 0, stopReason: "unavailable" };
     }
     if (result.status === "unauthorized") {
       // The same condition as a token we could not load: the tenant's agent
@@ -276,7 +297,7 @@ export class ChzCodeStatusRefreshService {
         message: "Статусы кодов Честного Знака не обновлены: нет токена",
         details: { tokenStatus: "unauthorized", productGroupCode },
       });
-      return { updated: 0, unknown: 0, stop: true };
+      return { updated: 0, unknown: 0, stopReason: "unauthorized" };
     }
     if (result.status === "rejected") {
       // Terminal for this group -- a missing contract is not fixed by asking
@@ -295,7 +316,7 @@ export class ChzCodeStatusRefreshService {
           codes: hashByRaw.size,
         },
       });
-      return { updated: 0, unknown: 0, stop: false };
+      return { updated: 0, unknown: 0, stopReason: null };
     }
 
     const infoByCis = new Map(result.value.map((info) => [info.cis, info]));
@@ -323,7 +344,7 @@ export class ChzCodeStatusRefreshService {
     const now = new Date();
     if (found.length > 0) await this.writeFacts(tenantId, productGroupCode, found, now);
     if (unknownHashes.length > 0) await this.countUnknown(tenantId, unknownHashes, now);
-    return { updated: found.length, unknown: unknownHashes.length, stop: false };
+    return { updated: found.length, unknown: unknownHashes.length, stopReason: null };
   }
 
   /**

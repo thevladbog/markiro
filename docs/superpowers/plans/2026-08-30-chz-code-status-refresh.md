@@ -862,7 +862,7 @@ The pass:
    - `rejected`: push the batch's rows to the long interval, journal the ЧЗ message, and continue with the next product group. Retrying a refusal is what this branch exists to avoid.
    - `unauthorized`: treat as the token case in step 1 and stop.
 4. A row whose hash resolves to no raw in either source — its `codes` partition was detached and it never came from an export — is pushed to the long interval and skipped, not failed. It is unrefreshable by design, and that is the mechanism by which archived codes leave the queue.
-5. Journal each pass once: batches, rows updated, rows unknown. Wrap the append in its own try/catch that logs and continues, as `signer-scheduler.service.ts` does — a failed audit write is not a reason to abandon a pass.
+5. Journal each pass once: batches, rows updated, rows unknown, and the stop reason if the pass stopped early (`unavailable` or `unauthorized`). A batch that stopped touched no rows, so it is not counted toward `batches`, and the entry's `outcome` is `warn` rather than `ok` in that case — a pass that made one call to an unreachable ЧЗ and wrote nothing down must not be journalled as a success, since that outcome is what the operator's channel card reads. Wrap the append in its own try/catch that logs and continues, as `signer-scheduler.service.ts` does — a failed audit write is not a reason to abandon a pass.
 6. Return `{ batches, updated, caughtUp: no due rows remained }`.
 
 - [ ] **Step 4: Run the tests**
