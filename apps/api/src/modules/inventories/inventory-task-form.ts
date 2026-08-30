@@ -1,4 +1,4 @@
-import { renderCode128Svg } from "@markiro/domain";
+import { renderLiteralDataMatrixSvg } from "@markiro/domain/artifacts";
 
 import { formatInventoryTaskBarcode } from "./station-inventory.dto";
 
@@ -104,10 +104,7 @@ export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string
   const product = escapeHtml(productText);
   const line = escapeHtml(lineText);
   const token = formatInventoryTaskBarcode(data.inventoryId);
-  const barcode = renderCode128Svg(token, { includeText: false }).replace(
-    "<svg ",
-    '<svg preserveAspectRatio="none" ',
-  );
+  const barcode = renderLiteralDataMatrixSvg(token);
   const isRepack = data.mode === "repack";
   const mode = isRepack ? "С переупаковкой" : "Без переупаковки";
   const capacity = data.boxCapacity;
@@ -153,9 +150,9 @@ export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string
   <style>
     @page { size: A4 portrait; margin: 0; }
     * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; background: #efefed; color: #17161a; font-family: Arial, "Helvetica Neue", sans-serif; }
+    html, body { margin: 0; padding: 0; background: #fff; color: #17161a; font-family: Arial, "Helvetica Neue", sans-serif; }
     body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-    .page { width: 210mm; height: 297mm; margin: 0 auto; padding: 16mm; background: #fafaf8; display: flex; flex-direction: column; overflow: hidden; }
+    .page { width: 210mm; height: 297mm; margin: 0 auto; padding: 16mm; background: #fff; display: flex; flex-direction: column; overflow: hidden; }
     .top { display: flex; justify-content: space-between; align-items: center; padding-bottom: 6mm; border-bottom: .25mm solid #cbc7bf; }
     .brand-logo { width: 34mm; height: 8mm; display: block; }
     .task-id { text-align: right; }
@@ -165,8 +162,8 @@ export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string
     h1 { margin: 0; font-size: 23pt; line-height: 1.08; letter-spacing: -.02em; }
     .subtitle { margin: 2.5mm 0 0; color: #4f4c47; font-size: 11pt; }
     .status { min-width: 36mm; padding: 4mm 5mm; border: .25mm solid #b7dfc8; border-radius: 3mm; background: #e7f6ed; color: #126b39; font-size: 9pt; font-weight: 800; text-align: center; text-transform: uppercase; }
-    .scan-zone { height: 43mm; border: .35mm solid #cbc7bf; border-radius: 4mm; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #fff; }
-    .barcode { width: 150mm; height: 17mm; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .scan-zone { height: 50mm; border: .35mm solid #cbc7bf; border-radius: 4mm; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #fff; }
+    .barcode { width: 32mm; height: 32mm; display: flex; align-items: center; justify-content: center; overflow: hidden; }
     .barcode svg { display: block; max-width: 100%; width: 100%; height: 100%; }
     .barcode-caption { margin-top: 1mm; font: 700 12pt/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; }
     .scan-hint { margin-top: 1mm; color: #77736d; font-size: 8pt; }
@@ -189,8 +186,8 @@ export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string
     .compact h1 { font-size: 19pt; }
     .compact .subtitle { margin-top: 1mm; max-width: 126mm; font-size: 8.5pt; line-height: 1.15; overflow-wrap: anywhere; }
     .compact .status { padding: 3mm 4mm; }
-    .compact .scan-zone { height: 38mm; }
-    .compact .barcode { width: 150mm; height: 17mm; }
+    .compact .scan-zone { height: 44mm; }
+    .compact .barcode { width: 28mm; height: 28mm; }
     .compact h2 { margin: 2.5mm 0 1.2mm; font-size: 10.5pt; }
     .compact .parameter { min-height: 6mm; padding: .5mm 0; }
     .compact dt { font-size: 7pt; }
@@ -209,7 +206,7 @@ export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string
   <main class="page${compact ? " compact" : ""}" data-layout="${compact ? "compact" : "standard"}">
     <header class="top">${logo()}<div class="task-id"><span class="eyebrow">Форма-задание</span><strong>${number}</strong></div></header>
     <section class="hero"><div><h1>Задание на инвентаризацию</h1><p class="subtitle">${mode} · ${organization}</p></div><div class="status">${STATUS_LABEL[data.status]}</div></section>
-    <section class="scan-zone" aria-label="Штрихкод задания"><div class="barcode" data-task-token="${escapeHtml(token)}">${barcode}</div><div class="barcode-caption">${number}</div><div class="scan-hint">Отсканируйте на терминале, чтобы открыть задание</div></section>
+    <section class="scan-zone" aria-label="Штрихкод задания"><div class="barcode" data-barcode-symbology="datamatrix" data-task-token="${escapeHtml(token)}">${barcode}</div><div class="barcode-caption">${number}</div><div class="scan-hint">Отсканируйте на терминале, чтобы открыть задание</div></section>
     <section><h2>Параметры задания</h2><dl>${parameters}</dl></section>
     <section class="steps"><h2>Как начать работу</h2><ol>${step(1, "Откройте терминал на выбранной линии и войдите оператором.")}${step(2, "Отсканируйте штрихкод задания. На своей линии оно также будет видно в списке.")}${step(3, "Если терминал относится к другой линии, подтвердите предупреждение перед входом.")}${step(4, finalStep)}</ol></section>
     <aside class="rules"><h2>Важные правила</h2><ul><li><strong>MOVING_BY_UD:</strong> код в отгрузке. Его нельзя учитывать, списывать или включать в документы.</li>${repackRule}<li>Дата производства действует на терминале до следующего изменения; в одном новом коробе одна дата.</li><li>Чтобы поставить работу на паузу, выйдите из задания. Закрыть инвентаризацию можно только в админке.</li><li>На время инвентаризации движения продукции по складу остановлены.</li></ul></aside>
