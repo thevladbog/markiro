@@ -132,12 +132,16 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
   const limit = vi.fn(async () => []);
   const orderBy = vi.fn(() => ({ limit }));
   const groupBy = vi.fn(() => ({ orderBy }));
+  const where = vi.fn(() => ({ orderBy, groupBy }));
+  const distinctWhere = vi.fn(async () => []);
+  const distinctFrom = vi.fn(() => ({ where: distinctWhere }));
   const db = {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
-        where: vi.fn(() => ({ orderBy, groupBy })),
+        where,
       })),
     })),
+    selectDistinct: vi.fn(() => ({ from: distinctFrom })),
     delete: vi.fn(() => ({
       where: vi.fn(async () => ({ rowCount: 0 })),
     })),

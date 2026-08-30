@@ -257,6 +257,7 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
   [
     IntegrationsController,
     {
+      codeStatuses: integrationsReadPolicy,
       list: integrationsReadPolicy,
       detail: integrationsReadPolicy,
       update: integrationsWritePolicy,

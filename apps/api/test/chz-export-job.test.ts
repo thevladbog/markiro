@@ -140,8 +140,11 @@ function emptyDb(): Db {
   const groupBy = vi.fn(() => ({ orderBy }));
   const where = vi.fn(() => ({ orderBy, groupBy }));
   const from = vi.fn(() => ({ where }));
+  const distinctWhere = vi.fn(async () => []);
+  const distinctFrom = vi.fn(() => ({ where: distinctWhere }));
   return {
     select: vi.fn(() => ({ from })),
+    selectDistinct: vi.fn(() => ({ from: distinctFrom })),
     delete: vi.fn(() => ({ where: vi.fn(async () => ({ rowCount: 0 })) })),
   } as unknown as Db;
 }
@@ -160,8 +163,11 @@ function dbWithChzReconcileRows(rows: { tenantId: string; inventoryId: string }[
   const groupBy = vi.fn(() => ({ orderBy: orderByRows }));
   const where = vi.fn(() => ({ orderBy: orderByEmpty, groupBy }));
   const from = vi.fn(() => ({ where }));
+  const distinctWhere = vi.fn(async () => []);
+  const distinctFrom = vi.fn(() => ({ where: distinctWhere }));
   return {
     select: vi.fn(() => ({ from })),
+    selectDistinct: vi.fn(() => ({ from: distinctFrom })),
     delete: vi.fn(() => ({ where: vi.fn(async () => ({ rowCount: 0 })) })),
   } as unknown as Db;
 }
@@ -188,8 +194,12 @@ function serviceWith(
     { run: vi.fn(async () => undefined) } as unknown as InventoryDocumentRunnerService,
     { run: vi.fn(async () => undefined) } satisfies SignerScheduler,
     chzExportRunner,
-    { run: vi.fn(async () => ({ inserted: 0, watermark: null, caughtUp: true })) } as unknown as ChzCodeStatusIngestService,
-    { run: vi.fn(async () => ({ batches: 0, updated: 0, caughtUp: true })) } as unknown as ChzCodeStatusRefreshService,
+    {
+      run: vi.fn(async () => ({ inserted: 0, watermark: null, caughtUp: true })),
+    } as unknown as ChzCodeStatusIngestService,
+    {
+      run: vi.fn(async () => ({ batches: 0, updated: 0, caughtUp: true })),
+    } as unknown as ChzCodeStatusRefreshService,
   );
 }
 
