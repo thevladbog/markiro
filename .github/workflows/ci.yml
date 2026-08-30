@@ -203,6 +203,10 @@ jobs:
         run: |
           pnpm --dir tools/production-browser --ignore-workspace install --frozen-lockfile
           pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium
+      - name: Verify the station inventory gallery contract
+        run: |
+          pnpm turbo run build --filter='@markiro/station^...'
+          pnpm test:station-inventory:browser
       - name: Verify Yandex runtime contracts
         run: pnpm test:yandex-runtime
       - name: Build legal verifier dependencies

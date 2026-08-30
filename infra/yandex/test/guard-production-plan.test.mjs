@@ -600,7 +600,7 @@ test("guard CLI exposes a fixed release-policy subscope without leaking plan val
   ).change;
   const policy = JSON.parse(policyChange.after.policy);
   policy.Statement.find(
-    (statement) => statement.Sid === "AllowPublisherStationObjects",
+    (statement) => statement.Sid === "AllowPublisherReleaseObjects",
   ).Action.push("do-not-print-this-plan-value");
   policyChange.after.policy = JSON.stringify(policy);
 
@@ -1837,7 +1837,7 @@ test("production plan guard rejects destructive or weakened release-origin chang
       const policyChange = resource(plan, policyAddress).change;
       const policy = JSON.parse(policyChange.after.policy);
       policy.Statement.find(
-        (statement) => statement.Sid === "AllowPublisherStationObjects",
+        (statement) => statement.Sid === "AllowPublisherReleaseObjects",
       ).Action.push("s3:DeleteObject");
       policyChange.after.policy = JSON.stringify(policy);
     },

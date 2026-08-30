@@ -153,6 +153,8 @@ export {
   generateInventoryAggregationXmlV2,
   generateInventoryBalancesByProductionDateCsv,
   generateInventoryCurrentStockCsv,
+  generateInventoryCurrentStockCsvV1,
+  generateInventoryCurrentStockTxt,
   generateInventoryDisaggregationXml,
   generateInventoryFinalBoxContentsCsv,
   generateInventoryFinalBoxesTxt,

@@ -27,6 +27,28 @@ const RETRYABLE_ERRORS = new Set([
   "INVALID_ORGANIZATION_INN",
 ]);
 
+const FORMAT_LABEL_KEYS: Readonly<Record<string, string>> = {
+  inventory_pdf_act: "pages.inventory.documents.format.inventory_pdf_act",
+  inventory_xml_gismt_aggregation:
+    "pages.inventory.documents.format.inventory_xml_gismt_aggregation",
+  inventory_xml_gismt_disaggregation:
+    "pages.inventory.documents.format.inventory_xml_gismt_disaggregation",
+  inventory_txt_write_off: "pages.inventory.documents.format.inventory_txt_write_off",
+  inventory_csv_write_off: "pages.inventory.documents.format.inventory_csv_write_off",
+  inventory_csv_current_stock: "pages.inventory.documents.format.inventory_csv_current_stock",
+  inventory_txt_current_stock: "pages.inventory.documents.format.inventory_txt_current_stock",
+  inventory_csv_final_box_contents:
+    "pages.inventory.documents.format.inventory_csv_final_box_contents",
+  inventory_txt_final_boxes: "pages.inventory.documents.format.inventory_txt_final_boxes",
+  inventory_csv_balances_by_production_date:
+    "pages.inventory.documents.format.inventory_csv_balances_by_production_date",
+};
+
+function formatLabel(formatId: string, t: TFunction, fallback?: string): string {
+  const key = FORMAT_LABEL_KEYS[formatId];
+  return key ? t(key) : (fallback ?? formatId);
+}
+
 function openDownload(value: InventoryDocumentDownload): void {
   const anchor = document.createElement("a");
   anchor.href = value.url;
@@ -110,6 +132,10 @@ export function InventoryDocuments({
     );
   const mutable = canWrite && inventoryStatus === "closed";
   const availableFormats = formats.data ?? [];
+  const catalogLabels = useMemo(
+    () => new Map((formats.data ?? []).map((format) => [format.id, format.label])),
+    [formats.data],
+  );
   const selectedFormats = availableFormats
     .filter((format) => selected.has(format.id))
     .map(({ id, version }) => ({ id, version }));
@@ -151,6 +177,9 @@ export function InventoryDocuments({
         {inventoryStatus === "completed" ? (
           <Alert tone="ok">{t("pages.inventory.documents.completedReadOnly")}</Alert>
         ) : null}
+        {inventoryStatus !== "closed" && inventoryStatus !== "completed" ? (
+          <Alert tone="info">{t("pages.inventory.documents.availableAfterClose")}</Alert>
+        ) : null}
         {formats.isPending || runs.isPending ? <Spinner label={t("common.loading")} /> : null}
         {formats.isError || runs.isError ? (
           <Alert tone="error">{t("pages.inventory.documents.errors.load")}</Alert>
@@ -177,7 +206,7 @@ export function InventoryDocuments({
                   key={`${format.id}@${format.version}`}
                   checked={selected.has(format.id)}
                   disabled={!mutable || create.isPending}
-                  label={`${format.label} · ${format.extension.toUpperCase()} · v${format.version}`}
+                  label={`${formatLabel(format.id, t, format.label)} · ${format.extension.toUpperCase()} · v${format.version}`}
                   onCheckedChange={(checked) => {
                     idempotencyKey.current = null;
                     setSelected((current) => {
@@ -232,6 +261,7 @@ export function InventoryDocuments({
                 retryPending={retry.isPending}
                 downloadPending={downloadPending}
                 language={i18n.language}
+                catalogLabels={catalogLabels}
                 onRetry={() => retry.mutate(item.id)}
                 onDownloadArtifact={(artifactId) =>
                   void download(`artifact:${artifactId}`, () =>
@@ -297,6 +327,7 @@ function DocumentRun({
   retryPending,
   downloadPending,
   language,
+  catalogLabels,
   onRetry,
   onDownloadArtifact,
   onDownloadZip,
@@ -307,6 +338,7 @@ function DocumentRun({
   retryPending: boolean;
   downloadPending: string | null;
   language: string;
+  catalogLabels: ReadonlyMap<string, string>;
   onRetry: () => void;
   onDownloadArtifact: (artifactId: string) => void;
   onDownloadZip: () => void;
@@ -354,10 +386,16 @@ function DocumentRun({
         <ul className="mk-inventory-document-artifacts">
           {item.artifacts.map((artifact) => {
             const invalidated = artifact.invalidatedAt !== null;
+            const localizedFormat = formatLabel(
+              artifact.formatId,
+              t,
+              catalogLabels.get(artifact.formatId),
+            );
             return (
               <li key={artifact.id}>
                 <span>
-                  <strong>{artifact.filename}</strong>
+                  <strong>{localizedFormat}</strong>
+                  <small className="mk-inventory-mono">{artifact.filename}</small>
                   <small>
                     {t("pages.inventory.documents.artifactMeta", {
                       codes: new Intl.NumberFormat(language).format(artifact.codeCount),
@@ -379,13 +417,18 @@ function DocumentRun({
                   variant="secondary"
                   disabled={invalidated}
                   loading={downloadPending === `artifact:${artifact.id}`}
+                  aria-label={
+                    invalidated
+                      ? undefined
+                      : t("pages.inventory.documents.downloadArtifact", {
+                          type: localizedFormat,
+                        })
+                  }
                   onClick={() => onDownloadArtifact(artifact.id)}
                 >
                   {invalidated
                     ? t("pages.inventory.documents.unavailable")
-                    : t("pages.inventory.documents.downloadArtifact", {
-                        filename: artifact.filename,
-                      })}
+                    : t("pages.inventory.documents.download")}
                 </Button>
               </li>
             );

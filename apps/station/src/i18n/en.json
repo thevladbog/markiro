@@ -223,7 +223,8 @@
       "sourceDateMismatch": "The code's date differs from the box date",
       "sourceDate": {
         "title": "This code's date is different from the box date",
-        "body": "The code was produced on {{code}}; the box date is {{box}}."
+        "codeLabel": "In the code",
+        "boxLabel": "Box date"
       },
       "print": {
         "printing": "Printing label",
@@ -282,9 +283,10 @@
       "applyDate": "Apply date",
       "sourceDate": {
         "title": "The code's date differs from the active one",
-        "body": "The code was produced on {{code}}; the active date is {{active}}.",
+        "codeLabel": "In the code",
+        "activeLabel": "Active",
         "mixedTitle": "The box holds several production dates",
-        "mixedBody": "The active date is {{active}}. No single date can be adopted.",
+        "mixedBody": "No single date can be adopted — count as is or set the code aside.",
         "apply": "Set {{date}} and count",
         "accept": "Count as is",
         "skip": "Skip the code",

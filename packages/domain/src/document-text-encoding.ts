@@ -31,8 +31,13 @@ export function encodeSemicolonCsv(
   header: readonly string[],
   rows: readonly (readonly string[])[],
 ): Uint8Array {
-  const content = [header, ...rows].map((row) => row.map(csvField).join(";")).join("\r\n") + "\r\n";
-  const encoded = textEncoder.encode(content);
+  return encodeSemicolonCsvRows([header, ...rows]);
+}
+
+export function encodeSemicolonCsvRows(rows: readonly (readonly string[])[]): Uint8Array {
+  const content = rows.map((row) => row.map(csvField).join(";")).join("\r\n");
+  const terminated = content.length === 0 ? "" : `${content}\r\n`;
+  const encoded = textEncoder.encode(terminated);
   const bytes = new Uint8Array(UTF8_BOM.length + encoded.length);
   bytes.set(UTF8_BOM);
   bytes.set(encoded, UTF8_BOM.length);

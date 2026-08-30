@@ -40,6 +40,27 @@ const ready = Boolean(
 const expectedFormats = {
   items: [
     {
+      id: "inventory_pdf_act",
+      version: 1,
+      label: "[PDF] Акт об инвентаризации",
+      extension: "pdf",
+      mimeType: "application/pdf",
+      requiredSourceCategories: [
+        "expected",
+        "verified",
+        "writeOffCandidates",
+        "protected",
+        "ineligible",
+        "unknown",
+        "oldBoxes",
+        "newBoxes",
+        "observedDateGroups",
+      ],
+      supportsParts: false,
+      requiresOrganizationInn: true,
+      availability: "available",
+    },
+    {
       id: "inventory_xml_gismt_aggregation",
       version: 2,
       label: "[XML][ГИСМТ] Формирование упаковки",
@@ -83,10 +104,20 @@ const expectedFormats = {
     },
     {
       id: "inventory_csv_current_stock",
-      version: 1,
+      version: 2,
       label: "[CSV] Коды на учёт",
       extension: "csv",
       mimeType: "text/csv; charset=utf-8",
+      requiredSourceCategories: ["verified", "protected"],
+      supportsParts: false,
+      availability: "available",
+    },
+    {
+      id: "inventory_txt_current_stock",
+      version: 1,
+      label: "[TXT] Коды на учёт",
+      extension: "txt",
+      mimeType: "text/plain; charset=utf-8",
       requiredSourceCategories: ["verified", "protected"],
       supportsParts: false,
       availability: "available",
@@ -231,7 +262,7 @@ describe.skipIf(!ready)("inventory document formats e2e", () => {
     return inventoryId;
   }
 
-  it("advertises the exact eight current formats and rejects unknown and hidden versions", async () => {
+  it("advertises the exact ten current formats and rejects unknown and hidden versions", async () => {
     const { agent, tenantId } = await owner();
     const closedInventoryId = await seedClosedInventory(tenantId);
     await agent.get("/inventory-document-formats").expect(200, expectedFormats);

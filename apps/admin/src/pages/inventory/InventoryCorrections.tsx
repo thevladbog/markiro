@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router";
 
 import { AdminPage, Alert, Button, Card, Input, Select, Spinner, Textarea } from "@markiro/ui";
 
+import { formatDate } from "../../lib/datetime.js";
 import {
   useCreateInventoryCorrection,
   useInventory,
@@ -24,6 +25,7 @@ interface Selection {
   action: CorrectionAction;
   target: CorrectionTarget;
   identity: string;
+  observedProductionDate: string | null;
 }
 
 function newIdempotencyKey(): string {
@@ -107,6 +109,7 @@ export function InventoryCorrections() {
 
   const select = (next: Selection) => {
     setSelection(next);
+    setObservedProductionDate(next.observedProductionDate ?? "");
     setSaved(false);
     correction.reset();
     idempotencyKey.current = newIdempotencyKey();
@@ -148,7 +151,11 @@ export function InventoryCorrections() {
         </Link>
       </header>
 
-      <div className="mk-inventory-live__columns">
+      <div
+        className={`mk-inventory-correction-layout${
+          inventory.data.mode === "repack" ? " mk-inventory-correction-layout--repack" : ""
+        }`}
+      >
         <Card title={t("pages.inventory.corrections.events")} titleAs="h2">
           <div className="mk-inventory-correction-filters">
             <Input
@@ -218,13 +225,21 @@ export function InventoryCorrections() {
             </Button>
           </div>
         </Card>
-        <Card title={t("pages.inventory.corrections.boxes")} titleAs="h2">
-          <ul className="mk-inventory-correction-list">
-            {progress.data.boxes.map((box) => (
-              <CorrectionBox key={box.id} box={box} onSelect={select} />
-            ))}
-          </ul>
-        </Card>
+        {inventory.data.mode === "repack" ? (
+          <Card title={t("pages.inventory.corrections.newBoxes")} titleAs="h2">
+            {progress.data.boxes.length === 0 ? (
+              <p className="mk-inventory-section-description">
+                {t("pages.inventory.corrections.newBoxesEmpty")}
+              </p>
+            ) : (
+              <ul className="mk-inventory-correction-list">
+                {progress.data.boxes.map((box) => (
+                  <CorrectionBox key={box.id} box={box} onSelect={select} />
+                ))}
+              </ul>
+            )}
+          </Card>
+        ) : null}
       </div>
 
       {selection ? (
@@ -287,11 +302,18 @@ function CorrectionEvent({
   event: InventoryEvidenceEvent;
   onSelect: (selection: Selection) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   return (
     <li>
       <span>
         <strong className="mk-inventory-mono">{event.displayIdentity}</strong>
+        {event.observedProductionDate ? (
+          <small>
+            {t("pages.inventory.corrections.productionDate", {
+              date: formatDate(event.observedProductionDate, i18n.language),
+            })}
+          </small>
+        ) : null}
         <small>{event.terminalName}</small>
       </span>
       <div className="mk-inventory-correction-list__actions">
@@ -310,7 +332,12 @@ function CorrectionEvent({
                 action === "void_scan" || action === "restore_scan"
                   ? { eventId: event.eventId }
                   : { codeResultId: event.codeResultId! };
-              onSelect({ action, target, identity: event.displayIdentity });
+              onSelect({
+                action,
+                target,
+                identity: event.displayIdentity,
+                observedProductionDate: event.observedProductionDate,
+              });
             }}
           >
             {t(`pages.inventory.corrections.action.${action}`)}
@@ -345,6 +372,7 @@ function CorrectionBox({
                 action: "invalidate_box",
                 target: { repackBoxId: box.id },
                 identity: box.sscc,
+                observedProductionDate: box.productionDate,
               })
             }
           >
@@ -360,6 +388,7 @@ function CorrectionBox({
                 action: "reprint",
                 target: { repackBoxId: box.id },
                 identity: box.sscc,
+                observedProductionDate: box.productionDate,
               })
             }
           >
