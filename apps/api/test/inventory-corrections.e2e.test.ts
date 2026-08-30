@@ -751,12 +751,14 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
       .expect(201);
     const boxProjection = (state: {
       state: string;
+      invalidationSource: "claim_lost" | "admin" | null;
       invalidatedAt: Date | null;
       updatedAt: Date;
     }) => ({
       kind: "repack_box",
       id: boxFixture.boxId,
       state: state.state,
+      invalidationSource: state.invalidationSource,
       printState: beforeBox!.printState,
       printAttemptCount: beforeBox!.printAttemptCount,
       printErrorCode: beforeBox!.printErrorCode,
@@ -769,6 +771,7 @@ describe.skipIf(!ready)("inventory administrative corrections", () => {
       afterProjectionDigest: digest(
         boxProjection({
           state: "invalidated",
+          invalidationSource: "admin",
           invalidatedAt: new Date(invalidated.body.createdAt),
           updatedAt: new Date(invalidated.body.createdAt),
         }),

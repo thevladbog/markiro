@@ -102,6 +102,12 @@
   gap: 6px;
 }
 
+.mk-inventory-close-blockers small {
+  display: block;
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
 .mk-inventory-late-list {
   list-style: none;
   margin: 0;

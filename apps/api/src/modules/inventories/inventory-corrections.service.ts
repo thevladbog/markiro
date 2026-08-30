@@ -60,6 +60,7 @@ function repackBoxProjection(
     RepackBox,
     | "id"
     | "state"
+    | "invalidationSource"
     | "printState"
     | "printAttemptCount"
     | "printErrorCode"
@@ -72,6 +73,7 @@ function repackBoxProjection(
     kind: "repack_box",
     id: box.id,
     state: box.state,
+    invalidationSource: box.invalidationSource,
     printState: box.printState,
     printAttemptCount: box.printAttemptCount,
     printErrorCode: box.printErrorCode,
@@ -432,6 +434,7 @@ export class InventoryCorrectionsService {
       const after = {
         ...box,
         state: "invalidated" as const,
+        invalidationSource: "admin" as const,
         invalidatedAt: changedAt,
         updatedAt: changedAt,
       };
@@ -443,7 +446,12 @@ export class InventoryCorrectionsService {
         apply: async () => {
           await tx
             .update(schema.inventoryRepackBoxes)
-            .set({ state: "invalidated", invalidatedAt: changedAt, updatedAt: changedAt })
+            .set({
+              state: "invalidated",
+              invalidationSource: "admin",
+              invalidatedAt: changedAt,
+              updatedAt: changedAt,
+            })
             .where(
               and(
                 eq(schema.inventoryRepackBoxes.tenantId, tenantId),

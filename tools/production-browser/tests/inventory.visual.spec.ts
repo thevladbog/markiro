@@ -477,10 +477,10 @@ interface RepackBoxBase {
   readonly productionDate: string;
 }
 function openBox(base: RepackBoxBase, itemCount: number) {
-  return { ...base, state: "open", printState: "not_ready", itemCount };
+  return { ...base, state: "open", invalidationSource: null, printState: "not_ready", itemCount };
 }
 function closedBox(base: RepackBoxBase, itemCount: number) {
-  return { ...base, state: "closed", printState: "printed", itemCount };
+  return { ...base, state: "closed", invalidationSource: null, printState: "printed", itemCount };
 }
 /**
  * Still running, nobody has attempted to close yet: Терминал 1 is filling its
@@ -794,6 +794,7 @@ const CLOSE_PREVIEW_BLOCKED = {
       deviceId: null,
       boxId: null,
       discrepancyCategory: null,
+      invalidationSource: null,
     },
     {
       code: "STALE_PARTICIPANT",
@@ -802,6 +803,7 @@ const CLOSE_PREVIEW_BLOCKED = {
       deviceId: null,
       boxId: null,
       discrepancyCategory: null,
+      invalidationSource: null,
     },
     {
       code: "PENDING_OUTBOX",
@@ -810,6 +812,7 @@ const CLOSE_PREVIEW_BLOCKED = {
       deviceId: null,
       boxId: null,
       discrepancyCategory: null,
+      invalidationSource: null,
     },
     {
       code: "PARTICIPANT_OPEN_BOX",
@@ -818,6 +821,7 @@ const CLOSE_PREVIEW_BLOCKED = {
       deviceId: null,
       boxId: null,
       discrepancyCategory: null,
+      invalidationSource: null,
     },
     {
       code: "OPEN_REPACK_BOX",
@@ -826,6 +830,7 @@ const CLOSE_PREVIEW_BLOCKED = {
       deviceId: null,
       boxId: null,
       discrepancyCategory: null,
+      invalidationSource: null,
     },
   ],
 };

@@ -264,6 +264,7 @@ describe.skipIf(!databaseUrl)("closed inventory result source", () => {
         capacity: 12,
         productionDate: "2026-08-09",
         state: "invalidated",
+        invalidationSource: "claim_lost",
         printState: "not_ready",
         invalidatedAt: new Date("2026-08-20T11:30:00.000Z"),
       },

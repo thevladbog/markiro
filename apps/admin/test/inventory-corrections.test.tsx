@@ -348,7 +348,13 @@ it("offers reprint only for a closed printed box and never for open, invalidated
   }
 });
 
-function box(id: string, sscc: string, state: string, printState: string) {
+function box(
+  id: string,
+  sscc: string,
+  state: string,
+  printState: string,
+  invalidationSource: "claim_lost" | "admin" | null = null,
+) {
   return {
     id,
     sscc,
@@ -356,6 +362,7 @@ function box(id: string, sscc: string, state: string, printState: string) {
     terminalName: "СТ-А-02",
     productionDate: "2025-09-19",
     state,
+    invalidationSource,
     printState,
     itemCount: 1,
   };

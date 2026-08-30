@@ -75,11 +75,11 @@ const progress = {
   dateMismatchCount: 1,
   voidedCount: 0,
   oldBoxCount: 4,
-  newBoxCount: 2,
-  invalidatedBoxCount: 0,
+  newBoxCount: 3,
+  invalidatedBoxCount: 2,
   pendingEventCount: 3,
   openBoxCount: 1,
-  boxTotal: 1,
+  boxTotal: 3,
   boxesTruncated: false,
   participants: [
     {
@@ -124,8 +124,31 @@ const progress = {
       terminalName: "Станция упаковки № 1",
       productionDate: "2025-09-19",
       state: "open",
+      invalidationSource: null,
       printState: "not_ready",
       itemCount: 7,
+    },
+    {
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      sscc: "146000000000000029",
+      terminalId: "77777777-7777-4777-8777-777777777777",
+      terminalName: "Станция упаковки № 1",
+      productionDate: "2025-09-19",
+      state: "invalidated",
+      invalidationSource: "claim_lost",
+      printState: "not_ready",
+      itemCount: 0,
+    },
+    {
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      sscc: "146000000000000036",
+      terminalId: "77777777-7777-4777-8777-777777777777",
+      terminalName: "Станция упаковки № 1",
+      productionDate: "2025-09-19",
+      state: "invalidated",
+      invalidationSource: "admin",
+      printState: "not_ready",
+      itemCount: 3,
     },
   ],
   recentEvents: [
@@ -234,6 +257,9 @@ it("renders approved live evidence with stale participants and local pending wor
   expect(screen.getByText("Вышел")).toBeDefined();
   expect(screen.getByText(/3 события на терминалах/)).toBeDefined();
   expect(screen.getByText("146000000000000012")).toBeDefined();
+  expect(screen.getByText("Аннулирован (конфликт сканов)")).toBeDefined();
+  expect(screen.getByText("Аннулирован (из кабинета)")).toBeDefined();
+  expect(screen.queryByText("Аннулирован")).toBeNull();
   expect(screen.getByText("(01)04680089900383 (21)SERIAL-42")).toBeDefined();
   expect(screen.getByRole("link", { name: "Исправления" })).toBeDefined();
   expect(

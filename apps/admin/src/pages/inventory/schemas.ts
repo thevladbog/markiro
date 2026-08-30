@@ -308,6 +308,14 @@ const inventoryParticipantSchema = z.strictObject({
   openBoxCount: nonnegativeInteger,
 });
 
+/**
+ * `claim_lost` — the system invalidated the box on a scan conflict and the operator
+ * can still return it to work from the terminal. `admin` — an irreversible
+ * `invalidate_box` correction made from the cabinet.
+ */
+const inventoryBoxInvalidationSourceSchema = z.enum(["claim_lost", "admin"]);
+export type InventoryBoxInvalidationSource = z.infer<typeof inventoryBoxInvalidationSourceSchema>;
+
 const inventoryLiveBoxSchema = z.strictObject({
   id: uuid,
   sscc: z.string().regex(/^\d{18}$/),
@@ -315,6 +323,7 @@ const inventoryLiveBoxSchema = z.strictObject({
   terminalName: z.string().min(1),
   productionDate: civilDate,
   state: z.enum(["open", "closed", "invalidated"]),
+  invalidationSource: inventoryBoxInvalidationSourceSchema.nullable(),
   printState: z.enum(["not_ready", "pending", "printing", "printed", "failed"]),
   itemCount: nonnegativeInteger,
 });
@@ -374,6 +383,7 @@ export const inventoryCloseBlockerSchema = z.strictObject({
   deviceId: uuid.nullable(),
   boxId: uuid.nullable(),
   discrepancyCategory: z.enum(["unknown", "ineligible", "date_mismatch", "voided"]).nullable(),
+  invalidationSource: inventoryBoxInvalidationSourceSchema.nullable(),
 });
 
 export const inventoryCloseResponseSchema = z.strictObject({

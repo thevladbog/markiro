@@ -361,6 +361,9 @@ function CorrectionBox({
       <span>
         <strong className="mk-inventory-mono">{box.sscc}</strong>
         <small>{box.terminalName}</small>
+        {box.invalidationSource === null ? null : (
+          <small>{t(`pages.inventory.live.boxInvalidation.${box.invalidationSource}`)}</small>
+        )}
       </span>
       <div className="mk-inventory-correction-list__actions">
         {box.state !== "invalidated" ? (

@@ -245,6 +245,7 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       capacity: 12,
       productionDate: "2026-08-09",
       state: "invalidated",
+      invalidationSource: "admin",
       printState: "not_ready",
       invalidatedAt: new Date("2026-08-20T11:00:00.000Z"),
     });
@@ -452,6 +453,7 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
           terminalId: terminalBId,
           terminalName: "Terminal B",
           state: "invalidated",
+          invalidationSource: "admin",
           printState: "not_ready",
           itemCount: 0,
         }),
@@ -609,6 +611,7 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
         capacity: 12,
         productionDate: "2026-08-10",
         state: "invalidated",
+        invalidationSource: "claim_lost",
         printState: "not_ready",
         invalidatedAt: new Date("2026-08-20T11:10:00.000Z"),
       });

@@ -1403,6 +1403,7 @@ export class StationInventorySyncService {
         id: schema.inventoryRepackBoxes.id,
         ownerDeviceId: schema.inventoryRepackBoxes.ownerDeviceId,
         state: schema.inventoryRepackBoxes.state,
+        invalidationSource: schema.inventoryRepackBoxes.invalidationSource,
         capacity: schema.inventoryRepackBoxes.capacity,
         productionDate: schema.inventoryRepackBoxes.productionDate,
         oldSsccContext: schema.inventoryRepackBoxes.oldSsccContext,
@@ -1426,24 +1427,14 @@ export class StationInventorySyncService {
     }
 
     if (mutation.action === "resolve-conflict") {
-      const [adminInvalidation] = await tx
-        .select({ id: schema.inventoryCorrections.id })
-        .from(schema.inventoryCorrections)
-        .where(
-          and(
-            eq(schema.inventoryCorrections.tenantId, tenantId),
-            eq(schema.inventoryCorrections.inventoryId, inventoryId),
-            eq(schema.inventoryCorrections.targetRepackBoxId, box.id),
-            eq(schema.inventoryCorrections.action, "invalidate_box"),
-          ),
-        )
-        .limit(1);
+      // Only the reversible scan-conflict invalidation returns to the line; an
+      // `invalidate_box` correction from the cabinet stays invalidated forever.
       if (
         box.state !== "invalidated" ||
+        box.invalidationSource !== "claim_lost" ||
         box.printAttemptCount !== 0 ||
         box.printedAt !== null ||
-        mutation.reason !== "claim-lost" ||
-        adminInvalidation !== undefined
+        mutation.reason !== "claim-lost"
       ) {
         throw new ConflictException({ code: "INVENTORY_REPACK_CONFLICT_RESOLUTION_INVALID" });
       }
@@ -1475,6 +1466,7 @@ export class StationInventorySyncService {
         .update(schema.inventoryRepackBoxes)
         .set({
           state: "open",
+          invalidationSource: null,
           printState: "not_ready",
           printAttemptCount: 0,
           printErrorCode: null,
@@ -1491,6 +1483,7 @@ export class StationInventorySyncService {
             eq(schema.inventoryRepackBoxes.id, box.id),
             eq(schema.inventoryRepackBoxes.ownerDeviceId, deviceId),
             eq(schema.inventoryRepackBoxes.state, "invalidated"),
+            eq(schema.inventoryRepackBoxes.invalidationSource, "claim_lost"),
           ),
         );
       await tx.insert(schema.tenantAuditEvents).values({
@@ -1502,6 +1495,7 @@ export class StationInventorySyncService {
         targetId: box.id,
         before: {
           state: box.state,
+          invalidationSource: box.invalidationSource,
           activeItemCount: activeItems.length,
           printState: box.printState,
           printAttemptCount: box.printAttemptCount,
@@ -1632,7 +1626,12 @@ export class StationInventorySyncService {
       if (outcome.status !== "applied" && !ownedReattach) {
         await tx
           .update(schema.inventoryRepackBoxes)
-          .set({ state: "invalidated", invalidatedAt: new Date(), updatedAt: new Date() })
+          .set({
+            state: "invalidated",
+            invalidationSource: "claim_lost",
+            invalidatedAt: new Date(),
+            updatedAt: new Date(),
+          })
           .where(eq(schema.inventoryRepackBoxes.id, box.id));
         return;
       }
@@ -1681,7 +1680,15 @@ export class StationInventorySyncService {
           );
         await tx
           .update(schema.inventoryRepackBoxes)
-          .set({ state: "invalidated", invalidatedAt: new Date(), updatedAt: new Date() })
+          .set({
+            state: "invalidated",
+            // A box the cabinet already invalidated stays irreversible even when a
+            // later scan conflict displaces one of its items, so the first
+            // invalidation keeps both its source and its timestamp.
+            invalidationSource: sql`coalesce(${schema.inventoryRepackBoxes.invalidationSource}, 'claim_lost'::inventory_repack_invalidation_source)`,
+            invalidatedAt: sql`coalesce(${schema.inventoryRepackBoxes.invalidatedAt}, now())`,
+            updatedAt: new Date(),
+          })
           .where(
             inArray(
               schema.inventoryRepackBoxes.id,
