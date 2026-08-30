@@ -425,6 +425,27 @@
   font-family: var(--font-mono);
 }
 
+.mk-inventory-live-metric--link {
+  text-decoration: none;
+  transition:
+    border-color 120ms,
+    filter 120ms,
+    transform 60ms;
+}
+
+.mk-inventory-live-metric--link:hover {
+  filter: brightness(1.06);
+}
+
+.mk-inventory-live-metric--link:active {
+  transform: translateY(1px);
+}
+
+.mk-inventory-live-metric--link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 .mk-inventory-live-metric--ok {
   border-color: var(--ok-border);
   background: var(--ok-bg);
@@ -531,9 +552,80 @@
 
 .mk-inventory-correction-filters {
   display: grid;
-  grid-template-columns: minmax(180px, 2fr) repeat(2, minmax(150px, 1fr));
+  grid-template-columns: minmax(180px, 2fr) repeat(3, minmax(145px, 1fr));
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.mk-inventory-correction-views {
+  margin-bottom: 14px;
+}
+
+.mk-inventory-correction-selection-head,
+.mk-inventory-copy-row,
+.mk-inventory-correction-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mk-inventory-correction-selection-head {
+  justify-content: space-between;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.mk-inventory-correction-selection-head__page {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mk-inventory-correction-selection-head__page small {
+  color: var(--fg-3);
+}
+
+.mk-inventory-correction-event {
+  align-items: flex-start !important;
+  padding: 12px 0;
+}
+
+.mk-inventory-correction-event__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mk-inventory-copy-row {
+  min-width: 0;
+}
+
+.mk-inventory-copy-row code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg-2);
+  font: var(--text-caption);
+  font-family: var(--font-mono);
+}
+
+.mk-inventory-correction-bulk-bar {
+  position: sticky;
+  z-index: 2;
+  bottom: 0;
+  justify-content: space-between;
+  margin: 12px -16px -16px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line-strong);
+  background: var(--surface-panel);
+  box-shadow: 0 -8px 20px rgb(0 0 0 / 12%);
+}
+
+.mk-inventory-correction-batch-panel {
+  display: grid;
+  gap: 14px;
 }
 
 .mk-inventory-correction-pagination {

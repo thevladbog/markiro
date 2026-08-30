@@ -12,6 +12,7 @@ import { StationInventorySyncService } from "./station-inventory-sync.service";
 import { InventoryReconciliationService } from "./inventory-reconciliation.service";
 import { InventoryResultSourceService } from "./inventory-result-source.service";
 import { InventoryCorrectionsService } from "./inventory-corrections.service";
+import { InventoryCorrectionBatchesService } from "./inventory-correction-batches.service";
 import { InventoryCloseService } from "./inventory-close.service";
 import { InventoryDocumentFormatsController } from "./inventory-document-formats.controller";
 import { InventoryDocumentFormatsService } from "./inventory-document-formats.service";
@@ -35,6 +36,7 @@ import { InventoryDocumentsService } from "./inventory-documents.service";
     InventoryReconciliationService,
     InventoryResultSourceService,
     InventoryCorrectionsService,
+    InventoryCorrectionBatchesService,
     InventoryCloseService,
     InventoryDocumentFormatsService,
     InventoryDocumentsService,

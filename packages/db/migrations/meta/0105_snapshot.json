@@ -1,6 +1,6 @@
 {
-  "id": "3561de26-227e-4144-9719-41785307891c",
-  "prevId": "d7834311-d2ea-4235-9c6b-1e5449cade09",
+  "id": "b78738d0-a5f2-4616-9683-1fa0c3b7cdd6",
+  "prevId": "3561de26-227e-4144-9719-41785307891c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -19116,6 +19116,13 @@
           "notNull": true,
           "default": "'open'"
         },
+        "invalidation_source": {
+          "name": "invalidation_source",
+          "type": "inventory_repack_invalidation_source",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
         "print_state": {
           "name": "print_state",
           "type": "inventory_repack_print_state",
@@ -19360,6 +19367,10 @@
         "inventory_repack_boxes_lifecycle_check": {
           "name": "inventory_repack_boxes_lifecycle_check",
           "value": "(\"inventory_repack_boxes\".\"state\" = 'open' and \"inventory_repack_boxes\".\"closed_at\" is null and \"inventory_repack_boxes\".\"invalidated_at\" is null)\n        or (\"inventory_repack_boxes\".\"state\" = 'closed' and \"inventory_repack_boxes\".\"closed_at\" is not null and \"inventory_repack_boxes\".\"invalidated_at\" is null)\n        or (\"inventory_repack_boxes\".\"state\" = 'invalidated' and \"inventory_repack_boxes\".\"invalidated_at\" is not null)"
+        },
+        "inventory_repack_boxes_invalidation_source_check": {
+          "name": "inventory_repack_boxes_invalidation_source_check",
+          "value": "(\"inventory_repack_boxes\".\"state\" = 'invalidated' and \"inventory_repack_boxes\".\"invalidation_source\" is not null)\n        or (\"inventory_repack_boxes\".\"state\" <> 'invalidated' and \"inventory_repack_boxes\".\"invalidation_source\" is null)"
         },
         "inventory_repack_boxes_lifecycle_print_check": {
           "name": "inventory_repack_boxes_lifecycle_print_check",
@@ -22530,6 +22541,14 @@
         "open",
         "closed",
         "invalidated"
+      ]
+    },
+    "public.inventory_repack_invalidation_source": {
+      "name": "inventory_repack_invalidation_source",
+      "schema": "public",
+      "values": [
+        "claim_lost",
+        "admin"
       ]
     },
     "public.inventory_repack_print_state": {

@@ -367,11 +367,6 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
           discrepancyCategory: "date_mismatch",
           count: 1,
         }),
-        expect.objectContaining({
-          code: "UNRESOLVED_DISCREPANCY",
-          discrepancyCategory: "voided",
-          count: 1,
-        }),
       ]),
     );
     expect(
@@ -379,6 +374,32 @@ describe.skipIf(!ready)("inventory close lifecycle", () => {
         (item: { discrepancyCategory?: string }) => item.discrepancyCategory === "missing",
       ),
     ).toBe(false);
+  });
+
+  it("does not treat audited voided scans as safe-close blockers", async () => {
+    const fixture = await seedRunningInventory();
+    await seedRequiredDiscrepancies(fixture);
+    await db
+      .update(schema.inventoryCodeResults)
+      .set({ classification: "voided" })
+      .where(
+        and(
+          eq(schema.inventoryCodeResults.tenantId, fixture.tenantId),
+          eq(schema.inventoryCodeResults.inventoryId, fixture.inventoryId),
+        ),
+      );
+
+    const preview = await fixture.agent
+      .get(`/inventories/${fixture.inventoryId}/close-preview`)
+      .expect(200);
+    expect(preview.body.blockers).not.toContainEqual(
+      expect.objectContaining({
+        code: "UNRESOLVED_DISCREPANCY",
+        discrepancyCategory: "voided",
+      }),
+    );
+
+    await fixture.agent.post(`/inventories/${fixture.inventoryId}/close`).send({}).expect(201);
   });
 
   it("requires emergency reason and explicit blocker acknowledgement, then stores the exact snapshot", async () => {

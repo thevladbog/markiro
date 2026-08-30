@@ -1497,6 +1497,62 @@ export const inventoryRepackPrintAttempts = pgTable(
   ],
 );
 
+/** One idempotent cabinet request that atomically changes multiple code projections. */
+export const inventoryCorrectionBatches = pgTable(
+  "inventory_correction_batches",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: tenantId(),
+    inventoryId: uuid("inventory_id").notNull(),
+    action: inventoryCorrectionActionEnum("action").notNull(),
+    reason: text("reason").notNull(),
+    requestDigest: char("request_digest", { length: 64 }).notNull(),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => user.id),
+    selectedEventCount: integer("selected_event_count").notNull(),
+    affectedCodeCount: integer("affected_code_count").notNull(),
+    resultRevision: integer("result_revision").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("inventory_correction_batches_tenant_id_inventory_uq").on(
+      table.tenantId,
+      table.id,
+      table.inventoryId,
+    ),
+    foreignKey({
+      name: "inventory_correction_batches_tenant_inventory_fk",
+      columns: [table.tenantId, table.inventoryId],
+      foreignColumns: [inventories.tenantId, inventories.id],
+    }),
+    index("inventory_correction_batches_inventory_revision_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.resultRevision,
+      table.createdAt,
+      table.id,
+    ),
+    check(
+      "inventory_correction_batches_action_check",
+      sql`${table.action} in ('void_scan', 'change_date')`,
+    ),
+    check(
+      "inventory_correction_batches_counts_check",
+      sql`${table.selectedEventCount} > 0 and ${table.affectedCodeCount} > 0`,
+    ),
+    check(
+      "inventory_correction_batches_reason_check",
+      sql`octet_length(btrim(${table.reason})) between 1 and 1024`,
+    ),
+    check(
+      "inventory_correction_batches_digest_check",
+      sql`${table.requestDigest} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check("inventory_correction_batches_revision_check", sql`${table.resultRevision} > 0`),
+  ],
+);
+
 /** Append-only projection correction with exact actor, target and revision evidence. */
 export const inventoryCorrections = pgTable(
   "inventory_corrections",
@@ -1504,6 +1560,7 @@ export const inventoryCorrections = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: tenantId(),
     inventoryId: uuid("inventory_id").notNull(),
+    batchId: uuid("batch_id"),
     action: inventoryCorrectionActionEnum("action").notNull(),
     reason: text("reason").notNull(),
     requestDigest: char("request_digest", { length: 64 }).notNull(),
@@ -1528,6 +1585,15 @@ export const inventoryCorrections = pgTable(
       name: "inventory_corrections_tenant_inventory_fk",
       columns: [table.tenantId, table.inventoryId],
       foreignColumns: [inventories.tenantId, inventories.id],
+    }),
+    foreignKey({
+      name: "inventory_corrections_tenant_batch_fk",
+      columns: [table.tenantId, table.batchId, table.inventoryId],
+      foreignColumns: [
+        inventoryCorrectionBatches.tenantId,
+        inventoryCorrectionBatches.id,
+        inventoryCorrectionBatches.inventoryId,
+      ],
     }),
     foreignKey({
       name: "inventory_corrections_tenant_operator_fk",
@@ -1566,6 +1632,12 @@ export const inventoryCorrections = pgTable(
       table.inventoryId,
       table.resultRevision,
       table.createdAt,
+      table.id,
+    ),
+    index("inventory_corrections_batch_idx").on(
+      table.tenantId,
+      table.inventoryId,
+      table.batchId,
       table.id,
     ),
     check(
@@ -1712,6 +1784,8 @@ export type InventoryRepackBox = typeof inventoryRepackBoxes.$inferSelect;
 export type NewInventoryRepackBox = typeof inventoryRepackBoxes.$inferInsert;
 export type InventoryRepackItem = typeof inventoryRepackItems.$inferSelect;
 export type NewInventoryRepackItem = typeof inventoryRepackItems.$inferInsert;
+export type InventoryCorrectionBatch = typeof inventoryCorrectionBatches.$inferSelect;
+export type NewInventoryCorrectionBatch = typeof inventoryCorrectionBatches.$inferInsert;
 export type InventoryCorrection = typeof inventoryCorrections.$inferSelect;
 export type NewInventoryCorrection = typeof inventoryCorrections.$inferInsert;
 export type InventoryLateEvent = typeof inventoryLateEvents.$inferSelect;

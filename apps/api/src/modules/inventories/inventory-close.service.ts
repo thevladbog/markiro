@@ -802,7 +802,6 @@ export class InventoryCloseService {
         ["unknown", discrepancy.unknown],
         ["ineligible", discrepancy.ineligible],
         ["date_mismatch", discrepancy.dateMismatch],
-        ["voided", discrepancy.voided],
       ] as const) {
         if (count > 0) {
           blockers.push(
