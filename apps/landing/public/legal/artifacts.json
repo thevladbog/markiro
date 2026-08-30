@@ -206,8 +206,8 @@
     "locale": "ru",
     "kind": "pdfa-2b",
     "fileName": "markiro_mkr-ins-06_2026.08-01_ru.pdf",
-    "bytes": 748129,
-    "sha256": "bebd06a9f6c072c548be059011758e62b044b56ab30fac24df154ce696ac74c0",
+    "bytes": 751860,
+    "sha256": "8557723e7123bdf090beccb5bf6ebda4e72d367b2976f068fd238902da5a9675",
     "mediaType": "application/pdf",
     "generator": {
       "docx": "9.7.1",
