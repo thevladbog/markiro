@@ -12,13 +12,13 @@ describe("generated billing act document", () => {
   it("copies frozen invoice parties, lines, and totals into an act model", () => {
     const model = toBillingActPrintModel(
       {
-        number: "ACT-000021",
+        number: "MRK-ACT-000021",
         createdAt: new Date("2026-08-21T10:00:00.000Z"),
         periodStart: "2026-07-01",
         periodEnd: "2026-07-31",
       },
       {
-        number: "INV-000021",
+        number: "MRK-INV-000021",
         status: "issued",
         issueDate: new Date("2026-08-21T10:00:00.000Z"),
         dueDate: new Date("2026-08-28T10:00:00.000Z"),
@@ -47,8 +47,8 @@ describe("generated billing act document", () => {
 
     expect(model).toMatchObject({
       kind: "act",
-      number: "ACT-000021",
-      sourceNumber: "INV-000021",
+      number: "MRK-ACT-000021",
+      sourceNumber: "MRK-INV-000021",
       periodStart: "2026-07-01",
       periodEnd: "2026-07-31",
       seller: { legalName: "ООО Маркиро", taxId: "9700000000" },
@@ -58,19 +58,19 @@ describe("generated billing act document", () => {
     });
     expect(documentKindLabel(model)).toBe("АКТ ОКАЗАННЫХ УСЛУГ");
     expect(documentSubject(model)).toBe("Акт оказанных услуг");
-    expect(documentBarcodeValue(model)).toBe("ACT-ACT-000021");
+    expect(documentBarcodeValue(model)).toBe("MRK-ACT-000021");
   });
 
   it("renders identical bytes for an idempotent issue retry", async () => {
     const model = toBillingActPrintModel(
       {
-        number: "ACT-000021",
+        number: "MRK-ACT-000021",
         createdAt: new Date("2026-08-21T10:00:00.000Z"),
         periodStart: "2026-07-01",
         periodEnd: "2026-07-31",
       },
       {
-        number: "INV-000021",
+        number: "MRK-INV-000021",
         status: "issued",
         issueDate: new Date("2026-08-21T10:00:00.000Z"),
         dueDate: null,

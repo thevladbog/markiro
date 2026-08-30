@@ -122,13 +122,16 @@ export class BillingService {
         );
       }
       const normalizedInvoiceSuffix = sql<string>`coalesce(
-        nullif(ltrim(substring(${schema.invoices.number} from 5), '0'), ''),
+        nullif(
+          ltrim(regexp_replace(${schema.invoices.number}, '^(MRK-)?INV-', ''), '0'),
+          ''
+        ),
         '0'
       )`;
       const [last] = await tx
         .select({ number: schema.invoices.number })
         .from(schema.invoices)
-        .where(sql`${schema.invoices.number} ~ '^INV-[0-9]+$'`)
+        .where(sql`${schema.invoices.number} ~ '^(MRK-)?INV-[0-9]+$'`)
         .orderBy(
           desc(sql`length(${normalizedInvoiceSuffix})`),
           desc(sql`${normalizedInvoiceSuffix} collate "C"`),
@@ -871,7 +874,7 @@ function invoicePaymentSummary(
 }
 
 function nextInvoiceNumber(last: string | undefined): string {
-  const suffix = last?.match(/^INV-([0-9]+)$/)?.[1] ?? "0";
+  const suffix = last?.match(/^(?:MRK-)?INV-([0-9]+)$/)?.[1] ?? "0";
   const digits = (suffix.replace(/^0+/, "") || "0").split("");
   let carry = 1;
   for (let index = digits.length - 1; index >= 0 && carry === 1; index -= 1) {
@@ -884,5 +887,5 @@ function nextInvoiceNumber(last: string | undefined): string {
     }
   }
   if (carry === 1) digits.unshift("1");
-  return `INV-${digits.join("").padStart(6, "0")}`;
+  return `MRK-INV-${digits.join("").padStart(6, "0")}`;
 }

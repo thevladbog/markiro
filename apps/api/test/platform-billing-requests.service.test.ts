@@ -1336,6 +1336,8 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
       if (outcomes[0]?.status !== "fulfilled" || outcomes[1]?.status !== "fulfilled") {
         throw new Error("invoice allocation did not complete for both tenants");
       }
+      expect(outcomes[0].value.number).toMatch(/^MRK-INV-[0-9]+$/);
+      expect(outcomes[1].value.number).toMatch(/^MRK-INV-[0-9]+$/);
       expect(outcomes[0].value.number).not.toBe(outcomes[1].value.number);
     } finally {
       await connection.pool.query(`
@@ -1348,12 +1350,12 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
   it("allocates after arbitrary-length numeric suffixes and ignores malformed invoice numbers", async () => {
     const fixtureNumbers = [
       "INV-9223372036854775808",
-      "INV-00009223372036854775809",
-      "INV-999999999999999999999999999999x",
+      "MRK-INV-00009223372036854775809",
+      "MRK-INV-999999999999999999999999999999x",
       "MANUAL-999999999999999999999999999999999999",
-      "INV-9223372036854775810",
-      "INV-999999999999999999999999999999",
-      "INV-1000000000000000000000000000000",
+      "MRK-INV-9223372036854775810",
+      "MRK-INV-999999999999999999999999999999",
+      "MRK-INV-1000000000000000000000000000000",
     ];
     await connection.db.insert(schema.invoices).values(
       fixtureNumbers.slice(0, 4).map((number) => ({
@@ -1365,16 +1367,16 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
 
     try {
       await expect(billing.create(actor, invoiceInput(tenantA))).resolves.toMatchObject({
-        number: "INV-9223372036854775810",
+        number: "MRK-INV-9223372036854775810",
       });
 
       await connection.db.insert(schema.invoices).values({
         tenantId: tenantB,
-        number: "INV-999999999999999999999999999999",
+        number: "MRK-INV-999999999999999999999999999999",
         createdByPlatformUserId: actorId,
       });
       await expect(billing.create(actor, invoiceInput(tenantB))).resolves.toMatchObject({
-        number: "INV-1000000000000000000000000000000",
+        number: "MRK-INV-1000000000000000000000000000000",
       });
     } finally {
       await connection.pool.query(

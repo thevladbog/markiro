@@ -14,7 +14,7 @@ const invoice = {
   id: INVOICE_ID,
   tenantId: TENANT_ID,
   tenantName: "ООО Фабрика",
-  number: "INV-000021",
+  number: "MRK-INV-000021",
   sellerBankAccountId: null,
   sourceOfferId: null,
   sourceRequestId: REQUEST_ID,
@@ -84,7 +84,7 @@ function act(status: "draft" | "issued") {
     requestId: REQUEST_ID,
     invoiceId: INVOICE_ID,
     orderedServiceId: null,
-    number: "ACT-000021",
+    number: "MRK-ACT-000021",
     status,
     periodStart: "2026-07-01",
     periodEnd: "2026-07-31",
@@ -137,11 +137,11 @@ describe("generated billing acts", () => {
 
     renderSaasApp({ initialEntry: `/billing-acts/${ACT_ID}` });
 
-    expect(await screen.findByRole("heading", { name: "ACT-000021" })).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "MRK-ACT-000021" })).toBeDefined();
     expect((await screen.findByRole("link", { name: "ООО Фабрика" })).getAttribute("href")).toBe(
       `/tenants/${TENANT_ID}`,
     );
-    expect(screen.getByRole("link", { name: "INV-000021" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "MRK-INV-000021" }).getAttribute("href")).toBe(
       `/invoices/${INVOICE_ID}`,
     );
     expect(screen.queryByText(TENANT_ID)).toBeNull();
@@ -167,13 +167,13 @@ describe("generated billing acts", () => {
     renderSaasApp({ initialEntry: "/billing-acts" });
 
     expect(await screen.findByRole("heading", { name: "Акты" })).toBeDefined();
-    expect((await screen.findByRole("link", { name: "ACT-000021" })).getAttribute("href")).toBe(
+    expect((await screen.findByRole("link", { name: "MRK-ACT-000021" })).getAttribute("href")).toBe(
       `/billing-acts/${ACT_ID}`,
     );
     expect(screen.getByRole("link", { name: "ООО Фабрика" }).getAttribute("href")).toBe(
       `/tenants/${TENANT_ID}`,
     );
-    expect(screen.getByRole("link", { name: "INV-000021" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "MRK-INV-000021" }).getAttribute("href")).toBe(
       `/invoices/${INVOICE_ID}`,
     );
     expect(screen.queryByText(INVOICE_ID)).toBeNull();
@@ -210,12 +210,12 @@ describe("generated billing acts", () => {
 
     await user.click(await screen.findByRole("combobox", { name: "Счёт-основание" }));
     await user.type(screen.getByRole("searchbox", { name: "Поиск по номеру или тенанту" }), "21");
-    await user.click(screen.getByRole("option", { name: /INV-000021/ }));
+    await user.click(screen.getByRole("option", { name: /MRK-INV-000021/ }));
 
     expect(await screen.findByText("Настройка интеграции")).toBeDefined();
     expect(screen.getByText("ООО Фабрика")).toBeDefined();
     expect(screen.getAllByText("15 000,00 ₽")).toHaveLength(2);
-    expect(screen.getByText("ACT-000021")).toBeDefined();
+    expect(screen.getByText("MRK-ACT-000021")).toBeDefined();
     expect(screen.queryByLabelText("PDF акта")).toBeNull();
     expect(screen.queryByLabelText("Тенант")).toBeNull();
     expect(screen.queryByLabelText("Заявка")).toBeNull();
@@ -232,7 +232,7 @@ describe("generated billing acts", () => {
       tenantId: TENANT_ID,
       requestId: REQUEST_ID,
       invoiceId: INVOICE_ID,
-      number: "ACT-000021",
+      number: "MRK-ACT-000021",
       periodStart: "2026-07-01",
       periodEnd: "2026-07-31",
     });
@@ -249,6 +249,8 @@ describe("generated billing acts", () => {
   it("retries generation with the same issue operation and does not create a second act", async () => {
     const createBodies: string[] = [];
     const issueBodies: string[] = [];
+    const legacyInvoice = { ...invoice, number: "INV-000021" };
+    const legacyInvoiceDetail = { ...invoiceDetail, number: "INV-000021" };
     let issueAttempts = 0;
     vi.stubGlobal(
       "fetch",
@@ -257,10 +259,10 @@ describe("generated billing acts", () => {
         const method = init?.method ?? "GET";
         if (url.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
         if (url.endsWith("/api/platform/invoices") && method === "GET") {
-          return jsonResponse(200, { items: [invoice] });
+          return jsonResponse(200, { items: [legacyInvoice] });
         }
         if (url.endsWith(`/api/platform/invoices/${INVOICE_ID}`) && method === "GET") {
-          return jsonResponse(200, invoiceDetail);
+          return jsonResponse(200, legacyInvoiceDetail);
         }
         if (url.endsWith("/api/platform/billing/acts") && method === "POST") {
           createBodies.push(String(init?.body));
@@ -287,6 +289,7 @@ describe("generated billing acts", () => {
 
     expect(await screen.findByText("Акт выпущен и PDF сформирован")).toBeDefined();
     expect(createBodies).toHaveLength(1);
+    expect(JSON.parse(createBodies[0] ?? "{}")).toMatchObject({ number: "MRK-ACT-000021" });
     expect(issueBodies).toHaveLength(2);
     expect(issueBodies[0]).toBe(issueBodies[1]);
   });
@@ -318,12 +321,12 @@ describe("generated billing acts", () => {
     const invalidate = vi.spyOn(rendered.queryClient, "invalidateQueries");
 
     await user.click(await screen.findByRole("combobox", { name: "Счёт-основание" }));
-    await user.click(screen.getByRole("option", { name: /INV-000021/ }));
+    await user.click(screen.getByRole("option", { name: /MRK-INV-000021/ }));
     await screen.findByText("Настройка интеграции");
     await user.click(screen.getByRole("button", { name: "Выпустить акт" }));
 
     expect(await screen.findByRole("heading", { name: "Выпуск акта недоступен" })).toBeDefined();
-    expect(screen.getByRole("link", { name: "ACT-000021" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "MRK-ACT-000021" }).getAttribute("href")).toBe(
       `/billing-acts/${ACT_ID}`,
     );
     expect(screen.queryByText(ACT_ID)).toBeNull();

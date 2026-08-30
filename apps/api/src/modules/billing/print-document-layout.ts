@@ -44,8 +44,7 @@ export function documentBarcodeValue(model: PrintDocumentModel): string {
   const number = /^[\x20-\x7e]+$/.test(model.number)
     ? model.number
     : Buffer.from(model.number, "utf8").toString("base64url");
-  const prefix = model.kind === "invoice" ? "INV" : model.kind === "act" ? "ACT" : "OFR";
-  return `${prefix}-${number}`;
+  return model.kind === "offer" ? `OFR-${number}` : number;
 }
 
 export function documentSubject(model: PrintDocumentModel): string {

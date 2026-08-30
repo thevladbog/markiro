@@ -53,7 +53,7 @@ const styles = StyleSheet.create({
   page: {
     paddingTop: 93,
     paddingHorizontal: 32,
-    paddingBottom: 45,
+    paddingBottom: 56,
     fontFamily: "IBM Plex Sans",
     fontSize: 8.5,
     color: colors.ink,
@@ -178,8 +178,8 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 32,
     right: 32,
-    bottom: 20,
-    height: 23,
+    bottom: 14,
+    height: 34,
     borderTopWidth: 0.7,
     borderTopColor: colors.rule,
     paddingTop: 5,
@@ -187,7 +187,15 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-start",
   },
-  barcode: { width: 148, height: 17 },
+  barcodeGroup: { flexDirection: "column", gap: 1.5 },
+  barcode: { width: 148, height: 16 },
+  barcodeCaption: {
+    fontFamily: "IBM Plex Sans",
+    fontSize: 5.8,
+    fontWeight: 600,
+    letterSpacing: 0.35,
+    color: colors.muted,
+  },
   footerText: { fontSize: 6.2, color: colors.muted },
 });
 
@@ -261,7 +269,10 @@ function Header({ model, logo }: { model: PrintDocumentModel; logo: string }) {
 function Footer({ model, barcode }: { model: PrintDocumentModel; barcode: string }) {
   return (
     <View style={styles.footer} fixed>
-      <Image style={styles.barcode} src={barcode} />
+      <View style={styles.barcodeGroup}>
+        <Image style={styles.barcode} src={barcode} />
+        <Text style={styles.barcodeCaption}>{documentBarcodeValue(model)}</Text>
+      </View>
       <Text style={styles.footerText}>
         Сформировано системой Markiro · {formatPrintDateTime(model.issuedOrPublishedAt)}
       </Text>

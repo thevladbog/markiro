@@ -419,9 +419,9 @@ function BillingActForm({ writable }: { writable: boolean }) {
 }
 
 function actNumberFromInvoice(invoiceNumber: string): string {
-  return /^INV-/i.test(invoiceNumber)
-    ? invoiceNumber.replace(/^INV-/i, "ACT-")
-    : `ACT-${invoiceNumber}`;
+  return /^(?:MRK-)?INV-/i.test(invoiceNumber)
+    ? invoiceNumber.replace(/^(?:MRK-)?INV-/i, "MRK-ACT-")
+    : `MRK-ACT-${invoiceNumber}`;
 }
 
 function formatMoney(value: string, locale: string): string {

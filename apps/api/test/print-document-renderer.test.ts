@@ -87,16 +87,18 @@ describe("print document HTML renderer", () => {
   });
 
   it("renders the approved invoice hierarchy without duplicate labels", () => {
-    const html = renderPrintHtml(baseInvoice);
+    const html = renderPrintHtml({ ...baseInvoice, number: "MRK-INV-000184" });
     const screenPage = html.match(/<article class="print-page">[\s\S]*<\/article>/)?.[0] ?? "";
 
     expect(count(screenPage, "СЧЁТ НА ОПЛАТУ")).toBe(1);
-    expect(html).toContain("№ 184 · 24.08.2026");
+    expect(html).toContain("№ MRK-INV-000184 · 24.08.2026");
     expect(html).toContain("Лицензия и услуги платформы Markiro");
     expect(html).not.toContain("Основной расчётный счёт");
     expect(html).not.toContain("Оплатить по QR");
     expect(html).toContain('aria-label="QR-код для оплаты счёта"');
     expect(html).toContain('aria-label="Штрихкод формы"');
+    expect(html).toContain('data-barcode-value="MRK-INV-000184"');
+    expect(html).toContain(">MRK-INV-000184</span>");
     expect(count(screenPage, "Сформировано системой Markiro")).toBe(1);
     expect(count(html, 'aria-hidden="true"')).toBe(2);
   });
@@ -197,6 +199,13 @@ describe("print document HTML renderer", () => {
     expect(documentBarcodeValue({ ...baseInvoice, kind: "offer", number: "КП-27" })).toBe(
       "OFR-0JrQny0yNw",
     );
+  });
+
+  it.each([
+    ["invoice", "MRK-INV-000184"],
+    ["act", "MRK-ACT-000184"],
+  ] as const)("encodes the %s form business number without a duplicate prefix", (kind, number) => {
+    expect(documentBarcodeValue({ ...baseInvoice, kind, number })).toBe(number);
   });
 
   it("renders a line comment below the item name in HTML", () => {
