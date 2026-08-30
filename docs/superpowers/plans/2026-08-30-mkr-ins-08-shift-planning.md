@@ -45,7 +45,12 @@
 
 **Interfaces:**
 - Consumes: `appRoutes` из `apps/admin/src/app.tsx`; маршруты `/lines`, `/lines/new`, `/shifts`, `/shifts/new`, `/shifts/:shiftId/edit`, `/devices` (см. `apps/admin/src/app.tsx:136-180,318`).
-- Produces: двенадцать PNG с идентификаторами `lines-list`, `line-form`, `line-delete-blocked`, `device-line`, `shifts-list`, `shift-product-mode`, `shift-planning`, `shift-assignment`, `shift-aggregation`, `shift-planned`, `shift-active-edit`, `shift-delete`. Ровно эти идентификаторы использует Task 2 и Task 3.
+- Produces: тринадцать PNG с идентификаторами `lines-list`, `line-form`, `line-delete-blocked`, `device-list`, `device-line`, `shifts-list`, `shift-product-options`, `shift-filled`, `shift-aggregation`, `shift-planned`, `shift-active-locked`, `shift-active-edit`, `shift-delete`. Ровно эти идентификаторы использует Task 2 и Task 3.
+
+**Набор уточнён при исполнении, по фактическому поведению интерфейса:**
+- Форма смены целиком помещается в одну панель, поэтому три задуманных «разделовых» кадра (`shift-product-mode`, `shift-planning`, `shift-assignment`) были бы одним и тем же изображением. Вместо них — кадры, несущие конкретные утверждения: `shift-product-options` (раскрытый список продуктов, где черновик и архивный подписаны и отключены), `shift-filled` (после выбора продукта подставился контрагент) и `shift-aggregation` (после выбора режима «Агрегация» появились «Шаблоны» и «Агрегация» с подставленной вместимостью короба).
+- В списке устройств линия показана в колонке «Место»; строка «Линия» с подсказкой живёт в форме устройства. Отсюда два кадра: `device-list` и `device-line`.
+- `shift-active-edit` — это сам диалог «Критическое изменение активной смены», а состояние заблокированных полей активной смены вынесено в отдельный кадр `shift-active-locked`.
 
 - [ ] **Step 1: Обобщить харнесс**
 
