@@ -469,7 +469,6 @@ async function recordInternal(
       // journal write would leave the box's own date briefly disagreeing with
       // the terminal's, and every item scan in that window silently degrades
       // to observe-only (see `dateMatches` below) instead of failing loudly.
-      // Do not add transaction support to chase this — see review notes.
       await setInventoryProductionDate(exec, {
         inventoryId: input.inventoryId,
         snapshotId: input.snapshotId,
