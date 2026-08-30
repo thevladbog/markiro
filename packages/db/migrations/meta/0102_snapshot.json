@@ -1,6 +1,6 @@
 {
-  "id": "ccebb7b0-94a9-45bd-9016-b2f131ac7d77",
-  "prevId": "cbe4c3e6-7770-4b2a-aaa9-1d38890522d3",
+  "id": "bac7c74b-44bd-4b41-bcd5-5be79b1f9f0b",
+  "prevId": "ccebb7b0-94a9-45bd-9016-b2f131ac7d77",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -11183,6 +11183,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "print_variant": {
+          "name": "print_variant",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'clean'"
+        },
         "error_code": {
           "name": "error_code",
           "type": "text",
@@ -11251,6 +11258,10 @@
         "invoice_documents_format_check": {
           "name": "invoice_documents_format_check",
           "value": "\"invoice_documents\".\"format\" in ('pdf', 'html')"
+        },
+        "invoice_documents_print_variant_check": {
+          "name": "invoice_documents_print_variant_check",
+          "value": "\"invoice_documents\".\"print_variant\" in ('clean', 'signed')"
         },
         "invoice_documents_ready_metadata_check": {
           "name": "invoice_documents_ready_metadata_check",
@@ -13283,6 +13294,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "print_variant": {
+          "name": "print_variant",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'clean'"
+        },
         "state": {
           "name": "state",
           "type": "billing_attachment_state",
@@ -13478,6 +13496,10 @@
         "billing_act_documents_content_type_pdf": {
           "name": "billing_act_documents_content_type_pdf",
           "value": "\"billing_act_documents\".\"content_type\" = 'application/pdf'"
+        },
+        "billing_act_documents_print_variant_check": {
+          "name": "billing_act_documents_print_variant_check",
+          "value": "\"billing_act_documents\".\"print_variant\" in ('clean', 'signed')"
         },
         "billing_act_documents_ready_shape_check": {
           "name": "billing_act_documents_ready_shape_check",

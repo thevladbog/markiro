@@ -712,8 +712,15 @@
     {
       "idx": 101,
       "version": "7",
-      "when": 1788069107801,
-      "tag": "0101_billing_print_variants",
+      "when": 1788059441622,
+      "tag": "0101_inventory_cancellation",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1788072039782,
+      "tag": "0102_billing_print_variants",
       "breakpoints": true
     }
   ]

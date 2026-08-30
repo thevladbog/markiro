@@ -10,10 +10,10 @@ const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 
 describe("billing print variant migration metadata", () => {
-  it("keeps the snapshot chain contiguous through 0101", async () => {
+  it("keeps the snapshot chain contiguous through 0102", async () => {
     const [previousText, currentText, journalText] = await Promise.all([
-      readFile(new URL("../migrations/meta/0100_snapshot.json", import.meta.url), "utf8"),
       readFile(new URL("../migrations/meta/0101_snapshot.json", import.meta.url), "utf8"),
+      readFile(new URL("../migrations/meta/0102_snapshot.json", import.meta.url), "utf8"),
       readFile(new URL("../migrations/meta/_journal.json", import.meta.url), "utf8"),
     ]);
     const previous = JSON.parse(previousText) as { id: string };
@@ -23,9 +23,9 @@ describe("billing print variant migration metadata", () => {
     };
 
     expect(current.prevId).toBe(previous.id);
-    expect(journal.entries.find(({ idx }) => idx === 101)).toMatchObject({
-      idx: 101,
-      tag: "0101_billing_print_variants",
+    expect(journal.entries.find(({ idx }) => idx === 102)).toMatchObject({
+      idx: 102,
+      tag: "0102_billing_print_variants",
     });
   });
 });
