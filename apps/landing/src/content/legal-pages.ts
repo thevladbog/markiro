@@ -51,6 +51,14 @@ const DESCRIPTION_BY_CODE = {
     ru: "Печатная инструкция наладчика: привязка станции к кабинету, подключение сканера и принтера, звук и обновления станции.",
     en: "Printable technician instruction: pairing the station with the cabinet, connecting the scanner and printer, sound, and station updates.",
   },
+  "MKR-INS-05": {
+    ru: "Печатная инструкция оператора для инвентаризации: открытие задания, вердикты сканирования, переупаковка коробов и печать этикеток.",
+    en: "Printable operator instruction for stock counts: opening a task, scan verdicts, repacking boxes, and label printing.",
+  },
+  "MKR-INS-06": {
+    ru: "Печатная инструкция менеджера: создание задания инвентаризации, выписки Честного Знака, фиксация снимка, терминалы и запуск.",
+    en: "Printable manager instruction: creating a stock-count task, Chestny Znak exports, fixing the snapshot, terminals, and launch.",
+  },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 
 export interface LegalDocumentPageDefinition {

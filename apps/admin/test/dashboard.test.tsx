@@ -237,9 +237,41 @@ describe("DashboardPage", () => {
 
     const validationRate = screen.getByRole("region", { name: "Проверка — темп" });
     const aggregationRate = screen.getByRole("region", { name: "Агрегация — темп" });
-    expect(
-      within(validationRate).getByLabelText(/21\.08\.2026: 4[\s\u00a0]?650 шт\.\/час смены/),
-    ).toBeDefined();
+    const validationBar = within(validationRate).getByLabelText(
+      /21\.08\.2026: 4[\s\u00a0]?650 шт\.\/час смены/,
+    );
+    expect(validationBar).toBeDefined();
+    expect(validationBar.getAttribute("tabindex")).toBe("0");
+    fireEvent.mouseEnter(validationBar);
+    const hoverTooltip = screen.getByRole("tooltip");
+    expect(hoverTooltip.textContent).toMatch(/21\.08\.2026: 4[\s\u00a0]?650 шт\.\/час смены/);
+    fireEvent.mouseLeave(validationBar);
+    fireEvent.mouseEnter(hoverTooltip);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(screen.getByRole("tooltip")).toBe(hoverTooltip);
+    const focusBeforeMouseEscape = document.activeElement;
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(document.activeElement).toBe(focusBeforeMouseEscape);
+
+    fireEvent.mouseEnter(validationBar);
+    const dismissibleHoverTooltip = screen.getByRole("tooltip");
+    fireEvent.mouseLeave(validationBar);
+    fireEvent.mouseEnter(dismissibleHoverTooltip);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(screen.getByRole("tooltip")).toBe(dismissibleHoverTooltip);
+    fireEvent.mouseLeave(dismissibleHoverTooltip);
+    await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
+    validationBar.blur();
+    validationBar.focus();
+    fireEvent.focus(validationBar);
+    expect(screen.getByRole("tooltip").textContent).toMatch(
+      /21\.08\.2026: 4[\s\u00a0]?650 шт\.\/час смены/,
+    );
+    expect(document.activeElement).toBe(validationBar);
+    fireEvent.keyDown(validationBar, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(document.activeElement).toBe(validationBar);
     expect(
       within(aggregationRate).getByLabelText(/21\.08\.2026: 16,6 коробов\/час смены/),
     ).toBeDefined();
@@ -301,6 +333,62 @@ describe("DashboardPage", () => {
     expect(labels).not.toContain("2026-07-30");
     expect(within(validation).getByLabelText(/30\.07\.2026:/)).toBeDefined();
     expect(within(validation).getByLabelText(/01\.08\.2026:/)).toBeDefined();
+    expect(validation.querySelectorAll(".mk-dashboard-bars__value")).toHaveLength(0);
+  });
+
+  it("uses dense labels and one keyboard stop per series across twelve weeks", async () => {
+    const fixture = dashboardFixture({ hasRunShift: true });
+    const firstBucket = fixture.dynamics.buckets[0];
+    if (!firstBucket) throw new Error("Expected a dashboard bucket fixture");
+    const buckets = Array.from({ length: 12 }, (_, index) => {
+      const start = new Date(Date.UTC(2026, 5, 1 + index * 7));
+      const end = new Date(Date.UTC(2026, 5, 8 + index * 7));
+      return {
+        ...firstBucket,
+        label: start.toISOString().slice(0, 10),
+        start: start.toISOString(),
+        end: end.toISOString(),
+        validation: {
+          ...firstBucket.validation,
+          acceptedUnits: 18600 + index * 1000,
+        },
+      };
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          ...fixture,
+          dynamics: { ...fixture.dynamics, period: "12w", grain: "week", buckets },
+        }),
+      ),
+    );
+
+    renderDashboard();
+
+    const validation = await screen.findByRole("region", { name: "Проверка — темп" });
+    expect(validation.querySelectorAll(".mk-dashboard-bars__value")).toHaveLength(0);
+    const visibleLabelIndexes = [
+      ...validation.querySelectorAll(".mk-dashboard-bars__label"),
+    ].flatMap((label, index) =>
+      label.classList.contains("mk-dashboard-bars__label--hidden") ? [] : [index],
+    );
+    expect(
+      visibleLabelIndexes.every(
+        (index, position) =>
+          position === 0 || index - (visibleLabelIndexes[position - 1] ?? 0) >= 2,
+      ),
+    ).toBe(true);
+    const bars = within(validation).getAllByRole("img");
+    expect(bars.filter((bar) => bar.getAttribute("tabindex") === "0")).toHaveLength(1);
+    expect(bars.filter((bar) => bar.getAttribute("tabindex") === "-1")).toHaveLength(11);
+
+    fireEvent.focus(bars[0] as HTMLElement);
+    expect(screen.getByRole("tooltip").textContent).toContain("01.06.2026");
+    fireEvent.keyDown(bars[0] as HTMLElement, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(bars[1]);
+    expect(screen.getByRole("tooltip").textContent).toContain("08.06.2026");
   });
 
   it("adds the year to axis dates when the selected range crosses a year boundary", async () => {
@@ -334,6 +422,47 @@ describe("DashboardPage", () => {
     ).toEqual(["31.12.2025", "01.01.2026"]);
   });
 
+  it("shows only contextual year-boundary labels in a seven-day range", async () => {
+    const fixture = dashboardFixture({ hasRunShift: true });
+    const firstBucket = fixture.dynamics.buckets[0];
+    const starts = Array.from(
+      { length: 7 },
+      (_, index) => new Date(Date.UTC(2025, 11, 28 + index, 21)),
+    );
+    const buckets = starts.map((start, index) => ({
+      ...firstBucket,
+      label: start.toISOString().slice(0, 10),
+      start: start.toISOString(),
+      end: new Date(start.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+      validation: {
+        ...firstBucket?.validation,
+        acceptedUnits: 18600 + index * 1000,
+      },
+    }));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          ...fixture,
+          dynamics: { ...fixture.dynamics, period: "7d", grain: "day", buckets },
+        }),
+      ),
+    );
+
+    renderDashboard();
+
+    const validation = await screen.findByRole("region", { name: "Проверка — темп" });
+    const visibleLabels = [
+      ...validation.querySelectorAll(
+        ".mk-dashboard-bars__label:not(.mk-dashboard-bars__label--hidden)",
+      ),
+    ].map((label) => label.textContent);
+    expect(visibleLabels).toEqual(["29.12.2025", "01.01.2026", "04.01.2026"]);
+    expect(within(validation).getByLabelText(/31\.12\.2025:/)).toBeDefined();
+    expect(within(validation).getByLabelText(/01\.01\.2026:/)).toBeDefined();
+  });
+
   it("requests a new coherent overview when the period changes", async () => {
     const thirtyDayFixture = dashboardFixture({ hasRunShift: true });
     vi.stubGlobal(
@@ -355,11 +484,23 @@ describe("DashboardPage", () => {
     );
 
     renderDashboard();
+    const refreshSlot = await waitFor(() => {
+      const slot = document.querySelector(".mk-dashboard-dynamics__refresh-slot");
+      expect(slot).not.toBeNull();
+      return slot;
+    });
+    expect(within(refreshSlot as HTMLElement).queryByRole("status")).toBeNull();
     const thirtyDays = await screen.findByRole("button", { name: "30 дней" });
     fireEvent.click(screen.getByRole("button", { name: "Выпуск" }));
     fireEvent.click(thirtyDays);
 
-    expect(screen.getByRole("status", { name: "Обновление данных" })).toBeDefined();
+    const refreshing = screen.getByRole("status", { name: "Обновление данных" });
+    expect(refreshing.closest(".mk-dashboard-dynamics__refresh-slot")).toBe(refreshSlot);
+    expect(refreshing.closest('[aria-busy="true"]')).toBeNull();
+    expect(
+      screen.getByRole("region", { name: "Проверка — выпуск" }).getAttribute("aria-busy"),
+    ).toBe("true");
+    expect(document.querySelector(".mk-dashboard-page > .mk-dashboard-refreshing")).toBeNull();
     expect(screen.getByRole("button", { name: "7 дней" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
@@ -369,7 +510,6 @@ describe("DashboardPage", () => {
     expect(screen.getByRole("button", { name: "Выпуск" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
-    expect(screen.getByText(/Показана предыдущая сводка/)).toBeDefined();
     expect(screen.getByRole("link", { name: /1 конфликт без разбора/ })).toBeDefined();
 
     await waitFor(() =>
@@ -387,6 +527,10 @@ describe("DashboardPage", () => {
     expect(screen.getByRole("button", { name: "Выпуск" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
+    expect(document.querySelector(".mk-dashboard-dynamics__refresh-slot")).toBe(refreshSlot);
+    expect(
+      screen.getByRole("region", { name: "Проверка — выпуск" }).getAttribute("aria-busy"),
+    ).toBe("false");
   });
 
   it("discloses fetching when returning to a cached period until fresh data swaps atomically", async () => {

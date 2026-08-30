@@ -148,24 +148,17 @@ function OperationalDashboard({
   canWrite: boolean;
   refreshing: boolean;
 }) {
-  const { t } = useTranslation();
-
   return (
     <>
-      {refreshing ? (
-        <div
-          className="mk-dashboard-refreshing"
-          role="status"
-          aria-label={t("pages.dashboard.refreshing.title")}
-        >
-          <strong>{t("pages.dashboard.refreshing.title")}</strong>
-          <span>{t("pages.dashboard.refreshing.hint")}</span>
-        </div>
-      ) : null}
       <ProductionVerdict verdict={overview.verdict} />
       <HeadlineFacts overview={overview} />
       <div className="mk-dashboard-operational-row">
-        <ProductionDynamics overview={overview} period={period} onPeriodChange={onPeriodChange} />
+        <ProductionDynamics
+          overview={overview}
+          period={period}
+          onPeriodChange={onPeriodChange}
+          refreshing={refreshing}
+        />
         <ControlSignals overview={overview} />
       </div>
       <ActiveShifts overview={overview} canWrite={canWrite} />

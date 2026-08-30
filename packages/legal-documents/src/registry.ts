@@ -1,7 +1,9 @@
 import { BRAND_LETTERHEAD_CONTENT } from "./documents/brand-letterhead.js";
+import { CABINET_INVENTORY_PREP_CONTENT } from "./documents/cabinet-inventory-prep.js";
 import { CONSENT_CONTENT } from "./documents/consent.js";
 import { PRIVACY_CONTENT } from "./documents/privacy.js";
 import { STATION_EXCEPTIONS_CONTENT } from "./documents/station-exceptions.js";
+import { STATION_INVENTORY_COUNT_CONTENT } from "./documents/station-inventory-count.js";
 import { STATION_OPERATOR_SHIFT_CONTENT } from "./documents/station-operator-shift.js";
 import { STATION_WORK_CYCLE_CONTENT } from "./documents/station-work-cycle.js";
 import { STATION_WORKSTATION_SETUP_CONTENT } from "./documents/station-workstation-setup.js";
@@ -28,6 +30,8 @@ const LEGAL_DOCUMENT_CODES = [
   "MKR-INS-02",
   "MKR-INS-03",
   "MKR-INS-04",
+  "MKR-INS-05",
+  "MKR-INS-06",
 ] as const;
 const LEGAL_DOCUMENT_STATUSES = ["draft", "active", "superseded", "withdrawn"] as const;
 
@@ -40,6 +44,8 @@ export const LEGAL_DOCUMENT_KIND_BY_CODE = {
   "MKR-INS-02": "instruction",
   "MKR-INS-03": "instruction",
   "MKR-INS-04": "instruction",
+  "MKR-INS-05": "instruction",
+  "MKR-INS-06": "instruction",
 } as const satisfies Record<LegalDocumentCode, LegalDocumentKind>;
 
 export function legalDocumentKind(code: LegalDocumentCode): LegalDocumentKind {
@@ -127,6 +133,22 @@ export const LEGAL_RELEASES = [
     operatorProfileId: "operator-2026-08-15",
     routes: { ru: "/instruktsii/nastroyka-rabochego-mesta/" },
   },
+  {
+    code: "MKR-INS-05",
+    revision: "2026.08/01",
+    effectiveDate: "2026-08-30",
+    status: "active",
+    operatorProfileId: "operator-2026-08-15",
+    routes: { ru: "/instruktsii/inventarizatsiya-na-terminale/" },
+  },
+  {
+    code: "MKR-INS-06",
+    revision: "2026.08/01",
+    effectiveDate: "2026-08-30",
+    status: "active",
+    operatorProfileId: "operator-2026-08-15",
+    routes: { ru: "/instruktsii/inventarizatsiya-podgotovka/" },
+  },
 ] as const satisfies readonly LegalDocumentRelease[];
 
 export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
@@ -138,6 +160,8 @@ export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
   { releaseKey: "MKR-INS-02/2026.08/01", content: STATION_WORK_CYCLE_CONTENT },
   { releaseKey: "MKR-INS-03/2026.08/01", content: STATION_EXCEPTIONS_CONTENT },
   { releaseKey: "MKR-INS-04/2026.08/01", content: STATION_WORKSTATION_SETUP_CONTENT },
+  { releaseKey: "MKR-INS-05/2026.08/01", content: STATION_INVENTORY_COUNT_CONTENT },
+  { releaseKey: "MKR-INS-06/2026.08/01", content: CABINET_INVENTORY_PREP_CONTENT },
 ];
 
 function compareLegalRevisions(left: LegalRevision, right: LegalRevision): number {

@@ -627,6 +627,13 @@ export async function prepareRelease(options, supplied = {}) {
     await mustRun(
       dependencies,
       "docker",
+      ["image", "prune", "--all", "--force"],
+      environment,
+      dependencies.timeouts.pull,
+    );
+    await mustRun(
+      dependencies,
+      "docker",
       [...compose, "pull", ...services],
       environment,
       dependencies.timeouts.pull,
