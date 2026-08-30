@@ -40,6 +40,7 @@ import {
   type InventoryDocumentGenerator,
 } from "../src/modules/inventories/inventory-document-runner.service";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
+import { settleQueuedBackgroundWork } from "./support/background-work";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
 import { createTestStationDevice, signUpAndActivate } from "./support/auth";
@@ -289,7 +290,13 @@ describe.skipIf(!ready)("inventory document endpoints", () => {
   }, 120_000);
 
   afterAll(async () => {
-    await app?.close();
+    // This suite stubs `PgBossService`, so the runs it enqueues stay `queued`
+    // for the next test file's workers to pick up. See `settleQueuedBackgroundWork`.
+    try {
+      await settleQueuedBackgroundWork(db);
+    } finally {
+      await app?.close();
+    }
   });
 
   async function seedInventory(

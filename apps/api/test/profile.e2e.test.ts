@@ -12,6 +12,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import { signUpWithInactiveOrg } from "./support/auth";
+import { settleQueuedBackgroundWork } from "./support/background-work";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(
@@ -37,6 +38,10 @@ describe.skipIf(!ready)("global profile and private avatar e2e", () => {
     const env = loadEnv();
     const setup: AuthSetup = setupAuth(env);
     db = setup.db;
+    // Neutralise background work an earlier file (or an aborted run) left
+    // claimable, before `app.init()` lets this suite's pg-boss workers
+    // reconcile it into the storage mock below. See `settleQueuedBackgroundWork`.
+    await settleQueuedBackgroundWork(db);
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL, env })],
     })

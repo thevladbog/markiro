@@ -22,7 +22,12 @@ const invoice = {
   issueDate: NOW,
   dueDate: "2026-08-28T10:00:00.000Z",
   currency: "RUB",
-  sellerSnapshot: { legalName: "ИП Богатырёв Владислав Сергеевич", taxId: "234190622844" },
+  sellerSnapshot: {
+    kind: "sole_proprietor",
+    fullName: "ИП Богатырёв Владислав Сергеевич",
+    displayName: "ИП Богатырёв Владислав Сергеевич",
+    inn: "234190622844",
+  },
   buyerSnapshot: { legalName: "ООО Фабрика" },
   sellerBankAccountSnapshot: null,
   buyerBankAccountSnapshot: null,
@@ -222,7 +227,9 @@ describe("generated billing acts", () => {
 
     expect(screen.getByLabelText("Начало периода").textContent).toContain("июля 2026");
     expect(screen.getByLabelText("Конец периода").textContent).toContain("июля 2026");
-    await user.click(screen.getByRole("checkbox", { name: "Добавить подпись и печать" }));
+    const signedPrint = screen.getByRole("checkbox", { name: "Добавить подпись и печать" });
+    expect(signedPrint.hasAttribute("disabled")).toBe(false);
+    await user.click(signedPrint);
     await user.click(screen.getByRole("button", { name: "Выпустить акт" }));
 
     expect(await screen.findByText("Акт выпущен и PDF сформирован")).toBeDefined();
