@@ -265,109 +265,6 @@ async function installApi(page: Page, scenario: Scenario) {
   return unexpected;
 }
 
-/**
- * `TerminalsStep`'s «Открыть форму-задание» button
- * (apps/admin/src/pages/inventory/InventoryDetailPage.tsx) calls
- * `window.open("/api/inventories/:id/task-form", "_blank")` -- a real Nest
- * route (apps/api/src/modules/inventories/inventories.controller.ts) that
- * server-renders a self-contained `text/html` A4 page
- * (`renderInventoryTaskFormHtml` in inventory-task-form.ts) straight from the
- * database, not JSON and not a client-side route. That renderer needs a live
- * DB-backed API server this harness doesn't run, so -- same discipline as
- * every JSON endpoint above -- the response is mocked at the network
- * boundary. It's mocked via `context.route`, not `page.route`, because the
- * popup tab the button opens is a second `Page` in the same `BrowserContext`
- * and only context-level routes apply to it. The markup below mirrors the
- * real template's section order, headings, and field labels
- * (ПРОДУКТ/GTIN/ЛИНИЯ/РЕЖИМ/ДАТА ПРОИЗВОДСТВА/ОЖИДАЕТСЯ К ПРОВЕРКЕ); the
- * barcode is a hand-drawn Code128-style bar pattern standing in for the real
- * `bwip-js`-rendered SVG, since that dependency isn't installed in this
- * test-only package (see task-2-report.md for the full rationale).
- */
-function taskFormBarcodeSvg(token: string): string {
-  let x = 0;
-  const rects: string[] = [];
-  for (const codePoint of token) {
-    const width = 2 + (codePoint.codePointAt(0)! % 3);
-    rects.push(`<rect x="${x}" width="${width}" height="80" />`);
-    x += width + 2;
-  }
-  return `<svg viewBox="0 0 ${x} 80" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"><rect width="${x}" height="80" fill="#fff"/><g fill="#17161a">${rects.join("")}</g></svg>`;
-}
-
-function taskFormFixtureHtml(): string {
-  const token = `markiro:inventory:v1:${INVENTORY_ID}`;
-  return `<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<title>Форма-задание на инвентаризацию ${inventoryRow.number}</title>
-<style>
-  @page { size: A4 portrait; margin: 0; }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: #efefed; color: #17161a; font-family: Arial, "Helvetica Neue", sans-serif; }
-  .page { width: 210mm; height: 297mm; margin: 0 auto; padding: 16mm; background: #fafaf8; display: flex; flex-direction: column; box-shadow: 0 2mm 8mm rgba(23, 22, 26, .12); }
-  .top { display: flex; justify-content: space-between; align-items: center; padding-bottom: 6mm; border-bottom: .25mm solid #cbc7bf; }
-  .brand { font-weight: 700; font-size: 20pt; }
-  .task-id { text-align: right; }
-  .eyebrow { display: block; color: #706d67; font-size: 8pt; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
-  .task-id strong { display: block; margin-top: 1.5mm; font: 700 14pt/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; }
-  .hero { display: grid; grid-template-columns: 1fr auto; gap: 8mm; align-items: end; padding: 8mm 0 7mm; }
-  h1 { margin: 0; font-size: 23pt; line-height: 1.08; letter-spacing: -.02em; }
-  .subtitle { margin: 2.5mm 0 0; color: #4f4c47; font-size: 11pt; }
-  .status { min-width: 36mm; padding: 4mm 5mm; border: .25mm solid #b7dfc8; border-radius: 3mm; background: #e7f6ed; color: #126b39; font-size: 9pt; font-weight: 800; text-align: center; text-transform: uppercase; }
-  .scan-zone { height: 43mm; border: .35mm solid #cbc7bf; border-radius: 4mm; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #fff; }
-  .barcode { width: 150mm; height: 17mm; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-  .barcode svg { display: block; width: 100%; height: 100%; }
-  .barcode-caption { margin-top: 1mm; font: 700 12pt/1.1 ui-monospace, SFMono-Regular, Consolas, monospace; }
-  .scan-hint { margin-top: 1mm; color: #77736d; font-size: 8pt; }
-  h2 { margin: 4.5mm 0 2mm; font-size: 12pt; line-height: 1.2; }
-  dl { margin: 0; }
-  .parameter { min-height: 8mm; display: grid; grid-template-columns: 1fr minmax(62mm, auto); align-items: center; gap: 6mm; border-bottom: .2mm solid #d8d5cf; }
-  dt { color: #706d67; font-size: 8pt; }
-  dd { margin: 0; max-width: 110mm; text-align: right; font-size: 10pt; font-weight: 700; overflow-wrap: anywhere; }
-  .steps { margin-top: 4mm; padding-top: 1mm; border-top: .2mm solid #d8d5cf; }
-  .steps ol { display: grid; gap: 2mm; margin: 0; padding: 0; list-style: none; }
-  .steps li { display: grid; grid-template-columns: 7mm 1fr; gap: 3mm; align-items: start; color: #4f4c47; font-size: 8.5pt; line-height: 1.28; }
-  .step-number { width: 6mm; height: 6mm; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: #17161a; color: #fff; font-size: 7pt; font-weight: 800; }
-  .rules { margin-top: 5mm; padding: 4mm 5mm; border: .25mm solid #c6daf5; border-radius: 3.5mm; background: #e6f0fd; color: #1756a6; }
-  .rules h2 { margin: 0 0 2mm; color: #1756a6; }
-  .rules ul { margin: 0; padding-left: 5mm; display: grid; gap: 1.2mm; font-size: 8pt; line-height: 1.25; }
-  .footer { margin-top: auto; padding-top: 3.5mm; border-top: .2mm solid #d8d5cf; display: flex; justify-content: space-between; color: #77736d; font-size: 7.5pt; }
-</style>
-</head>
-<body>
-  <main class="page">
-    <header class="top"><span class="brand">маркиро</span><div class="task-id"><span class="eyebrow">Форма-задание</span><strong>${inventoryRow.number}</strong></div></header>
-    <section class="hero"><div><h1>Задание на инвентаризацию</h1><p class="subtitle">Без переупаковки · Марка Ко</p></div><div class="status">К запуску</div></section>
-    <section class="scan-zone" aria-label="Штрихкод задания"><div class="barcode" data-task-token="${token}">${taskFormBarcodeSvg(token)}</div><div class="barcode-caption">${inventoryRow.number}</div><div class="scan-hint">Отсканируйте на терминале, чтобы открыть задание</div></section>
-    <section><h2>Параметры задания</h2><dl>
-      <div class="parameter"><dt>ПРОДУКТ</dt><dd>${PRODUCT.name}</dd></div>
-      <div class="parameter"><dt>GTIN</dt><dd>${PRODUCT.gtin14}</dd></div>
-      <div class="parameter"><dt>ЛИНИЯ</dt><dd>${LINE.name}</dd></div>
-      <div class="parameter"><dt>РЕЖИМ</dt><dd>Без переупаковки</dd></div>
-      <div class="parameter"><dt>ДАТА ПРОИЗВОДСТВА</dt><dd>01.08.2026 - 31.08.2026</dd></div>
-      <div class="parameter"><dt>ОЖИДАЕТСЯ К ПРОВЕРКЕ</dt><dd>${activeSnapshot.counts.expected} кодов</dd></div>
-    </dl></section>
-    <section class="steps"><h2>Как начать работу</h2><ol>
-      <li><span class="step-number">1</span><span>Откройте терминал на выбранной линии и войдите оператором.</span></li>
-      <li><span class="step-number">2</span><span>Отсканируйте штрихкод задания. На своей линии оно также будет видно в списке.</span></li>
-      <li><span class="step-number">3</span><span>Если терминал относится к другой линии, подтвердите предупреждение перед входом.</span></li>
-      <li><span class="step-number">4</span><span>Сканируйте коды единиц. Закрытую упаковку можно проверить одним сканированием кода упаковки.</span></li>
-    </ol></section>
-    <aside class="rules"><h2>Важные правила</h2><ul>
-      <li><strong>MOVING_BY_UD:</strong> код в отгрузке. Его нельзя учитывать, списывать или включать в документы.</li>
-      <li>При простой проверке сканирование кода короба отмечает его известное содержимое.</li>
-      <li>Дата производства действует на терминале до следующего изменения; в одном новом коробе одна дата.</li>
-      <li>Чтобы поставить работу на паузу, выйдите из задания. Закрыть инвентаризацию можно только в админке.</li>
-      <li>На время инвентаризации движения продукции по складу остановлены.</li>
-    </ul></aside>
-    <footer class="footer"><span>Сформировано: 28.08.2026 14:00 · Маркиро</span><span>${inventoryRow.number} · 1 / 1</span></footer>
-  </main>
-</body>
-</html>`;
-}
-
 test("renders the inventory list", async ({ page }) => {
   const unexpected = await installApi(page, "list");
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -404,8 +301,31 @@ test("renders the ЧЗ exports stage of an existing inventory", async ({ page })
   await expect(page.getByRole("button", { name: "Заказать из Честного Знака" })).toBeVisible();
   await expect(page.getByText("Готово").first()).toBeVisible();
   await expect(page.getByText("Нет файла").first()).toBeVisible();
+  // All six ЧЗ statuses (apps/admin/src/pages/inventory/schemas.ts's
+  // INVENTORY_CHZ_STATUSES) must be visible in the same picture -- the fixed
+  // two-column upload grid (inventory.css's .mk-inventory-upload-grid) is
+  // taller than 800px for six cards, so this is the one screenshot in the
+  // set that isn't cropped to 1280x800.
+  for (const label of ["Эмитирован", "В обороте", "Нанесён", "Выбыл", "Списан", "Расформирован"]) {
+    await expect(page.getByText(label, { exact: true })).toBeVisible();
+  }
   expect(unexpected).toEqual([]);
-  await page.screenshot({ path: screenshotPath("exports"), scale: "css" });
+  // `AppShell` (apps/admin/src/layout/AppShell.tsx) pins the whole shell to
+  // `height: 100vh; overflow: hidden` and scrolls internally inside its
+  // `<main>` (`flex: 1; overflow-y: auto`) -- so the *document* never
+  // overflows and Playwright's `fullPage` screenshot option is a no-op here
+  // (it measures document scroll height, which stays at the viewport size).
+  // Growing the viewport itself grows `100vh`, which grows `<main>` until
+  // its content fits without internal scrolling; then a normal screenshot
+  // at that taller size captures all six cards. Only this file uses a
+  // non-800 height -- every other screenshot in this suite stays 1280x800.
+  const overflow = await page
+    .locator("main")
+    .evaluate((element) => element.scrollHeight - element.clientHeight);
+  if (overflow > 0) {
+    await page.setViewportSize({ width: 1280, height: 800 + overflow });
+  }
+  await page.screenshot({ path: screenshotPath("exports"), scale: "css", fullPage: true });
 });
 
 test("renders a blocked ЧЗ export order", async ({ page }) => {
@@ -442,28 +362,28 @@ test("renders the terminals stage once a snapshot is fixed", async ({ page }) =>
   await page.screenshot({ path: screenshotPath("terminals"), scale: "css" });
 });
 
-test("opens the printable task form for a fixed snapshot", async ({ page, context }) => {
-  const unexpected = await installApi(page, "terminals");
-  await context.route(`**/api/inventories/${INVENTORY_ID}/task-form`, (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "text/html; charset=utf-8",
-      body: taskFormFixtureHtml(),
-    }),
-  );
+test("renders the real printable task form template", async ({ page }) => {
+  // `TerminalsStep`'s «Открыть форму-задание» button
+  // (apps/admin/src/pages/inventory/InventoryDetailPage.tsx) opens
+  // `GET /api/inventories/:id/task-form` in a new tab -- a real Nest route
+  // (apps/api/src/modules/inventories/inventories.controller.ts) that
+  // server-renders a self-contained `text/html` A4 page
+  // (`renderInventoryTaskFormHtml`, inventory-task-form.ts) straight from
+  // the database. That route needs a live DB-backed API server this browser
+  // harness doesn't run, so this screenshot instead exercises the same
+  // real, pure render function directly -- see
+  // apps/admin/test/browser/task-form-harness.ts, which imports it with a
+  // hand-built `InventoryTaskFormData` and writes its actual return value
+  // (including a genuine `renderCode128Svg` Code 128 barcode from
+  // `@markiro/domain`, not a stand-in) as the document. No network mocking
+  // is involved for this screen at all.
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
-  await expect(page.getByRole("heading", { level: 2, name: "Доступ терминалов" })).toBeVisible();
-  const [popup] = await Promise.all([
-    page.waitForEvent("popup"),
-    page.getByRole("button", { name: "Открыть форму-задание" }).click(),
-  ]);
-  await popup.waitForLoadState();
-  await popup.setViewportSize({ width: 1280, height: 800 });
-  await expect(popup.getByText("Задание на инвентаризацию")).toBeVisible();
-  expect(unexpected).toEqual([]);
-  await popup.screenshot({ path: screenshotPath("task-form"), scale: "css" });
-  await popup.close();
+  await page.goto("/test/browser/task-form.html");
+  await expect(page.getByRole("heading", { name: "Задание на инвентаризацию" })).toBeVisible();
+  await expect(page.getByText("ИНВ-000042").first()).toBeVisible();
+  await expect(page.getByText("Параметры задания")).toBeVisible();
+  await expect(page.locator(".barcode svg")).toBeVisible();
+  await page.screenshot({ path: screenshotPath("task-form"), scale: "css" });
 });
 
 test("renders the launch stage after continuing past terminals", async ({ page }) => {
