@@ -453,7 +453,7 @@ git commit -m "feat(api): cises/info on the True API client"
 - Consumes: `chzCodeStatuses`, `chzCodeStatusCursors` (Task 1), `schema.codes`, `schema.products`.
 - Consumes additionally: `schema.inventorySnapshotCodes` (`codeHash`, `gtin14`, `canonicalRaw`), the second source of codes.
 - Produces: `class ChzCodeStatusIngestService` with
-  `run(tenantId: string): Promise<{ inserted: number; watermark: Date | null; caughtUp: boolean }>`.
+  `run(tenantId: string, options?: { limit?: number }): Promise<{ inserted: number; watermark: Date | null; caughtUp: boolean }>`.
   Task 5 calls it once per pass before the refresh phase.
 
 **Addendum, added during this task's review — see below the commit step for the
@@ -461,6 +461,10 @@ full account:** the design described in this task's steps turned out to have two
 defects, both fixed before the task was considered done. `run()` now also
 consumes `chzCodeStatusCursors.lastFullSweepAt` (Task 1's addendum) and produces
 `CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS` alongside `CHZ_CODE_STATUS_INGEST_LIMIT`.
+`run()`'s `options.limit` (added in a later review pass) overrides the default
+budget for one call; it exists so a scheduler can spend less of a tick on one
+tenant, not only so tests can avoid seeding tens of thousands of rows. Task 5's
+call still just calls `run(tenantId)` and gets the default.
 
 - [ ] **Step 1: Write the failing test**
 

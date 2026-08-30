@@ -345,12 +345,10 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
     }
 
     // Pre-populate the cursor so the sweep doesn't run.
-    await db
-      .insert(schema.chzCodeStatusCursors)
-      .values({
-        tenantId,
-        lastFullSweepAt: new Date(),
-      });
+    await db.insert(schema.chzCodeStatusCursors).values({
+      tenantId,
+      lastFullSweepAt: new Date(),
+    });
 
     const result = await service.run(tenantId);
 
@@ -388,13 +386,11 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
     }
 
     // Pre-populate the cursor to prevent the sweep from running on first pass.
-    await db
-      .insert(schema.chzCodeStatusCursors)
-      .values({
-        tenantId,
-        lastScannedAt: new Date(BASE_SCANNED_AT.getTime() - 1000),
-        lastFullSweepAt: new Date(),
-      });
+    await db.insert(schema.chzCodeStatusCursors).values({
+      tenantId,
+      lastScannedAt: new Date(BASE_SCANNED_AT.getTime() - 1000),
+      lastFullSweepAt: new Date(),
+    });
 
     const first = await service.run(tenantId);
     expect(first.inserted).toBe(CHZ_CODE_STATUS_INGEST_LIMIT);
@@ -428,4 +424,69 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
     expect(third.inserted).toBeGreaterThanOrEqual(1);
     expect((await rowsFor(tenantId)).map((row) => row.codeHash)).toContain(HASH_A);
   }, 300_000);
+
+  it("discriminates sweep-first from cursor-first: finds a code planted behind the cursor even though the cursor walk alone could fill the whole budget", async () => {
+    // The test above does not actually pin down phase order: by the pass the
+    // sweep is forced due, the cursor walk's own backlog is down to two rows
+    // -- nowhere near the budget -- so the sweep runs with almost the whole
+    // budget left under either ordering. This test is built so the two
+    // orderings diverge on a single pass: the cursor walk *alone*, if it ran
+    // first with the full budget, would consume every row of it, while a
+    // code sits planted behind the cursor where only the sweep can find it.
+    // Sweep-first (the current order) spends budget on the sweep before the
+    // walk gets a chance to exhaust it, so the planted code is found this
+    // pass. Cursor-first would spend the entire budget on the walk and
+    // never reach the sweep this pass, missing it.
+    const limit = 5;
+
+    // Sorts first among every codeHash seeded below (hex, zero-padded), so
+    // the sweep's `order by codeHash` always returns it within any
+    // truncated batch, however small.
+    const plantedHash = hash(0);
+    await seedCode({ codeHash: plantedHash, gtin14: PRODUCT_GTIN, scannedAt: t(-1) });
+
+    // Exactly `limit` codes strictly ahead of the cursor -- on their own
+    // enough for the cursor walk to fill the whole budget if it ran first.
+    for (let index = 1; index <= limit; index += 1) {
+      await seedCode({ codeHash: hash(index), gtin14: PRODUCT_GTIN, scannedAt: t(index) });
+    }
+
+    // The cursor sits between the planted code and the "ahead" codes. No
+    // sweep has ever run for this tenant, so it is due on this very first
+    // pass without needing `forceFullSweepDue`.
+    await db.insert(schema.chzCodeStatusCursors).values({ tenantId, lastScannedAt: t(0) });
+
+    const result = await service.run(tenantId, { limit });
+
+    expect(result.inserted).toBeGreaterThanOrEqual(1);
+    expect((await rowsFor(tenantId)).map((row) => row.codeHash)).toContain(plantedHash);
+  });
+
+  it("does not throw when the sweep consumes the whole budget, leaving the cursor walk a zero limit", async () => {
+    // Before the reorder, the cursor walk always ran with at least some
+    // budget left by earlier phases. Now the sweep runs first and can
+    // legitimately spend the entire budget itself, leaving `walkCodes`
+    // called with `limit: 0` for the first time. `walkCodes` fetches an
+    // empty batch in that case and its `rows.length > 0` guard must skip
+    // straight past `rows[0]!.scannedAt` rather than throw.
+    const limit = 3;
+    for (let index = 1; index <= limit; index += 1) {
+      await seedCode({ codeHash: hash(index), gtin14: PRODUCT_GTIN, scannedAt: t(index) });
+    }
+
+    const result = await service.run(tenantId, { limit });
+
+    // The sweep alone filled the budget (3 codes, limit 3), so the pass is
+    // honestly not caught up, and the walk -- called with nothing left to
+    // spend -- must not have advanced the cursor.
+    expect(result.inserted).toBe(limit);
+    expect(result.caughtUp).toBe(false);
+    expect(result.watermark).toBeNull();
+
+    const [cursorRow] = await db
+      .select({ lastScannedAt: schema.chzCodeStatusCursors.lastScannedAt })
+      .from(schema.chzCodeStatusCursors)
+      .where(eq(schema.chzCodeStatusCursors.tenantId, tenantId));
+    expect(cursorRow?.lastScannedAt ?? null).toBeNull();
+  });
 });

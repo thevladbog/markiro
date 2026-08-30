@@ -109,6 +109,13 @@ export class ChzCodeStatusIngestService {
    * `CHZ_CODE_STATUS_INGEST_LIMIT` for why they share one budget rather than
    * each carrying its own.
    *
+   * `options.limit` overrides the default budget (`CHZ_CODE_STATUS_INGEST_LIMIT`)
+   * for this call. It is not a test-only knob: the budget is a property of the
+   * call, not a hidden global, which is the honest shape for something a
+   * scheduler drives -- the scheduler is free to call with a smaller budget
+   * for a tenant it wants to spend less of a tick on, and tests can construct
+   * a budget-exhaustion scenario without seeding tens of thousands of rows.
+   *
    * The sweep runs first despite being rare (at most once per day per tenant)
    * because it is the only phase that can find codes that arrived behind the
    * cursor -- a normal occurrence for a Station syncing after an outage. A
@@ -122,13 +129,22 @@ export class ChzCodeStatusIngestService {
    * is retried the next one), but this order ensures it is not skipped for
    * the duration of a multi-pass backfill.
    *
+   * One cost of that ordering, worth knowing rather than tripping over: on a
+   * cold start (nothing has ever run for a tenant) the sweep and the cursor
+   * walk independently discover largely the same rows in the same pass --
+   * the sweep's anti-join has no cursor to narrow it, so it sees the same
+   * backlog the walk is about to see too. The walk's `onConflictDoNothing`
+   * makes the overlap a no-op rather than a correctness problem, but it is a
+   * real redundant-read cost, and it lands during exactly the backfill the
+   * per-pass budget exists to bound.
+   *
    * A phase skipped because the budget ran out is conservatively counted as
    * "not caught up": with zero budget left there is no way to check whether
    * it actually had more rows waiting without spending more of the budget
    * than the pass is allowed, so the pass reports itself unfinished rather
    * than guessing.
    */
-  async run(tenantId: string): Promise<ChzCodeStatusIngestResult> {
+  async run(tenantId: string, options?: { limit?: number }): Promise<ChzCodeStatusIngestResult> {
     const [cursor] = await this.db
       .select({
         lastScannedAt: schema.chzCodeStatusCursors.lastScannedAt,
@@ -137,7 +153,7 @@ export class ChzCodeStatusIngestService {
       .from(schema.chzCodeStatusCursors)
       .where(eq(schema.chzCodeStatusCursors.tenantId, tenantId));
 
-    let remaining = CHZ_CODE_STATUS_INGEST_LIMIT;
+    let remaining = options?.limit ?? CHZ_CODE_STATUS_INGEST_LIMIT;
 
     const sweepIsDue =
       !cursor?.lastFullSweepAt ||
@@ -152,8 +168,14 @@ export class ChzCodeStatusIngestService {
       remaining = Math.max(0, remaining - sweep.rowsFetched);
       await this.markFullSweepRan(tenantId);
     } else if (sweepIsDue) {
-      // Due, but the budget is exhausted before we could run it.
-      // Left for the next pass rather than run unbounded.
+      // Defensive only: the sweep is now the first phase to spend the
+      // budget, so `remaining` still equals the pass's full limit here and
+      // this branch is unreachable with a positive limit. It stays as a
+      // guard against a future reorder (or a caller passing `limit: 0`)
+      // rather than to document a live path -- the invariant it states (a
+      // sweep skipped for lack of budget leaves `lastFullSweepAt` stale, so
+      // it is retried next pass) is what phase order guarantees now, not
+      // this branch.
       sweepCaughtUp = false;
     }
 
