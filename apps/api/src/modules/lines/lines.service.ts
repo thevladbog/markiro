@@ -71,7 +71,7 @@ export class LinesService {
         onlineStations: 0,
         lastSeenAt: null,
       };
-      if (row.deviceId) {
+      if (row.deviceId && row.revokedAt === null) {
         current.assignedStations += 1;
         if (stationDeviceLifecycle(row, now) === "online") current.onlineStations += 1;
         if (row.lastSeenAt && (!current.lastSeenAt || row.lastSeenAt > current.lastSeenAt))
