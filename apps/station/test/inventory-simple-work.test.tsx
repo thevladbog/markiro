@@ -744,7 +744,13 @@ describe("simple inventory work screen", () => {
     await waitFor(() =>
       expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
     );
-    expect(scan.isListening()).toBe(false);
+    // Waited for, not asserted outright: the dialog text commits with the
+    // `heldScan` render, while the listener is torn down by the passive effect
+    // that reacts to it. The second back-to-back scan leaves extra queued work
+    // pending across that gap, so on a loaded machine the text can be observed
+    // a tick before the teardown runs. A timeout here still means the listener
+    // was never torn down.
+    await waitFor(() => expect(scan.isListening()).toBe(false));
     // Only EXPECTED has ever been committed: NEXTDAY's mismatch writes
     // nothing, and PROTECTED must not have been silently processed while
     // the dialog for NEXTDAY is open.
