@@ -265,24 +265,15 @@ const CODE_RESULT_ID_2 = "b0000000-0000-4000-8000-000000000002";
 const CODE_RESULT_ID_3 = "b0000000-0000-4000-8000-000000000003";
 
 /**
- * Scan identities exactly as the API hands them to the cabinet. Both event
- * endpoints select `e.normalized_identity as "displayIdentity"`
- * (`inventory-reconciliation.service.ts`, recent events and evidence), and
- * `InventoryLivePage.tsx`/`InventoryCorrections.tsx` print that string
- * verbatim inside `.mk-inventory-mono` -- nothing anywhere formats it into a
- * GTIN/serial pair, so a mock must not either.
- *
- * The shape is enforced on ingest by `station-inventory-sync.service.ts`: an
- * item event is rejected unless `normalized_identity === 'item:' + codeHash`,
- * and a box event unless it is `` `${kind}:${sscc}` ``. `codeHash` is
- * `kmHash` = sha256("01" + gtin14 + "21" + serial)
- * (packages/domain/src/gs1/km.ts), so the three hashes below are the real
- * SHA-256 digests of `010460000000000621000123` / `...000512` / `...000456`
- * -- the three KMs of «Сироп «Клюква», 0.5 л» this document's frames follow.
+ * Human-readable identities and canonical clipboard values produced from the
+ * retained raw scan payload by `inventory-event-display.ts`.
  */
-const ITEM_IDENTITY_1 = "item:9eb9ec097a5da25a489f27b955909d59d144090c0406a8820ace3811d1e6a706";
-const ITEM_IDENTITY_2 = "item:b0ae53fb623d55c4a282101b19890fc9ad1df089479fac91f7b3042777e20561";
-const ITEM_IDENTITY_3 = "item:638bb42b587121368f550d8ab81a99b4d21c7cb7c26937056d1fd22ed3454d61";
+const ITEM_IDENTITY_1 = "(01)04600000000006 (21)000123";
+const ITEM_IDENTITY_2 = "(01)04600000000006 (21)000512";
+const ITEM_IDENTITY_3 = "(01)04600000000006 (21)000456";
+const ITEM_COPY_IDENTITY_1 = "010460000000000621000123";
+const ITEM_COPY_IDENTITY_2 = "010460000000000621000512";
+const ITEM_COPY_IDENTITY_3 = "010460000000000621000456";
 /**
  * The old box Терминал 2 opened to start repacking. An `old_box` event carries
  * the *source* box's SSCC (`applyRepackMutation` stores it as the new box's
@@ -291,7 +282,8 @@ const ITEM_IDENTITY_3 = "item:638bb42b587121368f550d8ab81a99b4d21c7cb7c26937056d
  * check digit, since a scan with a bad one never becomes an event
  * (`parseScannedSscc` -> `isValidSscc`).
  */
-const OLD_BOX_IDENTITY = "old_box:046012345600000016";
+const OLD_BOX_IDENTITY = "(00)046012345600000016";
+const OLD_BOX_COPY_IDENTITY = "00046012345600000016";
 const LATE_EVENT_ID_1 = "c0000000-0000-4000-8000-000000000001";
 const LATE_EVENT_ID_2 = "c0000000-0000-4000-8000-000000000002";
 const DOC_RUN_FIRST_ID = "d0000000-0000-4000-8000-000000000002";
@@ -674,8 +666,11 @@ const RUNNING_PROGRESS = {
   openBoxCount: 1,
   boxTotal: 2,
   boxesTruncated: false,
+  verifiedBoxTotal: 0,
+  verifiedBoxesTruncated: false,
   participants: PARTICIPANTS_WORKING,
   boxes: BOXES_RUNNING,
+  verifiedBoxes: [],
   recentEvents: RECENT_EVENTS_RUNNING,
 };
 
@@ -744,17 +739,34 @@ const EVIDENCE_RESPONSE = {
   pageSize: 50,
   total: 4,
   hasMore: false,
+  allMatchingActions: [],
+  allMatchingAffectedCodeCount: 3,
   items: [
     {
       ...RECENT_EVENTS_RUNNING[0],
+      copyIdentity: ITEM_COPY_IDENTITY_1,
+      affectedCodeCount: 1,
+      discrepancyCodeCount: 1,
+      classifications: ["protected"],
+      discrepancyCategories: ["date_mismatch"],
       actions: ["void_scan", "change_date"],
     },
     {
       ...RECENT_EVENTS_RUNNING[1],
+      copyIdentity: ITEM_COPY_IDENTITY_2,
+      affectedCodeCount: 1,
+      discrepancyCodeCount: 0,
+      classifications: ["expected"],
+      discrepancyCategories: [],
       actions: ["void_scan", "remove_item"],
     },
     {
       ...RECENT_EVENTS_RUNNING[2],
+      copyIdentity: ITEM_COPY_IDENTITY_3,
+      affectedCodeCount: 1,
+      discrepancyCodeCount: 0,
+      classifications: ["voided"],
+      discrepancyCategories: [],
       actions: ["restore_scan"],
     },
     {
@@ -768,6 +780,11 @@ const EVIDENCE_RESPONSE = {
       scannedAt: "2026-08-29T09:10:00.000Z",
       classification: null,
       observedProductionDate: null,
+      copyIdentity: OLD_BOX_COPY_IDENTITY,
+      affectedCodeCount: 0,
+      discrepancyCodeCount: 0,
+      classifications: [],
+      discrepancyCategories: [],
       actions: [],
     },
   ],
@@ -1352,7 +1369,7 @@ test("renders the live progress of a running inventory", async ({ page }) => {
   // case-insensitive by default.
   await expect(page.getByText("Расхождения", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "Участники" })).toBeVisible();
-  await expect(page.getByRole("heading", { level: 2, name: "Короба" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Новые короба" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "Последние события" })).toBeVisible();
   expect(unexpected).toEqual([]);
   await screenshotFullMain(page, screenshotPath07("live"));
@@ -1371,6 +1388,7 @@ test("renders the corrections list with its filters", async ({ page }) => {
   await expect(page.getByLabel("Тип события")).toBeVisible();
   await expect(page.getByLabel("Классификация")).toBeVisible();
   await expect(page.getByText(ITEM_IDENTITY_1)).toBeVisible();
+  await expect(page.getByText(ITEM_COPY_IDENTITY_1)).toBeVisible();
   expect(unexpected).toEqual([]);
   await screenshotFullMain(page, screenshotPath07("corrections-list"));
 });
@@ -1397,8 +1415,8 @@ test("renders the correction form for a selected item", async ({ page }) => {
   await expect(page.getByLabel("Причина исправления")).toBeVisible();
   // `pages.inventory.corrections.observedDate` verbatim (ru.json) -- renamed
   // from "Наблюдаемая дата производства" by 5dff4fcf2 (#383).
-  await expect(page.getByLabel("Новая дата производства")).toBeVisible();
-  await expect(page.getByText("Восстановить скан")).toBeVisible();
+  await expect(page.getByLabel("Новая дата производства")).toHaveValue("2026-08-20");
+  await expect(page.getByRole("button", { name: "Изменить дату" }).last()).toBeDisabled();
   expect(unexpected).toEqual([]);
   await screenshotFullMain(page, screenshotPath07("corrections-form"));
 });
