@@ -26,9 +26,17 @@ function screenshotPath(name: string): string {
 
 /**
  * MKR-INS-07 (printed inventory-closing instruction) screenshot targets --
- * the post-launch half of the same lifecycle: same "Марка Ко" organisation,
- * same ИНВ-000042 inventory as MKR-INS-06, now running/closed/completed
- * instead of preparing.
+ * the post-launch half of the lifecycle, same "Марка Ко" organisation and
+ * line as MKR-INS-06, but its own ИНВ-000043 inventory rather than
+ * MKR-INS-06's ИНВ-000042. It has to be a *repack* inventory, not a
+ * reuse of MKR-INS-06's check-mode one: this document's corrections and
+ * closing screens depict repack-box actions (invalidate, reprint) and an
+ * open/closed box count that feeds close blockers, and check-mode
+ * inventories reject repack events outright
+ * (`station-inventory-sync.service.ts`'s `INVENTORY_EVENT_MODE_MISMATCH`)
+ * and never populate `inventory_repack_boxes`
+ * (`inventory-reconciliation.service.ts`) -- a check-mode inventory could
+ * never actually reach the states these frames show.
  */
 const SCREENSHOT_DIR_07 = join(
   import.meta.dirname,
@@ -255,13 +263,47 @@ const ARTIFACT_COMPLETE_ID = "e0000000-0000-4000-8000-000000000002";
 const CLOSE_BLOCKER_PARTICIPANT_ID = "f0000000-0000-4000-8000-000000000001";
 const CLOSE_BLOCKER_BOX_ID = "f0000000-0000-4000-8000-000000000002";
 
+/**
+ * MKR-INS-07's own inventory -- deliberately *not* a reuse of MKR-INS-06's
+ * `inventoryRow`/`INVENTORY_ID`/`activeSnapshot` (those stay untouched so
+ * MKR-INS-06's eight PNGs stay byte-identical). `mode: "repack"` plus a
+ * non-null `boxLabelTemplate` are required together by
+ * `validateInventoryResponseSemantics` (schemas.ts) for any repack-mode
+ * inventory.
+ */
+const INVENTORY_ID_07 = "51000000-0000-4000-8000-000000000001";
+const SNAPSHOT_ID_07 = "61000000-0000-4000-8000-000000000001";
+
+const inventoryRow07 = {
+  id: INVENTORY_ID_07,
+  number: "ИНВ-000043",
+  status: "preparing",
+  mode: "repack",
+  productId: PRODUCT_ID,
+  gtin14: "04600000000006",
+  productName: "Сироп «Клюква», 0.5 л",
+  lineId: LINE_ID,
+  lineName: "Линия 1",
+  productionDateFrom: "2026-08-01",
+  productionDateTo: "2026-08-31",
+  boxLabelTemplateId: TEMPLATE_ID,
+  boxLabelTemplate: { id: TEMPLATE_ID, name: "Короб 100×150" },
+  activeSnapshotId: null,
+  resultRevision: 0,
+  createdAt: "2026-08-28T09:00:00.000Z",
+  updatedAt: "2026-08-28T09:00:00.000Z",
+};
+
+/** Same shape as MKR-INS-06's `activeSnapshot`, just re-keyed to this inventory -- reads the old one (never mutates it) so MKR-INS-06's fixtures stay untouched. */
+const activeSnapshot07 = { ...activeSnapshot, id: SNAPSHOT_ID_07, inventoryId: INVENTORY_ID_07 };
+
 /** Shared by every post-launch detail fetch: a fixed snapshot always exists once an inventory is running (see the `terminals` scenario's comment above -- "ready" is the only status that carries a freshly fixed snapshot, and running/closed/completed all come after it). */
 function postLaunchInventoryDetail(status: "running" | "closed" | "completed") {
   return {
-    ...inventoryRow,
+    ...inventoryRow07,
     status,
-    activeSnapshotId: SNAPSHOT_ID,
-    activeSnapshot,
+    activeSnapshotId: SNAPSHOT_ID_07,
+    activeSnapshot: activeSnapshot07,
     blockers: EMPTY_BLOCKERS,
     imports: readyImports,
     resultRevision: 1,
@@ -302,13 +344,56 @@ const DOCUMENT_FORMATS_RESPONSE = { items: DOCUMENT_FORMATS };
 const NO_DOCUMENT_RUNS = { items: [] };
 
 /**
- * Progress payload for the `running` screens (live progress, corrections,
- * the closing modal). `expectedCount` matches MKR-INS-06's
+ * Repack boxes shared by every post-launch progress payload below, in three
+ * open/closed combinations so each scenario's box states stay consistent
+ * with what it claims about close blockers
+ * (`inventory-close.service.ts`'s `OPEN_REPACK_BOX` check): an open box is
+ * only realistic while still `running` and *before* a close attempt, or
+ * while a scenario's own close-preview blockers actually count it.
+ */
+const BOX_1_BASE = {
+  id: BOX_ID_1,
+  sscc: "123456789012345670",
+  terminalId: DEVICE_ID_1,
+  terminalName: "Терминал 1",
+  productionDate: "2026-08-15",
+  printState: "printed",
+  itemCount: 42,
+} as const;
+const BOX_2_BASE = {
+  id: BOX_ID_2,
+  sscc: "223456789012345670",
+  terminalId: DEVICE_ID_2,
+  terminalName: "Терминал 2",
+  productionDate: "2026-08-16",
+  printState: "printed",
+  itemCount: 60,
+} as const;
+/** Still running, nobody has attempted to close yet -- one box open, one already closed. Backs `live`/`corrections`. */
+const BOXES_ONE_OPEN = [
+  { ...BOX_1_BASE, state: "open" },
+  { ...BOX_2_BASE, state: "closed" },
+];
+/** Both closed -- the only state consistent with a close-preview that claims zero blockers. Backs `closePreviewReady` and every `closed`-status screen (late events, documents, completion, reopen). */
+const BOXES_ALL_CLOSED = [
+  { ...BOX_1_BASE, state: "closed" },
+  { ...BOX_2_BASE, state: "closed" },
+];
+/** Both open -- matches `CLOSE_PREVIEW_BLOCKED`'s `OPEN_REPACK_BOX` count of 2 exactly. Backs `closePreviewBlocked`. */
+const BOXES_ALL_OPEN = [
+  { ...BOX_1_BASE, state: "open" },
+  { ...BOX_2_BASE, state: "open" },
+];
+
+/**
+ * Progress payload for the plain `running` screens (live progress,
+ * corrections) where nobody has attempted to close yet, so an open box is
+ * unremarkable. `expectedCount` matches MKR-INS-06's
  * `activeSnapshot.counts.expected` (116) for narrative continuity.
  */
 const RUNNING_PROGRESS = {
-  inventoryId: INVENTORY_ID,
-  snapshotId: SNAPSHOT_ID,
+  inventoryId: INVENTORY_ID_07,
+  snapshotId: SNAPSHOT_ID_07,
   status: "running",
   resultRevision: 1,
   expectedCount: 116,
@@ -351,28 +436,7 @@ const RUNNING_PROGRESS = {
       openBoxCount: 0,
     },
   ],
-  boxes: [
-    {
-      id: BOX_ID_1,
-      sscc: "123456789012345670",
-      terminalId: DEVICE_ID_1,
-      terminalName: "Терминал 1",
-      productionDate: "2026-08-15",
-      state: "open",
-      printState: "printed",
-      itemCount: 42,
-    },
-    {
-      id: BOX_ID_2,
-      sscc: "223456789012345670",
-      terminalId: DEVICE_ID_2,
-      terminalName: "Терминал 2",
-      productionDate: "2026-08-16",
-      state: "closed",
-      printState: "printed",
-      itemCount: 60,
-    },
-  ],
+  boxes: BOXES_ONE_OPEN,
   recentEvents: [
     {
       eventId: EVENT_ID_1,
@@ -401,7 +465,32 @@ const RUNNING_PROGRESS = {
   ],
 };
 
-/** Progress payload for the `closed` screens (late events, documents, completion, reopen). */
+/**
+ * Progress payload for the close-preview modal once it claims zero
+ * blockers -- every box must be closed here, or a real close attempt would
+ * raise `OPEN_REPACK_BOX` and contradict the "Блокировок нет" the modal
+ * shows. Backs `closePreviewReady`.
+ */
+const RUNNING_PROGRESS_READY = {
+  ...RUNNING_PROGRESS,
+  boxes: BOXES_ALL_CLOSED,
+  openBoxCount: 0,
+};
+
+/**
+ * Progress payload for the close-preview modal once it's blocked --
+ * `CLOSE_PREVIEW_BLOCKED`'s `OPEN_REPACK_BOX` blocker claims a count of 2,
+ * so this shows exactly 2 open boxes (not 3, and not the 1-open baseline
+ * `RUNNING_PROGRESS` uses before anyone has attempted to close). Backs
+ * `closePreviewBlocked`.
+ */
+const RUNNING_PROGRESS_BLOCKED = {
+  ...RUNNING_PROGRESS,
+  boxes: BOXES_ALL_OPEN,
+  openBoxCount: 2,
+};
+
+/** Progress payload for the `closed` screens (late events, documents, completion, reopen) -- boxes are all closed, consistent with the closed status carrying zero open-box blockers. */
 const CLOSED_PROGRESS = {
   ...RUNNING_PROGRESS,
   status: "closed",
@@ -411,6 +500,8 @@ const CLOSED_PROGRESS = {
   unknownCount: 0,
   pendingEventCount: 0,
   participants: [],
+  boxes: BOXES_ALL_CLOSED,
+  openBoxCount: 0,
 };
 
 /** Evidence events behind the corrections screen -- one with a full action set (unknown scan, still correctable), one already voided (only restorable), one known box with nothing to correct. */
@@ -463,7 +554,7 @@ const EVIDENCE_RESPONSE = {
 };
 
 const CLOSE_PREVIEW_READY = {
-  inventoryId: INVENTORY_ID,
+  inventoryId: INVENTORY_ID_07,
   status: "running",
   resultRevision: 1,
   blockers: [],
@@ -473,10 +564,14 @@ const CLOSE_PREVIEW_READY = {
  * `BLOCKER_KEYS` (InventoryClosePanel.tsx) maps these two codes to
  * `pages.inventory.close.blocker.active` ("Активные терминалы: {{count}}")
  * and `...openBoxes` ("Открытые короба: {{count}}") -- the exact phrasing
- * the MKR-INS-07 brief's screen table calls for.
+ * the MKR-INS-07 brief's screen table calls for. The `OPEN_REPACK_BOX`
+ * count (2) matches `RUNNING_PROGRESS_BLOCKED`'s two open boxes exactly --
+ * `inventory-close.service.ts`'s blocker count is a real tally of open
+ * repack boxes, so a mismatched number here would depict a state the
+ * product can't produce.
  */
 const CLOSE_PREVIEW_BLOCKED = {
-  inventoryId: INVENTORY_ID,
+  inventoryId: INVENTORY_ID_07,
   status: "running",
   resultRevision: 1,
   blockers: [
@@ -490,7 +585,7 @@ const CLOSE_PREVIEW_BLOCKED = {
     },
     {
       code: "OPEN_REPACK_BOX",
-      count: 3,
+      count: 2,
       participantId: null,
       deviceId: null,
       boxId: CLOSE_BLOCKER_BOX_ID,
@@ -540,7 +635,7 @@ const DOCUMENT_RUNS_HISTORY = {
   items: [
     {
       id: DOC_RUN_PROCESSING_ID,
-      inventoryId: INVENTORY_ID,
+      inventoryId: INVENTORY_ID_07,
       resultRevision: 1,
       selectedFormats: [
         { id: "inventory_csv_current_stock", version: 1 },
@@ -557,7 +652,7 @@ const DOCUMENT_RUNS_HISTORY = {
     },
     {
       id: DOC_RUN_READY_HISTORY_ID,
-      inventoryId: INVENTORY_ID,
+      inventoryId: INVENTORY_ID_07,
       resultRevision: 1,
       selectedFormats: [{ id: "inventory_csv_current_stock", version: 1 }],
       status: "ready",
@@ -573,7 +668,7 @@ const DOCUMENT_RUNS_HISTORY = {
           formatId: "inventory_csv_current_stock",
           formatVersion: 1,
           partNumber: 1,
-          filename: "inv-000042-current-stock.csv",
+          filename: "inv-000043-current-stock.csv",
           mimeType: "text/csv; charset=utf-8",
           rowCount: 116,
           codeCount: 114,
@@ -593,7 +688,7 @@ const DOCUMENT_RUNS_COMPLETE = {
   items: [
     {
       id: DOC_RUN_READY_COMPLETE_ID,
-      inventoryId: INVENTORY_ID,
+      inventoryId: INVENTORY_ID_07,
       resultRevision: 1,
       selectedFormats: [{ id: "inventory_csv_current_stock", version: 1 }],
       status: "ready",
@@ -609,7 +704,7 @@ const DOCUMENT_RUNS_COMPLETE = {
           formatId: "inventory_csv_current_stock",
           formatVersion: 1,
           partNumber: 1,
-          filename: "inv-000042-current-stock.csv",
+          filename: "inv-000043-current-stock.csv",
           mimeType: "text/csv; charset=utf-8",
           rowCount: 116,
           codeCount: 114,
@@ -736,21 +831,36 @@ async function installApi(page: Page, scenario: Scenario) {
       "closedDocumentsHistory",
       "closedCompletion",
     ];
-    if (RUNNING_SCENARIOS.includes(scenario) && path === `/api/inventories/${INVENTORY_ID}`) {
+    if (RUNNING_SCENARIOS.includes(scenario) && path === `/api/inventories/${INVENTORY_ID_07}`) {
       return json(route, RUNNING_DETAIL);
     }
-    if (CLOSED_SCENARIOS.includes(scenario) && path === `/api/inventories/${INVENTORY_ID}`) {
+    if (CLOSED_SCENARIOS.includes(scenario) && path === `/api/inventories/${INVENTORY_ID_07}`) {
       return json(route, CLOSED_DETAIL);
     }
+    // Each "running" scenario gets its own box states (see `BOXES_ONE_OPEN`/
+    // `BOXES_ALL_CLOSED`/`BOXES_ALL_OPEN` above) so the boxes shown always
+    // agree with what that scenario's own close-preview (if any) claims.
     if (
-      RUNNING_SCENARIOS.includes(scenario) &&
-      path === `/api/inventories/${INVENTORY_ID}/progress`
+      (scenario === "live" || scenario === "corrections") &&
+      path === `/api/inventories/${INVENTORY_ID_07}/progress`
     ) {
       return json(route, RUNNING_PROGRESS);
     }
     if (
+      scenario === "closePreviewReady" &&
+      path === `/api/inventories/${INVENTORY_ID_07}/progress`
+    ) {
+      return json(route, RUNNING_PROGRESS_READY);
+    }
+    if (
+      scenario === "closePreviewBlocked" &&
+      path === `/api/inventories/${INVENTORY_ID_07}/progress`
+    ) {
+      return json(route, RUNNING_PROGRESS_BLOCKED);
+    }
+    if (
       CLOSED_SCENARIOS.includes(scenario) &&
-      path === `/api/inventories/${INVENTORY_ID}/progress`
+      path === `/api/inventories/${INVENTORY_ID_07}/progress`
     ) {
       return json(route, CLOSED_PROGRESS);
     }
@@ -770,7 +880,7 @@ async function installApi(page: Page, scenario: Scenario) {
       (RUNNING_SCENARIOS.includes(scenario) ||
         scenario === "closedLate" ||
         scenario === "closedDocumentsCatalog") &&
-      path === `/api/inventories/${INVENTORY_ID}/document-runs`
+      path === `/api/inventories/${INVENTORY_ID_07}/document-runs`
     ) {
       return json(route, NO_DOCUMENT_RUNS);
     }
@@ -779,7 +889,7 @@ async function installApi(page: Page, scenario: Scenario) {
     }
     if (
       scenario === "closedDocumentsHistory" &&
-      path === `/api/inventories/${INVENTORY_ID}/document-runs`
+      path === `/api/inventories/${INVENTORY_ID_07}/document-runs`
     ) {
       return json(route, DOCUMENT_RUNS_HISTORY);
     }
@@ -788,26 +898,26 @@ async function installApi(page: Page, scenario: Scenario) {
     }
     if (
       scenario === "closedCompletion" &&
-      path === `/api/inventories/${INVENTORY_ID}/document-runs`
+      path === `/api/inventories/${INVENTORY_ID_07}/document-runs`
     ) {
       return json(route, DOCUMENT_RUNS_COMPLETE);
     }
-    if (scenario === "corrections" && path === `/api/inventories/${INVENTORY_ID}/evidence`) {
+    if (scenario === "corrections" && path === `/api/inventories/${INVENTORY_ID_07}/evidence`) {
       return json(route, EVIDENCE_RESPONSE);
     }
     if (
       scenario === "closePreviewReady" &&
-      path === `/api/inventories/${INVENTORY_ID}/close-preview`
+      path === `/api/inventories/${INVENTORY_ID_07}/close-preview`
     ) {
       return json(route, CLOSE_PREVIEW_READY);
     }
     if (
       scenario === "closePreviewBlocked" &&
-      path === `/api/inventories/${INVENTORY_ID}/close-preview`
+      path === `/api/inventories/${INVENTORY_ID_07}/close-preview`
     ) {
       return json(route, CLOSE_PREVIEW_BLOCKED);
     }
-    if (scenario === "closedLate" && path === `/api/inventories/${INVENTORY_ID}/late-events`) {
+    if (scenario === "closedLate" && path === `/api/inventories/${INVENTORY_ID_07}/late-events`) {
       return json(route, LATE_EVENTS_RESPONSE);
     }
 
@@ -869,15 +979,10 @@ test("renders the ЧЗ exports stage of an existing inventory", async ({ page })
   // (it measures document scroll height, which stays at the viewport size).
   // Growing the viewport itself grows `100vh`, which grows `<main>` until
   // its content fits without internal scrolling; then a normal screenshot
-  // at that taller size captures all six cards. Only this file uses a
-  // non-800 height -- every other screenshot in this suite stays 1280x800.
-  const overflow = await page
-    .locator("main")
-    .evaluate((element) => element.scrollHeight - element.clientHeight);
-  if (overflow > 0) {
-    await page.setViewportSize({ width: 1280, height: 800 + overflow });
-  }
-  await page.screenshot({ path: screenshotPath("exports"), scale: "css", fullPage: true });
+  // at that taller size captures all six cards. `screenshotFullMain` (top of
+  // file) implements exactly this and is reused by several MKR-INS-07
+  // screenshots below -- this is the one MKR-INS-06 screenshot that needs it.
+  await screenshotFullMain(page, screenshotPath("exports"));
 });
 
 test("renders a blocked ЧЗ export order", async ({ page }) => {
@@ -957,8 +1062,8 @@ test("renders the launch stage after continuing past terminals", async ({ page }
 test("renders the live progress of a running inventory", async ({ page }) => {
   const unexpected = await installApi(page, "live");
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
-  await expect(page.getByRole("heading", { level: 1, name: "ИНВ-000042" })).toBeVisible();
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}`);
+  await expect(page.getByRole("heading", { level: 1, name: "ИНВ-000043" })).toBeVisible();
   await expect(page.getByText("Ожидается", { exact: true })).toBeVisible();
   await expect(page.getByText("Проверено", { exact: true })).toBeVisible();
   await expect(page.getByText("Не найдено", { exact: true })).toBeVisible();
@@ -977,9 +1082,9 @@ test("renders the live progress of a running inventory", async ({ page }) => {
 test("renders the corrections list with its filters", async ({ page }) => {
   const unexpected = await installApi(page, "corrections");
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}/corrections`);
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}/corrections`);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Исправления · ИНВ-000042" }),
+    page.getByRole("heading", { level: 1, name: "Исправления · ИНВ-000043" }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "События и коды" })).toBeVisible();
   await expect(page.getByLabel("Тип события")).toBeVisible();
@@ -992,7 +1097,7 @@ test("renders the corrections list with its filters", async ({ page }) => {
 test("renders the correction form for a selected item", async ({ page }) => {
   const unexpected = await installApi(page, "corrections");
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}/corrections`);
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}/corrections`);
   // `CorrectionEvent` (InventoryCorrections.tsx) overrides the *first*
   // action button's accessible name with "Выбрать {identity}" for
   // screen-reader clarity, so its visible text ("Отменить скан") is no
@@ -1017,7 +1122,7 @@ test("renders the correction form for a selected item", async ({ page }) => {
 test("renders the close preview with no blockers", async ({ page }) => {
   const unexpected = await installApi(page, "closePreviewReady");
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}`);
   await page.getByRole("button", { name: "Закрыть инвентаризацию" }).click();
   await expect(page.getByText("Проверка перед закрытием")).toBeVisible();
   await expect(
@@ -1031,7 +1136,7 @@ test("renders the close preview with no blockers", async ({ page }) => {
 test("renders the close preview with active blockers", async ({ page }) => {
   const unexpected = await installApi(page, "closePreviewBlocked");
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}`);
   await page.getByRole("button", { name: "Закрыть инвентаризацию" }).click();
   await expect(
     page.getByText(
@@ -1039,7 +1144,7 @@ test("renders the close preview with active blockers", async ({ page }) => {
     ),
   ).toBeVisible();
   await expect(page.getByText("Активные терминалы: 2")).toBeVisible();
-  await expect(page.getByText("Открытые короба: 3")).toBeVisible();
+  await expect(page.getByText("Открытые короба: 2")).toBeVisible();
   expect(unexpected).toEqual([]);
   await page.screenshot({ path: screenshotPath07("close-blocked"), scale: "css" });
 });
@@ -1054,7 +1159,7 @@ test("renders the emergency-close form once blockers are acknowledged", async ({
   // scenario deliberately doesn't do).
   const unexpected = await installApi(page, "closePreviewBlocked");
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}`);
   await page.getByRole("button", { name: "Закрыть инвентаризацию" }).click();
   await expect(page.getByText("Активные терминалы: 2")).toBeVisible();
   await page
@@ -1083,7 +1188,7 @@ test("renders late events awaiting a decision", async ({ page }) => {
   // for the full trade-off.
   const unexpected = await installApi(page, "closedLate");
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}`);
   await page.getByRole("button", { name: "Поздние события" }).click();
   await expect(page.getByText("batch-2026-08-29-01")).toBeVisible();
   await expect(page.getByText("18 событий")).toBeVisible();
@@ -1099,7 +1204,7 @@ test("renders late events awaiting a decision", async ({ page }) => {
 test("renders the document catalog before any run exists", async ({ page }) => {
   const unexpected = await installApi(page, "closedDocumentsCatalog");
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}`);
   await expect(page.getByRole("heading", { level: 2, name: "Итоговые документы" })).toBeVisible();
   await expect(page.getByText("Что сформировать")).toBeVisible();
   await expect(page.getByText("[CSV] Коды на учёт · CSV · v1")).toBeVisible();
@@ -1112,7 +1217,7 @@ test("renders the document catalog before any run exists", async ({ page }) => {
 test("renders the document generation history", async ({ page }) => {
   const unexpected = await installApi(page, "closedDocumentsHistory");
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}`);
   await expect(page.getByRole("heading", { level: 3, name: "История формирования" })).toBeVisible();
   await expect(page.getByText("Готово")).toBeVisible();
   await expect(page.getByText("Формируется")).toBeVisible();
@@ -1125,7 +1230,7 @@ test("renders the document generation history", async ({ page }) => {
 test("renders the completion step once documents are downloaded", async ({ page }) => {
   const unexpected = await installApi(page, "closedCompletion");
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}`);
   await expect(page.getByRole("heading", { level: 3, name: "Завершение" })).toBeVisible();
   await expect(page.getByText("Итоговые документы скачаны и проверены")).toBeVisible();
   await page.getByRole("checkbox", { name: "Итоговые документы скачаны и проверены" }).check();
@@ -1137,7 +1242,7 @@ test("renders the completion step once documents are downloaded", async ({ page 
 test("renders the reopen confirmation dialog", async ({ page }) => {
   const unexpected = await installApi(page, "closedDocumentsCatalog");
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}`);
   await page.getByRole("button", { name: "Возобновить" }).click();
   await expect(page.getByText("Возобновить инвентаризацию?")).toBeVisible();
   await expect(
