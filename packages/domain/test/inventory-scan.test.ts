@@ -7,6 +7,7 @@ import {
   type InventoryLocalClaim,
   type InventoryScanSnapshotRow,
 } from "../src/inventory/scan.js";
+import { resolveInventoryScanSourceDate as fromPackageRoot } from "../src/index.js";
 
 const GTIN = "04600000000015";
 const OTHER_GTIN = "04600682000013";
@@ -371,5 +372,9 @@ describe("inventory scan source production date", () => {
       scanKind: "known_box",
       productionDate: "2026-08-22",
     });
+  });
+
+  it("exposes the policy from the package root barrel", () => {
+    expect(fromPackageRoot).toBe(resolveInventoryScanSourceDate);
   });
 });
