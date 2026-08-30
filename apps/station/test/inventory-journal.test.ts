@@ -2004,4 +2004,66 @@ describe("inventory scan source production date guard", () => {
         .get("rescan-event-recheck"),
     ).toEqual({ count: 0 });
   });
+
+  it("resumes an already-reserved event's durable outcome instead of re-litigating the date once the terminal moves on", async () => {
+    const { db, exec } = await setup();
+    seedCode(db, "REPLAY", { productionDate: "2026-08-20" });
+
+    // A live session crashes right after the event is reserved (its
+    // `active_production_date` is durably stamped) but before its
+    // projection lands. Note: a *committed* replay can never expose this
+    // ordering bug — its own successful projection insert leaves a
+    // permanent self-claim, so a fresh reclassification on replay always
+    // comes back `duplicate` (guard is a structural no-op) and the
+    // existing-event branch already returns the durable stored verdict
+    // regardless of guard order. The pending case has no such claim yet,
+    // so it is the one case that actually distinguishes the two orderings.
+    await expect(
+      recordInventoryScan(
+        failOnce(exec, /INSERT INTO inventory_code_results_mirror/i),
+        input(raw("REPLAY"), "replay-event"),
+      ),
+    ).rejects.toThrow("simulated durable write failure");
+    expect(db.prepare("SELECT commit_state FROM inventory_scan_events_mirror").get()).toEqual({
+      commit_state: "pending",
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get()).toEqual(
+      { count: 0 },
+    );
+
+    // No restart happens (no mount-time reconcile); instead the terminal's
+    // active date moves on independently, away from REPLAY's own date.
+    await setInventoryProductionDate(exec, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      deviceId: DEVICE_ID,
+      operatorId: OPERATOR_ID,
+      productionDate: "2026-08-25",
+      updatedAt: "2026-08-25T10:05:00.000Z",
+    });
+
+    // The terminal replays the exact same event id. The reservation already
+    // exists and is recoverable; the guard must not re-litigate its date
+    // against the terminal's now-mismatched active date.
+    const outcome = await recordInventoryScan(exec, input(raw("REPLAY"), "replay-event"));
+
+    expect(outcome).toMatchObject({ outcome: "recorded", verdict: "expected" });
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror WHERE event_id = ?")
+        .get("replay-event"),
+    ).toEqual({ count: 1 });
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS count FROM inventory_outbox WHERE event_id = ?")
+        .get("replay-event"),
+    ).toEqual({ count: 1 });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM inventory_code_results_mirror WHERE first_accepted_event_id = ?",
+        )
+        .get("replay-event"),
+    ).toEqual({ count: 1 });
+  });
 });

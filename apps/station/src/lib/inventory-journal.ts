@@ -1402,9 +1402,6 @@ async function recordInventoryScanInternal(
     return { outcome: "recorded", ...resultFrom(classification, "invalid", 0, null) };
   }
 
-  const mismatch = await guardSourceProductionDate(exec, input, classification, facts);
-  if (mismatch) return mismatch;
-
   let event = await existingEvent(exec, input.inventoryId, input.snapshotId, input.eventId);
   if (event) {
     ensureExactReservation(event, input, classification);
@@ -1434,17 +1431,21 @@ async function recordInventoryScanInternal(
   if (classification.kind === "invalid") {
     return { outcome: "recorded", ...resultFrom(classification, "invalid", 0, null) };
   }
-  // Reconciliation can change a code's classification (e.g. a failed prior
-  // claim releasing it from `duplicate` back to `expected`), so the guard
-  // must be re-run against the reloaded facts. Still strictly before
-  // reserveEvent, so a mismatch here writes nothing either.
-  const reconciledMismatch = await guardSourceProductionDate(
-    exec,
-    input,
-    classification,
-    reconciledFacts,
-  );
-  if (reconciledMismatch) return reconciledMismatch;
+  if (!event) {
+    // Reconciliation can change a code's classification (e.g. a failed prior
+    // claim releasing it from `duplicate` back to `expected`), so the guard
+    // must be re-run against the reloaded facts. Still strictly before
+    // reserveEvent, so a mismatch here writes nothing either.
+    //
+    // Only reached when this eventId has no reservation yet. A replayed
+    // eventId that already reserved (pending or committed, handled above)
+    // must skip the guard entirely: the date decision was made when the
+    // event was reserved and is already stamped on the row as
+    // `active_production_date`, so resuming or replaying must not
+    // re-litigate it against a terminal date that has moved since.
+    const mismatch = await guardSourceProductionDate(exec, input, classification, reconciledFacts);
+    if (mismatch) return mismatch;
+  }
   event ??= await reserveEvent(exec, input, classification);
   ensureExactReservation(event, input, classification);
   if (commitState(event.commit_state) !== "pending") {
