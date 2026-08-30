@@ -262,7 +262,9 @@ point at which detaching and archiving an old monthly partition of `codes`
 becomes worth designing — and the number in the second column is the one that
 needs an operator rather than an engineer, because those codes are unaskable
 until their product is given a Chestny ZNAK group. Giving the product a group
-does not resolve them immediately: the ingest job only re-resolves a null
-group the next time that exact code is ingested again (typically the next
-Station scan of it), not retroactively for every row already sitting in the
-table.
+does not resolve them instantly: the ingest job re-resolves a null group the
+next time that exact code is scanned, or, for a row already sitting in the
+table with nothing left to scan it again (e.g. one that only ever arrived
+through a bootstrap inventory export), within the next daily full sweep
+(`CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS`, currently 24 hours). So the remedy
+does reach every row already in the table — just not instantly.

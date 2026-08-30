@@ -251,6 +251,75 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
     expect(afterGroup!.nextRefreshAt.getTime()).toBeLessThanOrEqual(Date.now());
   });
 
+  it("re-resolves a snapshot-only code's null group via the daily sweep, without waiting for a scan that will never come", async () => {
+    await clearProductGroup(PRODUCT_GTIN);
+    // The population final review flagged as still unreachable: a code that
+    // lives only in `inventory_snapshot_codes` (a bootstrap import) for a
+    // product that had no ЧЗ group at import time. Unlike a `codes` row,
+    // this one has no "next scan" to fall back on -- `shifts.service.ts`
+    // blocks opening a shift for a draft product -- so only the sweep can
+    // ever revisit it.
+    await seedSnapshotCode(HASH_B, PRODUCT_GTIN);
+    const first = await service.run(tenantId);
+    expect(first.inserted).toBe(1);
+    const [beforeGroup] = await rowsFor(tenantId);
+    expect(beforeGroup).toMatchObject({ codeHash: HASH_B, chzProductGroupCode: null });
+
+    // The operator gives the product a ЧЗ group. No ordinary pass changes
+    // anything: `walkSnapshotCodes` (the per-pass anti-join) still excludes
+    // this row because it already exists.
+    await db
+      .update(schema.products)
+      .set({ chzProductGroupCode: 8 })
+      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.gtin14, PRODUCT_GTIN)));
+
+    const ordinaryPass = await service.run(tenantId);
+    expect(ordinaryPass.inserted).toBe(0);
+    const [stillUngrouped] = await rowsFor(tenantId);
+    expect(stillUngrouped).toMatchObject({ codeHash: HASH_B, chzProductGroupCode: null });
+
+    // Once the sweep is due, its widened anti-join over
+    // `inventory_snapshot_codes` re-feeds the row and `insertStatuses`
+    // re-resolves the now-assigned group.
+    await forceFullSweepDue();
+    const sweepPass = await service.run(tenantId);
+
+    // Re-resolving an existing row's group is not a new discovery.
+    expect(sweepPass.inserted).toBe(0);
+    const [afterGroup] = await rowsFor(tenantId);
+    expect(afterGroup).toMatchObject({ codeHash: HASH_B, chzProductGroupCode: 8 });
+    // Due immediately: a code that just became askable is maximally stale.
+    expect(afterGroup!.nextRefreshAt.getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("leaves an already-grouped, already-checked row untouched by the same widened sweep", async () => {
+    // The sweep's widened predicate must not disturb a row that is already
+    // settled: one with a group, and with ЧЗ facts the refresh service
+    // already wrote. Both `sweepCodes` and `sweepSnapshotCodes` share
+    // `insertStatuses`'s `setWhere`, so a settled row from either source
+    // must survive a sweep pass unchanged.
+    await seedCode({ codeHash: HASH_A, gtin14: PRODUCT_GTIN, scannedAt: t(1) });
+    await seedSnapshotCode(HASH_C, PRODUCT_GTIN);
+    await service.run(tenantId);
+
+    const checkedAt = new Date("2026-01-10T00:00:00.000Z");
+    await db
+      .update(schema.chzCodeStatuses)
+      .set({ status: "APPLIED", checkedAt })
+      .where(eq(schema.chzCodeStatuses.tenantId, tenantId));
+
+    await forceFullSweepDue();
+    const sweepPass = await service.run(tenantId);
+
+    expect(sweepPass.inserted).toBe(0);
+    const rows = await rowsFor(tenantId);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row).toMatchObject({ chzProductGroupCode: 8, status: "APPLIED" });
+      expect(row.checkedAt?.getTime()).toBe(checkedAt.getTime());
+    }
+  });
+
   it("leaves a settled row untouched -- group and ЧЗ facts alike -- when the same code is scanned again", async () => {
     await seedCode({ codeHash: HASH_A, gtin14: PRODUCT_GTIN, scannedAt: t(1) });
     await service.run(tenantId);

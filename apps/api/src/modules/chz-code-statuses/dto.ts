@@ -9,11 +9,13 @@ import type { SchemaObject } from "@nestjs/swagger";
  * `withoutProductGroup` is the one number here the operator can act on: those
  * codes are unaskable until their product has a ЧЗ group, because
  * `cises/info` takes the group as a query parameter. Giving the product a
- * group does not resolve them immediately -- `ChzCodeStatusIngestService`
- * only re-resolves a null group the next time that exact code is ingested
- * again (see `insertStatuses`'s doc), typically the next time it is scanned
- * -- but it is no longer a dead end once that happens. Everything else here
- * is informational.
+ * group does not resolve them instantly -- `ChzCodeStatusIngestService`
+ * re-resolves a null group the next time that exact code is scanned, or,
+ * for a code with no scan to fall back on (e.g. one that only ever arrived
+ * through a bootstrap inventory export), within the next daily full sweep
+ * (see `sweepCodes`'s and `sweepSnapshotCodes`'s docs) -- but it is no
+ * longer a dead end once either happens. Everything else here is
+ * informational.
  */
 export interface ChzCodeStatusSummaryDto {
   /** Every code the tenant's store knows about, refreshable or not. */

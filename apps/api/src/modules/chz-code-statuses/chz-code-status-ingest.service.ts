@@ -1,13 +1,14 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
-import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { DB } from "../../auth/auth.module";
 
 /**
- * How many rows one pass walks, shared across all three phases below (the
- * `codes` cursor walk, the full sweep, and the `inventory_snapshot_codes`
- * anti-join) -- see `ChzCodeStatusIngestService.run`. It is one budget, not
+ * How many rows one pass walks, shared across all four phases below (the
+ * `codes` cursor walk, the full sweep over `codes`, the per-pass
+ * `inventory_snapshot_codes` anti-join, and its once-a-day widened
+ * counterpart) -- see `ChzCodeStatusIngestService.run`. It is one budget, not
  * one constant reused per phase: a pass must not be able to hold a worker for
  * a multiple of this bound just because the work happens to come from more
  * than one source.
@@ -19,11 +20,15 @@ import { DB } from "../../auth/auth.module";
 export const CHZ_CODE_STATUS_INGEST_LIMIT = 50_000;
 
 /**
- * How often the full anti-join sweep (see `sweepCodes`) is allowed to run per
- * tenant. Once a day: the refresh cadence for a code already in the store is
- * daily (see the status->interval rule), so a code that arrives behind the
- * cursor still joins the store within the same period it would have been
- * refreshed in anyway -- there is nothing to gain from sweeping more often.
+ * How often the full anti-join sweep (`sweepCodes` and `sweepSnapshotCodes`)
+ * is allowed to run per tenant. Once a day: the refresh cadence for a code
+ * already in the store is daily (see the status->interval rule), so a code
+ * that arrives behind the cursor still joins the store within the same
+ * period it would have been refreshed in anyway -- there is nothing to gain
+ * from sweeping more often. The same cadence bounds how quickly a
+ * newly-assigned product group reaches a code the sweep re-feeds (see
+ * `sweepCodes`'s and `sweepSnapshotCodes`'s docs): within a day, not
+ * instantly.
  */
 export const CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
@@ -71,7 +76,7 @@ interface AntiJoinResult {
  * facts, which the refresh job (a later task) fills in and this service never
  * touches.
  *
- * Three phases feed the same table per pass, sharing one per-pass row budget
+ * Four phases feed the same table per pass, sharing one per-pass row budget
  * (`CHZ_CODE_STATUS_INGEST_LIMIT`, see `run`), keyed on `(tenantId,
  * codeHash)`:
  *  - `codes`, walked forward from a per-tenant cursor on `scanned_at`. That
@@ -88,13 +93,17 @@ interface AntiJoinResult {
  *    warehoused spare being redeployed, or repeated dead-RTC reboots. A code
  *    can therefore be committed with a `scanned_at` the cursor has already
  *    passed; the cursor's strict `>` would skip it forever. The sweep is the
- *    backstop that catches it.
+ *    backstop that catches it. This same sweep also re-feeds any row whose
+ *    group is still null, on the same daily cadence -- see `sweepCodes`'s doc
+ *    for why that lives here rather than in a phase that runs every pass.
  *  - `inventory_snapshot_codes`, walked by a plain anti-join every pass. It
  *    is unpartitioned and does not grow per scan, so no cursor is needed --
  *    and it is the only source for a tenant whose history predates Markiro:
  *    those codes arrived through one ordered export and never appear in
- *    `codes`.
- * All three funnel into `insertStatuses`'s single upsert on the shared key,
+ *    `codes`. A second, widened anti-join over the same table runs on the
+ *    sweep's daily cadence rather than every pass -- see
+ *    `sweepSnapshotCodes`'s doc for why that one exists at all.
+ * All four funnel into `insertStatuses`'s single upsert on the shared key,
  * so a code that arrived through more than one path yields exactly one row --
  * see that method's own doc for the one case it updates rather than leaves
  * alone (a null product group becoming resolvable).
@@ -105,11 +114,18 @@ export class ChzCodeStatusIngestService {
 
   /**
    * Spends the pass's one shared row budget in order: the full sweep if it is
-   * due, then the cursor walk, then the snapshot anti-join, passing what
-   * remains of the budget to each phase and skipping a phase entirely once
-   * the budget hits zero. See the class doc for why three phases exist and
-   * `CHZ_CODE_STATUS_INGEST_LIMIT` for why they share one budget rather than
-   * each carrying its own.
+   * due, then the cursor walk, then the per-pass snapshot anti-join, passing
+   * what remains of the budget to each phase and skipping a phase entirely
+   * once the budget hits zero. See the class doc for why four phases exist
+   * and `CHZ_CODE_STATUS_INGEST_LIMIT` for why they share one budget rather
+   * than each carrying its own.
+   *
+   * The "full sweep if due" step is itself two sub-phases sharing the
+   * budget the same way the top-level phases do: `sweepCodes` over `codes`
+   * first, then `sweepSnapshotCodes` over `inventory_snapshot_codes` with
+   * whatever it left. Both use the widened re-resolution predicate (see
+   * either method's doc); the per-pass snapshot anti-join below (
+   * `walkSnapshotCodes`) deliberately keeps the narrow one.
    *
    * `options.limit` overrides the default budget (`CHZ_CODE_STATUS_INGEST_LIMIT`)
    * for this call. It is not a test-only knob: the budget is a property of the
@@ -167,9 +183,22 @@ export class ChzCodeStatusIngestService {
     let sweepCaughtUp = true;
     if (sweepIsDue && remaining > 0) {
       const sweep = await this.sweepCodes(tenantId, remaining);
-      sweepInserted = sweep.inserted;
+      sweepInserted += sweep.inserted;
       sweepCaughtUp = sweep.caughtUp;
       remaining = Math.max(0, remaining - sweep.rowsFetched);
+
+      if (remaining > 0) {
+        const snapshotSweep = await this.sweepSnapshotCodes(tenantId, remaining);
+        sweepInserted += snapshotSweep.inserted;
+        sweepCaughtUp = sweepCaughtUp && snapshotSweep.caughtUp;
+        remaining = Math.max(0, remaining - snapshotSweep.rowsFetched);
+      } else {
+        // The `codes` sweep alone spent everything the top-level phases left
+        // it, so the snapshot sweep never ran this pass -- same reasoning as
+        // the "not caught up" comment below `run`'s other budget checks.
+        sweepCaughtUp = false;
+      }
+
       await this.markFullSweepRan(tenantId);
     } else if (sweepIsDue) {
       // Defensive only: the sweep is now the first phase to spend the
@@ -305,13 +334,26 @@ export class ChzCodeStatusIngestService {
 
   /**
    * Full anti-join sweep over `codes` for one tenant: every hash with no
-   * `chz_code_statuses` row, regardless of `scanned_at`. Unlike `walkCodes`
-   * this ignores the cursor entirely, so it is the only phase that can find
-   * a code committed with a `scanned_at` behind the cursor -- see the class
-   * doc for why that is a normal, expected occurrence rather than an edge
-   * case. Run at most once per `CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS` (see
-   * `run`) precisely because it cannot prune by `scanned_at` and so scans
-   * more broadly than the cursor walk.
+   * `chz_code_statuses` row, **or** with one whose group is still null --
+   * regardless of `scanned_at`. Unlike `walkCodes` this ignores the cursor
+   * entirely, so it is the only phase (together with `sweepSnapshotCodes`)
+   * that can find a code committed with a `scanned_at` behind the cursor --
+   * see the class doc for why that is a normal, expected occurrence rather
+   * than an edge case. Run at most once per
+   * `CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS` (see `run`) precisely because it
+   * cannot prune by `scanned_at` and so scans more broadly than the cursor
+   * walk.
+   *
+   * The null-group half of the predicate (final review, the sweep-reach
+   * finding) re-feeds a row that already exists so `insertStatuses`'s
+   * `onConflictDoUpdate` gets a chance to re-resolve its group from the
+   * current `products` table -- see that method's doc. Without it, a `codes`
+   * row ingested before its product had a ЧЗ group only ever got re-resolved
+   * by a fresh scan of the same physical code; this makes the daily sweep a
+   * second, scan-independent path to the same outcome. `insertStatuses`'s
+   * `setWhere` keeps this a no-op for every row that is already settled (a
+   * group, once set, is never reconsidered), so widening the predicate here
+   * costs an already-resolved tenant nothing beyond the read.
    */
   private async sweepCodes(tenantId: string, limit: number): Promise<AntiJoinResult> {
     const rows = await this.db
@@ -327,7 +369,15 @@ export class ChzCodeStatusIngestService {
           eq(schema.chzCodeStatuses.codeHash, schema.codes.codeHash),
         ),
       )
-      .where(and(eq(schema.codes.tenantId, tenantId), isNull(schema.chzCodeStatuses.codeHash)))
+      .where(
+        and(
+          eq(schema.codes.tenantId, tenantId),
+          or(
+            isNull(schema.chzCodeStatuses.codeHash),
+            isNull(schema.chzCodeStatuses.chzProductGroupCode),
+          ),
+        ),
+      )
       .orderBy(schema.codes.codeHash)
       .limit(limit);
 
@@ -350,6 +400,15 @@ export class ChzCodeStatusIngestService {
    * `inventory_snapshot_codes` is not partitioned and does not grow per
    * scan, so a plain anti-join every pass is affordable and needs no cursor
    * of its own -- unlike `codes`.
+   *
+   * Deliberately kept to the narrow "row absent" predicate -- never widened
+   * to also re-feed a row whose group is still null the way `sweepCodes` and
+   * `sweepSnapshotCodes` are. This phase runs on every pass (as often as
+   * every ten minutes), and a tenant with a large ungrouped population would
+   * have its entire backlog re-fetched and re-upserted that often for no
+   * gain: nothing about an already-known row's resolvability changes between
+   * two ordinary passes. `sweepSnapshotCodes` carries the widened predicate
+   * on the sweep's once-a-day cadence instead -- see its doc.
    */
   private async walkSnapshotCodes(tenantId: string, limit: number): Promise<AntiJoinResult> {
     const rows = await this.db
@@ -379,7 +438,62 @@ export class ChzCodeStatusIngestService {
   }
 
   /**
-   * Shared by all three sources: dedupe by `codeHash` (a code scanned twice, or
+   * The widened counterpart to `walkSnapshotCodes`, run only on the sweep's
+   * once-a-day cadence (see `run` and `CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS`):
+   * every `inventory_snapshot_codes` hash with no `chz_code_statuses` row, or
+   * with one whose group is still null.
+   *
+   * This is the only phase that can ever re-resolve a code living *only* in
+   * `inventory_snapshot_codes` -- the exact population this whole feature
+   * bootstraps from (a tenant whose history predates Markiro, imported
+   * before some of its products had a ЧЗ group). A `codes` row can always
+   * fall back on a fresh scan of the same physical code reaching
+   * `walkCodes` or `sweepCodes`; a snapshot-only row has no equivalent
+   * fallback, because the product it belongs to is a draft
+   * (`shifts.service.ts` refuses to open a shift for one) and so the code
+   * can never be scanned again. Without this phase, a null group assigned
+   * to such a product after import stayed unaskable forever even though
+   * `insertStatuses` was always willing to re-resolve it -- nothing ever
+   * re-fed the row for it to act on.
+   *
+   * Kept out of `walkSnapshotCodes` (every pass) for the same cost reason
+   * `sweepCodes`'s widening is kept out of `walkCodes`: re-fetching a whole
+   * ungrouped population every ten minutes buys nothing over checking once a
+   * day, since nothing about a settled row's resolvability changes between
+   * passes -- only between a group actually being assigned.
+   */
+  private async sweepSnapshotCodes(tenantId: string, limit: number): Promise<AntiJoinResult> {
+    const rows = await this.db
+      .selectDistinctOn([schema.inventorySnapshotCodes.codeHash], {
+        codeHash: schema.inventorySnapshotCodes.codeHash,
+        gtin14: schema.inventorySnapshotCodes.gtin14,
+      })
+      .from(schema.inventorySnapshotCodes)
+      .leftJoin(
+        schema.chzCodeStatuses,
+        and(
+          eq(schema.chzCodeStatuses.tenantId, schema.inventorySnapshotCodes.tenantId),
+          eq(schema.chzCodeStatuses.codeHash, schema.inventorySnapshotCodes.codeHash),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.inventorySnapshotCodes.tenantId, tenantId),
+          or(
+            isNull(schema.chzCodeStatuses.codeHash),
+            isNull(schema.chzCodeStatuses.chzProductGroupCode),
+          ),
+        ),
+      )
+      .orderBy(schema.inventorySnapshotCodes.codeHash)
+      .limit(limit);
+
+    const inserted = await this.insertStatuses(tenantId, rows);
+    return { inserted, caughtUp: rows.length < limit, rowsFetched: rows.length };
+  }
+
+  /**
+   * Shared by all four sources: dedupe by `codeHash` (a code scanned twice, or
    * present in more than one export, must yield one row), resolve each
    * distinct GTIN's product group in one query, and insert due-immediately
    * rows -- or, for a row another phase already placed, re-resolve its
@@ -392,7 +506,8 @@ export class ChzCodeStatusIngestService {
    * otherwise never be asked about again even after the operator gives its
    * product a group, because `cises/info` takes the group as a query
    * parameter and nothing else in this service ever revisits a row that
-   * already exists. `setWhere` keeps the update a strict no-op for every
+   * already exists -- see `sweepCodes` and `sweepSnapshotCodes` for the two
+   * phases that now do. `setWhere` keeps the update a strict no-op for every
    * settled row -- one that already has a group, or already carries ЧЗ facts
    * from the refresh service -- by firing only when this row's group is
    * still null and the newly-resolved one is not: neither condition can ever
@@ -400,6 +515,23 @@ export class ChzCodeStatusIngestService {
    * once, and refreshing it here only touches the columns ingest owns
    * (group, due date), never the ЧЗ facts columns that belong to
    * `ChzCodeStatusRefreshService`.
+   *
+   * The `gtinByHash` dedup below is load-bearing, not just an optimisation:
+   * `onConflictDoUpdate` raises "ON CONFLICT DO UPDATE command cannot affect
+   * row a second time" if one `INSERT` statement's own VALUES list repeats a
+   * conflict-target key, so a duplicate `codeHash` reaching the chunk loop
+   * below would fail the whole pass rather than silently double-write. Each
+   * of the four phases calls this method separately with its own `rows`,
+   * never a batch merged across phases, so a hash `sweepCodes` and
+   * `sweepSnapshotCodes` (or either sweep and its per-pass counterpart) both
+   * happen to find in the same pass is written by two separate `INSERT`
+   * statements, not two rows of one -- Postgres just applies the second as
+   * an ordinary (and, per `setWhere`, likely no-op) update against the row
+   * the first one already committed. The dedup here only has to cover
+   * duplicates *within* one phase's own fetch (`sweepCodes` and
+   * `sweepSnapshotCodes` guarantee that with `selectDistinctOn`; `walkCodes`
+   * relies on this map instead, since the same code scanned twice is two
+   * distinct `codes` rows sharing one hash).
    */
   private async insertStatuses(tenantId: string, rows: CandidateCode[]): Promise<number> {
     if (rows.length === 0) return 0;

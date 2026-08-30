@@ -166,8 +166,9 @@ export class IntegrationsController {
     description:
       "The freshness line: how many codes `chz_code_statuses` knows about, how many ЧЗ answered " +
       "for in the last day, and how many carry no ЧЗ product group -- those are unaskable until " +
-      "their product gets one, since `cises/info` takes the group as a query parameter, and are " +
-      "re-resolved the next time that code is ingested once it does.",
+      "their product gets one, since `cises/info` takes the group as a query parameter. Once it " +
+      "does, they are re-resolved the next time the code is scanned, or, failing that, within a " +
+      "day via the ingest job's full sweep.",
   })
   @ApiParam({ name: "type", enum: INTEGRATION_CHANNEL_TYPES })
   @ApiOkResponse({ schema: chzCodeStatusSummaryOpenApiSchema })

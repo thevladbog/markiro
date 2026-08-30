@@ -694,6 +694,64 @@ git add apps/api/src/modules/chz-code-statuses apps/api/test/chz-code-status-ing
 git commit -m "fix(chz): re-resolve a null product group on re-ingest"
 ```
 
+**Addendum, added closing the last finding of the whole-branch review:** the
+previous addendum's own limits section said the plain truth as of that fix —
+"nothing re-selects an already-existing row on its own" — but that left one
+population permanently stuck rather than merely delayed: a code living
+**only** in `inventory_snapshot_codes`, for a product with no ЧЗ group at
+import time. That row has no "next scan" to fall back on, because
+`shifts.service.ts` refuses to open a shift for a draft product — historical
+stock from a bootstrap import is never scanned again. Re-resolution as it
+stood required a fresh sighting of the code, and a snapshot-only code can
+never produce one, so giving such a product a group did nothing, forever,
+contradicting the very docs the last addendum had just narrowed to be honest.
+
+Fix: `sweepCodes`'s anti-join predicate was widened from "row absent" to "row
+absent **or** row present with a null group", so the daily full sweep now
+also re-feeds an existing `chz_code_statuses` row for `insertStatuses` to
+re-resolve — `setWhere` already made that a no-op for every settled row, so
+nothing already grouped or already carrying ЧЗ facts is disturbed. A second,
+matching anti-join, `sweepSnapshotCodes`, was added over
+`inventory_snapshot_codes` and gated behind the same `sweepIsDue` check and
+budget as `sweepCodes` — **not** folded into the per-pass `walkSnapshotCodes`,
+which stays on the narrow predicate: widening the phase that runs every pass
+(as often as every ten minutes) would re-fetch a tenant's entire ungrouped
+population that often for no gain, since nothing about a row's resolvability
+changes between two ordinary passes. `run()`'s "full sweep if due" step now
+spends its slice of the shared budget across these two anti-joins in
+sequence, `sweepCodes` first, mirroring how the top-level phases already
+share the pass budget.
+
+The four call sites into `insertStatuses` (the cursor walk, `sweepCodes`,
+`walkSnapshotCodes`, and `sweepSnapshotCodes`) each pass their own
+separately-fetched `rows`, never a batch merged across phases, so widening
+`sweepCodes` and adding `sweepSnapshotCodes` cannot make two phases collide
+inside one `INSERT` statement even when both happen to rediscover the same
+hash in one pass (possible for a code that was both scanned and exported) —
+each phase's fetch becomes its own `INSERT`, applied against whatever the
+previous one already committed. The
+`gtinByHash` map in `insertStatuses` remains the thing that would matter if
+that invariant were ever broken (a duplicate `codeHash` in one `INSERT`'s
+own VALUES list raises "ON CONFLICT DO UPDATE command cannot affect row a
+second time"), so it is now documented as load-bearing rather than a plain
+optimisation.
+
+The DTO comment, the controller's OpenAPI description, the runbook, and both
+i18n strings were all updated to stop promising the narrower "next scan
+only" remedy the previous addendum had written — and, in the same breath,
+not to overclaim instant resolution: the true guarantee is "within a day via
+the sweep, sooner if the code is scanned again". Two tests were added: a
+snapshot-only code with no group is ingested unaskable, the product is then
+given a group, an ordinary pass leaves it untouched, and the next pass with
+the sweep forced due re-groups it; and a second test pins that the same
+widened sweep leaves an already-grouped row with ЧЗ facts (from either
+source) completely untouched.
+
+```bash
+git add apps/api/src/modules/chz-code-statuses apps/api/test/chz-code-status-ingest.service.test.ts apps/api/src/modules/integrations/integrations.controller.ts docs/runbooks apps/admin/src/i18n docs/superpowers/plans/2026-08-30-chz-code-status-refresh.md
+git commit -m "fix(chz): widen the daily sweep to re-resolve snapshot-only codes too"
+```
+
 ---
 
 ### Task 4: The refresh pass
@@ -1131,7 +1189,7 @@ also enqueues a pass.
 
 `apps/api/test/jobs-shift-exports.test.ts`'s "rejects an enqueue when pg-boss
 does not return a job id" test had a `boss.send.mockResolvedValueOnce(null)`
-moved to *after* `onModuleInit()`, with a comment explaining that the boot
+moved to _after_ `onModuleInit()`, with a comment explaining that the boot
 block's own `boss.send` call would otherwise consume it. With that boot-time
 call gone, the mock moved back to before `onModuleInit()` and the comment was
 removed, matching this test's shape from before either boot-pass attempt.

@@ -2946,7 +2946,7 @@
           "line": "Chestny ZNAK codes: {{total}}. Refreshed in the last day: {{refreshedLastDay}}. {{lastChecked}}",
           "lastCheckedAt": "Last checked: {{at}}",
           "neverChecked": "No checks yet",
-          "withoutProductGroup": "With no Chestny ZNAK product group: {{count}} — refreshing resumes once their product gets one and the code is seen again (e.g. on its next scan)",
+          "withoutProductGroup": "With no Chestny ZNAK product group: {{count}} — refreshing resumes within a day of giving their product one, sooner if the code is scanned again",
           "loadError": "Could not load code status data"
         },
         "danger": {
