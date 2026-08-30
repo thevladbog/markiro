@@ -73,6 +73,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /integrations (IntegrationsController.list)",
       "GET /integrations/:type (IntegrationsController.detail)",
       "GET /integrations/:type/candidates (IntegrationsController.listCandidates)",
+      "GET /integrations/:type/code-statuses (IntegrationsController.codeStatuses)",
       "GET /integrations/:type/journal (IntegrationsController.journal)",
       "GET /integrations/public_api/keys (ApiKeysController.list)",
       "GET /inventories (InventoriesController.list)",

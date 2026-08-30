@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 
 import {
   productionTrueApiClientDependencies,
+  type CisInfo,
   type CreateDispenserTaskInput,
   type DispenserResult,
   type DispenserTaskSummary,
@@ -27,6 +28,9 @@ const DOWNLOAD_TIMEOUT_MS = 60_000;
  * the sandbox rejects it, only this constant changes.
  */
 const PACKAGE_TYPE = "UNIT";
+
+/** True API's documented ceiling for one `cises/info` call. */
+export const CISES_INFO_BATCH_LIMIT = 1000;
 
 @Injectable()
 export class TrueApiClient {
@@ -129,6 +133,68 @@ export class TrueApiClient {
       DOWNLOAD_TIMEOUT_MS,
       {},
       async (response) => new Uint8Array(await response.arrayBuffer()),
+    );
+  }
+
+  async cisesInfo(
+    auth: TrueApiAuth,
+    productGroupCode: number,
+    cises: string[],
+  ): Promise<TrueApiResult<CisInfo[]>> {
+    // A RangeError rather than a silent slice: the caller batches, and a
+    // truncated request would look like ЧЗ having no opinion about the codes
+    // that were dropped.
+    if (cises.length > CISES_INFO_BATCH_LIMIT) {
+      throw new RangeError(`cises/info accepts at most ${CISES_INFO_BATCH_LIMIT} codes`);
+    }
+    const query = new URLSearchParams({ pg: String(productGroupCode) });
+    return this.request(
+      auth,
+      `/cises/info?${query.toString()}`,
+      REQUEST_TIMEOUT_MS,
+      { method: "POST", body: JSON.stringify(cises) },
+      async (response) => {
+        const payload: unknown = await response.json();
+        // A non-array response is a parse failure. Treating it as an empty
+        // answer would mark every code in the batch unknown, potentially
+        // backing off a whole product group on a single malformed response.
+        if (!Array.isArray(payload)) {
+          return null;
+        }
+        return payload.flatMap((row) => {
+          // A `null`/`undefined`/non-object row cannot carry a `cis` at all --
+          // reading `.cis` off it would throw, and `request()` turns any
+          // throw from `parse` into `unavailable` for the WHOLE batch, losing
+          // the answers for every other code in it over one malformed row.
+          if (row === null || typeof row !== "object") return [];
+          const record = row as Record<string, unknown>;
+          const cis = typeof record.cis === "string" ? record.cis : "";
+          // A row we cannot attribute to a code we asked about is worse than
+          // absent: the caller matches on `cis`, and an empty string would
+          // match nothing while looking like an answer.
+          if (cis.length === 0) return [];
+          // Same reasoning for `status`: an absent/non-string status is not
+          // ЧЗ answering "" -- it is ЧЗ not answering. `stringOrEmpty` would
+          // turn it into a persisted `status: ""`, which `intervalFor` reads
+          // as freshly in-circulation and the refresh service writes down as
+          // though ЧЗ had responded. Dropping the row instead leaves it
+          // exactly where the caller's "unknown" handling already expects an
+          // absent answer to be.
+          const status =
+            typeof record.status === "string" && record.status.length > 0 ? record.status : "";
+          if (status.length === 0) return [];
+          return [
+            {
+              cis,
+              status,
+              statusEx: typeof record.statusEx === "string" ? record.statusEx : null,
+              ownerInn: typeof record.ownerInn === "string" ? record.ownerInn : null,
+              withdrawReason:
+                typeof record.withdrawReason === "string" ? record.withdrawReason : null,
+            },
+          ];
+        });
+      },
     );
   }
 
