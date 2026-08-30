@@ -219,6 +219,10 @@
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
+.mk-inventory-launch-confirmation {
+  display: grid;
+  gap: 12px;
+}
 .mk-inventory-actions {
   display: flex;
   justify-content: flex-end;

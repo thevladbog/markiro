@@ -651,7 +651,15 @@ it("recovers the active snapshot after reload and blocks start until warehouse c
   const start = screen.getByRole("button", { name: "Запустить инвентаризацию" });
   expect(start.hasAttribute("disabled")).toBe(true);
   expect(screen.getByText("Снимок зафиксирован: 4 116 ожидаемых кодов")).toBeDefined();
-  await user.click(screen.getByRole("checkbox", { name: "Движения по складу остановлены" }));
+  const warehouseStopped = screen.getByRole("checkbox", {
+    name: "Движения по складу остановлены",
+  });
+  const launchWarning = screen.getByText(
+    "Подтвердите остановку складских движений перед запуском.",
+  );
+  expect(warehouseStopped.closest(".mk-inventory-launch-confirmation")).not.toBeNull();
+  expect(launchWarning.closest(".mk-inventory-launch-confirmation")).not.toBeNull();
+  await user.click(warehouseStopped);
   expect(start.hasAttribute("disabled")).toBe(false);
   await user.click(start);
   await waitFor(() => expect(starts).toBe(1));

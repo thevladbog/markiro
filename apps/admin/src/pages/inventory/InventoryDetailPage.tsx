@@ -545,14 +545,18 @@ function LaunchStep({
           <dd>{t(`pages.inventory.mode.${inventory.mode}`)}</dd>
         </div>
       </dl>
-      <Checkbox
-        label={t("pages.inventory.launch.warehouseStopped")}
-        checked={warehouseStopped}
-        onCheckedChange={setWarehouseStopped}
-        disabled={!canWrite || start.isPending}
-      />
-      {!warehouseStopped ? <Alert tone="warn">{t("pages.inventory.launch.blocked")}</Alert> : null}
-      {start.isError ? <Alert tone="error">{start.error.message}</Alert> : null}
+      <div className="mk-inventory-launch-confirmation">
+        <Checkbox
+          label={t("pages.inventory.launch.warehouseStopped")}
+          checked={warehouseStopped}
+          onCheckedChange={setWarehouseStopped}
+          disabled={!canWrite || start.isPending}
+        />
+        {!warehouseStopped ? (
+          <Alert tone="warn">{t("pages.inventory.launch.blocked")}</Alert>
+        ) : null}
+        {start.isError ? <Alert tone="error">{start.error.message}</Alert> : null}
+      </div>
       <div className="mk-inventory-actions">
         <Button variant="secondary" type="button" onClick={onBack}>
           {t("common.back")}
