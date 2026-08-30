@@ -63,6 +63,7 @@ import {
   discardInventoryLateEventsSchema,
   fixInventorySnapshotOpenApiSchema,
   fixInventorySnapshotSchema,
+  INVENTORY_ACTIONABLE_DISCREPANCY_CATEGORIES,
   INVENTORY_DISCREPANCY_CATEGORIES,
   INVENTORY_EVIDENCE_CLASSIFICATIONS,
   INVENTORY_EVIDENCE_KINDS,
@@ -252,12 +253,18 @@ export class InventoriesController {
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @ApiOperation({ summary: "List inventory scan evidence" })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiQuery({ name: "scope", required: false, enum: ["all", "discrepancies"] })
   @ApiQuery({ name: "search", required: false, schema: { type: "string", maxLength: 128 } })
   @ApiQuery({ name: "kind", required: false, enum: INVENTORY_EVIDENCE_KINDS })
   @ApiQuery({
     name: "classification",
     required: false,
     enum: INVENTORY_EVIDENCE_CLASSIFICATIONS,
+  })
+  @ApiQuery({
+    name: "discrepancyCategory",
+    required: false,
+    enum: INVENTORY_ACTIONABLE_DISCREPANCY_CATEGORIES,
   })
   @ApiQuery({ name: "page", required: false, schema: { type: "integer", minimum: 1, default: 1 } })
   @ApiQuery({

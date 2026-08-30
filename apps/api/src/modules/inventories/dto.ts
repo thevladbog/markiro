@@ -492,10 +492,17 @@ export const INVENTORY_EVIDENCE_CLASSIFICATIONS = [
   "voided",
 ] as const;
 export const INVENTORY_EVIDENCE_KINDS = ["item", "known_box", "old_box"] as const;
+export const INVENTORY_ACTIONABLE_DISCREPANCY_CATEGORIES = [
+  "ineligible",
+  "unknown",
+  "date_mismatch",
+] as const;
 export const listInventoryEvidenceQuerySchema = z.strictObject({
+  scope: z.enum(["all", "discrepancies"]).default("all"),
   search: z.string().trim().min(1).max(128).optional(),
   kind: z.enum(INVENTORY_EVIDENCE_KINDS).optional(),
   classification: z.enum(INVENTORY_EVIDENCE_CLASSIFICATIONS).optional(),
+  discrepancyCategory: z.enum(INVENTORY_ACTIONABLE_DISCREPANCY_CATEGORIES).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
 });
@@ -503,6 +510,11 @@ export type ListInventoryEvidenceQueryDto = z.infer<typeof listInventoryEvidence
 
 export type InventoryEvidenceAction = "void_scan" | "restore_scan" | "change_date" | "remove_item";
 export interface InventoryEvidenceEventDto extends InventoryRecentEventDto {
+  copyIdentity: string | null;
+  affectedCodeCount: number;
+  discrepancyCodeCount: number;
+  classifications: Array<"expected" | "protected" | "ineligible" | "unknown" | "voided">;
+  discrepancyCategories: Array<"ineligible" | "unknown" | "date_mismatch">;
   actions: InventoryEvidenceAction[];
 }
 
@@ -511,6 +523,8 @@ export interface ListInventoryEvidenceResponseDto {
   pageSize: number;
   total: number;
   hasMore: boolean;
+  allMatchingActions: InventoryEvidenceAction[];
+  allMatchingAffectedCodeCount: number;
   items: InventoryEvidenceEventDto[];
 }
 
@@ -1366,9 +1380,36 @@ const inventoryRecentEventOpenApiSchema: SchemaObject = {
 
 const inventoryEvidenceEventOpenApiSchema: SchemaObject = {
   ...inventoryRecentEventOpenApiSchema,
-  required: [...(inventoryRecentEventOpenApiSchema.required ?? []), "actions"],
+  required: [
+    ...(inventoryRecentEventOpenApiSchema.required ?? []),
+    "copyIdentity",
+    "affectedCodeCount",
+    "discrepancyCodeCount",
+    "classifications",
+    "discrepancyCategories",
+    "actions",
+  ],
   properties: {
     ...inventoryRecentEventOpenApiSchema.properties,
+    copyIdentity: { type: "string", nullable: true },
+    affectedCodeCount: { type: "integer", minimum: 0 },
+    discrepancyCodeCount: { type: "integer", minimum: 0 },
+    classifications: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: ["expected", "protected", "ineligible", "unknown", "voided"],
+      },
+      uniqueItems: true,
+    },
+    discrepancyCategories: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: ["ineligible", "unknown", "date_mismatch"],
+      },
+      uniqueItems: true,
+    },
     actions: {
       type: "array",
       items: {
@@ -1383,12 +1424,29 @@ const inventoryEvidenceEventOpenApiSchema: SchemaObject = {
 export const listInventoryEvidenceOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,
-  required: ["page", "pageSize", "total", "hasMore", "items"],
+  required: [
+    "page",
+    "pageSize",
+    "total",
+    "hasMore",
+    "allMatchingActions",
+    "allMatchingAffectedCodeCount",
+    "items",
+  ],
   properties: {
     page: { type: "integer", minimum: 1 },
     pageSize: { type: "integer", minimum: 1, maximum: 100 },
     total: { type: "integer", minimum: 0 },
     hasMore: { type: "boolean" },
+    allMatchingActions: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: ["void_scan", "restore_scan", "change_date", "remove_item"],
+      },
+      uniqueItems: true,
+    },
+    allMatchingAffectedCodeCount: { type: "integer", minimum: 0 },
     items: { type: "array", items: inventoryEvidenceEventOpenApiSchema },
   },
 };

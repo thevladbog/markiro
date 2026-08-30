@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import express from "express";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -548,9 +548,110 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
         actions: ["void_scan"],
       }),
     ]);
+    const discrepancies = await agent
+      .get(`/inventories/${inventoryId}/evidence?scope=discrepancies&pageSize=20`)
+      .expect(200);
+    expect(discrepancies.body).toMatchObject({ total: 3 });
+    expect(discrepancies.body.items).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ classification: "voided" })]),
+    );
+    const dateMismatch = await agent
+      .get(
+        `/inventories/${inventoryId}/evidence?scope=discrepancies&discrepancyCategory=date_mismatch`,
+      )
+      .expect(200);
+    expect(dateMismatch.body.items).toEqual([
+      expect.objectContaining({
+        classifications: ["expected"],
+        discrepancyCategories: ["date_mismatch"],
+      }),
+    ]);
     await agent
       .get(`/inventories/${inventoryId}/evidence?page=0&pageSize=101&search=${"x".repeat(129)}`)
       .expect(400);
+  });
+
+  it("groups a known-box scan and exposes filter-wide actionable metadata", async () => {
+    const boxEventId = randomUUID();
+    const boxSscc = sourceSscc;
+    const hashes = Array.from({ length: 20 }, (_, index) =>
+      (index + 160).toString(16).padStart(64, "0"),
+    );
+    const expectedHashes = hashes.slice(0, 18);
+
+    await db.insert(schema.inventorySnapshotCodes).values(
+      expectedHashes.map((codeHash, index) =>
+        codeRow(codeHash, `BOX-${index}`, {
+          expected: true,
+          sourceProductionDate: "2026-08-05",
+          parentSscc: boxSscc,
+        }),
+      ),
+    );
+    await db.insert(schema.inventoryScanEvents).values(
+      event(boxEventId, terminalAId, "reconciliation-a", 7n, null, {
+        kind: "known_box",
+        normalizedIdentity: `known_box:${boxSscc}`,
+        rawPayload: boxSscc,
+        scannedAt: new Date("2026-08-20T10:07:00.000Z"),
+      }),
+    );
+    await db
+      .insert(schema.inventoryCodeResults)
+      .values(
+        hashes.map((codeHash, index) =>
+          result(
+            boxEventId,
+            codeHash,
+            index < expectedHashes.length ? "expected" : "unknown",
+            index < expectedHashes.length ? snapshotId : null,
+            "2026-08-05",
+          ),
+        ),
+      );
+
+    try {
+      const response = await agent
+        .get(`/inventories/${inventoryId}/evidence?kind=known_box&pageSize=20`)
+        .expect(200);
+
+      expect(response.body).toMatchObject({
+        total: 1,
+        allMatchingActions: ["void_scan", "change_date"],
+        allMatchingAffectedCodeCount: 20,
+      });
+      expect(response.body.items).toEqual([
+        expect.objectContaining({
+          eventId: boxEventId,
+          copyIdentity: `00${boxSscc}`,
+          affectedCodeCount: 20,
+          discrepancyCodeCount: 2,
+          classifications: ["expected", "unknown"],
+          discrepancyCategories: ["unknown"],
+          classification: null,
+        }),
+      ]);
+
+      const discrepancyOnly = await agent
+        .get(
+          `/inventories/${inventoryId}/evidence?scope=discrepancies&discrepancyCategory=unknown&kind=known_box`,
+        )
+        .expect(200);
+      expect(discrepancyOnly.body).toMatchObject({
+        total: 1,
+        allMatchingAffectedCodeCount: 20,
+      });
+    } finally {
+      await db
+        .delete(schema.inventoryCodeResults)
+        .where(eq(schema.inventoryCodeResults.firstAcceptedEventId, boxEventId));
+      await db
+        .delete(schema.inventoryScanEvents)
+        .where(eq(schema.inventoryScanEvents.eventId, boxEventId));
+      await db
+        .delete(schema.inventorySnapshotCodes)
+        .where(inArray(schema.inventorySnapshotCodes.codeHash, expectedHashes));
+    }
   });
 
   it("paginates audit-safe discrepancy rows in category, SSCC, and code-hash order", async () => {
@@ -683,18 +784,31 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       "winner",
     ]);
     const evidence = responseSchema(document, "/inventories/{id}/evidence");
-    exactObject(evidence, ["page", "pageSize", "total", "hasMore", "items"]);
+    exactObject(evidence, [
+      "page",
+      "pageSize",
+      "total",
+      "hasMore",
+      "allMatchingActions",
+      "allMatchingAffectedCodeCount",
+      "items",
+    ]);
     exactObject(evidence.properties!.items!.items!, [
       "eventId",
       "codeResultId",
       "kind",
       "displayIdentity",
+      "copyIdentity",
       "authoritativeVerdict",
       "terminalId",
       "terminalName",
       "scannedAt",
       "classification",
       "observedProductionDate",
+      "affectedCodeCount",
+      "discrepancyCodeCount",
+      "classifications",
+      "discrepancyCategories",
       "actions",
     ]);
     const serialized = JSON.stringify({ progress, discrepancies, evidence });
