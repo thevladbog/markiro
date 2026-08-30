@@ -411,7 +411,7 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
 
     // The second pass: the cursor walk fills the budget on its own, the
     // sweep is still hot, so it should not run. HASH_A stays undetected.
-    const second = await service.run(tenantId);
+    await service.run(tenantId);
     expect((await rowsFor(tenantId)).map((row) => row.codeHash)).not.toContain(HASH_A);
 
     // Force the sweep to be due.

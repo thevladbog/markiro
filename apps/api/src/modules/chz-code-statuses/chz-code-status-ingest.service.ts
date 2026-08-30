@@ -183,13 +183,13 @@ export class ChzCodeStatusIngestService {
     remaining = Math.max(0, remaining - scanned.rowsFetched);
 
     let exportedInserted = 0;
-    let exportedCaughtUp = true;
+    // Not `true`: with no budget left the snapshot phase never ran, so the
+    // pass has not caught up on it and must not claim otherwise.
+    let exportedCaughtUp = false;
     if (remaining > 0) {
       const exported = await this.walkSnapshotCodes(tenantId, remaining);
       exportedInserted = exported.inserted;
       exportedCaughtUp = exported.caughtUp;
-    } else {
-      exportedCaughtUp = false;
     }
 
     return {
