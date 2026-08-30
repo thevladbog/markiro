@@ -242,7 +242,19 @@ function CheckInventoryWorkScreen({
   // happened while I was reading" and drop its now-stale result instead of
   // clobbering the newer state.
   const dateWriteVersionRef = useRef(0);
+  // Bumped at the start of every refresh() call. `refresh()` is fire-and-
+  // forget from a scan's onOutcome/onError and is also invoked by the sync
+  // engine's onProgressApplied and its own mount/heartbeat pollProgress —
+  // none of those call sites are serialized against each other, and (unlike
+  // the test harness's strictly FIFO SQLite wrapper) the real tauriExecutor
+  // is genuinely concurrent IPC, so an older-started refresh's read can
+  // resolve after a newer one's. Comparing the sequence number lets a
+  // refresh detect "a fresher refresh has since started" and drop its own
+  // now-stale results (progress, recent, and date alike) instead of
+  // reverting the screen to an earlier state.
+  const refreshSeqRef = useRef(0);
   const refresh = useCallback(async () => {
+    const seq = (refreshSeqRef.current += 1);
     const dateVersionAtStart = dateWriteVersionRef.current;
     const [nextProgress, nextRecent, activeDate] = await Promise.all([
       readInventoryProgress(exec, inventory.inventoryId, inventory.snapshotId, deviceId),
@@ -260,17 +272,25 @@ function CheckInventoryWorkScreen({
         deviceId,
       }),
     ]);
-    if (mounted.current) {
-      setProgress(nextProgress);
-      setRecent(nextRecent);
-      setResult((current) => current ?? (nextRecent[0] ? restoredResult(nextRecent[0]) : null));
-      if (activeDate !== null && dateWriteVersionRef.current === dateVersionAtStart) {
-        setProductionDate(activeDate);
-        // This read can resolve after the operator has since opened the date
-        // dialog and started typing; only the toolbar display is refreshed
-        // here, never an in-progress, unsaved draft.
-        if (!dateDialogOpenRef.current) setDateDraft(activeDate);
-      }
+    if (!mounted.current || refreshSeqRef.current !== seq) return;
+    setProgress(nextProgress);
+    setRecent(nextRecent);
+    setResult((current) => current ?? (nextRecent[0] ? restoredResult(nextRecent[0]) : null));
+    if (activeDate !== null && dateWriteVersionRef.current === dateVersionAtStart) {
+      // Never *establish* productionDate here, only update it: queue.open()
+      // and the source.start effect both gate scanner intake on
+      // `productionDate !== null`, and that gate is deliberately owned by
+      // the hydration effect, which only sets it after
+      // reconcilePendingInventoryEvents has run. A sync-driven refresh can
+      // otherwise land first (e.g. pollProgress on mount, racing hydration)
+      // and open the gate early, letting a physical scan be journaled while
+      // the screen's own reconciliation of orphan pending events is still
+      // in flight.
+      setProductionDate((current) => (current === null ? current : activeDate));
+      // This read can resolve after the operator has since opened the date
+      // dialog and started typing; only the toolbar display is refreshed
+      // here, never an in-progress, unsaved draft.
+      if (!dateDialogOpenRef.current) setDateDraft(activeDate);
     }
   }, [deviceId, exec, inventory.inventoryId, inventory.snapshotId]);
 
@@ -387,6 +407,14 @@ function CheckInventoryWorkScreen({
         onError: (_raw, error) => {
           console.error("station: inventory scan write failed", error);
           if (mounted.current) setWriteFailed(true);
+          // guardSourceProductionDate can commit a silent date adoption
+          // before reserveEvent/the projection insert throws, so a failed
+          // scan can still leave the terminal's persisted date ahead of the
+          // toolbar and dateDraft. A later sync poll would self-heal this,
+          // but not while offline — exactly when writes are failing.
+          void refresh().catch((refreshError: unknown) => {
+            console.error("station: inventory progress refresh failed", refreshError);
+          });
         },
       }),
     [
