@@ -178,6 +178,30 @@ test("prepare stops after local API and edge readiness with an exclusive pending
   );
 });
 
+test("prepare reclaims only unused Docker images before pulling the release", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture();
+
+  await prepareRelease(
+    { environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+
+  const pruneIndex = calls.findIndex(
+    ({ command, args }) => command === "docker" && args[0] === "image" && args[1] === "prune",
+  );
+  const pullIndex = calls.findIndex(({ args }) => args.includes("pull"));
+  assert.ok(pruneIndex >= 0);
+  assert.deepEqual(calls[pruneIndex].args, ["image", "prune", "--all", "--force"]);
+  assert.ok(pruneIndex < pullIndex);
+  assert.equal(
+    calls.some(
+      ({ args }) =>
+        ["container", "volume", "network", "system"].includes(args[0]) && args[1] === "prune",
+    ),
+    false,
+  );
+});
+
 test("prepare preserves the latest healthy v-b selector through preflight and the staged Compose switch", async () => {
   const { calls, dependencies, releaseDirectory } = await fixture({
     previousVbtech: VBTECH_SELECTOR,
