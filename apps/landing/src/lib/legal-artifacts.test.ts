@@ -42,8 +42,8 @@ describe("loadLegalArtifacts", () => {
   it("loads the complete release set and verifies current bytes and hashes", async () => {
     const artifacts = await loadLegalArtifacts(publicRoot);
 
-    expect(artifacts).toHaveLength(19);
-    expect(artifacts.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(15);
+    expect(artifacts).toHaveLength(20);
+    expect(artifacts.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(16);
     expect(artifacts.filter(({ kind }) => kind === "template-docx")).toHaveLength(4);
     expect(artifacts.every(({ href }) => href.startsWith("/legal/files/"))).toBe(true);
     // One release train (2026.08) in the current dash-separated naming scheme;

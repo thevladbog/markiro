@@ -97,6 +97,15 @@ test("production graph is the direct VM MVP and cannot reintroduce managed edge 
   for (const mutation of mutations) assert.throws(() => assertDirectGraph(mutation));
 });
 
+test("production VM metadata mirrors the live serial-console state without forcing OS Login metadata", async () => {
+  const compute = await source("infra/yandex/modules/compute/main.tf");
+  const instance = block(compute, 'resource "yandex_compute_instance" "app"');
+  const metadata = block(instance, "metadata =");
+
+  assert.match(metadata, /serial-port-enable\s*=\s*"1"/);
+  assert.doesNotMatch(metadata, /enable-oslogin\s*=/);
+});
+
 test("all public names are gated together and resolve only to the retained app address", async () => {
   const production = await source("infra/yandex/production/main.tf");
   for (const name of [

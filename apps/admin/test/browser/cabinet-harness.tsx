@@ -17,16 +17,18 @@ import {
 } from "../../src/auth/client.js";
 
 /**
- * Synthetic session for the inventory browser harness: a manager-level user
- * in the same "Марка Ко" organization used by the tenant-billing harness.
+ * Synthetic session for the cabinet browser harness: a manager-level user in
+ * the "Марка Ко" organization shared by every cabinet evidence suite.
  * Capabilities themselves are NOT injected here -- `RequireCapability`
  * (apps/admin/src/access/context.tsx) reads them from `AccessProvider`,
  * which `pages/Shell.tsx` populates from `GET /api/access/me` through
- * `useAccessDocument`. The Playwright spec mocks that endpoint (role
- * "manager" -> operations.read + operations.write, see
- * packages/domain/src/access/cabinet.ts's `ROLE_CAPABILITIES`), exactly
- * like the tenant-billing precedent mocks `/api/access/me` for its own
- * roles.
+ * `useAccessDocument`. Each Playwright spec mocks that endpoint with the
+ * role it needs (role "manager" -> operations.read + operations.write, see
+ * packages/domain/src/access/cabinet.ts's `ROLE_CAPABILITIES`), exactly like
+ * the tenant-billing precedent mocks `/api/access/me` for its own roles.
+ *
+ * The screen under test comes from `?route=`; every spec passes it
+ * explicitly, so the fallback below is only a safe landing page.
  */
 const session: SessionData = {
   session: { activeOrganizationId: "browser_org" },
@@ -51,7 +53,7 @@ const authClient: AuthClientLike = {
 
 const container = document.getElementById("root");
 if (!container) throw new Error("#root element not found");
-const initialEntry = new URLSearchParams(window.location.search).get("route") ?? "/inventory";
+const initialEntry = new URLSearchParams(window.location.search).get("route") ?? "/";
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 });
