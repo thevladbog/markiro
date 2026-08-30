@@ -435,7 +435,7 @@ function InventoryOtherLineConfirmationFixture() {
   return (
     <InventoryTaskConfirmation
       resolved={resolved}
-      currentLineName="Линия розлива 1 / Filling line 1"
+      currentLineName="Тестовая линия Б"
       busy={false}
       onCancel={() => undefined}
       onConfirm={() => undefined}
