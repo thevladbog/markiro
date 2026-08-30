@@ -63,6 +63,10 @@ const DESCRIPTION_BY_CODE = {
     ru: "Печатная инструкция менеджера: ход инвентаризации, исправления, закрытие, поздние события, итоговые документы и завершение.",
     en: "Printable manager instruction: stock-count progress, corrections, closing, late events, final documents, and completion.",
   },
+  "MKR-INS-08": {
+    ru: "Печатная инструкция менеджера: производственная линия, станции на линии, планирование смены, режимы, агрегация и запуск.",
+    en: "Printable manager instruction: production lines, stations on a line, shift planning, modes, aggregation, and launch.",
+  },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 
 export interface LegalDocumentPageDefinition {

@@ -9,7 +9,7 @@ import { createSyncEngine, type SyncEngine, type SyncState } from "./sync.js";
  * silently recovers (e.g. a captive portal clearing with no `online` event)
  * still drains within a bounded window.
  */
-const HEARTBEAT_MS = 15_000;
+export const HEARTBEAT_MS = 15_000;
 
 export interface UseSyncEngineDeps {
   exec: SqlExecutor;

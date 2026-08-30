@@ -498,6 +498,12 @@ function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
           body: docsBootstrap,
           headers: { "content-type": "application/javascript" },
         });
+      if (path === "/signer-agent/pair")
+        return response({
+          status: 400,
+          body: '{"message":[],"error":"Bad Request","statusCode":400}',
+          headers: { "content-type": "application/json" },
+        });
       if (path === "/unknown")
         return response({
           status: 404,
@@ -544,6 +550,14 @@ test("runner public smoke exercises the external route contract without local Do
   );
 
   assert.ok(client.requests.some(({ url }) => new URL(url).pathname === "/health/ready"));
+  assert.ok(
+    client.requests.some(
+      ({ url, init }) =>
+        new URL(url).pathname === "/signer-agent/pair" &&
+        init?.method === "POST" &&
+        init?.body === "{}",
+    ),
+  );
   assert.ok(
     client.requests.some(
       ({ url }) =>
@@ -1022,6 +1036,12 @@ test("defines the complete immutable public-route smoke contract", () => {
       ["GET", "/api/health/ready", "ready-json", "200 JSON from upstream /health/ready"],
       ["GET", "/station/bootstrap", "station-proxy", "not SPA"],
       ["GET", "/kiosk/bootstrap", "proxy", "not SPA"],
+      [
+        "POST",
+        "/signer-agent/pair",
+        "signer-pairing-proxy",
+        "400 JSON from upstream request validation",
+      ],
       ["POST", "/1c_exchange", "commerce-ml", "not SPA and request body reaches API unchanged"],
       ["GET", "/health/live", "json", "200 JSON"],
       ["GET", "/health/ready", "ready-json", "200 JSON ok or degraded"],
@@ -1641,6 +1661,11 @@ test("rejects an edge 404 for station bootstrap and proxy 404s elsewhere", async
       "/kiosk/bootstrap",
       response({ status: 404, headers: { "content-type": "application/json" } }),
       /proxy/,
+    ],
+    [
+      "/signer-agent/pair",
+      response({ status: 404, body: "not found", headers: { "content-type": "text/plain" } }),
+      /signer pairing/,
     ],
     [
       "/api/health/live",

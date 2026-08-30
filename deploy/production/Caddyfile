@@ -121,7 +121,7 @@
 			}
 		}
 
-		@device path /station/* /kiosk/* /health /health/* /openapi.json /docs /docs/*
+		@device path /station/* /kiosk/* /signer-agent/* /health /health/* /openapi.json /docs /docs/*
 		handle @device {
 			reverse_proxy api:3000 {
 				import standard_api_transport

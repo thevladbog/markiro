@@ -16,7 +16,7 @@ import {
   credentialGenerationOwnership,
   sealCredentialGeneration,
 } from "../src/lib/credential-recovery.js";
-import { makeExec, makeRotatingExec } from "./support/sqlite-exec.js";
+import { makeExec, makeRotatingExec, openFileDatabase } from "./support/sqlite-exec.js";
 
 const INVENTORY_ID = "11111111-1111-4111-8111-111111111111";
 const SNAPSHOT_ID = "22222222-2222-4222-8222-222222222222";
@@ -114,7 +114,7 @@ async function setup(): Promise<{ db: DatabaseSync; exec: SqlExecutor }> {
 async function rotatingProgressSetup(hooks: Parameters<typeof makeRotatingExec>[1] = {}) {
   const directory = mkdtempSync(join(tmpdir(), `inventory-progress-${randomUUID()}-`));
   const path = join(directory, "mirror.sqlite");
-  const databases = [new DatabaseSync(path), new DatabaseSync(path)];
+  const databases = [openFileDatabase(path), openFileDatabase(path)];
   const exec = makeRotatingExec(databases, hooks);
   await applyMigrations(exec);
   const db = databases[0]!;
@@ -168,7 +168,7 @@ describe("inventory sync engine", () => {
   it("reruns receipt migrations through rotating pooled SQLite connections", async () => {
     const directory = mkdtempSync(join(tmpdir(), `inventory-migration-${randomUUID()}-`));
     const path = join(directory, "mirror.sqlite");
-    const databases = [new DatabaseSync(path), new DatabaseSync(path)];
+    const databases = [openFileDatabase(path), openFileDatabase(path)];
     try {
       const exec = makeRotatingExec(databases);
       await applyMigrations(exec);
