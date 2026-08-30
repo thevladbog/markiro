@@ -27,10 +27,18 @@ import {
   paymentPurpose,
   paymentQrPayload,
   profileIdentity,
+  resolvePrintVariant,
+  type PrintRenderOptions,
 } from "./print-document-layout";
 import type { BillingProfileSnapshot, PrintDocumentModel, PrintLine } from "./print-document-model";
 
 const markiroLogo = readFileSync(join(__dirname, "assets/markiro-logo-on-light.svg"), "utf8");
+const authorizedSignature = `data:image/png;base64,${readFileSync(
+  join(__dirname, "assets/vb-signature-ink.png"),
+).toString("base64")}`;
+const legalSeal = `data:image/png;base64,${readFileSync(
+  join(__dirname, "assets/vb-seal-legal-logo-duo-mci.png"),
+).toString("base64")}`;
 
 Font.register({
   family: "IBM Plex Sans",
@@ -53,7 +61,7 @@ const styles = StyleSheet.create({
   page: {
     paddingTop: 93,
     paddingHorizontal: 32,
-    paddingBottom: 45,
+    paddingBottom: 56,
     fontFamily: "IBM Plex Sans",
     fontSize: 8.5,
     color: colors.ink,
@@ -160,9 +168,26 @@ const styles = StyleSheet.create({
     fontWeight: 600,
   },
   signing: { flexDirection: "row", alignItems: "flex-end", gap: 36, marginTop: 14 },
-  signature: { flex: 1 },
+  signature: { flex: 1, position: "relative", minHeight: 88 },
   signatureLine: { marginTop: 23 },
+  signedSignatureLine: { marginTop: 53 },
   signatureHint: { fontSize: 6.5, color: colors.muted, marginTop: 3 },
+  authorizedSignature: {
+    position: "absolute",
+    left: 24,
+    bottom: 13,
+    width: 122,
+    height: 65,
+    objectFit: "contain",
+  },
+  legalSeal: {
+    position: "absolute",
+    left: 112,
+    bottom: -3,
+    width: 88,
+    height: 88,
+    objectFit: "contain",
+  },
   stamp: {
     width: 88,
     height: 88,
@@ -178,8 +203,8 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 32,
     right: 32,
-    bottom: 20,
-    height: 23,
+    bottom: 14,
+    height: 34,
     borderTopWidth: 0.7,
     borderTopColor: colors.rule,
     paddingTop: 5,
@@ -187,7 +212,15 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-start",
   },
-  barcode: { width: 148, height: 17 },
+  barcodeGroup: { flexDirection: "column", gap: 1.5 },
+  barcode: { width: 148, height: 16 },
+  barcodeCaption: {
+    fontFamily: "IBM Plex Sans",
+    fontSize: 5.8,
+    fontWeight: 600,
+    letterSpacing: 0.35,
+    color: colors.muted,
+  },
   footerText: { fontSize: 6.2, color: colors.muted },
 });
 
@@ -261,7 +294,10 @@ function Header({ model, logo }: { model: PrintDocumentModel; logo: string }) {
 function Footer({ model, barcode }: { model: PrintDocumentModel; barcode: string }) {
   return (
     <View style={styles.footer} fixed>
-      <Image style={styles.barcode} src={barcode} />
+      <View style={styles.barcodeGroup}>
+        <Image style={styles.barcode} src={barcode} />
+        <Text style={styles.barcodeCaption}>{documentBarcodeValue(model)}</Text>
+      </View>
       <Text style={styles.footerText}>
         Сформировано системой Markiro · {formatPrintDateTime(model.issuedOrPublishedAt)}
       </Text>
@@ -346,7 +382,25 @@ function LinesTable({ lines }: { lines: PrintLine[] }) {
   );
 }
 
-function Closing({ model }: { model: PrintDocumentModel }) {
+function Signature({ label, signed }: { label: string; signed: boolean }) {
+  return (
+    <View style={styles.signature}>
+      <Text style={styles.sectionLabel}>{label}</Text>
+      {signed ? (
+        <>
+          <Image style={styles.authorizedSignature} src={authorizedSignature} cache={false} />
+          <Image style={styles.legalSeal} src={legalSeal} cache={false} />
+        </>
+      ) : null}
+      <Text style={signed ? styles.signedSignatureLine : styles.signatureLine}>
+        ________________ / ____________________
+      </Text>
+      <Text style={styles.signatureHint}>подпись / расшифровка</Text>
+    </View>
+  );
+}
+
+function Closing({ model, signed }: { model: PrintDocumentModel; signed: boolean }) {
   return (
     <>
       <View style={styles.totals} wrap={false}>
@@ -375,24 +429,36 @@ function Closing({ model }: { model: PrintDocumentModel }) {
           <Text style={styles.sectionLabel}>НАЗНАЧЕНИЕ ПЛАТЕЖА</Text>
           <Text style={styles.noteText}>{paymentPurpose(model)}</Text>
         </View>
-      ) : (
+      ) : model.kind === "offer" ? (
         <Text style={styles.offerNotice}>Не является счётом на оплату</Text>
+      ) : (
+        <View style={styles.noteSection}>
+          <Text style={styles.sectionLabel}>РЕЗУЛЬТАТ ОКАЗАНИЯ УСЛУГ</Text>
+          <Text style={styles.noteText}>
+            Услуги оказаны в полном объёме и в согласованные сроки. Заказчик претензий по объёму,
+            качеству и срокам оказания услуг не имеет.
+          </Text>
+        </View>
       )}
       <View style={styles.signing} wrap={false}>
-        <View style={styles.signature}>
-          <Text style={styles.sectionLabel}>ПОСТАВЩИК</Text>
-          <Text style={styles.signatureLine}>________________ / ____________________</Text>
-          <Text style={styles.signatureHint}>подпись / расшифровка</Text>
-        </View>
-        <View style={styles.stamp}>
-          <Text style={styles.stampText}>МЕСТО ДЛЯ ПЕЧАТИ</Text>
-        </View>
+        <Signature label={model.kind === "act" ? "ИСПОЛНИТЕЛЬ" : "ПОСТАВЩИК"} signed={signed} />
+        {model.kind === "act" ? (
+          <Signature label="ЗАКАЗЧИК" signed={false} />
+        ) : signed ? null : (
+          <View style={styles.stamp}>
+            <Text style={styles.stampText}>МЕСТО ДЛЯ ПЕЧАТИ</Text>
+          </View>
+        )}
       </View>
     </>
   );
 }
 
-export async function renderPrintPdf(model: PrintDocumentModel): Promise<Buffer> {
+export async function renderPrintPdf(
+  model: PrintDocumentModel,
+  options: PrintRenderOptions = {},
+): Promise<Buffer> {
+  const printVariant = resolvePrintVariant(model, options);
   const logo = await svgDataUri(markiroLogo, 1120);
   const qrPayload = paymentQrPayload(model);
   const qr = qrPayload ? qrVector(renderQrSvg(qrPayload)) : null;
@@ -403,29 +469,47 @@ export async function renderPrintPdf(model: PrintDocumentModel): Promise<Buffer>
     900,
   );
   const pdf = await renderToBuffer(
-    <Document title={`${documentKindLabel(model)} № ${model.number}`}>
+    <Document
+      title={`${documentKindLabel(model)} № ${model.number}`}
+      creationDate={model.issuedOrPublishedAt}
+      modificationDate={model.issuedOrPublishedAt}
+    >
       <Page size="A4" style={styles.page} wrap>
         <Header model={model} logo={logo} />
         <View style={styles.body}>
           <Text style={styles.subject}>{documentSubject(model)}</Text>
           <Text style={styles.meta}>
-            от {formatPrintDate(model.issuedOrPublishedAt)} ·{" "}
-            {model.kind === "invoice" ? "оплатить до" : "действительно до"}{" "}
-            {formatPrintDate(model.dueOrExpiresAt)}
+            {model.kind === "act" ? (
+              <>
+                от {formatPrintDate(model.issuedOrPublishedAt)} · период{" "}
+                {formatCivilDate(model.periodStart)} — {formatCivilDate(model.periodEnd)} ·
+                основание: счёт № {model.sourceNumber}
+              </>
+            ) : (
+              <>
+                от {formatPrintDate(model.issuedOrPublishedAt)} ·{" "}
+                {model.kind === "invoice" ? "оплатить до" : "действительно до"}{" "}
+                {formatPrintDate(model.dueOrExpiresAt)}
+              </>
+            )}
           </Text>
-          <Bank model={model} qr={qr} />
+          {model.kind === "act" ? null : <Bank model={model} qr={qr} />}
           <View style={styles.parties} wrap={false}>
-            <Party label="ПОСТАВЩИК" profile={model.seller} />
-            <Party label="ПОКУПАТЕЛЬ" profile={model.buyer} />
+            <Party
+              label={model.kind === "act" ? "ИСПОЛНИТЕЛЬ" : "ПОСТАВЩИК"}
+              profile={model.seller}
+            />
+            <Party label={model.kind === "act" ? "ЗАКАЗЧИК" : "ПОКУПАТЕЛЬ"} profile={model.buyer} />
           </View>
           <View style={styles.itemsHeading}>
             <Text style={styles.sectionLabel}>
-              СОСТАВ {model.kind === "invoice" ? "СЧЁТА" : "ПРЕДЛОЖЕНИЯ"}
+              СОСТАВ{" "}
+              {model.kind === "invoice" ? "СЧЁТА" : model.kind === "act" ? "АКТА" : "ПРЕДЛОЖЕНИЯ"}
             </Text>
             <Text style={[styles.mono, styles.muted]}>{model.lines.length} поз.</Text>
           </View>
           <LinesTable lines={model.lines} />
-          <Closing model={model} />
+          <Closing model={model} signed={printVariant === "signed"} />
         </View>
         <Footer model={model} barcode={barcode} />
       </Page>
@@ -433,4 +517,10 @@ export async function renderPrintPdf(model: PrintDocumentModel): Promise<Buffer>
   );
   if (pdf.byteLength > 10 * 1024 * 1024) throw new Error("print_document_too_large");
   return pdf;
+}
+
+function formatCivilDate(value: string | null | undefined): string {
+  if (!value) return "—";
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : value;
 }

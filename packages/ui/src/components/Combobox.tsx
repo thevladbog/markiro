@@ -18,6 +18,7 @@ export interface ComboboxProps<TValue extends string = string> {
   options: readonly ComboboxOption<TValue>[];
   value?: TValue;
   onValueChange: (value: TValue) => void;
+  onSearchChange?: (query: string) => void;
   placeholder: string;
   searchPlaceholder: string;
   emptyText: string;
@@ -58,6 +59,7 @@ export function Combobox<TValue extends string = string>({
   options,
   value,
   onValueChange,
+  onSearchChange,
   placeholder,
   searchPlaceholder,
   emptyText,
@@ -103,17 +105,22 @@ export function Combobox<TValue extends string = string>({
     setOpen(false);
   };
 
+  const updateQuery = (nextQuery: string) => {
+    setQuery(nextQuery);
+    onSearchChange?.(nextQuery);
+  };
+
   const selectOption = (option: ComboboxOption<TValue>) => {
     if (option.disabled) return;
     onValueChange(option.value);
-    setQuery("");
+    updateQuery("");
     close();
   };
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (disabled) return;
     setOpen(nextOpen);
-    if (!nextOpen) setQuery("");
+    if (!nextOpen) updateQuery("");
   };
 
   const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -207,7 +214,7 @@ export function Combobox<TValue extends string = string>({
               value={query}
               placeholder={searchPlaceholder}
               onChange={(event) => {
-                setQuery(event.target.value);
+                updateQuery(event.target.value);
                 setActiveIndex(-1);
               }}
               onKeyDown={handleInputKeyDown}

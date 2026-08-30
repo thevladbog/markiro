@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router";
 
-import { Alert, Button, Card, Input, Select, Textarea } from "@markiro/ui";
+import { Alert, Button, Card, DatePicker, FileDropZone, Select, Textarea } from "@markiro/ui";
 
 import { CABINET_ACCESS_QUERY_KEY } from "../../access/api.js";
 import { ForbiddenPage } from "../../access/ForbiddenPage.js";
@@ -51,7 +51,7 @@ function createError(cause: unknown): CreateRequestError {
 }
 
 export function CreateRequestPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const client = useQueryClient();
   const [params] = useSearchParams();
@@ -76,6 +76,13 @@ export function CreateRequestPage() {
 
   const update = (next: BillingRequestFormValues) => {
     setValues(next);
+    setErrors({ files: [] });
+    setActionError(null);
+    attempt.current = null;
+  };
+
+  const addFile = (file: File) => {
+    setValues((current) => ({ ...current, files: [...current.files, file] }));
     setErrors({ files: [] });
     setActionError(null);
     attempt.current = null;
@@ -222,15 +229,20 @@ export function CreateRequestPage() {
               {descriptionError}
             </p>
           ) : null}
-          <Input
+          <DatePicker
             label={t("pages.billing.requests.create.desiredAt")}
-            type="date"
             value={values.desiredAt}
+            placeholder={t("common.datePicker.placeholder")}
+            clearLabel={t("common.datePicker.clear")}
+            calendarLabel={t("common.datePicker.calendar")}
+            previousMonthLabel={t("common.datePicker.previousMonth")}
+            nextMonthLabel={t("common.datePicker.nextMonth")}
+            locale={i18n.resolvedLanguage ?? i18n.language}
             {...(errors.desiredAt
               ? { error: t("pages.billing.requests.create.errors.desiredAt") }
               : {})}
             disabled={busy}
-            onChange={(event) => update({ ...values, desiredAt: event.target.value })}
+            onValueChange={(desiredAt) => update({ ...values, desiredAt: desiredAt ?? "" })}
           />
           {values.contextType && values.contextId ? (
             <p className="mk-billing-request-context">
@@ -243,14 +255,40 @@ export function CreateRequestPage() {
               })}
             </p>
           ) : null}
-          <Input
-            label={t("pages.billing.requests.create.files")}
-            type="file"
-            multiple
+          <FileDropZone
+            ariaLabel={t("pages.billing.requests.create.files")}
+            label={t("pages.billing.requests.create.dropLabel")}
+            hint={t("pages.billing.requests.create.fileHint")}
             accept="application/pdf,image/jpeg,image/png,text/plain"
+            multiple
             disabled={busy}
-            onChange={(event) => update({ ...values, files: Array.from(event.target.files ?? []) })}
+            onFile={addFile}
+            onRejected={addFile}
           />
+          {values.files.length > 0 ? (
+            <ul className="mk-billing-selected-files">
+              {values.files.map((file, index) => (
+                <li key={`${file.name}-${file.size}-${index}`}>
+                  <span>{file.name}</span>
+                  <Button
+                    type="button"
+                    size="compact"
+                    variant="secondary"
+                    disabled={busy}
+                    aria-label={t("pages.billing.requests.create.removeFile", { name: file.name })}
+                    onClick={() =>
+                      update({
+                        ...values,
+                        files: values.files.filter((_, fileIndex) => fileIndex !== index),
+                      })
+                    }
+                  >
+                    {t("pages.billing.requests.create.remove")}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {errors.files.length > 0 ? (
             <ul className="mk-billing-form-errors" role="alert">
               {errors.files.map((error, index) => (

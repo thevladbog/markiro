@@ -178,7 +178,7 @@ it("shows all five server request types and validates description, desired date,
   fireEvent.click(screen.getByRole("button", { name: "Создать заявку" }));
   expect(screen.getByText("Опишите запрос: от 1 до 4000 символов.")).toBeDefined();
   fireEvent.change(screen.getByLabelText("Описание"), { target: { value: "x".repeat(4001) } });
-  fireEvent.change(screen.getByLabelText("Вложения"), {
+  fireEvent.change(screen.getByTestId("file-drop-input"), {
     target: {
       files: [
         new File(["zip"], "archive.zip", { type: "application/zip" }),
@@ -209,9 +209,26 @@ it("shows all five server request types and validates description, desired date,
       ],
     }).files,
   ).toEqual([]);
-  expect(screen.getByLabelText("Вложения").getAttribute("accept")).toBe(
+  expect(screen.getByTestId("file-drop-input").getAttribute("accept")).toBe(
     "application/pdf,image/jpeg,image/png,text/plain",
   );
+});
+
+it("uses the shared branded calendar and multiple-file drop zone for a new request", () => {
+  vi.stubGlobal("fetch", vi.fn());
+  renderBilling(<CreateRequestPage />, "/billing/requests/new");
+
+  expect(screen.getByRole("button", { name: "Желаемая дата" })).toBeDefined();
+  const dropZone = screen.getByRole("button", { name: "Вложения" });
+  const fileInput = screen.getByTestId("file-drop-input") as HTMLInputElement;
+  expect(fileInput.multiple).toBe(true);
+
+  const first = new File(["%PDF-1"], "contract.pdf", { type: "application/pdf" });
+  const second = new File(["details"], "details.txt", { type: "text/plain" });
+  fireEvent.drop(dropZone, { dataTransfer: { files: [first, second] } });
+
+  expect(screen.getByText("contract.pdf")).toBeDefined();
+  expect(screen.getByText("details.txt")).toBeDefined();
 });
 
 it.each([
@@ -335,9 +352,9 @@ it("prefills valid limit context and never sends an invalid URL context", async 
     "/billing/requests/new?type=capacity_change&contextType=limit&contextId=../../secret",
   );
   fireEvent.change(screen.getByLabelText("Описание"), { target: { value: "  Две линии  " } });
-  fireEvent.change(screen.getByLabelText("Желаемая дата"), {
-    target: { value: "2026-09-10" },
-  });
+  fireEvent.click(screen.getByRole("button", { name: "Желаемая дата" }));
+  fireEvent.click(screen.getByRole("button", { name: "Следующий месяц" }));
+  fireEvent.click(screen.getByRole("button", { name: "10 сентября 2026" }));
   fireEvent.click(screen.getByRole("button", { name: "Создать заявку" }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({
@@ -435,7 +452,7 @@ it("merges complete upload rows, locks retry double clicks, and reconciles an ac
   vi.stubGlobal("fetch", fetch);
   renderBilling(<CreateRequestPage />, "/billing/requests/new");
   fireEvent.change(screen.getByLabelText("Описание"), { target: { value: "Документы" } });
-  fireEvent.change(screen.getByLabelText("Вложения"), {
+  fireEvent.change(screen.getByTestId("file-drop-input"), {
     target: {
       files: [
         new File(["%PDF-1"], "first.pdf", { type: "application/pdf" }),
@@ -504,7 +521,7 @@ it("classifies initial upload network, 5xx, and 400 failures without recreating 
   vi.stubGlobal("fetch", fetch);
   renderBilling(<CreateRequestPage />, "/billing/requests/new");
   fireEvent.change(screen.getByLabelText("Описание"), { target: { value: "Документы" } });
-  fireEvent.change(screen.getByLabelText("Вложения"), {
+  fireEvent.change(screen.getByTestId("file-drop-input"), {
     target: {
       files: [
         new File(["one"], "network.txt", { type: "text/plain" }),
