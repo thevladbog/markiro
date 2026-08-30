@@ -14,6 +14,7 @@ import { hashDeviceToken } from "../src/pickup/device-token";
 import { hashSecret } from "../src/lib/pin-hash";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import { createTestEmployee } from "./support/auth";
+import { settleQueuedBackgroundWork } from "./support/background-work";
 import { listenOnLoopback } from "./support/listen-loopback";
 import sharp from "sharp";
 
@@ -54,6 +55,10 @@ describe.skipIf(!ready)("kiosk bootstrap hashes e2e", () => {
     const env = loadEnv();
     setup = setupAuth(env);
     db = setup.db;
+    // Neutralise background work an earlier file (or an aborted run) left
+    // claimable, before `app.init()` lets this suite's pg-boss workers
+    // reconcile it into the storage mock below. See `settleQueuedBackgroundWork`.
+    await settleQueuedBackgroundWork(db);
 
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
