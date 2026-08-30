@@ -938,7 +938,7 @@ test("edge build validates every tracked legal artifact before copying landing o
     readFile("apps/landing/public/legal/artifacts.json", "utf8"),
   ]);
   const artifacts = JSON.parse(manifestSource);
-  assert.equal(artifacts.length, 16);
+  assert.equal(artifacts.length, 17);
   assert.equal(new Set(artifacts.map(({ fileName }) => fileName)).size, artifacts.length);
   for (const artifact of artifacts) {
     assert.match(artifact.sha256, /^[0-9a-f]{64}$/);
