@@ -82,18 +82,25 @@ describe.skipIf(!databaseUrl)("inventory claim evidence migration", () => {
       { id: deviceAId, tenantId, name: "Station A", lineId },
       { id: deviceBId, tenantId, name: "Station B", lineId },
     ]);
-    await db.insert(schema.inventories).values({
-      id: inventoryId,
-      tenantId,
-      number: `INV-${randomUUID()}`,
-      productId,
-      gtin14Snapshot: "04600000000015",
-      lineId,
-      mode: "check",
-      productionDateFrom: "2026-08-01",
-      productionDateTo: "2026-08-31",
-      createdByUserId: userId,
-    });
+    // Keep this legacy fixture independent from columns added after migration
+    // 73, just like the product insert above.
+    await pool.query(
+      `INSERT INTO inventories
+         (id, tenant_id, number, product_id, gtin14_snapshot, line_id, mode,
+          production_date_from, production_date_to, created_by_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, 'check', $7, $8, $9)`,
+      [
+        inventoryId,
+        tenantId,
+        `INV-${randomUUID()}`,
+        productId,
+        "04600000000015",
+        lineId,
+        "2026-08-01",
+        "2026-08-31",
+        userId,
+      ],
+    );
     await pool.query(
       `INSERT INTO inventory_snapshots
          (id, tenant_id, inventory_id, combined_digest, emitted_count, introduced_count,

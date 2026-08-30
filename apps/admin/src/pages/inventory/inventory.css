@@ -5,6 +5,14 @@
   min-width: 0;
 }
 
+.mk-inventory-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .mk-inventory-close-panel,
 .mk-inventory-late-events,
 .mk-inventory-late-decision,
@@ -217,6 +225,10 @@
 .mk-inventory-form__dates {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.mk-inventory-launch-confirmation {
+  display: grid;
   gap: 12px;
 }
 .mk-inventory-actions {
