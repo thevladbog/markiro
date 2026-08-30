@@ -644,6 +644,55 @@ export interface InventoryCorrectionDto {
   createdAt: string;
 }
 
+const uniqueUuidArray = z
+  .array(z.string().uuid())
+  .min(1)
+  .refine((ids) => new Set(ids).size === ids.length, "eventIds must be unique");
+const uniqueOptionalUuidArray = z
+  .array(z.string().uuid())
+  .refine((ids) => new Set(ids).size === ids.length, "excludedEventIds must be unique");
+const inventoryEvidenceBatchFilterSchema = z.strictObject({
+  scope: z.enum(["all", "discrepancies"]),
+  search: z.string().trim().min(1).max(128).optional(),
+  kind: z.enum(INVENTORY_EVIDENCE_KINDS).optional(),
+  classification: z.enum(INVENTORY_EVIDENCE_CLASSIFICATIONS).optional(),
+  discrepancyCategory: z.enum(INVENTORY_ACTIONABLE_DISCREPANCY_CATEGORIES).optional(),
+});
+const inventoryCorrectionBatchSelectionSchema = z.discriminatedUnion("mode", [
+  z.strictObject({ mode: z.literal("explicit"), eventIds: uniqueUuidArray }),
+  z.strictObject({
+    mode: z.literal("all_matching"),
+    filter: inventoryEvidenceBatchFilterSchema,
+    excludedEventIds: uniqueOptionalUuidArray,
+  }),
+]);
+const correctionBatchRequestShape = {
+  selection: inventoryCorrectionBatchSelectionSchema,
+  reason: correctionReasonSchema,
+  expectedResultRevision: z.number().int().nonnegative(),
+  idempotencyKey: z.string().trim().min(1).max(128),
+};
+export const createInventoryCorrectionBatchSchema = z.discriminatedUnion("action", [
+  z.strictObject({ action: z.literal("void_scan"), ...correctionBatchRequestShape }),
+  z.strictObject({
+    action: z.literal("change_date"),
+    observedProductionDate: inventoryCivilDateSchema("observedProductionDate"),
+    ...correctionBatchRequestShape,
+  }),
+]);
+export type CreateInventoryCorrectionBatchDto = z.infer<
+  typeof createInventoryCorrectionBatchSchema
+>;
+
+export interface InventoryCorrectionBatchDto {
+  id: string;
+  action: "void_scan" | "change_date";
+  selectedEventCount: number;
+  affectedCodeCount: number;
+  resultRevision: number;
+  createdAt: string;
+}
+
 const uuidSchema = { type: "string", format: "uuid" } as const;
 const dateSchema = { type: "string", format: "date" } as const;
 const dateTimeSchema = { type: "string", format: "date-time" } as const;
@@ -841,6 +890,105 @@ export const inventoryCorrectionOpenApiSchema: SchemaObject = {
     },
     beforeProjectionDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
     afterProjectionDigest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    resultRevision: { type: "integer", minimum: 1 },
+    createdAt: dateTimeSchema,
+  },
+};
+
+const inventoryCorrectionBatchSelectionOpenApiSchema: SchemaObject = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["mode", "eventIds"],
+      properties: {
+        mode: { type: "string", enum: ["explicit"] },
+        eventIds: { type: "array", minItems: 1, uniqueItems: true, items: uuidSchema },
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["mode", "filter", "excludedEventIds"],
+      properties: {
+        mode: { type: "string", enum: ["all_matching"] },
+        filter: {
+          type: "object",
+          additionalProperties: false,
+          required: ["scope"],
+          properties: {
+            scope: { type: "string", enum: ["all", "discrepancies"] },
+            search: { type: "string", minLength: 1, maxLength: 128 },
+            kind: { type: "string", enum: [...INVENTORY_EVIDENCE_KINDS] },
+            classification: {
+              type: "string",
+              enum: [...INVENTORY_EVIDENCE_CLASSIFICATIONS],
+            },
+            discrepancyCategory: {
+              type: "string",
+              enum: [...INVENTORY_ACTIONABLE_DISCREPANCY_CATEGORIES],
+            },
+          },
+        },
+        excludedEventIds: { type: "array", uniqueItems: true, items: uuidSchema },
+      },
+    },
+  ],
+  discriminator: { propertyName: "mode" },
+};
+
+function correctionBatchRequestOpenApiBranch(action: "void_scan" | "change_date"): SchemaObject {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "action",
+      "selection",
+      "reason",
+      "expectedResultRevision",
+      "idempotencyKey",
+      ...(action === "change_date" ? ["observedProductionDate"] : []),
+    ],
+    properties: {
+      action: { type: "string", enum: [action] },
+      selection: inventoryCorrectionBatchSelectionOpenApiSchema,
+      reason: {
+        type: "string",
+        minLength: 1,
+        maxLength: 1024,
+        "x-maxUtf8Bytes": 1024,
+      } as SchemaObject & { "x-maxUtf8Bytes": number },
+      expectedResultRevision: { type: "integer", minimum: 0 },
+      idempotencyKey: { type: "string", minLength: 1, maxLength: 128 },
+      ...(action === "change_date" ? { observedProductionDate: dateSchema } : {}),
+    },
+  };
+}
+
+export const createInventoryCorrectionBatchOpenApiSchema: SchemaObject = {
+  oneOf: [
+    correctionBatchRequestOpenApiBranch("void_scan"),
+    correctionBatchRequestOpenApiBranch("change_date"),
+  ],
+  discriminator: { propertyName: "action" },
+};
+
+export const inventoryCorrectionBatchOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "action",
+    "selectedEventCount",
+    "affectedCodeCount",
+    "resultRevision",
+    "createdAt",
+  ],
+  properties: {
+    id: uuidSchema,
+    action: { type: "string", enum: ["void_scan", "change_date"] },
+    selectedEventCount: { type: "integer", minimum: 1 },
+    affectedCodeCount: { type: "integer", minimum: 1 },
     resultRevision: { type: "integer", minimum: 1 },
     createdAt: dateTimeSchema,
   },

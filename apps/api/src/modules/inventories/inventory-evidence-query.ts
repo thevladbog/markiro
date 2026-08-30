@@ -74,10 +74,12 @@ export function buildInventoryEvidenceRowsSql(input: EvidenceSqlInput): SQL {
     eventFilters.push(sql`e.kind = ${input.filter.kind}`);
   }
   if (input.eventIds !== undefined) {
-    eventFilters.push(sql`e.event_id = any(${input.eventIds}::uuid[])`);
+    eventFilters.push(sql`e.event_id = any(${postgresUuidArray(input.eventIds)}::uuid[])`);
   }
   if (input.excludedEventIds !== undefined && input.excludedEventIds.length > 0) {
-    eventFilters.push(sql`not (e.event_id = any(${input.excludedEventIds}::uuid[]))`);
+    eventFilters.push(
+      sql`not (e.event_id = any(${postgresUuidArray(input.excludedEventIds)}::uuid[]))`,
+    );
   }
 
   const evidenceFilters: SQL[] = [];
@@ -183,6 +185,18 @@ export function buildInventoryEvidenceRowsSql(input: EvidenceSqlInput): SQL {
     select * from evidence
     ${evidenceWhere}
   `;
+}
+
+export function postgresUuidArray(values: readonly string[]): string {
+  if (
+    values.some(
+      (value) =>
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value),
+    )
+  ) {
+    throw new Error("Inventory evidence UUID selection is invalid");
+  }
+  return `{${values.join(",")}}`;
 }
 
 export async function resolveInventoryEvidenceEvents(

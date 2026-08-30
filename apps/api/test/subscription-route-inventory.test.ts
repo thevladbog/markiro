@@ -246,6 +246,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /inventories/:id/close (InventoriesController.close)",
       "POST /inventories/:id/complete (InventoriesController.complete)",
       "POST /inventories/:id/corrections (InventoriesController.correct)",
+      "POST /inventories/:id/corrections/batch (InventoriesController.correctBatch)",
       "POST /inventories/:id/document-runs (InventoriesController.createDocumentRun)",
       "POST /inventories/:id/emergency-close (InventoriesController.emergencyClose)",
       "POST /inventories/:id/imports/:status (InventoriesController.importEvidence)",

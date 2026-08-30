@@ -59,6 +59,8 @@ import {
   retryInventoryDocumentRunSchema,
   createInventoryCorrectionOpenApiSchema,
   createInventoryCorrectionSchema,
+  createInventoryCorrectionBatchOpenApiSchema,
+  createInventoryCorrectionBatchSchema,
   discardInventoryLateEventsOpenApiSchema,
   discardInventoryLateEventsSchema,
   fixInventorySnapshotOpenApiSchema,
@@ -78,6 +80,7 @@ import {
   inventoryLateEventReplayOpenApiSchema,
   inventoryOpenApiSchema,
   inventoryCorrectionOpenApiSchema,
+  inventoryCorrectionBatchOpenApiSchema,
   closeInventoryOpenApiSchema,
   closeInventorySchema,
   completeInventoryOpenApiSchema,
@@ -109,6 +112,7 @@ import {
   type CreateInventoryDto,
   type CreateInventoryDocumentRunDto,
   type CreateInventoryCorrectionDto,
+  type CreateInventoryCorrectionBatchDto,
   type DiscardInventoryLateEventsDto,
   type FixInventorySnapshotDto,
   type InventoryDto,
@@ -117,6 +121,7 @@ import {
   type InventoryDocumentRunsResponseDto,
   type RetryInventoryDocumentRunDto,
   type InventoryCorrectionDto,
+  type InventoryCorrectionBatchDto,
   type EmergencyCloseInventoryDto,
   type InventoryCloseDto,
   type InventoryClosePreviewDto,
@@ -143,6 +148,7 @@ import { InventoriesService } from "./inventories.service";
 import { InventoryLifecycleService } from "./inventory-lifecycle.service";
 import { InventoryReconciliationService } from "./inventory-reconciliation.service";
 import { InventoryCorrectionsService } from "./inventory-corrections.service";
+import { InventoryCorrectionBatchesService } from "./inventory-correction-batches.service";
 import { InventoryCloseService } from "./inventory-close.service";
 import { InventoryDocumentsService } from "./inventory-documents.service";
 import { renderInventoryTaskFormHtml } from "./inventory-task-form";
@@ -163,6 +169,7 @@ export class InventoriesController {
     private readonly lifecycle: InventoryLifecycleService,
     private readonly reconciliation: InventoryReconciliationService,
     private readonly corrections: InventoryCorrectionsService,
+    private readonly correctionBatches: InventoryCorrectionBatchesService,
     private readonly closeService: InventoryCloseService,
     private readonly documents: InventoryDocumentsService,
   ) {}
@@ -494,6 +501,28 @@ export class InventoriesController {
     body: CreateInventoryCorrectionDto,
   ): Promise<InventoryCorrectionDto> {
     return this.corrections.correct(req.tenantId!, req.userId!, id, body);
+  }
+
+  @Post(":id/corrections/batch")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
+  @ApiOperation({
+    summary: "Apply an inventory correction batch",
+    description:
+      "Atomically voids scans or changes production dates for explicit or filter-wide event selection.",
+  })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiBody({ schema: createInventoryCorrectionBatchOpenApiSchema })
+  @ApiCreatedResponse({ schema: inventoryCorrectionBatchOpenApiSchema })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
+  correctBatch(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+    @Body(new ZodValidationPipe(createInventoryCorrectionBatchSchema))
+    body: CreateInventoryCorrectionBatchDto,
+  ): Promise<InventoryCorrectionBatchDto> {
+    return this.correctionBatches.correct(req.tenantId!, req.userId!, id, body);
   }
 
   @Post()
