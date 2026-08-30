@@ -21,7 +21,7 @@ const EXPECTED_PDFS = Object.freeze([
   "markiro_mkr-ins-03_2026.08-01_ru.pdf",
   "markiro_mkr-ins-04_2026.08-01_ru.pdf",
   "markiro_mkr-ins-05_2026.08-01_ru.pdf",
-  "markiro_mkr-ins-06_2026.08-01_ru.pdf",
+  "markiro_mkr-ins-06_2026.08-02_ru.pdf",
   "markiro_mkr-ins-07_2026.08-02_ru.pdf",
   "markiro_mkr-ins-08_2026.08-01_ru.pdf",
   "markiro_mkr-pd-01_2026.08-01_en.pdf",

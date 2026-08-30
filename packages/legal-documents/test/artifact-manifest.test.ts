@@ -292,9 +292,9 @@ function artifactEntry(
   kind: PublishedLegalArtifact["kind"],
 ): { readonly entry: PublishedLegalArtifact; readonly bytes: Uint8Array } {
   const extension = kind === "pdfa-2b" ? "pdf" : "docx";
-  // MKR-INS-07 was reissued as 2026.08/02 once the cabinet started showing why a
-  // repack box is invalidated; every other code is still on its first revision.
-  const revision = code === "MKR-INS-07" ? "2026.08/02" : "2026.08/01";
+  // MKR-INS-06 and MKR-INS-07 were reissued as 2026.08/02 on 2026-08-31; every
+  // other code is still on its first revision.
+  const revision = code === "MKR-INS-06" || code === "MKR-INS-07" ? "2026.08/02" : "2026.08/01";
   const fileName = `markiro_${code.toLowerCase()}_${revision.replace("/", "-")}_${locale}.${extension}`;
   const bytes = artifactBytes(fileName);
   return {
@@ -307,9 +307,9 @@ function artifactEntry(
           ? "2026-08-21"
           : code === "MKR-INS-03" || code === "MKR-INS-04"
             ? "2026-08-22"
-            : code === "MKR-INS-05" || code === "MKR-INS-06" || code === "MKR-INS-08"
+            : code === "MKR-INS-05" || code === "MKR-INS-08"
               ? "2026-08-30"
-              : code === "MKR-INS-07"
+              : code === "MKR-INS-06" || code === "MKR-INS-07"
                 ? "2026-08-31"
                 : "2026-08-15",
       locale,
@@ -1208,7 +1208,7 @@ describe("legal artifact release generation", () => {
       "MKR-INS-03|ru|legal-pdf|https://markiro.app/d/MKR-INS-03/2026.08/01/22.08.2026",
       "MKR-INS-04|ru|legal-pdf|https://markiro.app/d/MKR-INS-04/2026.08/01/22.08.2026",
       "MKR-INS-05|ru|legal-pdf|https://markiro.app/d/MKR-INS-05/2026.08/01/30.08.2026",
-      "MKR-INS-06|ru|legal-pdf|https://markiro.app/d/MKR-INS-06/2026.08/01/30.08.2026",
+      "MKR-INS-06|ru|legal-pdf|https://markiro.app/d/MKR-INS-06/2026.08/02/31.08.2026",
       "MKR-INS-07|ru|legal-pdf|https://markiro.app/d/MKR-INS-07/2026.08/02/31.08.2026",
       "MKR-INS-08|ru|legal-pdf|https://markiro.app/d/MKR-INS-08/2026.08/01/30.08.2026",
     ]);
