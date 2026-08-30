@@ -89,14 +89,16 @@ export function DeviceActions({
             <Button type="button" size="compact" variant="secondary" onClick={() => onPair(device)}>
               {t("pages.devices.actions.repair")}
             </Button>
-            <Button
-              type="button"
-              size="compact"
-              variant="destructive"
-              onClick={() => setConfirmingRevoke(true)}
-            >
-              {t(`pages.devices.actions.${actionKey}`)}
-            </Button>
+            {device.status !== "revoked" ? (
+              <Button
+                type="button"
+                size="compact"
+                variant="destructive"
+                onClick={() => setConfirmingRevoke(true)}
+              >
+                {t(`pages.devices.actions.${actionKey}`)}
+              </Button>
+            ) : null}
           </>
         ) : null}
       </div>
