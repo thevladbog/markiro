@@ -342,12 +342,13 @@ export class InventoriesService {
         ...input,
         boxLabelTemplateId: input.boxLabelTemplateId ?? null,
       });
-      // The sequence continues across both formats: inventories created before
-      // the switch to `IVN-YY-NNNN` keep their legacy `ИНВ-NNNNN` number, but
-      // still count towards the tenant's next sequence value.
+      // The sequence continues across all historical formats. Existing document
+      // numbers remain immutable, but still count towards the tenant's next value.
       const [sequence] = await tx
         .select({
           last: sql<number>`coalesce(max(case
+            when ${schema.inventories.number} ~ '^INVENTORY-[0-9]{2}-[0-9]+$'
+            then split_part(${schema.inventories.number}, '-', 3)::integer
             when ${schema.inventories.number} ~ '^IVN-[0-9]{2}-[0-9]+$'
             then split_part(${schema.inventories.number}, '-', 3)::integer
             when ${schema.inventories.number} ~ '^ИНВ-[0-9]+$'

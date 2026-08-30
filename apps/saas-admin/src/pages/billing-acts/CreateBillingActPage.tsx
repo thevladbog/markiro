@@ -1,22 +1,40 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
-import { Alert, Button, Input, SectionHeader } from "@markiro/ui";
-import { platformCommercialContracts, type BillingActCreateDto } from "@markiro/platform-contracts";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  Combobox,
+  DatePicker,
+  SectionHeader,
+  Spinner,
+  StatusChip,
+  type ComboboxOption,
+} from "@markiro/ui";
+import {
+  SIGNED_PRINT_SELLER_TAX_ID,
+  platformCommercialContracts,
+  type BillingActCreateDto,
+  type PrintDocumentVariant,
+} from "@markiro/platform-contracts";
 
 import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { useNavigationGuard } from "../../layout/NavigationGuard.js";
+import { getInvoice, listInvoices } from "../billing/api.js";
+import { invoiceStatusTone } from "../billing/invoice-status.js";
+import { sellerTaxId } from "../billing/seller-snapshot.js";
 import { createBillingAct, getBillingAct, issueBillingAct } from "./api.js";
 
-type Progress = "idle" | "creating" | "uploading" | "draft" | "issued";
+type Progress = "idle" | "creating" | "generating" | "draft" | "issued";
 
 interface IssueAttempt {
   create: BillingActCreateDto;
   issueKey: string;
-  file: File;
   actId: string | null;
+  printVariant: PrintDocumentVariant;
 }
 
 export function CreateBillingActPage() {
@@ -25,26 +43,61 @@ export function CreateBillingActPage() {
 }
 
 function BillingActForm({ writable }: { writable: boolean }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [search] = useSearchParams();
   const client = useQueryClient();
-  const [number, setNumber] = useState("");
+  const contextTenantId = search.get("tenantId");
+  const contextRequestId = search.get("requestId");
+  const [invoiceId, setInvoiceId] = useState(search.get("invoiceId") ?? "");
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
-  const [file, setFile] = useState<File | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress>("idle");
   const [forbidden, setForbidden] = useState(false);
   const observedRevocation = useRef(false);
   const attemptRef = useRef<IssueAttempt | null>(null);
   const [attempt, setAttempt] = useState<IssueAttempt | null>(null);
-  const [tenantId, setTenantId] = useState(search.get("tenantId") ?? "");
-  const [requestId, setRequestId] = useState(search.get("requestId") ?? "");
-  const [invoiceId, setInvoiceId] = useState(search.get("invoiceId") ?? "");
-  const [orderedServiceId, setOrderedServiceId] = useState(search.get("orderedServiceId") ?? "");
+  const [withSignatureSeal, setWithSignatureSeal] = useState(false);
+
+  const invoices = useQuery({
+    queryKey: ["platform", "invoices"],
+    queryFn: listInvoices,
+    enabled: writable,
+  });
+  const eligibleInvoices = useMemo(
+    () =>
+      (invoices.data?.items ?? []).filter(
+        (invoice) =>
+          invoice.status !== "draft" &&
+          invoice.status !== "cancelled" &&
+          (!contextTenantId || invoice.tenantId === contextTenantId),
+      ),
+    [contextTenantId, invoices.data?.items],
+  );
+  const invoiceOptions: ComboboxOption[] = eligibleInvoices.map((invoice) => ({
+    value: invoice.id,
+    label: invoice.number,
+    description: `${invoice.tenantName} · ${formatMoney(invoice.total, i18n.language)}`,
+    keywords: [invoice.tenantName, invoice.number],
+  }));
+  const selectedInvoice = eligibleInvoices.find((invoice) => invoice.id === invoiceId);
+  const detail = useQuery({
+    queryKey: ["platform", "invoices", invoiceId],
+    queryFn: () => getInvoice(invoiceId),
+    enabled: Boolean(invoiceId) && writable,
+  });
+
+  useEffect(() => {
+    if (!selectedInvoice?.issueDate || periodStart || periodEnd) return;
+    const suggested = previousCalendarMonth(selectedInvoice.issueDate);
+    setPeriodStart(suggested.start);
+    setPeriodEnd(suggested.end);
+  }, [periodEnd, periodStart, selectedInvoice?.issueDate]);
+
   useEffect(() => {
     if (!writable) {
       observedRevocation.current = true;
+      setForbidden(true);
       return;
     }
     if (observedRevocation.current) {
@@ -52,19 +105,13 @@ function BillingActForm({ writable }: { writable: boolean }) {
       setForbidden(false);
     }
   }, [writable]);
+
   const invalidateActFamilies = async (current: IssueAttempt) => {
     await Promise.all([
       client.invalidateQueries({ queryKey: ["platform", "billing", "acts"] }),
       client.invalidateQueries({ queryKey: ["platform", "billing", "requests"] }),
       current.actId
-        ? client.invalidateQueries({
-            queryKey: ["platform", "billing", "acts", current.actId],
-          })
-        : Promise.resolve(),
-      current.actId
-        ? client.invalidateQueries({
-            queryKey: ["platform", "billing", "acts", current.actId, "document"],
-          })
+        ? client.invalidateQueries({ queryKey: ["platform", "billing", "acts", current.actId] })
         : Promise.resolve(),
       current.create.requestId
         ? client.invalidateQueries({
@@ -73,77 +120,65 @@ function BillingActForm({ writable }: { writable: boolean }) {
         : Promise.resolve(),
     ]);
   };
-  const latchForbidden = async (current: IssueAttempt) => {
+
+  const latchForbidden = async (current: IssueAttempt | null) => {
     setForbidden(true);
     await Promise.all([
       client.invalidateQueries({ queryKey: ["platform", "me"] }),
-      invalidateActFamilies(current),
+      current ? invalidateActFamilies(current) : Promise.resolve(),
     ]);
   };
+
   const issue = useMutation({
     mutationFn: async (current: IssueAttempt) => {
-      let issuedAttempt = current;
+      let next = current;
       let actId = current.actId;
       if (!actId) {
         setProgress("creating");
         const created = await createBillingAct(current.create);
         actId = created.id;
-        issuedAttempt = { ...current, actId: created.id };
-        attemptRef.current = issuedAttempt;
-        setAttempt(issuedAttempt);
+        next = { ...current, actId };
+        attemptRef.current = next;
+        setAttempt(next);
         setProgress("draft");
-        await invalidateActFamilies(issuedAttempt);
+        await invalidateActFamilies(next);
       }
-      setProgress("uploading");
-      return issueBillingAct(actId, issuedAttempt.issueKey, issuedAttempt.file);
+      setProgress("generating");
+      return issueBillingAct(actId, next.issueKey, next.printVariant);
     },
     onSuccess: async (act) => {
-      if (act.status !== "issued" || act.issuedAt === null || act.document?.state !== "ready") {
+      const current = attemptRef.current;
+      if (act.status === "issued" && act.document?.state === "ready") {
+        attemptRef.current = null;
+        setAttempt(null);
+        setProgress("issued");
+      } else {
         setProgress("draft");
-        const retained = attemptRef.current;
-        if (retained) await invalidateActFamilies(retained);
-        return;
       }
-      const issuedAttempt = attemptRef.current;
-      attemptRef.current = null;
-      setAttempt(null);
-      setProgress("issued");
-      if (issuedAttempt) await invalidateActFamilies(issuedAttempt);
+      if (current) await invalidateActFamilies(current);
     },
     onError: async (error) => {
-      const retained = attemptRef.current;
-      if (retained && isForbidden(error)) {
-        if (retained.actId) {
-          setAttempt(retained);
-          setProgress("draft");
-        } else {
+      const current = attemptRef.current;
+      if (isForbidden(error)) {
+        if (!current?.actId) {
           attemptRef.current = null;
           setAttempt(null);
-          setProgress("idle");
         }
-        await latchForbidden(retained);
-        return;
-      }
-      if (retained?.actId) {
-        setAttempt(retained);
-        setProgress("draft");
-        await invalidateActFamilies(retained);
-        return;
-      }
-      setProgress("idle");
-      if (retained) await invalidateActFamilies(retained);
-      if (!retryable(error)) {
+        await latchForbidden(current);
+      } else if (!current?.actId && !retryable(error)) {
         attemptRef.current = null;
         setAttempt(null);
       }
+      setProgress(current?.actId ? "draft" : "idle");
+      if (current && !isForbidden(error)) await invalidateActFamilies(current);
     },
   });
+
   const reconcile = useMutation({
     mutationFn: (actId: string) => getBillingAct(actId),
     onSuccess: async (act) => {
-      const retained = attemptRef.current;
-      if (!retained) return;
-      if (act.status === "issued" && act.issuedAt !== null && act.document?.state === "ready") {
+      const current = attemptRef.current;
+      if (act.status === "issued" && act.document?.state === "ready") {
         attemptRef.current = null;
         setAttempt(null);
         issue.reset();
@@ -151,62 +186,37 @@ function BillingActForm({ writable }: { writable: boolean }) {
       } else {
         setProgress("draft");
       }
-      await invalidateActFamilies(retained);
+      if (current) await invalidateActFamilies(current);
     },
     onError: async (error) => {
-      const retained = attemptRef.current;
-      if (!retained) return;
-      if (isForbidden(error)) {
-        setAttempt(retained);
-        await latchForbidden(retained);
-        return;
-      }
-      await invalidateActFamilies(retained);
+      const current = attemptRef.current;
+      if (isForbidden(error)) await latchForbidden(current);
     },
   });
+
   const resetAttempt = () => {
     if (attemptRef.current) return;
-    attemptRef.current = null;
-    setAttempt(null);
     issue.reset();
     setValidationError(null);
-  };
-  const chooseFile = (next: File | undefined) => {
-    if (attemptRef.current) return;
-    resetAttempt();
-    setValidationError(null);
-    setFile(null);
-    if (!next) return;
-    if (next.type !== "application/pdf") {
-      setValidationError(t("billingActs.errors.pdfOnly"));
-      return;
-    }
-    if (next.size === 0 || next.size > 5 * 1024 * 1024) {
-      setValidationError(t("billingActs.errors.pdfSize"));
-      return;
-    }
-    setFile(next);
+    setProgress("idle");
   };
   const submit = () => {
     if (issue.isPending) return;
-    if (!file) {
-      setValidationError(t("billingActs.errors.pdfRequired"));
+    const retained = attemptRef.current;
+    if (retained) {
+      issue.mutate(retained);
       return;
     }
-    const existing = attemptRef.current;
-    if (existing) {
-      issue.mutate(existing);
+    if (!selectedInvoice || !detail.data) {
+      setValidationError(t("billingActs.errors.invoiceRequired"));
       return;
     }
-    const parsedRequestId = optionalLink(requestId);
-    const parsedInvoiceId = optionalLink(invoiceId);
-    const parsedOrderedServiceId = optionalLink(orderedServiceId);
+    const sourceRequestId = selectedInvoice.sourceRequestId ?? contextRequestId;
     const parsed = platformCommercialContracts.billingActs.create.body.safeParse({
-      tenantId,
-      ...(parsedRequestId ? { requestId: parsedRequestId } : {}),
-      ...(parsedInvoiceId ? { invoiceId: parsedInvoiceId } : {}),
-      ...(parsedOrderedServiceId ? { orderedServiceId: parsedOrderedServiceId } : {}),
-      number,
+      tenantId: selectedInvoice.tenantId,
+      ...(sourceRequestId ? { requestId: sourceRequestId } : {}),
+      invoiceId: selectedInvoice.id,
+      number: actNumberFromInvoice(selectedInvoice.number),
       periodStart,
       periodEnd,
       idempotencyKey: crypto.randomUUID(),
@@ -215,18 +225,22 @@ function BillingActForm({ writable }: { writable: boolean }) {
       setValidationError(t("billingActs.errors.form"));
       return;
     }
-    const attempt: IssueAttempt = {
+    const next: IssueAttempt = {
       create: parsed.data,
       issueKey: crypto.randomUUID(),
-      file,
       actId: null,
+      printVariant: withSignatureSeal ? "signed" : "clean",
     };
-    attemptRef.current = attempt;
-    setAttempt(attempt);
-    issue.mutate(attempt);
+    attemptRef.current = next;
+    setAttempt(next);
+    setValidationError(null);
+    issue.mutate(next);
   };
+
   const frozen = attempt !== null;
   useNavigationGuard(false, frozen || issue.isPending || reconcile.isPending);
+  const backPath = contextRequestId ? `/billing-requests/${contextRequestId}` : "/billing-acts";
+
   if (forbidden || !writable) {
     return (
       <section className="catalog-page">
@@ -234,34 +248,19 @@ function BillingActForm({ writable }: { writable: boolean }) {
           eyebrow="COMMERCE / ACTS / READ ONLY"
           title={t("billingActs.forbiddenTitle")}
           description={t("billingActs.forbiddenBody")}
-          actionsLabel={t("billingActs.actions")}
-          actions={
-            <Link
-              to={optionalUuid(requestId) ? `/billing-requests/${requestId}` : "/billing-requests"}
-            >
-              {t("billingActs.back")}
-            </Link>
-          }
+          actions={<Link to={backPath}>{t("billingActs.backToRegistry")}</Link>}
         />
         <Alert tone="error">{t("billingActs.forbiddenBody")}</Alert>
         {attempt?.actId ? (
-          <div className="billing-act-recovery" aria-label={t("billingActs.recovery.title")}>
-            <Alert tone="info">{t("billingActs.progress.draftSaved")}</Alert>
-            <dl>
-              <dt>{t("billingActs.fields.number")}</dt>
-              <dd>{attempt.create.number}</dd>
-              <dt>{t("billingActs.fields.actId")}</dt>
-              <dd>
-                <code>{attempt.actId}</code>
-              </dd>
-              <dt>{t("billingActs.recovery.status")}</dt>
-              <dd>{t("billingActs.recovery.draft")}</dd>
-            </dl>
-          </div>
+          <Alert tone="info">
+            {t("billingActs.progress.draftSaved")}.{" "}
+            <Link to={`/billing-acts/${attempt.actId}`}>{attempt.create.number}</Link>
+          </Alert>
         ) : null}
       </section>
     );
   }
+
   return (
     <section className="catalog-page billing-act-page">
       <SectionHeader
@@ -269,98 +268,147 @@ function BillingActForm({ writable }: { writable: boolean }) {
         title={t("billingActs.title")}
         description={t("billingActs.description")}
         actionsLabel={t("billingActs.actions")}
-        actions={
-          <Link
-            to={optionalUuid(requestId) ? `/billing-requests/${requestId}` : "/billing-requests"}
-          >
-            {t("billingActs.back")}
-          </Link>
-        }
+        actions={<Link to={backPath}>{t("billingActs.backToRegistry")}</Link>}
       />
       <form
-        className="billing-act-form"
+        className="billing-act-form billing-act-form--generated"
         onSubmit={(event) => {
           event.preventDefault();
           submit();
         }}
       >
-        <Input
-          label={t("billingActs.fields.number")}
-          value={number}
-          disabled={frozen}
-          onChange={(event) => {
-            setNumber(event.target.value);
-            resetAttempt();
-          }}
-        />
-        <Input
-          label={t("billingActs.fields.periodStart")}
-          type="date"
-          value={periodStart}
-          disabled={frozen}
-          onChange={(event) => {
-            setPeriodStart(event.target.value);
-            resetAttempt();
-          }}
-        />
-        <Input
-          label={t("billingActs.fields.periodEnd")}
-          type="date"
-          value={periodEnd}
-          disabled={frozen}
-          onChange={(event) => {
-            setPeriodEnd(event.target.value);
-            resetAttempt();
-          }}
-        />
-        <Input
-          label={t("billingActs.fields.tenant")}
-          value={tenantId}
-          disabled={frozen}
-          onChange={(event) => {
-            setTenantId(event.target.value);
-            resetAttempt();
-          }}
-        />
-        <Input
-          label={t("billingActs.fields.request")}
-          value={requestId}
-          disabled={frozen}
-          onChange={(event) => {
-            setRequestId(event.target.value);
-            resetAttempt();
-          }}
-        />
-        <Input
-          label={t("billingActs.fields.invoice")}
-          value={invoiceId}
-          disabled={frozen}
-          onChange={(event) => {
-            setInvoiceId(event.target.value);
-            resetAttempt();
-          }}
-        />
-        <Input
-          label={t("billingActs.fields.service")}
-          value={orderedServiceId}
-          disabled={frozen}
-          onChange={(event) => {
-            setOrderedServiceId(event.target.value);
-            resetAttempt();
-          }}
-        />
-        <div className="billing-act-file">
-          <label htmlFor="billing-act-pdf">{t("billingActs.fields.pdf")}</label>
-          <input
-            id="billing-act-pdf"
-            type="file"
-            accept="application/pdf,.pdf"
+        <section className="billing-act-source" aria-labelledby="billing-act-source-title">
+          <div className="billing-act-source__heading">
+            <div>
+              <span className="commerce-ledger__eyebrow">01 / SOURCE</span>
+              <h2 id="billing-act-source-title">{t("billingActs.source.title")}</h2>
+            </div>
+            <span>{t("billingActs.source.hint")}</span>
+          </div>
+          <Combobox
+            label={t("billingActs.fields.invoiceSource")}
+            options={invoiceOptions}
+            {...(invoiceId ? { value: invoiceId } : {})}
+            onValueChange={(value) => {
+              setInvoiceId(value);
+              setWithSignatureSeal(false);
+              resetAttempt();
+            }}
+            placeholder={t("billingActs.source.placeholder")}
+            searchPlaceholder={t("billingActs.source.searchPlaceholder")}
+            emptyText={t("billingActs.source.empty")}
+            loadingText={t("billingActs.source.loading")}
+            loading={invoices.isPending}
             disabled={frozen}
-            aria-describedby="billing-act-pdf-hint"
-            onChange={(event) => chooseFile(event.target.files?.[0])}
           />
-          <small id="billing-act-pdf-hint">{t("billingActs.fields.pdfHint")}</small>
-        </div>
+          {invoices.error ? <Alert tone="error">{t("billingActs.source.loadError")}</Alert> : null}
+        </section>
+
+        {invoiceId && detail.isPending ? (
+          <Spinner label={t("billingActs.source.loadingDetail")} />
+        ) : null}
+        {detail.data ? (
+          <section className="billing-act-preview" aria-labelledby="billing-act-preview-title">
+            <header>
+              <div>
+                <span className="commerce-ledger__eyebrow">02 / DOCUMENT</span>
+                <h2 id="billing-act-preview-title">{t("billingActs.preview.title")}</h2>
+              </div>
+              <StatusChip
+                status={invoiceStatusTone(detail.data.status)}
+                label={t(`billing.statuses.${detail.data.status}`)}
+              />
+            </header>
+            <dl className="billing-act-preview__facts">
+              <div>
+                <dt>{t("billingActs.fields.number")}</dt>
+                <dd>{actNumberFromInvoice(detail.data.number)}</dd>
+              </div>
+              <div>
+                <dt>{t("billingActs.fields.invoice")}</dt>
+                <dd>
+                  <Link to={`/invoices/${detail.data.id}`}>{detail.data.number}</Link>
+                </dd>
+              </div>
+              <div>
+                <dt>{t("billingActs.fields.tenant")}</dt>
+                <dd>
+                  <Link to={`/tenants/${detail.data.tenantId}`}>{detail.data.tenantName}</Link>
+                </dd>
+              </div>
+              <div>
+                <dt>{t("billingActs.preview.total")}</dt>
+                <dd>{formatMoney(detail.data.total, i18n.language)}</dd>
+              </div>
+            </dl>
+            <div className="billing-act-preview__lines">
+              {detail.data.lines.map((line) => (
+                <div key={line.id}>
+                  <span>{line.position.toString().padStart(2, "0")}</span>
+                  <strong>{line.nameRu}</strong>
+                  <span>
+                    {line.quantity} {line.unit}
+                  </span>
+                  <strong>{formatMoney(line.lineTotal, i18n.language)}</strong>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="billing-act-period" aria-labelledby="billing-act-period-title">
+          <div className="billing-act-source__heading">
+            <div>
+              <span className="commerce-ledger__eyebrow">03 / PERIOD</span>
+              <h2 id="billing-act-period-title">{t("billingActs.period.title")}</h2>
+            </div>
+            <span>{t("billingActs.period.hint")}</span>
+          </div>
+          <div className="billing-act-period__fields">
+            <DatePicker
+              label={t("billingActs.fields.periodStart")}
+              value={periodStart}
+              onValueChange={(value) => {
+                setPeriodStart(value ?? "");
+                resetAttempt();
+              }}
+              locale={i18n.language}
+              disabled={frozen}
+            />
+            <DatePicker
+              label={t("billingActs.fields.periodEnd")}
+              value={periodEnd}
+              onValueChange={(value) => {
+                setPeriodEnd(value ?? "");
+                resetAttempt();
+              }}
+              locale={i18n.language}
+              disabled={frozen}
+            />
+          </div>
+        </section>
+
+        {detail.data ? (
+          <Checkbox
+            label={t("billingActs.print.signed")}
+            checked={withSignatureSeal}
+            onCheckedChange={(checked) => {
+              setWithSignatureSeal(checked);
+              resetAttempt();
+            }}
+            disabled={
+              frozen ||
+              sellerTaxId(detail.data.sellerSnapshot) !== SIGNED_PRINT_SELLER_TAX_ID ||
+              issue.isPending
+            }
+            hint={t(
+              sellerTaxId(detail.data.sellerSnapshot) === SIGNED_PRINT_SELLER_TAX_ID
+                ? "billingActs.print.signedHint"
+                : "billingActs.print.signedUnavailable",
+            )}
+          />
+        ) : null}
+
         {validationError ? <Alert tone="error">{validationError}</Alert> : null}
         {issue.error ? (
           <Alert tone="error">
@@ -370,54 +418,61 @@ function BillingActForm({ writable }: { writable: boolean }) {
           </Alert>
         ) : null}
         {progress === "creating" ? <p role="status">{t("billingActs.progress.creating")}</p> : null}
-        {progress === "uploading" ? (
-          <p role="status">{t("billingActs.progress.uploading")}</p>
+        {progress === "generating" ? (
+          <p role="status">{t("billingActs.progress.generating")}</p>
         ) : null}
-        {attempt?.actId ? (
-          <>
-            <Alert tone="info">{t("billingActs.progress.draftSaved")}</Alert>
-            <p>
-              {t("billingActs.fields.actId")} <code>{attempt.actId}</code>
-            </p>
-          </>
+        {attempt?.actId && progress === "draft" ? (
+          <Alert tone="info">{t("billingActs.progress.draftSaved")}</Alert>
         ) : null}
         {progress === "issued" ? <Alert tone="ok">{t("billingActs.progress.issued")}</Alert> : null}
-        {attempt?.actId ? (
+        <div className="billing-act-form__actions">
+          {attempt?.actId ? (
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={issue.isPending || reconcile.isPending}
+              loading={reconcile.isPending}
+              onClick={() => reconcile.mutate(attempt.actId!)}
+            >
+              {t("billingActs.reconcile")}
+            </Button>
+          ) : null}
           <Button
-            type="button"
-            variant="secondary"
-            disabled={issue.isPending || reconcile.isPending}
-            loading={reconcile.isPending}
-            onClick={() => {
-              if (attempt.actId) reconcile.mutate(attempt.actId);
-            }}
+            type="submit"
+            disabled={issue.isPending || progress === "issued" || !detail.data}
+            loading={issue.isPending}
           >
-            {t("billingActs.reconcile")}
+            {issue.isError && attempt?.actId ? t("billingActs.resume") : t("billingActs.submit")}
           </Button>
-        ) : null}
-        <Button
-          type="submit"
-          disabled={issue.isPending || progress === "issued"}
-          loading={issue.isPending}
-        >
-          {issue.isError
-            ? attempt?.actId
-              ? t("billingActs.resume")
-              : t("billingActs.retry")
-            : t("billingActs.submit")}
-        </Button>
+        </div>
       </form>
     </section>
   );
 }
 
-function optionalUuid(value: string | null): string | undefined {
-  return platformCommercialContracts.billingActs.detail.params.safeParse(value).data;
+function actNumberFromInvoice(invoiceNumber: string): string {
+  return /^(?:MRK-)?INV-/i.test(invoiceNumber)
+    ? invoiceNumber.replace(/^(?:MRK-)?INV-/i, "MRK-ACT-")
+    : `MRK-ACT-${invoiceNumber}`;
 }
 
-function optionalLink(value: string): string | undefined {
-  const normalized = value.trim();
-  return normalized || undefined;
+function formatMoney(value: string, locale: string): string {
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "RUB",
+    minimumFractionDigits: 2,
+  }).format(Number(value));
+}
+
+function previousCalendarMonth(timestamp: string): { start: string; end: string } {
+  const issued = new Date(timestamp);
+  const first = new Date(Date.UTC(issued.getUTCFullYear(), issued.getUTCMonth() - 1, 1));
+  const last = new Date(Date.UTC(issued.getUTCFullYear(), issued.getUTCMonth(), 0));
+  return { start: isoDay(first), end: isoDay(last) };
+}
+
+function isoDay(value: Date): string {
+  return value.toISOString().slice(0, 10);
 }
 
 function retryable(error: unknown): boolean {

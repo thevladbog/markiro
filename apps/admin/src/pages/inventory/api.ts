@@ -184,6 +184,10 @@ async function startInventory(inventoryId: string): Promise<void> {
   stationInventoryManifestSchema.parse(value);
 }
 
+async function cancelInventory(inventoryId: string): Promise<void> {
+  await apiFetch<void>(`/inventories/${inventoryId}/cancel`, { method: "POST" });
+}
+
 async function closeInventory(input: {
   inventoryId: string;
   emergencyReason?: string;
@@ -480,6 +484,14 @@ export function useStartInventory(): UseMutationResult<void, Error, string> {
         queryKey: [...INVENTORIES_QUERY_KEY, inventoryId],
       });
     },
+  });
+}
+
+export function useCancelInventory(): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: cancelInventory,
+    onSuccess: (_result, inventoryId) => invalidateInventory(queryClient, inventoryId),
   });
 }
 

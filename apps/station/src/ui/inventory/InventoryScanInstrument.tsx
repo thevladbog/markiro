@@ -12,6 +12,8 @@ export interface InventoryScanInstrumentLabels {
   unknown: string;
   duplicateHere: string;
   duplicateOther: string;
+  terminalHere: string;
+  terminalOther: string;
   invalid: string;
   writeFailed: string;
   boxAccepted: (count: number) => string;
@@ -62,12 +64,10 @@ export function InventoryScanInstrument({
       badge = labels.discrepancyBadge;
       tone = "warn";
     } else if (result.verdict === "duplicate") {
-      title =
-        result.firstWinning?.deviceId === currentDeviceId
-          ? labels.duplicateHere
-          : labels.duplicateOther;
+      const wonHere = result.firstWinning?.deviceId === currentDeviceId;
+      title = wonHere ? labels.duplicateHere : labels.duplicateOther;
       detail = result.firstWinning
-        ? `${result.firstWinning.deviceId} · ${new Intl.DateTimeFormat(
+        ? `${wonHere ? labels.terminalHere : labels.terminalOther} · ${new Intl.DateTimeFormat(
             i18n.language === "ru" ? "ru-RU" : "en-US",
             { timeStyle: "medium" },
           ).format(new Date(result.firstWinning.scannedAt))}`

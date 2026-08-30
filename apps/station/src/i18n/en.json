@@ -219,6 +219,12 @@
       "closeIncomplete": "Close incomplete box",
       "empty": "The open box has no bottles yet.",
       "dateBlocked": "Close the incomplete box or clear it first.",
+      "sourceDateBlocked": "The box already holds bottles of another date. Close or clear it.",
+      "sourceDateMismatch": "The code's date differs from the box date",
+      "sourceDate": {
+        "title": "This code's date is different from the box date",
+        "body": "The code was produced on {{code}}; the box date is {{box}}."
+      },
       "print": {
         "printing": "Printing label",
         "printed": "Label printed",
@@ -274,6 +280,16 @@
       "dateDialogTitle": "Change production date",
       "cancel": "Cancel",
       "applyDate": "Apply date",
+      "sourceDate": {
+        "title": "The code's date differs from the active one",
+        "body": "The code was produced on {{code}}; the active date is {{active}}.",
+        "mixedTitle": "The box holds several production dates",
+        "mixedBody": "The active date is {{active}}. No single date can be adopted.",
+        "apply": "Set {{date}} and count",
+        "accept": "Count as is",
+        "skip": "Skip the code",
+        "outOfRange": "The code's date is outside the task range."
+      },
       "verdict": {
         "expected": "Code accepted",
         "boxAccepted": "Box accepted: {{count}} codes",
@@ -282,6 +298,8 @@
         "unknown": "Code is absent from the source snapshot",
         "duplicateHere": "Code was already checked on this terminal",
         "duplicateOther": "Code was already checked on another terminal",
+        "terminalHere": "This terminal",
+        "terminalOther": "Another terminal",
         "invalid": "Code not recognized",
         "writeFailed": "Scan was not saved — scan again"
       },

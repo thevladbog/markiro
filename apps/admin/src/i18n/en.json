@@ -305,6 +305,7 @@
         "draft": "Draft",
         "preparing": "Preparing",
         "ready": "Ready to start",
+        "cancelled": "Cancelled",
         "running": "Running",
         "closed": "Closed",
         "completed": "Completed"
@@ -353,6 +354,11 @@
         "loadError": "Inventory unavailable",
         "loadErrorHint": "Check the address or retry loading.",
         "saveParameters": "Save and continue",
+        "cancelAction": "Cancel inventory",
+        "cancelConfirmTitle": "Cancel inventory?",
+        "cancelConfirmBody": "Preparation will stop. Uploaded exports and the fixed snapshot will remain in the history.",
+        "cancelError": "Could not cancel the inventory.",
+        "cancelled": "The inventory was cancelled before launch.",
         "backToList": "Back to inventories"
       },
       "chz": {
@@ -416,10 +422,12 @@
         "title": "Snapshot review",
         "description": "Review the exact six selected uploads before fixing the immutable snapshot.",
         "files": "Chestny ZNAK exports",
-        "expectedLabel": "Expected",
-        "expected": "Expected: {{count}}",
+        "expectedLabel": "Expected stock",
+        "expected": "Expected stock: {{count}}",
+        "pendingValue": "Calculated after fixation",
         "fixHint": "The server calculates final counts and excluded MOVING_BY_UD codes during fixation.",
-        "fix": "Fix snapshot"
+        "fix": "Fix snapshot",
+        "continue": "Continue to stations"
       },
       "terminals": {
         "title": "Station access",
@@ -501,7 +509,7 @@
         "reopen": "Reopen",
         "reopenConfirmTitle": "Reopen inventory?",
         "reopenConfirm": "Confirm reopen",
-        "reopenExplanation": "The result revision will increase, close fields will be cleared, final documents will be invalidated once artifact storage is available, and pending late events will become available for replay.",
+        "reopenExplanation": "The result revision will increase, the close details will be cleared, final documents that were already generated will be invalidated and can no longer be downloaded — you will have to generate them again after the next close, and pending late events will become available for processing again.",
         "completionUnavailable": "Completion will become available after final documents are generated, downloaded, and checked.",
         "documentsChecked": "Final documents have been downloaded and checked",
         "complete": "Complete inventory",
@@ -1178,6 +1186,10 @@
           "descriptionLabel": "Description",
           "desiredAt": "Desired date",
           "files": "Attachments",
+          "dropLabel": "Drop files here or click",
+          "fileHint": "PDF, JPEG, PNG, or TXT · up to 5 MiB each",
+          "remove": "Remove",
+          "removeFile": "Remove file {{name}}",
           "context": "Context: {{type}} — {{id}}",
           "retry": "Retry submission",
           "uploading": "Uploading {{name}}",
@@ -2941,6 +2953,13 @@
           "revokeError": "Could not revoke the agent",
           "cancel": "Cancel",
           "loadError": "Could not load the agent list"
+        },
+        "codeStatuses": {
+          "line": "Chestny ZNAK codes: {{total}}. Refreshed in the last day: {{refreshedLastDay}}. {{lastChecked}}",
+          "lastCheckedAt": "Last checked: {{at}}",
+          "neverChecked": "No checks yet",
+          "withoutProductGroup": "With no Chestny ZNAK product group: {{count}} — refreshing resumes within a day of giving their product one, sooner if the code is scanned again",
+          "loadError": "Could not load code status data"
         },
         "danger": {
           "title": "Delete integration",

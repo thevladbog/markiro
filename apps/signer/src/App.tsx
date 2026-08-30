@@ -1,7 +1,14 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Spinner } from "@markiro/ui";
+import { UpdateBanner } from "./components/UpdateBanner.js";
 import { bridge, type AgentStatus } from "./lib/bridge.js";
+import {
+  announceUpdate,
+  checkForUpdate,
+  UPDATE_CHECK_INTERVAL_MS,
+  type SignerUpdate,
+} from "./lib/updates.js";
 import { Pairing } from "./pages/Pairing.js";
 import { Status } from "./pages/Status.js";
 
@@ -18,6 +25,28 @@ export function nextSignerView(status: AgentStatus | null): SignerView {
 export function App(): ReactElement {
   const { t } = useTranslation();
   const [status, setStatus] = useState<AgentStatus | null>(null);
+  const [update, setUpdate] = useState<SignerUpdate | null>(null);
+  const announced = useRef(new Set<string>());
+
+  useEffect(() => {
+    // The check is deliberately quiet: `checkForUpdate` resolves to null on
+    // failure, so an unreachable mirror costs a console warning and nothing
+    // else. The tray announces each version once; the banner is where the
+    // operator consents.
+    let disposed = false;
+    const run = async (): Promise<void> => {
+      const found = await checkForUpdate();
+      if (disposed || !found) return;
+      setUpdate(found);
+      await announceUpdate(found, announced.current);
+    };
+    void run();
+    const timer = setInterval(() => void run(), UPDATE_CHECK_INTERVAL_MS);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     // `bridge.status()` (the initial snapshot) and `bridge.onStatus` (the
@@ -55,5 +84,13 @@ export function App(): ReactElement {
       />
     );
   }
-  return <Status status={status} onChanged={() => void bridge.status().then(setStatus)} />;
+  // The banner rides above the ready screen only: the pairing screen is an
+  // operator mid-setup, and an update prompt there competes with the one
+  // action they came to do.
+  return (
+    <>
+      <UpdateBanner update={update} onInstalled={() => setUpdate(null)} />
+      <Status status={status} onChanged={() => void bridge.status().then(setStatus)} />
+    </>
+  );
 }

@@ -17,6 +17,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { CHZ_MAX_INPUT_BYTES } from "../src/modules/inventories/chz-tabular-reader";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
+import { settleQueuedBackgroundWork } from "./support/background-work";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
 
@@ -132,6 +133,10 @@ describe.skipIf(!ready)("inventory immutable snapshot fixation e2e", () => {
     const env = loadEnv();
     setup = setupAuth(env);
     db = setup.db;
+    // Neutralise background work an earlier file (or an aborted run) left
+    // claimable, before `app.init()` lets this suite's pg-boss workers
+    // reconcile it into the storage mock below. See `settleQueuedBackgroundWork`.
+    await settleQueuedBackgroundWork(db);
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL, env })],
     })
@@ -223,6 +228,23 @@ describe.skipIf(!ready)("inventory immutable snapshot fixation e2e", () => {
       }),
     );
     return Object.fromEntries(entries) as ImportSelection;
+  }
+
+  /**
+   * The evidence objects one inventory uploaded, and nothing else.
+   *
+   * `objects` is process-wide and this suite boots the real `AppModule`, so its
+   * pg-boss workers run in-process against the shared test database. Any
+   * `inventory_document_runs` row another suite left `queued` there is
+   * re-enqueued by `PgBossService`'s boot reconciliation and generated here,
+   * writing `tenants/<other tenant>/inventory-documents/...` artifacts through
+   * the same overridden `ObjectStorageService`. Those replays land at an
+   * arbitrary moment, so asserting on the whole map (its size, or its full key
+   * set) is a coin flip -- `expect(objects.size).toBe(6)` below saw 7 on CI.
+   */
+  function evidenceKeys(tenantId: string, inventoryId: string): string[] {
+    const prefix = `tenants/${tenantId}/inventories/${inventoryId}/imports/`;
+    return [...objects.keys()].filter((key) => key.startsWith(prefix)).sort();
   }
 
   async function importRow(importId: string) {
@@ -551,13 +573,14 @@ describe.skipIf(!ready)("inventory immutable snapshot fixation e2e", () => {
     const imports = await uploadSelection(agent, inventoryId, {
       INTRODUCED: [duplicate, duplicate],
     });
-    const objectKeys = [...objects.keys()].sort();
+    const objectKeys = evidenceKeys(tenantId, inventoryId);
+    expect(objectKeys).toHaveLength(INVENTORY_CHZ_STATUSES.length);
 
     await agent
       .post(`/inventories/${inventoryId}/snapshots`)
       .send(selectionBody(imports))
       .expect(422, { code: "INVENTORY_SNAPSHOT_DUPLICATE_CODE" });
-    expect([...objects.keys()].sort()).toEqual(objectKeys);
+    expect(evidenceKeys(tenantId, inventoryId)).toEqual(objectKeys);
     const snapshots = await db
       .select({ id: schema.inventorySnapshots.id })
       .from(schema.inventorySnapshots)
@@ -817,7 +840,9 @@ describe.skipIf(!ready)("inventory immutable snapshot fixation e2e", () => {
       productionDate: "2026-08-15",
     }));
     const imports = await uploadSelection(agent, inventoryId, { INTRODUCED: rows });
-    const [sourceObjectKey] = objects.keys();
+    const objectKeys = evidenceKeys(tenantId, inventoryId);
+    const [sourceObjectKey] = objectKeys;
+    expect(objectKeys).toHaveLength(INVENTORY_CHZ_STATUSES.length);
     expect(sourceObjectKey).toBeDefined();
     await db.execute(
       sql.raw(`
@@ -882,7 +907,7 @@ describe.skipIf(!ready)("inventory immutable snapshot fixation e2e", () => {
       );
     expect(snapshots).toEqual([]);
     expect(inventory).toEqual({ status: "preparing", activeSnapshotId: null });
-    expect(objects.size).toBe(6);
+    expect(evidenceKeys(tenantId, inventoryId)).toEqual(objectKeys);
     const [audit] = await db
       .select({ outcome: schema.tenantAuditEvents.outcome, after: schema.tenantAuditEvents.after })
       .from(schema.tenantAuditEvents)

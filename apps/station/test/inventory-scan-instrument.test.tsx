@@ -25,6 +25,8 @@ const labels: InventoryScanInstrumentLabels = {
   unknown: "Код отсутствует в исходном снимке",
   duplicateHere: "Код уже проверен на этом терминале",
   duplicateOther: "Код уже проверен на другом терминале",
+  terminalHere: "Этот терминал",
+  terminalOther: "Другой терминал",
   invalid: "Код не распознан",
   writeFailed: "Не удалось записать скан",
   boxAccepted: (count) => `Короб принят: ${count} кодов`,
@@ -78,7 +80,8 @@ describe("InventoryScanInstrument duplicate-verdict timestamp", () => {
 
     const alert = await screen.findByText("Код уже проверен на другом терминале");
     const detail = alert.closest(".mk-alert")?.textContent ?? "";
-    expect(detail).toContain("terminal-b");
+    expect(detail).toContain("Другой терминал");
+    expect(detail).not.toContain("terminal-b");
     expect(detail).toContain(ruTime);
     expect(detail).not.toMatch(/AM|PM/i);
   });
@@ -97,7 +100,8 @@ describe("InventoryScanInstrument duplicate-verdict timestamp", () => {
 
     const alert = await screen.findByText("Код уже проверен на другом терминале");
     const detail = alert.closest(".mk-alert")?.textContent ?? "";
-    expect(detail).toContain("terminal-b");
+    expect(detail).toContain("Другой терминал");
+    expect(detail).not.toContain("terminal-b");
     expect(detail).toContain(enTime);
     expect(detail).toMatch(/AM|PM/i);
   });

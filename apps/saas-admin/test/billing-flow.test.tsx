@@ -58,7 +58,11 @@ const invoiceBase = {
   issueDate: "2026-08-21T10:00:00.000Z",
   dueDate: "2026-08-28T10:00:00.000Z",
   currency: "RUB",
-  sellerSnapshot: { displayName: "Markiro" },
+  sellerSnapshot: {
+    kind: "sole_proprietor",
+    displayName: "Markiro",
+    inn: "234190622844",
+  },
   buyerSnapshot: { displayName: "Factory" },
   subtotal: "12500.00",
   vatTotal: "2500.00",
@@ -233,7 +237,7 @@ function installApi({
         });
       }
       if (path.endsWith(`/api/platform/invoices/${INVOICE_ID}/documents`) && method === "POST") {
-        calls.push({ method, path, body: {} });
+        calls.push({ method, path, body: JSON.parse(String(init.body)) });
         if (failRender) return jsonResponse(503, { code: "object_storage_unavailable" });
         documents = readyDocuments;
         return jsonResponse(201, {
@@ -748,5 +752,20 @@ describe("invoice commercial lifecycle", () => {
         alert.textContent?.includes("Не удалось сформировать печатные формы"),
       ),
     ).toBe(true);
+  });
+
+  it("requests a signed invoice revision only after an explicit operator choice", async () => {
+    const api = installApi({ initialDocuments: [failedHtmlDocument] });
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/invoices/${INVOICE_ID}` });
+
+    await user.click(await screen.findByRole("button", { name: "Повторить формирование" }));
+    const signedPrint = screen.getByRole("checkbox", { name: "Добавить подпись и печать" });
+    expect(signedPrint.hasAttribute("disabled")).toBe(false);
+    await user.click(signedPrint);
+    await user.click(screen.getByRole("button", { name: "Сформировать новую версию" }));
+
+    await waitFor(() => expect(api.calls()).toHaveLength(1));
+    expect(api.calls()[0]?.body).toEqual({ printVariant: "signed" });
   });
 });

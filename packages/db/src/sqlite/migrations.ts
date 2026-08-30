@@ -1078,26 +1078,30 @@ export const STATION_MIGRATIONS: string[] = [
        SELECT RAISE(ABORT, 'inventory outbox payload changed');
      END;`,
   `DROP TRIGGER IF EXISTS inventory_sync_apply_ack;`,
+  // SQLite trigger programs accept only the bare target table after UPDATE.
+  // Keep target references qualified by that table name, but never introduce
+  // an `AS` alias here or in later trigger bodies: deployed stations rerun
+  // this statement to repair a crash between the DROP and CREATE steps.
   `CREATE TRIGGER inventory_sync_apply_ack
      AFTER INSERT ON inventory_sync_ack_receipts
      BEGIN
-       UPDATE inventory_scan_events_mirror AS event
+       UPDATE inventory_scan_events_mirror
           SET authoritative_verdict = (
                 SELECT json_extract(outcome.value, '$.status')
                   FROM json_each(NEW.response_json, '$.outcomes') outcome
-                 WHERE json_extract(outcome.value, '$.eventId') = event.event_id
+                 WHERE json_extract(outcome.value, '$.eventId') = inventory_scan_events_mirror.event_id
               ),
               server_reason_code = (
                 SELECT json_extract(outcome.value, '$.reasonCode')
                   FROM json_each(NEW.response_json, '$.outcomes') outcome
-                 WHERE json_extract(outcome.value, '$.eventId') = event.event_id
+                 WHERE json_extract(outcome.value, '$.eventId') = inventory_scan_events_mirror.event_id
               ),
               server_result_revision = json_extract(NEW.response_json, '$.resultRevision'),
               server_winner_code_hash = (
                 SELECT json_extract(claim.value, '$.codeHash')
                   FROM json_each(NEW.response_json, '$.outcomes') outcome,
                        json_each(outcome.value, '$.claims') claim
-                 WHERE json_extract(outcome.value, '$.eventId') = event.event_id
+                 WHERE json_extract(outcome.value, '$.eventId') = inventory_scan_events_mirror.event_id
                    AND json_extract(claim.value, '$.status') = 'duplicate'
                  ORDER BY json_extract(claim.value, '$.codeHash') LIMIT 1
               ),
@@ -1105,7 +1109,7 @@ export const STATION_MIGRATIONS: string[] = [
                 SELECT json_extract(claim.value, '$.winner.eventId')
                   FROM json_each(NEW.response_json, '$.outcomes') outcome,
                        json_each(outcome.value, '$.claims') claim
-                 WHERE json_extract(outcome.value, '$.eventId') = event.event_id
+                 WHERE json_extract(outcome.value, '$.eventId') = inventory_scan_events_mirror.event_id
                    AND json_extract(claim.value, '$.status') = 'duplicate'
                  ORDER BY json_extract(claim.value, '$.codeHash') LIMIT 1
               ),
@@ -1113,7 +1117,7 @@ export const STATION_MIGRATIONS: string[] = [
                 SELECT json_extract(claim.value, '$.winner.deviceId')
                   FROM json_each(NEW.response_json, '$.outcomes') outcome,
                        json_each(outcome.value, '$.claims') claim
-                 WHERE json_extract(outcome.value, '$.eventId') = event.event_id
+                 WHERE json_extract(outcome.value, '$.eventId') = inventory_scan_events_mirror.event_id
                    AND json_extract(claim.value, '$.status') = 'duplicate'
                  ORDER BY json_extract(claim.value, '$.codeHash') LIMIT 1
               ),
@@ -1121,15 +1125,15 @@ export const STATION_MIGRATIONS: string[] = [
                 SELECT json_extract(claim.value, '$.winner.scannedAt')
                   FROM json_each(NEW.response_json, '$.outcomes') outcome,
                        json_each(outcome.value, '$.claims') claim
-                 WHERE json_extract(outcome.value, '$.eventId') = event.event_id
+                 WHERE json_extract(outcome.value, '$.eventId') = inventory_scan_events_mirror.event_id
                    AND json_extract(claim.value, '$.status') = 'duplicate'
                  ORDER BY json_extract(claim.value, '$.codeHash') LIMIT 1
               )
-        WHERE event.inventory_id = NEW.inventory_id
-          AND event.snapshot_id = NEW.snapshot_id
+        WHERE inventory_scan_events_mirror.inventory_id = NEW.inventory_id
+          AND inventory_scan_events_mirror.snapshot_id = NEW.snapshot_id
           AND EXISTS (
             SELECT 1 FROM json_each(NEW.response_json, '$.outcomes') outcome
-             WHERE json_extract(outcome.value, '$.eventId') = event.event_id
+             WHERE json_extract(outcome.value, '$.eventId') = inventory_scan_events_mirror.event_id
           );
 
        INSERT INTO inventory_event_claim_outcomes_mirror (
@@ -1254,7 +1258,7 @@ export const STATION_MIGRATIONS: string[] = [
            ELSE inventory_code_results_mirror.origin_classification END,
          updated_at = excluded.updated_at;
 
-       UPDATE inventory_code_results_mirror AS result
+       UPDATE inventory_code_results_mirror
           SET classification = CASE json_extract(item.value, '$.classification')
                 WHEN 'ineligible' THEN 'known-ineligible'
                 ELSE json_extract(item.value, '$.classification') END,
@@ -1262,9 +1266,9 @@ export const STATION_MIGRATIONS: string[] = [
               updated_at = json_extract(item.value, '$.correctedAt')
          FROM json_each(NEW.page_json, '$.items') item
         WHERE json_type(item.value, '$.winner') = 'null'
-          AND result.inventory_id = NEW.inventory_id
-          AND result.snapshot_id = NEW.snapshot_id
-          AND result.code_hash = json_extract(item.value, '$.codeHash');
+          AND inventory_code_results_mirror.inventory_id = NEW.inventory_id
+          AND inventory_code_results_mirror.snapshot_id = NEW.snapshot_id
+          AND inventory_code_results_mirror.code_hash = json_extract(item.value, '$.codeHash');
 
        INSERT INTO inventory_conflicts_mirror (
          inventory_id, snapshot_id, conflict_id, code_hash, losing_event_id,
@@ -1726,35 +1730,35 @@ export const STATION_MIGRATIONS: string[] = [
            ELSE inventory_code_results_mirror.origin_classification END,
          updated_at = excluded.updated_at;
 
-       UPDATE inventory_code_results_mirror AS result
+       UPDATE inventory_code_results_mirror
           SET classification = (
                 SELECT CASE json_extract(final.value, '$.classification')
                   WHEN 'ineligible' THEN 'known-ineligible'
                   ELSE json_extract(final.value, '$.classification') END
                   FROM json_each(NEW.page_json, '$.items') final
-                 WHERE json_extract(final.value, '$.codeHash') = result.code_hash
+                 WHERE json_extract(final.value, '$.codeHash') = inventory_code_results_mirror.code_hash
                  ORDER BY json_extract(final.value, '$.revision') DESC,
                           json_extract(final.value, '$.id') DESC LIMIT 1
               ),
               observed_production_date = (
                 SELECT json_extract(final.value, '$.observedProductionDate')
                   FROM json_each(NEW.page_json, '$.items') final
-                 WHERE json_extract(final.value, '$.codeHash') = result.code_hash
+                 WHERE json_extract(final.value, '$.codeHash') = inventory_code_results_mirror.code_hash
                  ORDER BY json_extract(final.value, '$.revision') DESC,
                           json_extract(final.value, '$.id') DESC LIMIT 1
               ),
               updated_at = (
                 SELECT json_extract(final.value, '$.correctedAt')
                   FROM json_each(NEW.page_json, '$.items') final
-                 WHERE json_extract(final.value, '$.codeHash') = result.code_hash
+                 WHERE json_extract(final.value, '$.codeHash') = inventory_code_results_mirror.code_hash
                  ORDER BY json_extract(final.value, '$.revision') DESC,
                           json_extract(final.value, '$.id') DESC LIMIT 1
               )
-        WHERE result.inventory_id = NEW.inventory_id
-          AND result.snapshot_id = NEW.snapshot_id
+        WHERE inventory_code_results_mirror.inventory_id = NEW.inventory_id
+          AND inventory_code_results_mirror.snapshot_id = NEW.snapshot_id
           AND EXISTS (
             SELECT 1 FROM json_each(NEW.page_json, '$.items') item
-             WHERE json_extract(item.value, '$.codeHash') = result.code_hash
+             WHERE json_extract(item.value, '$.codeHash') = inventory_code_results_mirror.code_hash
           );
 
        INSERT INTO inventory_conflicts_mirror (
@@ -2074,19 +2078,19 @@ export const STATION_MIGRATIONS: string[] = [
   `CREATE TRIGGER IF NOT EXISTS inventory_repack_invalidate_ack_v1
      AFTER INSERT ON inventory_sync_ack_receipts
      BEGIN
-       UPDATE inventory_repack_boxes_mirror AS box
+       UPDATE inventory_repack_boxes_mirror
           SET state = 'invalidated', invalidated_at = NEW.applied_at,
               updated_at = NEW.applied_at
-        WHERE box.inventory_id = NEW.inventory_id
-          AND box.snapshot_id = NEW.snapshot_id
-          AND box.state = 'open'
+        WHERE inventory_repack_boxes_mirror.inventory_id = NEW.inventory_id
+          AND inventory_repack_boxes_mirror.snapshot_id = NEW.snapshot_id
+          AND inventory_repack_boxes_mirror.state = 'open'
           AND EXISTS (
             SELECT 1
               FROM inventory_repack_items_mirror item,
                    json_each(NEW.response_json, '$.outcomes') outcome
-             WHERE item.inventory_id = box.inventory_id
-               AND item.snapshot_id = box.snapshot_id
-               AND item.box_id = box.box_id
+             WHERE item.inventory_id = inventory_repack_boxes_mirror.inventory_id
+               AND item.snapshot_id = inventory_repack_boxes_mirror.snapshot_id
+               AND item.box_id = inventory_repack_boxes_mirror.box_id
                AND item.removed_at IS NULL
                AND item.source_event_id = json_extract(outcome.value, '$.eventId')
                AND json_extract(outcome.value, '$.status') = 'duplicate'
@@ -2095,19 +2099,19 @@ export const STATION_MIGRATIONS: string[] = [
   `CREATE TRIGGER IF NOT EXISTS inventory_repack_invalidate_progress_v1
      AFTER INSERT ON inventory_progress_receipts_v2
      BEGIN
-       UPDATE inventory_repack_boxes_mirror AS box
+       UPDATE inventory_repack_boxes_mirror
           SET state = 'invalidated', invalidated_at = NEW.applied_at,
               updated_at = NEW.applied_at
-        WHERE box.inventory_id = NEW.inventory_id
-          AND box.snapshot_id = NEW.snapshot_id
-          AND box.state = 'open'
+        WHERE inventory_repack_boxes_mirror.inventory_id = NEW.inventory_id
+          AND inventory_repack_boxes_mirror.snapshot_id = NEW.snapshot_id
+          AND inventory_repack_boxes_mirror.state = 'open'
           AND EXISTS (
             SELECT 1
               FROM inventory_repack_items_mirror item,
                    json_each(NEW.page_json, '$.items') progress
-             WHERE item.inventory_id = box.inventory_id
-               AND item.snapshot_id = box.snapshot_id
-               AND item.box_id = box.box_id
+             WHERE item.inventory_id = inventory_repack_boxes_mirror.inventory_id
+               AND item.snapshot_id = inventory_repack_boxes_mirror.snapshot_id
+               AND item.box_id = inventory_repack_boxes_mirror.box_id
                AND item.removed_at IS NULL
                AND item.code_hash = json_extract(progress.value, '$.codeHash')
                AND json_type(progress.value, '$.winner') = 'object'
@@ -2127,21 +2131,23 @@ export const STATION_MIGRATIONS: string[] = [
   `CREATE TRIGGER IF NOT EXISTS inventory_repack_invalidate_ack_v2
      AFTER INSERT ON inventory_sync_ack_receipts
      BEGIN
-       UPDATE inventory_repack_boxes_mirror AS box
+       UPDATE inventory_repack_boxes_mirror
           SET state = 'invalidated',
-              print_state = CASE WHEN box.print_state = 'pending' THEN 'failed'
-                                 ELSE box.print_state END,
+              print_state = CASE WHEN inventory_repack_boxes_mirror.print_state = 'pending'
+                                 THEN 'failed' ELSE inventory_repack_boxes_mirror.print_state END,
               invalidated_at = NEW.applied_at, updated_at = NEW.applied_at
-        WHERE box.inventory_id = NEW.inventory_id
-          AND box.snapshot_id = NEW.snapshot_id
-          AND (box.state = 'open' OR (box.state = 'closed' AND box.print_state = 'pending'))
+        WHERE inventory_repack_boxes_mirror.inventory_id = NEW.inventory_id
+          AND inventory_repack_boxes_mirror.snapshot_id = NEW.snapshot_id
+          AND (inventory_repack_boxes_mirror.state = 'open'
+            OR (inventory_repack_boxes_mirror.state = 'closed'
+              AND inventory_repack_boxes_mirror.print_state = 'pending'))
           AND EXISTS (
             SELECT 1
               FROM inventory_repack_items_mirror item,
                    json_each(NEW.response_json, '$.outcomes') outcome
-             WHERE item.inventory_id = box.inventory_id
-               AND item.snapshot_id = box.snapshot_id
-               AND item.box_id = box.box_id
+             WHERE item.inventory_id = inventory_repack_boxes_mirror.inventory_id
+               AND item.snapshot_id = inventory_repack_boxes_mirror.snapshot_id
+               AND item.box_id = inventory_repack_boxes_mirror.box_id
                AND item.removed_at IS NULL
                AND item.source_event_id = json_extract(outcome.value, '$.eventId')
                AND json_extract(outcome.value, '$.status') = 'duplicate'
@@ -2150,21 +2156,23 @@ export const STATION_MIGRATIONS: string[] = [
   `CREATE TRIGGER IF NOT EXISTS inventory_repack_invalidate_progress_v2
      AFTER INSERT ON inventory_progress_receipts_v2
      BEGIN
-       UPDATE inventory_repack_boxes_mirror AS box
+       UPDATE inventory_repack_boxes_mirror
           SET state = 'invalidated',
-              print_state = CASE WHEN box.print_state = 'pending' THEN 'failed'
-                                 ELSE box.print_state END,
+              print_state = CASE WHEN inventory_repack_boxes_mirror.print_state = 'pending'
+                                 THEN 'failed' ELSE inventory_repack_boxes_mirror.print_state END,
               invalidated_at = NEW.applied_at, updated_at = NEW.applied_at
-        WHERE box.inventory_id = NEW.inventory_id
-          AND box.snapshot_id = NEW.snapshot_id
-          AND (box.state = 'open' OR (box.state = 'closed' AND box.print_state = 'pending'))
+        WHERE inventory_repack_boxes_mirror.inventory_id = NEW.inventory_id
+          AND inventory_repack_boxes_mirror.snapshot_id = NEW.snapshot_id
+          AND (inventory_repack_boxes_mirror.state = 'open'
+            OR (inventory_repack_boxes_mirror.state = 'closed'
+              AND inventory_repack_boxes_mirror.print_state = 'pending'))
           AND EXISTS (
             SELECT 1
               FROM inventory_repack_items_mirror item,
                    json_each(NEW.page_json, '$.items') progress
-             WHERE item.inventory_id = box.inventory_id
-               AND item.snapshot_id = box.snapshot_id
-               AND item.box_id = box.box_id
+             WHERE item.inventory_id = inventory_repack_boxes_mirror.inventory_id
+               AND item.snapshot_id = inventory_repack_boxes_mirror.snapshot_id
+               AND item.box_id = inventory_repack_boxes_mirror.box_id
                AND item.removed_at IS NULL
                AND item.code_hash = json_extract(progress.value, '$.codeHash')
                AND json_type(progress.value, '$.winner') = 'object'
@@ -2815,32 +2823,32 @@ export const STATION_MIGRATIONS: string[] = [
   `CREATE TRIGGER IF NOT EXISTS inventory_progress_apply_admin_corrections_v1
      AFTER INSERT ON inventory_progress_receipts_v2
      BEGIN
-       UPDATE inventory_repack_items_mirror AS member
+       UPDATE inventory_repack_items_mirror
           SET removed_at = (
             SELECT json_extract(item.value, '$.correctedAt')
               FROM json_each(NEW.page_json, '$.items') item
              WHERE json_extract(item.value, '$.kind') = 'remove_item'
-               AND json_extract(item.value, '$.boxId') = member.box_id
-               AND json_extract(item.value, '$.codeHash') = member.code_hash
+               AND json_extract(item.value, '$.boxId') = inventory_repack_items_mirror.box_id
+               AND json_extract(item.value, '$.codeHash') = inventory_repack_items_mirror.code_hash
              ORDER BY json_extract(item.value, '$.revision') DESC,
                       json_extract(item.value, '$.id') DESC LIMIT 1
           )
-        WHERE member.inventory_id = NEW.inventory_id
-          AND member.snapshot_id = NEW.snapshot_id
-          AND member.removed_at IS NULL
+        WHERE inventory_repack_items_mirror.inventory_id = NEW.inventory_id
+          AND inventory_repack_items_mirror.snapshot_id = NEW.snapshot_id
+          AND inventory_repack_items_mirror.removed_at IS NULL
           AND EXISTS (
             SELECT 1 FROM json_each(NEW.page_json, '$.items') item
              WHERE json_extract(item.value, '$.kind') = 'remove_item'
-               AND json_extract(item.value, '$.boxId') = member.box_id
-               AND json_extract(item.value, '$.codeHash') = member.code_hash
+               AND json_extract(item.value, '$.boxId') = inventory_repack_items_mirror.box_id
+               AND json_extract(item.value, '$.codeHash') = inventory_repack_items_mirror.code_hash
           );
 
-       UPDATE inventory_repack_boxes_mirror AS box
+       UPDATE inventory_repack_boxes_mirror
           SET state = 'invalidated', invalidated_at = (
                 SELECT json_extract(item.value, '$.correctedAt')
                   FROM json_each(NEW.page_json, '$.items') item
                  WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
-                   AND json_extract(item.value, '$.boxId') = box.box_id
+                   AND json_extract(item.value, '$.boxId') = inventory_repack_boxes_mirror.box_id
                  ORDER BY json_extract(item.value, '$.revision') DESC,
                           json_extract(item.value, '$.id') DESC LIMIT 1
               ),
@@ -2848,34 +2856,34 @@ export const STATION_MIGRATIONS: string[] = [
                 SELECT json_extract(item.value, '$.correctedAt')
                   FROM json_each(NEW.page_json, '$.items') item
                  WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
-                   AND json_extract(item.value, '$.boxId') = box.box_id
+                   AND json_extract(item.value, '$.boxId') = inventory_repack_boxes_mirror.box_id
                  ORDER BY json_extract(item.value, '$.revision') DESC,
                           json_extract(item.value, '$.id') DESC LIMIT 1
               )
-        WHERE box.inventory_id = NEW.inventory_id
-          AND box.snapshot_id = NEW.snapshot_id
+        WHERE inventory_repack_boxes_mirror.inventory_id = NEW.inventory_id
+          AND inventory_repack_boxes_mirror.snapshot_id = NEW.snapshot_id
           AND EXISTS (
             SELECT 1 FROM json_each(NEW.page_json, '$.items') item
              WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
-               AND json_extract(item.value, '$.boxId') = box.box_id
+               AND json_extract(item.value, '$.boxId') = inventory_repack_boxes_mirror.box_id
           );
 
-       UPDATE inventory_remote_reprint_requests AS request
+       UPDATE inventory_remote_reprint_requests
           SET completed_at = (
             SELECT json_extract(item.value, '$.correctedAt')
               FROM json_each(NEW.page_json, '$.items') item
              WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
-               AND json_extract(item.value, '$.boxId') = request.box_id
+               AND json_extract(item.value, '$.boxId') = inventory_remote_reprint_requests.box_id
              ORDER BY json_extract(item.value, '$.revision') DESC,
                       json_extract(item.value, '$.id') DESC LIMIT 1
           )
-        WHERE request.inventory_id = NEW.inventory_id
-          AND request.snapshot_id = NEW.snapshot_id
-          AND request.completed_at IS NULL
+        WHERE inventory_remote_reprint_requests.inventory_id = NEW.inventory_id
+          AND inventory_remote_reprint_requests.snapshot_id = NEW.snapshot_id
+          AND inventory_remote_reprint_requests.completed_at IS NULL
           AND EXISTS (
             SELECT 1 FROM json_each(NEW.page_json, '$.items') item
              WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
-               AND json_extract(item.value, '$.boxId') = request.box_id
+               AND json_extract(item.value, '$.boxId') = inventory_remote_reprint_requests.box_id
           );
 
        INSERT INTO inventory_remote_reprint_requests
@@ -2908,21 +2916,23 @@ export const STATION_MIGRATIONS: string[] = [
   `CREATE TRIGGER IF NOT EXISTS inventory_repack_invalidate_ack_v3
      AFTER INSERT ON inventory_sync_ack_receipts
      BEGIN
-       UPDATE inventory_repack_boxes_mirror AS box
+       UPDATE inventory_repack_boxes_mirror
           SET state = 'invalidated', invalidation_source = 'claim_lost',
-              print_state = CASE WHEN box.print_state = 'pending' THEN 'failed'
-                                 ELSE box.print_state END,
+              print_state = CASE WHEN inventory_repack_boxes_mirror.print_state = 'pending'
+                                 THEN 'failed' ELSE inventory_repack_boxes_mirror.print_state END,
               invalidated_at = NEW.applied_at, updated_at = NEW.applied_at
-        WHERE box.inventory_id = NEW.inventory_id
-          AND box.snapshot_id = NEW.snapshot_id
-          AND (box.state = 'open' OR (box.state = 'closed' AND box.print_state = 'pending'))
+        WHERE inventory_repack_boxes_mirror.inventory_id = NEW.inventory_id
+          AND inventory_repack_boxes_mirror.snapshot_id = NEW.snapshot_id
+          AND (inventory_repack_boxes_mirror.state = 'open'
+            OR (inventory_repack_boxes_mirror.state = 'closed'
+              AND inventory_repack_boxes_mirror.print_state = 'pending'))
           AND EXISTS (
             SELECT 1
               FROM inventory_repack_items_mirror item,
                    json_each(NEW.response_json, '$.outcomes') outcome
-             WHERE item.inventory_id = box.inventory_id
-               AND item.snapshot_id = box.snapshot_id
-               AND item.box_id = box.box_id
+             WHERE item.inventory_id = inventory_repack_boxes_mirror.inventory_id
+               AND item.snapshot_id = inventory_repack_boxes_mirror.snapshot_id
+               AND item.box_id = inventory_repack_boxes_mirror.box_id
                AND item.removed_at IS NULL
                AND item.source_event_id = json_extract(outcome.value, '$.eventId')
                AND json_extract(outcome.value, '$.status') = 'duplicate'
@@ -2933,21 +2943,23 @@ export const STATION_MIGRATIONS: string[] = [
   `CREATE TRIGGER IF NOT EXISTS inventory_repack_invalidate_progress_v3
      AFTER INSERT ON inventory_progress_receipts_v2
      BEGIN
-       UPDATE inventory_repack_boxes_mirror AS box
+       UPDATE inventory_repack_boxes_mirror
           SET state = 'invalidated', invalidation_source = 'claim_lost',
-              print_state = CASE WHEN box.print_state = 'pending' THEN 'failed'
-                                 ELSE box.print_state END,
+              print_state = CASE WHEN inventory_repack_boxes_mirror.print_state = 'pending'
+                                 THEN 'failed' ELSE inventory_repack_boxes_mirror.print_state END,
               invalidated_at = NEW.applied_at, updated_at = NEW.applied_at
-        WHERE box.inventory_id = NEW.inventory_id
-          AND box.snapshot_id = NEW.snapshot_id
-          AND (box.state = 'open' OR (box.state = 'closed' AND box.print_state = 'pending'))
+        WHERE inventory_repack_boxes_mirror.inventory_id = NEW.inventory_id
+          AND inventory_repack_boxes_mirror.snapshot_id = NEW.snapshot_id
+          AND (inventory_repack_boxes_mirror.state = 'open'
+            OR (inventory_repack_boxes_mirror.state = 'closed'
+              AND inventory_repack_boxes_mirror.print_state = 'pending'))
           AND EXISTS (
             SELECT 1
               FROM inventory_repack_items_mirror item,
                    json_each(NEW.page_json, '$.items') progress
-             WHERE item.inventory_id = box.inventory_id
-               AND item.snapshot_id = box.snapshot_id
-               AND item.box_id = box.box_id
+             WHERE item.inventory_id = inventory_repack_boxes_mirror.inventory_id
+               AND item.snapshot_id = inventory_repack_boxes_mirror.snapshot_id
+               AND item.box_id = inventory_repack_boxes_mirror.box_id
                AND item.removed_at IS NULL
                AND item.code_hash = json_extract(progress.value, '$.codeHash')
                AND json_type(progress.value, '$.winner') = 'object'
@@ -3153,32 +3165,32 @@ export const STATION_MIGRATIONS: string[] = [
   `CREATE TRIGGER IF NOT EXISTS inventory_progress_apply_admin_corrections_v2
      AFTER INSERT ON inventory_progress_receipts_v2
      BEGIN
-       UPDATE inventory_repack_items_mirror AS member
+       UPDATE inventory_repack_items_mirror
           SET removed_at = (
             SELECT json_extract(item.value, '$.removedAt')
               FROM json_each(NEW.page_json, '$.items') item
              WHERE json_extract(item.value, '$.kind') = 'remove_item'
-               AND json_extract(item.value, '$.boxId') = member.box_id
-               AND json_extract(item.value, '$.codeHash') = member.code_hash
+               AND json_extract(item.value, '$.boxId') = inventory_repack_items_mirror.box_id
+               AND json_extract(item.value, '$.codeHash') = inventory_repack_items_mirror.code_hash
              ORDER BY json_extract(item.value, '$.revision') DESC,
                       json_extract(item.value, '$.id') DESC LIMIT 1
           )
-        WHERE member.inventory_id = NEW.inventory_id
-          AND member.snapshot_id = NEW.snapshot_id
-          AND member.removed_at IS NULL
+        WHERE inventory_repack_items_mirror.inventory_id = NEW.inventory_id
+          AND inventory_repack_items_mirror.snapshot_id = NEW.snapshot_id
+          AND inventory_repack_items_mirror.removed_at IS NULL
           AND EXISTS (
             SELECT 1 FROM json_each(NEW.page_json, '$.items') item
              WHERE json_extract(item.value, '$.kind') = 'remove_item'
-               AND json_extract(item.value, '$.boxId') = member.box_id
-               AND json_extract(item.value, '$.codeHash') = member.code_hash
+               AND json_extract(item.value, '$.boxId') = inventory_repack_items_mirror.box_id
+               AND json_extract(item.value, '$.codeHash') = inventory_repack_items_mirror.code_hash
           );
 
-       UPDATE inventory_repack_boxes_mirror AS box
+       UPDATE inventory_repack_boxes_mirror
           SET state = 'invalidated', invalidation_source = 'admin', invalidated_at = (
                 SELECT json_extract(item.value, '$.correctedAt')
                   FROM json_each(NEW.page_json, '$.items') item
                  WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
-                   AND json_extract(item.value, '$.boxId') = box.box_id
+                   AND json_extract(item.value, '$.boxId') = inventory_repack_boxes_mirror.box_id
                  ORDER BY json_extract(item.value, '$.revision') DESC,
                           json_extract(item.value, '$.id') DESC LIMIT 1
               ),
@@ -3186,34 +3198,34 @@ export const STATION_MIGRATIONS: string[] = [
                 SELECT json_extract(item.value, '$.correctedAt')
                   FROM json_each(NEW.page_json, '$.items') item
                  WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
-                   AND json_extract(item.value, '$.boxId') = box.box_id
+                   AND json_extract(item.value, '$.boxId') = inventory_repack_boxes_mirror.box_id
                  ORDER BY json_extract(item.value, '$.revision') DESC,
                           json_extract(item.value, '$.id') DESC LIMIT 1
               )
-        WHERE box.inventory_id = NEW.inventory_id
-          AND box.snapshot_id = NEW.snapshot_id
+        WHERE inventory_repack_boxes_mirror.inventory_id = NEW.inventory_id
+          AND inventory_repack_boxes_mirror.snapshot_id = NEW.snapshot_id
           AND EXISTS (
             SELECT 1 FROM json_each(NEW.page_json, '$.items') item
              WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
-               AND json_extract(item.value, '$.boxId') = box.box_id
+               AND json_extract(item.value, '$.boxId') = inventory_repack_boxes_mirror.box_id
           );
 
-       UPDATE inventory_remote_reprint_requests AS request
+       UPDATE inventory_remote_reprint_requests
           SET completed_at = (
             SELECT json_extract(item.value, '$.correctedAt')
               FROM json_each(NEW.page_json, '$.items') item
              WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
-               AND json_extract(item.value, '$.boxId') = request.box_id
+               AND json_extract(item.value, '$.boxId') = inventory_remote_reprint_requests.box_id
              ORDER BY json_extract(item.value, '$.revision') DESC,
                       json_extract(item.value, '$.id') DESC LIMIT 1
           )
-        WHERE request.inventory_id = NEW.inventory_id
-          AND request.snapshot_id = NEW.snapshot_id
-          AND request.completed_at IS NULL
+        WHERE inventory_remote_reprint_requests.inventory_id = NEW.inventory_id
+          AND inventory_remote_reprint_requests.snapshot_id = NEW.snapshot_id
+          AND inventory_remote_reprint_requests.completed_at IS NULL
           AND EXISTS (
             SELECT 1 FROM json_each(NEW.page_json, '$.items') item
              WHERE json_extract(item.value, '$.kind') = 'invalidate_box'
-               AND json_extract(item.value, '$.boxId') = request.box_id
+               AND json_extract(item.value, '$.boxId') = inventory_remote_reprint_requests.box_id
           );
 
        INSERT INTO inventory_remote_reprint_requests

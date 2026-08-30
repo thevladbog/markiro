@@ -67,6 +67,21 @@ pub fn signer_set_server_url(
     state.runtime.set_server_url(&url).map_err(|e| e.to_string())
 }
 
+/// An available update is actionable in the same sense a degraded phase is:
+/// it needs the operator's hands. The window's banner is where they consent;
+/// this is only how they learn to open the window.
+#[tauri::command]
+pub fn signer_notify_update(app: tauri::AppHandle, version: String) {
+    use tauri_plugin_notification::NotificationExt as _;
+
+    let _ = app
+        .notification()
+        .builder()
+        .title("Markiro Подписант")
+        .body(format!("Доступна версия {version}"))
+        .show();
+}
+
 /// The agent only ships for Windows; on other platforms the shell still builds
 /// (so `cargo test` runs in CI on Linux) but every capability refuses.
 #[cfg(not(windows))]

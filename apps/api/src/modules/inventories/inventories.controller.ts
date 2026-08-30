@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -20,6 +21,7 @@ import {
   ApiConsumes,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
@@ -606,6 +608,22 @@ export class InventoriesController {
     @Body(new ZodValidationPipe(fixInventorySnapshotSchema)) body: FixInventorySnapshotDto,
   ): Promise<InventorySnapshotDto> {
     return this.inventories.fixSnapshot(req.tenantId!, req.userId!, id, body);
+  }
+
+  @Post(":id/cancel")
+  @HttpCode(204)
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
+  @ApiOperation({ summary: "Cancel an inventory before it starts" })
+  @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
+  @ApiNoContentResponse()
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403)
+  cancel(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
+  ): Promise<void> {
+    return this.lifecycle.cancel(req.tenantId!, req.userId!, id);
   }
 
   @Post(":id/start")
