@@ -11,6 +11,7 @@ import {
 } from "@markiro/domain";
 
 import type { SqlExecutor } from "./mirror.js";
+import { setInventoryProductionDate } from "./inventory-date.js";
 import { burnSerial } from "./sscc-pool.js";
 
 const BOX_EXTENSION_DIGIT = 0;
@@ -28,6 +29,8 @@ export interface RecordInventoryRepackScanInput {
   scannedAt: string;
   createBoxId?: () => string;
   createItemId?: () => string;
+  /** Оператор осознанно зачёл код с текущей датой короба. */
+  acceptSourceDateMismatch?: boolean;
 }
 
 export interface InventoryRepackBoxView {
@@ -60,12 +63,15 @@ export interface InventoryRepackScanResult {
     | "duplicate"
     | "invalid"
     | "date-mismatch"
+    | "source-date-mismatch"
     | "capacity-closed";
   boxId: string | null;
   newSscc: string | null;
   itemCount: number;
   printState: InventoryRepackBoxView["printState"] | null;
   sourceParentMismatch: boolean;
+  /** Дата из снапшота для спорного кода; null во всех остальных вердиктах. */
+  sourceProductionDate: string | null;
 }
 
 interface TerminalRow {
@@ -344,6 +350,7 @@ async function replayResult(
     itemCount: box?.itemCount ?? 0,
     printState: box?.printState ?? null,
     sourceParentMismatch: false,
+    sourceProductionDate: null,
   };
 }
 
@@ -395,6 +402,22 @@ async function snapshotFacts(
   };
 }
 
+/** Одна дата, общая для пригодного содержимого старого короба, иначе null. */
+async function oldBoxSourceDate(
+  exec: SqlExecutor,
+  input: RecordInventoryRepackScanInput,
+  oldSscc: string,
+): Promise<string | null> {
+  const rows = await exec.all<{ source_production_date: string }>(
+    `SELECT DISTINCT source_production_date
+       FROM inventory_snapshot_codes_mirror
+      WHERE snapshot_id = ? AND parent_sscc = ? AND expected = 1 AND protected = 0
+        AND source_production_date IS NOT NULL`,
+    [input.snapshotId, oldSscc],
+  );
+  return rows.length === 1 ? (rows[0]?.source_production_date ?? null) : null;
+}
+
 async function recordInternal(
   exec: SqlExecutor,
   input: RecordInventoryRepackScanInput,
@@ -423,7 +446,20 @@ async function recordInternal(
         itemCount: 0,
         printState: null,
         sourceParentMismatch: false,
+        sourceProductionDate: null,
       };
+    }
+    const seeded = await oldBoxSourceDate(exec, input, oldSscc);
+    const boxDate = seeded ?? terminalState.active_production_date!;
+    if (seeded !== null && seeded !== terminalState.active_production_date) {
+      await setInventoryProductionDate(exec, {
+        inventoryId: input.inventoryId,
+        snapshotId: input.snapshotId,
+        deviceId: input.deviceId,
+        operatorId: input.operatorId,
+        productionDate: seeded,
+        updatedAt: input.scannedAt,
+      });
     }
     const serial = await burnSerial(exec, input.issuerPrefix, BOX_EXTENSION_DIGIT);
     if (serial === null) throw new Error("inventory repack SSCC pool is exhausted");
@@ -441,7 +477,7 @@ async function recordInternal(
       oldSscc,
       newSscc,
       capacity: input.capacity,
-      productionDate: terminalState.active_production_date!,
+      productionDate: boxDate,
     };
     const event = inventoryEventSchema.parse({
       eventId: input.eventId,
@@ -452,7 +488,7 @@ async function recordInternal(
       normalizedIdentity: `old_box:${oldSscc}`,
       codeHash: null,
       canonicalRaw: oldSscc,
-      activeProductionDate: terminalState.active_production_date,
+      activeProductionDate: boxDate,
       localVerdict: "unknown",
       repack,
     });
@@ -466,7 +502,7 @@ async function recordInternal(
       oldSscc,
       newSscc,
       capacity: input.capacity,
-      productionDate: terminalState.active_production_date,
+      productionDate: boxDate,
     });
     return replayResult(exec, input, { payload_json: JSON.stringify(event) });
   }
@@ -486,6 +522,7 @@ async function recordInternal(
       itemCount: box.itemCount,
       printState: box.printState,
       sourceParentMismatch: false,
+      sourceProductionDate: null,
     };
   }
   const codeHash = kmHash(canonical);
@@ -507,6 +544,24 @@ async function recordInternal(
       itemCount: box.itemCount,
       printState: box.printState,
       sourceParentMismatch: false,
+      sourceProductionDate: null,
+    };
+  }
+  const sourceDate = facts.row?.sourceProductionDate ?? null;
+  if (
+    !input.acceptSourceDateMismatch &&
+    classification.kind === "expected" &&
+    sourceDate !== null &&
+    sourceDate !== box.productionDate
+  ) {
+    return {
+      verdict: "source-date-mismatch",
+      boxId: box.boxId,
+      newSscc: box.newSscc,
+      itemCount: box.itemCount,
+      printState: box.printState,
+      sourceParentMismatch: false,
+      sourceProductionDate: sourceDate,
     };
   }
   const sequence = await allocateSequence(
@@ -569,6 +624,7 @@ async function recordInternal(
     itemCount: after.box?.itemCount ?? box.itemCount,
     printState: after.box?.printState ?? box.printState,
     sourceParentMismatch,
+    sourceProductionDate: null,
   };
 }
 

@@ -657,6 +657,7 @@ function galleryRepackResult(variant: string): InventoryRepackScanResult | null 
       itemCount: 0,
       printState: "not_ready",
       sourceParentMismatch: false,
+      sourceProductionDate: null,
     };
   }
   if (variant === "repack-capacity-20") {
@@ -667,6 +668,7 @@ function galleryRepackResult(variant: string): InventoryRepackScanResult | null 
       itemCount: 12,
       printState: "not_ready",
       sourceParentMismatch: false,
+      sourceProductionDate: null,
     };
   }
   if (variant === "repack-box-ready") {
@@ -677,6 +679,7 @@ function galleryRepackResult(variant: string): InventoryRepackScanResult | null 
       itemCount: 20,
       printState: "pending",
       sourceParentMismatch: false,
+      sourceProductionDate: null,
     };
   }
   return null;
