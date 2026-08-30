@@ -45,6 +45,14 @@ The environment is protected by `required_reviewers`, so a dispatch waits for an
 approval before the job starts. That is deliberate: the approval is the second
 pair of eyes on a build that will install itself on customer machines.
 
+The bucket's policy lives in `infra/yandex/modules/station-releases/main.tf`
+and grants the publisher **and the public** both `station/*` and `signer/*`.
+The public grant matters as much as the write grant: without it the workflow's
+read-back fails and, worse, the agent's updater could never fetch
+`latest.json` — a release that goes green and silently never reaches anyone.
+The module is still named `station-releases` because renaming it would change
+the terraform address and destroy the bucket; it serves both products.
+
 ## Cutting a release
 
 1. On `main`, bump `version` in `apps/signer/src-tauri/tauri.conf.json`. That

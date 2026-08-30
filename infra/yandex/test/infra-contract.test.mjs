@@ -226,25 +226,45 @@ test("Station releases use one protected versioned bucket and a prefix-limited p
   );
 
   const policy = block(releases, 'resource "yandex_storage_bucket_policy" "releases"');
-  assert.match(policy, /AllowPublicStationReleaseObjects/);
+  assert.match(policy, /AllowPublicReleaseObjects/);
   assert.match(policy, /Principal\s*=\s*"\*"/);
   assert.match(policy, /Action\s*=\s*\["s3:GetObject"\]/);
   assert.match(
     policy,
-    /AllowPublisherStationObjects[\s\S]*Action\s*=\s*\["s3:GetObject",\s*"s3:PutObject"\]/,
+    /AllowPublisherReleaseObjects[\s\S]*Action\s*=\s*\["s3:GetObject",\s*"s3:PutObject"\]/,
   );
   assert.match(
     policy,
-    /AllowPublisherStationBucketPreflight[\s\S]*Action\s*=\s*\["s3:GetBucketLocation",\s*"s3:ListBucket"\]/,
+    /AllowPublisherReleaseBucketPreflight[\s\S]*Action\s*=\s*\["s3:GetBucketLocation",\s*"s3:ListBucket"\]/,
   );
   assert.match(
     policy,
-    /Condition\s*=\s*\{[\s\S]*StringLike\s*=\s*\{[\s\S]*"s3:prefix"\s*=\s*\["station\/\*"\]/,
+    /Condition\s*=\s*\{[\s\S]*StringLike\s*=\s*\{[\s\S]*"s3:prefix"\s*=\s*\["station\/\*",\s*"signer\/\*"\]/,
   );
-  assert.match(
-    policy,
-    /Resource\s*=\s*\["arn:aws:s3:::\$\{yandex_storage_bucket\.releases\.bucket\}\/station\/\*"\]/,
-  );
+
+  // The bucket serves the Station under station/* and the signer agent under
+  // signer/*. Both grants must name both prefixes: a policy that only allowed
+  // writes would still leave the signer's latest.json unreadable, so the agent
+  // would never see an update and the release would fail silently rather than
+  // loudly.
+  for (const sid of ["AllowPublicReleaseObjects", "AllowPublisherReleaseObjects"]) {
+    // Bounded to this statement: slicing to the end of the block would let a
+    // later statement's signer/* satisfy an earlier statement's assertion, and
+    // the check would pass on a policy that grants writes but not reads.
+    const start = policy.indexOf(sid);
+    assert.notEqual(start, -1, `${sid} must exist`);
+    const next = policy.indexOf("Sid       =", start + sid.length);
+    const grant = next === -1 ? policy.slice(start) : policy.slice(start, next);
+    for (const prefix of ["station", "signer"]) {
+      assert.match(
+        grant,
+        new RegExp(
+          `"arn:aws:s3:::\\$\\{yandex_storage_bucket\\.releases\\.bucket\\}/${prefix}/\\*"`,
+        ),
+        `${sid} must grant ${prefix}/*`,
+      );
+    }
+  }
   assert.match(
     policy,
     /AllowTerraformReleaseManagement[\s\S]*CanonicalUser\s*=\s*var\.terraform_service_account_id/,
