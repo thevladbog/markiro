@@ -24,7 +24,12 @@ function newQueryClient() {
   });
 }
 
-const NO_TOKEN = { status: "none" as const, obtainedAt: null, expiresAt: null, certThumbprint: null };
+const NO_TOKEN = {
+  status: "none" as const,
+  obtainedAt: null,
+  expiresAt: null,
+  certThumbprint: null,
+};
 
 const READ_ONLY_ACCESS: AccessDocument = {
   roles: ["member"],
