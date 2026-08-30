@@ -3,6 +3,7 @@ import {
   classifyScan,
   INVENTORY_CHZ_STATUSES,
   kmHash,
+  resolveInventoryScanSourceDate,
   type InventoryChzStatus,
   type InventoryLocalClaim,
   type InventoryOriginClassification,
@@ -11,6 +12,7 @@ import {
 } from "@markiro/domain";
 
 import type { SqlExecutor } from "./mirror.js";
+import { setInventoryProductionDate } from "./inventory-date.js";
 
 export type InventoryLocalVerdict =
   "expected" | "protected" | "known-ineligible" | "unknown" | "duplicate" | "invalid";
@@ -24,6 +26,8 @@ export interface RecordInventoryScanInput {
   raw: string;
   eventId: string;
   scannedAt: string;
+  /** Оператор осознанно зачёл код с текущей активной датой. */
+  acceptSourceDateMismatch?: boolean;
 }
 
 export interface InventoryScanPresentation {
@@ -38,6 +42,17 @@ export interface RecordInventoryScanResult extends InventoryScanPresentation {
   boxChildCount: number;
   firstWinning: InventoryLocalClaim | null;
 }
+
+export interface InventoryScanDateMismatch {
+  outcome: "date-mismatch";
+  activeDate: string;
+  /** null для смешанного короба — подставлять нечего. */
+  codeDate: string | null;
+  mixed: boolean;
+}
+
+export type RecordInventoryScanOutcome =
+  ({ outcome: "recorded" } & RecordInventoryScanResult) | InventoryScanDateMismatch;
 
 export interface RecentInventoryOperation extends InventoryScanPresentation {
   eventId: string;
@@ -71,6 +86,7 @@ interface SnapshotDbRow {
   serial: string;
   source_status: string;
   source_state: string | null;
+  source_production_date: string | null;
   expected: number;
   protected: number;
   parent_sscc: string | null;
@@ -163,6 +179,7 @@ function snapshotRow(row: SnapshotDbRow): InventoryScanSnapshotRow {
     serial: row.serial,
     sourceStatus: row.source_status,
     sourceState: row.source_state,
+    sourceProductionDate: row.source_production_date,
     expected: row.expected === 1,
     protected: row.protected === 1,
     parentSscc: row.parent_sscc,
@@ -189,7 +206,7 @@ async function loadClassifierFacts(
     const codeHash = kmHash(scannerInput.km);
     snapshotRows = await exec.all<SnapshotDbRow>(
       `SELECT code_hash, canonical_raw, gtin14, serial, source_status, source_state,
-              expected, protected, parent_sscc
+              source_production_date, expected, protected, parent_sscc
          FROM inventory_snapshot_codes_mirror
         WHERE snapshot_id = ? AND code_hash = ?
           AND EXISTS (
@@ -213,7 +230,7 @@ async function loadClassifierFacts(
   } else if (scannerInput.kind === "sscc") {
     snapshotRows = await exec.all<SnapshotDbRow>(
       `SELECT code_hash, canonical_raw, gtin14, serial, source_status, source_state,
-              expected, protected, parent_sscc
+              source_production_date, expected, protected, parent_sscc
          FROM inventory_snapshot_codes_mirror
         WHERE snapshot_id = ? AND parent_sscc = ?
           AND EXISTS (
@@ -1317,13 +1334,73 @@ function resultFrom(
   };
 }
 
+async function hasDeviceScans(
+  exec: SqlExecutor,
+  input: RecordInventoryScanInput,
+): Promise<boolean> {
+  const rows = await exec.all<{ present: number }>(
+    `SELECT 1 AS present FROM inventory_scan_events_mirror
+      WHERE inventory_id = ? AND snapshot_id = ? AND device_id = ?
+      LIMIT 1`,
+    [input.inventoryId, input.snapshotId, input.deviceId],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Сверяет дату из снапшота с активной датой терминала до резервирования
+ * события: в этой точке не записано ничего, поэтому «пропустить код» не
+ * требует отката иммутабельного журнала.
+ */
+async function guardSourceProductionDate(
+  exec: SqlExecutor,
+  input: RecordInventoryScanInput,
+  classification: InventoryScanClassification,
+  facts: Awaited<ReturnType<typeof loadClassifierFacts>>,
+): Promise<InventoryScanDateMismatch | null> {
+  if (input.acceptSourceDateMismatch) return null;
+  const source = resolveInventoryScanSourceDate(classification, {
+    findSnapshotCode: (codeHash) => facts.rows.find((row) => row.codeHash === codeHash) ?? null,
+    findSnapshotChildren: (parentSscc) => facts.rows.filter((row) => row.parentSscc === parentSscc),
+  });
+  if (source.kind === "none") return null;
+  const active = await activeDate(exec, input);
+  if (source.kind === "single") {
+    if (source.productionDate === active) return null;
+    if (!(await hasDeviceScans(exec, input))) {
+      // Not range-checked against [productionDateFrom, productionDateTo]
+      // here: `source.productionDate` only ever comes from an `expected` row,
+      // and inventory-mirror.ts's bundle validation (classifyInventorySnapshotRow
+      // against the manifest's range) already guarantees those are in range.
+      await setInventoryProductionDate(exec, {
+        inventoryId: input.inventoryId,
+        snapshotId: input.snapshotId,
+        deviceId: input.deviceId,
+        operatorId: input.operatorId,
+        productionDate: source.productionDate,
+        updatedAt: input.scannedAt,
+      });
+      return null;
+    }
+  }
+  return {
+    outcome: "date-mismatch",
+    activeDate: active,
+    codeDate: source.kind === "single" ? source.productionDate : null,
+    mixed: source.kind === "mixed",
+  };
+}
+
 async function recordInventoryScanInternal(
   exec: SqlExecutor,
   input: RecordInventoryScanInput,
-): Promise<RecordInventoryScanResult> {
+): Promise<RecordInventoryScanOutcome> {
   if (!input.eventId) throw new Error("inventory event id is required");
-  let classification = classifyFromFacts(input, await loadClassifierFacts(exec, input));
-  if (classification.kind === "invalid") return resultFrom(classification, "invalid", 0, null);
+  const facts = await loadClassifierFacts(exec, input);
+  let classification = classifyFromFacts(input, facts);
+  if (classification.kind === "invalid") {
+    return { outcome: "recorded", ...resultFrom(classification, "invalid", 0, null) };
+  }
 
   let event = await existingEvent(exec, input.inventoryId, input.snapshotId, input.eventId);
   if (event) {
@@ -1339,7 +1416,7 @@ async function recordInventoryScanInternal(
         input.eventId,
       );
       const winner = verdict === "duplicate" ? storedDuplicateWinner(event) : null;
-      return resultFrom(classification, verdict, summary.total, winner);
+      return { outcome: "recorded", ...resultFrom(classification, verdict, summary.total, winner) };
     }
   }
 
@@ -1349,8 +1426,26 @@ async function recordInventoryScanInternal(
     input.snapshotId,
     input.eventId,
   );
-  classification = classifyFromFacts(input, await loadClassifierFacts(exec, input));
-  if (classification.kind === "invalid") return resultFrom(classification, "invalid", 0, null);
+  const reconciledFacts = await loadClassifierFacts(exec, input);
+  classification = classifyFromFacts(input, reconciledFacts);
+  if (classification.kind === "invalid") {
+    return { outcome: "recorded", ...resultFrom(classification, "invalid", 0, null) };
+  }
+  if (!event) {
+    // Reconciliation can change a code's classification (e.g. a failed prior
+    // claim releasing it from `duplicate` back to `expected`), so the guard
+    // must be re-run against the reloaded facts. Still strictly before
+    // reserveEvent, so a mismatch here writes nothing either.
+    //
+    // Only reached when this eventId has no reservation yet. A replayed
+    // eventId that already reserved (pending or committed, handled above)
+    // must skip the guard entirely: the date decision was made when the
+    // event was reserved and is already stamped on the row as
+    // `active_production_date`, so resuming or replaying must not
+    // re-litigate it against a terminal date that has moved since.
+    const mismatch = await guardSourceProductionDate(exec, input, classification, reconciledFacts);
+    if (mismatch) return mismatch;
+  }
   event ??= await reserveEvent(exec, input, classification);
   ensureExactReservation(event, input, classification);
   if (commitState(event.commit_state) !== "pending") {
@@ -1432,7 +1527,10 @@ async function recordInventoryScanInternal(
     throw new Error("inventory outbox reservation mismatch");
   }
   await finalizePendingEvent(exec, input.inventoryId, input.snapshotId, input.eventId);
-  return resultFrom(classification, verdict, summary.total, firstWinning);
+  return {
+    outcome: "recorded",
+    ...resultFrom(classification, verdict, summary.total, firstWinning),
+  };
 }
 
 /**
@@ -1444,7 +1542,7 @@ async function recordInventoryScanInternal(
 export function recordInventoryScan(
   exec: SqlExecutor,
   input: RecordInventoryScanInput,
-): Promise<RecordInventoryScanResult> {
+): Promise<RecordInventoryScanOutcome> {
   return serializeJournal(() => recordInventoryScanInternal(exec, input));
 }
 

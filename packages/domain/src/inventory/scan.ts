@@ -11,6 +11,8 @@ export interface InventoryScanSnapshotRow {
   serial: string;
   sourceStatus: InventoryChzStatus;
   sourceState: string | null;
+  /** Дата производства из снапшота. Для `expected` гарантированно не null. */
+  sourceProductionDate: string | null;
   expected: boolean;
   protected: boolean;
   parentSscc: string | null;
@@ -184,4 +186,55 @@ export function classifyInventoryScan(
     kind: "invalid",
     reason: scannerInput.kind === "gtin" ? "unsupported" : "malformed",
   };
+}
+
+export type InventoryScanSourceDate =
+  | { kind: "none" }
+  | { kind: "single"; scanKind: "item" | "known_box"; productionDate: string }
+  | { kind: "mixed"; scanKind: "known_box" };
+
+/**
+ * Дата производства, которая следует из самого скана. Считается только для
+ * `expected`: для дубля она уже зафиксирована победителем, у неизвестного кода
+ * её нет, а подстройка активной даты под `protected`/`known-ineligible`
+ * испортила бы дату всем последующим нормальным сканам.
+ *
+ * Для короба берётся только **не зачтённое** (`firstWinning === null`)
+ * содержимое. Это отличается от `oldBoxSourceDate` в
+ * `apps/station/src/lib/inventory-repacking.ts`, которая читает дату старого
+ * короба при перекладке по всем `expected`-детям без учёта зачёта: на
+ * частично переложенном коробе эта функция игнорирует уже перенесённые
+ * бутылки, а `oldBoxSourceDate` видит их наравне с остатком и потому может
+ * увидеть больше дат и вернуть null там, где здесь получился бы `single`.
+ */
+export function resolveInventoryScanSourceDate(
+  classification: InventoryScanClassification,
+  context: Pick<InventoryScanClassifierContext, "findSnapshotCode" | "findSnapshotChildren">,
+): InventoryScanSourceDate {
+  if (classification.kind !== "expected") return { kind: "none" };
+
+  if (classification.scanKind === "item") {
+    const row = context.findSnapshotCode(classification.codeHash);
+    const productionDate = row?.sourceProductionDate ?? null;
+    return productionDate === null
+      ? { kind: "none" }
+      : { kind: "single", scanKind: "item", productionDate };
+  }
+
+  const unclaimed = new Set(
+    classification.children
+      .filter((child) => child.firstWinning === null && child.originClassification === "expected")
+      .map((child) => child.codeHash),
+  );
+  let productionDate: string | null = null;
+  for (const row of context.findSnapshotChildren(classification.sscc)) {
+    if (!unclaimed.has(row.codeHash) || row.sourceProductionDate === null) continue;
+    if (productionDate !== null && productionDate !== row.sourceProductionDate) {
+      return { kind: "mixed", scanKind: "known_box" };
+    }
+    productionDate = row.sourceProductionDate;
+  }
+  return productionDate === null
+    ? { kind: "none" }
+    : { kind: "single", scanKind: "known_box", productionDate };
 }

@@ -9,6 +9,7 @@ import {
   reconcilePendingInventoryEvents,
   recordInventoryScan,
   type InventoryProgress,
+  type InventoryScanDateMismatch,
   type RecentInventoryOperation,
   type RecordInventoryScanResult,
 } from "../lib/inventory-journal.js";
@@ -85,6 +86,7 @@ export type InventoryWorkGalleryState =
       writeFailed?: boolean;
       leaveFailed?: boolean;
       dateDialog?: boolean;
+      heldScan?: HeldInventoryScan | null;
     }
   | {
       mode: "repack";
@@ -105,6 +107,7 @@ export type InventoryWorkGalleryState =
         quantity: number;
         productionDate: string;
       }[];
+      heldScan?: HeldRepackScan | null;
     };
 
 const EMPTY_PROGRESS: InventoryProgress = {
@@ -115,6 +118,10 @@ const EMPTY_PROGRESS: InventoryProgress = {
   acceptedBoxes: 0,
   acceptedItems: 0,
 };
+
+type HeldInventoryScan = InventoryScanDateMismatch & { raw: string };
+
+type CheckScanOutcome = ({ outcome: "recorded" } & RecordInventoryScanResult) | HeldInventoryScan;
 
 const defaultEventId = () => crypto.randomUUID();
 const defaultNow = () => new Date().toISOString();
@@ -151,6 +158,26 @@ function restoredResult(operation: RecentInventoryOperation): RecordInventorySca
     serialSuffix: operation.serialSuffix,
     ssccSuffix: operation.ssccSuffix,
   };
+}
+
+/**
+ * Runs `fn` as a queued job behind any already-buffered scans/jobs, in the
+ * same strict order the scan queue processes everything else. Resolves once
+ * `fn` completes; rejects if the queue is closed or `fn` throws.
+ */
+function runQueuedJob(queue: ScanQueue, fn: () => Promise<void>): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const accepted = queue.enqueueJob(async () => {
+      try {
+        await fn();
+        resolve();
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error("inventory scan queue job failed"));
+        throw error;
+      }
+    });
+    if (!accepted) reject(new Error("inventory scan queue is closed"));
+  });
 }
 
 export function InventoryWorkScreen(props: InventoryWorkScreenProps) {
@@ -194,6 +221,12 @@ function CheckInventoryWorkScreen({
   const [leaving, setLeaving] = useState(false);
   const [leaveFailed, setLeaveFailed] = useState(gallery?.leaveFailed ?? false);
   const mounted = useRef(true);
+  const [heldScan, setHeldScan] = useState<HeldInventoryScan | null>(gallery?.heldScan ?? null);
+  const heldRef = useRef(false);
+  const [dialogBusy, setDialogBusy] = useState(false);
+  const dialogBusyRef = useRef(false);
+  const bypassRef = useRef<string | null>(null);
+  const queueRef = useRef<ScanQueue | null>(null);
   const refresh = useCallback(async () => {
     const [nextProgress, nextRecent] = await Promise.all([
       readInventoryProgress(exec, inventory.inventoryId, inventory.snapshotId, deviceId),
@@ -278,9 +311,12 @@ function CheckInventoryWorkScreen({
 
   const queue = useMemo(
     () =>
-      createScanQueue<RecordInventoryScanResult>({
-        process: (raw) =>
-          recordInventoryScan(exec, {
+      createScanQueue<CheckScanOutcome>({
+        shouldProcess: () => !heldRef.current,
+        process: async (raw) => {
+          const bypass = bypassRef.current === raw;
+          if (bypass) bypassRef.current = null;
+          const outcome = await recordInventoryScan(exec, {
             inventoryId: inventory.inventoryId,
             snapshotId: inventory.snapshotId,
             deviceId,
@@ -289,10 +325,24 @@ function CheckInventoryWorkScreen({
             raw,
             eventId: createEventId(),
             scannedAt: now(),
-          }),
+            ...(bypass ? { acceptSourceDateMismatch: true } : {}),
+          });
+          return outcome.outcome === "recorded" ? outcome : { ...outcome, raw };
+        },
         onOutcome: (outcome) => {
           if (!mounted.current) return;
           setWriteFailed(false);
+          if (outcome.outcome === "date-mismatch") {
+            heldRef.current = true;
+            queueRef.current?.discardBufferedScans();
+            // Clear any stale accepted verdict from a prior scan so the floor
+            // screen does not keep showing e.g. "Код принят" behind the held
+            // dialog for a code that was never recorded (mirrors repack,
+            // which sets its own `result` before holding).
+            setResult(null);
+            setHeldScan(outcome);
+            return;
+          }
           setResult(outcome);
           nudgeInventorySync();
           void refresh().catch((error: unknown) => {
@@ -319,6 +369,10 @@ function CheckInventoryWorkScreen({
   );
 
   useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
+
+  useEffect(() => {
     if (gallery || productionDate === null) return undefined;
     queue.open();
     const unregister = onScanQueueRegister?.(queue);
@@ -329,35 +383,81 @@ function CheckInventoryWorkScreen({
   }, [gallery, onScanQueueRegister, productionDate, queue]);
 
   useEffect(() => {
-    if (gallery || productionDate === null || dateDialog) return undefined;
+    if (gallery || productionDate === null || dateDialog || heldScan) return undefined;
     return source.start((raw) => queue.enqueue(raw));
-  }, [dateDialog, gallery, productionDate, queue, source]);
+  }, [dateDialog, gallery, heldScan, productionDate, queue, source]);
 
   const applyDate = async () => {
     if (dateDraft < inventory.productionDateFrom || dateDraft > inventory.productionDateTo) return;
-    await new Promise<void>((resolve, reject) => {
-      const accepted = queue.enqueueJob(async () => {
-        try {
-          await setInventoryProductionDate(exec, {
-            inventoryId: inventory.inventoryId,
-            snapshotId: inventory.snapshotId,
-            deviceId,
-            operatorId,
-            productionDate: dateDraft,
-            updatedAt: now(),
-          });
-          resolve();
-        } catch (error) {
-          reject(error instanceof Error ? error : new Error("inventory date update failed"));
-          throw error;
-        }
-      });
-      if (!accepted) reject(new Error("inventory scan queue is closed"));
-    });
+    await runQueuedJob(queue, () =>
+      setInventoryProductionDate(exec, {
+        inventoryId: inventory.inventoryId,
+        snapshotId: inventory.snapshotId,
+        deviceId,
+        operatorId,
+        productionDate: dateDraft,
+        updatedAt: now(),
+      }),
+    );
     if (mounted.current) {
       setProductionDate(dateDraft);
       setDateDialog(false);
     }
+  };
+
+  const codeDateInRange =
+    heldScan?.codeDate !== null &&
+    heldScan !== null &&
+    heldScan.codeDate >= inventory.productionDateFrom &&
+    heldScan.codeDate <= inventory.productionDateTo;
+
+  const releaseHeldScan = () => {
+    heldRef.current = false;
+    setHeldScan(null);
+  };
+
+  /** Queues a terminal-date write behind any buffered scans/jobs, same as `applyDate`. */
+  const writeActiveProductionDate = (productionDate: string) =>
+    runQueuedJob(queue, () =>
+      setInventoryProductionDate(exec, {
+        inventoryId: inventory.inventoryId,
+        snapshotId: inventory.snapshotId,
+        deviceId,
+        operatorId,
+        productionDate,
+        updatedAt: now(),
+      }),
+    );
+
+  const adoptHeldDate = async () => {
+    // Reentrancy guard for a double-tap landing before React disables the
+    // button (finding 2): checked synchronously, so a second invocation in
+    // the same tick as the first is a no-op regardless of render timing.
+    if (dialogBusyRef.current) return;
+    const held = heldScan;
+    if (!held || held.codeDate === null) return;
+    const codeDate = held.codeDate;
+    dialogBusyRef.current = true;
+    setDialogBusy(true);
+    try {
+      await writeActiveProductionDate(codeDate);
+      if (!mounted.current) return;
+      setProductionDate(codeDate);
+      setDateDraft(codeDate);
+      releaseHeldScan();
+      queue.enqueue(held.raw);
+    } finally {
+      dialogBusyRef.current = false;
+      if (mounted.current) setDialogBusy(false);
+    }
+  };
+
+  const acceptHeldScan = () => {
+    const held = heldScan;
+    if (!held) return;
+    bypassRef.current = held.raw;
+    releaseHeldScan();
+    queue.enqueue(held.raw);
   };
 
   const locale = i18n.language === "ru" ? "ru-RU" : "en-US";
@@ -557,11 +657,66 @@ function CheckInventoryWorkScreen({
           <p>{t("inventory.work.futureOnly")}</p>
         </div>
       </FullScreenDialog>
+      <FullScreenDialog
+        open={heldScan !== null}
+        title={
+          heldScan?.mixed
+            ? t("inventory.work.sourceDate.mixedTitle")
+            : t("inventory.work.sourceDate.title")
+        }
+        backLabel={t("inventory.work.sourceDate.skip")}
+        backPlacement="footer"
+        backDisabled={dialogBusy}
+        onClose={releaseHeldScan}
+        footer={
+          heldScan?.mixed ? (
+            <Button size="floor" disabled={dialogBusy} onClick={acceptHeldScan}>
+              {t("inventory.work.sourceDate.accept")}
+            </Button>
+          ) : codeDateInRange ? (
+            <Button
+              size="floor"
+              disabled={dialogBusy}
+              onClick={() =>
+                void adoptHeldDate().catch((error: unknown) => {
+                  console.error("station: inventory date adoption failed", error);
+                  if (mounted.current) {
+                    setWriteFailed(true);
+                    releaseHeldScan();
+                  }
+                })
+              }
+            >
+              {t("inventory.work.sourceDate.apply", {
+                date: heldScan?.codeDate ? formatCivilDate(heldScan.codeDate, locale) : "",
+              })}
+            </Button>
+          ) : null
+        }
+      >
+        <div className="inventory-date-dialog">
+          <p>
+            {heldScan?.mixed
+              ? t("inventory.work.sourceDate.mixedBody", {
+                  active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
+                })
+              : t("inventory.work.sourceDate.body", {
+                  code: heldScan?.codeDate ? formatCivilDate(heldScan.codeDate, locale) : "",
+                  active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
+                })}
+          </p>
+          {!heldScan?.mixed && !codeDateInRange ? (
+            <p>{t("inventory.work.sourceDate.outOfRange")}</p>
+          ) : null}
+        </div>
+      </FullScreenDialog>
     </StationScreen>
   );
 }
 
 const EMPTY_REPACK_STATE: InventoryRepackStateView = { phase: "awaiting-old-box", box: null };
+
+type HeldRepackScan = { raw: string; boxDate: string; codeDate: string; itemCount: number };
 
 function RepackInventoryWorkScreen({
   exec,
@@ -598,6 +753,11 @@ function RepackInventoryWorkScreen({
   const [recent, setRecent] = useState<RecentInventoryOperation[]>(gallery?.recent ?? []);
   const [writeFailed, setWriteFailed] = useState(gallery?.writeFailed ?? false);
   const [dateDialog, setDateDialog] = useState(gallery?.dateDialog ?? false);
+  // Read synchronously (not via effect) so the `old-box-selected` date
+  // reload below always sees the dialog state as of the render that is
+  // current when its promise resolves, not one render behind.
+  const dateDialogOpenRef = useRef(dateDialog);
+  dateDialogOpenRef.current = dateDialog;
   const [correctionsDialog, setCorrectionsDialog] = useState(gallery?.correctionsDialog ?? false);
   const [busy, setBusy] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -620,6 +780,12 @@ function RepackInventoryWorkScreen({
   const printInvocationBusy = useRef(false);
   const remoteReprintBusy = useRef(false);
   const [refreshRevision, setRefreshRevision] = useState(0);
+  const [heldScan, setHeldScan] = useState<HeldRepackScan | null>(gallery?.heldScan ?? null);
+  const heldRef = useRef(false);
+  const [dialogBusy, setDialogBusy] = useState(false);
+  const dialogBusyRef = useRef(false);
+  const queueRef = useRef<ScanQueue | null>(null);
+  const boxDateRef = useRef("");
 
   const refresh = useCallback(async () => {
     const [nextState, nextRecent, nextReprint] = await Promise.all([
@@ -638,6 +804,7 @@ function RepackInventoryWorkScreen({
       setRefreshRevision((current) => current + 1);
     }
   }, [deviceId, exec, inventory.inventoryId, inventory.snapshotId]);
+  boxDateRef.current = state.box?.productionDate ?? "";
 
   const {
     state: syncState,
@@ -706,8 +873,9 @@ function RepackInventoryWorkScreen({
 
   const queue = useMemo(
     () =>
-      createScanQueue<InventoryRepackScanResult>({
-        process: (raw) =>
+      createScanQueue<{ outcome: InventoryRepackScanResult; raw: string }>({
+        shouldProcess: () => !heldRef.current,
+        process: async (raw) =>
           recordInventoryRepackScan(exec, {
             inventoryId: inventory.inventoryId,
             snapshotId: inventory.snapshotId,
@@ -719,16 +887,58 @@ function RepackInventoryWorkScreen({
             raw,
             eventId: createEventId(),
             scannedAt: now(),
-          }),
-        onOutcome: (outcome) => {
+          }).then((outcome) => ({ outcome, raw })),
+        onOutcome: ({ outcome, raw }) => {
           if (!mounted.current) return;
+          setWriteFailed(false);
+          if (outcome.verdict === "source-date-mismatch" && outcome.sourceProductionDate) {
+            heldRef.current = true;
+            queueRef.current?.discardBufferedScans();
+            setResult(outcome);
+            setHeldScan({
+              raw,
+              boxDate: boxDateRef.current,
+              codeDate: outcome.sourceProductionDate,
+              // Authoritative as of this outcome's own DB read — unlike
+              // `state.box.itemCount`, which can still be lagging behind an
+              // accepted add or a just-opened box (see the back-to-back scan
+              // test), because `refresh()` is fired-and-forget from the
+              // previous outcome and may not have committed yet.
+              itemCount: outcome.itemCount,
+            });
+            return;
+          }
           if (outcome.verdict === "old-box-selected") {
             setPrintResult(null);
             setProvisionalPrintFailure(null);
+            // Task 4's seeding can move the terminal's active date to the old
+            // box's own content date; refresh() only reloads box/recent/print
+            // state, so the toolbar's productionDate/dateDraft must be synced
+            // from the persisted terminal state here or they keep showing the
+            // stale value — and a later "apply date" on the still-empty box
+            // would write that stale date back, un-doing the seed.
+            void loadInventoryProductionDate(exec, {
+              inventoryId: inventory.inventoryId,
+              snapshotId: inventory.snapshotId,
+              deviceId,
+            })
+              .then((date) => {
+                if (mounted.current && date !== null) {
+                  setProductionDate(date);
+                  // Scans (and therefore this reload) cannot be enqueued
+                  // while the date dialog is open, but this read can still
+                  // resolve after the operator has since opened it and
+                  // started typing; only the toolbar display is refreshed
+                  // here, never an in-progress, unsaved draft.
+                  if (!dateDialogOpenRef.current) setDateDraft(date);
+                }
+              })
+              .catch((error: unknown) => {
+                console.error("station: repack toolbar date refresh failed", error);
+              });
           }
           if (outcome.verdict === "capacity-closed") setPrintBusy(true);
           setResult(outcome);
-          setWriteFailed(false);
           nudge();
           void refresh();
         },
@@ -752,6 +962,10 @@ function RepackInventoryWorkScreen({
       refresh,
     ],
   );
+
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
 
   useEffect(() => {
     if (gallery || productionDate === null) return undefined;
@@ -789,7 +1003,8 @@ function RepackInventoryWorkScreen({
       dateDialog ||
       correctionsDialog ||
       unresolvedPrint ||
-      printBusy
+      printBusy ||
+      heldScan
     ) {
       return undefined;
     }
@@ -798,6 +1013,7 @@ function RepackInventoryWorkScreen({
     correctionsDialog,
     dateDialog,
     gallery,
+    heldScan,
     printBusy,
     productionDate,
     queue,
@@ -1093,36 +1309,24 @@ function RepackInventoryWorkScreen({
   const runCorrection = async (kind: "remove" | "clear" | "resolve-conflict") => {
     setBusy(true);
     try {
-      await new Promise<void>((resolve, reject) => {
-        if (
-          !queue.enqueueJob(async () => {
-            try {
-              const input = {
-                inventoryId: inventory.inventoryId,
-                snapshotId: inventory.snapshotId,
-                deviceId,
-                operatorId,
-                eventId: createEventId(),
-                changedAt: now(),
-              };
-              if (kind === "remove") {
-                await removeLastInventoryRepackItem(exec, input);
-              } else if (kind === "resolve-conflict") {
-                await resolveInvalidatedInventoryRepackBox(exec, {
-                  ...input,
-                  reason: "claim-lost",
-                });
-              } else {
-                await clearOpenInventoryRepackBox(exec, input);
-              }
-              resolve();
-            } catch (error) {
-              reject(error instanceof Error ? error : new Error("repack correction failed"));
-              throw error;
-            }
-          })
-        ) {
-          reject(new Error("inventory scan queue is closed"));
+      await runQueuedJob(queue, async () => {
+        const input = {
+          inventoryId: inventory.inventoryId,
+          snapshotId: inventory.snapshotId,
+          deviceId,
+          operatorId,
+          eventId: createEventId(),
+          changedAt: now(),
+        };
+        if (kind === "remove") {
+          await removeLastInventoryRepackItem(exec, input);
+        } else if (kind === "resolve-conflict") {
+          await resolveInvalidatedInventoryRepackBox(exec, {
+            ...input,
+            reason: "claim-lost",
+          });
+        } else {
+          await clearOpenInventoryRepackBox(exec, input);
         }
       });
       nudge();
@@ -1225,45 +1429,100 @@ function RepackInventoryWorkScreen({
       dateDraft > inventory.productionDateTo
     )
       return;
-    await new Promise<void>((resolve, reject) => {
-      if (
-        !queue.enqueueJob(async () => {
-          try {
-            if (state.box) {
-              await changeOpenInventoryRepackDate(exec, {
-                inventoryId: inventory.inventoryId,
-                snapshotId: inventory.snapshotId,
-                deviceId,
-                operatorId,
-                eventId: createEventId(),
-                changedAt: now(),
-                productionDate: dateDraft,
-              });
-              nudge();
-            } else {
-              await setInventoryProductionDate(exec, {
-                inventoryId: inventory.inventoryId,
-                snapshotId: inventory.snapshotId,
-                deviceId,
-                operatorId,
-                productionDate: dateDraft,
-                updatedAt: now(),
-              });
-            }
-            resolve();
-          } catch (error) {
-            reject(error instanceof Error ? error : new Error("repack date change failed"));
-            throw error;
-          }
-        })
-      ) {
-        reject(new Error("inventory scan queue is closed"));
+    await runQueuedJob(queue, async () => {
+      if (state.box) {
+        await changeOpenInventoryRepackDate(exec, {
+          inventoryId: inventory.inventoryId,
+          snapshotId: inventory.snapshotId,
+          deviceId,
+          operatorId,
+          eventId: createEventId(),
+          changedAt: now(),
+          productionDate: dateDraft,
+        });
+        // Redundant for the date itself: the `inventory_repack_apply_journal_v1`
+        // trigger already moves inventory_terminal_state.active_production_date
+        // on every change-date journal row. Kept because it also carries
+        // operator_id, which the trigger does not touch, and because the
+        // terminal-vs-box `dateMatches` check in inventory-repacking.ts is a
+        // load-bearing invariant that should be visible here rather than
+        // resting entirely on an invisible trigger. Mirrors `adoptHeldDate`.
+        await setInventoryProductionDate(exec, {
+          inventoryId: inventory.inventoryId,
+          snapshotId: inventory.snapshotId,
+          deviceId,
+          operatorId,
+          productionDate: dateDraft,
+          updatedAt: now(),
+        });
+        nudge();
+      } else {
+        await setInventoryProductionDate(exec, {
+          inventoryId: inventory.inventoryId,
+          snapshotId: inventory.snapshotId,
+          deviceId,
+          operatorId,
+          productionDate: dateDraft,
+          updatedAt: now(),
+        });
       }
     });
     await refresh();
     if (mounted.current) {
       setProductionDate(dateDraft);
       setDateDialog(false);
+    }
+  };
+
+  const releaseHeldScan = () => {
+    heldRef.current = false;
+    setHeldScan(null);
+  };
+
+  const adoptHeldDate = async () => {
+    // Reentrancy guard for a double-tap landing before React disables the
+    // button: checked synchronously, so a second invocation in the same tick
+    // as the first is a no-op regardless of render timing.
+    if (dialogBusyRef.current) return;
+    const held = heldScan;
+    if (!held || held.itemCount > 0) return;
+    dialogBusyRef.current = true;
+    setDialogBusy(true);
+    try {
+      // Not range-checked against [productionDateFrom, productionDateTo]
+      // here: `held.codeDate` only ever comes from an `expected` row's
+      // source-date mismatch, and inventory-mirror.ts's bundle validation
+      // (classifyInventorySnapshotRow against the manifest's range) already
+      // guarantees those are in range.
+      await runQueuedJob(queue, async () => {
+        await changeOpenInventoryRepackDate(exec, {
+          inventoryId: inventory.inventoryId,
+          snapshotId: inventory.snapshotId,
+          deviceId,
+          operatorId,
+          eventId: createEventId(),
+          changedAt: now(),
+          productionDate: held.codeDate,
+        });
+        await setInventoryProductionDate(exec, {
+          inventoryId: inventory.inventoryId,
+          snapshotId: inventory.snapshotId,
+          deviceId,
+          operatorId,
+          productionDate: held.codeDate,
+          updatedAt: now(),
+        });
+      });
+      nudge();
+      await refresh();
+      if (!mounted.current) return;
+      setProductionDate(held.codeDate);
+      setDateDraft(held.codeDate);
+      releaseHeldScan();
+      queue.enqueue(held.raw);
+    } finally {
+      dialogBusyRef.current = false;
+      if (mounted.current) setDialogBusy(false);
     }
   };
 
@@ -1424,6 +1683,7 @@ function RepackInventoryWorkScreen({
                 oldSelected: t("inventory.repack.oldSelected"),
                 accepted: t("inventory.repack.accepted"),
                 discrepancy: t("inventory.repack.discrepancy"),
+                sourceDateMismatch: t("inventory.repack.sourceDateMismatch"),
                 writeFailed: t("inventory.work.verdict.writeFailed"),
                 position: (position, filled) =>
                   t("inventory.repack.position", {
@@ -1550,6 +1810,70 @@ function RepackInventoryWorkScreen({
             onChange={(event) => setDateDraft(event.currentTarget.value)}
           />
           {state.box && state.box.itemCount > 0 ? <p>{t("inventory.repack.dateBlocked")}</p> : null}
+        </div>
+      </FullScreenDialog>
+      <FullScreenDialog
+        open={heldScan !== null}
+        title={t("inventory.repack.sourceDate.title")}
+        backLabel={t("inventory.work.sourceDate.skip")}
+        backPlacement="footer"
+        backDisabled={dialogBusy}
+        onClose={releaseHeldScan}
+        footer={
+          heldScan && heldScan.itemCount === 0 ? (
+            <Button
+              size="floor"
+              disabled={dialogBusy}
+              onClick={() =>
+                void adoptHeldDate().catch((error: unknown) => {
+                  console.error("station: repack date adoption failed", error);
+                  if (mounted.current) {
+                    setWriteFailed(true);
+                    releaseHeldScan();
+                  }
+                })
+              }
+            >
+              {t("inventory.work.sourceDate.apply", {
+                date: formatCivilDate(heldScan.codeDate, locale),
+              })}
+            </Button>
+          ) : null
+        }
+      >
+        <div className="inventory-date-dialog">
+          <p>
+            {t("inventory.repack.sourceDate.body", {
+              code: heldScan ? formatCivilDate(heldScan.codeDate, locale) : "",
+              // `boxDate` is not carried by the scan outcome (see
+              // `HeldRepackScan`), only mirrored from React state via
+              // `boxDateRef`, which can still be empty right after a
+              // back-to-back old-box + first-bottle scan; fall back instead
+              // of formatting an empty string, matching
+              // `RepackBoxInstrument`'s own guard on the same field.
+              box: heldScan
+                ? heldScan.boxDate
+                  ? formatCivilDate(heldScan.boxDate, locale)
+                  : "—"
+                : "",
+            })}
+          </p>
+          {heldScan && heldScan.itemCount > 0 ? (
+            <>
+              <p>{t("inventory.repack.sourceDateBlocked")}</p>
+              <Button
+                variant="secondary"
+                size="floor"
+                disabled={dialogBusy}
+                onClick={() => {
+                  releaseHeldScan();
+                  setCorrectionsDialog(true);
+                }}
+              >
+                {t("inventory.repack.corrections")}
+              </Button>
+            </>
+          ) : null}
         </div>
       </FullScreenDialog>
     </StationScreen>
