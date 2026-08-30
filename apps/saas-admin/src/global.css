@@ -1505,9 +1505,14 @@ textarea {
 }
 
 .invoice-documents__row span,
+.invoice-documents__row small,
 .invoice-documents__draft-note {
   color: var(--fg-3);
   font: var(--text-body-sm);
+}
+
+.invoice-documents__signature-option {
+  margin: 16px 20px;
 }
 
 .invoice-documents__actions {

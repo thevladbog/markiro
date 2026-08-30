@@ -5,6 +5,7 @@ import { Link, useSearchParams } from "react-router";
 import {
   Alert,
   Button,
+  Checkbox,
   Combobox,
   DatePicker,
   SectionHeader,
@@ -12,7 +13,12 @@ import {
   StatusChip,
   type ComboboxOption,
 } from "@markiro/ui";
-import { platformCommercialContracts, type BillingActCreateDto } from "@markiro/platform-contracts";
+import {
+  SIGNED_PRINT_SELLER_TAX_ID,
+  platformCommercialContracts,
+  type BillingActCreateDto,
+  type PrintDocumentVariant,
+} from "@markiro/platform-contracts";
 
 import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
@@ -27,6 +33,7 @@ interface IssueAttempt {
   create: BillingActCreateDto;
   issueKey: string;
   actId: string | null;
+  printVariant: PrintDocumentVariant;
 }
 
 export function CreateBillingActPage() {
@@ -49,6 +56,7 @@ function BillingActForm({ writable }: { writable: boolean }) {
   const observedRevocation = useRef(false);
   const attemptRef = useRef<IssueAttempt | null>(null);
   const [attempt, setAttempt] = useState<IssueAttempt | null>(null);
+  const [withSignatureSeal, setWithSignatureSeal] = useState(false);
 
   const invoices = useQuery({
     queryKey: ["platform", "invoices"],
@@ -135,7 +143,7 @@ function BillingActForm({ writable }: { writable: boolean }) {
         await invalidateActFamilies(next);
       }
       setProgress("generating");
-      return issueBillingAct(actId, next.issueKey);
+      return issueBillingAct(actId, next.issueKey, next.printVariant);
     },
     onSuccess: async (act) => {
       const current = attemptRef.current;
@@ -220,6 +228,7 @@ function BillingActForm({ writable }: { writable: boolean }) {
       create: parsed.data,
       issueKey: crypto.randomUUID(),
       actId: null,
+      printVariant: withSignatureSeal ? "signed" : "clean",
     };
     attemptRef.current = next;
     setAttempt(next);
@@ -281,6 +290,7 @@ function BillingActForm({ writable }: { writable: boolean }) {
             {...(invoiceId ? { value: invoiceId } : {})}
             onValueChange={(value) => {
               setInvoiceId(value);
+              setWithSignatureSeal(false);
               resetAttempt();
             }}
             placeholder={t("billingActs.source.placeholder")}
@@ -377,6 +387,27 @@ function BillingActForm({ writable }: { writable: boolean }) {
           </div>
         </section>
 
+        {detail.data ? (
+          <Checkbox
+            label={t("billingActs.print.signed")}
+            checked={withSignatureSeal}
+            onCheckedChange={(checked) => {
+              setWithSignatureSeal(checked);
+              resetAttempt();
+            }}
+            disabled={
+              frozen ||
+              sellerTaxId(detail.data.sellerSnapshot) !== SIGNED_PRINT_SELLER_TAX_ID ||
+              issue.isPending
+            }
+            hint={t(
+              sellerTaxId(detail.data.sellerSnapshot) === SIGNED_PRINT_SELLER_TAX_ID
+                ? "billingActs.print.signedHint"
+                : "billingActs.print.signedUnavailable",
+            )}
+          />
+        ) : null}
+
         {validationError ? <Alert tone="error">{validationError}</Alert> : null}
         {issue.error ? (
           <Alert tone="error">
@@ -422,6 +453,11 @@ function actNumberFromInvoice(invoiceNumber: string): string {
   return /^(?:MRK-)?INV-/i.test(invoiceNumber)
     ? invoiceNumber.replace(/^(?:MRK-)?INV-/i, "MRK-ACT-")
     : `MRK-ACT-${invoiceNumber}`;
+}
+
+function sellerTaxId(snapshot: unknown): string | null {
+  if (!snapshot || typeof snapshot !== "object" || !("taxId" in snapshot)) return null;
+  return typeof snapshot.taxId === "string" ? snapshot.taxId : null;
 }
 
 function formatMoney(value: string, locale: string): string {

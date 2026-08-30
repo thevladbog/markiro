@@ -356,7 +356,14 @@
       "cancel": "Cancel",
       "renderError": "Could not generate the print forms. Please try again.",
       "downloadError": "Could not get the print-form link. Please try again.",
-      "popupBlocked": "The browser blocked the print form. Allow pop-ups and try again."
+      "popupBlocked": "The browser blocked the print form. Allow pop-ups and try again.",
+      "signed": "Add signature and seal",
+      "signedHint": "The supplier's authorized signature and seal will be added to the print form.",
+      "signedUnavailable": "Signature and seal are available only for the configured seller.",
+      "variant": {
+        "clean": "Clean form",
+        "signed": "Signed and sealed"
+      }
     },
     "statuses": {
       "draft": "Draft",
@@ -525,6 +532,7 @@
       "title": "Act",
       "description": "Status and links for the closing document.",
       "status": "Status",
+      "printVariant": "Print form",
       "openRequest": "Open request",
       "openTenant": "Open tenant",
       "openInvoice": "Open invoice",
@@ -561,6 +569,15 @@
     "period": {
       "title": "Service period",
       "hint": "The period must end in the past"
+    },
+    "print": {
+      "signed": "Add signature and seal",
+      "signedHint": "The contractor's signature and seal will be added to the PDF; the customer field remains blank.",
+      "signedUnavailable": "Signature and seal are available only for the configured contractor.",
+      "variant": {
+        "clean": "Clean form",
+        "signed": "Signed and sealed"
+      }
     },
     "fields": {
       "number": "Act number",

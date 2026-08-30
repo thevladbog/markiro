@@ -1602,6 +1602,35 @@ describe("platform commercial contracts", () => {
     });
   });
 
+  it("defaults print generation to a clean form and accepts an explicit signed variant", () => {
+    const idempotencyKey = "83111111-1111-4111-8111-111111111119";
+    const invoiceIssueBody = Reflect.get(platformCommercialContracts.invoices.issue, "body") as
+      | { parse(input: unknown): unknown; safeParse(input: unknown): { success: boolean } }
+      | undefined;
+    const invoiceRenderBody = Reflect.get(
+      platformCommercialContracts.invoices.documents.render,
+      "body",
+    ) as
+      | { parse(input: unknown): unknown; safeParse(input: unknown): { success: boolean } }
+      | undefined;
+
+    expect(invoiceIssueBody?.parse({})).toEqual({ printVariant: "clean" });
+    expect(invoiceRenderBody?.parse({ printVariant: "signed" })).toEqual({
+      printVariant: "signed",
+    });
+    expect(platformCommercialContracts.billingActs.issue.body.parse({ idempotencyKey })).toEqual({
+      idempotencyKey,
+      printVariant: "clean",
+    });
+    expect(
+      platformCommercialContracts.billingActs.issue.body.parse({
+        idempotencyKey,
+        printVariant: "signed",
+      }),
+    ).toEqual({ idempotencyKey, printVariant: "signed" });
+    expect(invoiceIssueBody?.safeParse({ printVariant: "facsimile" }).success).toBe(false);
+  });
+
   it("parses exact platform request events and durable act document metadata", () => {
     const requestId = "85111111-1111-4111-8111-111111111119";
     const event = platformCommercialContracts.billingRequests.comment.response.parse({

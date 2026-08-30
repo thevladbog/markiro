@@ -221,12 +221,14 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/invoices/{id}/issue",
     "201",
     platformCommercialContracts.invoices.issue.response,
+    { body: platformCommercialContracts.invoices.issue.body },
   ),
   route(
     "post",
     "/platform/invoices/{id}/document",
     "201",
     platformCommercialContracts.invoices.document.response,
+    { body: platformCommercialContracts.invoices.document.body },
   ),
   route(
     "get",
@@ -239,6 +241,7 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/invoices/{id}/documents",
     "201",
     platformCommercialContracts.invoices.documents.render.response,
+    { body: platformCommercialContracts.invoices.documents.render.body },
   ),
   route(
     "get",

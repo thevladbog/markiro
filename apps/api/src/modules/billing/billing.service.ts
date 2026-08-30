@@ -37,6 +37,7 @@ import {
   beginPlatformBillingMutation,
   commitPlatformBillingMutation,
 } from "../platform-billing-idempotency";
+import { storedPrintVariant } from "./print-document-layout";
 
 const cents = (value: string): bigint => {
   const [whole, fraction = "00"] = value.split(".");
@@ -343,6 +344,7 @@ export class BillingService {
             id: schema.invoiceDocuments.id,
             revision: schema.invoiceDocuments.revision,
             format: schema.invoiceDocuments.format,
+            printVariant: schema.invoiceDocuments.printVariant,
             status: schema.invoiceDocuments.status,
             contentType: schema.invoiceDocuments.contentType,
             byteSize: schema.invoiceDocuments.byteSize,
@@ -400,7 +402,10 @@ export class BillingService {
         return {
           ...invoice,
           lines,
-          documents,
+          documents: documents.map((document) => ({
+            ...document,
+            printVariant: storedPrintVariant(document.printVariant),
+          })),
           payments,
           paymentSummary:
             invoice.status === "draft" || invoice.status === "cancelled"

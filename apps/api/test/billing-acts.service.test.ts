@@ -379,6 +379,7 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
           status: "issued",
           number: act.number,
           documentId: issued.document!.id,
+          printVariant: "clean",
           sha256: issued.document!.sha256,
           byteSize: file.buffer.byteLength,
         },
@@ -397,7 +398,7 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
         number: `INV-ACT-${randomUUID()}`,
         status: "issued",
         issueDate: fixedNow,
-        sellerSnapshot: { legalName: "ООО Маркиро", taxId: "9700000000" },
+        sellerSnapshot: { legalName: "ИП Богатырев Владислав Сергеевич", taxId: "234190622844" },
         buyerSnapshot: { legalName: "ООО Фабрика", taxId: "7700000000" },
         subtotal: "100.00",
         vatTotal: "0.00",
@@ -432,9 +433,16 @@ describe.skipIf(!databaseUrl)("billing acts on isolated Postgres", () => {
       idempotencyKey: randomUUID(),
     });
 
-    const issued = await acts.issueGenerated(actor, act.id, { idempotencyKey: randomUUID() });
+    const issued = await acts.issueGenerated(actor, act.id, {
+      idempotencyKey: randomUUID(),
+      printVariant: "signed",
+    });
 
-    expect(issued).toMatchObject({ status: "issued", invoiceId: invoice!.id });
+    expect(issued).toMatchObject({
+      status: "issued",
+      invoiceId: invoice!.id,
+      document: { printVariant: "signed" },
+    });
     const [, body, contentType] = storage.putVerified.mock.calls.at(-1)!;
     expect(contentType).toBe("application/pdf");
     expect(body.subarray(0, 5).toString()).toBe("%PDF-");

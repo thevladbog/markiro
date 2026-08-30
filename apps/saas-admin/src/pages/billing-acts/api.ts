@@ -2,6 +2,7 @@ import {
   platformCommercialContracts,
   type BillingAct,
   type BillingActCreateDto,
+  type PrintDocumentVariant,
 } from "@markiro/platform-contracts";
 
 import { platformApiFetch } from "../../api/client.js";
@@ -28,9 +29,16 @@ export function listBillingActs() {
   });
 }
 
-export function issueBillingAct(id: string, idempotencyKey: string): Promise<BillingAct> {
+export function issueBillingAct(
+  id: string,
+  idempotencyKey: string,
+  printVariant: PrintDocumentVariant = "clean",
+): Promise<BillingAct> {
   const actId = platformCommercialContracts.billingActs.issue.params.parse(id);
-  const body = platformCommercialContracts.billingActs.issue.body.parse({ idempotencyKey });
+  const body = platformCommercialContracts.billingActs.issue.body.parse({
+    idempotencyKey,
+    printVariant,
+  });
   return platformApiFetch(`/billing/acts/${actId}/issue`, {
     responseSchema: platformCommercialContracts.billingActs.issue.response,
     method: "POST",

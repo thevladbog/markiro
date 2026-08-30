@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router";
-import { Alert, Button, ConfirmDialog, SectionHeader, StatusChip } from "@markiro/ui";
+import { Alert, Button, Checkbox, ConfirmDialog, SectionHeader, StatusChip } from "@markiro/ui";
+import { SIGNED_PRINT_SELLER_TAX_ID } from "@markiro/platform-contracts";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import {
   applyInvoice,
@@ -43,6 +44,11 @@ function date(value: string | null): string {
     : "—";
 }
 
+function sellerTaxId(snapshot: unknown): string | null {
+  if (!snapshot || typeof snapshot !== "object" || !("taxId" in snapshot)) return null;
+  return typeof snapshot.taxId === "string" ? snapshot.taxId : null;
+}
+
 export function InvoiceDetailPage() {
   const { t } = useTranslation();
   const { invoiceId = "" } = useParams();
@@ -65,6 +71,7 @@ export function InvoiceDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [downloadBlocked, setDownloadBlocked] = useState(false);
   const [documentsNow, setDocumentsNow] = useState(() => Date.now());
+  const [withSignatureSeal, setWithSignatureSeal] = useState(false);
 
   const refresh = async () => {
     await Promise.all([
@@ -84,7 +91,11 @@ export function InvoiceDetailPage() {
     },
     onSuccess: refresh,
   });
-  const issue = useMutation({ mutationFn: () => issueInvoice(invoiceId), onSuccess: refresh });
+  const printVariant = withSignatureSeal ? "signed" : "clean";
+  const issue = useMutation({
+    mutationFn: () => issueInvoice(invoiceId, printVariant),
+    onSuccess: refresh,
+  });
   const withdraw = useMutation({
     mutationFn: () => cancelInvoice(invoiceId),
     onSuccess: async () => {
@@ -100,7 +111,7 @@ export function InvoiceDetailPage() {
     },
   });
   const document = useMutation({
-    mutationFn: () => renderInvoice(invoiceId),
+    mutationFn: () => renderInvoice(invoiceId, printVariant),
     onSuccess: async () => {
       await refresh();
       setConfirmDocumentRender(false);
@@ -180,6 +191,7 @@ export function InvoiceDetailPage() {
     );
   }
   const invoice = detail.data;
+  const signedPrintAllowed = sellerTaxId(invoice.sellerSnapshot) === SIGNED_PRINT_SELLER_TAX_ID;
   const state = flowState(invoice);
   const manualDecisionMissing = pendingLines.some(
     (line) =>
@@ -379,6 +391,9 @@ export function InvoiceDetailPage() {
                                     format: format.toUpperCase(),
                                   })}
                           </span>
+                          {item ? (
+                            <small>{t(`billing.documents.variant.${item.printVariant}`)}</small>
+                          ) : null}
                         </div>
                         {item?.status === "ready" ? (
                           <Button
@@ -407,6 +422,20 @@ export function InvoiceDetailPage() {
               {t("billing.documents.retry")}
             </Button>
           </div>
+        ) : null}
+        {canWrite ? (
+          <Checkbox
+            className="invoice-documents__signature-option"
+            label={t("billing.documents.signed")}
+            checked={withSignatureSeal}
+            onCheckedChange={setWithSignatureSeal}
+            disabled={!signedPrintAllowed || issue.isPending || document.isPending}
+            hint={t(
+              signedPrintAllowed
+                ? "billing.documents.signedHint"
+                : "billing.documents.signedUnavailable",
+            )}
+          />
         ) : null}
       </section>
 

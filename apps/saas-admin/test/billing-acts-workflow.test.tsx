@@ -22,7 +22,7 @@ const invoice = {
   issueDate: NOW,
   dueDate: "2026-08-28T10:00:00.000Z",
   currency: "RUB",
-  sellerSnapshot: { legalName: "ООО Маркиро" },
+  sellerSnapshot: { legalName: "ИП Богатырёв Владислав Сергеевич", taxId: "234190622844" },
   buyerSnapshot: { legalName: "ООО Фабрика" },
   sellerBankAccountSnapshot: null,
   buyerBankAccountSnapshot: null,
@@ -222,6 +222,7 @@ describe("generated billing acts", () => {
 
     expect(screen.getByLabelText("Начало периода").textContent).toContain("июля 2026");
     expect(screen.getByLabelText("Конец периода").textContent).toContain("июля 2026");
+    await user.click(screen.getByRole("checkbox", { name: "Добавить подпись и печать" }));
     await user.click(screen.getByRole("button", { name: "Выпустить акт" }));
 
     expect(await screen.findByText("Акт выпущен и PDF сформирован")).toBeDefined();
@@ -240,6 +241,7 @@ describe("generated billing acts", () => {
     expect(issue?.init?.body).not.toBeInstanceOf(FormData);
     expect(JSON.parse(String(issue?.init?.body))).toMatchObject({
       idempotencyKey: expect.stringMatching(/[0-9a-f-]{36}/),
+      printVariant: "signed",
     });
     await waitFor(() =>
       expect(requests.filter(({ url }) => url.endsWith("/issue"))).toHaveLength(1),

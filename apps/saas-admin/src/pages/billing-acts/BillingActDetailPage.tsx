@@ -82,6 +82,12 @@ export function BillingActDetailPage() {
           <dt>{t("billingActs.fields.periodEnd")}</dt>
           <dd>{act.periodEnd}</dd>
         </div>
+        {act.document ? (
+          <div>
+            <dt>{t("billingActs.detail.printVariant")}</dt>
+            <dd>{t(`billingActs.print.variant.${act.document.printVariant}`)}</dd>
+          </div>
+        ) : null}
         <div>
           <dt>{t("billingActs.fields.tenant")}</dt>
           <dd>

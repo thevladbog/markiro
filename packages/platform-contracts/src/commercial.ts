@@ -581,10 +581,17 @@ export const offerDetailSchema = z.discriminatedUnion("status", [
   expiredOfferDetailSchema,
 ]);
 
+export const SIGNED_PRINT_SELLER_TAX_ID = "234190622844";
+export const printDocumentVariantSchema = z.enum(["clean", "signed"]);
+const printDocumentGenerationSchema = z
+  .object({ printVariant: printDocumentVariantSchema.default("clean") })
+  .strict();
+
 const documentCommonFields = {
   id: platformUuidSchema,
   revision: positiveIntegerSchema,
   format: z.enum(["html", "pdf"]),
+  printVariant: printDocumentVariantSchema.default("clean"),
 };
 const pendingDocumentFields = {
   ...documentCommonFields,
@@ -940,13 +947,16 @@ export const billingActCreateSchema = z
     path: ["periodEnd"],
     message: "Act period end must be on or after period start",
   });
-export const billingActIssueSchema = billingActIdempotencySchema;
+export const billingActIssueSchema = billingActIdempotencySchema
+  .extend({ printVariant: printDocumentVariantSchema.default("clean") })
+  .strict();
 export const billingActCancelSchema = billingActIdempotencySchema;
 export const billingActDocumentSchema = z.discriminatedUnion("state", [
   z
     .object({
       id: platformUuidSchema,
       revision: positiveIntegerSchema,
+      printVariant: printDocumentVariantSchema.default("clean"),
       state: z.literal("pending"),
       contentType: z.literal("application/pdf"),
       byteSize: positiveIntegerSchema.max(5 * 1024 * 1024),
@@ -961,6 +971,7 @@ export const billingActDocumentSchema = z.discriminatedUnion("state", [
     .object({
       id: platformUuidSchema,
       revision: positiveIntegerSchema,
+      printVariant: printDocumentVariantSchema.default("clean"),
       state: z.literal("ready"),
       contentType: z.literal("application/pdf"),
       byteSize: positiveIntegerSchema.max(5 * 1024 * 1024),
@@ -975,6 +986,7 @@ export const billingActDocumentSchema = z.discriminatedUnion("state", [
     .object({
       id: platformUuidSchema,
       revision: positiveIntegerSchema,
+      printVariant: printDocumentVariantSchema.default("clean"),
       state: z.enum(["failed", "cleanup_required"]),
       contentType: z.literal("application/pdf"),
       byteSize: positiveIntegerSchema.max(5 * 1024 * 1024),
@@ -1782,8 +1794,16 @@ export const platformCommercialContracts = {
     list: { response: z.object({ items: z.array(invoiceListItemSchema) }).strict() },
     detail: { params: invoiceIdSchema, response: invoiceDetailSchema },
     create: { body: invoiceCreateSchema, response: draftInvoiceCreateResponseSchema },
-    issue: { params: invoiceIdSchema, response: issuedInvoiceWithDocumentsSchema },
-    document: { params: invoiceIdSchema, response: commercialDocumentRenderResultSchema },
+    issue: {
+      params: invoiceIdSchema,
+      body: printDocumentGenerationSchema,
+      response: issuedInvoiceWithDocumentsSchema,
+    },
+    document: {
+      params: invoiceIdSchema,
+      body: printDocumentGenerationSchema,
+      response: commercialDocumentRenderResultSchema,
+    },
     documentUrl: { params: invoiceIdSchema, response: commercialDocumentDownloadSchema },
     apply: {
       params: invoiceIdSchema,
@@ -1794,7 +1814,11 @@ export const platformCommercialContracts = {
     delete: { params: invoiceIdSchema, response: invoiceDeleteResultSchema },
     documents: {
       list: { params: invoiceIdSchema, response: z.array(commercialDocumentListItemSchema) },
-      render: { params: invoiceIdSchema, response: commercialDocumentRenderResultSchema },
+      render: {
+        params: invoiceIdSchema,
+        body: printDocumentGenerationSchema,
+        response: commercialDocumentRenderResultSchema,
+      },
       download: {
         params: z.object({ invoiceId: invoiceIdSchema, documentId: documentIdSchema }).strict(),
         response: commercialDocumentDownloadSchema,
@@ -1898,6 +1922,7 @@ export type OfferPaymentResult = z.output<typeof offerPaymentResultSchema>;
 export type OfferPaymentResultSource = z.input<typeof offerPaymentResultSchema>;
 export type OfferReviseDto = z.output<typeof offerReviseSchema>;
 export type CommercialDocument = z.output<typeof commercialDocumentSchema>;
+export type PrintDocumentVariant = z.output<typeof printDocumentVariantSchema>;
 export type CommercialDocumentSource = z.input<typeof commercialDocumentSchema>;
 export type CommercialDocumentServiceSource = z.input<typeof commercialDocumentServiceSchema>;
 export type CommercialDocumentListItem = z.output<typeof commercialDocumentListItemSchema>;
@@ -1965,6 +1990,7 @@ export type PlatformBillingRequest = z.output<typeof platformBillingRequestSchem
 export type PlatformBillingRequestEvent = z.output<typeof platformBillingRequestEventSchema>;
 export type PlatformBillingRequestLink = z.output<typeof platformBillingRequestLinkResponseSchema>;
 export type BillingActCreateDto = z.output<typeof billingActCreateSchema>;
+export type BillingActIssueInput = z.input<typeof billingActIssueSchema>;
 export type BillingActIssueDto = z.output<typeof billingActIssueSchema>;
 export type BillingActCancelDto = z.output<typeof billingActCancelSchema>;
 export type BillingAct = z.output<typeof billingActSchema>;

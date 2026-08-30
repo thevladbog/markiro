@@ -67,6 +67,14 @@ describe("print document HTML renderer", () => {
     }
   });
 
+  it("ships the private server-side signature and legal seal assets", () => {
+    for (const file of ["vb-signature-ink.png", "vb-seal-legal-logo-duo-mci.png"]) {
+      const path = join(process.cwd(), "src/modules/billing/assets", file);
+      expect(existsSync(path)).toBe(true);
+      expect(readFileSync(path).subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+    }
+  });
+
   it("renders a deterministic Cyrillic legal invoice", () => {
     expect(
       renderPrintHtml({
@@ -101,6 +109,28 @@ describe("print document HTML renderer", () => {
     expect(html).toContain(">MRK-INV-000184</span>");
     expect(count(screenPage, "Сформировано системой Markiro")).toBe(1);
     expect(count(html, 'aria-hidden="true"')).toBe(2);
+  });
+
+  it("renders an authorized seller signature and seal only for the signed variant", () => {
+    const authorizedInvoice = {
+      ...baseInvoice,
+      seller: { ...baseInvoice.seller, taxId: "234190622844" },
+    };
+
+    const clean = renderPrintHtml(authorizedInvoice, { printVariant: "clean" });
+    const signed = renderPrintHtml(authorizedInvoice, { printVariant: "signed" });
+
+    expect(clean).not.toContain('class="authorized-signature"');
+    expect(clean).not.toContain('class="legal-seal"');
+    expect(signed).toContain('data-print-variant="signed"');
+    expect(signed).toContain('class="authorized-signature"');
+    expect(signed).toContain('class="legal-seal"');
+  });
+
+  it("rejects a signed form when the seller tax id does not match the legal seal", () => {
+    expect(() => renderPrintHtml(baseInvoice, { printVariant: "signed" })).toThrow(
+      "signed_print_seller_not_authorized",
+    );
   });
 
   it("renders the approved eight-module Markiro lockup in the print header", () => {
@@ -258,6 +288,20 @@ describe("print document HTML renderer", () => {
     });
     expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
     expect(pdf.byteLength).toBeLessThan(10 * 1024 * 1024);
+  });
+
+  it("renders distinct clean and signed PDF bytes for the authorized seller", async () => {
+    const authorizedInvoice = {
+      ...baseInvoice,
+      seller: { ...baseInvoice.seller, taxId: "234190622844" },
+    };
+
+    const clean = await renderPrintPdf(authorizedInvoice, { printVariant: "clean" });
+    const signed = await renderPrintPdf(authorizedInvoice, { printVariant: "signed" });
+
+    expect(clean.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(signed.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(signed.equals(clean)).toBe(false);
   });
 
   it("includes a line comment in the PDF output", async () => {

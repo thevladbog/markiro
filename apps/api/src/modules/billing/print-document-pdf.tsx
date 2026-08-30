@@ -27,10 +27,18 @@ import {
   paymentPurpose,
   paymentQrPayload,
   profileIdentity,
+  resolvePrintVariant,
+  type PrintRenderOptions,
 } from "./print-document-layout";
 import type { BillingProfileSnapshot, PrintDocumentModel, PrintLine } from "./print-document-model";
 
 const markiroLogo = readFileSync(join(__dirname, "assets/markiro-logo-on-light.svg"), "utf8");
+const authorizedSignature = `data:image/png;base64,${readFileSync(
+  join(__dirname, "assets/vb-signature-ink.png"),
+).toString("base64")}`;
+const legalSeal = `data:image/png;base64,${readFileSync(
+  join(__dirname, "assets/vb-seal-legal-logo-duo-mci.png"),
+).toString("base64")}`;
 
 Font.register({
   family: "IBM Plex Sans",
@@ -160,9 +168,26 @@ const styles = StyleSheet.create({
     fontWeight: 600,
   },
   signing: { flexDirection: "row", alignItems: "flex-end", gap: 36, marginTop: 14 },
-  signature: { flex: 1 },
+  signature: { flex: 1, position: "relative", minHeight: 88 },
   signatureLine: { marginTop: 23 },
+  signedSignatureLine: { marginTop: 53 },
   signatureHint: { fontSize: 6.5, color: colors.muted, marginTop: 3 },
+  authorizedSignature: {
+    position: "absolute",
+    left: 24,
+    bottom: 13,
+    width: 122,
+    height: 65,
+    objectFit: "contain",
+  },
+  legalSeal: {
+    position: "absolute",
+    left: 112,
+    bottom: -3,
+    width: 88,
+    height: 88,
+    objectFit: "contain",
+  },
   stamp: {
     width: 88,
     height: 88,
@@ -357,7 +382,25 @@ function LinesTable({ lines }: { lines: PrintLine[] }) {
   );
 }
 
-function Closing({ model }: { model: PrintDocumentModel }) {
+function Signature({ label, signed }: { label: string; signed: boolean }) {
+  return (
+    <View style={styles.signature}>
+      <Text style={styles.sectionLabel}>{label}</Text>
+      {signed ? (
+        <>
+          <Image style={styles.authorizedSignature} src={authorizedSignature} cache={false} />
+          <Image style={styles.legalSeal} src={legalSeal} cache={false} />
+        </>
+      ) : null}
+      <Text style={signed ? styles.signedSignatureLine : styles.signatureLine}>
+        ________________ / ____________________
+      </Text>
+      <Text style={styles.signatureHint}>подпись / расшифровка</Text>
+    </View>
+  );
+}
+
+function Closing({ model, signed }: { model: PrintDocumentModel; signed: boolean }) {
   return (
     <>
       <View style={styles.totals} wrap={false}>
@@ -398,20 +441,10 @@ function Closing({ model }: { model: PrintDocumentModel }) {
         </View>
       )}
       <View style={styles.signing} wrap={false}>
-        <View style={styles.signature}>
-          <Text style={styles.sectionLabel}>
-            {model.kind === "act" ? "ИСПОЛНИТЕЛЬ" : "ПОСТАВЩИК"}
-          </Text>
-          <Text style={styles.signatureLine}>________________ / ____________________</Text>
-          <Text style={styles.signatureHint}>подпись / расшифровка</Text>
-        </View>
+        <Signature label={model.kind === "act" ? "ИСПОЛНИТЕЛЬ" : "ПОСТАВЩИК"} signed={signed} />
         {model.kind === "act" ? (
-          <View style={styles.signature}>
-            <Text style={styles.sectionLabel}>ЗАКАЗЧИК</Text>
-            <Text style={styles.signatureLine}>________________ / ____________________</Text>
-            <Text style={styles.signatureHint}>подпись / расшифровка</Text>
-          </View>
-        ) : (
+          <Signature label="ЗАКАЗЧИК" signed={false} />
+        ) : signed ? null : (
           <View style={styles.stamp}>
             <Text style={styles.stampText}>МЕСТО ДЛЯ ПЕЧАТИ</Text>
           </View>
@@ -421,7 +454,11 @@ function Closing({ model }: { model: PrintDocumentModel }) {
   );
 }
 
-export async function renderPrintPdf(model: PrintDocumentModel): Promise<Buffer> {
+export async function renderPrintPdf(
+  model: PrintDocumentModel,
+  options: PrintRenderOptions = {},
+): Promise<Buffer> {
+  const printVariant = resolvePrintVariant(model, options);
   const logo = await svgDataUri(markiroLogo, 1120);
   const qrPayload = paymentQrPayload(model);
   const qr = qrPayload ? qrVector(renderQrSvg(qrPayload)) : null;
@@ -472,7 +509,7 @@ export async function renderPrintPdf(model: PrintDocumentModel): Promise<Buffer>
             <Text style={[styles.mono, styles.muted]}>{model.lines.length} поз.</Text>
           </View>
           <LinesTable lines={model.lines} />
-          <Closing model={model} />
+          <Closing model={model} signed={printVariant === "signed"} />
         </View>
         <Footer model={model} barcode={barcode} />
       </Page>

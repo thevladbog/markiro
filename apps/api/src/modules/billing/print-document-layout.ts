@@ -1,4 +1,28 @@
+import { SIGNED_PRINT_SELLER_TAX_ID, type PrintDocumentVariant } from "@markiro/platform-contracts";
 import type { BillingProfileSnapshot, PrintDocumentModel } from "./print-document-model";
+
+export interface PrintRenderOptions {
+  printVariant?: PrintDocumentVariant;
+}
+
+export function storedPrintVariant(value: string): PrintDocumentVariant {
+  if (value === "clean" || value === "signed") return value;
+  throw new Error("stored_print_variant_invalid");
+}
+
+export function resolvePrintVariant(
+  model: PrintDocumentModel,
+  options: PrintRenderOptions = {},
+): PrintDocumentVariant {
+  const printVariant = options.printVariant ?? "clean";
+  if (printVariant === "signed" && model.seller.taxId !== SIGNED_PRINT_SELLER_TAX_ID) {
+    throw new Error("signed_print_seller_not_authorized");
+  }
+  if (printVariant === "signed" && model.kind === "offer") {
+    throw new Error("signed_print_document_kind_not_supported");
+  }
+  return printVariant;
+}
 
 export function formatPrintDate(value: Date | null): string {
   return value
