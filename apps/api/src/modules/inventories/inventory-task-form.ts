@@ -162,7 +162,7 @@ export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string
     .hero { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
     h1 { margin: 0; font-size: 23pt; line-height: 1.08; letter-spacing: -.02em; }
     .subtitle { margin: 2.5mm 0 0; color: #4f4c47; font-size: 11pt; }
-    .status { min-width: 36mm; padding: 4mm 5mm; border: .25mm solid #b7dfc8; border-radius: 3mm; background: #e7f6ed; color: #126b39; font-size: 9pt; font-weight: 800; text-align: center; text-transform: uppercase; }
+    .status { min-width: 36mm; margin-top: 3mm; padding: 4mm 5mm; border: .25mm solid #b7dfc8; border-radius: 3mm; background: #e7f6ed; color: #126b39; font-size: 9pt; font-weight: 800; text-align: center; text-transform: uppercase; }
     .scan-zone { min-height: 44mm; border-left: .25mm solid #cbc7bf; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #fff; }
     .barcode { width: 32mm; height: 32mm; display: flex; align-items: center; justify-content: center; overflow: hidden; }
     .barcode svg { display: block; max-width: 100%; width: 100%; height: 100%; }
@@ -194,7 +194,7 @@ export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string
     .compact .task-passport { grid-template-columns: minmax(0, 1fr) 42mm; gap: 6mm; padding: 4mm 0; }
     .compact h1 { font-size: 19pt; }
     .compact .subtitle { margin-top: 1mm; max-width: 126mm; font-size: 8.5pt; line-height: 1.15; overflow-wrap: anywhere; }
-    .compact .status { padding: 3mm 4mm; }
+    .compact .status { margin-top: 2mm; padding: 3mm 4mm; }
     .compact .scan-zone { min-height: 38mm; }
     .compact .barcode { width: 28mm; height: 28mm; }
     .compact h2 { margin: 2.5mm 0 1.2mm; font-size: 10.5pt; }

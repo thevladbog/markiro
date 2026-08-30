@@ -64,6 +64,13 @@ describe("renderInventoryTaskFormHtml", () => {
     );
   });
 
+  it("separates the launch status from the task heading in both layouts", () => {
+    const html = renderInventoryTaskFormHtml(fixture());
+
+    expect(html).toMatch(/\.status\s*\{[^}]*margin-top:\s*3mm/s);
+    expect(html).toMatch(/\.compact \.status\s*\{[^}]*margin-top:\s*2mm/s);
+  });
+
   it("uses the remaining page area for handwritten operator comments on a dot grid", () => {
     const html = renderInventoryTaskFormHtml(fixture());
 
