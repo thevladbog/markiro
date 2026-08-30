@@ -29,6 +29,9 @@
     "empty": "No GOST certificate with a private key was found. Check that CryptoPro is installed and the token is plugged in.",
     "unavailable": "Could not read the certificate store.",
     "refresh": "Refresh list",
+    "validUntil": "Valid until {{at}}",
+    "inn": "INN: {{inn}}",
+    "thumbprint": "Thumbprint: {{thumbprint}}",
     "expiring": "The certificate expires {{at}}. Issue a new one, or token refresh will stop working.",
     "expired": "The certificate expired {{at}}. Signing is not possible."
   },

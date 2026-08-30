@@ -1,19 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CertificatePicker } from "../src/components/CertificatePicker.js";
 import type { CertificateSummary } from "../src/lib/bridge.js";
-
-// Radix's Select needs pointer-capture and scroll APIs jsdom does not
-// implement; without these the trigger never opens in a test environment.
-beforeAll(() => {
-  Object.defineProperties(HTMLElement.prototype, {
-    hasPointerCapture: { value: () => false },
-    setPointerCapture: { value: () => undefined },
-    releasePointerCapture: { value: () => undefined },
-    scrollIntoView: { value: () => undefined },
-  });
-});
 
 const usable: CertificateSummary = {
   thumbprint: "AB12",
@@ -50,16 +39,26 @@ describe("CertificatePicker", () => {
 
     render(<CertificatePicker selected={null} onSelected={vi.fn()} />);
 
-    const trigger = await screen.findByRole("combobox");
-    await user.click(trigger);
-    expect(screen.getByRole("option", { name: /ООО Ромашка/ })).toBeDefined();
-    expect(screen.queryByRole("option", { name: /Без закрытого ключа/ })).toBeNull();
-    await user.keyboard("{Escape}"); // close before the refresh re-renders the list
+    expect(await screen.findByRole("radio", { name: /ООО Ромашка/ })).toBeDefined();
+    expect(screen.queryByRole("radio", { name: /Без закрытого ключа/ })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /Обновить список|Refresh list/ }));
 
-    await user.click(trigger);
-    expect(screen.getByRole("option", { name: /ООО Ромашка/ })).toBeDefined();
-    expect(screen.queryByRole("option", { name: /Без закрытого ключа/ })).toBeNull();
+    expect(screen.getByRole("radio", { name: /ООО Ромашка/ })).toBeDefined();
+    expect(screen.queryByRole("radio", { name: /Без закрытого ключа/ })).toBeNull();
+  });
+
+  it("shows the certificate owner, INN, expiration date, and thumbprint without truncation", async () => {
+    const { bridge } = await import("../src/lib/bridge.js");
+    vi.mocked(bridge.listCertificates).mockResolvedValue([usable]);
+
+    render(<CertificatePicker selected="AB12" onSelected={vi.fn()} />);
+
+    expect(
+      ((await screen.findByRole("radio", { name: /ООО Ромашка/ })) as HTMLInputElement).checked,
+    ).toBe(true);
+    expect(screen.getByText(/ИНН: 7712345678|INN: 7712345678/)).toBeDefined();
+    expect(screen.getByText(/Действует до.*2030|Valid until.*2030/)).toBeDefined();
+    expect(screen.getByText(/Отпечаток: AB12|Thumbprint: AB12/)).toBeDefined();
   });
 });
