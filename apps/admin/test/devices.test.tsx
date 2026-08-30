@@ -26,27 +26,29 @@ function activeExpiry(): string {
   return new Date(Date.now() + 60_000).toISOString();
 }
 
-function renderPage() {
+function renderPage(
+  items: readonly Record<string, unknown>[] = [
+    {
+      id: "kiosk-1",
+      type: "kiosk",
+      name: "Entrance kiosk",
+      place: { id: null, name: "Lobby" },
+      status: "online",
+      lastSeenAt: null,
+      paired: true,
+    },
+  ],
+) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.startsWith("/api/devices"))
         return response({
-          items: [
-            {
-              id: "kiosk-1",
-              type: "kiosk",
-              name: "Entrance kiosk",
-              place: { id: null, name: "Lobby" },
-              status: "online",
-              lastSeenAt: null,
-              paired: true,
-            },
-          ],
+          items,
           page: 1,
           pageSize: 8,
-          total: 1,
+          total: items.length,
         });
       if (url === "/api/lines") return response({ items: [] });
       throw new Error(`Unexpected request: ${url}`);
@@ -86,6 +88,25 @@ it("keeps kiosk settings reachable as a button-styled action in the unified devi
   const settings = screen.getByRole("link", { name: "Настройки киоска" });
   expect(settings.className).toContain("mk-device-actions__kiosk-settings");
   expect(settings.getAttribute("href")).toBe("/devices/kiosks/kiosk-1/edit");
+});
+
+it("does not offer another revoke for an already revoked station", async () => {
+  renderPage([
+    {
+      id: "station-revoked",
+      type: "station",
+      name: "Revoked station",
+      place: { id: "line-1", name: "Line 1" },
+      status: "revoked",
+      lastSeenAt: "2026-08-29T10:00:00.000Z",
+      paired: false,
+    },
+  ]);
+
+  await screen.findByText("Revoked station");
+
+  expect(screen.queryByRole("button", { name: "Отозвать" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Выдать новый код" })).toBeDefined();
 });
 
 it("does not leave auth cleanup tied to the jsdom window", async () => {
