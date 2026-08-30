@@ -24,6 +24,42 @@ function screenshotPath(name: string): string {
   return join(SCREENSHOT_DIR, `${name}.png`);
 }
 
+/**
+ * MKR-INS-07 (printed inventory-closing instruction) screenshot targets --
+ * the post-launch half of the same lifecycle: same "Марка Ко" organisation,
+ * same ИНВ-000042 inventory as MKR-INS-06, now running/closed/completed
+ * instead of preparing.
+ */
+const SCREENSHOT_DIR_07 = join(
+  import.meta.dirname,
+  "../../../packages/legal-documents/assets/instructions/mkr-ins-07",
+);
+function screenshotPath07(name: string): string {
+  return join(SCREENSHOT_DIR_07, `${name}.png`);
+}
+
+/**
+ * `AppShell` pins the shell to `height: 100vh; overflow: hidden` and scrolls
+ * internally inside `<main>` (see the `exports` screenshot's comment further
+ * down for the full explanation), so a screenshot at a fixed 1280x800
+ * viewport silently crops anything below the fold instead of failing the
+ * test. Several MKR-INS-07 screens stack more content than 800px allows
+ * (the live progress page; the documents card once catalog/history/
+ * completion sections all render) -- this reuses the exports screenshot's
+ * technique instead of inventing another one: grow the viewport by `main`'s
+ * actual overflow, then capture. A no-op when the page already fits.
+ */
+async function screenshotFullMain(page: Page, path: string): Promise<void> {
+  const overflow = await page
+    .locator("main")
+    .evaluate((element) => element.scrollHeight - element.clientHeight);
+  if (overflow > 0) {
+    const viewport = page.viewportSize() ?? { width: 1280, height: 800 };
+    await page.setViewportSize({ width: viewport.width, height: viewport.height + overflow });
+  }
+  await page.screenshot({ path, scale: "css", fullPage: true });
+}
+
 const PROFILE = { firstName: "Игорь", middleName: null, lastName: "Волков", hasAvatar: false };
 /**
  * `RequireCapability` (apps/admin/src/access/context.tsx) reads capabilities
@@ -188,7 +224,421 @@ function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-type Scenario = "list" | "create" | "exports" | "exportsBlocked" | "snapshot" | "terminals";
+/**
+ * MKR-INS-07 fixtures. Same organisation/inventory as above, now past
+ * launch: `InventoryDetailPage` (InventoryDetailPage.tsx) hands off to
+ * `InventoryLivePage` for any of `running`/`closed`/`completed`, which reads
+ * its own status from `GET /inventories/:id/progress`
+ * (`useInventoryProgress`) rather than from the outer detail fetch -- both
+ * are mocked to agree below. `InventoryLivePage` unconditionally mounts
+ * `InventoryDocuments`, so every post-launch scenario (including the ones
+ * that never touch documents) must also answer `/inventory-document-formats`
+ * and `/inventories/:id/document-runs`.
+ */
+const DEVICE_ID_1 = "80000000-0000-4000-8000-000000000001";
+const DEVICE_ID_2 = "80000000-0000-4000-8000-000000000002";
+const DEVICE_ID_3 = "80000000-0000-4000-8000-000000000003";
+const BOX_ID_1 = "90000000-0000-4000-8000-000000000001";
+const BOX_ID_2 = "90000000-0000-4000-8000-000000000002";
+const EVENT_ID_1 = "a0000000-0000-4000-8000-000000000001";
+const EVENT_ID_2 = "a0000000-0000-4000-8000-000000000002";
+const EVENT_ID_3 = "a0000000-0000-4000-8000-000000000003";
+const CODE_RESULT_ID_1 = "b0000000-0000-4000-8000-000000000001";
+const CODE_RESULT_ID_2 = "b0000000-0000-4000-8000-000000000002";
+const LATE_EVENT_ID_1 = "c0000000-0000-4000-8000-000000000001";
+const LATE_EVENT_ID_2 = "c0000000-0000-4000-8000-000000000002";
+const DOC_RUN_PROCESSING_ID = "d0000000-0000-4000-8000-000000000001";
+const DOC_RUN_READY_HISTORY_ID = "d0000000-0000-4000-8000-000000000002";
+const DOC_RUN_READY_COMPLETE_ID = "d0000000-0000-4000-8000-000000000003";
+const ARTIFACT_HISTORY_ID = "e0000000-0000-4000-8000-000000000001";
+const ARTIFACT_COMPLETE_ID = "e0000000-0000-4000-8000-000000000002";
+const CLOSE_BLOCKER_PARTICIPANT_ID = "f0000000-0000-4000-8000-000000000001";
+const CLOSE_BLOCKER_BOX_ID = "f0000000-0000-4000-8000-000000000002";
+
+/** Shared by every post-launch detail fetch: a fixed snapshot always exists once an inventory is running (see the `terminals` scenario's comment above -- "ready" is the only status that carries a freshly fixed snapshot, and running/closed/completed all come after it). */
+function postLaunchInventoryDetail(status: "running" | "closed" | "completed") {
+  return {
+    ...inventoryRow,
+    status,
+    activeSnapshotId: SNAPSHOT_ID,
+    activeSnapshot,
+    blockers: EMPTY_BLOCKERS,
+    imports: readyImports,
+    resultRevision: 1,
+  };
+}
+
+const RUNNING_DETAIL = postLaunchInventoryDetail("running");
+const CLOSED_DETAIL = postLaunchInventoryDetail("closed");
+
+/**
+ * Two real formats from `INVENTORY_DOCUMENT_FORMATS`
+ * (packages/domain/src/inventory/documents.ts) that don't require an
+ * organisation ИНН, keeping the mock catalog free of that extra gate.
+ */
+const DOCUMENT_FORMATS = [
+  {
+    id: "inventory_csv_current_stock",
+    version: 1,
+    label: "[CSV] Коды на учёт",
+    extension: "csv",
+    mimeType: "text/csv; charset=utf-8",
+    requiredSourceCategories: ["verified", "protected"],
+    supportsParts: false,
+    availability: "available",
+  },
+  {
+    id: "inventory_txt_write_off",
+    version: 1,
+    label: "[TXT] Коды к списанию",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    requiredSourceCategories: ["writeOffCandidates", "protected"],
+    supportsParts: false,
+    availability: "available",
+  },
+];
+const DOCUMENT_FORMATS_RESPONSE = { items: DOCUMENT_FORMATS };
+const NO_DOCUMENT_RUNS = { items: [] };
+
+/**
+ * Progress payload for the `running` screens (live progress, corrections,
+ * the closing modal). `expectedCount` matches MKR-INS-06's
+ * `activeSnapshot.counts.expected` (116) for narrative continuity.
+ */
+const RUNNING_PROGRESS = {
+  inventoryId: INVENTORY_ID,
+  snapshotId: SNAPSHOT_ID,
+  status: "running",
+  resultRevision: 1,
+  expectedCount: 116,
+  verifiedCount: 82,
+  missingCount: 10,
+  protectedCount: 2,
+  protectedFoundCount: 2,
+  ineligibleCount: 1,
+  unknownCount: 3,
+  dateMismatchCount: 0,
+  voidedCount: 0,
+  oldBoxCount: 1,
+  newBoxCount: 1,
+  invalidatedBoxCount: 0,
+  pendingEventCount: 3,
+  openBoxCount: 1,
+  boxTotal: 2,
+  boxesTruncated: false,
+  participants: [
+    {
+      deviceId: DEVICE_ID_1,
+      terminalName: "Терминал 1",
+      operatorName: "Мария Кузнецова",
+      joinedAt: "2026-08-29T08:00:00.000Z",
+      leftAt: null,
+      heartbeatAt: "2026-08-29T09:58:00.000Z",
+      state: "active",
+      pendingEventCount: 0,
+      openBoxCount: 1,
+    },
+    {
+      deviceId: DEVICE_ID_2,
+      terminalName: "Терминал 2",
+      operatorName: "Пётр Смирнов",
+      joinedAt: "2026-08-29T08:05:00.000Z",
+      leftAt: null,
+      heartbeatAt: "2026-08-29T09:40:00.000Z",
+      state: "stale",
+      pendingEventCount: 3,
+      openBoxCount: 0,
+    },
+  ],
+  boxes: [
+    {
+      id: BOX_ID_1,
+      sscc: "123456789012345670",
+      terminalId: DEVICE_ID_1,
+      terminalName: "Терминал 1",
+      productionDate: "2026-08-15",
+      state: "open",
+      printState: "printed",
+      itemCount: 42,
+    },
+    {
+      id: BOX_ID_2,
+      sscc: "223456789012345670",
+      terminalId: DEVICE_ID_2,
+      terminalName: "Терминал 2",
+      productionDate: "2026-08-16",
+      state: "closed",
+      printState: "printed",
+      itemCount: 60,
+    },
+  ],
+  recentEvents: [
+    {
+      eventId: EVENT_ID_1,
+      codeResultId: CODE_RESULT_ID_1,
+      kind: "item",
+      displayIdentity: "04600000000006 · 000123",
+      authoritativeVerdict: "expected",
+      terminalId: DEVICE_ID_1,
+      terminalName: "Терминал 1",
+      scannedAt: "2026-08-29T09:55:00.000Z",
+      classification: "expected",
+      observedProductionDate: "2026-08-15",
+    },
+    {
+      eventId: EVENT_ID_3,
+      codeResultId: null,
+      kind: "old_box",
+      displayIdentity: "SSCC 223456789012345670",
+      authoritativeVerdict: "unknown",
+      terminalId: DEVICE_ID_2,
+      terminalName: "Терминал 2",
+      scannedAt: "2026-08-29T09:50:00.000Z",
+      classification: "unknown",
+      observedProductionDate: null,
+    },
+  ],
+};
+
+/** Progress payload for the `closed` screens (late events, documents, completion, reopen). */
+const CLOSED_PROGRESS = {
+  ...RUNNING_PROGRESS,
+  status: "closed",
+  verifiedCount: 114,
+  missingCount: 2,
+  ineligibleCount: 0,
+  unknownCount: 0,
+  pendingEventCount: 0,
+  participants: [],
+};
+
+/** Evidence events behind the corrections screen -- one with a full action set (unknown scan, still correctable), one already voided (only restorable), one known box with nothing to correct. */
+const EVIDENCE_RESPONSE = {
+  page: 1,
+  pageSize: 50,
+  total: 3,
+  hasMore: false,
+  items: [
+    {
+      eventId: EVENT_ID_1,
+      codeResultId: CODE_RESULT_ID_1,
+      kind: "item",
+      displayIdentity: "04600000000006 · 000123",
+      authoritativeVerdict: "unknown",
+      terminalId: DEVICE_ID_1,
+      terminalName: "Терминал 1",
+      scannedAt: "2026-08-29T09:55:00.000Z",
+      classification: "unknown",
+      observedProductionDate: "2026-08-20",
+      actions: ["void_scan", "change_date", "remove_item"],
+    },
+    {
+      eventId: EVENT_ID_2,
+      codeResultId: CODE_RESULT_ID_2,
+      kind: "item",
+      displayIdentity: "04600000000006 · 000456",
+      authoritativeVerdict: "voided",
+      terminalId: DEVICE_ID_2,
+      terminalName: "Терминал 2",
+      scannedAt: "2026-08-29T09:20:00.000Z",
+      classification: "voided",
+      observedProductionDate: null,
+      actions: ["restore_scan"],
+    },
+    {
+      eventId: EVENT_ID_3,
+      codeResultId: null,
+      kind: "known_box",
+      displayIdentity: "SSCC 223456789012345670",
+      authoritativeVerdict: "expected",
+      terminalId: DEVICE_ID_2,
+      terminalName: "Терминал 2",
+      scannedAt: "2026-08-29T09:10:00.000Z",
+      classification: "expected",
+      observedProductionDate: null,
+      actions: [],
+    },
+  ],
+};
+
+const CLOSE_PREVIEW_READY = {
+  inventoryId: INVENTORY_ID,
+  status: "running",
+  resultRevision: 1,
+  blockers: [],
+};
+
+/**
+ * `BLOCKER_KEYS` (InventoryClosePanel.tsx) maps these two codes to
+ * `pages.inventory.close.blocker.active` ("Активные терминалы: {{count}}")
+ * and `...openBoxes` ("Открытые короба: {{count}}") -- the exact phrasing
+ * the MKR-INS-07 brief's screen table calls for.
+ */
+const CLOSE_PREVIEW_BLOCKED = {
+  inventoryId: INVENTORY_ID,
+  status: "running",
+  resultRevision: 1,
+  blockers: [
+    {
+      code: "ACTIVE_PARTICIPANT",
+      count: 2,
+      participantId: CLOSE_BLOCKER_PARTICIPANT_ID,
+      deviceId: DEVICE_ID_2,
+      boxId: null,
+      discrepancyCategory: null,
+    },
+    {
+      code: "OPEN_REPACK_BOX",
+      count: 3,
+      participantId: null,
+      deviceId: null,
+      boxId: CLOSE_BLOCKER_BOX_ID,
+      discrepancyCategory: null,
+    },
+  ],
+};
+
+/** Two late-events batches, both still pending a decision, closed inventory (`canDiscard`). */
+const LATE_EVENTS_RESPONSE = {
+  page: 1,
+  pageSize: 50,
+  total: 2,
+  hasMore: false,
+  items: [
+    {
+      id: LATE_EVENT_ID_1,
+      batchId: "batch-2026-08-29-01",
+      deviceId: DEVICE_ID_2,
+      terminalName: "Терминал 2",
+      eventCount: 18,
+      receivedAt: "2026-08-29T21:10:00.000Z",
+      closedRevision: 1,
+      reason: "STATION_OFFLINE",
+      resolution: "pending",
+      resolvedAt: null,
+      replayAvailable: false,
+    },
+    {
+      id: LATE_EVENT_ID_2,
+      batchId: "batch-2026-08-29-02",
+      deviceId: DEVICE_ID_3,
+      terminalName: "Терминал 3",
+      eventCount: 5,
+      receivedAt: "2026-08-29T21:40:00.000Z",
+      closedRevision: 1,
+      reason: "NETWORK_TIMEOUT",
+      resolution: "pending",
+      resolvedAt: null,
+      replayAvailable: false,
+    },
+  ],
+};
+
+/** One run still generating, one already done -- both at the current result revision, so the completion section stays blocked (`currentRunActive` stays true) until the active run finishes. Backs `documents-history.png`. */
+const DOCUMENT_RUNS_HISTORY = {
+  items: [
+    {
+      id: DOC_RUN_PROCESSING_ID,
+      inventoryId: INVENTORY_ID,
+      resultRevision: 1,
+      selectedFormats: [
+        { id: "inventory_csv_current_stock", version: 1 },
+        { id: "inventory_txt_write_off", version: 1 },
+      ],
+      status: "processing",
+      errorCode: null,
+      sourceSnapshotStartedAt: "2026-08-29T22:05:00.000Z",
+      sourceSnapshotCompletedAt: null,
+      completedAt: null,
+      attemptCount: 1,
+      createdAt: "2026-08-29T22:05:00.000Z",
+      artifacts: [],
+    },
+    {
+      id: DOC_RUN_READY_HISTORY_ID,
+      inventoryId: INVENTORY_ID,
+      resultRevision: 1,
+      selectedFormats: [{ id: "inventory_csv_current_stock", version: 1 }],
+      status: "ready",
+      errorCode: null,
+      sourceSnapshotStartedAt: "2026-08-29T21:50:00.000Z",
+      sourceSnapshotCompletedAt: "2026-08-29T21:52:00.000Z",
+      completedAt: "2026-08-29T21:52:00.000Z",
+      attemptCount: 1,
+      createdAt: "2026-08-29T21:50:00.000Z",
+      artifacts: [
+        {
+          id: ARTIFACT_HISTORY_ID,
+          formatId: "inventory_csv_current_stock",
+          formatVersion: 1,
+          partNumber: 1,
+          filename: "inv-000042-current-stock.csv",
+          mimeType: "text/csv; charset=utf-8",
+          rowCount: 116,
+          codeCount: 114,
+          boxCount: 2,
+          byteSize: 20480,
+          sha256: DIGEST,
+          downloadedAt: null,
+          invalidatedAt: null,
+        },
+      ],
+    },
+  ],
+};
+
+/** A single finished, fully downloaded run at the current result revision -- `currentArtifactsReady` is true, so the completion section is actionable. Backs `completion.png`. */
+const DOCUMENT_RUNS_COMPLETE = {
+  items: [
+    {
+      id: DOC_RUN_READY_COMPLETE_ID,
+      inventoryId: INVENTORY_ID,
+      resultRevision: 1,
+      selectedFormats: [{ id: "inventory_csv_current_stock", version: 1 }],
+      status: "ready",
+      errorCode: null,
+      sourceSnapshotStartedAt: "2026-08-29T21:50:00.000Z",
+      sourceSnapshotCompletedAt: "2026-08-29T21:52:00.000Z",
+      completedAt: "2026-08-29T21:52:00.000Z",
+      attemptCount: 1,
+      createdAt: "2026-08-29T21:50:00.000Z",
+      artifacts: [
+        {
+          id: ARTIFACT_COMPLETE_ID,
+          formatId: "inventory_csv_current_stock",
+          formatVersion: 1,
+          partNumber: 1,
+          filename: "inv-000042-current-stock.csv",
+          mimeType: "text/csv; charset=utf-8",
+          rowCount: 116,
+          codeCount: 114,
+          boxCount: 2,
+          byteSize: 20480,
+          sha256: DIGEST,
+          downloadedAt: "2026-08-29T22:00:00.000Z",
+          invalidatedAt: null,
+        },
+      ],
+    },
+  ],
+};
+
+type Scenario =
+  | "list"
+  | "create"
+  | "exports"
+  | "exportsBlocked"
+  | "snapshot"
+  | "terminals"
+  | "live"
+  | "corrections"
+  | "closePreviewReady"
+  | "closePreviewBlocked"
+  | "closedLate"
+  | "closedDocumentsCatalog"
+  | "closedDocumentsHistory"
+  | "closedCompletion";
 
 /**
  * Every scenario shares the shell/auth fetches (profile, access, pending
@@ -268,6 +718,97 @@ async function installApi(page: Page, scenario: Scenario) {
     }
     if (scenario === "terminals" && path === "/api/lines/presence") {
       return json(route, LINE_PRESENCE);
+    }
+
+    // MKR-INS-07: post-launch screens. `InventoryDetailPage` hands off to
+    // `InventoryLivePage` once the detail fetch reports running/closed --
+    // that page then drives its own status from `/progress`, so both must
+    // agree (see `postLaunchInventoryDetail` above).
+    const RUNNING_SCENARIOS: Scenario[] = [
+      "live",
+      "corrections",
+      "closePreviewReady",
+      "closePreviewBlocked",
+    ];
+    const CLOSED_SCENARIOS: Scenario[] = [
+      "closedLate",
+      "closedDocumentsCatalog",
+      "closedDocumentsHistory",
+      "closedCompletion",
+    ];
+    if (RUNNING_SCENARIOS.includes(scenario) && path === `/api/inventories/${INVENTORY_ID}`) {
+      return json(route, RUNNING_DETAIL);
+    }
+    if (CLOSED_SCENARIOS.includes(scenario) && path === `/api/inventories/${INVENTORY_ID}`) {
+      return json(route, CLOSED_DETAIL);
+    }
+    if (
+      RUNNING_SCENARIOS.includes(scenario) &&
+      path === `/api/inventories/${INVENTORY_ID}/progress`
+    ) {
+      return json(route, RUNNING_PROGRESS);
+    }
+    if (
+      CLOSED_SCENARIOS.includes(scenario) &&
+      path === `/api/inventories/${INVENTORY_ID}/progress`
+    ) {
+      return json(route, CLOSED_PROGRESS);
+    }
+    // `InventoryLivePage` always mounts `InventoryDocuments`, even on
+    // screens that aren't about documents at all (live, the closing modal,
+    // late events) -- so every one of those needs the catalog/history
+    // endpoints answered, not just the three documents-specific scenarios.
+    if (
+      (RUNNING_SCENARIOS.includes(scenario) ||
+        scenario === "closedLate" ||
+        scenario === "closedDocumentsCatalog") &&
+      path === "/api/inventory-document-formats"
+    ) {
+      return json(route, DOCUMENT_FORMATS_RESPONSE);
+    }
+    if (
+      (RUNNING_SCENARIOS.includes(scenario) ||
+        scenario === "closedLate" ||
+        scenario === "closedDocumentsCatalog") &&
+      path === `/api/inventories/${INVENTORY_ID}/document-runs`
+    ) {
+      return json(route, NO_DOCUMENT_RUNS);
+    }
+    if (scenario === "closedDocumentsHistory" && path === "/api/inventory-document-formats") {
+      return json(route, DOCUMENT_FORMATS_RESPONSE);
+    }
+    if (
+      scenario === "closedDocumentsHistory" &&
+      path === `/api/inventories/${INVENTORY_ID}/document-runs`
+    ) {
+      return json(route, DOCUMENT_RUNS_HISTORY);
+    }
+    if (scenario === "closedCompletion" && path === "/api/inventory-document-formats") {
+      return json(route, DOCUMENT_FORMATS_RESPONSE);
+    }
+    if (
+      scenario === "closedCompletion" &&
+      path === `/api/inventories/${INVENTORY_ID}/document-runs`
+    ) {
+      return json(route, DOCUMENT_RUNS_COMPLETE);
+    }
+    if (scenario === "corrections" && path === `/api/inventories/${INVENTORY_ID}/evidence`) {
+      return json(route, EVIDENCE_RESPONSE);
+    }
+    if (
+      scenario === "closePreviewReady" &&
+      path === `/api/inventories/${INVENTORY_ID}/close-preview`
+    ) {
+      return json(route, CLOSE_PREVIEW_READY);
+    }
+    if (
+      scenario === "closePreviewBlocked" &&
+      path === `/api/inventories/${INVENTORY_ID}/close-preview`
+    ) {
+      return json(route, CLOSE_PREVIEW_BLOCKED);
+    }
+    if (scenario === "closedLate" && path === `/api/inventories/${INVENTORY_ID}/late-events`) {
+      return json(route, LATE_EVENTS_RESPONSE);
     }
 
     unexpected.push(`${route.request().method()} ${path}${url.search}`);
@@ -408,4 +949,203 @@ test("renders the launch stage after continuing past terminals", async ({ page }
   ).toBeVisible();
   expect(unexpected).toEqual([]);
   await page.screenshot({ path: screenshotPath("launch"), scale: "css" });
+});
+
+// --- MKR-INS-07 (post-launch: progress, corrections, closing, late events,
+// documents, completion, reopen) -------------------------------------------
+
+test("renders the live progress of a running inventory", async ({ page }) => {
+  const unexpected = await installApi(page, "live");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await expect(page.getByRole("heading", { level: 1, name: "ИНВ-000042" })).toBeVisible();
+  await expect(page.getByText("Ожидается", { exact: true })).toBeVisible();
+  await expect(page.getByText("Проверено", { exact: true })).toBeVisible();
+  await expect(page.getByText("Не найдено", { exact: true })).toBeVisible();
+  // Exact match: the running-hint paragraph in the closing card below also
+  // contains the lowercase substring "расхождения"
+  // ("...обязательные расхождения"), and `getByText` matching is
+  // case-insensitive by default.
+  await expect(page.getByText("Расхождения", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Участники" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Короба" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Последние события" })).toBeVisible();
+  expect(unexpected).toEqual([]);
+  await screenshotFullMain(page, screenshotPath07("live"));
+});
+
+test("renders the corrections list with its filters", async ({ page }) => {
+  const unexpected = await installApi(page, "corrections");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}/corrections`);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Исправления · ИНВ-000042" }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "События и коды" })).toBeVisible();
+  await expect(page.getByLabel("Тип события")).toBeVisible();
+  await expect(page.getByLabel("Классификация")).toBeVisible();
+  await expect(page.getByText("04600000000006 · 000123")).toBeVisible();
+  expect(unexpected).toEqual([]);
+  await screenshotFullMain(page, screenshotPath07("corrections-list"));
+});
+
+test("renders the correction form for a selected item", async ({ page }) => {
+  const unexpected = await installApi(page, "corrections");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}/corrections`);
+  // `CorrectionEvent` (InventoryCorrections.tsx) overrides the *first*
+  // action button's accessible name with "Выбрать {identity}" for
+  // screen-reader clarity, so its visible text ("Отменить скан") is no
+  // longer the accessible name -- match on visible text here instead of
+  // role name.
+  await expect(page.getByText("Отменить скан")).toBeVisible();
+  // Clicking "Изменить дату" (the second action, no aria-label override) on
+  // the first evidence event opens the correction form for that action
+  // (InventoryCorrections.tsx's `select`) -- a purely local state change, no
+  // network call.
+  await page.getByRole("button", { name: "Изменить дату" }).click();
+  await expect(
+    page.getByRole("heading", { level: 2, name: "Исправление · 04600000000006 · 000123" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Причина исправления")).toBeVisible();
+  await expect(page.getByLabel("Наблюдаемая дата производства")).toBeVisible();
+  await expect(page.getByText("Восстановить скан")).toBeVisible();
+  expect(unexpected).toEqual([]);
+  await screenshotFullMain(page, screenshotPath07("corrections-form"));
+});
+
+test("renders the close preview with no blockers", async ({ page }) => {
+  const unexpected = await installApi(page, "closePreviewReady");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await page.getByRole("button", { name: "Закрыть инвентаризацию" }).click();
+  await expect(page.getByText("Проверка перед закрытием")).toBeVisible();
+  await expect(
+    page.getByText("Блокировок нет. Результат будет зафиксирован в текущей ревизии."),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Закрыть безопасно" })).toBeVisible();
+  expect(unexpected).toEqual([]);
+  await page.screenshot({ path: screenshotPath07("close-ready"), scale: "css" });
+});
+
+test("renders the close preview with active blockers", async ({ page }) => {
+  const unexpected = await installApi(page, "closePreviewBlocked");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await page.getByRole("button", { name: "Закрыть инвентаризацию" }).click();
+  await expect(
+    page.getByText(
+      "Безопасное закрытие недоступно. Устраните блокировки или зафиксируйте аварийное решение.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByText("Активные терминалы: 2")).toBeVisible();
+  await expect(page.getByText("Открытые короба: 3")).toBeVisible();
+  expect(unexpected).toEqual([]);
+  await page.screenshot({ path: screenshotPath07("close-blocked"), scale: "css" });
+});
+
+test("renders the emergency-close form once blockers are acknowledged", async ({ page }) => {
+  // Same blocked preview as `close-blocked` -- `InventoryClosePanel.tsx`
+  // shows the emergency reason field, the acknowledgement checkbox and the
+  // "Закрыть аварийно" button in the very same modal state as soon as
+  // `blockers.length > 0`; there is no separate "emergency mode" to switch
+  // into. What distinguishes this screenshot is filling the form in (never
+  // submitting it -- that would need `/emergency-close` mocked, which this
+  // scenario deliberately doesn't do).
+  const unexpected = await installApi(page, "closePreviewBlocked");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await page.getByRole("button", { name: "Закрыть инвентаризацию" }).click();
+  await expect(page.getByText("Активные терминалы: 2")).toBeVisible();
+  await page
+    .getByLabel("Причина аварийного закрытия")
+    .fill("Обрыв связи со складом, партия зафиксирована по факту пересчёта.");
+  await page
+    .getByRole("checkbox", {
+      name: "Я понимаю, что блокировки останутся в зафиксированном результате",
+    })
+    .check();
+  await expect(page.getByRole("button", { name: "Закрыть аварийно" })).toBeEnabled();
+  expect(unexpected).toEqual([]);
+  await page.screenshot({ path: screenshotPath07("close-emergency"), scale: "css" });
+});
+
+test("renders late events awaiting a decision", async ({ page }) => {
+  // Continuity note: this scenario uses the `closed` status (matching the
+  // late-events/documents/completion group below), not `running`. That
+  // makes `InventoryLateEvents.tsx`'s `canDiscard` branch (status ===
+  // "closed") reachable, which is what shows "Причина решения" and
+  // "Исключить выбранные" -- but that same status makes the per-event
+  // "Повторить обработку" button unreachable, since it only renders when
+  // `inventoryStatus === "running"` (line ~160). The two cannot appear in
+  // the same screenshot: closed unlocks discarding, running unlocks
+  // replaying, and an inventory has exactly one status. See the task report
+  // for the full trade-off.
+  const unexpected = await installApi(page, "closedLate");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await page.getByRole("button", { name: "Поздние события" }).click();
+  await expect(page.getByText("batch-2026-08-29-01")).toBeVisible();
+  await expect(page.getByText("18 событий")).toBeVisible();
+  await page.getByRole("checkbox", { name: "Выбрать пакет batch-2026-08-29-01" }).check();
+  await page
+    .getByLabel("Причина решения")
+    .fill("Пакет пришёл после закрытия по регламенту, короба уже пересчитаны вручную.");
+  await expect(page.getByRole("button", { name: "Исключить выбранные" })).toBeVisible();
+  expect(unexpected).toEqual([]);
+  await page.screenshot({ path: screenshotPath07("late-events"), scale: "css" });
+});
+
+test("renders the document catalog before any run exists", async ({ page }) => {
+  const unexpected = await installApi(page, "closedDocumentsCatalog");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await expect(page.getByRole("heading", { level: 2, name: "Итоговые документы" })).toBeVisible();
+  await expect(page.getByText("Что сформировать")).toBeVisible();
+  await expect(page.getByText("[CSV] Коды на учёт · CSV · v1")).toBeVisible();
+  await expect(page.getByText("[TXT] Коды к списанию · TXT · v1")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Сформировать документы" })).toBeVisible();
+  expect(unexpected).toEqual([]);
+  await screenshotFullMain(page, screenshotPath07("documents-catalog"));
+});
+
+test("renders the document generation history", async ({ page }) => {
+  const unexpected = await installApi(page, "closedDocumentsHistory");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await expect(page.getByRole("heading", { level: 3, name: "История формирования" })).toBeVisible();
+  await expect(page.getByText("Готово")).toBeVisible();
+  await expect(page.getByText("Формируется")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Скачать ZIP" })).toBeVisible();
+  await expect(page.getByText("кодов: 114", { exact: false })).toBeVisible();
+  expect(unexpected).toEqual([]);
+  await screenshotFullMain(page, screenshotPath07("documents-history"));
+});
+
+test("renders the completion step once documents are downloaded", async ({ page }) => {
+  const unexpected = await installApi(page, "closedCompletion");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await expect(page.getByRole("heading", { level: 3, name: "Завершение" })).toBeVisible();
+  await expect(page.getByText("Итоговые документы скачаны и проверены")).toBeVisible();
+  await page.getByRole("checkbox", { name: "Итоговые документы скачаны и проверены" }).check();
+  await expect(page.getByRole("button", { name: "Завершить инвентаризацию" })).toBeEnabled();
+  expect(unexpected).toEqual([]);
+  await screenshotFullMain(page, screenshotPath07("completion"));
+});
+
+test("renders the reopen confirmation dialog", async ({ page }) => {
+  const unexpected = await installApi(page, "closedDocumentsCatalog");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID}`);
+  await page.getByRole("button", { name: "Возобновить" }).click();
+  await expect(page.getByText("Возобновить инвентаризацию?")).toBeVisible();
+  await expect(
+    page.getByText("Ревизия результата увеличится, закрывающие поля будут очищены,", {
+      exact: false,
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Подтвердить возобновление" })).toBeVisible();
+  expect(unexpected).toEqual([]);
+  await page.screenshot({ path: screenshotPath07("reopen"), scale: "css" });
 });
