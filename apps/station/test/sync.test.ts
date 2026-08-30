@@ -32,7 +32,29 @@ import { createCredentialGeneration } from "../src/lib/credential-recovery.js";
 // restore afterwards, so unexpected errors elsewhere still print.
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
+
+/**
+ * Advances past the engine's retry backoff instead of sleeping through it.
+ *
+ * Four tests here need `createSyncEngine`'s scheduled retry to fire, and used
+ * to wait it out on the real clock -- `BACKOFF_START_MS + 500` is 2.5s each,
+ * ~10s of the station suite's ~45s spent idle. The backoff timer is armed
+ * when the first `post` rejects, so `vi.useFakeTimers()` has to be installed
+ * at the top of the test body, before the engine is nudged; a timer created
+ * against the real clock cannot be advanced afterwards.
+ *
+ * This asserts exactly what the sleep did -- that the engine's OWN retry
+ * fires, with no extra nudge -- and it is the pattern the rest of this file
+ * already uses (see the sealed-credential and request-timeout tests). The
+ * 2.5s of fake time also moves `Date.now()`, which is inert here: the
+ * wall-clock staleness checks in the Finding 4 tests compare against
+ * `STUCK_AFTER_MS` (15 minutes), so 2.5s is 0.28% of the threshold.
+ */
+async function advancePastRetryBackoff(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(BACKOFF_START_MS + 500);
+}
 
 async function migratedExec(): Promise<SqlExecutor> {
   const db = new DatabaseSync(":memory:");
@@ -525,6 +547,7 @@ describe("sync engine", () => {
       "retry, or one a nudge triggers) resends the SAME batch id and the SAME row count " +
       "instead of folding in rows queued during the backoff window (Finding 1)",
     async () => {
+      vi.useFakeTimers(); // see advancePastRetryBackoff
       const exec = await migratedExec();
       await seedInstallId(exec, "install-1");
       await seed(exec, 2);
@@ -561,7 +584,7 @@ describe("sync engine", () => {
       // must be the pinned one: wait past the scheduled backoff so the
       // engine's own retry has certainly fired, then let anything in flight
       // settle.
-      await new Promise((resolve) => setTimeout(resolve, BACKOFF_START_MS + 500));
+      await advancePastRetryBackoff();
       await engine.idle();
 
       // Once the pinned (2-row) batch is acknowledged, the SAME drain loop
@@ -579,7 +602,6 @@ describe("sync engine", () => {
 
       engine.stop();
     },
-    10_000,
   );
 
   it(
@@ -1445,6 +1467,7 @@ describe("sync engine", () => {
     "after a success: does NOT report stuck for a freshly queued scan whose upload fails, even " +
       "once the injected clock has crossed the threshold since the last success (Finding 4)",
     async () => {
+      vi.useFakeTimers(); // see advancePastRetryBackoff
       const exec = await migratedExec();
       await seed(exec, 1);
       let clock = 1_000_000;
@@ -1485,18 +1508,18 @@ describe("sync engine", () => {
       // on the very first failed attempt against the new scan -- exactly the
       // "cries wolf" behaviour this fix removes.
       clock += STUCK_AFTER_MS + 1;
-      await new Promise((resolve) => setTimeout(resolve, BACKOFF_START_MS + 500));
+      await advancePastRetryBackoff();
       await engine.idle();
       expect(states.at(-1)).toMatchObject({ pending: 1, stuck: false });
       engine.stop();
     },
-    10_000,
   );
 
   it(
     "after a success: reports stuck once an OLD queued scan (stale on the wall clock) has " +
       "failed to move for the threshold on the injected clock too (Finding 4)",
     async () => {
+      vi.useFakeTimers(); // see advancePastRetryBackoff
       const exec = await migratedExec();
       await seed(exec, 1);
       let clock = 1_000_000;
@@ -1529,7 +1552,7 @@ describe("sync engine", () => {
       expect(states.at(-1)).toMatchObject({ pending: 1, stuck: false });
 
       clock += STUCK_AFTER_MS + 1;
-      await new Promise((resolve) => setTimeout(resolve, BACKOFF_START_MS + 500));
+      await advancePastRetryBackoff();
       await engine.idle();
       // Both conditions now hold: the injected clock crossed the threshold
       // since `lastSuccessAt`, AND the oldest queued scan is itself older
@@ -1537,7 +1560,6 @@ describe("sync engine", () => {
       expect(states.at(-1)).toMatchObject({ pending: 1, stuck: true });
       engine.stop();
     },
-    10_000,
   );
 
   it("records conflicts the server reports and counts them in the state", async () => {
@@ -2594,6 +2616,7 @@ describe("sync engine: pools and closures", () => {
       "letting the retry's grown box set collide with the already-claimed batch id and " +
       "silently swallow the new closure (Finding 1)",
     async () => {
+      vi.useFakeTimers(); // see advancePastRetryBackoff
       const claimed = new Set<string>();
       const appliedBoxIds = new Set<string>();
       let dropNextResponse = false;
@@ -2655,7 +2678,7 @@ describe("sync engine: pools and closures", () => {
       await openBox(exec, SHIFT, "b2", ISO, TERMINAL);
       await closeBox(exec, "b2", "004601234560000024", ISO, null);
 
-      await new Promise((resolve) => setTimeout(resolve, BACKOFF_START_MS + 500));
+      await advancePastRetryBackoff();
       await engine.idle();
 
       // The fix under test: b2's closure actually reaches the server,
@@ -2671,7 +2694,6 @@ describe("sync engine: pools and closures", () => {
 
       engine.stop();
     },
-    10_000,
   );
 
   // CodeRabbit PR33 review, Finding 2: `readClosedUnackedBoxes` used to have
