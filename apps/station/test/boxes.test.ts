@@ -20,7 +20,7 @@ import {
   openBox,
   type BoxPrintErrorCode,
 } from "../src/lib/boxes.js";
-import { makeExec } from "./support/sqlite-exec.js";
+import { makeExec, openFileDatabase } from "./support/sqlite-exec.js";
 
 /** One scan event, distinguished by `id` only in its raw payload. */
 function event(id: string, shiftId = "s1"): ScanEventRow {
@@ -467,7 +467,7 @@ describe("boxes", () => {
       const fixtureDir = mkdtempSync(join(tmpdir(), "markiro-box-print-"));
       const databasePath = join(fixtureDir, "station.sqlite");
       try {
-        const firstDb = new DatabaseSync(databasePath);
+        const firstDb = openFileDatabase(databasePath);
         try {
           const firstExec = makeExec(firstDb);
           await applyMigrations(firstExec);
@@ -484,7 +484,7 @@ describe("boxes", () => {
           firstDb.close();
         }
 
-        const reopenedDb = new DatabaseSync(databasePath);
+        const reopenedDb = openFileDatabase(databasePath);
         try {
           const reopenedExec = makeExec(reopenedDb);
           await applyMigrations(reopenedExec);
