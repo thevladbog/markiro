@@ -9,6 +9,7 @@ import { and, eq, like } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
 import { loadEnv } from "../src/env";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
+import { settleQueuedBackgroundWork } from "./support/background-work";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { signUpAndActivate } from "./support/auth";
 import { excludeExchangeRoute } from "../src/modules/exchange/exchange.module";
@@ -156,6 +157,10 @@ describe("mode=import", () => {
     const env = loadEnv({ ...process.env, SUBSCRIPTION_ENFORCEMENT_MODE: "managed_only" });
     const setup: AuthSetup = setupAuth(env);
     db = setup.db;
+    // Neutralise background work an earlier file (or an aborted run) left
+    // claimable, before `app.init()` lets this suite's pg-boss workers
+    // reconcile it into the storage mock below. See `settleQueuedBackgroundWork`.
+    await settleQueuedBackgroundWork(db);
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL, env })],
     })

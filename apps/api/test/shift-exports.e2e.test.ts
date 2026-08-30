@@ -17,6 +17,7 @@ import {
   setOnlyOrganizationMemberRole,
   signUpAndActivate,
 } from "./support/auth";
+import { settleQueuedBackgroundWork } from "./support/background-work";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
 import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
@@ -72,8 +73,14 @@ describe.skipIf(!ready)("shift exports e2e", () => {
   });
 
   afterAll(async () => {
-    await app?.close();
-    vi.unstubAllEnvs();
+    // This suite stubs `PgBossService`, so the exports it enqueues stay `queued`
+    // for the next test file's workers to pick up. See `settleQueuedBackgroundWork`.
+    try {
+      await settleQueuedBackgroundWork(db);
+    } finally {
+      await app?.close();
+      vi.unstubAllEnvs();
+    }
   });
 
   async function fixture(status: "planned" | "active" | "closed" = "closed") {

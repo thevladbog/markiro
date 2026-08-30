@@ -20,6 +20,7 @@ import { CHZ_MAX_INPUT_BYTES } from "../src/modules/inventories/chz-tabular-read
 import { InventoryDocumentRunnerService } from "../src/modules/inventories/inventory-document-runner.service";
 import { InventoriesService } from "../src/modules/inventories/inventories.service";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
+import { settleQueuedBackgroundWork } from "./support/background-work";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { setOnlyOrganizationMemberRole, signUpAndActivate } from "./support/auth";
 import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
@@ -91,6 +92,10 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     const env = loadEnv();
     setup = setupAuth(env);
     db = setup.db;
+    // Neutralise background work an earlier file (or an aborted run) left
+    // claimable, before `app.init()` lets this suite's pg-boss workers
+    // reconcile it into the storage mock below. See `settleQueuedBackgroundWork`.
+    await settleQueuedBackgroundWork(db);
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL, env })],
     })
