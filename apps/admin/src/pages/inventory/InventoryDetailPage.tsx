@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import {
@@ -10,6 +10,7 @@ import {
   Button,
   Card,
   Checkbox,
+  ConfirmDialog,
   EmptyState,
   FileDropZone,
   PageHeader,
@@ -22,6 +23,7 @@ import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { useLinePresence } from "../shifts/api.js";
 import {
+  useCancelInventory,
   useFixInventorySnapshot,
   useInventory,
   useStartInventory,
@@ -68,10 +70,13 @@ function count(value: number, locale: string): string {
 
 export function InventoryDetailPage() {
   const { inventoryId = "" } = useParams();
+  const navigate = useNavigate();
   const { t } = useTranslation();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const query = useInventory(inventoryId);
   const update = useUpdateInventory();
+  const cancel = useCancelInventory();
+  const [cancelOpen, setCancelOpen] = useState(false);
   const [step, setStep] = useState(2);
   const [selected, setSelected] = useState<Partial<InventorySnapshotInputs>>({});
   const [fixedSnapshot, setFixedSnapshot] = useState<InventorySnapshot | null>(null);
@@ -117,6 +122,29 @@ export function InventoryDetailPage() {
   }
 
   const inventory = query.data;
+  if (inventory.status === "cancelled") {
+    return (
+      <AdminPage className="mk-inventory-page">
+        <PageHeader
+          title={inventory.number}
+          actions={
+            <StatusChip
+              {...inventoryStatusChipProps(inventory.status)}
+              label={t(`pages.inventory.status.${inventory.status}`)}
+            />
+          }
+        />
+        <p className="mk-inventory-page__description">
+          {inventory.productName} · {inventory.lineName} ·{" "}
+          {t(`pages.inventory.mode.${inventory.mode}`)}
+        </p>
+        <Alert tone="error">{t("pages.inventory.detail.cancelled")}</Alert>
+        <Link className="mk-inventory-back-link" to="/inventory">
+          {t("pages.inventory.detail.backToList")}
+        </Link>
+      </AdminPage>
+    );
+  }
   if (
     inventory.status === "running" ||
     inventory.status === "closed" ||
@@ -127,16 +155,34 @@ export function InventoryDetailPage() {
   const snapshot = fixedSnapshot ?? inventory.activeSnapshot;
   const isMutable = inventory.status === "draft" || inventory.status === "preparing";
   const canEditParameters = canWrite && isMutable;
+  const canCancel =
+    canWrite &&
+    (inventory.status === "draft" ||
+      inventory.status === "preparing" ||
+      inventory.status === "ready");
 
   return (
     <AdminPage className="mk-inventory-page">
       <PageHeader
         title={inventory.number}
         actions={
-          <StatusChip
-            {...inventoryStatusChipProps(inventory.status)}
-            label={t(`pages.inventory.status.${inventory.status}`)}
-          />
+          <div className="mk-inventory-header-actions">
+            <StatusChip
+              {...inventoryStatusChipProps(inventory.status)}
+              label={t(`pages.inventory.status.${inventory.status}`)}
+            />
+            {canCancel ? (
+              <Button
+                variant="destructive-outline"
+                onClick={() => {
+                  cancel.reset();
+                  setCancelOpen(true);
+                }}
+              >
+                {t("pages.inventory.detail.cancelAction")}
+              </Button>
+            ) : null}
+          </div>
         }
       />
       <p className="mk-inventory-page__description">
@@ -210,6 +256,29 @@ export function InventoryDetailPage() {
       <Link className="mk-inventory-back-link" to="/inventory">
         {t("pages.inventory.detail.backToList")}
       </Link>
+      <ConfirmDialog
+        open={cancelOpen}
+        title={t("pages.inventory.detail.cancelConfirmTitle")}
+        description={t("pages.inventory.detail.cancelConfirmBody")}
+        entity={inventory.number}
+        error={cancel.isError ? t("pages.inventory.detail.cancelError") : undefined}
+        confirmLabel={t("pages.inventory.detail.cancelAction")}
+        cancelLabel={t("common.cancel")}
+        tone="destructive"
+        busy={cancel.isPending}
+        onCancel={() => {
+          if (cancel.isPending) return;
+          setCancelOpen(false);
+          cancel.reset();
+        }}
+        onConfirm={() =>
+          cancel.mutate(inventory.id, {
+            onSuccess: () => {
+              void navigate("/inventory");
+            },
+          })
+        }
+      />
     </AdminPage>
   );
 }

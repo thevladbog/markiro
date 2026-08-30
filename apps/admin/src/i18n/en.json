@@ -305,6 +305,7 @@
         "draft": "Draft",
         "preparing": "Preparing",
         "ready": "Ready to start",
+        "cancelled": "Cancelled",
         "running": "Running",
         "closed": "Closed",
         "completed": "Completed"
@@ -353,6 +354,11 @@
         "loadError": "Inventory unavailable",
         "loadErrorHint": "Check the address or retry loading.",
         "saveParameters": "Save and continue",
+        "cancelAction": "Cancel inventory",
+        "cancelConfirmTitle": "Cancel inventory?",
+        "cancelConfirmBody": "Preparation will stop. Uploaded exports and the fixed snapshot will remain in the history.",
+        "cancelError": "Could not cancel the inventory.",
+        "cancelled": "The inventory was cancelled before launch.",
         "backToList": "Back to inventories"
       },
       "chz": {

@@ -100,6 +100,33 @@ const IMPORTS = [
     diagnostics: [{ code: "CHZ_STATUS_MISMATCH", rowNumber: 12 }],
   },
 ];
+const ACTIVE_SNAPSHOT = {
+  id: ID.snapshot,
+  inventoryId: ID.inventory,
+  revision: 1,
+  combinedDigest: "a".repeat(64),
+  fixedAt: "2026-08-26T09:15:00.000Z",
+  inputs: {
+    EMITTED: ID.emitted,
+    INTRODUCED: ID.introducedOld,
+    APPLIED: ID.applied,
+    RETIRED: ID.retired,
+    WRITTEN_OFF: ID.writtenOff,
+    DISAGGREGATION: ID.disaggregation,
+  },
+  counts: {
+    emitted: 166,
+    introduced: 4323,
+    applied: 0,
+    retired: 1868,
+    writtenOff: 1460,
+    disaggregation: 0,
+    protected: 207,
+    expected: 4116,
+    packages: 48,
+    loose: 3828,
+  },
+};
 
 function attempt(
   id: string,
@@ -550,34 +577,80 @@ it("hides parameter editing from inventory readers", async () => {
   expect(screen.queryByRole("button", { name: "Назад к параметрам" })).toBeNull();
 });
 
+it("cancels a ready inventory after confirmation and returns to the list", async () => {
+  let cancelled = false;
+  const requests: Array<{ url: string; method: string | undefined }> = [];
+  const { router, user } = renderRoute(`/inventory/${ID.inventory}`, async (input, init) => {
+    const url = String(input);
+    requests.push({ url, method: init?.method });
+    const dependency = shellDependency(url);
+    if (dependency) return dependency;
+    if (url === `/api/inventories/${ID.inventory}` && !init?.method) {
+      return response(
+        detail({
+          status: "ready",
+          activeSnapshotId: ID.snapshot,
+          activeSnapshot: ACTIVE_SNAPSHOT,
+        }),
+      );
+    }
+    if (url === `/api/inventories/${ID.inventory}/cancel` && init?.method === "POST") {
+      cancelled = true;
+      return new Response(null, { status: 204 });
+    }
+    if (url === "/api/inventories" && !init?.method) {
+      return response({
+        items: [
+          {
+            ...BASE_INVENTORY,
+            status: cancelled ? "cancelled" : "ready",
+            activeSnapshotId: ID.snapshot,
+          },
+        ],
+      });
+    }
+    if (url === "/api/lines/presence") return response({ items: [] });
+    throw new Error(`Unexpected request: ${url}`);
+  });
+
+  await user.click(await screen.findByRole("button", { name: "Отменить инвентаризацию" }));
+  const dialog = await screen.findByRole("alertdialog");
+  expect(within(dialog).getByText("Отменить инвентаризацию?")).toBeDefined();
+  await user.click(within(dialog).getByRole("button", { name: "Отменить инвентаризацию" }));
+
+  await waitFor(() => expect(router.state.location.pathname).toBe("/inventory"));
+  expect(
+    requests.some(
+      ({ url, method }) => url === `/api/inventories/${ID.inventory}/cancel` && method === "POST",
+    ),
+  ).toBe(true);
+  expect(await screen.findByText("Отменена")).toBeDefined();
+});
+
+it("renders a cancelled inventory as a terminal read-only preparation state", async () => {
+  renderRoute(`/inventory/${ID.inventory}`, async (input) => {
+    const url = String(input);
+    const dependency = shellDependency(url);
+    if (dependency) return dependency;
+    if (url === `/api/inventories/${ID.inventory}`) {
+      return response(
+        detail({
+          status: "cancelled",
+          activeSnapshotId: ID.snapshot,
+          activeSnapshot: ACTIVE_SNAPSHOT,
+        }),
+      );
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+
+  expect(await screen.findByText("Инвентаризация отменена до запуска.")).toBeDefined();
+  expect(screen.queryByRole("heading", { name: "Выписки по статусам кодов" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Отменить инвентаризацию" })).toBeNull();
+});
+
 it("recovers the active snapshot after reload and blocks start until warehouse confirmation", async () => {
-  const snapshot = {
-    id: ID.snapshot,
-    inventoryId: ID.inventory,
-    revision: 1,
-    combinedDigest: "a".repeat(64),
-    fixedAt: "2026-08-26T09:15:00.000Z",
-    inputs: {
-      EMITTED: ID.emitted,
-      INTRODUCED: ID.introducedOld,
-      APPLIED: ID.applied,
-      RETIRED: ID.retired,
-      WRITTEN_OFF: ID.writtenOff,
-      DISAGGREGATION: ID.disaggregation,
-    },
-    counts: {
-      emitted: 166,
-      introduced: 4323,
-      applied: 0,
-      retired: 1868,
-      writtenOff: 1460,
-      disaggregation: 0,
-      protected: 207,
-      expected: 4116,
-      packages: 48,
-      loose: 3828,
-    },
-  };
+  const snapshot = ACTIVE_SNAPSHOT;
   let starts = 0;
   const { user } = renderRoute(`/inventory/${ID.inventory}`, async (input, init) => {
     const url = String(input);

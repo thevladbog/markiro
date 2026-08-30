@@ -115,9 +115,14 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       ["/inventories/{id}", "patch"],
       ["/inventories/{id}/imports/{status}", "post"],
       ["/inventories/{id}/snapshots", "post"],
+      ["/inventories/{id}/cancel", "post"],
       ["/inventories/{id}/start", "post"],
     ] as const;
     for (const [path, method] of paths) operation(document, path, method);
+
+    const cancel = operation(document, "/inventories/{id}/cancel", "post");
+    expect(cancel.requestBody).toBeUndefined();
+    expect(cancel.responses["204"]).toBeDefined();
 
     const taskForm = operation(document, "/inventories/{id}/task-form", "get");
     const taskFormResponse = taskForm.responses["200"];
