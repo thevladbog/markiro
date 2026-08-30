@@ -817,7 +817,12 @@ describe.skipIf(!ready)("inventory immutable snapshot fixation e2e", () => {
       productionDate: "2026-08-15",
     }));
     const imports = await uploadSelection(agent, inventoryId, { INTRODUCED: rows });
-    const [sourceObjectKey] = objects.keys();
+    const inventoryObjectPrefix = `tenants/${tenantId}/inventories/${inventoryId}/`;
+    const inventoryObjectKeys = [...objects.keys()]
+      .filter((key) => key.startsWith(inventoryObjectPrefix))
+      .sort();
+    expect(inventoryObjectKeys).toHaveLength(INVENTORY_CHZ_STATUSES.length);
+    const [sourceObjectKey] = inventoryObjectKeys;
     expect(sourceObjectKey).toBeDefined();
     await db.execute(
       sql.raw(`
@@ -882,7 +887,9 @@ describe.skipIf(!ready)("inventory immutable snapshot fixation e2e", () => {
       );
     expect(snapshots).toEqual([]);
     expect(inventory).toEqual({ status: "preparing", activeSnapshotId: null });
-    expect(objects.size).toBe(6);
+    expect(
+      [...objects.keys()].filter((key) => key.startsWith(inventoryObjectPrefix)).sort(),
+    ).toEqual(inventoryObjectKeys);
     const [audit] = await db
       .select({ outcome: schema.tenantAuditEvents.outcome, after: schema.tenantAuditEvents.after })
       .from(schema.tenantAuditEvents)

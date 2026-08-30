@@ -10,6 +10,7 @@ export const INVENTORY_STATUS_CHIP: Record<
   draft: { status: "neutral", glyph: "–" },
   preparing: { status: "warn", glyph: "◷" },
   ready: { status: "info", glyph: "●" },
+  cancelled: { status: "error", glyph: "×" },
   running: { status: "ok", glyph: "✓" },
   closed: { status: "neutral", glyph: "■" },
   completed: { status: "neutral", glyph: "✓" },

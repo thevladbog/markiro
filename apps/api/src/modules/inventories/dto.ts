@@ -20,6 +20,7 @@ export const INVENTORY_LIFECYCLE_STATUSES = [
   "draft",
   "preparing",
   "ready",
+  "cancelled",
   "running",
   "closed",
   "completed",

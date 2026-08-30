@@ -6,7 +6,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
 import {
@@ -35,7 +35,7 @@ type InventoryTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 interface LockedInventory {
   id: string;
   number: string;
-  status: "draft" | "preparing" | "ready" | "running" | "closed" | "completed";
+  status: "draft" | "preparing" | "ready" | "cancelled" | "running" | "closed" | "completed";
   mode: "check" | "repack";
   productId: string;
   gtin14Snapshot: string;
@@ -73,6 +73,66 @@ interface StartFacts {
 @Injectable()
 export class InventoryLifecycleService {
   constructor(@Inject(DB) private readonly db: Db) {}
+
+  cancel(tenantId: string, actorUserId: string, inventoryId: string): Promise<void> {
+    return this.db.transaction(async (tx) => {
+      const inventory = await this.lockInventory(tx, tenantId, inventoryId);
+      if (
+        inventory.status !== "draft" &&
+        inventory.status !== "preparing" &&
+        inventory.status !== "ready"
+      ) {
+        throw new ConflictException({ code: "INVENTORY_CANCEL_REQUIRES_PRE_START" });
+      }
+
+      const cancelledAt = new Date();
+      await tx
+        .update(schema.inventories)
+        .set({
+          status: "cancelled",
+          cancelledByUserId: actorUserId,
+          cancelledAt,
+          updatedAt: cancelledAt,
+        })
+        .where(
+          and(eq(schema.inventories.tenantId, tenantId), eq(schema.inventories.id, inventory.id)),
+        );
+      await tx
+        .update(schema.chzExportRuns)
+        .set({
+          state: "failed",
+          errorCode: "INVENTORY_CANCELLED",
+          errorMessage: null,
+          claimedAt: null,
+          completedAt: cancelledAt,
+          updatedAt: cancelledAt,
+        })
+        .where(
+          and(
+            eq(schema.chzExportRuns.tenantId, tenantId),
+            eq(schema.chzExportRuns.inventoryId, inventory.id),
+            inArray(schema.chzExportRuns.state, ["queued", "ordered", "ready"]),
+          ),
+        );
+      await tx.insert(schema.tenantAuditEvents).values({
+        organizationId: tenantId,
+        actorUserId,
+        action: "inventory.cancelled",
+        outcome: "success",
+        targetType: "inventory",
+        targetId: inventory.id,
+        before: {
+          status: inventory.status,
+          activeSnapshotId: inventory.activeSnapshotId,
+        },
+        after: {
+          status: "cancelled",
+          cancelledByUserId: actorUserId,
+          cancelledAt,
+        },
+      });
+    });
+  }
 
   start(
     tenantId: string,

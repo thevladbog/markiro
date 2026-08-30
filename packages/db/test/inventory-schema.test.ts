@@ -111,6 +111,7 @@ describe("inventory preparation schema", () => {
       "draft",
       "preparing",
       "ready",
+      "cancelled",
       "running",
       "closed",
       "completed",
@@ -270,6 +271,16 @@ describe("inventory preparation schema", () => {
   });
 
   it("pairs lifecycle evidence and requires completion acknowledgement", () => {
+    expect(Object.keys(schema.inventories)).toEqual(
+      expect.arrayContaining(["cancelledByUserId", "cancelledAt"]),
+    );
+    expect(checkExpression("inventories", "inventories_cancelled_fields_check")).toContain(
+      '("cancelled_by_user_id" is null and "cancelled_at" is null)',
+    );
+    const cancellation = checkExpression("inventories", "inventories_cancelled_lifecycle_check");
+    expect(cancellation).toContain("\"status\" = 'cancelled'");
+    expect(cancellation).toContain('"cancelled_by_user_id" is not null');
+    expect(cancellation).toContain('"cancelled_at" is not null');
     expect(checkExpression("inventories", "inventories_started_fields_check")).toContain(
       '("started_by_user_id" is null and "started_at" is null)',
     );
@@ -298,7 +309,7 @@ describe("inventory preparation schema", () => {
       "inventories",
       "inventories_station_manifest_lifecycle_check",
     );
-    expect(lifecycle).toContain("\"status\" in ('draft', 'preparing', 'ready')");
+    expect(lifecycle).toContain("\"status\" in ('draft', 'preparing', 'ready', 'cancelled')");
     expect(lifecycle).toContain('"station_manifest" is null');
     expect(lifecycle).toContain("\"status\" in ('running', 'closed', 'completed')");
     expect(lifecycle).toContain('"station_manifest" is not null');
@@ -325,6 +336,31 @@ describe("inventory preparation schema", () => {
     );
   });
 
+  it("packages inventory cancellation evidence and lifecycle constraints", () => {
+    const migration = readFileSync(
+      new URL("../migrations/0101_inventory_cancellation.sql", import.meta.url),
+      "utf8",
+    );
+    const snapshot = readFileSync(
+      new URL("../migrations/meta/0101_snapshot.json", import.meta.url),
+      "utf8",
+    );
+    const journal = JSON.parse(
+      readFileSync(new URL("../migrations/meta/_journal.json", import.meta.url), "utf8"),
+    ) as { entries: Array<{ tag: string }> };
+
+    expect(migration).toContain(
+      "CREATE TYPE \"public\".\"inventory_lifecycle_status\" AS ENUM('draft', 'preparing', 'ready', 'cancelled'",
+    );
+    expect(migration).toContain('ALTER COLUMN "status" TYPE "public"."inventory_lifecycle_status"');
+    expect(migration).toContain('ADD COLUMN "cancelled_by_user_id" text');
+    expect(migration).toContain('ADD COLUMN "cancelled_at" timestamp with time zone');
+    expect(migration).toContain('CONSTRAINT "inventories_cancelled_lifecycle_check"');
+    expect(snapshot).toContain('"cancelled_by_user_id"');
+    expect(snapshot).toContain('"inventories_cancelled_lifecycle_check"');
+    expect(journal.entries.some((entry) => entry.tag === "0101_inventory_cancellation")).toBe(true);
+  });
+
   it("declares date, digest, count, lifecycle, mode, and classification checks", () => {
     const checks = [
       ...getTableConfig(table("inventories")).checks,
@@ -340,6 +376,8 @@ describe("inventory preparation schema", () => {
         "inventories_mode_template_check",
         "inventories_active_snapshot_lifecycle_check",
         "inventories_station_manifest_lifecycle_check",
+        "inventories_cancelled_fields_check",
+        "inventories_cancelled_lifecycle_check",
         "inventory_imports_byte_size_nonnegative_check",
         "inventory_imports_sha256_check",
         "inventory_imports_counts_nonnegative_check",
@@ -957,6 +995,8 @@ const inventoryTestEnums = [
   "inventory_import_parse_outcome",
 ] as const;
 const inventoryCurrentConstraints = [
+  "inventories_cancelled_fields_check",
+  "inventories_cancelled_lifecycle_check",
   "inventories_started_fields_check",
   "inventories_closed_fields_check",
   "inventories_completed_fields_check",
@@ -1058,6 +1098,7 @@ async function ensureInventoryTestSchema(
     "0068_inventory_protected_date_precedence.sql",
     "0069_inventory_station_manifest.sql",
     "0081_easy_frank_castle.sql",
+    "0101_inventory_cancellation.sql",
   ]) {
     const migration = readFileSync(
       new URL(`../migrations/${migrationName}`, import.meta.url),
