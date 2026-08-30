@@ -127,6 +127,7 @@ import { applyMigrations, readShiftContext } from "../src/lib/mirror.js";
 import { tauriExecutor } from "../src/lib/sqlite.js";
 import { BACKOFF_START_MS } from "../src/lib/sync.js";
 import { OPERATOR_IDLE_TIMEOUT_MS } from "../src/lib/operator-idle-lock.js";
+import { HEARTBEAT_MS } from "../src/lib/use-sync-engine.js";
 import * as WorkScreenModule from "../src/pages/WorkScreen.js";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import { inventorySnapshotContentDigest, inventorySnapshotPageDigest } from "@markiro/domain";
@@ -4937,6 +4938,20 @@ describe("App", () => {
       }),
     );
 
+    // Fake timers must be installed BEFORE the render that mounts
+    // `useSyncEngine`, because that effect is what calls
+    // `setInterval(nudge, HEARTBEAT_MS)` -- an interval created against the
+    // real clock cannot be driven by `advanceTimersByTime` later. The rest of
+    // this file installs them mid-test instead (see the idle-lock tests),
+    // which works there only because `fireEvent.pointerDown` re-arms the idle
+    // timer AFTER the swap.
+    //
+    // `shouldAdvanceTime` keeps the clock ticking with real time so the whole
+    // async setup below -- `findBy*` polling, the 250ms bundle-recovery poll
+    // in App.tsx, the mocked fetches -- behaves exactly as it did on real
+    // timers. The only thing this buys is the ability to jump the one long
+    // wait at the end of the test.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     render(<App />);
     await signInAsOperator();
     fireEvent.click(await screen.findByRole("button", { name: "Rejoin" }));
@@ -5019,11 +5034,22 @@ describe("App", () => {
     });
 
     // No scan callback or online event nudges the engine here. The normal
-    // 15-second heartbeat must discover this durable row by itself after the
-    // bundle revision, proving that recovery did not leave sync paused.
-    await waitFor(() => expect(scanPosts).toBe(1), { timeout: 17_000 });
+    // heartbeat must discover this durable row by itself after the bundle
+    // revision, proving that recovery did not leave sync paused.
+    //
+    // The heartbeat is driven, not waited out. Sleeping through the real
+    // `HEARTBEAT_MS` cost this one test 15s of the station suite's ~45s --
+    // and the wait is a fixed interval anchored at engine start, so a loaded
+    // CI runner does not stretch it, it just risks pushing the setup past the
+    // first tick and into a 30s second one. Advancing the clock asserts the
+    // same fact (the periodic interval, with no nudge, drains the outbox) in
+    // 0.3s, and it now fails honestly if the interval is never armed.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+    });
+    await waitFor(() => expect(scanPosts).toBe(1));
     expect(outbox).toEqual([]);
-  }, 20_000);
+  });
 
   // Task 13 review, Finding 1: App.tsx used to hardcode `issuerPrefix={null}`
   // and `boxCapacity={null}` into WorkScreen unconditionally, so the box UI

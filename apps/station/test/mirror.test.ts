@@ -13,6 +13,7 @@ import {
   type SqlExecutor,
   type StationBundle,
 } from "../src/lib/mirror.js";
+import { openFileDatabase } from "./support/sqlite-exec.js";
 
 function nodeExecutor(db = new DatabaseSync(":memory:")): SqlExecutor {
   return {
@@ -243,7 +244,7 @@ describe("mirror", () => {
   it("retains the mirrored production date after closing and reopening SQLite", async () => {
     const directory = mkdtempSync(join(tmpdir(), "markiro-station-mirror-"));
     const databasePath = join(directory, "station.sqlite");
-    let db: DatabaseSync | undefined = new DatabaseSync(databasePath);
+    let db: DatabaseSync | undefined = openFileDatabase(databasePath);
 
     try {
       const exec = nodeExecutor(db);
@@ -253,7 +254,7 @@ describe("mirror", () => {
         shift: { ...bundle.shift, productionDate: "2026-08-20" },
       });
       db.close();
-      db = new DatabaseSync(databasePath);
+      db = openFileDatabase(databasePath);
 
       expect((await readShiftContext(nodeExecutor(db), "s1"))?.productionDate).toBe("2026-08-20");
     } finally {

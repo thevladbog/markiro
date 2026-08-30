@@ -12,7 +12,7 @@ import {
   prepareInventoryOutboxBatch,
 } from "../src/lib/inventory-outbox.js";
 import { applyMigrations } from "../src/lib/mirror.js";
-import { makeExec, makeRotatingExec } from "./support/sqlite-exec.js";
+import { makeExec, makeRotatingExec, openFileDatabase } from "./support/sqlite-exec.js";
 
 const INVENTORY_ID = "11111111-1111-4111-8111-111111111111";
 const SNAPSHOT_ID = "22222222-2222-4222-8222-222222222222";
@@ -54,7 +54,7 @@ async function setup() {
 async function rotatingSetup(hooks: Parameters<typeof makeRotatingExec>[1] = {}) {
   const directory = mkdtempSync(join(tmpdir(), `inventory-outbox-${randomUUID()}-`));
   const path = join(directory, "mirror.sqlite");
-  const databases = [new DatabaseSync(path), new DatabaseSync(path)];
+  const databases = [openFileDatabase(path), openFileDatabase(path)];
   const exec = makeRotatingExec(databases, hooks);
   await applyMigrations(exec);
   const db = databases[0]!;
