@@ -23,6 +23,7 @@
     "test:production-bundle:contract": "node --test deploy/production/test/*.test.mjs",
     "test:production-docs:browser": "pnpm --dir tools/production-browser --ignore-workspace test",
     "test:station-inventory:browser": "pnpm --dir tools/production-browser --ignore-workspace test:station-inventory",
+    "test:inventory:browser": "pnpm --dir tools/production-browser --ignore-workspace test:inventory",
     "test:landing:browser": "pnpm --dir tools/production-browser --ignore-workspace test:landing",
     "test:landing:lighthouse": "pnpm --dir tools/production-browser --ignore-workspace test:landing:lighthouse",
     "test:yandex-infra:contract": "node --test infra/yandex/test/*.test.mjs",

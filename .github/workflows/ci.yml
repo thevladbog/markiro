@@ -207,6 +207,10 @@ jobs:
         run: |
           pnpm turbo run build --filter='@markiro/station^...'
           pnpm test:station-inventory:browser
+      - name: Verify the inventory admin gallery contract
+        run: |
+          pnpm turbo run build --filter='@markiro/admin^...'
+          pnpm test:inventory:browser
       - name: Verify Yandex runtime contracts
         run: pnpm test:yandex-runtime
       - name: Build legal verifier dependencies
