@@ -428,6 +428,7 @@ export const billingActDocuments = pgTable(
     contentType: text("content_type").notNull(),
     sha256: text("sha256").notNull(),
     byteSize: integer("byte_size").notNull(),
+    printVariant: text("print_variant").notNull().default("clean"),
     state: billingAttachmentState("state").notNull().default("pending"),
     uploadedByPlatformUserId: text("uploaded_by_platform_user_id")
       .notNull()
@@ -463,6 +464,10 @@ export const billingActDocuments = pgTable(
     check("billing_act_documents_revision_positive", sql`${table.revision} > 0`),
     check("billing_act_documents_byte_size_positive", sql`${table.byteSize} > 0`),
     check("billing_act_documents_content_type_pdf", sql`${table.contentType} = 'application/pdf'`),
+    check(
+      "billing_act_documents_print_variant_check",
+      sql`${table.printVariant} in ('clean', 'signed')`,
+    ),
     check(
       "billing_act_documents_ready_shape_check",
       sql`(${table.state} = 'ready' and ${table.readyAt} is not null)

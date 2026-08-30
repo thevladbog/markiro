@@ -31,7 +31,7 @@ type InventoryTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 interface LockedInventory {
   id: string;
-  status: "draft" | "preparing" | "ready" | "running" | "closed" | "completed";
+  status: "draft" | "preparing" | "ready" | "cancelled" | "running" | "closed" | "completed";
   resultRevision: number;
   closedByUserId: string | null;
   closedAt: Date | string | null;

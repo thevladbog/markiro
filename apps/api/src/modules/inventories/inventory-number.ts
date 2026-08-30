@@ -5,7 +5,7 @@
  * and disaggregation acts (`DSG`): a Latin prefix, the two-digit year of
  * creation, and a zero-padded per-tenant sequence.
  *
- * The prefix is `IVN` rather than `INV` because `INV-NNNNNN` already
+ * The prefix is `IVN` rather than `INV` because `MRK-INV-NNNNNN` already
  * identifies billing invoices in the same cabinet.
  */
 

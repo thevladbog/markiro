@@ -75,6 +75,34 @@ describe("FileDropZone", () => {
     expect(onFile).toHaveBeenCalledWith(file);
   });
 
+  it("forwards every accepted file from a multiple drop and reports rejected files", () => {
+    const onFile = vi.fn();
+    const onRejected = vi.fn();
+    render(
+      <FileDropZone
+        label="Перетащите файлы или нажмите"
+        accept=".pdf,.txt"
+        multiple
+        onFile={onFile}
+        onRejected={onRejected}
+      />,
+    );
+    const input = screen.getByTestId("file-drop-input") as HTMLInputElement;
+    const pdf = new File(["pdf"], "contract.pdf", { type: "application/pdf" });
+    const txt = new File(["txt"], "note.txt", { type: "text/plain" });
+    const executable = new File(["bin"], "run.exe", {
+      type: "application/octet-stream",
+    });
+
+    fireEvent.drop(screen.getByRole("button"), {
+      dataTransfer: { files: [pdf, executable, txt] },
+    });
+
+    expect(input.multiple).toBe(true);
+    expect(onFile.mock.calls).toEqual([[pdf], [txt]]);
+    expect(onRejected).toHaveBeenCalledWith(executable);
+  });
+
   it("ignores a dropped file while disabled", () => {
     const onFile = vi.fn();
     render(

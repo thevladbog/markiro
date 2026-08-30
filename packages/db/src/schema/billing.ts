@@ -388,6 +388,7 @@ export const invoiceDocuments = pgTable(
     sha256: text("sha256"),
     byteSize: integer("byte_size"),
     rendererVersion: text("renderer_version").notNull(),
+    printVariant: text("print_variant").notNull().default("clean"),
     errorCode: text("error_code"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -406,6 +407,10 @@ export const invoiceDocuments = pgTable(
     }),
     check("invoice_documents_revision_positive", sql`${table.revision} > 0`),
     check("invoice_documents_format_check", sql`${table.format} in ('pdf', 'html')`),
+    check(
+      "invoice_documents_print_variant_check",
+      sql`${table.printVariant} in ('clean', 'signed')`,
+    ),
     check(
       "invoice_documents_ready_metadata_check",
       sql`${table.status} <> 'ready' or (${table.objectKey} is not null and ${table.sha256} is not null and ${table.byteSize} is not null)`,

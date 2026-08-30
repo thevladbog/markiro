@@ -330,6 +330,119 @@ describe.skipIf(!ready)("inventory ready/start lifecycle e2e", () => {
     expect(JSON.stringify(response.body)).not.toContain("manifest-secret");
   }
 
+  it.each(["draft", "preparing", "ready"] as const)(
+    "cancels a %s inventory with durable actor/time evidence and an exact audit",
+    async (status) => {
+      const agent = request.agent(app!.getHttpServer());
+      const fixture = await seedReadyInventory(agent);
+      if (status !== "ready") {
+        await db
+          .update(schema.inventories)
+          .set({ status, activeSnapshotId: null })
+          .where(eq(schema.inventories.id, fixture.inventoryId));
+      }
+      if (status === "ready") {
+        await db.insert(schema.chzExportRuns).values({
+          tenantId: fixture.tenantId,
+          inventoryId: fixture.inventoryId,
+          status: "INTRODUCED",
+          state: "queued",
+          orderedByUserId: fixture.actorUserId,
+        });
+      }
+
+      await agent.post(`/inventories/${fixture.inventoryId}/cancel`).expect(204);
+
+      const stored = await db.execute<{
+        status: string;
+        cancelled_by_user_id: string | null;
+        cancelled_at: string | null;
+      }>(sql`
+        select status::text, cancelled_by_user_id, cancelled_at
+        from inventories
+        where tenant_id = ${fixture.tenantId} and id = ${fixture.inventoryId}
+      `);
+      expect(stored.rows).toEqual([
+        {
+          status: "cancelled",
+          cancelled_by_user_id: fixture.actorUserId,
+          cancelled_at: expect.any(String),
+        },
+      ]);
+
+      const audits = await db
+        .select({
+          organizationId: schema.tenantAuditEvents.organizationId,
+          actorUserId: schema.tenantAuditEvents.actorUserId,
+          action: schema.tenantAuditEvents.action,
+          outcome: schema.tenantAuditEvents.outcome,
+          targetType: schema.tenantAuditEvents.targetType,
+          targetId: schema.tenantAuditEvents.targetId,
+          before: schema.tenantAuditEvents.before,
+          after: schema.tenantAuditEvents.after,
+        })
+        .from(schema.tenantAuditEvents)
+        .where(
+          and(
+            eq(schema.tenantAuditEvents.organizationId, fixture.tenantId),
+            eq(schema.tenantAuditEvents.action, "inventory.cancelled"),
+            eq(schema.tenantAuditEvents.targetId, fixture.inventoryId),
+          ),
+        );
+      expect(audits).toEqual([
+        {
+          organizationId: fixture.tenantId,
+          actorUserId: fixture.actorUserId,
+          action: "inventory.cancelled",
+          outcome: "success",
+          targetType: "inventory",
+          targetId: fixture.inventoryId,
+          before: { status, activeSnapshotId: status === "ready" ? fixture.snapshotId : null },
+          after: {
+            status: "cancelled",
+            cancelledByUserId: fixture.actorUserId,
+            cancelledAt: expect.any(String),
+          },
+        },
+      ]);
+
+      if (status === "ready") {
+        const [run] = await db
+          .select({
+            state: schema.chzExportRuns.state,
+            errorCode: schema.chzExportRuns.errorCode,
+            completedAt: schema.chzExportRuns.completedAt,
+          })
+          .from(schema.chzExportRuns)
+          .where(eq(schema.chzExportRuns.inventoryId, fixture.inventoryId));
+        expect(run).toEqual({
+          state: "failed",
+          errorCode: "INVENTORY_CANCELLED",
+          completedAt: expect.any(Date),
+        });
+      }
+    },
+  );
+
+  it("rejects cancellation after start, rejects repeats, and hides foreign-tenant inventories", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const running = await seedReadyInventory(owner);
+    await owner.post(`/inventories/${running.inventoryId}/start`).expect(201);
+    await owner.post(`/inventories/${running.inventoryId}/cancel`).expect(409, {
+      code: "INVENTORY_CANCEL_REQUIRES_PRE_START",
+    });
+
+    const cancelled = await seedReadyInventory(owner);
+    await owner.post(`/inventories/${cancelled.inventoryId}/cancel`).expect(204);
+    await owner.post(`/inventories/${cancelled.inventoryId}/cancel`).expect(409, {
+      code: "INVENTORY_CANCEL_REQUIRES_PRE_START",
+    });
+
+    const foreign = request.agent(app!.getHttpServer());
+    await signUpAndActivate(foreign);
+    await foreign.post(`/inventories/${running.inventoryId}/cancel`).expect(404);
+  });
+
   it("transitions ready check inventory once and returns the frozen sanitized manifest with an exact durable audit", async () => {
     const agent = request.agent(app!.getHttpServer());
     const fixture = await seedReadyInventory(agent);
