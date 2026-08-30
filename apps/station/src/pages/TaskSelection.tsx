@@ -32,7 +32,7 @@ import {
   type ShiftSelectionRouteIntentOptions,
 } from "./ShiftSelection.js";
 
-const INVENTORY_PAGE_SIZE = 1;
+const INVENTORY_PAGE_SIZE = 3;
 type TaskCategory = "production" | "warehouse";
 interface SelectionRouteIntentRecord {
   token: symbol;

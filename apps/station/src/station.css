@@ -2719,6 +2719,30 @@ body,
   .setup-panel__printer-actions {
     grid-template-columns: minmax(0, 1fr) minmax(190px, 0.45fr);
   }
+
+  .setup-card--printer-config {
+    padding: var(--sp-2);
+    gap: var(--sp-2);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .setup-card--printer-config > .setup-card__title,
+  .setup-card--printer-config > .setup-choice-group--printer-transport,
+  .setup-card--printer-config > .setup-touch-choice--checkbox {
+    grid-column: 1 / -1;
+  }
+
+  .setup-card--printer-config > .setup-panel__fields {
+    grid-column: 1;
+  }
+
+  .setup-card--printer-config > .setup-choice-group--printer-language {
+    grid-column: 2;
+  }
+
+  .setup-choice-group__options--transport {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .new-shift__panel {
