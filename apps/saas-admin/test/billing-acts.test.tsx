@@ -16,6 +16,29 @@ afterEach(() => {
 });
 
 describe("platform billing act issue", () => {
+  it("opens a linked act by its number instead of ending on a missing route", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+        if (url.endsWith(`/api/platform/billing/acts/${ACT_ID}`)) {
+          return jsonResponse(200, act("issued", readyDocument()));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    renderSaasApp({ initialEntry: `/billing-acts/${ACT_ID}` });
+
+    expect(await screen.findByRole("heading", { name: "ACT-42" })).toBeDefined();
+    expect(screen.getByText("Выпущен")).toBeDefined();
+    expect(screen.getByRole("link", { name: "Открыть заявку" }).getAttribute("href")).toBe(
+      `/billing-requests/${REQUEST_ID}`,
+    );
+    expect(screen.queryByText(ACT_ID)).toBeNull();
+  });
+
   it("rejects non-PDF and oversized files before creating an act", async () => {
     const fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

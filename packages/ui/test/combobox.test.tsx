@@ -59,6 +59,17 @@ describe("Combobox", () => {
     expect(screen.queryByRole("option", { name: /Custom/i })).toBeNull();
   });
 
+  it("reports a search query so remote suggestions can be loaded", async () => {
+    const user = userEvent.setup();
+    const onSearchChange = vi.fn();
+    renderCombobox({ onSearchChange });
+
+    await user.click(screen.getByRole("combobox", { name: "Offer" }));
+    await user.type(screen.getByRole("searchbox", { name: "Search offers" }), "KP-42");
+
+    expect(onSearchChange).toHaveBeenLastCalledWith("KP-42");
+  });
+
   it("selects the active filtered option with ArrowDown and Enter", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();

@@ -3137,7 +3137,6 @@ textarea {
 }
 
 .billing-request-filters label,
-.billing-request-link-form label,
 .billing-act-file {
   display: grid;
   gap: 6px;
@@ -3146,7 +3145,6 @@ textarea {
 }
 
 .billing-request-filters select,
-.billing-request-link-form select,
 .billing-act-file input {
   min-height: 40px;
   width: 100%;
@@ -3159,7 +3157,6 @@ textarea {
 }
 
 .billing-request-filters select:focus-visible,
-.billing-request-link-form select:focus-visible,
 .billing-act-file input:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
@@ -3247,8 +3244,12 @@ textarea {
   margin: 4px 0 0;
 }
 
-.billing-request-link-form > .mk-input {
-  flex: 1 1 320px;
+.billing-request-link-form > .mk-field:first-child {
+  flex: 0 1 220px;
+}
+
+.billing-request-link-form > .mk-combobox {
+  flex: 1 1 360px;
 }
 
 .billing-act-form {

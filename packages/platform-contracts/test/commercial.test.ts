@@ -1427,6 +1427,7 @@ describe("platform commercial contracts", () => {
           type: "invoice",
           targetId: INVOICE_ID,
           targetLabel: "INV-000042",
+          targetHref: `/invoices/${INVOICE_ID}`,
           createdAt: CREATED_AT,
         },
       ],
@@ -1441,6 +1442,7 @@ describe("platform commercial contracts", () => {
     expect(parsed.offerAction).toMatchObject({ canRevise: true, canCreateInvoice: false });
     expect(parsed.tenantName).toBe("ООО Северная линия");
     expect(parsed.links[0]?.targetLabel).toBe("INV-000042");
+    expect(parsed.links[0]?.targetHref).toBe(`/invoices/${INVOICE_ID}`);
     expect(
       platformCommercialContracts.billingRequests.detail.response.safeParse({
         ...parsed,
@@ -1454,12 +1456,46 @@ describe("platform commercial contracts", () => {
       }).success,
     ).toBe(false);
     expect(
+      platformCommercialContracts.billingRequests.detail.response.safeParse({
+        ...parsed,
+        links: parsed.links.map(({ targetHref: _targetHref, ...link }) => link),
+      }).success,
+    ).toBe(false);
+    expect(
       platformCommercialContracts.billingRequests.status.body.safeParse({
         status: "completed",
         idempotencyKey: "81111111-1111-4111-8111-111111111119",
         allowedTransitions: ["completed"],
       }).success,
     ).toBe(false);
+  });
+
+  it("contracts tenant-scoped request link suggestions by display number", () => {
+    const requestId = "82111111-1111-4111-8111-111111111120";
+    const query = platformCommercialContracts.billingRequests.linkTargets.query.parse({
+      type: "offer",
+      q: " КП-42 ",
+    });
+    const response = platformCommercialContracts.billingRequests.linkTargets.response.parse({
+      items: [
+        {
+          id: OFFER_ID,
+          label: "КП-000042",
+          href: `/offers?selected=${OFFER_ID}`,
+        },
+      ],
+      truncated: false,
+    });
+
+    expect(query).toEqual({ type: "offer", q: "КП-42" });
+    expect(response.items[0]).toEqual({
+      id: OFFER_ID,
+      label: "КП-000042",
+      href: `/offers?selected=${OFFER_ID}`,
+    });
+    expect(platformCommercialContracts.billingRequests.linkTargets.params.parse(requestId)).toBe(
+      requestId,
+    );
   });
 
   it("requires an explicit request-registry truncation signal", () => {

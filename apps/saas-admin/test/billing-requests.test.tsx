@@ -134,6 +134,7 @@ describe("platform billing request operations", () => {
                 type: "offer",
                 targetId: OFFER_ID,
                 targetLabel: "КП-000042",
+                targetHref: `/offers?selected=${OFFER_ID}`,
                 createdAt: now,
               },
             ],
@@ -146,7 +147,9 @@ describe("platform billing request operations", () => {
     renderSaasApp({ initialEntry: `/billing-requests/${REQUEST_ID}` });
 
     expect(await screen.findByRole("link", { name: "ООО Северная линия" })).toBeDefined();
-    expect(screen.getByText("КП-000042")).toBeDefined();
+    expect(screen.getByRole("link", { name: "КП-000042" }).getAttribute("href")).toBe(
+      `/offers?selected=${OFFER_ID}`,
+    );
     expect(screen.queryByText(TENANT_ID)).toBeNull();
     expect(screen.queryByText(OFFER_ID)).toBeNull();
     expect(
@@ -154,6 +157,89 @@ describe("platform billing request operations", () => {
         name: "Добавить комментарий",
       }),
     ).toBeDefined();
+  });
+
+  it("searches link targets by number and links the selected entity without exposing its id", async () => {
+    const user = userEvent.setup();
+    let linked = false;
+    let postedBody: unknown;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = decodeURIComponent(String(input));
+        const method = init?.method ?? "GET";
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+        if (
+          url.endsWith(
+            `/api/platform/billing/requests/${REQUEST_ID}/link-targets?type=offer&q=КП-000042`,
+          )
+        ) {
+          return jsonResponse(200, {
+            items: [
+              {
+                id: OFFER_ID,
+                label: "КП-000042",
+                href: `/offers?selected=${OFFER_ID}`,
+              },
+            ],
+            truncated: false,
+          });
+        }
+        if (url.endsWith(`/api/platform/billing/requests/${REQUEST_ID}/links`)) {
+          postedBody = JSON.parse(String(init?.body));
+          linked = true;
+          return jsonResponse(201, {
+            id: "51111111-1111-4111-8111-111111111121",
+            tenantId: TENANT_ID,
+            requestId: REQUEST_ID,
+            type: "offer",
+            targetId: OFFER_ID,
+            targetLabel: "КП-000042",
+            targetHref: `/offers?selected=${OFFER_ID}`,
+            createdAt: now,
+          });
+        }
+        if (url.endsWith(`/api/platform/billing/requests/${REQUEST_ID}`) && method === "GET") {
+          return jsonResponse(200, {
+            ...request,
+            allowedTransitions: [],
+            offerAction: null,
+            events: [event],
+            links: linked
+              ? [
+                  {
+                    id: "51111111-1111-4111-8111-111111111121",
+                    tenantId: TENANT_ID,
+                    requestId: REQUEST_ID,
+                    type: "offer",
+                    targetId: OFFER_ID,
+                    targetLabel: "КП-000042",
+                    targetHref: `/offers?selected=${OFFER_ID}`,
+                    createdAt: now,
+                  },
+                ]
+              : [],
+          });
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      }),
+    );
+
+    renderSaasApp({ initialEntry: `/billing-requests/${REQUEST_ID}` });
+
+    const typeSelect = await screen.findByRole("combobox", { name: "Тип объекта" });
+    expect(typeSelect.tagName).toBe("BUTTON");
+    await user.click(screen.getByRole("combobox", { name: "Объект" }));
+    await user.type(
+      screen.getByRole("searchbox", { name: "Поиск по номеру или названию" }),
+      "КП-000042",
+    );
+    await user.click(await screen.findByRole("option", { name: "КП-000042" }));
+    await user.click(screen.getByRole("button", { name: "Добавить связь" }));
+
+    expect(postedBody).toMatchObject({ type: "offer", targetId: OFFER_ID });
+    expect(await screen.findByRole("link", { name: "КП-000042" })).toBeDefined();
+    expect(screen.queryByText(OFFER_ID)).toBeNull();
   });
 
   it.each([
@@ -342,7 +428,7 @@ describe("platform billing request operations", () => {
       "disabled",
       true,
     );
-    expect(screen.getByLabelText("ID объекта")).toHaveProperty("disabled", true);
+    expect(screen.getByRole("combobox", { name: "Объект" })).toHaveProperty("disabled", true);
     expect(screen.queryByRole("link", { name: "Создать предложение" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Выпустить акт" })).toBeNull();
   });

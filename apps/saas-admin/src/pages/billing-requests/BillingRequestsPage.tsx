@@ -1,8 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { Alert, Button, Input, SectionHeader, Spinner, StatusChip, Table } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Combobox,
+  Input,
+  SectionHeader,
+  Select,
+  Spinner,
+  StatusChip,
+  Table,
+} from "@markiro/ui";
 import {
   platformCommercialContracts,
   type PlatformBillingRequestCommentDto,
@@ -17,7 +27,9 @@ import {
   commentBillingRequest,
   getBillingRequest,
   linkBillingRequest,
+  listBillingRequestLinkTargets,
   listBillingRequests,
+  type BillingRequestLinkTarget,
   transitionBillingRequest,
   type BillingRequestListItem,
 } from "./api.js";
@@ -199,6 +211,9 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
     useState<PlatformBillingRequestStatusMutationDto | null>(null);
   const [linkType, setLinkType] = useState<PlatformBillingRequestLinkDto["type"]>("offer");
   const [targetId, setTargetId] = useState("");
+  const [linkSearch, setLinkSearch] = useState("");
+  const [debouncedLinkSearch, setDebouncedLinkSearch] = useState("");
+  const [selectedTarget, setSelectedTarget] = useState<BillingRequestLinkTarget | null>(null);
   const [linkAttempt, setLinkAttempt] = useState<PlatformBillingRequestLinkDto | null>(null);
   const [reviseAttempt, setReviseAttempt] = useState<{
     offerId: string;
@@ -206,6 +221,37 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
   } | null>(null);
   const detailKey = [...listKey, requestId] as const;
   const detail = useQuery({ queryKey: detailKey, queryFn: () => getBillingRequest(requestId) });
+  useEffect(() => {
+    const normalized = linkSearch.trim().replace(/\s+/g, " ");
+    if (!normalized) {
+      setDebouncedLinkSearch("");
+      return;
+    }
+    const timer = window.setTimeout(() => setDebouncedLinkSearch(normalized), 250);
+    return () => window.clearTimeout(timer);
+  }, [linkSearch]);
+  const linkTargets = useQuery({
+    queryKey: [
+      "platform",
+      "billing",
+      "requests",
+      requestId,
+      "link-targets",
+      linkType,
+      debouncedLinkSearch,
+    ],
+    queryFn: ({ signal }) =>
+      listBillingRequestLinkTargets(requestId, { type: linkType, q: debouncedLinkSearch }, signal),
+    enabled: writable && debouncedLinkSearch.length > 0,
+    staleTime: 60_000,
+  });
+  const linkTargetOptions = useMemo(() => {
+    const candidates = linkTargets.data?.items ?? [];
+    const targets = selectedTarget
+      ? [selectedTarget, ...candidates.filter((candidate) => candidate.id !== selectedTarget.id)]
+      : candidates;
+    return targets.map((target) => ({ value: target.id, label: target.label }));
+  }, [linkTargets.data?.items, selectedTarget]);
   const refresh = async () => {
     await Promise.all([
       client.invalidateQueries({ queryKey: listKey }),
@@ -245,6 +291,9 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
     mutationFn: (input: PlatformBillingRequestLinkDto) => linkBillingRequest(requestId, input),
     onSuccess: async () => {
       setTargetId("");
+      setLinkSearch("");
+      setDebouncedLinkSearch("");
+      setSelectedTarget(null);
       setLinkAttempt(null);
       await refresh();
     },
@@ -364,7 +413,9 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
           {request.links.map((item) => (
             <li key={item.id}>
               {t(`billingRequests.links.${item.type}`)} ·{" "}
-              <strong>{item.targetLabel ?? t("billingRequests.links.unnamed")}</strong>
+              <Link to={item.targetHref}>
+                {item.targetLabel ?? t("billingRequests.links.unnamed")}
+              </Link>
             </li>
           ))}
         </ul>
@@ -479,33 +530,41 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
             </Button>
           </div>
           <div className="billing-request-link-form">
-            <label>
-              <span>{t("billingRequests.links.type")}</span>
-              <select
-                value={linkType}
-                disabled={retainedAction !== null}
-                onChange={(event) => {
-                  const type = linkTypes.find((candidate) => candidate === event.target.value);
-                  if (type) {
-                    setLinkType(type);
-                    setLinkAttempt(null);
-                    link.reset();
-                  }
-                }}
-              >
-                {linkTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {t(`billingRequests.links.${type}`)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Input
-              label={t("billingRequests.links.target")}
-              value={targetId}
+            <Select
+              label={t("billingRequests.links.type")}
+              options={linkTypes.map((type) => ({
+                value: type,
+                label: t(`billingRequests.links.${type}`),
+              }))}
+              value={linkType}
               disabled={retainedAction !== null}
-              onChange={(event) => {
-                setTargetId(event.target.value);
+              onValueChange={(type) => {
+                setLinkType(type);
+                setTargetId("");
+                setLinkSearch("");
+                setDebouncedLinkSearch("");
+                setSelectedTarget(null);
+                setLinkAttempt(null);
+                link.reset();
+              }}
+            />
+            <Combobox
+              label={t("billingRequests.links.target")}
+              options={linkTargetOptions}
+              value={targetId}
+              placeholder={t("billingRequests.links.placeholder")}
+              searchPlaceholder={t("billingRequests.links.searchPlaceholder")}
+              emptyText={t("billingRequests.links.empty")}
+              loadingText={t("billingRequests.links.loading")}
+              loading={linkTargets.isFetching}
+              disabled={retainedAction !== null}
+              {...(linkTargets.error ? { error: t("billingRequests.links.loadError") } : {})}
+              onSearchChange={setLinkSearch}
+              onValueChange={(value) => {
+                setTargetId(value);
+                setSelectedTarget(
+                  linkTargets.data?.items.find((candidate) => candidate.id === value) ?? null,
+                );
                 setLinkAttempt(null);
                 link.reset();
               }}

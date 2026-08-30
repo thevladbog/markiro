@@ -483,8 +483,13 @@
     },
     "links": {
       "title": "Linked objects",
-      "type": "Link type",
-      "target": "Object ID",
+      "type": "Object type",
+      "target": "Object",
+      "placeholder": "Select an object",
+      "searchPlaceholder": "Search by number or name",
+      "empty": "No matches",
+      "loading": "Searching objects…",
+      "loadError": "Could not load suggestions",
       "add": "Add link",
       "unnamed": "Unnamed",
       "offer": "Offer",
@@ -511,6 +516,22 @@
     "retry": "Retry issue",
     "resume": "Continue issuing saved draft",
     "reconcile": "Reconcile saved draft",
+    "status": {
+      "draft": "Draft",
+      "issued": "Issued",
+      "cancelled": "Cancelled"
+    },
+    "detail": {
+      "title": "Act",
+      "description": "Status and links for the closing document.",
+      "status": "Status",
+      "openRequest": "Open request",
+      "openTenant": "Open tenant",
+      "openInvoice": "Open invoice",
+      "loadError": "Could not load the act",
+      "forbiddenTitle": "Act unavailable",
+      "forbiddenBody": "Billing read permission is required to view the act."
+    },
     "fields": {
       "number": "Act number",
       "actId": "Draft ID:",

@@ -286,6 +286,13 @@ export const CURRENT_SAAS_ROUTES = [
     platformCommercialContracts.billingRequests.detail.response,
   ),
   route(
+    "get",
+    "/platform/billing/requests/{id}/link-targets",
+    "200",
+    platformCommercialContracts.billingRequests.linkTargets.response,
+    { query: platformCommercialContracts.billingRequests.linkTargets.query },
+  ),
+  route(
     "post",
     "/platform/billing/requests/{id}/offer",
     "201",

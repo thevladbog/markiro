@@ -1,5 +1,15 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, desc, eq, getTableColumns, inArray, isNull } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  ilike,
+  inArray,
+  isNull,
+  notExists,
+} from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   platformCommercialContracts,
@@ -7,6 +17,7 @@ import {
   type PlatformBillingRequestEvent,
   type PlatformBillingRequestLink,
   type PlatformBillingRequestLinkDto,
+  type PlatformBillingRequestLinkTargetQueryDto,
   type PlatformBillingRequestListQueryDto,
   type PlatformBillingRequestOfferCreateDto,
   type PlatformBillingRequestStatusMutationDto,
@@ -33,6 +44,7 @@ type RequestWithTenantName = typeof schema.tenantBillingRequests.$inferSelect & 
   tenantName: string;
 };
 const registryLimit = 100;
+const linkTargetLimit = 20;
 
 const transitions: Record<RequestStatus, readonly RequestStatus[]> = {
   new: ["under_review", "cancelled"],
@@ -115,6 +127,55 @@ export class PlatformBillingRequestsService {
 
   async detail(_actor: PlatformPrincipal, requestId: string) {
     return this.detailWith(this.db, requestId);
+  }
+
+  async linkTargets(
+    _actor: PlatformPrincipal,
+    requestId: string,
+    query: PlatformBillingRequestLinkTargetQueryDto,
+  ) {
+    const canonicalRequestId = canonicalBillingUuid(requestId);
+    const located = await this.locate(canonicalRequestId);
+    const table = linkTable(query.type);
+    const label = linkLabelColumn(query.type);
+    const linkedTarget = linkColumn(query.type);
+    const candidates = await this.db
+      .select({ id: table.id, label })
+      .from(table)
+      .where(
+        and(
+          eq(table.tenantId, located.tenantId),
+          ilike(label, `%${escapeLikePattern(query.q)}%`),
+          notExists(
+            this.db
+              .select({ id: schema.tenantBillingRequestLinks.id })
+              .from(schema.tenantBillingRequestLinks)
+              .where(
+                and(
+                  eq(schema.tenantBillingRequestLinks.tenantId, located.tenantId),
+                  eq(linkedTarget, table.id),
+                ),
+              ),
+          ),
+        ),
+      )
+      .orderBy(asc(label), asc(table.id))
+      .limit(linkTargetLimit + 1);
+    const truncated = candidates.length > linkTargetLimit;
+    return {
+      items: candidates.slice(0, linkTargetLimit).flatMap((candidate) =>
+        candidate.label
+          ? [
+              {
+                id: candidate.id,
+                label: candidate.label,
+                href: linkTargetHref(query.type, candidate.id, located.tenantId),
+              },
+            ]
+          : [],
+      ),
+      truncated,
+    };
   }
 
   async comment(
@@ -731,6 +792,10 @@ function responsibleSide(status: RequestStatus) {
   return "markiro" as const;
 }
 
+function escapeLikePattern(value: string) {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
 async function resolveLinkLabels(
   db: RequestReadExecutor,
   tenantId: string,
@@ -851,8 +916,17 @@ function linkSource(
     type,
     targetId,
     targetLabel,
+    targetHref: linkTargetHref(type, targetId, link.tenantId),
     createdAt: link.createdAt.toISOString(),
   };
+}
+
+function linkTargetHref(type: LinkType, targetId: string, tenantId: string): string {
+  if (type === "offer") return `/offers?selected=${targetId}`;
+  if (type === "invoice") return `/invoices/${targetId}`;
+  if (type === "payment") return `/payments?selected=${targetId}`;
+  if (type === "act") return `/billing-acts/${targetId}`;
+  return `/tenants/${encodeURIComponent(tenantId)}?section=services&selected=${targetId}`;
 }
 
 function inferLinkSource(

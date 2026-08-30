@@ -2,6 +2,7 @@ import {
   platformCommercialContracts,
   type PlatformBillingRequestCommentDto,
   type PlatformBillingRequestLinkDto,
+  type PlatformBillingRequestLinkTargetQueryDto,
   type PlatformBillingRequestListQueryDto,
   type PlatformBillingRequestOfferCreateDto,
   type PlatformBillingRequestStatusMutationDto,
@@ -13,6 +14,9 @@ export type BillingRequestListItem = Awaited<
   ReturnType<typeof listBillingRequests>
 >["items"][number];
 export type BillingRequestDetail = Awaited<ReturnType<typeof getBillingRequest>>;
+export type BillingRequestLinkTarget = Awaited<
+  ReturnType<typeof listBillingRequestLinkTargets>
+>["items"][number];
 
 export function billingRequestListPath(query: PlatformBillingRequestListQueryDto): string {
   const parsed = platformCommercialContracts.billingRequests.list.query.parse(query);
@@ -34,6 +38,20 @@ export function getBillingRequest(id: string) {
   const requestId = platformCommercialContracts.billingRequests.detail.params.parse(id);
   return platformApiFetch(`/billing/requests/${requestId}`, {
     responseSchema: platformCommercialContracts.billingRequests.detail.response,
+  });
+}
+
+export function listBillingRequestLinkTargets(
+  id: string,
+  query: PlatformBillingRequestLinkTargetQueryDto,
+  signal?: AbortSignal,
+) {
+  const requestId = platformCommercialContracts.billingRequests.linkTargets.params.parse(id);
+  const parsed = platformCommercialContracts.billingRequests.linkTargets.query.parse(query);
+  const search = new URLSearchParams({ type: parsed.type, q: parsed.q });
+  return platformApiFetch(`/billing/requests/${requestId}/link-targets?${search}`, {
+    responseSchema: platformCommercialContracts.billingRequests.linkTargets.response,
+    ...(signal ? { signal } : {}),
   });
 }
 

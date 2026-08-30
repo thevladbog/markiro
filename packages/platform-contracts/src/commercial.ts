@@ -773,6 +773,13 @@ const platformBillingRequestLinkCommon = {
   targetId: platformUuidSchema,
   idempotencyKey: platformUuidSchema,
 };
+export const platformBillingRequestLinkTypeSchema = z.enum([
+  "offer",
+  "invoice",
+  "payment",
+  "act",
+  "ordered_service",
+]);
 export const platformBillingRequestLinkSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("offer"), ...platformBillingRequestLinkCommon }).strict(),
   z.object({ type: z.literal("invoice"), ...platformBillingRequestLinkCommon }).strict(),
@@ -828,15 +835,40 @@ export const platformBillingRequestLinkResponseSchema = z
     id: platformUuidSchema,
     tenantId: platformTenantIdSchema,
     requestId: platformUuidSchema,
-    type: z.enum(["offer", "invoice", "payment", "act", "ordered_service"]),
+    type: platformBillingRequestLinkTypeSchema,
     targetId: platformUuidSchema,
     targetLabel: z.string().trim().min(1).max(1_000).nullable().default(null),
+    targetHref: z.string().trim().startsWith("/").max(1_000).nullable().default(null),
     createdAt: responseTimestampSchema,
   })
   .strict();
 
 const platformBillingRequestResolvedLinkSchema = platformBillingRequestLinkResponseSchema
-  .extend({ targetLabel: z.string().trim().min(1).max(1_000).nullable() })
+  .extend({
+    targetLabel: z.string().trim().min(1).max(1_000).nullable(),
+    targetHref: z.string().trim().startsWith("/").max(1_000),
+  })
+  .strict();
+
+export const platformBillingRequestLinkTargetQuerySchema = z
+  .object({
+    type: platformBillingRequestLinkTypeSchema,
+    q: trimmedTextSchema(200),
+  })
+  .strict();
+export const platformBillingRequestLinkTargetResponseSchema = z
+  .object({
+    items: z.array(
+      z
+        .object({
+          id: platformUuidSchema,
+          label: z.string().trim().min(1).max(1_000),
+          href: z.string().trim().startsWith("/").max(1_000),
+        })
+        .strict(),
+    ),
+    truncated: z.boolean(),
+  })
   .strict();
 
 export const platformBillingRequestSchema = z
@@ -1797,6 +1829,11 @@ export const platformCommercialContracts = {
         .strict(),
     },
     detail: { params: platformUuidSchema, response: platformBillingRequestDetailSchema },
+    linkTargets: {
+      params: platformUuidSchema,
+      query: platformBillingRequestLinkTargetQuerySchema,
+      response: platformBillingRequestLinkTargetResponseSchema,
+    },
     createOffer: {
       params: platformUuidSchema,
       body: platformBillingRequestOfferCreateSchema,
@@ -1939,6 +1976,9 @@ export type PlatformBillingRequestStatusMutationDto = z.output<
   typeof platformBillingRequestStatusMutationSchema
 >;
 export type PlatformBillingRequestLinkDto = z.output<typeof platformBillingRequestLinkSchema>;
+export type PlatformBillingRequestLinkTargetQueryDto = z.output<
+  typeof platformBillingRequestLinkTargetQuerySchema
+>;
 export type PlatformBillingRequest = z.output<typeof platformBillingRequestSchema>;
 export type PlatformBillingRequestEvent = z.output<typeof platformBillingRequestEventSchema>;
 export type PlatformBillingRequestLink = z.output<typeof platformBillingRequestLinkResponseSchema>;

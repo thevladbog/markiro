@@ -921,9 +921,16 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
       type: "offer",
       targetId: offer!.id,
       targetLabel: offer!.number,
+      targetHref: `/offers?selected=${offer!.id}`,
     });
     await expect(requests.detail(actor, request.id)).resolves.toMatchObject({
-      links: [expect.objectContaining({ targetId: offer!.id, targetLabel: offer!.number })],
+      links: [
+        expect.objectContaining({
+          targetId: offer!.id,
+          targetLabel: offer!.number,
+          targetHref: `/offers?selected=${offer!.id}`,
+        }),
+      ],
     });
     const linkedEvents = await connection.db
       .select()
@@ -931,6 +938,52 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
       .where(eq(schema.tenantBillingRequestEvents.idempotencyKey, idempotencyKey));
     expect(linkedEvents).toHaveLength(1);
     expect(linkedEvents[0]).toMatchObject({ kind: "offer_linked", actorPlatformUserId: actorId });
+  });
+
+  it("suggests only unlinked request-tenant targets matching their display number", async () => {
+    const request = await insertRequest(connection.db, tenantA, tenantUser, "under_review");
+    const suffix = randomUUID();
+    const [localOffer] = await connection.db
+      .insert(schema.commercialOffers)
+      .values({
+        tenantId: tenantA,
+        revision: 1,
+        status: "published",
+        number: `KP-SUGGEST-${suffix}`,
+        publishedAt: new Date(),
+        createdByPlatformUserId: actorId,
+      })
+      .returning();
+    await connection.db.insert(schema.commercialOffers).values({
+      tenantId: tenantB,
+      revision: 1,
+      status: "published",
+      number: `KP-SUGGEST-FOREIGN-${suffix}`,
+      publishedAt: new Date(),
+      createdByPlatformUserId: actorId,
+    });
+
+    await expect(
+      requests.linkTargets(actor, request.id, { type: "offer", q: `suggest-${suffix}` }),
+    ).resolves.toEqual({
+      items: [
+        {
+          id: localOffer!.id,
+          label: localOffer!.number,
+          href: `/offers?selected=${localOffer!.id}`,
+        },
+      ],
+      truncated: false,
+    });
+
+    await requests.link(actor, request.id, {
+      type: "offer",
+      targetId: localOffer!.id,
+      idempotencyKey: randomUUID(),
+    });
+    await expect(
+      requests.linkTargets(actor, request.id, { type: "offer", q: `suggest-${suffix}` }),
+    ).resolves.toEqual({ items: [], truncated: false });
   });
 
   it("serializes different-request claims for the same target into one link and one exact conflict", async () => {
