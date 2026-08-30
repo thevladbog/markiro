@@ -7,16 +7,20 @@ import type { SchemaObject } from "@nestjs/swagger";
  * code, tenant-wide -- see that table's own doc, packages/db/src/schema/chz.ts.
  *
  * `withoutProductGroup` is the one number here the operator can act on: those
- * codes are stuck until someone gives their product a ЧЗ group, because
- * `cises/info` takes the group as a query parameter and a code with none can
- * never be asked about. Everything else is informational.
+ * codes are unaskable until their product has a ЧЗ group, because
+ * `cises/info` takes the group as a query parameter. Giving the product a
+ * group does not resolve them immediately -- `ChzCodeStatusIngestService`
+ * only re-resolves a null group the next time that exact code is ingested
+ * again (see `insertStatuses`'s doc), typically the next time it is scanned
+ * -- but it is no longer a dead end once that happens. Everything else here
+ * is informational.
  */
 export interface ChzCodeStatusSummaryDto {
   /** Every code the tenant's store knows about, refreshable or not. */
   total: number;
   /** `checkedAt` within the last 24 hours -- ЧЗ answered about the code recently. */
   refreshedLastDay: number;
-  /** `chzProductGroupCode is null` -- stuck; see the class doc above. */
+  /** `chzProductGroupCode is null` -- unaskable; see the class doc above. */
   withoutProductGroup: number;
   /** `max(checkedAt)` across the tenant, or `null` if no pass has ever checked one. */
   lastCheckedAt: string | null;

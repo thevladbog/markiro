@@ -65,7 +65,7 @@ function formatPairingCode(code: string): string {
 export function SignerAgentsPanel() {
   const { t, i18n } = useTranslation();
   const { data, isPending, isError } = useSignerAgents();
-  const { data: codeStatuses } = useChzCodeStatusSummary();
+  const { data: codeStatuses, isError: isCodeStatusesError } = useChzCodeStatusSummary();
   const canWriteIntegrations = useCan(CABINET_CAPABILITY.INTEGRATIONS_WRITE);
   const canManageCredentials = useCan(CABINET_CAPABILITY.CREDENTIALS_MANAGE);
   const canManage = canWriteIntegrations && canManageCredentials;
@@ -227,7 +227,9 @@ export function SignerAgentsPanel() {
           <Table columns={columns} rows={data.agents} getRowKey={(agent) => agent.id} />
         ) : null}
 
-        {codeStatuses ? (
+        {isCodeStatusesError ? (
+          <Alert tone="error">{t("pages.integrations.channel.codeStatuses.loadError")}</Alert>
+        ) : codeStatuses ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={{ font: "var(--text-body)", color: "var(--fg-3)" }}>
               {t("pages.integrations.channel.codeStatuses.line", {

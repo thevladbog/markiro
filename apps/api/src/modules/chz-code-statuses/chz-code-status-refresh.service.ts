@@ -41,7 +41,13 @@ function intervalFor(status: string): number {
 }
 
 export interface ChzCodeStatusRefreshResult {
-  /** How many `cises/info` calls this pass actually made. */
+  /**
+   * How many `cises/info` calls this pass made and kept the result of. A
+   * batch that stops the pass (`unavailable`/`unauthorized`) also makes a
+   * call, but is deliberately not counted here -- see `stopReason` and
+   * `refreshBatch`'s own doc for why a batch that touched no rows does not
+   * belong in this count.
+   */
   batches: number;
   /** Rows ЧЗ stated the facts for, and this pass wrote down. */
   updated: number;
@@ -65,6 +71,14 @@ type StopReason = "unavailable" | "unauthorized";
 interface BatchOutcome {
   updated: number;
   unknown: number;
+  /**
+   * True only for a `rejected` product group: terminal for that group, not
+   * for the pass, so it does not set `stopReason` and the loop moves on to
+   * the next group -- but it is still something, not an `ok`. Carried out
+   * to `run` so the end-of-pass summary can count it (see `rejectedGroups`
+   * there).
+   */
+  rejected: boolean;
   /** Set when the next batch would fail for the same reason; null otherwise. */
   stopReason: StopReason | null;
 }
@@ -117,6 +131,7 @@ export class ChzCodeStatusRefreshService {
     let updated = 0;
     let unknown = 0;
     let unresolved = 0;
+    let rejectedGroups = 0;
     let caughtUp = false;
     let stopReason: StopReason | null = null;
 
@@ -147,23 +162,31 @@ export class ChzCodeStatusRefreshService {
       batches += 1;
       updated += outcome.updated;
       unknown += outcome.unknown;
+      if (outcome.rejected) rejectedGroups += 1;
     }
 
     // Only when the pass actually did something: a cron tick over a tenant
     // with nothing due is not an event, and journalling it would bury the
     // ones that are. A pass that stopped early is always something, even if
     // it managed zero batches -- reporting `ok` there would tell the
-    // operator's channel card that codes were refreshed when none were.
+    // operator's channel card that codes were refreshed when none were. The
+    // same argument holds for a rejected group: `JournalService.append`
+    // overwrites the channel row's `lastOutcome` on every append, so the
+    // per-group `warn` written inside the loop above would otherwise be
+    // clobbered by this session-grain summary reporting `ok` right after it,
+    // leaving the channel card claiming everything worked.
     if (batches > 0 || unresolved > 0 || stopReason !== null) {
       await this.append(tenantId, {
-        outcome: stopReason !== null ? "warn" : "ok",
+        outcome: stopReason !== null || rejectedGroups > 0 ? "warn" : "ok",
         direction: "out",
         grain: "session",
         message:
           stopReason !== null
             ? "Обновление статусов кодов Честного Знака остановлено раньше срока"
-            : "Обновлены статусы кодов Честного Знака",
-        details: { batches, updated, unknown, unresolved, stopReason },
+            : rejectedGroups > 0
+              ? "Статусы кодов Честного Знака обновлены не полностью"
+              : "Обновлены статусы кодов Честного Знака",
+        details: { batches, updated, unknown, unresolved, rejectedGroups, stopReason },
       });
     }
     return { batches, updated, caughtUp };
@@ -284,7 +307,7 @@ export class ChzCodeStatusRefreshService {
       // walking the remaining groups into the same unreachable ЧЗ. The
       // end-of-pass summary is what tells the operator this happened -- see
       // `stopReason` there -- so no item/session entry is duplicated here.
-      return { updated: 0, unknown: 0, stopReason: "unavailable" };
+      return { updated: 0, unknown: 0, rejected: false, stopReason: "unavailable" };
     }
     if (result.status === "unauthorized") {
       // The same condition as a token we could not load: the tenant's agent
@@ -297,7 +320,7 @@ export class ChzCodeStatusRefreshService {
         message: "Статусы кодов Честного Знака не обновлены: нет токена",
         details: { tokenStatus: "unauthorized", productGroupCode },
       });
-      return { updated: 0, unknown: 0, stopReason: "unauthorized" };
+      return { updated: 0, unknown: 0, rejected: false, stopReason: "unauthorized" };
     }
     if (result.status === "rejected") {
       // Terminal for this group -- a missing contract is not fixed by asking
@@ -316,7 +339,7 @@ export class ChzCodeStatusRefreshService {
           codes: hashByRaw.size,
         },
       });
-      return { updated: 0, unknown: 0, stopReason: null };
+      return { updated: 0, unknown: 0, rejected: true, stopReason: null };
     }
 
     const infoByCis = new Map(result.value.map((info) => [info.cis, info]));
@@ -344,7 +367,12 @@ export class ChzCodeStatusRefreshService {
     const now = new Date();
     if (found.length > 0) await this.writeFacts(tenantId, productGroupCode, found, now);
     if (unknownHashes.length > 0) await this.countUnknown(tenantId, unknownHashes, now);
-    return { updated: found.length, unknown: unknownHashes.length, stopReason: null };
+    return {
+      updated: found.length,
+      unknown: unknownHashes.length,
+      rejected: false,
+      stopReason: null,
+    };
   }
 
   /**

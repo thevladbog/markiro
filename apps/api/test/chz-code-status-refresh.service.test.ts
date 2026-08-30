@@ -494,6 +494,29 @@ describe.skipIf(!ready)("ChzCodeStatusRefreshService", () => {
     expect(result.caughtUp).toBe(true);
   });
 
+  it("journals warn, not ok, for a pass where every group was rejected", async () => {
+    // Both groups reject, the pass never stops early (`stopReason` stays
+    // null -- a rejection moves to the next group), and `caughtUp` ends up
+    // true. Without carrying the rejection out of `refreshBatch`, the
+    // session-grain summary below would report `ok` and, because
+    // `JournalService.append` overwrites the channel row's `lastOutcome` on
+    // every append, clobber the per-group `warn`s written moments earlier.
+    await seedStatus({ codeHash: HASH_A, group: 8, nextRefreshAt: past(2) });
+    await seedStatus({ codeHash: HASH_B, group: 15, nextRefreshAt: past(1) });
+    client.fail({ status: "rejected", code: "403", message: "no active contract" });
+
+    const result = await service.run(tenantId);
+
+    expect(result.caughtUp).toBe(true);
+    const summaryCall = journal.append.mock.calls.find(
+      ([event]) => event.grain === "session" && event.direction === "out",
+    );
+    expect(summaryCall?.[0]).toMatchObject({
+      outcome: "warn",
+      details: expect.objectContaining({ rejectedGroups: 2, stopReason: null }),
+    });
+  });
+
   it("does nothing and reports not caught up when no token is available", async () => {
     await seedStatus({ codeHash: HASH_A, group: 8, nextRefreshAt: past(1) });
     tokens.getActiveToken.mockResolvedValue({ status: "expired" });

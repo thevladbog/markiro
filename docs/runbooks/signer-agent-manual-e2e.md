@@ -260,5 +260,9 @@ from chz_code_statuses;
 A tenant in the hundreds of thousands needs nothing further. Millions is the
 point at which detaching and archiving an old monthly partition of `codes`
 becomes worth designing — and the number in the second column is the one that
-needs an operator rather than an engineer, because those codes are stuck until
-their product is given a Chestny ZNAK group.
+needs an operator rather than an engineer, because those codes are unaskable
+until their product is given a Chestny ZNAK group. Giving the product a group
+does not resolve them immediately: the ingest job only re-resolves a null
+group the next time that exact code is ingested again (typically the next
+Station scan of it), not retroactively for every row already sitting in the
+table.

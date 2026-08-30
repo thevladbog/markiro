@@ -153,11 +153,15 @@ const RUN_CHZ_EXPORT_QUEUE_POLICY = "stately";
  * those environments one clear, actionable boot failure instead of costing
  * every environment a silent one.
  */
-async function assertChzExportQueuePolicy(boss: PgBoss): Promise<void> {
+async function queuePolicy(boss: PgBoss, queueName: string): Promise<string | undefined> {
   const { rows } = await boss
     .getDb()
-    .executeSql("select policy from pgboss.queue where name = $1", [RUN_CHZ_EXPORT_QUEUE]);
-  const actual = (rows[0] as { policy?: string } | undefined)?.policy;
+    .executeSql("select policy from pgboss.queue where name = $1", [queueName]);
+  return (rows[0] as { policy?: string } | undefined)?.policy;
+}
+
+async function assertChzExportQueuePolicy(boss: PgBoss): Promise<void> {
+  const actual = await queuePolicy(boss, RUN_CHZ_EXPORT_QUEUE);
   if (actual !== RUN_CHZ_EXPORT_QUEUE_POLICY) {
     throw new Error(
       `${RUN_CHZ_EXPORT_QUEUE} queue policy is "${actual ?? "unknown"}", expected ` +
@@ -166,6 +170,33 @@ async function assertChzExportQueuePolicy(boss: PgBoss): Promise<void> {
         `database. Fix by confirming the queue has no jobs, then running: ` +
         `delete from pgboss.queue where name = '${RUN_CHZ_EXPORT_QUEUE}'; -- createQueue ` +
         `will recreate it under the right policy on the next boot.`,
+    );
+  }
+}
+
+const REFRESH_CHZ_CODE_STATUSES_QUEUE_POLICY = "stately";
+
+/**
+ * Same reasoning and same `createQueue`-cannot-fix-it caveat as
+ * `assertChzExportQueuePolicy` above, for `refresh-chz-code-statuses`
+ * (final review, Finding 4): that queue carries no per-job singleton key --
+ * every job on it does the same thing (walk every enabled tenant) -- so
+ * `stately` with no key is what stops two passes from ever being `active`
+ * at once. A queue stuck on `standard` would let a boot-time enqueue and the
+ * next cron tick overlap, doubling `cises/info` traffic against True API's
+ * 50 requests/second participant-wide limit until the client starts
+ * reporting `unavailable`.
+ */
+async function assertRefreshChzCodeStatusesQueuePolicy(boss: PgBoss): Promise<void> {
+  const actual = await queuePolicy(boss, REFRESH_CHZ_CODE_STATUSES_QUEUE);
+  if (actual !== REFRESH_CHZ_CODE_STATUSES_QUEUE_POLICY) {
+    throw new Error(
+      `${REFRESH_CHZ_CODE_STATUSES_QUEUE} queue policy is "${actual ?? "unknown"}", expected ` +
+        `"${REFRESH_CHZ_CODE_STATUSES_QUEUE_POLICY}". createQueue cannot change an existing ` +
+        `queue's policy, so overlap protection between passes is silently inert on this ` +
+        `database. Fix by confirming the queue has no jobs, then running: ` +
+        `delete from pgboss.queue where name = '${REFRESH_CHZ_CODE_STATUSES_QUEUE}'; -- ` +
+        `createQueue will recreate it under the right policy on the next boot.`,
     );
   }
 }
@@ -284,7 +315,13 @@ const REFRESH_CHZ_CODE_STATUSES_CRON = "*/10 * * * *";
  *    next one. Both phases already bound themselves per tenant per pass, so
  *    this job does not loop to exhaustion either -- a backlog drains over
  *    several ticks. One tenant's failure (either phase) is caught and logged
- *    without stopping the rest of the tenants.
+ *    without stopping the rest of the tenants. Unlike every other schedule
+ *    above, this one talks to a third party, so it is the one queue besides
+ *    `run-chz-export` carrying a `stately` policy (final review, Finding 4):
+ *    with no per-job key, that stops a boot-time run and a cron tick from
+ *    ever being `active` at once, which matters because this is also the one
+ *    schedule the boot block enqueues rather than awaits inline (final
+ *    review, Finding 2) -- see the boot block's own comment for why.
  *
  * pg-boss v12 requires a queue to be created (`createQueue`) before it can
  * be scheduled or worked -- scheduling against a queue that doesn't exist
@@ -486,14 +523,6 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         }),
       );
 
-      await boss.createQueue(REFRESH_CHZ_CODE_STATUSES_QUEUE);
-      await boss.schedule(REFRESH_CHZ_CODE_STATUSES_QUEUE, REFRESH_CHZ_CODE_STATUSES_CRON);
-      this.workerIds.push(
-        await boss.work(REFRESH_CHZ_CODE_STATUSES_QUEUE, async () => {
-          await this.runRefreshChzCodeStatuses();
-        }),
-      );
-
       await boss.createQueue(RUN_CHZ_EXPORT_QUEUE, {
         // See `chzExportSingletonKey` above for why this policy plus a
         // per-order key is what makes a duplicate chain impossible instead
@@ -580,8 +609,37 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       );
       await this.reconcileUnfinishedChzExports(boss);
 
-      // Also run all eleven maintenance paths once immediately at boot rather
-      // than waiting for the first tick of any schedule.
+      await boss.createQueue(REFRESH_CHZ_CODE_STATUSES_QUEUE, {
+        // No singleton key: every job on this queue does the same thing (walk
+        // every enabled tenant), so `stately` alone is what stops a boot-time
+        // enqueue and the next cron tick from ever being `active` together --
+        // see `assertRefreshChzCodeStatusesQueuePolicy` below for why that
+        // matters against True API's rate limit (final review, Finding 4).
+        policy: REFRESH_CHZ_CODE_STATUSES_QUEUE_POLICY,
+      });
+      // `createQueue` above is a no-op if this queue already existed under a
+      // different policy -- see `assertRefreshChzCodeStatusesQueuePolicy`.
+      await assertRefreshChzCodeStatusesQueuePolicy(boss);
+      await boss.schedule(REFRESH_CHZ_CODE_STATUSES_QUEUE, REFRESH_CHZ_CODE_STATUSES_CRON);
+      this.workerIds.push(
+        await boss.work(REFRESH_CHZ_CODE_STATUSES_QUEUE, async () => {
+          await this.runRefreshChzCodeStatuses();
+        }),
+      );
+
+      // Also run ten of these eleven maintenance paths once immediately at
+      // boot rather than waiting for the first tick of any schedule. The
+      // eleventh -- refreshing Chestny ZNAK code statuses -- is the only one
+      // of the eleven that talks to a third party (True API's `cises/info`,
+      // up to `CHZ_STATUS_MAX_BATCHES_PER_PASS` calls per tenant at a
+      // 15-second timeout each) rather than just this database, so it is
+      // enqueued instead of awaited here: Nest awaits `onModuleInit` before
+      // the server starts listening, and running it inline would block
+      // startup on a serial per-tenant loop against ЧЗ (final review,
+      // Finding 2). The cron above fires within ten minutes regardless, so
+      // nothing is lost by not running it inline -- same reasoning as
+      // `reconcileUnfinishedChzExports`, the only other boot path that
+      // enqueues rather than runs.
       await this.runEnsurePartitions();
       await this.runPruneKioskPairAttempts();
       await this.runPruneExchangeAttempts();
@@ -592,7 +650,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       await this.mailRetention.prune();
       await this.subscriptionStatus.run();
       await this.signerScheduler.run();
-      await this.runRefreshChzCodeStatuses();
+      await boss.send(REFRESH_CHZ_CODE_STATUSES_QUEUE, {});
       this.started = true;
     } catch (e) {
       // Bootstrap failed partway through: stop whatever pg-boss managed to

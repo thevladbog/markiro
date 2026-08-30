@@ -2946,7 +2946,8 @@
           "line": "Chestny ZNAK codes: {{total}}. Refreshed in the last day: {{refreshedLastDay}}. {{lastChecked}}",
           "lastCheckedAt": "Last checked: {{at}}",
           "neverChecked": "No checks yet",
-          "withoutProductGroup": "With no Chestny ZNAK product group: {{count}} — refreshing is stuck until their product gets one"
+          "withoutProductGroup": "With no Chestny ZNAK product group: {{count}} — refreshing resumes once their product gets one and the code is seen again (e.g. on its next scan)",
+          "loadError": "Could not load code status data"
         },
         "danger": {
           "title": "Delete integration",

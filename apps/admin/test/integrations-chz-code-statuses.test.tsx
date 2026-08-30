@@ -42,6 +42,7 @@ let summaryFixture: ChzCodeStatusSummary = {
   withoutProductGroup: 0,
   lastCheckedAt: null,
 };
+let summaryFails = false;
 
 beforeEach(() => {
   summaryFixture = {
@@ -50,6 +51,7 @@ beforeEach(() => {
     withoutProductGroup: 0,
     lastCheckedAt: null,
   };
+  summaryFails = false;
 });
 
 function renderPanel(access: AccessDocument = READ_ONLY_ACCESS) {
@@ -62,6 +64,7 @@ function renderPanel(access: AccessDocument = READ_ONLY_ACCESS) {
     }
 
     if (method === "GET" && path === "/integrations/chestny_znak/code-statuses") {
+      if (summaryFails) return jsonResponse(500, { message: "boom" });
       return jsonResponse(200, summaryFixture);
     }
 
@@ -129,5 +132,17 @@ describe("SignerAgentsPanel code-statuses freshness line", () => {
 
     expect(await screen.findByText(/товарной группы|product group/i)).toBeDefined();
     expect(screen.getByText(/4/)).toBeDefined();
+  });
+
+  it("shows a load error instead of silently rendering nothing when the summary request fails", async () => {
+    summaryFails = true;
+    renderPanel();
+
+    expect(
+      await screen.findByText(/не удалось загрузить сведения|could not load code status data/i),
+    ).toBeDefined();
+    // Must not look like an empty/never-checked store -- that would hide a
+    // broken endpoint behind an indistinguishable "nothing to report" state.
+    expect(screen.queryByText(/ещё не было|no checks yet/i)).toBeNull();
   });
 });

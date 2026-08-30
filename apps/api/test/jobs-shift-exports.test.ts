@@ -240,9 +240,14 @@ describe("PgBossService shift export queue", () => {
 
   it("rejects an enqueue when pg-boss does not return a job id", async () => {
     const boss = fakeBoss();
-    boss.send.mockResolvedValueOnce(null);
     const { service } = serviceWith(boss);
     await service.onModuleInit();
+    // Set up *after* boot, not before: the boot block now also calls
+    // `boss.send` once itself, to enqueue the refresh-chz-code-statuses pass
+    // (final review, Finding 2) -- a `mockResolvedValueOnce` set up earlier
+    // would be consumed by that unrelated boot-time call instead of the
+    // `enqueueShiftExport` call this test is actually about.
+    boss.send.mockResolvedValueOnce(null);
 
     await expect(service.enqueueShiftExport("export-1")).rejects.toThrow(
       "shift export enqueue failed",

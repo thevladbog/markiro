@@ -217,6 +217,68 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
     expect(row).toMatchObject({ codeHash: HASH_B, chzProductGroupCode: null });
   });
 
+  it("re-resolves a null product group once the product is given one, without counting it as a new discovery", async () => {
+    await clearProductGroup(PRODUCT_GTIN);
+    // The reachable path final review Finding 1 is about: a tenant
+    // bootstrapped from an ordered export for a product nobody has grouped
+    // yet. `walkSnapshotCodes` stores the code with a null group.
+    await seedSnapshotCode(HASH_B, PRODUCT_GTIN);
+    const first = await service.run(tenantId);
+    expect(first.inserted).toBe(1);
+    const [beforeGroup] = await rowsFor(tenantId);
+    expect(beforeGroup).toMatchObject({ codeHash: HASH_B, chzProductGroupCode: null });
+
+    // The operator gives the product a ЧЗ group. Nothing about
+    // `chz_code_statuses` changes by itself: the sweep and the snapshot walk
+    // both exclude rows that already exist, so only a fresh sighting of this
+    // exact code can revisit it.
+    await db
+      .update(schema.products)
+      .set({ chzProductGroupCode: 8 })
+      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.gtin14, PRODUCT_GTIN)));
+
+    // The Station later scans the same physical code -- an ordinary event,
+    // not a special re-ingest trigger. `walkCodes` has no cursor yet (the
+    // first pass found nothing in `codes`), so it picks this up.
+    await seedCode({ codeHash: HASH_B, gtin14: PRODUCT_GTIN, scannedAt: t(1) });
+    const second = await service.run(tenantId);
+
+    // Re-resolving an existing row's group is not a new discovery.
+    expect(second.inserted).toBe(0);
+    const [afterGroup] = await rowsFor(tenantId);
+    expect(afterGroup).toMatchObject({ codeHash: HASH_B, chzProductGroupCode: 8 });
+    // Due immediately: a code that just became askable is maximally stale.
+    expect(afterGroup!.nextRefreshAt.getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("leaves a settled row untouched -- group and ЧЗ facts alike -- when the same code is scanned again", async () => {
+    await seedCode({ codeHash: HASH_A, gtin14: PRODUCT_GTIN, scannedAt: t(1) });
+    await service.run(tenantId);
+    const [before] = await rowsFor(tenantId);
+    expect(before).toMatchObject({ codeHash: HASH_A, chzProductGroupCode: 8 });
+
+    // Only the refresh service ever sets these; a spurious touch by ingest
+    // would be visible here.
+    const checkedAt = new Date("2026-01-10T00:00:00.000Z");
+    await db
+      .update(schema.chzCodeStatuses)
+      .set({ status: "APPLIED", checkedAt })
+      .where(
+        and(
+          eq(schema.chzCodeStatuses.tenantId, tenantId),
+          eq(schema.chzCodeStatuses.codeHash, HASH_A),
+        ),
+      );
+
+    await seedCode({ codeHash: HASH_A, gtin14: PRODUCT_GTIN, scannedAt: t(2) });
+    const result = await service.run(tenantId);
+
+    expect(result.inserted).toBe(0);
+    const [after] = await rowsFor(tenantId);
+    expect(after).toMatchObject({ codeHash: HASH_A, chzProductGroupCode: 8, status: "APPLIED" });
+    expect(after!.checkedAt?.getTime()).toBe(checkedAt.getTime());
+  });
+
   it("advances the watermark and does not re-read what it already walked", async () => {
     await seedCode({ codeHash: HASH_A, gtin14: PRODUCT_GTIN, scannedAt: t(1) });
     const first = await service.run(tenantId);

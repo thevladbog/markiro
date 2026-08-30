@@ -1,6 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
-import { and, asc, eq, gt, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 
 import { DB } from "../../auth/auth.module";
 
@@ -94,8 +94,10 @@ interface AntiJoinResult {
  *    and it is the only source for a tenant whose history predates Markiro:
  *    those codes arrived through one ordered export and never appear in
  *    `codes`.
- * All three insert with `onConflictDoNothing` on the shared key, so a code
- * that arrived through more than one path yields exactly one row.
+ * All three funnel into `insertStatuses`'s single upsert on the shared key,
+ * so a code that arrived through more than one path yields exactly one row --
+ * see that method's own doc for the one case it updates rather than leaves
+ * alone (a null product group becoming resolvable).
  */
 @Injectable()
 export class ChzCodeStatusIngestService {
@@ -133,10 +135,12 @@ export class ChzCodeStatusIngestService {
    * cold start (nothing has ever run for a tenant) the sweep and the cursor
    * walk independently discover largely the same rows in the same pass --
    * the sweep's anti-join has no cursor to narrow it, so it sees the same
-   * backlog the walk is about to see too. The walk's `onConflictDoNothing`
-   * makes the overlap a no-op rather than a correctness problem, but it is a
-   * real redundant-read cost, and it lands during exactly the backfill the
-   * per-pass budget exists to bound.
+   * backlog the walk is about to see too. `insertStatuses`'s upsert makes the
+   * overlap a no-op rather than a correctness problem -- its `setWhere` only
+   * ever fires when a null group is turning non-null, which cannot be true
+   * for a row the sweep and the walk resolve to the same group within one
+   * pass -- but it is a real redundant-read cost, and it lands during
+   * exactly the backfill the per-pass budget exists to bound.
    *
    * A phase skipped because the budget ran out is conservatively counted as
    * "not caught up": with zero budget left there is no way to check whether
@@ -378,8 +382,24 @@ export class ChzCodeStatusIngestService {
    * Shared by all three sources: dedupe by `codeHash` (a code scanned twice, or
    * present in more than one export, must yield one row), resolve each
    * distinct GTIN's product group in one query, and insert due-immediately
-   * rows with `onConflictDoNothing` so a code another phase already placed
-   * is left untouched.
+   * rows -- or, for a row another phase already placed, re-resolve its
+   * product group if that is the one thing about it still unresolved.
+   *
+   * That second case (final review, Finding 1) is why this is
+   * `onConflictDoUpdate` rather than `onConflictDoNothing`: a code first seen
+   * with no ЧЗ group (the bootstrap this whole feature centres on -- an
+   * imported inventory export for a product nobody has grouped yet) would
+   * otherwise never be asked about again even after the operator gives its
+   * product a group, because `cises/info` takes the group as a query
+   * parameter and nothing else in this service ever revisits a row that
+   * already exists. `setWhere` keeps the update a strict no-op for every
+   * settled row -- one that already has a group, or already carries ЧЗ facts
+   * from the refresh service -- by firing only when this row's group is
+   * still null and the newly-resolved one is not: neither condition can ever
+   * be true again once the group is set, so a row is re-grouped at most
+   * once, and refreshing it here only touches the columns ingest owns
+   * (group, due date), never the ЧЗ facts columns that belong to
+   * `ChzCodeStatusRefreshService`.
    */
   private async insertStatuses(tenantId: string, rows: CandidateCode[]): Promise<number> {
     if (rows.length === 0) return 0;
@@ -410,14 +430,35 @@ export class ChzCodeStatusIngestService {
     let insertedCount = 0;
     for (let offset = 0; offset < values.length; offset += INSERT_CHUNK_SIZE) {
       const chunk = values.slice(offset, offset + INSERT_CHUNK_SIZE);
-      const inserted = await this.db
+      const written = await this.db
         .insert(schema.chzCodeStatuses)
         .values(chunk)
-        .onConflictDoNothing({
+        .onConflictDoUpdate({
           target: [schema.chzCodeStatuses.tenantId, schema.chzCodeStatuses.codeHash],
+          set: {
+            chzProductGroupCode: sql`excluded.chz_product_group_code`,
+            // The same JS-computed instant a fresh insert below gets, not a
+            // second `sql\`now()\`` evaluated in Postgres: comparing this
+            // column against `Date.now()` afterward (tests, and any caller
+            // reasoning about "just became due") must not depend on the
+            // Node process's clock agreeing with the database server's.
+            nextRefreshAt,
+            updatedAt: nextRefreshAt,
+          },
+          setWhere: sql`${schema.chzCodeStatuses.chzProductGroupCode} is null
+                        and excluded.chz_product_group_code is not null`,
         })
-        .returning({ codeHash: schema.chzCodeStatuses.codeHash });
-      insertedCount += inserted.length;
+        // Postgres's standard insert-vs-update discriminator: `xmax` is 0 for
+        // a row this statement inserted fresh, non-zero for one it updated
+        // via the conflict branch above. Needed because `onConflictDoUpdate`
+        // returns both kinds of row, and re-grouping an already-known code is
+        // not "a code newly discovered this pass" -- callers of `run()` read
+        // `inserted` to mean exactly that.
+        .returning({
+          codeHash: schema.chzCodeStatuses.codeHash,
+          isNewRow: sql<boolean>`(xmax = 0)`,
+        });
+      insertedCount += written.filter((row) => row.isNewRow).length;
     }
     return insertedCount;
   }

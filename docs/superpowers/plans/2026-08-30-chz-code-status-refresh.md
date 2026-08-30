@@ -655,6 +655,45 @@ git add apps/api/src/modules/chz-code-statuses apps/api/test/chz-code-status-ing
 git commit -m "fix(chz): add a full sweep and a shared ingest budget"
 ```
 
+**Addendum, added during the final whole-branch review (Finding 1, critical):**
+`insertStatuses` inserted with `onConflictDoNothing`, and nothing else in the
+branch ever wrote `chzProductGroupCode` for a row whose group was null — not
+the refresh service (`writeFacts` only ever sees rows already selected with a
+non-null group; `pushOut`/`countUnknown` never touch it), and not a fourth
+mechanism, because there isn't one. A code ingested before its product had a
+ЧЗ group — the bootstrap this whole design centres on, an imported inventory
+export for a product nobody has grouped yet — stayed unaskable **forever**,
+even after the operator gave the product a group, contradicting the DTO
+comment, the controller's OpenAPI description, the runbook, and the
+operator-facing banner (both languages), all of which promised a remedy that
+did nothing.
+
+Fix: `insertStatuses` is now `onConflictDoUpdate`, with a `setWhere` that
+fires only when the existing row's group is still null and the newly-resolved
+one is not (`drizzle-orm@0.45.2` supports `setWhere` on `onConflictDoUpdate`,
+confirmed in-repo rather than assumed — `chz-exports.service.ts` and
+`station-scans.service.ts` already rely on it). That condition can never be
+true again once a row has a group, and it never touches a row's ЧЗ facts
+columns, so a settled row — one with a group, or with facts the refresh
+service already wrote — is provably never disturbed. `insertedCount` now
+comes from a `(xmax = 0)` discriminator in the `returning` clause (the
+standard Postgres insert-vs-update tell) so re-grouping an existing row is
+never counted as a new discovery.
+
+This does **not** make a null group resolve itself the instant the operator
+sets it: nothing re-selects an already-existing row on its own (the sweep and
+the snapshot anti-join both exclude rows that already have one), so the fix
+only takes effect the next time that exact code is ingested again — in
+practice, the next time it is scanned. The docs and banner text were narrowed
+to say that rather than promising something immediate. A new test ingests a
+code with no group, gives the product one, then feeds the same code through
+`walkCodes` again (a second scan) and asserts the row is re-grouped and due.
+
+```bash
+git add apps/api/src/modules/chz-code-statuses apps/api/test/chz-code-status-ingest.service.test.ts apps/api/src/modules/integrations/integrations.controller.ts docs/runbooks apps/admin/src/i18n apps/admin/src/pages/integrations
+git commit -m "fix(chz): re-resolve a null product group on re-ingest"
+```
+
 ---
 
 ### Task 4: The refresh pass
@@ -877,6 +916,34 @@ git add apps/api/src/modules/chz-code-statuses apps/api/test/chz-code-status-ref
 git commit -m "feat(api): refresh Chestny ZNAK code statuses through cises/info"
 ```
 
+**Addendum, added during the final whole-branch review (Finding 3, important):**
+step 5 above says a batch that stopped the pass is not journalled as `ok` "since
+that outcome is what the operator's channel card reads" — but the same summary
+used `outcome: stopReason !== null ? "warn" : "ok"`, and a `rejected` product
+group (step 3's third bullet) returns with `stopReason: null`, since a refusal
+is terminal for that group, not for the pass. An all-rejected pass therefore
+journalled `ok` at the session grain right after journalling `warn` at the item
+grain for each rejected group, and `JournalService.append` writes the channel
+row's `lastOutcome` on every append — so the trailing `ok` silently overwrote
+the `warn`s, and the channel card reported everything working when nothing had
+been refreshed. Fixed by carrying a `rejectedGroups` counter out of the batch
+loop and setting `outcome: "warn"` whenever it is above zero, the same as for
+an early stop; the summary's `details` now also carries `rejectedGroups`. A new
+test seeds two groups that both reject and asserts the session-grain summary is
+`warn`.
+
+Also, `ChzCodeStatusRefreshResult.batches`'s doc comment said "how many
+`cises/info` calls this pass actually made" — true of the count but misleading
+about the mechanism: a batch that stops the pass (`unavailable`/`unauthorized`)
+also makes a call and is deliberately excluded from this count (see step 5's
+own "not counted toward `batches`" wording). The comment was corrected to say
+so explicitly; the counting behavior itself was already correct and unchanged.
+
+```bash
+git add apps/api/src/modules/chz-code-statuses apps/api/test/chz-code-status-refresh.service.test.ts
+git commit -m "fix(chz): journal warn, not ok, when every group in a pass is rejected"
+```
+
 ---
 
 ### Task 5: Job wiring
@@ -975,6 +1042,55 @@ git add apps/api/src/jobs apps/api/src/modules/chz-code-statuses apps/api/src/ap
 git commit -m "feat(api): schedule Chestny ZNAK code status refresh"
 ```
 
+**Addendum, added during the final whole-branch review (Findings 2 and 4,
+important):** two defects in how the boot block used this queue.
+
+1. **The boot pass blocked API startup on a third party.** An earlier commit
+   ("fix(jobs): add missing boot-time pass for ChZ code status refresh") added
+   `await this.runRefreshChzCodeStatuses()` directly in the `onModuleInit` boot
+   block, alongside the other ten maintenance paths. Nest awaits
+   `onModuleInit` before the server starts listening, so startup blocked on a
+   serial per-tenant loop of ingest scans plus up to
+   `CHZ_STATUS_MAX_BATCHES_PER_PASS` (20) `cises/info` calls at a 15-second
+   timeout each — the only one of the eleven boot-time paths that touches a
+   third party at all. `reconcileUnfinishedChzExports`, the nearest sibling
+   from the previous ЧЗ slice (Task 4/5 of that plan), deliberately enqueues
+   rather than runs inline for exactly this reason.
+
+   Fix: the boot block now enqueues one job onto `refresh-chz-code-statuses`
+   (`await boss.send(REFRESH_CHZ_CODE_STATUSES_QUEUE, {})`) instead of calling
+   the service directly. The ten-minute cron still fires regardless, so
+   nothing is lost.
+
+2. **The queue had no singleton policy.** It was registered with a bare
+   `createQueue(REFRESH_CHZ_CODE_STATUSES_QUEUE)` — no policy, no singleton
+   key — and nothing claims due rows. Once the boot pass above enqueues a job
+   and the ten-minute cron can also enqueue one, an overlapping pass would
+   duplicate `cises/info` calls against the participant-wide 50 requests/second
+   limit, which the True API client maps to `unavailable` — stopping both
+   passes. `RUN_CHZ_EXPORT_QUEUE`, registered a few lines below this queue in
+   the same file, already solves the identical problem with `policy: "stately"`
+   plus a singleton key; this queue has no per-job payload to key on (every job
+   does the same thing — walk every enabled tenant), so `stately` alone, with
+   no key, is what stops a boot-time job and a cron tick from ever being
+   `active` together.
+
+   Because `createQueue` cannot change an existing queue's policy — confirmed
+   the hard way on `run-chz-export` earlier in this same file
+   (`assertChzExportQueuePolicy`'s own doc) — a boot-time assertion
+   (`assertRefreshChzCodeStatusesQueuePolicy`) was added the same way, failing
+   loudly rather than silently limping along on a database where the queue was
+   ever created under a different policy.
+
+   The ingest is idempotent and a duplicated refresh pass is wasteful rather
+   than wrong, so the queue policy alone is the fix — no claim on due rows was
+   added.
+
+```bash
+git add apps/api/src/jobs apps/api/test/chz-code-status-job.test.ts apps/api/test/jobs-readiness.test.ts
+git commit -m "fix(chz): enqueue the boot-time code status refresh and give its queue a stately policy"
+```
+
 ---
 
 ### Task 6: The freshness line
@@ -1069,6 +1185,35 @@ Expected: all green.
 ```bash
 git add apps/api/src/modules/chz-code-statuses apps/api/src/modules/integrations apps/api/test apps/admin
 git commit -m "feat(admin): show Chestny ZNAK code status freshness"
+```
+
+**Addendum, added during the final whole-branch review (Finding 1, on the text
+from Step 4; Finding 5, second bullet):**
+
+- The "stuck until their product gets a ЧЗ group" line from Step 4, and the
+  matching DTO/OpenAPI/runbook text, overstated the remedy: nothing in the
+  ingest service ever revisited a row on its own, so giving the product a
+  group did nothing until Finding 1's `onConflictDoUpdate` fix landed (Task 3's
+  second addendum) — and even after that fix, resolution only happens the
+  next time the code is ingested again (typically its next scan), not the
+  instant the group is assigned. The banner text in both languages, the DTO
+  comment, and the controller's OpenAPI description were all reworded to say
+  that instead of promising something immediate.
+- `SignerAgentsPanel.tsx`'s freshness line had no `isError` handling for
+  `useChzCodeStatusSummary` — unlike `useSignerAgents` right beside it in the
+  same panel, which renders an explicit load-error `Alert`. A failed summary
+  request rendered identically to "no data" (nothing at all, since the
+  `codeStatuses ?` guard is falsy for `undefined`), so the operator could not
+  tell a broken endpoint from a tenant with an empty store. Fixed by reading
+  `isError` off the same query and rendering an error `Alert`, mirroring
+  `useSignerAgents`'s own branch exactly. New keys
+  (`pages.integrations.channel.codeStatuses.loadError`) were added to both
+  `ru.json` and `en.json`, and a test asserts the error alert renders and that
+  it does not look like the "no checks yet" empty state.
+
+```bash
+git add apps/api/src/modules/chz-code-statuses apps/api/src/modules/integrations apps/admin/src/pages/integrations apps/admin/src/i18n apps/admin/test docs/runbooks
+git commit -m "fix(admin): show a load error for the code-status summary and correct the group-fix promise"
 ```
 
 ---
