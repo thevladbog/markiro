@@ -402,7 +402,14 @@ async function snapshotFacts(
   };
 }
 
-/** Одна дата, общая для пригодного содержимого старого короба, иначе null. */
+/**
+ * Единственная непустая дата среди пригодного (expected, не protected)
+ * содержимого старого короба. Строки без даты (`source_production_date IS
+ * NULL`) не попадают в выборку и не мешают: короб с одной датированной
+ * бутылкой и девятнадцатью без даты всё равно даст эту одну дату. Возвращает
+ * null, если пригодных датированных строк нет или встречается больше одной
+ * разной даты.
+ */
 async function oldBoxSourceDate(
   exec: SqlExecutor,
   input: RecordInventoryRepackScanInput,
@@ -452,6 +459,17 @@ async function recordInternal(
     const seeded = await oldBoxSourceDate(exec, input, oldSscc);
     const boxDate = seeded ?? terminalState.active_production_date!;
     if (seeded !== null && seeded !== terminalState.active_production_date) {
+      // SqlExecutor exposes only run/all — no transactions — so this UPDATE to
+      // inventory_terminal_state commits independently of the open-box journal
+      // INSERT a few lines below. If burnSerial then returns null (SSCC pool
+      // exhausted) or the journal write fails, the terminal's active date has
+      // already moved with no box and no event to show for it; a later
+      // old-box scan with mixed contents would fall back to this now-stranded
+      // date. Seeding first is still the lesser evil: seeding *after* the
+      // journal write would leave the box's own date briefly disagreeing with
+      // the terminal's, and every item scan in that window silently degrades
+      // to observe-only (see `dateMatches` below) instead of failing loudly.
+      // Do not add transaction support to chase this — see review notes.
       await setInventoryProductionDate(exec, {
         inventoryId: input.inventoryId,
         snapshotId: input.snapshotId,
@@ -548,9 +566,16 @@ async function recordInternal(
     };
   }
   const sourceDate = facts.row?.sourceProductionDate ?? null;
+  // Computed once and reused for both the date guard below and the add-item
+  // eligibility further down, so the two always agree. A code re-scanned
+  // after remove-last/clear-box classifies as "duplicate" with
+  // reattachAllowed === true, not "expected" — gating the guard on
+  // `classification.kind === "expected"` alone let that re-attach path add
+  // the item straight into a box with a different printed date, no dialog.
+  const eligible = classification.kind === "expected" || facts.reattachAllowed;
   if (
     !input.acceptSourceDateMismatch &&
-    classification.kind === "expected" &&
+    eligible &&
     sourceDate !== null &&
     sourceDate !== box.productionDate
   ) {
@@ -570,7 +595,6 @@ async function recordInternal(
     input.snapshotId,
     input.deviceId,
   );
-  const eligible = classification.kind === "expected" || facts.reattachAllowed;
   const dateMatches = terminalState.active_production_date === box.productionDate;
   const sourceParentMismatch = facts.row?.parentSscc !== box.oldSsccContext;
   const position = box.itemCount + 1;
