@@ -479,6 +479,25 @@ it("keeps invalidated artifacts visibly unavailable after reopening", async () =
   expect(screen.queryByRole("button", { name: "Сформировать документы" })).toBeNull();
 });
 
+it("names revision zero as the initial result in generation history", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/inventory-document-formats") return response({ items: [format] });
+      if (url === `/api/inventories/${INVENTORY_ID}/document-runs`) {
+        return response({ items: [run("ready", { resultRevision: 0 })] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+
+  renderDocuments("closed");
+
+  expect(await screen.findByText("Исходный результат")).toBeDefined();
+  expect(screen.queryByText("Результат, ревизия 0")).toBeNull();
+});
+
 it("downloads an artifact or ZIP through the tenant-scoped API response", async () => {
   const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   const emptyTxtArtifact = {

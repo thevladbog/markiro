@@ -558,6 +558,7 @@
         "generate": "Generate documents",
         "history": "Generation history",
         "historyEmpty": "No documents have been generated yet.",
+        "runInitialResult": "Initial result",
         "runRevision": "Result revision {{revision}}",
         "previousRevision": "These documents belong to a previous result revision.",
         "status": {

@@ -350,7 +350,9 @@ function DocumentRun({
       <header>
         <span>
           <strong>
-            {t("pages.inventory.documents.runRevision", { revision: item.resultRevision })}
+            {item.resultRevision === 0
+              ? t("pages.inventory.documents.runInitialResult")
+              : t("pages.inventory.documents.runRevision", { revision: item.resultRevision })}
           </strong>
           <small>
             {new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "short" }).format(
