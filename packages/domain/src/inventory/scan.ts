@@ -198,6 +198,14 @@ export type InventoryScanSourceDate =
  * `expected`: для дубля она уже зафиксирована победителем, у неизвестного кода
  * её нет, а подстройка активной даты под `protected`/`known-ineligible`
  * испортила бы дату всем последующим нормальным сканам.
+ *
+ * Для короба берётся только **не зачтённое** (`firstWinning === null`)
+ * содержимое. Это отличается от `oldBoxSourceDate` в
+ * `apps/station/src/lib/inventory-repacking.ts`, которая читает дату старого
+ * короба при перекладке по всем `expected`-детям без учёта зачёта: на
+ * частично переложенном коробе эта функция игнорирует уже перенесённые
+ * бутылки, а `oldBoxSourceDate` видит их наравне с остатком и потому может
+ * увидеть больше дат и вернуть null там, где здесь получился бы `single`.
  */
 export function resolveInventoryScanSourceDate(
   classification: InventoryScanClassification,
@@ -218,13 +226,15 @@ export function resolveInventoryScanSourceDate(
       .filter((child) => child.firstWinning === null && child.originClassification === "expected")
       .map((child) => child.codeHash),
   );
-  const dates = new Set<string>();
+  let productionDate: string | null = null;
   for (const row of context.findSnapshotChildren(classification.sscc)) {
     if (!unclaimed.has(row.codeHash) || row.sourceProductionDate === null) continue;
-    dates.add(row.sourceProductionDate);
+    if (productionDate !== null && productionDate !== row.sourceProductionDate) {
+      return { kind: "mixed", scanKind: "known_box" };
+    }
+    productionDate = row.sourceProductionDate;
   }
-  if (dates.size === 0) return { kind: "none" };
-  if (dates.size > 1) return { kind: "mixed", scanKind: "known_box" };
-  const [productionDate] = [...dates];
-  return { kind: "single", scanKind: "known_box", productionDate: productionDate! };
+  return productionDate === null
+    ? { kind: "none" }
+    : { kind: "single", scanKind: "known_box", productionDate };
 }
