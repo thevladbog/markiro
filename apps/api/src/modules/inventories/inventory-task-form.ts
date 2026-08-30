@@ -1,4 +1,4 @@
-import { renderLiteralDataMatrixSvg } from "@markiro/domain/artifacts";
+import { renderLiteralDataMatrixSvg } from "@markiro/domain";
 
 import { formatInventoryTaskBarcode } from "./station-inventory.dto";
 

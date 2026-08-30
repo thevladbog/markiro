@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import bwipjs from "bwip-js";
 import { DomainError } from "../src/errors.js";
-import { renderLiteralDataMatrixSvg } from "../src/artifacts.js";
-import { renderCode128Svg, renderDataMatrixSvg, renderQrSvg } from "../src/barcodes/svg.js";
+import {
+  renderCode128Svg,
+  renderDataMatrixSvg,
+  renderLiteralDataMatrixSvg,
+  renderQrSvg,
+} from "../src/index.js";
 import { decodeDataMatrixAscii } from "./helpers/decode-data-matrix.js";
 
 const GS = String.fromCharCode(0x1d); // ASCII 0x1D separator
