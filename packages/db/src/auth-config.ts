@@ -6,6 +6,17 @@ import type { Db } from "./client.js";
 import { organizationAccessControl, organizationRoles } from "./organization-access.js";
 import * as authSchema from "./schema/auth.js";
 
+/**
+ * A station is an always-connected, offline-first device rather than an
+ * occasional public API consumer. Better Auth's API-key limiter resets its
+ * counter only after a full idle window; a legitimate uninterrupted inventory
+ * bundle therefore becomes permanently rate limited after enough pages. The
+ * enrolled device row and key revocation remain the station authorization and
+ * kill-switch boundaries. Public integration keys keep their separate bounded
+ * limiter below.
+ */
+export const STATION_API_KEY_RATE_LIMIT = { enabled: false } as const;
+
 // The explicit `<BetterAuthOptions>` type argument (instead of letting it be
 // inferred from the options object) works around a TypeScript declaration-emit
 // limitation (TS2883) triggered by `@better-auth/api-key`'s zod-derived types:
@@ -59,15 +70,7 @@ function buildAuthImpl(db: Db, opts: BuildAuthOptions) {
           // `metadata: { kind: "station" }`; the plugin rejects any
           // `metadata` on createApiKey unless explicitly enabled per config.
           enableMetadata: true,
-          // The plugin default (10 requests/day) throttles a live station
-          // into RATE_LIMITED failures within a single shift, since
-          // TenantGuard calls verifyApiKey() on every request. Keep rate
-          // limiting enabled (revoke remains the hard kill switch for a
-          // leaked key) but raise the cap to a station-appropriate value:
-          // 600 requests/minute is a safe operational ceiling with generous
-          // headroom for normal + scanning traffic, to be validated against
-          // real line throughput in a later plan.
-          rateLimit: { enabled: true, maxRequests: 600, timeWindow: 1000 * 60 },
+          rateLimit: STATION_API_KEY_RATE_LIMIT,
         },
         {
           configId: "public",
