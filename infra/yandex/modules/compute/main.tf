@@ -95,9 +95,14 @@ resource "yandex_compute_instance" "app" {
     nat_ip_address     = yandex_vpc_address.app.external_ipv4_address[0].address
   }
 
+  # Both flags were turned on directly on the instance and are meant to stay,
+  # so the configuration records that rather than reverting it on the next
+  # apply. They were originally false; the serial console in particular grants
+  # access that does not pass through the SSH controls this module sets up, so
+  # it is a deliberate trade for recoverability, not an oversight.
   metadata = {
-    enable-oslogin     = false
-    serial-port-enable = false
+    enable-oslogin     = true
+    serial-port-enable = true
     user-data          = local.app_cloud_init
   }
 }
