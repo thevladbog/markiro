@@ -904,4 +904,81 @@ describe("repack inventory work screen", () => {
       expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"),
     );
   });
+
+  it("holds only the first of two back-to-back mismatching scans and drops the second from the queue", async () => {
+    const db = new DatabaseSync(":memory:");
+    const exec = makeExec(db);
+    await applyMigrations(exec);
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0043', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    db.prepare(
+      `INSERT INTO sscc_pool
+         (issuer_prefix, extension_digit, from_serial, to_serial, next_serial)
+       VALUES ('460068200', 0, 1, 100, 1)`,
+    ).run();
+    // MISMATCH carries a different date than the box will open at
+    // (productionDateFrom, since OLD_SSCC has no children to seed from).
+    // MATCH shares the box's date, so — absent the queue-hold gate — it
+    // would be silently added behind the open dialog instead of being
+    // dropped for a deliberate rescan.
+    const mismatch = canonicalizeKm(`01${GTIN}21REPACK-QUEUE-MISMATCH`);
+    const match = canonicalizeKm(`01${GTIN}21REPACK-QUEUE-MATCH`);
+    for (const [km, productionDate] of [
+      [mismatch, "2026-08-21"],
+      [match, "2026-08-19"],
+    ] as const) {
+      db.prepare(
+        `INSERT INTO inventory_snapshot_codes_mirror
+           (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+            source_production_date, parent_sscc, expected, protected)
+         VALUES (?, ?, ?, ?, ?, 'INTRODUCED', ?, '346006820000000098', 1, 0)`,
+      ).run(SNAPSHOT_ID, kmHash(km), km.raw, GTIN, km.serial, productionDate);
+    }
+    const scan = scanner();
+
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+        createEventId={() => crypto.randomUUID()}
+        now={() => "2026-08-25T10:00:01.000Z"}
+      />,
+    );
+    await waitFor(() => expect(scan.active()).toBe(true));
+    scan.emit(OLD_SSCC);
+    await waitFor(() =>
+      expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20"),
+    );
+
+    // Back to back, with no `await` in between: both scans land in the scan
+    // queue's buffer before React commits `heldScan` and tears the listener
+    // down.
+    scan.emit(mismatch.raw);
+    scan.emit(match.raw);
+
+    await waitFor(() =>
+      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+    );
+    expect(scan.active()).toBe(false);
+    // MATCH must not have been silently added behind the open dialog.
+    expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20");
+
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить код" }));
+
+    // The scanner resumes with nothing queued behind it: MATCH was dropped
+    // entirely, not silently added and not held as a second dialog.
+    await waitFor(() => expect(scan.active()).toBe(true));
+    expect(screen.queryByText("Дата в коде отличается от активной")).toBeNull();
+    expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20");
+
+    // MATCH can still be scanned normally afterward.
+    scan.emit(match.raw);
+    await waitFor(() =>
+      expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"),
+    );
+  });
 });

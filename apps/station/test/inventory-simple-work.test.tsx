@@ -687,4 +687,72 @@ describe("simple inventory work screen", () => {
       .get(DEVICE_ID) as { active_production_date: string };
     expect(terminalDate.active_production_date).toBe("2026-08-19");
   });
+
+  it("holds only the first of two back-to-back mismatching scans and drops the second from the queue", async () => {
+    const { db, exec } = await fixture();
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', 1, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    scan.emit(raw("EXPECTED"));
+    await waitFor(() => expect(screen.getByText("Код принят")).toBeTruthy());
+
+    // Back to back, with no `await` in between: a keyboard-wedge scanner
+    // delivers a burst of codes into `source.start`'s callback inside one
+    // macrotask, before React commits `heldScan` and tears the listener
+    // down — both land in the scan queue's buffer before NEXTDAY's mismatch
+    // outcome has a chance to hold the queue. PROTECTED needs no date match
+    // to be accepted, so if it is silently processed behind the dialog it is
+    // unambiguously recorded.
+    scan.emit(raw("NEXTDAY"));
+    scan.emit(raw("PROTECTED"));
+
+    await waitFor(() =>
+      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+    );
+    expect(scan.isListening()).toBe(false);
+    // Only EXPECTED has ever been committed: NEXTDAY's mismatch writes
+    // nothing, and PROTECTED must not have been silently processed while
+    // the dialog for NEXTDAY is open.
+    expect(
+      (
+        db
+          .prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror")
+          .get() as { count: number }
+      ).count,
+    ).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить код" }));
+
+    // The scanner resumes intake with nothing queued behind it: PROTECTED
+    // was dropped entirely, not silently recorded and not held as a second
+    // dialog.
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+    expect(screen.queryByText("Дата в коде отличается от активной")).toBeNull();
+    expect(
+      (
+        db
+          .prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror")
+          .get() as { count: number }
+      ).count,
+    ).toBe(1);
+
+    // PROTECTED can still be scanned normally afterward.
+    scan.emit(raw("PROTECTED"));
+    expect(await screen.findByText("Код не учтён: уже в отгрузке")).toBeDefined();
+  });
 });
