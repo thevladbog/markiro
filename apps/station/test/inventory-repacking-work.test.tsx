@@ -10,6 +10,7 @@ import i18n from "../src/i18n/index.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import { InventoryWorkScreen } from "../src/pages/InventoryWorkScreen.js";
+import { deferred } from "./support/deferred.js";
 import { makeExec } from "./support/sqlite-exec.js";
 
 const INVENTORY_ID = "11111111-1111-4111-8111-111111111111";
@@ -79,14 +80,6 @@ function scanner() {
     starts: () => starts,
     stops: () => stops,
   };
-}
-
-function deferred() {
-  let release!: () => void;
-  const promise = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  return { promise, release };
 }
 
 beforeAll(async () => i18n.changeLanguage("ru"));

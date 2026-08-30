@@ -16,6 +16,7 @@ import { applyMigrations } from "../src/lib/mirror.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import { InventoryWorkScreen } from "../src/pages/InventoryWorkScreen.js";
+import { deferred } from "./support/deferred.js";
 import { makeExec } from "./support/sqlite-exec.js";
 
 const INVENTORY_ID = "11111111-1111-4111-8111-111111111111";
@@ -80,14 +81,6 @@ function scanner() {
     },
     stop,
   };
-}
-
-function deferred() {
-  let release!: () => void;
-  const promise = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  return { promise, release };
 }
 
 async function fixture() {
