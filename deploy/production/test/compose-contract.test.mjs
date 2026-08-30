@@ -184,6 +184,14 @@ test("production Compose contains only hardened application services", async () 
   }
 });
 
+test("production API memory bounds leave capacity for one large inventory import", async () => {
+  const compose = loadYaml(await readFile(productionCompose, "utf8"));
+  const api = compose.services.api;
+
+  assert.equal(api.mem_limit, "3g");
+  assert.equal(api.environment.NODE_OPTIONS, "--max-old-space-size=2048");
+});
+
 test("v-b overlay adds one isolated internal web service without publishing host ports", async () => {
   const compose = await readFile(vbtechCompose, "utf8");
   const model = loadYaml(compose);

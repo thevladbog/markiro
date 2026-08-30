@@ -9,7 +9,9 @@ import { INVENTORY_CHZ_STATUSES, kmHash, type InventoryChzStatus } from "@markir
 import { ChzImportError, parseChzImport } from "../src/modules/inventories/chz-import-parser";
 import {
   CHZ_MAX_INPUT_BYTES,
+  CHZ_MAX_ROWS,
   CHZ_MAX_UNCOMPRESSED_BYTES,
+  readChzTabular,
 } from "../src/modules/inventories/chz-tabular-reader";
 
 const GTIN = "04680089900383";
@@ -185,9 +187,12 @@ function inlineRow(rowNumber: number, values: readonly string[]): string {
 
 function xlsxBytes(
   options: {
+    emptySheetData?: "missing" | "self-closing";
     formulaCell?: "missing-cache" | "empty-v" | "empty-is";
+    sequentialRowIds?: boolean;
     sparseDataRow?: boolean;
     worksheetPaddingBytes?: number;
+    dataRowCount?: number;
   } = {},
 ): Uint8Array {
   const rawKm = `01${GTIN}21SYNTHETIC-XLSX${GS}93tail,"punctuation"`;
@@ -196,32 +201,54 @@ function xlsxBytes(
     state: "MOVING_BY_UD",
     productionDate: "2026-08-19T00:00:00Z",
   });
-  const row3Cells = row
-    .map((value, index) => ({ value, index }))
-    .filter(({ value }) => !options.sparseDataRow || value !== "")
-    .map(({ value, index }) => {
-      const ref = `${columnName(index)}3`;
-      if (index === 0 && options.formulaCell === "missing-cache") {
-        return `<c r="${ref}" t="str"><f>1+1</f></c>`;
-      }
-      if (index === 0 && options.formulaCell === "empty-v") {
-        return `<c r="${ref}" t="str"><f>1+1</f><v/></c>`;
-      }
-      if (index === 0 && options.formulaCell === "empty-is") {
-        return `<c r="${ref}" t="inlineStr"><f>1+1</f><is/></c>`;
-      }
-      if (index === 0) return `<c r="${ref}" t="s"><v>0</v></c>`;
-      return `<c r="${ref}" t="inlineStr"><is><t>${xml(value)}</t></is></c>`;
-    })
-    .join("");
+  const rowCells = (rowNumber: number) =>
+    row
+      .map((value, index) => ({ value, index }))
+      .filter(({ value }) => !options.sparseDataRow || value !== "")
+      .map(({ value, index }) => {
+        const ref = `${columnName(index)}${rowNumber}`;
+        const cellValue =
+          index === 0 && options.sequentialRowIds
+            ? `01${GTIN}21BATCH-${String(rowNumber - 2).padStart(6, "0")}`
+            : value;
+        if (index === 0 && options.formulaCell === "missing-cache") {
+          return `<c r="${ref}" t="str"><f>1+1</f></c>`;
+        }
+        if (index === 0 && options.formulaCell === "empty-v") {
+          return `<c r="${ref}" t="str"><f>1+1</f><v/></c>`;
+        }
+        if (index === 0 && options.formulaCell === "empty-is") {
+          return `<c r="${ref}" t="inlineStr"><f>1+1</f><is/></c>`;
+        }
+        if (index === 0 && !options.sequentialRowIds) {
+          return `<c r="${ref}" t="s"><v>0</v></c>`;
+        }
+        return `<c r="${ref}" t="inlineStr"><is><t>${xml(cellValue)}</t></is></c>`;
+      })
+      .join("");
+  const dataRows = Array.from({ length: options.dataRowCount ?? 1 }, (_, index) => {
+    const rowNumber = index + 3;
+    return `<row r="${rowNumber}">${rowCells(rowNumber)}</row>`;
+  });
+  const padding = `<!--${"x".repeat(options.worksheetPaddingBytes ?? 0)}-->`;
+  const sheetData =
+    options.emptySheetData === "missing"
+      ? padding
+      : options.emptySheetData === "self-closing"
+        ? `<sheetData/>${padding}`
+        : [
+            "<sheetData>",
+            inlineRow(1, [filter("INTRODUCED")]),
+            inlineRow(2, HEADER),
+            ...dataRows,
+            padding,
+            "</sheetData>",
+          ].join("");
   const worksheet = [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>',
-    inlineRow(1, [filter("INTRODUCED")]),
-    inlineRow(2, HEADER),
-    `<row r="3">${row3Cells}</row>`,
-    `<!--${"x".repeat(options.worksheetPaddingBytes ?? 0)}-->`,
-    "</sheetData></worksheet>",
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    sheetData,
+    "</worksheet>",
   ].join("");
   const workbook = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -459,8 +486,8 @@ describe("Chestny ZNAK inventory import parser", () => {
     expect(result.emptyResult).toBe(true);
   });
 
-  it("accepts a valid CSV above the former 8 MiB input limit", () => {
-    const rows = Array.from({ length: 30_000 }, (_, index) => {
+  it("accepts a valid CSV at the scale of a 58,806-row cabinet export", () => {
+    const rows = Array.from({ length: 58_804 }, (_, index) => {
       const row = dataRow("INTRODUCED", {
         rawKm: `01${GTIN}21SYNTHETIC-LARGE-${index.toString().padStart(5, "0")}`,
       });
@@ -473,6 +500,16 @@ describe("Chestny ZNAK inventory import parser", () => {
     const result = parse(bytes);
 
     expect(result.rows).toHaveLength(rows.length);
+  });
+
+  it("still rejects a CSV beyond the raised row limit", () => {
+    const bytes = strToU8(`${"x\n".repeat(CHZ_MAX_ROWS)}x`);
+
+    expectImportError(
+      () => readChzTabular({ filename: "status.csv", mimeType: MIME_CSV, bytes }),
+      "CHZ_ROW_LIMIT",
+      CHZ_MAX_ROWS + 1,
+    );
   });
 
   it("rejects a near-match errors marker fail-closed", () => {
@@ -658,6 +695,15 @@ describe("Chestny ZNAK inventory import parser", () => {
     );
   });
 
+  it("allows the declared expansion size of a 58,806-row cabinet XLSX", () => {
+    const cabinetScale = setZipUncompressedSize(xlsxBytes(), 124 * 1024 * 1024);
+
+    expectImportError(
+      () => parse(cabinetScale, { filename: "status.xlsx", mimeType: MIME_XLSX }),
+      "CHZ_ZIP_INVALID",
+    );
+  });
+
   it("reads shared-string and inline-string XLSX cells from the first visible worksheet", () => {
     const result = parse(xlsxBytes(), { filename: "status.xlsx", mimeType: MIME_XLSX });
     expect(result.rows).toHaveLength(1);
@@ -670,14 +716,41 @@ describe("Chestny ZNAK inventory import parser", () => {
     expect(result.rows[0]!.canonicalKm).toContain(GS);
   });
 
-  it("accepts a valid CHZ XLSX whose worksheet expands beyond the former 16 MiB archive limit", () => {
-    const result = parse(xlsxBytes({ worksheetPaddingBytes: 17 * 1024 * 1024 }), {
+  it("accepts a valid CHZ XLSX whose worksheet expands beyond the former 64 MiB limit", () => {
+    const result = parse(xlsxBytes({ worksheetPaddingBytes: 65 * 1024 * 1024 }), {
       filename: "status.xlsx",
       mimeType: MIME_XLSX,
     });
 
     expect(result.rows).toHaveLength(1);
   });
+
+  it("preserves row order and limits across XLSX worksheet batches", () => {
+    const result = parse(xlsxBytes({ dataRowCount: 513, sequentialRowIds: true }), {
+      filename: "status.xlsx",
+      mimeType: MIME_XLSX,
+    });
+
+    expect(result.rows).toHaveLength(513);
+    expect(result.rows.map((row) => row.serial)).toEqual(
+      Array.from({ length: 513 }, (_, index) => `BATCH-${String(index + 1).padStart(6, "0")}`),
+    );
+  });
+
+  it.each(["missing", "self-closing"] as const)(
+    "applies the metadata limit to a worksheet with %s sheetData",
+    (emptySheetData) => {
+      expectImportError(
+        () =>
+          readChzTabular({
+            filename: "status.xlsx",
+            mimeType: MIME_XLSX,
+            bytes: xlsxBytes({ emptySheetData, worksheetPaddingBytes: 2 * 1024 * 1024 }),
+          }),
+        "CHZ_XLSX_METADATA_LIMIT",
+      );
+    },
+  );
 
   it("reconstructs a genuinely sparse XLSX data row from cell references", () => {
     const result = parse(xlsxBytes({ sparseDataRow: true }), {
