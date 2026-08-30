@@ -66,6 +66,9 @@ test("writes the mirror before creating the GitHub Release", () => {
   assert.ok(mirror > 0, "the mirror publish step must exist");
   assert.ok(release > 0, "the GitHub Release step must exist");
   assert.ok(mirror < release, "the mirror publish must precede the GitHub Release");
+  assert.match(workflow, /download_url=.*sed -n 3p/);
+  assert.match(workflow, /DOWNLOAD_URL: \$\{\{ steps\.mirror\.outputs\.download_url \}\}/);
+  assert.match(workflow, /Постоянная ссылка: %s/);
 });
 
 test("looks for the bundle where this crate layout actually puts it", async () => {

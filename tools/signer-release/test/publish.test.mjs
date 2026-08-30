@@ -24,12 +24,19 @@ async function bundleDirWith({ installer = true, signature = true } = {}) {
 /** A store that records puts and serves them back, standing in for the mirror. */
 function fakeMirror() {
   const objects = new Map();
+  const operations = [];
   return {
     objects,
+    operations,
     store: {
       bucket: "bucket",
       put: async (key, body) => {
+        operations.push(`put:${key}`);
         objects.set(key, Buffer.isBuffer(body) ? body : Buffer.from(body));
+      },
+      copyInstallerToDownload: async ({ immutableKey }) => {
+        operations.push(`copy:${immutableKey}`);
+        objects.set("signer/download", objects.get(immutableKey));
       },
     },
     fetchImpl: async (url) => {
@@ -51,6 +58,7 @@ test("uploads the installer, its signature and a manifest that points at them", 
   });
 
   assert.deepEqual([...mirror.objects.keys()].sort(), [
+    "signer/download",
     "signer/stable/latest.json",
     "signer/stable/releases/0.1.0/markiro-signer-0.1.0-windows-x86_64-setup.exe",
     "signer/stable/releases/0.1.0/markiro-signer-0.1.0-windows-x86_64-setup.exe.sig",
@@ -62,6 +70,7 @@ test("uploads the installer, its signature and a manifest that points at them", 
   // The .sig file's trailing newline must not reach the manifest: Tauri
   // compares the signature verbatim.
   assert.equal(manifest.platforms["windows-x86_64"].signature, SIGNATURE);
+  assert.equal(result.downloadUrl, "https://releases.markiro.app/signer/download");
 });
 
 test("verifies the published bytes over the public URL", async () => {
@@ -124,6 +133,10 @@ test("uploads the manifest only after the artifacts it names", async () => {
       order.push(key);
       await mirror.store.put(key, body);
     },
+    copyInstallerToDownload: async (input) => {
+      order.push("signer/download");
+      await mirror.store.copyInstallerToDownload(input);
+    },
   };
   await publishSignerRelease({
     version: VERSION,
@@ -133,4 +146,27 @@ test("uploads the manifest only after the artifacts it names", async () => {
     fetchImpl: mirror.fetchImpl,
   });
   assert.equal(order.at(-1), "signer/stable/latest.json");
+  assert.ok(order.indexOf("signer/download") < order.indexOf("signer/stable/latest.json"));
+});
+
+test("does not advance latest.json until the versionless installer is publicly verified", async () => {
+  const mirror = fakeMirror();
+  const fetchImpl = async (url) => {
+    if (new URL(url).pathname === "/signer/download") {
+      return new Response(Buffer.from("stale installer"), { status: 200 });
+    }
+    return mirror.fetchImpl(url);
+  };
+
+  await assert.rejects(
+    publishSignerRelease({
+      version: VERSION,
+      bundleDir: await bundleDirWith(),
+      pubDate: "2026-08-30T12:00:00.000Z",
+      store: mirror.store,
+      fetchImpl,
+    }),
+    /does not match/,
+  );
+  assert.equal(mirror.objects.has("signer/stable/latest.json"), false);
 });
