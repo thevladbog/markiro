@@ -245,23 +245,23 @@ function json(route: Route, body: unknown, status = 200) {
  */
 const DEVICE_ID_1 = "80000000-0000-4000-8000-000000000001";
 const DEVICE_ID_2 = "80000000-0000-4000-8000-000000000002";
-const DEVICE_ID_3 = "80000000-0000-4000-8000-000000000003";
 const BOX_ID_1 = "90000000-0000-4000-8000-000000000001";
 const BOX_ID_2 = "90000000-0000-4000-8000-000000000002";
+const BOX_ID_3 = "90000000-0000-4000-8000-000000000003";
 const EVENT_ID_1 = "a0000000-0000-4000-8000-000000000001";
 const EVENT_ID_2 = "a0000000-0000-4000-8000-000000000002";
 const EVENT_ID_3 = "a0000000-0000-4000-8000-000000000003";
+const EVENT_ID_4 = "a0000000-0000-4000-8000-000000000004";
 const CODE_RESULT_ID_1 = "b0000000-0000-4000-8000-000000000001";
 const CODE_RESULT_ID_2 = "b0000000-0000-4000-8000-000000000002";
+const CODE_RESULT_ID_3 = "b0000000-0000-4000-8000-000000000003";
 const LATE_EVENT_ID_1 = "c0000000-0000-4000-8000-000000000001";
 const LATE_EVENT_ID_2 = "c0000000-0000-4000-8000-000000000002";
-const DOC_RUN_PROCESSING_ID = "d0000000-0000-4000-8000-000000000001";
-const DOC_RUN_READY_HISTORY_ID = "d0000000-0000-4000-8000-000000000002";
-const DOC_RUN_READY_COMPLETE_ID = "d0000000-0000-4000-8000-000000000003";
-const ARTIFACT_HISTORY_ID = "e0000000-0000-4000-8000-000000000001";
-const ARTIFACT_COMPLETE_ID = "e0000000-0000-4000-8000-000000000002";
-const CLOSE_BLOCKER_PARTICIPANT_ID = "f0000000-0000-4000-8000-000000000001";
-const CLOSE_BLOCKER_BOX_ID = "f0000000-0000-4000-8000-000000000002";
+const DOC_RUN_FIRST_ID = "d0000000-0000-4000-8000-000000000002";
+const DOC_RUN_SECOND_ID = "d0000000-0000-4000-8000-000000000001";
+const ARTIFACT_FIRST_STOCK_ID = "e0000000-0000-4000-8000-000000000001";
+const ARTIFACT_SECOND_STOCK_ID = "e0000000-0000-4000-8000-000000000002";
+const ARTIFACT_SECOND_WRITE_OFF_ID = "e0000000-0000-4000-8000-000000000003";
 
 /**
  * MKR-INS-07's own inventory -- deliberately *not* a reuse of MKR-INS-06's
@@ -294,23 +294,74 @@ const inventoryRow07 = {
   updatedAt: "2026-08-28T09:00:00.000Z",
 };
 
-/** Same shape as MKR-INS-06's `activeSnapshot`, just re-keyed to this inventory -- reads the old one (never mutates it) so MKR-INS-06's fixtures stay untouched. */
-const activeSnapshot07 = { ...activeSnapshot, id: SNAPSHOT_ID_07, inventoryId: INVENTORY_ID_07 };
+/**
+ * Same shape as MKR-INS-06's `activeSnapshot`, re-keyed to this inventory and
+ * re-scaled to the size this document's frames depict -- reads the old one
+ * (never mutates it) so MKR-INS-06's fixtures stay untouched. The counts have
+ * to be small: `station-inventory-sync.service.ts` (`validateAndExpand`)
+ * forces every *eligible* item scan in repack mode to be an `add-item`, and
+ * `applyRepackMutation` caps a box at the product's `boxCapacity` (12 here),
+ * so an inventory with N verified codes necessarily has ceil(N/12) repack
+ * boxes. A 116-code snapshot would mean ten boxes in the "Короба" card;
+ * 24 expected codes are exactly the two-then-three boxes these frames show.
+ * `expected` is `introduced ∩ applied` minus `protected`, as in MKR-INS-06.
+ */
+const activeSnapshot07 = {
+  ...activeSnapshot,
+  id: SNAPSHOT_ID_07,
+  inventoryId: INVENTORY_ID_07,
+  counts: {
+    ...activeSnapshot.counts,
+    introduced: 26,
+    applied: 26,
+    expected: 24,
+    packages: 2,
+    loose: 4,
+  },
+};
+
+/**
+ * Detail-level counters (`inventories.service.ts`: `activeParticipantCount` is
+ * every participant row with `left_at is null`, the rest are sums of the same
+ * live state the progress payload reports). Not rendered by
+ * `InventoryLivePage`, but they travel in the same frame's detail response, so
+ * each post-launch scenario passes the tally that matches its own progress.
+ */
+const RUNNING_BLOCKERS = {
+  activeParticipantCount: 2,
+  pendingEventCount: 3,
+  participantOpenBoxCount: 1,
+  openRepackBoxCount: 1,
+  unresolvedPrintBoxCount: 0,
+};
+const RUNNING_BLOCKERS_BLOCKED = {
+  activeParticipantCount: 2,
+  pendingEventCount: 3,
+  participantOpenBoxCount: 2,
+  openRepackBoxCount: 2,
+  unresolvedPrintBoxCount: 0,
+};
 
 /** Shared by every post-launch detail fetch: a fixed snapshot always exists once an inventory is running (see the `terminals` scenario's comment above -- "ready" is the only status that carries a freshly fixed snapshot, and running/closed/completed all come after it). */
-function postLaunchInventoryDetail(status: "running" | "closed" | "completed") {
+function postLaunchInventoryDetail(
+  status: "running" | "closed" | "completed",
+  blockers: typeof EMPTY_BLOCKERS = EMPTY_BLOCKERS,
+) {
   return {
     ...inventoryRow07,
     status,
     activeSnapshotId: SNAPSHOT_ID_07,
     activeSnapshot: activeSnapshot07,
-    blockers: EMPTY_BLOCKERS,
+    blockers,
     imports: readyImports,
     resultRevision: 1,
   };
 }
 
-const RUNNING_DETAIL = postLaunchInventoryDetail("running");
+const RUNNING_DETAIL = postLaunchInventoryDetail("running", RUNNING_BLOCKERS);
+const RUNNING_DETAIL_BLOCKED = postLaunchInventoryDetail("running", RUNNING_BLOCKERS_BLOCKED);
+/** Everyone has left the task and every box is closed -- the only state a zero-blocker close preview can describe. */
+const RUNNING_DETAIL_READY = postLaunchInventoryDetail("running");
 const CLOSED_DETAIL = postLaunchInventoryDetail("closed");
 
 /**
@@ -344,12 +395,15 @@ const DOCUMENT_FORMATS_RESPONSE = { items: DOCUMENT_FORMATS };
 const NO_DOCUMENT_RUNS = { items: [] };
 
 /**
- * Repack boxes shared by every post-launch progress payload below, in three
- * open/closed combinations so each scenario's box states stay consistent
- * with what it claims about close blockers
- * (`inventory-close.service.ts`'s `OPEN_REPACK_BOX` check): an open box is
- * only realistic while still `running` and *before* a close attempt, or
- * while a scenario's own close-preview blockers actually count it.
+ * Repack boxes shared by every post-launch progress payload below. Box states
+ * are never invented per frame: `inventory-close.service.ts` counts open boxes
+ * (`OPEN_REPACK_BOX`), invalidated ones (`INVALIDATED_REPACK_BOX`) and closed
+ * ones that are not `printed` (`UNRESOLVED_BOX_PRINT`), so a frame's box list
+ * and its close preview are two views of the same tally. `printState` follows
+ * the real lifecycle in `station-inventory-sync.service.ts`: `not_ready` while
+ * the box is open, `pending` the moment it closes, `printed` once the label
+ * came out. `itemCount` never exceeds the product's `boxCapacity` (12) --
+ * `applyRepackMutation` closes a box at capacity and rejects anything past it.
  */
 const BOX_1_BASE = {
   id: BOX_ID_1,
@@ -357,8 +411,6 @@ const BOX_1_BASE = {
   terminalId: DEVICE_ID_1,
   terminalName: "Терминал 1",
   productionDate: "2026-08-15",
-  printState: "printed",
-  itemCount: 42,
 } as const;
 const BOX_2_BASE = {
   id: BOX_ID_2,
@@ -366,187 +418,304 @@ const BOX_2_BASE = {
   terminalId: DEVICE_ID_2,
   terminalName: "Терминал 2",
   productionDate: "2026-08-16",
-  printState: "printed",
-  itemCount: 60,
 } as const;
-/** Still running, nobody has attempted to close yet -- one box open, one already closed. Backs `live`/`corrections`. */
-const BOXES_ONE_OPEN = [
-  { ...BOX_1_BASE, state: "open" },
-  { ...BOX_2_BASE, state: "closed" },
+const BOX_3_BASE = {
+  id: BOX_ID_3,
+  sscc: "323456789012345670",
+  terminalId: DEVICE_ID_2,
+  terminalName: "Терминал 2",
+  productionDate: "2026-08-16",
+} as const;
+interface RepackBoxBase {
+  readonly id: string;
+  readonly sscc: string;
+  readonly terminalId: string;
+  readonly terminalName: string;
+  readonly productionDate: string;
+}
+function openBox(base: RepackBoxBase, itemCount: number) {
+  return { ...base, state: "open", printState: "not_ready", itemCount };
+}
+function closedBox(base: RepackBoxBase, itemCount: number) {
+  return { ...base, state: "closed", printState: "printed", itemCount };
+}
+/**
+ * Still running, nobody has attempted to close yet: Терминал 1 is filling its
+ * box, Терминал 2 has already closed and printed a full one. Backs
+ * `live`/`corrections`; the closed+printed box is also what makes the
+ * "Поставить перепечать в очередь" action render at all (`CorrectionBox`
+ * shows it only for `closed` + `printed`).
+ */
+const BOXES_RUNNING = [openBox(BOX_1_BASE, 7), closedBox(BOX_2_BASE, 12)];
+/**
+ * A close attempt while both terminals still hold an open box -- Терминал 2
+ * opened a second one after closing its first. Matches
+ * `CLOSE_PREVIEW_BLOCKED`'s `OPEN_REPACK_BOX` count of 2 exactly. The API
+ * orders open boxes first, newest first, then closed ones.
+ */
+const BOXES_BLOCKED = [openBox(BOX_3_BASE, 0), openBox(BOX_1_BASE, 7), closedBox(BOX_2_BASE, 12)];
+/** Every box closed and printed -- the only box state a close preview with zero blockers can describe. Backs `closePreviewReady` and every `closed`-status screen (late events, documents, completion, reopen). */
+const BOXES_CLOSED = [
+  closedBox(BOX_3_BASE, 4),
+  closedBox(BOX_2_BASE, 12),
+  closedBox(BOX_1_BASE, 7),
 ];
-/** Both closed -- the only state consistent with a close-preview that claims zero blockers. Backs `closePreviewReady` and every `closed`-status screen (late events, documents, completion, reopen). */
-const BOXES_ALL_CLOSED = [
-  { ...BOX_1_BASE, state: "closed" },
-  { ...BOX_2_BASE, state: "closed" },
+
+const PARTICIPANT_1_BASE = {
+  deviceId: DEVICE_ID_1,
+  terminalName: "Терминал 1",
+  operatorName: "Мария Кузнецова",
+  joinedAt: "2026-08-29T08:00:00.000Z",
+} as const;
+const PARTICIPANT_2_BASE = {
+  deviceId: DEVICE_ID_2,
+  terminalName: "Терминал 2",
+  operatorName: "Пётр Смирнов",
+  joinedAt: "2026-08-29T08:05:00.000Z",
+} as const;
+/**
+ * Both terminals still in the task: one heartbeating (`active`), one past the
+ * 45-second window `inventory-close.service.ts` uses to split
+ * `ACTIVE_PARTICIPANT` from `STALE_PARTICIPANT`, still holding three unsynced
+ * events (`PENDING_OUTBOX`). `openBoxCount` is each terminal's own report and
+ * feeds `PARTICIPANT_OPEN_BOX`, so it tracks that frame's box list.
+ */
+const PARTICIPANTS_WORKING = [
+  {
+    ...PARTICIPANT_1_BASE,
+    leftAt: null,
+    heartbeatAt: "2026-08-29T09:58:00.000Z",
+    state: "active",
+    pendingEventCount: 0,
+    openBoxCount: 1,
+  },
+  {
+    ...PARTICIPANT_2_BASE,
+    leftAt: null,
+    heartbeatAt: "2026-08-29T09:40:00.000Z",
+    state: "stale",
+    pendingEventCount: 3,
+    openBoxCount: 0,
+  },
 ];
-/** Both open -- matches `CLOSE_PREVIEW_BLOCKED`'s `OPEN_REPACK_BOX` count of 2 exactly. Backs `closePreviewBlocked`. */
-const BOXES_ALL_OPEN = [
-  { ...BOX_1_BASE, state: "open" },
-  { ...BOX_2_BASE, state: "open" },
+/** Same two terminals at the moment of the blocked close attempt: Терминал 2 now reports the second box it opened. */
+const PARTICIPANTS_WORKING_BOTH_OPEN = [
+  PARTICIPANTS_WORKING[0],
+  { ...PARTICIPANTS_WORKING[1], openBoxCount: 1 },
+];
+/**
+ * Both operators have left the task. The participant rows survive with
+ * `left_at` set (the progress query keeps them and labels them `left`), and
+ * the close-blocker query ignores them entirely (`where left_at is null`), so
+ * this is what "no terminal blockers" actually looks like.
+ */
+const PARTICIPANTS_LEFT = [
+  {
+    ...PARTICIPANT_1_BASE,
+    leftAt: "2026-08-29T10:12:00.000Z",
+    heartbeatAt: "2026-08-29T10:12:00.000Z",
+    state: "left",
+    pendingEventCount: 0,
+    openBoxCount: 0,
+  },
+  {
+    ...PARTICIPANT_2_BASE,
+    leftAt: "2026-08-29T10:15:00.000Z",
+    heartbeatAt: "2026-08-29T10:15:00.000Z",
+    state: "left",
+    pendingEventCount: 0,
+    openBoxCount: 0,
+  },
+];
+
+/**
+ * The three newest scan events while corrections are still open. Each one is
+ * also an `EVIDENCE_RESPONSE` row (same event ids, same classifications):
+ * both endpoints read `inventory_scan_events` left-joined to
+ * `inventory_code_results`, so a code result exists exactly when
+ * `codeResultId` is set, and `classification` comes from that same row.
+ * `authoritativeVerdict` is `applied` for every accepted event
+ * (`station-inventory-sync.service.ts`).
+ */
+const RECENT_EVENTS_RUNNING = [
+  {
+    eventId: EVENT_ID_1,
+    codeResultId: CODE_RESULT_ID_1,
+    kind: "item",
+    displayIdentity: "04600000000006 · 000123",
+    authoritativeVerdict: "applied",
+    terminalId: DEVICE_ID_1,
+    terminalName: "Терминал 1",
+    scannedAt: "2026-08-29T09:55:00.000Z",
+    classification: "protected",
+    observedProductionDate: "2026-08-20",
+  },
+  {
+    eventId: EVENT_ID_4,
+    codeResultId: CODE_RESULT_ID_3,
+    kind: "item",
+    displayIdentity: "04600000000006 · 000512",
+    authoritativeVerdict: "applied",
+    terminalId: DEVICE_ID_1,
+    terminalName: "Терминал 1",
+    scannedAt: "2026-08-29T09:50:00.000Z",
+    classification: "expected",
+    observedProductionDate: "2026-08-15",
+  },
+  {
+    eventId: EVENT_ID_2,
+    codeResultId: CODE_RESULT_ID_2,
+    kind: "item",
+    displayIdentity: "04600000000006 · 000456",
+    authoritativeVerdict: "applied",
+    terminalId: DEVICE_ID_2,
+    terminalName: "Терминал 2",
+    scannedAt: "2026-08-29T09:20:00.000Z",
+    classification: "voided",
+    observedProductionDate: "2026-08-16",
+  },
+];
+/**
+ * The same three events after the corrections section has been worked
+ * through: the protected code's observed date now matches the ЧЗ date (so the
+ * `date_mismatch` discrepancy is gone) and the voided scan was restored to its
+ * origin classification (`inventory-corrections.service.ts`'s `restore_scan`
+ * writes back `originClassification`). Nothing else can clear those two
+ * counters, and both must be zero before a close preview may report no
+ * blockers at all.
+ */
+const RECENT_EVENTS_RESOLVED = [
+  { ...RECENT_EVENTS_RUNNING[0], observedProductionDate: "2026-08-15" },
+  RECENT_EVENTS_RUNNING[1],
+  { ...RECENT_EVENTS_RUNNING[2], classification: "expected" },
 ];
 
 /**
  * Progress payload for the plain `running` screens (live progress,
  * corrections) where nobody has attempted to close yet, so an open box is
- * unremarkable. `expectedCount` matches MKR-INS-06's
- * `activeSnapshot.counts.expected` (116) for narrative continuity.
+ * unremarkable. Every counter is tied to the others the way the API derives
+ * them (`inventory-reconciliation.service.ts`): `expectedCount` is the
+ * snapshot's expected set (24), and an expected code is either verified, or
+ * still missing, or voided -- 18 + 5 + 1 = 24. `verifiedCount` also equals the
+ * codes sitting in repack boxes (6 + 12; the seventh item in box 1 is the
+ * voided one), because repack mode boxes every eligible scan. "Расхождения"
+ * on the page is `ineligible + unknown + dateMismatch`, here two protected
+ * codes scanned with a production date that differs from the ЧЗ one.
  */
 const RUNNING_PROGRESS = {
   inventoryId: INVENTORY_ID_07,
   snapshotId: SNAPSHOT_ID_07,
   status: "running",
   resultRevision: 1,
-  expectedCount: 116,
-  verifiedCount: 82,
-  missingCount: 10,
+  expectedCount: 24,
+  verifiedCount: 18,
+  missingCount: 5,
   protectedCount: 2,
   protectedFoundCount: 2,
-  ineligibleCount: 1,
-  unknownCount: 3,
-  dateMismatchCount: 0,
-  voidedCount: 0,
+  ineligibleCount: 0,
+  unknownCount: 0,
+  dateMismatchCount: 2,
+  voidedCount: 1,
   oldBoxCount: 1,
-  newBoxCount: 1,
+  newBoxCount: 2,
   invalidatedBoxCount: 0,
   pendingEventCount: 3,
   openBoxCount: 1,
   boxTotal: 2,
   boxesTruncated: false,
-  participants: [
+  participants: PARTICIPANTS_WORKING,
+  boxes: BOXES_RUNNING,
+  recentEvents: RECENT_EVENTS_RUNNING,
+};
+
+/**
+ * Progress payload behind the close-preview modal once it reports zero
+ * blockers. `inventory-close.service.ts` derives that list from exactly this
+ * state, so *all* of it has to be clean at once: nobody left in the task, no
+ * unsynced events, every box closed and printed, and no unresolved
+ * discrepancy of any category (`unknown`, `ineligible`, `date_mismatch`,
+ * `voided`). Four more codes were packed into the last box in the meantime, so
+ * 23 verified + 1 missing still add up to the 24 expected. Backs
+ * `closePreviewReady`.
+ */
+const RUNNING_PROGRESS_READY = {
+  ...RUNNING_PROGRESS,
+  verifiedCount: 23,
+  missingCount: 1,
+  dateMismatchCount: 0,
+  voidedCount: 0,
+  newBoxCount: 3,
+  boxTotal: 3,
+  pendingEventCount: 0,
+  openBoxCount: 0,
+  participants: PARTICIPANTS_LEFT,
+  boxes: BOXES_CLOSED,
+  recentEvents: RECENT_EVENTS_RESOLVED,
+};
+
+/**
+ * Progress payload behind the blocked close preview: the corrections from
+ * section 3 are done (no discrepancy blockers left), but both terminals are
+ * still in the task, Терминал 2's queue has not drained and two boxes are
+ * open. `CLOSE_PREVIEW_BLOCKED` below is the literal derivation of this
+ * state. The restored scan is now verified (18 + 1), so 19 + 5 = 24.
+ * Backs `closePreviewBlocked`.
+ */
+const RUNNING_PROGRESS_BLOCKED = {
+  ...RUNNING_PROGRESS,
+  verifiedCount: 19,
+  dateMismatchCount: 0,
+  voidedCount: 0,
+  newBoxCount: 3,
+  boxTotal: 3,
+  openBoxCount: 2,
+  participants: PARTICIPANTS_WORKING_BOTH_OPEN,
+  boxes: BOXES_BLOCKED,
+  recentEvents: RECENT_EVENTS_RESOLVED,
+};
+
+/** Progress payload for the `closed` screens (late events, documents, completion, reopen) -- the state the ready preview described, now fixed as the closed result. */
+const CLOSED_PROGRESS = { ...RUNNING_PROGRESS_READY, status: "closed" };
+
+/**
+ * Evidence events behind the corrections screen. The `actions` array is not
+ * free-form: `parseEvidenceEventRow`
+ * (apps/api/src/modules/inventories/inventory-reconciliation.service.ts)
+ * derives it from the event itself -- no code result means no actions, a
+ * voided result means only `restore_scan`, a result whose code sits in an open
+ * box means `void_scan` + `remove_item`, a result in no active box means
+ * `void_scan` + `change_date`, and one in a closed box means `void_scan`
+ * alone. These four rows are one of each, which is also what the printed
+ * instruction says about the buttons depending on the row's state.
+ */
+const EVIDENCE_RESPONSE = {
+  page: 1,
+  pageSize: 50,
+  total: 4,
+  hasMore: false,
+  items: [
     {
-      deviceId: DEVICE_ID_1,
-      terminalName: "Терминал 1",
-      operatorName: "Мария Кузнецова",
-      joinedAt: "2026-08-29T08:00:00.000Z",
-      leftAt: null,
-      heartbeatAt: "2026-08-29T09:58:00.000Z",
-      state: "active",
-      pendingEventCount: 0,
-      openBoxCount: 1,
+      ...RECENT_EVENTS_RUNNING[0],
+      actions: ["void_scan", "change_date"],
     },
     {
-      deviceId: DEVICE_ID_2,
-      terminalName: "Терминал 2",
-      operatorName: "Пётр Смирнов",
-      joinedAt: "2026-08-29T08:05:00.000Z",
-      leftAt: null,
-      heartbeatAt: "2026-08-29T09:40:00.000Z",
-      state: "stale",
-      pendingEventCount: 3,
-      openBoxCount: 0,
+      ...RECENT_EVENTS_RUNNING[1],
+      actions: ["void_scan", "remove_item"],
     },
-  ],
-  boxes: BOXES_ONE_OPEN,
-  recentEvents: [
     {
-      eventId: EVENT_ID_1,
-      codeResultId: CODE_RESULT_ID_1,
-      kind: "item",
-      displayIdentity: "04600000000006 · 000123",
-      authoritativeVerdict: "expected",
-      terminalId: DEVICE_ID_1,
-      terminalName: "Терминал 1",
-      scannedAt: "2026-08-29T09:55:00.000Z",
-      classification: "expected",
-      observedProductionDate: "2026-08-15",
+      ...RECENT_EVENTS_RUNNING[2],
+      actions: ["restore_scan"],
     },
     {
       eventId: EVENT_ID_3,
       codeResultId: null,
       kind: "old_box",
       displayIdentity: "SSCC 223456789012345670",
-      authoritativeVerdict: "unknown",
-      terminalId: DEVICE_ID_2,
-      terminalName: "Терминал 2",
-      scannedAt: "2026-08-29T09:50:00.000Z",
-      classification: "unknown",
-      observedProductionDate: null,
-    },
-  ],
-};
-
-/**
- * Progress payload for the close-preview modal once it claims zero
- * blockers -- every box must be closed here, or a real close attempt would
- * raise `OPEN_REPACK_BOX` and contradict the "Блокировок нет" the modal
- * shows. Backs `closePreviewReady`.
- */
-const RUNNING_PROGRESS_READY = {
-  ...RUNNING_PROGRESS,
-  boxes: BOXES_ALL_CLOSED,
-  openBoxCount: 0,
-};
-
-/**
- * Progress payload for the close-preview modal once it's blocked --
- * `CLOSE_PREVIEW_BLOCKED`'s `OPEN_REPACK_BOX` blocker claims a count of 2,
- * so this shows exactly 2 open boxes (not 3, and not the 1-open baseline
- * `RUNNING_PROGRESS` uses before anyone has attempted to close). Backs
- * `closePreviewBlocked`.
- */
-const RUNNING_PROGRESS_BLOCKED = {
-  ...RUNNING_PROGRESS,
-  boxes: BOXES_ALL_OPEN,
-  openBoxCount: 2,
-};
-
-/** Progress payload for the `closed` screens (late events, documents, completion, reopen) -- boxes are all closed, consistent with the closed status carrying zero open-box blockers. */
-const CLOSED_PROGRESS = {
-  ...RUNNING_PROGRESS,
-  status: "closed",
-  verifiedCount: 114,
-  missingCount: 2,
-  ineligibleCount: 0,
-  unknownCount: 0,
-  pendingEventCount: 0,
-  participants: [],
-  boxes: BOXES_ALL_CLOSED,
-  openBoxCount: 0,
-};
-
-/** Evidence events behind the corrections screen -- one with a full action set (unknown scan, still correctable), one already voided (only restorable), one known box with nothing to correct. */
-const EVIDENCE_RESPONSE = {
-  page: 1,
-  pageSize: 50,
-  total: 3,
-  hasMore: false,
-  items: [
-    {
-      eventId: EVENT_ID_1,
-      codeResultId: CODE_RESULT_ID_1,
-      kind: "item",
-      displayIdentity: "04600000000006 · 000123",
-      authoritativeVerdict: "unknown",
-      terminalId: DEVICE_ID_1,
-      terminalName: "Терминал 1",
-      scannedAt: "2026-08-29T09:55:00.000Z",
-      classification: "unknown",
-      observedProductionDate: "2026-08-20",
-      actions: ["void_scan", "change_date", "remove_item"],
-    },
-    {
-      eventId: EVENT_ID_2,
-      codeResultId: CODE_RESULT_ID_2,
-      kind: "item",
-      displayIdentity: "04600000000006 · 000456",
-      authoritativeVerdict: "voided",
-      terminalId: DEVICE_ID_2,
-      terminalName: "Терминал 2",
-      scannedAt: "2026-08-29T09:20:00.000Z",
-      classification: "voided",
-      observedProductionDate: null,
-      actions: ["restore_scan"],
-    },
-    {
-      eventId: EVENT_ID_3,
-      codeResultId: null,
-      kind: "known_box",
-      displayIdentity: "SSCC 223456789012345670",
-      authoritativeVerdict: "expected",
+      authoritativeVerdict: "applied",
       terminalId: DEVICE_ID_2,
       terminalName: "Терминал 2",
       scannedAt: "2026-08-29T09:10:00.000Z",
-      classification: "expected",
+      classification: null,
       observedProductionDate: null,
       actions: [],
     },
@@ -561,14 +730,14 @@ const CLOSE_PREVIEW_READY = {
 };
 
 /**
- * `BLOCKER_KEYS` (InventoryClosePanel.tsx) maps these two codes to
- * `pages.inventory.close.blocker.active` ("Активные терминалы: {{count}}")
- * and `...openBoxes` ("Открытые короба: {{count}}") -- the exact phrasing
- * the MKR-INS-07 brief's screen table calls for. The `OPEN_REPACK_BOX`
- * count (2) matches `RUNNING_PROGRESS_BLOCKED`'s two open boxes exactly --
- * `inventory-close.service.ts`'s blocker count is a real tally of open
- * repack boxes, so a mismatched number here would depict a state the
- * product can't produce.
+ * The honest derivation of `RUNNING_PROGRESS_BLOCKED`: one active and one
+ * stale participant, their three unsynced events, the two open boxes they
+ * report and the two open boxes the server itself counts. `BLOCKER_KEYS`
+ * (InventoryClosePanel.tsx) renders them as "Активные терминалы: 1",
+ * "Терминалы без связи: 1", "Несинхронизированные события: 3", "Открытые
+ * короба по данным терминалов: 2" and "Открытые короба: 2". The API never
+ * fills `participantId`/`deviceId`/`boxId` for these aggregate counts
+ * (`blocker()` in inventory-close.service.ts defaults them all to null).
  */
 const CLOSE_PREVIEW_BLOCKED = {
   inventoryId: INVENTORY_ID_07,
@@ -577,9 +746,33 @@ const CLOSE_PREVIEW_BLOCKED = {
   blockers: [
     {
       code: "ACTIVE_PARTICIPANT",
+      count: 1,
+      participantId: null,
+      deviceId: null,
+      boxId: null,
+      discrepancyCategory: null,
+    },
+    {
+      code: "STALE_PARTICIPANT",
+      count: 1,
+      participantId: null,
+      deviceId: null,
+      boxId: null,
+      discrepancyCategory: null,
+    },
+    {
+      code: "PENDING_OUTBOX",
+      count: 3,
+      participantId: null,
+      deviceId: null,
+      boxId: null,
+      discrepancyCategory: null,
+    },
+    {
+      code: "PARTICIPANT_OPEN_BOX",
       count: 2,
-      participantId: CLOSE_BLOCKER_PARTICIPANT_ID,
-      deviceId: DEVICE_ID_2,
+      participantId: null,
+      deviceId: null,
       boxId: null,
       discrepancyCategory: null,
     },
@@ -588,13 +781,18 @@ const CLOSE_PREVIEW_BLOCKED = {
       count: 2,
       participantId: null,
       deviceId: null,
-      boxId: CLOSE_BLOCKER_BOX_ID,
+      boxId: null,
       discrepancyCategory: null,
     },
   ],
 };
 
-/** Two late-events batches, both still pending a decision, closed inventory (`canDiscard`). */
+/**
+ * Two late-events batches, both still pending a decision, closed inventory
+ * (`canDiscard`). Both come from terminals the reader has already met on the
+ * live and closing frames -- Терминал 2 is the one whose queue was behind all
+ * along, Терминал 1 lost the answer to its last upload.
+ */
 const LATE_EVENTS_RESPONSE = {
   page: 1,
   pageSize: 50,
@@ -606,7 +804,7 @@ const LATE_EVENTS_RESPONSE = {
       batchId: "batch-2026-08-29-01",
       deviceId: DEVICE_ID_2,
       terminalName: "Терминал 2",
-      eventCount: 18,
+      eventCount: 6,
       receivedAt: "2026-08-29T21:10:00.000Z",
       closedRevision: 1,
       reason: "STATION_OFFLINE",
@@ -617,9 +815,9 @@ const LATE_EVENTS_RESPONSE = {
     {
       id: LATE_EVENT_ID_2,
       batchId: "batch-2026-08-29-02",
-      deviceId: DEVICE_ID_3,
-      terminalName: "Терминал 3",
-      eventCount: 5,
+      deviceId: DEVICE_ID_1,
+      terminalName: "Терминал 1",
+      eventCount: 2,
       receivedAt: "2026-08-29T21:40:00.000Z",
       closedRevision: 1,
       reason: "NETWORK_TIMEOUT",
@@ -630,11 +828,63 @@ const LATE_EVENTS_RESPONSE = {
   ],
 };
 
-/** One run still generating, one already done -- both at the current result revision, so the completion section stays blocked (`currentRunActive` stays true) until the active run finishes. Backs `documents-history.png`. */
+/**
+ * Artifact counters come straight from the generators in
+ * packages/domain/src/inventory/tabular-document-generators.ts: the current
+ * stock CSV writes one header row plus one row per verified code (23 here, the
+ * closed result's `verifiedCount`) and reports no boxes at all, while the
+ * write-off TXT lists the expected codes that were never scanned (the single
+ * missing one). Filenames come from `inventoryDocumentFilenamePrefix`, which
+ * keeps the inventory number's letters and digits.
+ */
+const CURRENT_STOCK_ARTIFACT = {
+  formatId: "inventory_csv_current_stock",
+  formatVersion: 1,
+  partNumber: 1,
+  filename: "inventory-ИНВ-000043-current-stock.csv",
+  mimeType: "text/csv; charset=utf-8",
+  rowCount: 24,
+  codeCount: 23,
+  boxCount: 0,
+  byteSize: 856,
+  sha256: DIGEST,
+  invalidatedAt: null,
+} as const;
+const WRITE_OFF_ARTIFACT = {
+  formatId: "inventory_txt_write_off",
+  formatVersion: 1,
+  partNumber: 1,
+  filename: "inventory-ИНВ-000043-write-off.txt",
+  mimeType: "text/plain; charset=utf-8",
+  rowCount: 1,
+  codeCount: 1,
+  boxCount: 0,
+  byteSize: 37,
+  sha256: DIGEST,
+  invalidatedAt: null,
+} as const;
+
+/** The first run: one format, finished, its file not downloaded yet. Present on both documents frames -- a run history only ever grows. */
+const DOCUMENT_RUN_FIRST = {
+  id: DOC_RUN_FIRST_ID,
+  inventoryId: INVENTORY_ID_07,
+  resultRevision: 1,
+  selectedFormats: [{ id: "inventory_csv_current_stock", version: 1 }],
+  status: "ready",
+  errorCode: null,
+  sourceSnapshotStartedAt: "2026-08-29T21:50:00.000Z",
+  sourceSnapshotCompletedAt: "2026-08-29T21:52:00.000Z",
+  completedAt: "2026-08-29T21:52:00.000Z",
+  attemptCount: 1,
+  createdAt: "2026-08-29T21:50:00.000Z",
+  artifacts: [{ ...CURRENT_STOCK_ARTIFACT, id: ARTIFACT_FIRST_STOCK_ID, downloadedAt: null }],
+};
+
+/** The second run, both formats, caught mid-generation. Backs `documents-history.png`: `currentRunActive` is true, so the completion section stays blocked while it works. */
 const DOCUMENT_RUNS_HISTORY = {
   items: [
     {
-      id: DOC_RUN_PROCESSING_ID,
+      id: DOC_RUN_SECOND_ID,
       inventoryId: INVENTORY_ID_07,
       resultRevision: 1,
       selectedFormats: [
@@ -650,72 +900,37 @@ const DOCUMENT_RUNS_HISTORY = {
       createdAt: "2026-08-29T22:05:00.000Z",
       artifacts: [],
     },
-    {
-      id: DOC_RUN_READY_HISTORY_ID,
-      inventoryId: INVENTORY_ID_07,
-      resultRevision: 1,
-      selectedFormats: [{ id: "inventory_csv_current_stock", version: 1 }],
-      status: "ready",
-      errorCode: null,
-      sourceSnapshotStartedAt: "2026-08-29T21:50:00.000Z",
-      sourceSnapshotCompletedAt: "2026-08-29T21:52:00.000Z",
-      completedAt: "2026-08-29T21:52:00.000Z",
-      attemptCount: 1,
-      createdAt: "2026-08-29T21:50:00.000Z",
-      artifacts: [
-        {
-          id: ARTIFACT_HISTORY_ID,
-          formatId: "inventory_csv_current_stock",
-          formatVersion: 1,
-          partNumber: 1,
-          filename: "inv-000043-current-stock.csv",
-          mimeType: "text/csv; charset=utf-8",
-          rowCount: 116,
-          codeCount: 114,
-          boxCount: 2,
-          byteSize: 20480,
-          sha256: DIGEST,
-          downloadedAt: null,
-          invalidatedAt: null,
-        },
-      ],
-    },
+    DOCUMENT_RUN_FIRST,
   ],
 };
 
-/** A single finished, fully downloaded run at the current result revision -- `currentArtifactsReady` is true, so the completion section is actionable. Backs `completion.png`. */
+/**
+ * The same two runs a few minutes later: the second one finished and both of
+ * its files were downloaded, which is what `currentArtifactsReady` checks (the
+ * newest ready run at the current revision, every artifact non-invalidated and
+ * downloaded). Backs `completion.png`.
+ */
 const DOCUMENT_RUNS_COMPLETE = {
   items: [
     {
-      id: DOC_RUN_READY_COMPLETE_ID,
-      inventoryId: INVENTORY_ID_07,
-      resultRevision: 1,
-      selectedFormats: [{ id: "inventory_csv_current_stock", version: 1 }],
+      ...DOCUMENT_RUNS_HISTORY.items[0],
       status: "ready",
-      errorCode: null,
-      sourceSnapshotStartedAt: "2026-08-29T21:50:00.000Z",
-      sourceSnapshotCompletedAt: "2026-08-29T21:52:00.000Z",
-      completedAt: "2026-08-29T21:52:00.000Z",
-      attemptCount: 1,
-      createdAt: "2026-08-29T21:50:00.000Z",
+      sourceSnapshotCompletedAt: "2026-08-29T22:07:00.000Z",
+      completedAt: "2026-08-29T22:07:00.000Z",
       artifacts: [
         {
-          id: ARTIFACT_COMPLETE_ID,
-          formatId: "inventory_csv_current_stock",
-          formatVersion: 1,
-          partNumber: 1,
-          filename: "inv-000043-current-stock.csv",
-          mimeType: "text/csv; charset=utf-8",
-          rowCount: 116,
-          codeCount: 114,
-          boxCount: 2,
-          byteSize: 20480,
-          sha256: DIGEST,
-          downloadedAt: "2026-08-29T22:00:00.000Z",
-          invalidatedAt: null,
+          ...CURRENT_STOCK_ARTIFACT,
+          id: ARTIFACT_SECOND_STOCK_ID,
+          downloadedAt: "2026-08-29T22:12:00.000Z",
+        },
+        {
+          ...WRITE_OFF_ARTIFACT,
+          id: ARTIFACT_SECOND_WRITE_OFF_ID,
+          downloadedAt: "2026-08-29T22:12:00.000Z",
         },
       ],
     },
+    DOCUMENT_RUN_FIRST,
   ],
 };
 
@@ -832,7 +1047,16 @@ async function installApi(page: Page, scenario: Scenario) {
       "closedCompletion",
     ];
     if (RUNNING_SCENARIOS.includes(scenario) && path === `/api/inventories/${INVENTORY_ID_07}`) {
-      return json(route, RUNNING_DETAIL);
+      // The detail response carries its own live tallies, so each running
+      // scenario answers with the ones matching its own progress payload.
+      return json(
+        route,
+        scenario === "closePreviewReady"
+          ? RUNNING_DETAIL_READY
+          : scenario === "closePreviewBlocked"
+            ? RUNNING_DETAIL_BLOCKED
+            : RUNNING_DETAIL,
+      );
     }
     if (CLOSED_SCENARIOS.includes(scenario) && path === `/api/inventories/${INVENTORY_ID_07}`) {
       return json(route, CLOSED_DETAIL);
@@ -1102,8 +1326,9 @@ test("renders the correction form for a selected item", async ({ page }) => {
   // action button's accessible name with "Выбрать {identity}" for
   // screen-reader clarity, so its visible text ("Отменить скан") is no
   // longer the accessible name -- match on visible text here instead of
-  // role name.
-  await expect(page.getByText("Отменить скан")).toBeVisible();
+  // role name. Two of the four evidence rows lead with that button, hence
+  // `first()`.
+  await expect(page.getByText("Отменить скан").first()).toBeVisible();
   // Clicking "Изменить дату" (the second action, no aria-label override) on
   // the first evidence event opens the correction form for that action
   // (InventoryCorrections.tsx's `select`) -- a purely local state change, no
@@ -1143,7 +1368,12 @@ test("renders the close preview with active blockers", async ({ page }) => {
       "Безопасное закрытие недоступно. Устраните блокировки или зафиксируйте аварийное решение.",
     ),
   ).toBeVisible();
-  await expect(page.getByText("Активные терминалы: 2")).toBeVisible();
+  // Every line the API would derive from this frame's own participants and
+  // boxes (see `CLOSE_PREVIEW_BLOCKED`).
+  await expect(page.getByText("Активные терминалы: 1")).toBeVisible();
+  await expect(page.getByText("Терминалы без связи: 1")).toBeVisible();
+  await expect(page.getByText("Несинхронизированные события: 3")).toBeVisible();
+  await expect(page.getByText("Открытые короба по данным терминалов: 2")).toBeVisible();
   await expect(page.getByText("Открытые короба: 2")).toBeVisible();
   expect(unexpected).toEqual([]);
   await page.screenshot({ path: screenshotPath07("close-blocked"), scale: "css" });
@@ -1161,7 +1391,7 @@ test("renders the emergency-close form once blockers are acknowledged", async ({
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}`);
   await page.getByRole("button", { name: "Закрыть инвентаризацию" }).click();
-  await expect(page.getByText("Активные терминалы: 2")).toBeVisible();
+  await expect(page.getByText("Активные терминалы: 1")).toBeVisible();
   await page
     .getByLabel("Причина аварийного закрытия")
     .fill("Обрыв связи со складом, партия зафиксирована по факту пересчёта.");
@@ -1184,14 +1414,13 @@ test("renders late events awaiting a decision", async ({ page }) => {
   // "Повторить обработку" button unreachable, since it only renders when
   // `inventoryStatus === "running"` (line ~160). The two cannot appear in
   // the same screenshot: closed unlocks discarding, running unlocks
-  // replaying, and an inventory has exactly one status. See the task report
-  // for the full trade-off.
+  // replaying, and an inventory has exactly one status.
   const unexpected = await installApi(page, "closedLate");
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}`);
   await page.getByRole("button", { name: "Поздние события" }).click();
   await expect(page.getByText("batch-2026-08-29-01")).toBeVisible();
-  await expect(page.getByText("18 событий")).toBeVisible();
+  await expect(page.getByText("6 событий")).toBeVisible();
   await page.getByRole("checkbox", { name: "Выбрать пакет batch-2026-08-29-01" }).check();
   await page
     .getByLabel("Причина решения")
@@ -1222,7 +1451,7 @@ test("renders the document generation history", async ({ page }) => {
   await expect(page.getByText("Готово")).toBeVisible();
   await expect(page.getByText("Формируется")).toBeVisible();
   await expect(page.getByRole("button", { name: "Скачать ZIP" })).toBeVisible();
-  await expect(page.getByText("кодов: 114", { exact: false })).toBeVisible();
+  await expect(page.getByText("кодов: 23", { exact: false })).toBeVisible();
   expect(unexpected).toEqual([]);
   await screenshotFullMain(page, screenshotPath07("documents-history"));
 });
@@ -1232,6 +1461,9 @@ test("renders the completion step once documents are downloaded", async ({ page 
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`/test/browser/inventory.html?route=/inventory/${INVENTORY_ID_07}`);
   await expect(page.getByRole("heading", { level: 3, name: "Завершение" })).toBeVisible();
+  // Both runs from the history frame are still here, now finished -- a run
+  // history never loses entries between two moments of the same result.
+  await expect(page.getByRole("button", { name: "Скачать ZIP" })).toHaveCount(2);
   await expect(page.getByText("Итоговые документы скачаны и проверены")).toBeVisible();
   await page.getByRole("checkbox", { name: "Итоговые документы скачаны и проверены" }).check();
   await expect(page.getByRole("button", { name: "Завершить инвентаризацию" })).toBeEnabled();
