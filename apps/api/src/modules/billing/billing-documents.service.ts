@@ -7,11 +7,13 @@ import type {
   CommercialDocumentListItemServiceSource,
   CommercialDocumentRenderServiceResultSource,
   CommercialDocumentServiceSource,
+  PrintDocumentVariant,
 } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import { ObjectStorageService } from "../storage/object-storage.service";
 import { BillingService } from "./billing.service";
 import { renderPrintHtml } from "./print-document-html";
+import { resolvePrintVariant, storedPrintVariant } from "./print-document-layout";
 import { toInvoicePrintModel } from "./print-document-model";
 import { renderPrintPdf } from "./print-document-pdf";
 
@@ -28,20 +30,25 @@ export class BillingDocumentsService {
   async renderInvoice(
     invoiceId: string,
     requestedRevision?: number,
+    printVariant: PrintDocumentVariant = "clean",
   ): Promise<CommercialDocumentRenderServiceResultSource> {
     const invoice = await this.billing.get(invoiceId);
     if (invoice.status === "draft") {
       throw new NotFoundException({ code: "invoice_not_issued" });
     }
     const revision = requestedRevision ?? (await this.nextRevision(invoiceId));
-    const pending = await this.ensurePending(invoice.tenantId, invoiceId, revision);
     const model = toInvoicePrintModel(invoice);
+    resolvePrintVariant(model, { printVariant });
+    const pending = await this.ensurePending(invoice.tenantId, invoiceId, revision, printVariant);
     const results = await Promise.all(pending.map((document) => this.renderOne(document, model)));
     return { revision, documents: results };
   }
 
-  async renderAndStore(invoiceId: string): Promise<CommercialDocumentRenderServiceResultSource> {
-    return this.renderInvoice(invoiceId);
+  async renderAndStore(
+    invoiceId: string,
+    printVariant: PrintDocumentVariant = "clean",
+  ): Promise<CommercialDocumentRenderServiceResultSource> {
+    return this.renderInvoice(invoiceId, undefined, printVariant);
   }
 
   async list(invoiceId: string): Promise<CommercialDocumentListItemServiceSource[]> {
@@ -50,6 +57,7 @@ export class BillingDocumentsService {
         id: schema.invoiceDocuments.id,
         revision: schema.invoiceDocuments.revision,
         format: schema.invoiceDocuments.format,
+        printVariant: schema.invoiceDocuments.printVariant,
         status: schema.invoiceDocuments.status,
         contentType: schema.invoiceDocuments.contentType,
         byteSize: schema.invoiceDocuments.byteSize,
@@ -60,7 +68,13 @@ export class BillingDocumentsService {
       })
       .from(schema.invoiceDocuments)
       .where(eq(schema.invoiceDocuments.invoiceId, invoiceId))
-      .orderBy(desc(schema.invoiceDocuments.revision), schema.invoiceDocuments.format);
+      .orderBy(desc(schema.invoiceDocuments.revision), schema.invoiceDocuments.format)
+      .then((documents) =>
+        documents.map((document) => ({
+          ...document,
+          printVariant: storedPrintVariant(document.printVariant),
+        })),
+      );
   }
 
   async url(invoiceId: string, documentId?: string): Promise<CommercialDocumentDownloadSource> {
@@ -97,7 +111,12 @@ export class BillingDocumentsService {
     return Number(row?.revision ?? 0) + 1;
   }
 
-  private async ensurePending(tenantId: string, invoiceId: string, revision: number) {
+  private async ensurePending(
+    tenantId: string,
+    invoiceId: string,
+    revision: number,
+    printVariant: PrintDocumentVariant,
+  ) {
     await this.db
       .insert(schema.invoiceDocuments)
       .values(
@@ -106,8 +125,9 @@ export class BillingDocumentsService {
           invoiceId,
           revision,
           format,
+          printVariant,
           status: "pending" as const,
-          rendererVersion: "billing-print-v2",
+          rendererVersion: "billing-print-v3",
         })),
       )
       .onConflictDoNothing({
@@ -137,8 +157,13 @@ export class BillingDocumentsService {
       const format = document.format as Format;
       const body =
         format === "html"
-          ? Buffer.from(renderPrintHtml(model), "utf8")
-          : await renderPrintPdf(model);
+          ? Buffer.from(
+              renderPrintHtml(model, { printVariant: storedPrintVariant(document.printVariant) }),
+              "utf8",
+            )
+          : await renderPrintPdf(model, {
+              printVariant: storedPrintVariant(document.printVariant),
+            });
       const contentType = format === "html" ? "text/html; charset=utf-8" : "application/pdf";
       const key = `tenants/${document.tenantId}/invoices/${document.invoiceId}/r${document.revision}.${format}`;
       await this.storage.ensureBucket();
@@ -151,7 +176,7 @@ export class BillingDocumentsService {
           contentType,
           sha256: createHash("sha256").update(body).digest("hex"),
           byteSize: body.byteLength,
-          rendererVersion: "billing-print-v2",
+          rendererVersion: "billing-print-v3",
           updatedAt: new Date(),
           errorCode: null,
         })
@@ -179,6 +204,7 @@ export class BillingDocumentsService {
       id: document.id,
       revision: document.revision,
       format: document.format,
+      printVariant: storedPrintVariant(document.printVariant),
       status: document.status,
       contentType: document.contentType,
       byteSize: document.byteSize,

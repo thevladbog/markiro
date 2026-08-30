@@ -1,23 +1,6 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  Get,
-  Param,
-  Post,
-  Query,
-  Req,
-  UploadedFile,
-  UseFilters,
-  UseInterceptors,
-} from "@nestjs/common";
-import { FileInterceptor } from "@nestjs/platform-express";
-import { ApiBody, ApiConsumes, ApiOperation, ApiTags } from "@nestjs/swagger";
-import { memoryStorage } from "multer";
-import {
-  billingActUploadTooLargeErrorSchema,
-  platformCommercialContracts,
-} from "@markiro/platform-contracts";
+import { Body, Controller, Get, Param, Post, Query, Req } from "@nestjs/common";
+import { ApiOperation, ApiTags } from "@nestjs/swagger";
+import { platformCommercialContracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
 import {
@@ -38,7 +21,6 @@ import {
   type BillingActListQueryDto,
 } from "./dto";
 import { BillingActsService } from "./billing-acts.service";
-import { BillingAttachmentUploadFilter } from "../tenant-billing/billing-attachment-upload.filter";
 
 @ApiTags("platform-billing-acts")
 @Controller("platform/billing/acts")
@@ -94,41 +76,20 @@ export class BillingActsController {
   }
 
   @Post(":id/issue")
-  @ApiOperation({ summary: "Issue a billing act with its PDF" })
-  @UseInterceptors(
-    FileInterceptor("file", {
-      storage: memoryStorage(),
-      limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 1, parts: 2 },
-    }),
-  )
-  @UseFilters(BillingAttachmentUploadFilter)
-  @ApiConsumes("multipart/form-data")
-  @ApiBody({
-    schema: {
-      type: "object",
-      additionalProperties: false,
-      required: ["idempotencyKey", "file"],
-      properties: {
-        idempotencyKey: { type: "string", format: "uuid" },
-        file: { type: "string", format: "binary" },
-      },
-    },
-  })
+  @ApiOperation({ summary: "Generate and issue a billing act PDF" })
   @PlatformApiProtectedCreated({
+    body: platformCommercialContracts.billingActs.issue.body,
     response: platformCommercialContracts.billingActs.issue.response,
-    errors: [{ status: 413, schema: billingActUploadTooLargeErrorSchema }],
   })
   @RequirePlatformCapabilities("billing.write")
   async issue(
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(billingActIdSchema)) id: string,
     @Body(new ZodValidationPipe(billingActIssueSchema)) body: BillingActIssueDto,
-    @UploadedFile() file?: Express.Multer.File,
   ) {
-    if (!file) throw new BadRequestException({ code: "billing_act_pdf_required" });
     return parsePlatformResponse(
       platformCommercialContracts.billingActs.issue.response,
-      await this.acts.issue(req.platformPrincipal!, id, body, file),
+      await this.acts.issueGenerated(req.platformPrincipal!, id, body),
     );
   }
 

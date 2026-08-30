@@ -1400,6 +1400,7 @@ describe("platform commercial contracts", () => {
     const parsed = platformCommercialContracts.billingRequests.detail.response.parse({
       id: requestId,
       tenantId: TENANT_ID,
+      tenantName: "ООО Северная линия",
       number: "BR-2026-001",
       type: "renewal",
       status: "under_review",
@@ -1418,7 +1419,18 @@ describe("platform commercial contracts", () => {
         canCreateInvoice: false,
       },
       events: [],
-      links: [],
+      links: [
+        {
+          id: "84111111-1111-4111-8111-111111111120",
+          tenantId: TENANT_ID,
+          requestId,
+          type: "invoice",
+          targetId: INVOICE_ID,
+          targetLabel: "INV-000042",
+          targetHref: `/invoices/${INVOICE_ID}`,
+          createdAt: CREATED_AT,
+        },
+      ],
     });
 
     expect(parsed.allowedTransitions).toEqual([
@@ -1428,6 +1440,27 @@ describe("platform commercial contracts", () => {
       "cancelled",
     ]);
     expect(parsed.offerAction).toMatchObject({ canRevise: true, canCreateInvoice: false });
+    expect(parsed.tenantName).toBe("ООО Северная линия");
+    expect(parsed.links[0]?.targetLabel).toBe("INV-000042");
+    expect(parsed.links[0]?.targetHref).toBe(`/invoices/${INVOICE_ID}`);
+    expect(
+      platformCommercialContracts.billingRequests.detail.response.safeParse({
+        ...parsed,
+        tenantName: undefined,
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.billingRequests.detail.response.safeParse({
+        ...parsed,
+        links: parsed.links.map(({ targetLabel: _targetLabel, ...link }) => link),
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCommercialContracts.billingRequests.detail.response.safeParse({
+        ...parsed,
+        links: parsed.links.map(({ targetHref: _targetHref, ...link }) => link),
+      }).success,
+    ).toBe(false);
     expect(
       platformCommercialContracts.billingRequests.status.body.safeParse({
         status: "completed",
@@ -1437,10 +1470,39 @@ describe("platform commercial contracts", () => {
     ).toBe(false);
   });
 
+  it("contracts tenant-scoped request link suggestions by display number", () => {
+    const requestId = "82111111-1111-4111-8111-111111111120";
+    const query = platformCommercialContracts.billingRequests.linkTargets.query.parse({
+      type: "offer",
+      q: " КП-42 ",
+    });
+    const response = platformCommercialContracts.billingRequests.linkTargets.response.parse({
+      items: [
+        {
+          id: OFFER_ID,
+          label: "КП-000042",
+          href: `/offers?selected=${OFFER_ID}`,
+        },
+      ],
+      truncated: false,
+    });
+
+    expect(query).toEqual({ type: "offer", q: "КП-42" });
+    expect(response.items[0]).toEqual({
+      id: OFFER_ID,
+      label: "КП-000042",
+      href: `/offers?selected=${OFFER_ID}`,
+    });
+    expect(platformCommercialContracts.billingRequests.linkTargets.params.parse(requestId)).toBe(
+      requestId,
+    );
+  });
+
   it("requires an explicit request-registry truncation signal", () => {
     const item = {
       id: "82111111-1111-4111-8111-111111111120",
       tenantId: TENANT_ID,
+      tenantName: "ООО Северная линия",
       number: "BR-2026-001",
       type: "renewal",
       status: "under_review",
@@ -1505,7 +1567,7 @@ describe("platform commercial contracts", () => {
     );
   });
 
-  it("strictly validates act dates, upload metadata, and idempotency bodies", () => {
+  it("strictly validates act dates and idempotency bodies", () => {
     const idempotencyKey = "83111111-1111-4111-8111-111111111119";
     const requestId = "84111111-1111-4111-8111-111111111119";
     const act = platformCommercialContracts.billingActs.create.body.parse({
@@ -1530,18 +1592,6 @@ describe("platform commercial contracts", () => {
       }).success,
     ).toBe(false);
     expect(
-      platformCommercialContracts.billingActs.uploadMetadata.safeParse({
-        contentType: "application/pdf",
-        byteSize: 5 * 1024 * 1024,
-      }).success,
-    ).toBe(true);
-    expect(
-      platformCommercialContracts.billingActs.uploadMetadata.safeParse({
-        contentType: "text/plain",
-        byteSize: 10,
-      }).success,
-    ).toBe(false);
-    expect(
       platformCommercialContracts.billingActs.issue.body.safeParse({
         idempotencyKey,
         contentType: "application/pdf",
@@ -1550,6 +1600,35 @@ describe("platform commercial contracts", () => {
     expect(platformCommercialContracts.billingActs.cancel.body.parse({ idempotencyKey })).toEqual({
       idempotencyKey,
     });
+  });
+
+  it("defaults print generation to a clean form and accepts an explicit signed variant", () => {
+    const idempotencyKey = "83111111-1111-4111-8111-111111111119";
+    const invoiceIssueBody = Reflect.get(platformCommercialContracts.invoices.issue, "body") as
+      | { parse(input: unknown): unknown; safeParse(input: unknown): { success: boolean } }
+      | undefined;
+    const invoiceRenderBody = Reflect.get(
+      platformCommercialContracts.invoices.documents.render,
+      "body",
+    ) as
+      | { parse(input: unknown): unknown; safeParse(input: unknown): { success: boolean } }
+      | undefined;
+
+    expect(invoiceIssueBody?.parse({})).toEqual({ printVariant: "clean" });
+    expect(invoiceRenderBody?.parse({ printVariant: "signed" })).toEqual({
+      printVariant: "signed",
+    });
+    expect(platformCommercialContracts.billingActs.issue.body.parse({ idempotencyKey })).toEqual({
+      idempotencyKey,
+      printVariant: "clean",
+    });
+    expect(
+      platformCommercialContracts.billingActs.issue.body.parse({
+        idempotencyKey,
+        printVariant: "signed",
+      }),
+    ).toEqual({ idempotencyKey, printVariant: "signed" });
+    expect(invoiceIssueBody?.safeParse({ printVariant: "facsimile" }).success).toBe(false);
   });
 
   it("parses exact platform request events and durable act document metadata", () => {

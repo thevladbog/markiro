@@ -2,6 +2,7 @@ import {
   platformCommercialContracts,
   type ApplyInvoiceDto,
   type CreateInvoiceDto,
+  type PrintDocumentVariant,
 } from "@markiro/platform-contracts";
 
 import type { SchemaObject } from "@nestjs/swagger";
@@ -9,7 +10,9 @@ import type { SchemaObject } from "@nestjs/swagger";
 export const createInvoiceSchema = platformCommercialContracts.invoices.create.body;
 export const invoiceIdSchema = platformCommercialContracts.invoices.detail.params;
 export const applyInvoiceSchema = platformCommercialContracts.invoices.apply.body;
+export const invoicePrintGenerationSchema = platformCommercialContracts.invoices.issue.body;
 
+export type InvoicePrintGenerationDto = { printVariant: PrintDocumentVariant };
 export type { ApplyInvoiceDto, CreateInvoiceDto };
 
 // Hand-written wire schemas for TenantBillingController responses: the tenant

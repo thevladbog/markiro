@@ -37,7 +37,7 @@ describe("bank statement parser", () => {
         "Сумма=15000.00",
         "Плательщик=ООО Фабрика",
         "ПлательщикСчет=40702810900000000001",
-        "НазначениеПлатежа=Оплата по счету INV-000021",
+        "НазначениеПлатежа=Оплата по счету MRK-INV-000021",
         "КонецДокумента",
         "КонецФайла",
       ].join("\r\n"),
@@ -51,7 +51,7 @@ describe("bank statement parser", () => {
       currency: "RUB",
       payerName: "ООО Фабрика",
       payerAccount: "40702810900000000001",
-      paymentPurpose: "Оплата по счету INV-000021",
+      paymentPurpose: "Оплата по счету MRK-INV-000021",
       bankReference: "42",
       parseError: null,
     });

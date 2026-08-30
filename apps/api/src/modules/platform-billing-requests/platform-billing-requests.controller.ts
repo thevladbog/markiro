@@ -13,11 +13,13 @@ import {
   platformBillingRequestCommentSchema,
   platformBillingRequestIdSchema,
   platformBillingRequestLinkSchema,
+  platformBillingRequestLinkTargetQuerySchema,
   platformBillingRequestListQuerySchema,
   platformBillingRequestOfferCreateSchema,
   platformBillingRequestStatusSchema,
   type PlatformBillingRequestCommentDto,
   type PlatformBillingRequestLinkDto,
+  type PlatformBillingRequestLinkTargetQueryDto,
   type PlatformBillingRequestListQueryDto,
   type PlatformBillingRequestOfferCreateDto,
   type PlatformBillingRequestStatusMutationDto,
@@ -58,6 +60,25 @@ export class PlatformBillingRequestsController {
     return parsePlatformResponse(
       platformCommercialContracts.billingRequests.detail.response,
       await this.requests.detail(req.platformPrincipal!, id),
+    );
+  }
+
+  @Get(":id/link-targets")
+  @ApiOperation({ summary: "Suggest tenant resources for a billing request link" })
+  @PlatformApiProtectedOk({
+    query: platformCommercialContracts.billingRequests.linkTargets.query,
+    response: platformCommercialContracts.billingRequests.linkTargets.response,
+  })
+  @RequirePlatformCapabilities("billing.read")
+  async linkTargets(
+    @Req() req: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(platformBillingRequestIdSchema)) id: string,
+    @Query(new ZodValidationPipe(platformBillingRequestLinkTargetQuerySchema))
+    query: PlatformBillingRequestLinkTargetQueryDto,
+  ) {
+    return parsePlatformResponse(
+      platformCommercialContracts.billingRequests.linkTargets.response,
+      await this.requests.linkTargets(req.platformPrincipal!, id, query),
     );
   }
 
