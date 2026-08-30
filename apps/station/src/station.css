@@ -1541,7 +1541,7 @@ body,
   padding: var(--sp-2);
   gap: 2px;
   border-radius: var(--r-1);
-  background: var(--surface-raised);
+  background: var(--surface-panel);
 }
 
 .repack-box-facts span {
@@ -1614,7 +1614,7 @@ body,
   gap: var(--sp-2);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-2);
-  background: var(--surface-raised);
+  background: var(--surface-panel);
   grid-template-rows: auto minmax(0, 1fr);
 }
 
@@ -1752,7 +1752,7 @@ body,
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--r-2);
-  background: var(--surface-raised);
+  background: var(--surface-panel);
 }
 
 .repack-reprint__placeholder {
@@ -1846,7 +1846,7 @@ body,
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: var(--surface-raised);
+  background: var(--surface-panel);
   font: var(--floor-title);
   place-items: center;
 }
@@ -1877,7 +1877,7 @@ body,
   min-width: 0;
   padding: var(--sp-2);
   border-radius: var(--r-1);
-  background: var(--surface-raised);
+  background: var(--surface-panel);
 }
 
 .inventory-box-print dt {
@@ -2055,11 +2055,6 @@ body,
   padding: var(--sp-4) var(--sp-3);
   gap: var(--sp-2);
   border-radius: var(--r-2);
-  /* `--surface-raised` (the token `.repack-box-facts` nominally uses for this
-     same idiom) is never defined anywhere in tokens.css, so it silently
-     resolves to transparent there. `--surface-panel` is the token that is
-     actually defined and used for raised-panel surfaces throughout this
-     file, so the neutral block uses it directly to render a visible card. */
   background: var(--surface-panel);
   text-align: center;
 }
