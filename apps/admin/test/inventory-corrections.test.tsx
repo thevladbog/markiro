@@ -1,7 +1,15 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -17,6 +25,8 @@ import {
   type SessionData,
 } from "../src/auth/client.js";
 import i18n from "../src/i18n/index.js";
+import { useCreateInventoryCorrectionBatch } from "../src/pages/inventory/api.js";
+import type { InventoryEvidenceResponse } from "../src/pages/inventory/schemas.js";
 
 const INVENTORY_ID = "11111111-1111-4111-8111-111111111111";
 const EVENT_ID = "44444444-4444-4444-8444-444444444444";
@@ -85,8 +95,11 @@ const progress = {
   openBoxCount: 0,
   boxTotal: 0,
   boxesTruncated: false,
+  verifiedBoxTotal: 0,
+  verifiedBoxesTruncated: false,
   participants: [],
   boxes: [],
+  verifiedBoxes: [],
   recentEvents: [
     {
       eventId: EVENT_ID,
@@ -103,20 +116,48 @@ const progress = {
   ],
 };
 
-const evidence = {
+const evidence: InventoryEvidenceResponse = {
   page: 1,
   pageSize: 50,
   total: 2,
   hasMore: false,
+  allMatchingActions: ["void_scan", "change_date"],
+  allMatchingAffectedCodeCount: 1,
   items: [
-    { ...progress.recentEvents[0], actions: ["void_scan", "change_date"] },
     {
-      ...progress.recentEvents[0],
+      eventId: EVENT_ID,
+      codeResultId: RESULT_ID,
+      kind: "item",
+      displayIdentity: "(01)04680089900383 (21)SERIAL-42",
+      authoritativeVerdict: "applied",
+      terminalId: "77777777-7777-4777-8777-777777777777",
+      terminalName: "СТ-А-02",
+      scannedAt: "2026-08-26T09:10:00.000Z",
+      classification: "unknown",
+      observedProductionDate: "2025-09-19",
+      copyIdentity: "010468008990038321SERIAL-42",
+      affectedCodeCount: 1,
+      discrepancyCodeCount: 1,
+      classifications: ["unknown"],
+      discrepancyCategories: ["unknown"],
+      actions: ["void_scan", "change_date"],
+    },
+    {
       eventId: "99999999-9999-4999-8999-999999999999",
       codeResultId: null,
+      kind: "item",
       authoritativeVerdict: "duplicate",
       displayIdentity: "duplicate evidence",
+      terminalId: "77777777-7777-4777-8777-777777777777",
+      terminalName: "СТ-А-02",
+      scannedAt: "2026-08-26T09:10:01.000Z",
+      classification: null,
       observedProductionDate: null,
+      copyIdentity: null,
+      affectedCodeCount: 0,
+      discrepancyCodeCount: 0,
+      classifications: [],
+      discrepancyCategories: [],
       actions: [],
     },
   ],
@@ -207,6 +248,75 @@ afterEach(async () => {
   await i18n.changeLanguage("ru");
 });
 
+it("posts a strict batch correction with the exact filter snapshot and exclusions", async () => {
+  const writes: unknown[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      writes.push(JSON.parse(String(init?.body)));
+      return response(
+        {
+          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          action: "change_date",
+          selectedEventCount: 8,
+          affectedCodeCount: 27,
+          resultRevision: 9,
+          createdAt: "2026-08-26T09:11:00.000Z",
+        },
+        201,
+      );
+    }),
+  );
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+  const { result } = renderHook(() => useCreateInventoryCorrectionBatch(), { wrapper });
+
+  await act(async () => {
+    await result.current.mutateAsync({
+      inventoryId: INVENTORY_ID,
+      correction: {
+        action: "change_date",
+        selection: {
+          mode: "all_matching",
+          filter: {
+            scope: "discrepancies",
+            search: "0468",
+            discrepancyCategory: "unknown",
+          },
+          excludedEventIds: [EVENT_ID],
+        },
+        observedProductionDate: "2025-09-20",
+        reason: "Исправление даты партии",
+        expectedResultRevision: 8,
+        idempotencyKey: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      },
+    });
+  });
+
+  expect(writes).toEqual([
+    {
+      action: "change_date",
+      selection: {
+        mode: "all_matching",
+        filter: {
+          scope: "discrepancies",
+          search: "0468",
+          discrepancyCategory: "unknown",
+        },
+        excludedEventIds: [EVENT_ID],
+      },
+      observedProductionDate: "2025-09-20",
+      reason: "Исправление даты партии",
+      expectedResultRevision: 8,
+      idempotencyKey: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    },
+  ]);
+});
+
 it("requires a reason and posts the selected scan with revision and a bounded idempotency key", async () => {
   const { writes } = renderCorrections();
   expect(await screen.findByRole("heading", { name: "Исправления · IVN-26-0042" })).toBeDefined();
@@ -278,7 +388,9 @@ it("uses paginated evidence actions and never offers controls for duplicate nonw
 it("does not render a date correction when evidence permits only voiding an active membership", async () => {
   const originalItems = evidence.items;
   const originalTotal = evidence.total;
-  evidence.items = [{ ...progress.recentEvents[0], actions: ["void_scan"] }];
+  const sourceEvent = originalItems[0];
+  if (!sourceEvent) throw new Error("Expected correction evidence fixture");
+  evidence.items = [{ ...sourceEvent, actions: ["void_scan"] }];
   evidence.total = 1;
   try {
     renderCorrections();

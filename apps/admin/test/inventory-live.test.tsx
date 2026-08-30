@@ -81,6 +81,8 @@ const progress = {
   openBoxCount: 1,
   boxTotal: 1,
   boxesTruncated: false,
+  verifiedBoxTotal: 0,
+  verifiedBoxesTruncated: false,
   participants: [
     {
       deviceId: "77777777-7777-4777-8777-777777777777",
@@ -128,6 +130,7 @@ const progress = {
       itemCount: 7,
     },
   ],
+  verifiedBoxes: [],
   recentEvents: [
     {
       eventId: EVENT_ID,

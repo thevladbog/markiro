@@ -5,8 +5,10 @@ import { apiFetch } from "../../api/client.js";
 import {
   createInventoryInputSchema,
   createInventoryDocumentRunInputSchema,
+  createInventoryCorrectionBatchInputSchema,
   createInventoryCorrectionInputSchema,
   chzExportStateSchema,
+  inventoryCorrectionBatchSchema,
   inventoryCorrectionSchema,
   inventoryCloseResponseSchema,
   inventoryClosePreviewResponseSchema,
@@ -28,10 +30,12 @@ import {
   inventorySnapshotSchema,
   listInventoriesSchema,
   stationInventoryManifestSchema,
+  type CreateInventoryCorrectionBatchInput,
   type CreateInventoryInput,
   type CreateInventoryCorrectionInput,
   type ChzExportState,
   type Inventory,
+  type InventoryCorrectionBatch,
   type InventoryCorrection,
   type InventoryCloseResponse,
   type InventoryClosePreviewResponse,
@@ -42,6 +46,7 @@ import {
   type InventoryDocumentFormat,
   type InventoryDocumentFormatSelection,
   type InventoryDocumentRun,
+  type InventoryEvidenceFilter,
   type InventoryEvidenceResponse,
   type InventoryImport,
   type InventoryProgress,
@@ -80,15 +85,16 @@ export function chzExportStateQueryKey(id: string) {
   return [...INVENTORIES_QUERY_KEY, id, "chz-exports"] as const;
 }
 
-export interface InventoryEvidenceQuery {
-  search?: string;
-  kind?: "item" | "known_box" | "old_box";
-  classification?: "expected" | "protected" | "ineligible" | "unknown" | "voided";
+export interface InventoryEvidenceQuery extends InventoryEvidenceFilter {
   page: number;
   pageSize: number;
 }
 
-function inventoryEvidenceQueryKey(id: string, query: InventoryEvidenceQuery) {
+export function inventoryEvidenceQueriesKey(id: string) {
+  return [...INVENTORIES_QUERY_KEY, id, "evidence"] as const;
+}
+
+export function inventoryEvidenceQueryKey(id: string, query: InventoryEvidenceQuery) {
   return [...INVENTORIES_QUERY_KEY, id, "evidence", query] as const;
 }
 
@@ -112,12 +118,16 @@ async function getInventoryEvidence(
   query: InventoryEvidenceQuery,
 ): Promise<InventoryEvidenceResponse> {
   const params = new URLSearchParams({
+    scope: query.scope,
     page: String(query.page),
     pageSize: String(query.pageSize),
   });
   if (query.search) params.set("search", query.search);
   if (query.kind) params.set("kind", query.kind);
   if (query.classification) params.set("classification", query.classification);
+  if (query.discrepancyCategory) {
+    params.set("discrepancyCategory", query.discrepancyCategory);
+  }
   const value = await apiFetch<unknown>(`/inventories/${id}/evidence?${params.toString()}`);
   return inventoryEvidenceResponseSchema.parse(value);
 }
@@ -132,6 +142,18 @@ async function createInventoryCorrection(input: {
     body: JSON.stringify(correction),
   });
   return inventoryCorrectionSchema.parse(value);
+}
+
+async function createInventoryCorrectionBatch(input: {
+  inventoryId: string;
+  correction: CreateInventoryCorrectionBatchInput;
+}): Promise<InventoryCorrectionBatch> {
+  const correction = createInventoryCorrectionBatchInputSchema.parse(input.correction);
+  const value = await apiFetch<unknown>(`/inventories/${input.inventoryId}/corrections/batch`, {
+    method: "POST",
+    body: JSON.stringify(correction),
+  });
+  return inventoryCorrectionBatchSchema.parse(value);
 }
 
 async function createInventory(input: CreateInventoryInput): Promise<Inventory> {
@@ -418,6 +440,29 @@ export function useCreateInventoryCorrection(): UseMutationResult<
       });
       void queryClient.invalidateQueries({
         queryKey: inventoryProgressQueryKey(input.inventoryId),
+      });
+    },
+  });
+}
+
+export function useCreateInventoryCorrectionBatch(): UseMutationResult<
+  InventoryCorrectionBatch,
+  Error,
+  { inventoryId: string; correction: CreateInventoryCorrectionBatchInput }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createInventoryCorrectionBatch,
+    onSuccess: (_result, input) => {
+      void queryClient.invalidateQueries({
+        queryKey: [...INVENTORIES_QUERY_KEY, input.inventoryId],
+        exact: true,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: inventoryProgressQueryKey(input.inventoryId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: inventoryEvidenceQueriesKey(input.inventoryId),
       });
     },
   });

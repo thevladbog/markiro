@@ -54,6 +54,7 @@ export function InventoryCorrections() {
   const evidence = useInventoryEvidence(
     inventoryId,
     {
+      scope: "all",
       page,
       pageSize: 50,
       ...(search.trim() ? { search: search.trim() } : {}),

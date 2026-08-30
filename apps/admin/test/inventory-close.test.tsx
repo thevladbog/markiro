@@ -34,8 +34,11 @@ const progress: InventoryProgress = {
   openBoxCount: 0,
   boxTotal: 0,
   boxesTruncated: false,
+  verifiedBoxTotal: 0,
+  verifiedBoxesTruncated: false,
   participants: [],
   boxes: [],
+  verifiedBoxes: [],
   recentEvents: [],
 };
 
