@@ -13,8 +13,8 @@ import {
 const root = new URL("../../../", import.meta.url);
 const releasedRoot = new URL("apps/landing/public/legal/", root);
 const releasedAttestation = new URL("deploy/production/legal-artifacts-attestation.json", root);
-const releaseId = "MKR-LEGAL-2026.08-08-2026-08-30";
-const manifestSha256 = "329e7144215d66c6e769c10c16b2b546ae1bcf09114fa0e7983492637754271a";
+const releaseId = "MKR-LEGAL-2026.08-09-2026-08-31";
+const manifestSha256 = "ebaa625f317efb30d9fe8a2a40d21f487946238c5edb61e1af70e4aeef1e7ba8";
 const releasedPdfNames = [
   "markiro_mkr-brd-01_2026.08-01_en.pdf",
   "markiro_mkr-brd-01_2026.08-01_ru.pdf",
@@ -26,14 +26,18 @@ const releasedPdfNames = [
   "markiro_mkr-ins-04_2026.08-01_ru.pdf",
   "markiro_mkr-ins-05_2026.08-01_ru.pdf",
   "markiro_mkr-ins-06_2026.08-01_ru.pdf",
-  "markiro_mkr-ins-07_2026.08-01_ru.pdf",
+  "markiro_mkr-ins-07_2026.08-02_ru.pdf",
   "markiro_mkr-pd-01_2026.08-01_en.pdf",
   "markiro_mkr-pd-01_2026.08-01_ru.pdf",
   "markiro_mkr-pd-02_2026.08-01_en.pdf",
   "markiro_mkr-pd-02_2026.08-01_ru.pdf",
 ];
+// The retired naming scheme separated the revision sequence with a dot rather
+// than a dash. Derive it from the revision segment itself, so a reissued
+// document (MKR-INS-07 is on 2026.08-02) still yields a name that differs from
+// the attested one.
 const oldPdfNames = releasedPdfNames.map((fileName) =>
-  fileName.replace("2026.08-01", "2026.08.01"),
+  fileName.replace(/_(\d{4}\.\d{2})-(\d{2})_/, "_$1.$2_"),
 );
 
 async function fixture() {

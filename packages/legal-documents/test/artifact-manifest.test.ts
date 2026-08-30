@@ -292,21 +292,26 @@ function artifactEntry(
   kind: PublishedLegalArtifact["kind"],
 ): { readonly entry: PublishedLegalArtifact; readonly bytes: Uint8Array } {
   const extension = kind === "pdfa-2b" ? "pdf" : "docx";
-  const fileName = `markiro_${code.toLowerCase()}_2026.08-01_${locale}.${extension}`;
+  // MKR-INS-07 was reissued as 2026.08/02 once the cabinet started showing why a
+  // repack box is invalidated; every other code is still on its first revision.
+  const revision = code === "MKR-INS-07" ? "2026.08/02" : "2026.08/01";
+  const fileName = `markiro_${code.toLowerCase()}_${revision.replace("/", "-")}_${locale}.${extension}`;
   const bytes = artifactBytes(fileName);
   return {
     bytes,
     entry: {
       code,
-      revision: "2026.08/01",
+      revision,
       effectiveDate:
         code === "MKR-INS-01" || code === "MKR-INS-02"
           ? "2026-08-21"
           : code === "MKR-INS-03" || code === "MKR-INS-04"
             ? "2026-08-22"
-            : code === "MKR-INS-05" || code === "MKR-INS-06" || code === "MKR-INS-07"
+            : code === "MKR-INS-05" || code === "MKR-INS-06"
               ? "2026-08-30"
-              : "2026-08-15",
+              : code === "MKR-INS-07"
+                ? "2026-08-31"
+                : "2026-08-15",
       locale,
       kind,
       fileName,
@@ -1203,11 +1208,13 @@ describe("legal artifact release generation", () => {
       "MKR-INS-04|ru|legal-pdf|https://markiro.app/d/MKR-INS-04/2026.08/01/22.08.2026",
       "MKR-INS-05|ru|legal-pdf|https://markiro.app/d/MKR-INS-05/2026.08/01/30.08.2026",
       "MKR-INS-06|ru|legal-pdf|https://markiro.app/d/MKR-INS-06/2026.08/01/30.08.2026",
-      "MKR-INS-07|ru|legal-pdf|https://markiro.app/d/MKR-INS-07/2026.08/01/30.08.2026",
+      "MKR-INS-07|ru|legal-pdf|https://markiro.app/d/MKR-INS-07/2026.08/02/31.08.2026",
     ]);
-    expect(new Set(entries.map(({ revision }) => revision))).toEqual(new Set(["2026.08/01"]));
+    expect(new Set(entries.map(({ revision }) => revision))).toEqual(
+      new Set(["2026.08/01", "2026.08/02"]),
+    );
     expect(new Set(entries.map(({ effectiveDate }) => effectiveDate))).toEqual(
-      new Set(["2026-08-15", "2026-08-21", "2026-08-22", "2026-08-30"]),
+      new Set(["2026-08-15", "2026-08-21", "2026-08-22", "2026-08-30", "2026-08-31"]),
     );
     expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(15);
     expect(await readdir(path.dirname(outDir))).toEqual(["legal"]);

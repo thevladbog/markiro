@@ -217,13 +217,13 @@
   },
   {
     "code": "MKR-INS-07",
-    "revision": "2026.08/01",
-    "effectiveDate": "2026-08-30",
+    "revision": "2026.08/02",
+    "effectiveDate": "2026-08-31",
     "locale": "ru",
     "kind": "pdfa-2b",
-    "fileName": "markiro_mkr-ins-07_2026.08-01_ru.pdf",
-    "bytes": 1610492,
-    "sha256": "695028e775d5f0f3ebe4bc30bd396ce28b64ea95d088c720f759071a09b1e68c",
+    "fileName": "markiro_mkr-ins-07_2026.08-02_ru.pdf",
+    "bytes": 1610451,
+    "sha256": "2e1319dc6ff5183245d17d026f249da61d9350ec469acbdff665c2bc4c4e3ca0",
     "mediaType": "application/pdf",
     "generator": {
       "docx": "9.7.1",

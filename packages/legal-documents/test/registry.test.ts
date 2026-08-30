@@ -41,7 +41,13 @@ describe("legal document registry", () => {
 
   it("pins paired, unique public routes and valid initial metadata", () => {
     expect(() => validateLegalRegistry(LEGAL_RELEASES)).not.toThrow();
-    expect(LEGAL_RELEASES.every(({ revision }) => revision === "2026.08/01")).toBe(true);
+    // Every code is still on its first revision except MKR-INS-07, reissued as
+    // 2026.08/02 once the cabinet started showing why a repack box is invalidated.
+    expect(
+      LEGAL_RELEASES.every(({ code, revision }) =>
+        code === "MKR-INS-07" ? revision === "2026.08/02" : revision === "2026.08/01",
+      ),
+    ).toBe(true);
     expect(
       LEGAL_RELEASES.filter(
         ({ code }) =>
@@ -60,7 +66,7 @@ describe("legal document registry", () => {
     expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-08-22");
     expect(findLegalRelease("MKR-INS-05").effectiveDate).toBe("2026-08-30");
     expect(findLegalRelease("MKR-INS-06").effectiveDate).toBe("2026-08-30");
-    expect(findLegalRelease("MKR-INS-07").effectiveDate).toBe("2026-08-30");
+    expect(findLegalRelease("MKR-INS-07").effectiveDate).toBe("2026-08-31");
     expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(15);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
     expect(findLegalRelease("MKR-PD-02", "2026.08/01")).toBe(LEGAL_RELEASES[1]);
