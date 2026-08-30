@@ -219,6 +219,8 @@
       "closeIncomplete": "Close incomplete box",
       "empty": "The open box has no bottles yet.",
       "dateBlocked": "Close the incomplete box or clear it first.",
+      "sourceDateBlocked": "The box already holds bottles of another date. Close or clear it.",
+      "sourceDateMismatch": "The code's date differs from the box date",
       "print": {
         "printing": "Printing label",
         "printed": "Label printed",

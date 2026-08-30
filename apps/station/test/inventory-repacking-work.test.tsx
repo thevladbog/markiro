@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { DatabaseSync } from "node:sqlite";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { canonicalizeKm, kmHash, type StationInventoryBundleManifest } from "@markiro/domain";
@@ -449,5 +449,174 @@ describe("repack inventory work screen", () => {
       .prepare("SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?")
       .get(DEVICE_ID) as { active_production_date: string };
     expect(terminal.active_production_date).toBe("2026-08-21");
+  });
+
+  it("refreshes the toolbar date after seeding the new box from the old box contents", async () => {
+    const db = new DatabaseSync(":memory:");
+    const exec = makeExec(db);
+    await applyMigrations(exec);
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0043', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    db.prepare(
+      `INSERT INTO sscc_pool
+         (issuer_prefix, extension_digit, from_serial, to_serial, next_serial)
+       VALUES ('460068200', 0, 1, 100, 1)`,
+    ).run();
+    const km = canonicalizeKm(`01${GTIN}21REPACK-TOOLBAR`);
+    db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+          source_production_date, parent_sscc, expected, protected)
+       VALUES (?, ?, ?, ?, ?, 'INTRODUCED', '2026-08-21', ?, 1, 0)`,
+    ).run(SNAPSHOT_ID, kmHash(km), km.raw, GTIN, km.serial, OLD_SSCC);
+    const scan = scanner();
+
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+        createEventId={() => crypto.randomUUID()}
+        now={() => "2026-08-25T10:00:01.000Z"}
+      />,
+    );
+    await waitFor(() => expect(scan.active()).toBe(true));
+    const toolbar = () => within(document.querySelector(".repack-toolbar")!);
+    expect(toolbar().getByText("19.08.2026")).toBeTruthy();
+
+    scan.emit(OLD_SSCC);
+
+    await waitFor(() => expect(toolbar().getByText("21.08.2026")).toBeTruthy());
+    expect(toolbar().queryByText("19.08.2026")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    expect((screen.getByLabelText("Дата производства") as HTMLInputElement).value).toBe(
+      "2026-08-21",
+    );
+  });
+
+  it("adopts the code's date into an empty repack box", async () => {
+    const db = new DatabaseSync(":memory:");
+    const exec = makeExec(db);
+    await applyMigrations(exec);
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0043', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    db.prepare(
+      `INSERT INTO sscc_pool
+         (issuer_prefix, extension_digit, from_serial, to_serial, next_serial)
+       VALUES ('460068200', 0, 1, 100, 1)`,
+    ).run();
+    for (const [serial, productionDate] of [
+      ["REPACK-MIX-A", "2026-08-21"],
+      ["REPACK-MIX-B", "2026-08-22"],
+    ] as const) {
+      const km = canonicalizeKm(`01${GTIN}21${serial}`);
+      db.prepare(
+        `INSERT INTO inventory_snapshot_codes_mirror
+           (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+            source_production_date, parent_sscc, expected, protected)
+         VALUES (?, ?, ?, ?, ?, 'INTRODUCED', ?, ?, 1, 0)`,
+      ).run(SNAPSHOT_ID, kmHash(km), km.raw, GTIN, km.serial, productionDate, OLD_SSCC);
+    }
+    const scan = scanner();
+
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+        createEventId={() => crypto.randomUUID()}
+        now={() => "2026-08-25T10:00:01.000Z"}
+      />,
+    );
+    await waitFor(() => expect(scan.active()).toBe(true));
+    scan.emit(OLD_SSCC);
+    await waitFor(() =>
+      expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20"),
+    );
+
+    scan.emit(canonicalizeKm(`01${GTIN}21REPACK-MIX-A`).raw);
+
+    await waitFor(() =>
+      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+    );
+    expect(scan.active()).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: /Установить/ }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"),
+    );
+    const box = db
+      .prepare("SELECT production_date FROM inventory_repack_boxes_mirror LIMIT 1")
+      .get() as { production_date: string };
+    expect(box.production_date).toBe("2026-08-21");
+    await waitFor(() => expect(scan.active()).toBe(true));
+  });
+
+  it("offers only skip and corrections when the repack box is not empty", async () => {
+    const db = new DatabaseSync(":memory:");
+    const exec = makeExec(db);
+    await applyMigrations(exec);
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0043', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    db.prepare(
+      `INSERT INTO sscc_pool
+         (issuer_prefix, extension_digit, from_serial, to_serial, next_serial)
+       VALUES ('460068200', 0, 1, 100, 1)`,
+    ).run();
+    for (const [serial, productionDate] of [
+      ["REPACK-KEEP", "2026-08-19"],
+      ["REPACK-OTHER", "2026-08-22"],
+    ] as const) {
+      const km = canonicalizeKm(`01${GTIN}21${serial}`);
+      db.prepare(
+        `INSERT INTO inventory_snapshot_codes_mirror
+           (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+            source_production_date, parent_sscc, expected, protected)
+         VALUES (?, ?, ?, ?, ?, 'INTRODUCED', ?, ?, 1, 0)`,
+      ).run(SNAPSHOT_ID, kmHash(km), km.raw, GTIN, km.serial, productionDate, OLD_SSCC);
+    }
+    const scan = scanner();
+
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+        createEventId={() => crypto.randomUUID()}
+        now={() => "2026-08-25T10:00:01.000Z"}
+      />,
+    );
+    await waitFor(() => expect(scan.active()).toBe(true));
+    scan.emit(OLD_SSCC);
+    scan.emit(canonicalizeKm(`01${GTIN}21REPACK-KEEP`).raw);
+    await waitFor(() =>
+      expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"),
+    );
+
+    scan.emit(canonicalizeKm(`01${GTIN}21REPACK-OTHER`).raw);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("В коробе уже есть бутылки другой даты. Закройте или очистите короб."),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByRole("button", { name: /Установить/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Пропустить код" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить код" }));
+
+    await waitFor(() => expect(scan.active()).toBe(true));
+    expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20");
   });
 });
