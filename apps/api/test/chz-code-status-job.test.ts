@@ -46,12 +46,15 @@ function fakeBoss() {
     stop: vi.fn(async () => undefined),
     createQueue: vi.fn(async () => undefined),
     schedule: vi.fn(async (_name?: string) => undefined),
-    work: vi.fn(async (name: string, optionsOrHandler: object | CronHandler, maybe?: CronHandler) => {
-      workerIndex += 1;
-      const fn = typeof optionsOrHandler === "function" ? (optionsOrHandler as CronHandler) : maybe;
-      if (name === REFRESH_CHZ_CODE_STATUSES_QUEUE && fn) refreshHandler = fn;
-      return `worker-${workerIndex}`;
-    }),
+    work: vi.fn(
+      async (name: string, optionsOrHandler: object | CronHandler, maybe?: CronHandler) => {
+        workerIndex += 1;
+        const fn =
+          typeof optionsOrHandler === "function" ? (optionsOrHandler as CronHandler) : maybe;
+        if (name === REFRESH_CHZ_CODE_STATUSES_QUEUE && fn) refreshHandler = fn;
+        return `worker-${workerIndex}`;
+      },
+    ),
     send: vi.fn(async () => "job-id" as string | null),
     // `checkReady`'s probe ignores the result; `assertChzExportQueuePolicy`
     // (jobs.module.ts) needs a row reporting the expected "stately" policy so
@@ -175,12 +178,23 @@ describe("PgBossService refresh-chz-code-statuses queue", () => {
     expect(ingest.run.mock.calls.map(([id]) => id).sort()).toEqual(["tenant-a", "tenant-b"]);
   });
 
-  it("keeps going when one tenant throws", async () => {
+  it("keeps going when one tenant's refresh throws", async () => {
     await seedTenantsWithChzChannel(["tenant-a", "tenant-b"]);
     refresh.run.mockRejectedValueOnce(new Error("boom"));
 
     await expect(handler()).resolves.not.toThrow();
 
     expect(refresh.run).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps going when one tenant's ingest throws", async () => {
+    await seedTenantsWithChzChannel(["tenant-a", "tenant-b"]);
+    ingest.run.mockRejectedValueOnce(new Error("boom"));
+
+    await expect(handler()).resolves.not.toThrow();
+
+    expect(ingest.run).toHaveBeenCalledTimes(2);
+    expect(refresh.run).toHaveBeenCalledOnce();
+    expect(refresh.run).toHaveBeenCalledWith("tenant-b");
   });
 });

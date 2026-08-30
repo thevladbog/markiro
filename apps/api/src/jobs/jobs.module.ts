@@ -580,7 +580,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       );
       await this.reconcileUnfinishedChzExports(boss);
 
-      // Also run all ten maintenance paths once immediately at boot rather
+      // Also run all eleven maintenance paths once immediately at boot rather
       // than waiting for the first tick of any schedule.
       await this.runEnsurePartitions();
       await this.runPruneKioskPairAttempts();
@@ -592,6 +592,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       await this.mailRetention.prune();
       await this.subscriptionStatus.run();
       await this.signerScheduler.run();
+      await this.runRefreshChzCodeStatuses();
       this.started = true;
     } catch (e) {
       // Bootstrap failed partway through: stop whatever pg-boss managed to
