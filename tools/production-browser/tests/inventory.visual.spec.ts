@@ -28,7 +28,7 @@ function screenshotPath(name: string): string {
  * MKR-INS-07 (printed inventory-closing instruction) screenshot targets --
  * the post-launch half of the lifecycle, same "Марка Ко" organisation and
  * line as MKR-INS-06, but its own INVENTORY-26-0043 inventory rather than
- * MKR-INS-06's ИНВ-000042. It has to be a *repack* inventory, not a
+ * MKR-INS-06's INVENTORY-26-0042. It has to be a *repack* inventory, not a
  * reuse of MKR-INS-06's check-mode one: this document's corrections and
  * closing screens depict repack-box actions (invalidate, reprint) and an
  * open/closed box count that feeds close blockers, and check-mode
@@ -119,9 +119,17 @@ const LABEL_TEMPLATE = {
 };
 const SHIFT_PLANNING_CONFIG = { defaultBoxLabelTemplateId: null };
 
+/**
+ * `formatInventoryNumber` (apps/api/src/modules/inventories/inventory-number.ts)
+ * is the only producer of `inventories.number` and emits `INVENTORY-YY-NNNN`,
+ * so a fixture number has to follow that shape to depict a real inventory.
+ * This one is created 2026-08-28 (`createdAt` below) as the tenant's 42nd,
+ * making `INVENTORY-26-0042` exactly what the API would have written -- the
+ * inventory the MKR-INS-07 one (`inventoryRow07`, the 43rd) follows on from.
+ */
 const inventoryRow = {
   id: INVENTORY_ID,
-  number: "ИНВ-000042",
+  number: "INVENTORY-26-0042",
   status: "preparing",
   mode: "check",
   productId: PRODUCT_ID,
@@ -1199,7 +1207,7 @@ test("renders the inventory list", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/test/browser/inventory.html?route=/inventory");
   await expect(page.getByRole("heading", { level: 1, name: "Инвентаризации" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "ИНВ-000042" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "INVENTORY-26-0042" })).toBeVisible();
   expect(unexpected).toEqual([]);
   await page.screenshot({ path: screenshotPath("list"), scale: "css" });
 });
@@ -1298,15 +1306,19 @@ test("renders the real printable task form template", async ({ page }) => {
   // real, pure render function directly -- see
   // apps/admin/test/browser/task-form-harness.ts, which imports it with a
   // hand-built `InventoryTaskFormData` and writes its actual return value
-  // (including a genuine `renderCode128Svg` Code 128 barcode from
+  // (including a genuine `renderLiteralDataMatrixSvg` Data Matrix symbol from
   // `@markiro/domain`, not a stand-in) as the document. No network mocking
   // is involved for this screen at all.
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/test/browser/task-form.html");
   await expect(page.getByRole("heading", { name: "Задание на инвентаризацию" })).toBeVisible();
-  await expect(page.getByText("ИНВ-000042").first()).toBeVisible();
+  await expect(page.getByText("INVENTORY-26-0042").first()).toBeVisible();
   await expect(page.getByText("Параметры задания")).toBeVisible();
   await expect(page.locator(".barcode svg")).toBeVisible();
+  // Pins the symbology the template actually renders: the scan symbol was
+  // Code 128 before a038bc106 switched it to Data Matrix, and nothing else
+  // here would notice it silently changing back.
+  await expect(page.locator(".barcode")).toHaveAttribute("data-barcode-symbology", "datamatrix");
   await page.screenshot({ path: screenshotPath("task-form"), scale: "css" });
 });
 
@@ -1353,7 +1365,9 @@ test("renders the corrections list with its filters", async ({ page }) => {
   await expect(
     page.getByRole("heading", { level: 1, name: "Исправления · INVENTORY-26-0043" }),
   ).toBeVisible();
-  await expect(page.getByRole("heading", { level: 2, name: "События и коды" })).toBeVisible();
+  // `pages.inventory.corrections.events` verbatim (ru.json) -- renamed from
+  // "События и коды" by 5dff4fcf2 (#383).
+  await expect(page.getByRole("heading", { level: 2, name: "События сканирования" })).toBeVisible();
   await expect(page.getByLabel("Тип события")).toBeVisible();
   await expect(page.getByLabel("Классификация")).toBeVisible();
   await expect(page.getByText(ITEM_IDENTITY_1)).toBeVisible();
@@ -1381,7 +1395,9 @@ test("renders the correction form for a selected item", async ({ page }) => {
     page.getByRole("heading", { level: 2, name: `Исправление · ${ITEM_IDENTITY_1}` }),
   ).toBeVisible();
   await expect(page.getByLabel("Причина исправления")).toBeVisible();
-  await expect(page.getByLabel("Наблюдаемая дата производства")).toBeVisible();
+  // `pages.inventory.corrections.observedDate` verbatim (ru.json) -- renamed
+  // from "Наблюдаемая дата производства" by 5dff4fcf2 (#383).
+  await expect(page.getByLabel("Новая дата производства")).toBeVisible();
   await expect(page.getByText("Восстановить скан")).toBeVisible();
   expect(unexpected).toEqual([]);
   await screenshotFullMain(page, screenshotPath07("corrections-form"));

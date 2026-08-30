@@ -44,7 +44,7 @@ export function renderDataMatrixSvg(text: string): string {
  * FNC1 control characters.
  */
 export function renderLiteralDataMatrixSvg(text: string): string {
-  const bytes = Buffer.byteLength(text, "utf8");
+  const bytes = new TextEncoder().encode(text).byteLength;
   if (bytes === 0 || bytes > MAX_LITERAL_DATA_MATRIX_UTF8_BYTES) {
     throw new DomainError(
       "LITERAL_DATA_MATRIX_TEXT_INVALID",
