@@ -20,10 +20,12 @@ services:
   api:
     image: ghcr.io/thevladbog/markiro-api@${MARKIRO_API_IMAGE_DIGEST:?MARKIRO_API_IMAGE_DIGEST is required}
     restart: unless-stopped
+    mem_limit: 3g
     env_file:
       - ${MARKIRO_ENV_FILE:-.env.production}
     environment:
       NODE_ENV: production
+      NODE_OPTIONS: "--max-old-space-size=2048"
       PORT: "3000"
       TRUST_PROXY_HOPS: "1"
     depends_on:

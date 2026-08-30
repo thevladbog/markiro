@@ -6,11 +6,14 @@ import { XMLParser } from "fast-xml-parser";
 import type { InventoryChzStatus } from "@markiro/domain";
 
 export const CHZ_MAX_INPUT_BYTES = 64 * 1024 * 1024;
-export const CHZ_MAX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
-export const CHZ_MAX_WORKSHEET_BYTES = 60 * 1024 * 1024;
-export const CHZ_MAX_ROWS = 50_000;
+// Cabinet XLSX exports are verbose: a 58,806-row, 7 MiB workbook expands to
+// roughly 124 MiB of worksheet XML. These bounds cover up to 100,000 rows
+// while the compressed upload remains subject to CHZ_MAX_INPUT_BYTES.
+export const CHZ_MAX_UNCOMPRESSED_BYTES = 256 * 1024 * 1024;
+export const CHZ_MAX_WORKSHEET_BYTES = 252 * 1024 * 1024;
+export const CHZ_MAX_ROWS = 100_000;
 export const CHZ_MAX_COLUMNS = 35;
-export const CHZ_MAX_CELLS = 1_750_000;
+export const CHZ_MAX_CELLS = 3_500_000;
 export const CHZ_MAX_CELL_UTF8_BYTES = 64 * 1024;
 const CHZ_MAX_ARCHIVE_ENTRIES = 128;
 /**
@@ -130,6 +133,18 @@ function utf8(bytes: Uint8Array, code: ChzImportErrorCode, rowNumber?: number): 
     return textDecoder.decode(bytes);
   } catch {
     return fail(code, rowNumber);
+  }
+}
+
+function assertUtf8(bytes: Uint8Array, code: ChzImportErrorCode): void {
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  try {
+    for (let offset = 0; offset < bytes.length; offset += 1024 * 1024) {
+      const end = Math.min(offset + 1024 * 1024, bytes.length);
+      decoder.decode(bytes.subarray(offset, end), { stream: end < bytes.length });
+    }
+  } catch {
+    fail(code);
   }
 }
 
@@ -503,6 +518,10 @@ function parseXml(
 ): Record<string, unknown> {
   if (bytes.length > maxBytes) fail(code);
   const source = utf8(bytes, "CHZ_XLSX_INVALID");
+  return parseXmlSource(source);
+}
+
+function parseXmlSource(source: string): Record<string, unknown> {
   if (/<!DOCTYPE/i.test(source)) fail("CHZ_XLSX_INVALID");
   const parser = new XMLParser({
     ignoreAttributes: false,
@@ -515,6 +534,126 @@ function parseXml(
   } catch {
     return fail("CHZ_XLSX_INVALID");
   }
+}
+
+function asciiIndexOf(bytes: Uint8Array, value: string, start = 0, end = bytes.length): number {
+  outer: for (let offset = start; offset + value.length <= end; offset += 1) {
+    for (let index = 0; index < value.length; index += 1) {
+      if (bytes[offset + index] !== value.charCodeAt(index)) continue outer;
+    }
+    return offset;
+  }
+  return -1;
+}
+
+function asciiStartsWith(bytes: Uint8Array, value: string, offset: number): boolean {
+  return asciiIndexOf(bytes, value, offset, offset + value.length) === offset;
+}
+
+function isXmlTagNameBoundary(value: number | undefined): boolean {
+  return value === 0x2f || value === 0x3e || (value !== undefined && isXmlWhitespace(value));
+}
+
+function xmlOpeningTagIndex(
+  bytes: Uint8Array,
+  name: string,
+  start = 0,
+  end = bytes.length,
+): number {
+  const prefix = `<${name}`;
+  let offset = start;
+  while (offset < end) {
+    const candidate = asciiIndexOf(bytes, prefix, offset, end);
+    if (candidate < 0) return -1;
+    if (isXmlTagNameBoundary(bytes[candidate + prefix.length])) return candidate;
+    offset = candidate + prefix.length;
+  }
+  return -1;
+}
+
+function asciiCaseInsensitiveIndexOf(bytes: Uint8Array, value: string): number {
+  const lower = value.toLowerCase();
+  outer: for (let offset = 0; offset + lower.length <= bytes.length; offset += 1) {
+    for (let index = 0; index < lower.length; index += 1) {
+      const byte = bytes[offset + index]!;
+      const normalized = byte >= 0x41 && byte <= 0x5a ? byte + 0x20 : byte;
+      if (normalized !== lower.charCodeAt(index)) continue outer;
+    }
+    return offset;
+  }
+  return -1;
+}
+
+function xmlTagEnd(bytes: Uint8Array, start: number, end: number): number {
+  let quote: number | null = null;
+  for (let offset = start; offset < end; offset += 1) {
+    const value = bytes[offset]!;
+    if (quote !== null) {
+      if (value === quote) quote = null;
+    } else if (value === 0x22 || value === 0x27) {
+      quote = value;
+    } else if (value === 0x3e) {
+      return offset;
+    }
+  }
+  return fail("CHZ_XLSX_INVALID");
+}
+
+function isXmlWhitespace(value: number): boolean {
+  return value === 0x09 || value === 0x0a || value === 0x0d || value === 0x20;
+}
+
+function isSelfClosingXmlTag(bytes: Uint8Array, tagStart: number, tagEnd: number): boolean {
+  let offset = tagEnd - 1;
+  while (offset > tagStart && isXmlWhitespace(bytes[offset]!)) offset -= 1;
+  return bytes[offset] === 0x2f;
+}
+
+function worksheetSkeleton(
+  bytes: Uint8Array,
+): { contentStart: number; contentEnd: number; worksheetOpenTag: string } | null {
+  if (bytes.length > CHZ_MAX_WORKSHEET_BYTES) fail("CHZ_WORKSHEET_LIMIT");
+  assertUtf8(bytes, "CHZ_XLSX_INVALID");
+  const worksheetStart = xmlOpeningTagIndex(bytes, "worksheet");
+  if (worksheetStart < 0) fail("CHZ_XLSX_INVALID");
+  if (asciiCaseInsensitiveIndexOf(bytes.subarray(0, worksheetStart), "<!DOCTYPE") >= 0) {
+    fail("CHZ_XLSX_INVALID");
+  }
+  const worksheetEnd = xmlTagEnd(bytes, worksheetStart, bytes.length);
+  const worksheetOpenTag = utf8(
+    bytes.subarray(worksheetStart, worksheetEnd + 1),
+    "CHZ_XLSX_INVALID",
+  );
+  const sheetDataStart = xmlOpeningTagIndex(bytes, "sheetData", worksheetEnd + 1);
+  if (sheetDataStart < 0) {
+    parseXml(bytes, CHZ_MAX_XML_METADATA_BYTES, "CHZ_XLSX_METADATA_LIMIT");
+    return null;
+  }
+  const sheetDataEnd = xmlTagEnd(bytes, sheetDataStart, bytes.length);
+  if (isSelfClosingXmlTag(bytes, sheetDataStart, sheetDataEnd)) {
+    parseXml(bytes, CHZ_MAX_XML_METADATA_BYTES, "CHZ_XLSX_METADATA_LIMIT");
+    return null;
+  }
+  const closingStart = asciiIndexOf(bytes, "</sheetData>", sheetDataEnd + 1);
+  if (closingStart < 0) fail("CHZ_XLSX_INVALID");
+
+  const prefix = bytes.subarray(0, sheetDataEnd + 1);
+  const suffix = bytes.subarray(closingStart);
+  if (prefix.length + suffix.length > CHZ_MAX_XML_METADATA_BYTES) {
+    fail("CHZ_XLSX_METADATA_LIMIT");
+  }
+  const skeleton = new Uint8Array(prefix.length + suffix.length);
+  skeleton.set(prefix);
+  skeleton.set(suffix, prefix.length);
+  const worksheet = asObject(
+    parseXml(skeleton, CHZ_MAX_XML_METADATA_BYTES, "CHZ_XLSX_METADATA_LIMIT")["worksheet"],
+  );
+  if (!Object.hasOwn(worksheet, "sheetData")) fail("CHZ_XLSX_INVALID");
+  return {
+    contentStart: sheetDataEnd + 1,
+    contentEnd: closingStart,
+    worksheetOpenTag,
+  };
 }
 
 function richText(value: unknown): string {
@@ -615,25 +754,30 @@ function xlsxCellValue(
   return value;
 }
 
-function parseWorksheet(bytes: Uint8Array, strings: readonly string[]): ChzTabularRecord[] {
-  const worksheet = asObject(
-    parseXml(bytes, CHZ_MAX_WORKSHEET_BYTES, "CHZ_WORKSHEET_LIMIT")["worksheet"],
-  );
-  const rows = asArray(asObject(worksheet["sheetData"])["row"]);
-  if (rows.length > CHZ_MAX_ROWS) fail("CHZ_ROW_LIMIT");
-  const records: ChzTabularRecord[] = [];
-  let previousRow = 0;
-  let totalCells = 0;
+interface WorksheetParseState {
+  records: ChzTabularRecord[];
+  previousRow: number;
+  totalCells: number;
+}
+
+function appendWorksheetRows(
+  rows: readonly unknown[],
+  strings: readonly string[],
+  state: WorksheetParseState,
+): void {
   for (const rawRow of rows) {
+    if (state.records.length >= CHZ_MAX_ROWS) fail("CHZ_ROW_LIMIT");
     const row = asObject(rawRow);
     const rowNumber = Number(textValue(row["@_r"]));
-    if (!Number.isInteger(rowNumber) || rowNumber <= previousRow) fail("CHZ_XLSX_INVALID");
-    previousRow = rowNumber;
+    if (!Number.isInteger(rowNumber) || rowNumber <= state.previousRow) {
+      fail("CHZ_XLSX_INVALID");
+    }
+    state.previousRow = rowNumber;
     const cells: string[] = [];
     let previousColumn = -1;
     for (const rawCell of asArray(row["c"])) {
-      totalCells += 1;
-      if (totalCells > CHZ_MAX_CELLS) fail("CHZ_CELL_LIMIT", rowNumber);
+      state.totalCells += 1;
+      if (state.totalCells > CHZ_MAX_CELLS) fail("CHZ_CELL_LIMIT", rowNumber);
       const cell = asObject(rawCell);
       const index = columnIndex(textValue(cell["@_r"]), rowNumber);
       if (index <= previousColumn || index >= CHZ_MAX_COLUMNS) fail("CHZ_ROW_WIDTH", rowNumber);
@@ -641,9 +785,73 @@ function parseWorksheet(bytes: Uint8Array, strings: readonly string[]): ChzTabul
       while (cells.length < index) cells.push("");
       cells.push(xlsxCellValue(cell, strings, rowNumber));
     }
-    records.push({ rowNumber, cells });
+    state.records.push({ rowNumber, cells });
   }
-  return records;
+}
+
+function parseWorksheetBatch(
+  source: string,
+  worksheetOpenTag: string,
+  strings: readonly string[],
+  state: WorksheetParseState,
+): void {
+  const batch = asObject(
+    parseXmlSource(`${worksheetOpenTag}<sheetData>${source}</sheetData></worksheet>`)["worksheet"],
+  );
+  appendWorksheetRows(asArray(asObject(batch["sheetData"])["row"]), strings, state);
+}
+
+function parseWorksheet(bytes: Uint8Array, strings: readonly string[]): ChzTabularRecord[] {
+  // Parsing a 100+ MiB worksheet as one fast-xml-parser tree takes multiple
+  // gigabytes of memory. Validate the workbook skeleton once, then parse only
+  // complete row batches while preserving global row and cell limits.
+  const skeleton = worksheetSkeleton(bytes);
+  if (skeleton === null) return [];
+
+  const state: WorksheetParseState = { records: [], previousRow: 0, totalCells: 0 };
+  const batches: string[] = [];
+  let batchBytes = 0;
+  let cursor = skeleton.contentStart;
+  const flush = () => {
+    if (batches.length === 0) return;
+    parseWorksheetBatch(batches.join(""), skeleton.worksheetOpenTag, strings, state);
+    batches.length = 0;
+    batchBytes = 0;
+  };
+
+  while (cursor < skeleton.contentEnd) {
+    while (cursor < skeleton.contentEnd && isXmlWhitespace(bytes[cursor]!)) cursor += 1;
+    if (cursor >= skeleton.contentEnd) break;
+
+    if (asciiStartsWith(bytes, "<!--", cursor)) {
+      flush();
+      const commentEnd = asciiIndexOf(bytes, "-->", cursor + 4, skeleton.contentEnd);
+      if (commentEnd < 0) fail("CHZ_XLSX_INVALID");
+      if (asciiIndexOf(bytes, "--", cursor + 4, commentEnd) >= 0) fail("CHZ_XLSX_INVALID");
+      cursor = commentEnd + 3;
+      continue;
+    }
+
+    if (xmlOpeningTagIndex(bytes, "row", cursor, cursor + "<row".length + 1) !== cursor) {
+      fail("CHZ_XLSX_INVALID");
+    }
+    const openEnd = xmlTagEnd(bytes, cursor, skeleton.contentEnd);
+    let rowEnd: number;
+    if (isSelfClosingXmlTag(bytes, cursor, openEnd)) {
+      rowEnd = openEnd + 1;
+    } else {
+      const closingStart = asciiIndexOf(bytes, "</row>", openEnd + 1, skeleton.contentEnd);
+      if (closingStart < 0) fail("CHZ_XLSX_INVALID");
+      rowEnd = closingStart + "</row>".length;
+    }
+    const rowSource = utf8(bytes.subarray(cursor, rowEnd), "CHZ_XLSX_INVALID");
+    batches.push(rowSource);
+    batchBytes += rowEnd - cursor;
+    cursor = rowEnd;
+    if (batchBytes >= 1024 * 1024 || batches.length >= 512) flush();
+  }
+  flush();
+  return state.records;
 }
 
 function parseXlsx(bytes: Uint8Array): ChzTabularRecord[] {
