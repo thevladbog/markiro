@@ -6,6 +6,7 @@ import process from "node:process";
 import { buildSignerManifest } from "./manifest.mjs";
 import {
   createSignerObjectStore,
+  SIGNER_DOWNLOAD_KEY,
   SIGNER_MANIFEST_KEY,
   signerObjectKey,
   signerPublicUrl,
@@ -58,23 +59,36 @@ export async function publishSignerRelease({
 
   await store.put(installerKey, installerBytes, "application/vnd.microsoft.portable-executable");
   await store.put(signatureKey, signatureBytes, "text/plain");
-  // Last, deliberately: latest.json is what the agent reads, so it may not
-  // name a download that has not landed yet.
-  await store.put(SIGNER_MANIFEST_KEY, manifestBytes, "application/json");
+  await store.copyInstallerToDownload({
+    immutableKey: installerKey,
+    attachmentFilename: names.installer,
+  });
 
-  const manifestUrl = signerPublicUrl(SIGNER_MANIFEST_KEY);
+  const downloadUrl = signerPublicUrl(SIGNER_DOWNLOAD_KEY);
   await verifyPublishedObject({
     url: installerUrl,
     expectedSha256: sha256(installerBytes),
     fetchImpl,
   });
   await verifyPublishedObject({
+    url: downloadUrl,
+    expectedSha256: sha256(installerBytes),
+    fetchImpl,
+  });
+
+  // Last, deliberately: latest.json is what the agent reads, so it may not
+  // name a download until both the immutable artifact and the first-install
+  // alias have landed and have been read back over public HTTPS.
+  await store.put(SIGNER_MANIFEST_KEY, manifestBytes, "application/json");
+
+  const manifestUrl = signerPublicUrl(SIGNER_MANIFEST_KEY);
+  await verifyPublishedObject({
     url: manifestUrl,
     expectedSha256: sha256(manifestBytes),
     fetchImpl,
   });
 
-  return { installerUrl, manifestUrl };
+  return { installerUrl, manifestUrl, downloadUrl };
 }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\", "/"))) {
@@ -91,4 +105,5 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replaceAll("\\",
   });
   console.log(result.manifestUrl);
   console.log(result.installerUrl);
+  console.log(result.downloadUrl);
 }

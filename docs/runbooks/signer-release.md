@@ -13,14 +13,25 @@ Two targets, written in this order:
 
 1. **The mirror** — `https://releases.markiro.app/signer/stable/`. The installer,
    its detached minisign signature, and `latest.json`. This is what a running
-   agent polls.
+   agent polls. The mirror also exposes the versionless first-install URL
+   `https://releases.markiro.app/signer/download`.
 2. **A GitHub Release** in `thevladbog/markiro`, tagged `signer-v<version>`,
-   with the installer attached. This is the page to send a customer for a first
-   install.
+   with the installer attached. Its notes point to the same versionless URL.
+
+Send customers the versionless URL, not an immutable path containing a version.
+Each stable release server-side copies the exact signed installer to
+`signer/download`, reads both URLs back over public HTTPS, and only then advances
+`latest.json`. There is no beta download alias.
 
 The mirror goes first on purpose. A failure between the two leaves clients with
 a consistent, fetchable update; the reverse order would announce a release the
 updater cannot download.
+
+The packaged agent calls `/signer-agent/*` directly on
+`https://admin.markiro.app`. The production edge proxies that namespace to the
+API and the public smoke sends an empty, invalid pairing body expecting the
+API's JSON `400`. This proves routing without creating an agent or consuming a
+real pairing code.
 
 ## Prerequisites
 
@@ -70,15 +81,30 @@ The job then runs the tooling contract, the signer's tests, typecheck, lint and
 uploads, reads the uploads back over public HTTPS and compares SHA-256, and
 only then creates the GitHub Release.
 
+## Repairing the versionless download
+
+Use **Repair signer stable download alias** only when `signer/download` is
+missing or does not match the installer named by the current stable manifest.
+Dispatch it from `main`, type `REPAIR-SIGNER-DOWNLOAD`, and approve the
+`station-release` environment.
+
+The repair does not build, tag, or publish a new release. It validates the
+public `signer/stable/latest.json`, requires its URL to be the exact immutable
+installer for that manifest version, copies that object to `signer/download`,
+and compares the public bytes. This is also the bootstrap path for stable
+releases published before the versionless URL existed.
+
 ## What to check afterwards
 
 ```bash
 curl -s https://releases.markiro.app/signer/stable/latest.json
+curl -fL -o /dev/null https://releases.markiro.app/signer/download
 ```
 
 - `version` is the version you bumped to.
 - `platforms."windows-x86_64".url` is under `signer/stable/releases/<version>/`
   and downloads.
+- `signer/download` downloads the same bytes as that immutable installer.
 - `gh release view signer-v<version>` shows the `-setup.exe` attached.
 
 The workflow already verified the bytes; this is confirming the _right thing_
@@ -103,13 +129,14 @@ under pressure, and it is the only check that covers the whole loop.
 
 ## When it fails
 
-| Failed at                        | State                                                                        | What to do                                                                                                                           |
-| -------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `authorize`, or the version gate | Nothing published                                                            | Fix the input or bump the version; re-dispatch                                                                                       |
-| The build or the signing step    | Nothing published                                                            | Fix and re-dispatch; no cleanup needed                                                                                               |
-| Publish to the mirror            | Artifacts may be uploaded with no `latest.json` naming them                  | Inert — no agent looks at them. A successful re-dispatch of the same version overwrites them                                         |
-| Read-back verification           | Artifacts on the mirror do not match what was built                          | Do **not** create the release by hand. Re-dispatch; if it fails twice, the mirror or its CDN is the problem                          |
-| Announce the GitHub Release      | The mirror is live, so clients **will** update, but there is no release page | Create the release by hand from the built installer. Do not re-dispatch: the tag gate will refuse, and the mirror is already correct |
+| Failed at                        | State                                                                                | What to do                                                                                                                           |
+| -------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `authorize`, or the version gate | Nothing published                                                                    | Fix the input or bump the version; re-dispatch                                                                                       |
+| The build or the signing step    | Nothing published                                                                    | Fix and re-dispatch; no cleanup needed                                                                                               |
+| Publish to the mirror            | Artifacts or the versionless alias may be uploaded with no `latest.json` naming them | Safe but incomplete — re-dispatch the same unpublished version; the manifest is advanced only after both installer URLs verify       |
+| Read-back verification           | Artifacts on the mirror do not match what was built                                  | Do **not** create the release by hand. Re-dispatch; if it fails twice, the mirror or its CDN is the problem                          |
+| Announce the GitHub Release      | The mirror is live, so clients **will** update, but there is no release page         | Create the release by hand from the built installer. Do not re-dispatch: the tag gate will refuse, and the mirror is already correct |
+| Repair download alias            | The current stable release is unchanged and the workflow is red                      | Do not copy by hand. Fix the manifest/mirror issue and re-dispatch the protected repair workflow                                     |
 
 A failed _update check_ on an installed agent is not an incident. It is logged
 to the console and the agent keeps signing; losing token refresh because a

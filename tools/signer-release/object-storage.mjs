@@ -1,11 +1,17 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createHash } from "node:crypto";
+
+import { signerArtifactNames } from "./version.mjs";
 
 export const SIGNER_PREFIX = "signer/";
 export const SIGNER_MANIFEST_KEY = "signer/stable/latest.json";
+export const SIGNER_DOWNLOAD_KEY = "signer/download";
 export const SIGNER_PUBLIC_BASE_URL = "https://releases.markiro.app";
 
 const YANDEX_S3_ENDPOINT = "https://storage.yandexcloud.net";
+const INSTALLER_CONTENT_TYPE = "application/vnd.microsoft.portable-executable";
+const MUTABLE_CACHE_CONTROL = "public, max-age=0, must-revalidate";
+const SOURCE_KEY_METADATA = "signer-source-key";
 
 /**
  * The signer shares a bucket with the Station's releases, so every key goes
@@ -49,6 +55,13 @@ export function createSignerObjectStore({ env = process.env, Client = S3Client }
   return {
     bucket,
     put: (key, body, contentType) => putSignerObject({ client, bucket, key, body, contentType }),
+    copyInstallerToDownload: ({ immutableKey, attachmentFilename }) =>
+      copySignerInstallerToDownload({
+        client,
+        bucket,
+        immutableKey,
+        attachmentFilename,
+      }),
   };
 }
 
@@ -56,6 +69,43 @@ export async function putSignerObject({ client, bucket, key, body, contentType }
   assertSignerKey(key);
   await client.send(
     new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }),
+  );
+}
+
+export async function copySignerInstallerToDownload({
+  client,
+  bucket,
+  immutableKey,
+  attachmentFilename,
+}) {
+  const parts = typeof immutableKey === "string" ? immutableKey.split("/") : [];
+  const version = parts[3];
+  const expectedFilename =
+    typeof version === "string" && /^\d+\.\d+\.\d+$/.test(version)
+      ? signerArtifactNames(version).installer
+      : null;
+  if (
+    parts.length !== 5 ||
+    parts[0] !== "signer" ||
+    parts[1] !== "stable" ||
+    parts[2] !== "releases" ||
+    parts[4] !== expectedFilename ||
+    attachmentFilename !== expectedFilename
+  ) {
+    throw new Error("download alias source must be the exact stable installer");
+  }
+  assertSignerKey(immutableKey);
+  await client.send(
+    new CopyObjectCommand({
+      Bucket: bucket,
+      Key: SIGNER_DOWNLOAD_KEY,
+      CopySource: `${bucket}/${immutableKey}`,
+      MetadataDirective: "REPLACE",
+      ContentType: INSTALLER_CONTENT_TYPE,
+      ContentDisposition: `attachment; filename="${attachmentFilename}"`,
+      CacheControl: MUTABLE_CACHE_CONTROL,
+      Metadata: { [SOURCE_KEY_METADATA]: immutableKey },
+    }),
   );
 }
 

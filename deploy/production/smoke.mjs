@@ -83,6 +83,12 @@ export const ROUTE_CHECKS = Object.freeze([
   Object.freeze({ method: "GET", path: "/kiosk/bootstrap", kind: "proxy", expected: "not SPA" }),
   Object.freeze({
     method: "POST",
+    path: "/signer-agent/pair",
+    kind: "signer-pairing-proxy",
+    expected: "400 JSON from upstream request validation",
+  }),
+  Object.freeze({
+    method: "POST",
     path: "/1c_exchange",
     kind: "commerce-ml",
     expected: "not SPA and request body reaches API unchanged",
@@ -790,6 +796,21 @@ function assertRoute(check, response, body, signature) {
       throw new Error(`${check.path} did not return valid JSON`);
     }
   }
+  if (check.kind === "signer-pairing-proxy") {
+    let payload;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      throw new Error("signer pairing did not return valid JSON");
+    }
+    if (
+      response.status !== 400 ||
+      !/application\/json/i.test(response.headers.get("content-type") || "") ||
+      payload?.statusCode !== 400
+    ) {
+      throw new Error("signer pairing did not reach upstream request validation");
+    }
+  }
   if (
     check.kind === "docs" &&
     (response.status !== 200 || !/text\/html/i.test(response.headers.get("content-type") || ""))
@@ -1059,7 +1080,13 @@ async function runAdminSmoke(options, client) {
             body: "type=catalog&mode=checkauth",
             headers: { "content-type": "application/x-www-form-urlencoded" },
           }
-        : { method: check.method };
+        : check.kind === "signer-pairing-proxy"
+          ? {
+              method: "POST",
+              body: "{}",
+              headers: { "content-type": "application/json" },
+            }
+          : { method: check.method };
     const response =
       check.path === "/" ? root : await publicRequest(client, new URL(path, baseUrl), init);
     const body = check.path === "/" ? rootHtml : await getText(response);
