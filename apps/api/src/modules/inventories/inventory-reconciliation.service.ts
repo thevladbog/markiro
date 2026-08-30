@@ -2,7 +2,7 @@ import { ConflictException, Inject, Injectable, NotFoundException } from "@nestj
 import { and, eq, sql } from "drizzle-orm";
 
 import { schema, type Db } from "@markiro/db";
-import { INVENTORY_CHZ_STATUSES, type InventoryChzStatus } from "@markiro/domain";
+import { INVENTORY_CHZ_STATUSES, parseScannedSscc, type InventoryChzStatus } from "@markiro/domain";
 
 import { DB } from "../../auth/auth.module";
 import type {
@@ -13,6 +13,7 @@ import type {
   InventoryParticipantDto,
   InventoryProgressDto,
   InventoryRecentEventDto,
+  InventoryVerifiedBoxDto,
   ListInventoryDiscrepanciesQueryDto,
   ListInventoryDiscrepanciesResponseDto,
   ListInventoryEvidenceQueryDto,
@@ -94,6 +95,16 @@ interface RecentEventRow {
   scannedAt: Date | string;
   classification: "expected" | "protected" | "ineligible" | "unknown" | "voided" | null;
   observedProductionDate: string | null;
+}
+
+interface VerifiedBoxRow {
+  eventId: string;
+  rawSscc: string;
+  terminalId: string;
+  terminalName: string;
+  scannedAt: Date | string;
+  affectedCodeCount: number;
+  total: number;
 }
 
 interface EvidenceAggregateRow {
@@ -251,6 +262,46 @@ export class InventoryReconciliationService {
           b.id
         limit 101
       `);
+    const verifiedBoxResult = await tx.execute(sql<VerifiedBoxRow>`
+        with ranked_boxes as (
+          select
+            e.event_id as "eventId",
+            substring(e.normalized_identity from length('known_box:') + 1) as "rawSscc",
+            e.device_id as "terminalId",
+            d.name as "terminalName",
+            e.scanned_at as "scannedAt",
+            count(r.id)::int as "affectedCodeCount",
+            row_number() over (
+              partition by e.normalized_identity
+              order by e.scanned_at desc, e.event_id desc
+            ) as identity_rank
+          from inventory_scan_events e
+          join station_devices d
+            on d.tenant_id = e.tenant_id
+           and d.id = e.device_id
+          left join inventory_code_results r
+            on r.tenant_id = e.tenant_id
+           and r.inventory_id = e.inventory_id
+           and r.first_accepted_event_id = e.event_id
+          where e.tenant_id = ${tenantId}
+            and e.inventory_id = ${inventoryId}
+            and e.kind = 'known_box'
+            and e.authoritative_verdict = 'applied'
+          group by e.event_id, d.name
+        )
+        select
+          "eventId",
+          "rawSscc",
+          "terminalId",
+          "terminalName",
+          "scannedAt",
+          "affectedCodeCount",
+          count(*) over()::int as total
+        from ranked_boxes
+        where identity_rank = 1
+        order by "scannedAt" desc, "eventId" desc
+        limit 101
+      `);
     const recentEventResult = await tx.execute(sql<RecentEventRow>`
         select
           e.event_id as "eventId",
@@ -288,8 +339,12 @@ export class InventoryReconciliationService {
       openBoxCount: participants.reduce((sum, row) => sum + row.openBoxCount, 0),
       boxTotal: counts.newBoxCount,
       boxesTruncated: boxResult.rows.length > 100,
+      verifiedBoxTotal:
+        verifiedBoxResult.rows.length === 0 ? 0 : readInteger(verifiedBoxResult.rows[0], "total"),
+      verifiedBoxesTruncated: verifiedBoxResult.rows.length > 100,
       participants,
       boxes: boxResult.rows.slice(0, 100).map(parseLiveBoxRow),
+      verifiedBoxes: verifiedBoxResult.rows.slice(0, 100).map(parseVerifiedBoxRow),
       recentEvents: recentEventResult.rows.map(parseRecentEventRow),
     };
   }
@@ -733,6 +788,23 @@ function parseLiveBoxRow(value: unknown): InventoryLiveBoxDto {
     state,
     printState,
     itemCount: readInteger(record, "itemCount"),
+  };
+}
+
+function parseVerifiedBoxRow(value: unknown): InventoryVerifiedBoxDto {
+  const record = asRecord(value, "Inventory verified box row is unavailable");
+  const rawSscc = readString(record, "rawSscc");
+  const sscc = parseScannedSscc(rawSscc);
+  if (sscc === null || sscc !== rawSscc) {
+    throw new Error("Inventory verified box SSCC is invalid");
+  }
+  return {
+    eventId: readString(record, "eventId"),
+    sscc,
+    terminalId: readString(record, "terminalId"),
+    terminalName: readString(record, "terminalName"),
+    scannedAt: readDate(record, "scannedAt").toISOString(),
+    affectedCodeCount: readInteger(record, "affectedCodeCount"),
   };
 }
 

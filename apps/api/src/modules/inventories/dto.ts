@@ -441,8 +441,11 @@ export interface InventoryProgressDto {
   openBoxCount: number;
   boxTotal: number;
   boxesTruncated: boolean;
+  verifiedBoxTotal: number;
+  verifiedBoxesTruncated: boolean;
   participants: InventoryParticipantDto[];
   boxes: InventoryLiveBoxDto[];
+  verifiedBoxes: InventoryVerifiedBoxDto[];
   recentEvents: InventoryRecentEventDto[];
 }
 
@@ -469,6 +472,15 @@ export interface InventoryLiveBoxDto {
   state: "open" | "closed" | "invalidated";
   printState: "not_ready" | "pending" | "printing" | "printed" | "failed";
   itemCount: number;
+}
+
+export interface InventoryVerifiedBoxDto {
+  eventId: string;
+  sscc: string;
+  terminalId: string;
+  terminalName: string;
+  scannedAt: string;
+  affectedCodeCount: number;
 }
 
 export interface InventoryRecentEventDto {
@@ -1275,6 +1287,7 @@ const inventoryCountProperties = {
   pendingEventCount: { type: "integer", minimum: 0 },
   openBoxCount: { type: "integer", minimum: 0 },
   boxTotal: { type: "integer", minimum: 0 },
+  verifiedBoxTotal: { type: "integer", minimum: 0 },
 } satisfies Record<
   Exclude<
     keyof InventoryProgressDto,
@@ -1284,8 +1297,10 @@ const inventoryCountProperties = {
     | "resultRevision"
     | "participants"
     | "boxes"
+    | "verifiedBoxes"
     | "recentEvents"
     | "boxesTruncated"
+    | "verifiedBoxesTruncated"
   >,
   SchemaObject
 >;
@@ -1342,6 +1357,20 @@ const inventoryLiveBoxOpenApiSchema: SchemaObject = {
       enum: ["not_ready", "pending", "printing", "printed", "failed"],
     },
     itemCount: { type: "integer", minimum: 0 },
+  },
+};
+
+const inventoryVerifiedBoxOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["eventId", "sscc", "terminalId", "terminalName", "scannedAt", "affectedCodeCount"],
+  properties: {
+    eventId: uuidSchema,
+    sscc: { type: "string", pattern: "^[0-9]{18}$" },
+    terminalId: uuidSchema,
+    terminalName: { type: "string" },
+    scannedAt: dateTimeSchema,
+    affectedCodeCount: { type: "integer", minimum: 0 },
   },
 };
 
@@ -1461,8 +1490,10 @@ export const inventoryProgressOpenApiSchema: SchemaObject = {
     "resultRevision",
     ...Object.keys(inventoryCountProperties),
     "boxesTruncated",
+    "verifiedBoxesTruncated",
     "participants",
     "boxes",
+    "verifiedBoxes",
     "recentEvents",
   ],
   properties: {
@@ -1472,8 +1503,10 @@ export const inventoryProgressOpenApiSchema: SchemaObject = {
     resultRevision: { type: "integer", minimum: 0 },
     ...inventoryCountProperties,
     boxesTruncated: { type: "boolean" },
+    verifiedBoxesTruncated: { type: "boolean" },
     participants: { type: "array", items: inventoryParticipantOpenApiSchema },
     boxes: { type: "array", items: inventoryLiveBoxOpenApiSchema },
+    verifiedBoxes: { type: "array", items: inventoryVerifiedBoxOpenApiSchema },
     recentEvents: { type: "array", items: inventoryRecentEventOpenApiSchema },
   },
 };

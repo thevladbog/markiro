@@ -9,6 +9,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { schema, type Db } from "@markiro/db";
+import { gs1CheckDigit } from "@markiro/domain";
 
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -424,6 +425,8 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       openBoxCount: 1,
       boxTotal: 1,
       boxesTruncated: false,
+      verifiedBoxTotal: 0,
+      verifiedBoxesTruncated: false,
       participants: [
         expect.objectContaining({
           deviceId: terminalAId,
@@ -456,6 +459,7 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
           itemCount: 0,
         }),
       ],
+      verifiedBoxes: [],
       recentEvents: expect.arrayContaining([
         expect.objectContaining({
           eventId: unknownEventId,
@@ -467,6 +471,88 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
         }),
       ]),
     });
+  });
+
+  it("returns unique applied check-mode boxes with bounded detail", async () => {
+    const batchId = `verified-boxes-${randomUUID()}`;
+    const boxEventIds = Array.from({ length: 101 }, () => randomUUID());
+    const duplicateEventId = randomUUID();
+    const ssccs = Array.from({ length: 101 }, (_, index) => {
+      const body = (9_000_000_000_000_0000n + BigInt(index)).toString();
+      return `${body}${gs1CheckDigit(body)}`;
+    });
+    const resultHashes = Array.from({ length: 101 }, (_, index) =>
+      (index + 1024).toString(16).padStart(64, "0"),
+    );
+
+    await db.insert(schema.inventoryScanBatches).values({
+      tenantId,
+      inventoryId,
+      deviceId: terminalCId,
+      batchId,
+      payloadDigest: "9".repeat(64),
+      sequenceCeiling: 102n,
+      outcome: "applied",
+      result: {},
+    });
+    await db.insert(schema.inventoryScanEvents).values([
+      ...boxEventIds.map((eventId, index) =>
+        event(eventId, terminalCId, batchId, BigInt(index + 1), null, {
+          kind: "known_box",
+          normalizedIdentity: `known_box:${ssccs[index]!}`,
+          rawPayload: ssccs[index]!,
+          scannedAt: new Date(1_777_000_000_000 + index * 1000),
+        }),
+      ),
+      event(duplicateEventId, terminalCId, batchId, 102n, null, {
+        kind: "known_box",
+        normalizedIdentity: `known_box:${ssccs[0]!}`,
+        rawPayload: ssccs[0]!,
+        scannedAt: new Date(1_777_000_200_000),
+        authoritativeVerdict: "duplicate",
+      }),
+    ]);
+    await db
+      .insert(schema.inventoryCodeResults)
+      .values(
+        boxEventIds.map((eventId, index) =>
+          result(eventId, resultHashes[index]!, "unknown", null, "2026-08-05"),
+        ),
+      );
+
+    try {
+      const response = await agent.get(`/inventories/${inventoryId}/progress`).expect(200);
+      expect(response.body).toMatchObject({
+        verifiedBoxTotal: 101,
+        verifiedBoxesTruncated: true,
+      });
+      expect(response.body.verifiedBoxes).toHaveLength(100);
+      expect(response.body.verifiedBoxes[0]).toEqual(
+        expect.objectContaining({
+          eventId: boxEventIds.at(-1),
+          sscc: ssccs.at(-1),
+          terminalId: terminalCId,
+          terminalName: "Terminal C",
+          affectedCodeCount: 1,
+        }),
+      );
+      expect(response.body.recentEvents).toContainEqual(
+        expect.objectContaining({
+          eventId: duplicateEventId,
+          authoritativeVerdict: "duplicate",
+        }),
+      );
+    } finally {
+      await db
+        .delete(schema.inventoryCodeResults)
+        .where(inArray(schema.inventoryCodeResults.firstAcceptedEventId, boxEventIds));
+      await db
+        .delete(schema.inventoryScanEvents)
+        .where(inArray(schema.inventoryScanEvents.eventId, [...boxEventIds, duplicateEventId]));
+      await db
+        .delete(schema.inventoryScanBatches)
+        .where(eq(schema.inventoryScanBatches.batchId, batchId));
+    }
   });
 
   it("pages, searches, and filters evidence while exposing actions only for current winners", async () => {
@@ -766,8 +852,11 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       "openBoxCount",
       "boxTotal",
       "boxesTruncated",
+      "verifiedBoxTotal",
+      "verifiedBoxesTruncated",
       "participants",
       "boxes",
+      "verifiedBoxes",
       "recentEvents",
     ]);
     const discrepancies = responseSchema(document, "/inventories/{id}/discrepancies");
