@@ -11,6 +11,8 @@ export interface InventoryScanSnapshotRow {
   serial: string;
   sourceStatus: InventoryChzStatus;
   sourceState: string | null;
+  /** Дата производства из снапшота. Для `expected` гарантированно не null. */
+  sourceProductionDate: string | null;
   expected: boolean;
   protected: boolean;
   parentSscc: string | null;
@@ -184,4 +186,45 @@ export function classifyInventoryScan(
     kind: "invalid",
     reason: scannerInput.kind === "gtin" ? "unsupported" : "malformed",
   };
+}
+
+export type InventoryScanSourceDate =
+  | { kind: "none" }
+  | { kind: "single"; scanKind: "item" | "known_box"; productionDate: string }
+  | { kind: "mixed"; scanKind: "known_box" };
+
+/**
+ * Дата производства, которая следует из самого скана. Считается только для
+ * `expected`: для дубля она уже зафиксирована победителем, у неизвестного кода
+ * её нет, а подстройка активной даты под `protected`/`known-ineligible`
+ * испортила бы дату всем последующим нормальным сканам.
+ */
+export function resolveInventoryScanSourceDate(
+  classification: InventoryScanClassification,
+  context: Pick<InventoryScanClassifierContext, "findSnapshotCode" | "findSnapshotChildren">,
+): InventoryScanSourceDate {
+  if (classification.kind !== "expected") return { kind: "none" };
+
+  if (classification.scanKind === "item") {
+    const row = context.findSnapshotCode(classification.codeHash);
+    const productionDate = row?.sourceProductionDate ?? null;
+    return productionDate === null
+      ? { kind: "none" }
+      : { kind: "single", scanKind: "item", productionDate };
+  }
+
+  const unclaimed = new Set(
+    classification.children
+      .filter((child) => child.firstWinning === null && child.originClassification === "expected")
+      .map((child) => child.codeHash),
+  );
+  const dates = new Set<string>();
+  for (const row of context.findSnapshotChildren(classification.sscc)) {
+    if (!unclaimed.has(row.codeHash) || row.sourceProductionDate === null) continue;
+    dates.add(row.sourceProductionDate);
+  }
+  if (dates.size === 0) return { kind: "none" };
+  if (dates.size > 1) return { kind: "mixed", scanKind: "known_box" };
+  const [productionDate] = [...dates];
+  return { kind: "single", scanKind: "known_box", productionDate: productionDate! };
 }

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { canonicalizeKm, kmHash } from "../src/gs1/km.js";
 import {
   classifyInventoryScan,
+  resolveInventoryScanSourceDate,
   type InventoryLocalClaim,
   type InventoryScanSnapshotRow,
 } from "../src/inventory/scan.js";
@@ -28,6 +29,7 @@ function row(
     serial: km.serial,
     sourceStatus: "INTRODUCED",
     sourceState: null,
+    sourceProductionDate: "2026-08-20",
     expected: true,
     protected: false,
     parentSscc: null,
@@ -270,4 +272,104 @@ describe("inventory scan classification", () => {
       expect(JSON.stringify(classify(scannerRaw, []))).not.toContain(scannerRaw || "operator-pin");
     },
   );
+});
+
+describe("inventory scan source production date", () => {
+  function resolve(scannerRaw: string, rows: InventoryScanSnapshotRow[], claims: InventoryLocalClaim[] = []) {
+    const rowsByHash = new Map(rows.map((item) => [item.codeHash, item]));
+    return resolveInventoryScanSourceDate(classify(scannerRaw, rows, claims), {
+      findSnapshotCode: (codeHash) => rowsByHash.get(codeHash) ?? null,
+      findSnapshotChildren: (parentSscc) => rows.filter((item) => item.parentSscc === parentSscc),
+    });
+  }
+
+  it("returns the item's own source date", () => {
+    const expected = row("ITEM-1", { sourceProductionDate: "2026-08-21" });
+
+    expect(resolve(raw("ITEM-1"), [expected])).toEqual({
+      kind: "single",
+      scanKind: "item",
+      productionDate: "2026-08-21",
+    });
+  });
+
+  it("returns none for a null source date", () => {
+    const expected = row("ITEM-2", { sourceProductionDate: null });
+
+    expect(resolve(raw("ITEM-2"), [expected])).toEqual({ kind: "none" });
+  });
+
+  it("returns none for a duplicate, an unknown, a protected and an ineligible code", () => {
+    const claimed = row("ITEM-3", { sourceProductionDate: "2026-08-21" });
+    const claim: InventoryLocalClaim = {
+      codeHash: claimed.codeHash,
+      eventId: "event-1",
+      deviceId: "device-1",
+      scannedAt: "2026-08-25T10:00:00.000Z",
+    };
+    const guarded = row("ITEM-4", {
+      sourceProductionDate: "2026-08-21",
+      sourceState: "MOVING_BY_UD",
+      expected: false,
+      protected: true,
+    });
+    const ineligible = row("ITEM-5", {
+      sourceProductionDate: "2026-08-21",
+      sourceStatus: "APPLIED",
+      expected: false,
+    });
+
+    expect(resolve(raw("ITEM-3"), [claimed], [claim])).toEqual({ kind: "none" });
+    expect(resolve(raw("ITEM-404"), [])).toEqual({ kind: "none" });
+    expect(resolve(raw("ITEM-4"), [guarded])).toEqual({ kind: "none" });
+    expect(resolve(raw("ITEM-5"), [ineligible])).toEqual({ kind: "none" });
+  });
+
+  it("returns the single date shared by a box's unclaimed expected children", () => {
+    const rows = [
+      row("BOX-1", { parentSscc: SSCC, sourceProductionDate: "2026-08-22" }),
+      row("BOX-2", { parentSscc: SSCC, sourceProductionDate: "2026-08-22" }),
+    ];
+
+    expect(resolve(SSCC, rows)).toEqual({
+      kind: "single",
+      scanKind: "known_box",
+      productionDate: "2026-08-22",
+    });
+  });
+
+  it("reports a box whose unclaimed expected children disagree as mixed", () => {
+    const rows = [
+      row("BOX-3", { parentSscc: SSCC, sourceProductionDate: "2026-08-22" }),
+      row("BOX-4", { parentSscc: SSCC, sourceProductionDate: "2026-08-23" }),
+    ];
+
+    expect(resolve(SSCC, rows)).toEqual({ kind: "mixed", scanKind: "known_box" });
+  });
+
+  it("ignores already-claimed and non-expected children when reading a box", () => {
+    const claimed = row("BOX-5", { parentSscc: SSCC, sourceProductionDate: "2026-08-23" });
+    const rows = [
+      claimed,
+      row("BOX-6", { parentSscc: SSCC, sourceProductionDate: "2026-08-22" }),
+      row("BOX-7", {
+        parentSscc: SSCC,
+        sourceProductionDate: "2026-08-24",
+        sourceStatus: "APPLIED",
+        expected: false,
+      }),
+    ];
+    const claim: InventoryLocalClaim = {
+      codeHash: claimed.codeHash,
+      eventId: "event-2",
+      deviceId: "device-1",
+      scannedAt: "2026-08-25T10:00:00.000Z",
+    };
+
+    expect(resolve(SSCC, rows, [claim])).toEqual({
+      kind: "single",
+      scanKind: "known_box",
+      productionDate: "2026-08-22",
+    });
+  });
 });
