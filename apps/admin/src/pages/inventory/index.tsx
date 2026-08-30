@@ -32,21 +32,25 @@ export function InventoryPage() {
       {
         key: "number",
         title: t("pages.inventory.list.number"),
-        width: 240,
+        width: 160,
         mono: true,
+        render: (row) => <Link to={row.id}>{row.number}</Link>,
+      },
+      {
+        key: "status",
+        title: t("pages.inventory.list.status"),
+        width: 190,
         render: (row) => (
-          <div className="mk-inventory-list__identity">
-            <Link to={row.id}>{row.number}</Link>
-            <StatusChip
-              {...inventoryStatusChipProps(row.status)}
-              label={t(`pages.inventory.status.${row.status}`)}
-            />
-          </div>
+          <StatusChip
+            {...inventoryStatusChipProps(row.status)}
+            label={t(`pages.inventory.status.${row.status}`)}
+          />
         ),
       },
       {
         key: "product",
         title: t("pages.inventory.list.productDates"),
+        wrap: true,
         render: (row) => (
           <span className="mk-inventory-list__stack">
             <strong>{row.productName}</strong>
@@ -60,6 +64,7 @@ export function InventoryPage() {
       {
         key: "line",
         title: t("pages.inventory.list.lineMode"),
+        wrap: true,
         render: (row) => (
           <span className="mk-inventory-list__stack">
             <strong>{row.lineName}</strong>
@@ -70,6 +75,7 @@ export function InventoryPage() {
       {
         key: "updatedAt",
         title: t("pages.inventory.list.updated"),
+        width: 180,
         render: (row) => (
           <time dateTime={row.updatedAt}>{formatCreatedAt(row.updatedAt, i18n.language)}</time>
         ),
@@ -110,7 +116,7 @@ export function InventoryPage() {
           }
         />
       ) : (
-        <Table columns={columns} rows={query.data} />
+        <Table className="mk-inventory-list" columns={columns} rows={query.data} />
       )}
     </AdminPage>
   );

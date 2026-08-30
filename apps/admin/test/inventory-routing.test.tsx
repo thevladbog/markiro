@@ -163,6 +163,17 @@ it("keeps inventory list/detail readable while exposing write controls only to w
   expect(await screen.findByRole("button", { name: "Создать инвентаризацию" })).toBeDefined();
 });
 
+it("renders inventory status in a dedicated table column", async () => {
+  const route = renderRoute("/inventory", READ_ACCESS);
+  const number = await screen.findByRole("link", { name: "IVN-26-0042" });
+  const status = screen.getByText("Черновик");
+
+  expect(screen.getByRole("columnheader", { name: "Номер" })).toBeDefined();
+  expect(screen.getByRole("columnheader", { name: "Статус" })).toBeDefined();
+  expect(number.closest("td")).not.toBe(status.closest("td"));
+  route.router.dispose();
+});
+
 it("denies direct create to readers before loading form dependencies", async () => {
   const { requests } = renderRoute("/inventory/new", READ_ACCESS);
 
