@@ -766,6 +766,13 @@ describe("inventory journal", () => {
       input(second.km.raw, "event-date-b", "2026-08-25T10:02:00.000Z"),
     );
 
+    // DATE-B is seeded at the terminal's new active date so the source
+    // production date guard added later doesn't hold this scan; that makes
+    // this assertion pass equally under an implementation that (wrongly)
+    // wrote the snapshot's own date. `inventory-simple-work.test.tsx`'s
+    // "orders a date change behind already-buffered scans…" still proves
+    // observed dates come from the terminal's active date and not the
+    // snapshot row, via its guard-bypassing INELIGIBLE scan.
     expect(
       db
         .prepare(
@@ -1868,7 +1875,7 @@ describe("inventory scan source production date guard", () => {
   it("bypasses the guard when the operator accepts the mismatch", async () => {
     const { db, exec } = await setup();
     seedCode(db, "SAME", { productionDate: "2026-08-20" });
-    seedCode(db, "OTHER", { productionDate: "2026-08-23" });
+    const other = seedCode(db, "OTHER", { productionDate: "2026-08-23" });
     await recordInventoryScan(exec, input(raw("SAME"), "1a1a1a1a-1a1a-41a1-81a1-1a1a1a1a1a1a"));
 
     const outcome = await recordInventoryScan(exec, {
@@ -1877,10 +1884,13 @@ describe("inventory scan source production date guard", () => {
     });
 
     expect(outcome).toMatchObject({ outcome: "recorded", verdict: "expected" });
+    // Scoped to OTHER's own code hash: it must have recorded the terminal's
+    // active date ("2026-08-20"), not its own snapshot date ("2026-08-23").
+    // A query over both rows would pass vacuously via SAME's row alone.
     const stored = db
-      .prepare("SELECT observed_production_date FROM inventory_code_results_mirror ORDER BY code_hash")
-      .all() as { observed_production_date: string }[];
-    expect(stored).toContainEqual({ observed_production_date: "2026-08-20" });
+      .prepare("SELECT observed_production_date FROM inventory_code_results_mirror WHERE code_hash = ?")
+      .get(other.codeHash) as { observed_production_date: string };
+    expect(stored).toEqual({ observed_production_date: "2026-08-20" });
   });
 
   it("reports a box whose children disagree as mixed", async () => {
@@ -1925,5 +1935,74 @@ describe("inventory scan source production date guard", () => {
     await expect(
       recordInventoryScan(exec, input(raw("MISSING"), "8b8b8b8b-8b8b-48b8-88b8-8b8b8b8b8b8b")),
     ).resolves.toMatchObject({ outcome: "recorded", verdict: "unknown" });
+  });
+
+  it("re-checks the date after reconciliation reclassifies a rescanned code from duplicate to expected", async () => {
+    const { db, exec } = await setup();
+    const code = seedCode(db, "RECHECK", { productionDate: "2026-08-20" });
+
+    // A live session crashes mid-write: the event is reserved and its claim
+    // row is in place, but the durable outbox write never lands.
+    await expect(
+      recordInventoryScan(
+        failOnce(exec, /INSERT INTO inventory_outbox/i),
+        input(code.km.raw, "orig-event-recheck"),
+      ),
+    ).rejects.toThrow("simulated durable write failure");
+    expect(db.prepare("SELECT commit_state FROM inventory_scan_events_mirror").get()).toEqual({
+      commit_state: "pending",
+    });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get()).toEqual(
+      { count: 1 },
+    );
+    expect(db.prepare("SELECT COUNT(*) AS count FROM inventory_outbox").get()).toEqual({
+      count: 0,
+    });
+
+    // No restart happens (no mount-time reconcile); instead the terminal's
+    // active date moves on independently, away from the code's own date.
+    await setInventoryProductionDate(exec, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      deviceId: DEVICE_ID,
+      operatorId: OPERATOR_ID,
+      productionDate: "2026-08-25",
+      updatedAt: "2026-08-25T10:01:00.000Z",
+    });
+
+    // The operator rescans the same code under a new event id. Pass 1 sees
+    // it as `duplicate` (the stale pending claim is still live) so the guard
+    // is a no-op; reconciliation then fails the stale event and deletes its
+    // claim, reclassifying the code as `expected`. The guard must catch the
+    // date disagreement on that reclassified pass, before any reservation.
+    const outcome = await recordInventoryScan(
+      exec,
+      input(code.km.raw, "rescan-event-recheck", "2026-08-25T10:02:00.000Z"),
+    );
+
+    expect(outcome).toEqual({
+      outcome: "date-mismatch",
+      scanKind: "item",
+      activeDate: "2026-08-25",
+      codeDate: "2026-08-20",
+      mixed: false,
+    });
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror WHERE event_id = ?")
+        .get("rescan-event-recheck"),
+    ).toEqual({ count: 0 });
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS count FROM inventory_outbox WHERE event_id = ?")
+        .get("rescan-event-recheck"),
+    ).toEqual({ count: 0 });
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM inventory_code_results_mirror WHERE first_accepted_event_id = ?",
+        )
+        .get("rescan-event-recheck"),
+    ).toEqual({ count: 0 });
   });
 });

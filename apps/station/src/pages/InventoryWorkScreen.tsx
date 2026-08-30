@@ -338,7 +338,10 @@ function CheckInventoryWorkScreen({
       nudgeInventorySync,
     ],
   );
-  queueRef.current = queue;
+
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
 
   useEffect(() => {
     if (gallery || productionDate === null) return undefined;

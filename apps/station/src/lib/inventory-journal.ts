@@ -1428,10 +1428,22 @@ async function recordInventoryScanInternal(
     input.snapshotId,
     input.eventId,
   );
-  classification = classifyFromFacts(input, await loadClassifierFacts(exec, input));
+  const reconciledFacts = await loadClassifierFacts(exec, input);
+  classification = classifyFromFacts(input, reconciledFacts);
   if (classification.kind === "invalid") {
     return { outcome: "recorded", ...resultFrom(classification, "invalid", 0, null) };
   }
+  // Reconciliation can change a code's classification (e.g. a failed prior
+  // claim releasing it from `duplicate` back to `expected`), so the guard
+  // must be re-run against the reloaded facts. Still strictly before
+  // reserveEvent, so a mismatch here writes nothing either.
+  const reconciledMismatch = await guardSourceProductionDate(
+    exec,
+    input,
+    classification,
+    reconciledFacts,
+  );
+  if (reconciledMismatch) return reconciledMismatch;
   event ??= await reserveEvent(exec, input, classification);
   ensureExactReservation(event, input, classification);
   if (commitState(event.commit_state) !== "pending") {
