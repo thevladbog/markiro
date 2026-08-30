@@ -81,7 +81,7 @@ export function InventoryDetailPage() {
     if (query.data.activeSnapshot) {
       setSelected(query.data.activeSnapshot.inputs);
       setFixedSnapshot(query.data.activeSnapshot);
-      setStep((current) => (current < 4 ? 4 : current));
+      setStep((current) => (fixedSnapshot === null && current < 4 ? 4 : current));
       return;
     }
     setSelected((current) => {
@@ -95,7 +95,7 @@ export function InventoryDetailPage() {
       }
       return next;
     });
-  }, [query.data]);
+  }, [fixedSnapshot, query.data]);
 
   if (query.isPending) {
     return (
@@ -186,8 +186,8 @@ export function InventoryDetailPage() {
           onBack={() => setStep(2)}
           onFixed={(value) => {
             setFixedSnapshot(value);
-            setStep(4);
           }}
+          onContinue={() => setStep(4)}
         />
       ) : null}
       {step === 4 && snapshot ? (
@@ -362,6 +362,7 @@ function SnapshotStep({
   canWrite,
   onBack,
   onFixed,
+  onContinue,
 }: {
   inventory: InventoryDetail;
   selected: Partial<InventorySnapshotInputs>;
@@ -369,6 +370,7 @@ function SnapshotStep({
   canWrite: boolean;
   onBack: () => void;
   onFixed: (snapshot: InventorySnapshot) => void;
+  onContinue: () => void;
 }) {
   const { t, i18n } = useTranslation();
   const fix = useFixInventorySnapshot();
@@ -387,7 +389,11 @@ function SnapshotStep({
         />
         <Metric
           label={t("pages.inventory.snapshot.expectedLabel")}
-          value={snapshot ? count(snapshot.counts.expected, i18n.language) : "—"}
+          value={
+            snapshot
+              ? count(snapshot.counts.expected, i18n.language)
+              : t("pages.inventory.snapshot.pendingValue")
+          }
           tone="accent"
         />
       </div>
@@ -405,17 +411,23 @@ function SnapshotStep({
         <Button variant="secondary" type="button" onClick={onBack}>
           {t("common.back")}
         </Button>
-        <Button
-          type="button"
-          disabled={!canWrite || !completeSelection(selected) || snapshot !== null}
-          loading={fix.isPending}
-          onClick={() => {
-            if (!completeSelection(selected)) return;
-            fix.mutate({ inventoryId: inventory.id, imports: selected }, { onSuccess: onFixed });
-          }}
-        >
-          {t("pages.inventory.snapshot.fix")}
-        </Button>
+        {snapshot ? (
+          <Button type="button" onClick={onContinue}>
+            {t("pages.inventory.snapshot.continue")}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            disabled={!canWrite || !completeSelection(selected)}
+            loading={fix.isPending}
+            onClick={() => {
+              if (!completeSelection(selected)) return;
+              fix.mutate({ inventoryId: inventory.id, imports: selected }, { onSuccess: onFixed });
+            }}
+          >
+            {t("pages.inventory.snapshot.fix")}
+          </Button>
+        )}
       </div>
     </Card>
   );

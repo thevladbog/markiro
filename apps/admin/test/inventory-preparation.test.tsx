@@ -345,29 +345,32 @@ it("keeps six independent slots, zero-row success, replacement history, and exac
     }
     if (url.endsWith("/snapshots") && init?.method === "POST") {
       posts.push({ url, body: JSON.parse(String(init.body)) });
-      return response(
-        {
-          id: ID.snapshot,
-          inventoryId: ID.inventory,
-          revision: 1,
-          combinedDigest: "a".repeat(64),
-          fixedAt: "2026-08-26T09:15:00.000Z",
-          inputs: (JSON.parse(String(init.body)) as { imports: unknown }).imports,
-          counts: {
-            emitted: 166,
-            introduced: 4323,
-            applied: 0,
-            retired: 1868,
-            writtenOff: 1460,
-            disaggregation: 0,
-            protected: 207,
-            expected: 4116,
-            packages: 48,
-            loose: 3828,
-          },
+      const snapshot = {
+        id: ID.snapshot,
+        inventoryId: ID.inventory,
+        revision: 1,
+        combinedDigest: "a".repeat(64),
+        fixedAt: "2026-08-26T09:15:00.000Z",
+        inputs: (JSON.parse(String(init.body)) as { imports: unknown }).imports,
+        counts: {
+          emitted: 166,
+          introduced: 4323,
+          applied: 0,
+          retired: 1868,
+          writtenOff: 1460,
+          disaggregation: 0,
+          protected: 207,
+          expected: 4116,
+          packages: 48,
+          loose: 3828,
         },
-        201,
-      );
+      };
+      currentDetail = detail({
+        status: "ready",
+        activeSnapshotId: ID.snapshot,
+        activeSnapshot: snapshot,
+      });
+      return response(snapshot, 201);
     }
     if (url === "/api/lines/presence") return response({ items: [] });
     throw new Error(`Unexpected request: ${url}`);
@@ -394,6 +397,8 @@ it("keeps six independent slots, zero-row success, replacement history, and exac
   await user.click(await screen.findByRole("radio", { name: /introduced-old\.zip/ }));
   await user.click(screen.getByRole("button", { name: "Проверить снимок" }));
   expect(await screen.findByRole("heading", { name: "Проверка снимка" })).toBeDefined();
+  expect(screen.getByText("Ожидаемый остаток")).toBeDefined();
+  expect(screen.getByText("Рассчитается после фиксации")).toBeDefined();
   await user.click(screen.getByRole("button", { name: "Зафиксировать снимок" }));
 
   expect(posts.find(({ url }) => url.endsWith("/snapshots"))?.body).toEqual({
@@ -406,7 +411,14 @@ it("keeps six independent slots, zero-row success, replacement history, and exac
       DISAGGREGATION: ID.disaggregation,
     },
   });
-  expect(await screen.findByText("Ожидается: 4 116")).toBeDefined();
+  expect(await screen.findByRole("heading", { name: "Проверка снимка" })).toBeDefined();
+  expect(await screen.findByText("Ожидаемый остаток: 4 116")).toBeDefined();
+  await user.click(screen.getByRole("button", { name: "К терминалам" }));
+  expect(await screen.findByRole("heading", { name: "Доступ терминалов" })).toBeDefined();
+  await user.click(screen.getByRole("button", { name: "Назад" }));
+  expect(await screen.findByRole("heading", { name: "Проверка снимка" })).toBeDefined();
+  await user.click(screen.getByRole("button", { name: "К терминалам" }));
+  expect(await screen.findByRole("heading", { name: "Доступ терминалов" })).toBeDefined();
 });
 
 it("refreshes persisted failed upload attempts and diagnostics after a 422 response", async () => {
