@@ -8,7 +8,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   ChzCodeStatusIngestService,
   CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS,
-  CHZ_CODE_STATUS_INGEST_LIMIT,
 } from "../src/modules/chz-code-statuses/chz-code-status-ingest.service";
 
 const ready = Boolean(process.env.DATABASE_URL);
@@ -372,15 +371,20 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
   });
 
   it("reports that it is not caught up when it hits the per-pass limit", async () => {
-    for (let index = 0; index < CHZ_CODE_STATUS_INGEST_LIMIT + 1; index += 1) {
+    // `CHZ_CODE_STATUS_INGEST_LIMIT` is the default budget, but `run`'s
+    // `options.limit` overrides it for exactly this kind of test: exhausting
+    // a pass's budget does not require seeding tens of thousands of rows,
+    // only `limit + 1` of them.
+    const limit = 5;
+    for (let index = 0; index < limit + 1; index += 1) {
       await seedCode({ codeHash: hash(index), gtin14: PRODUCT_GTIN, scannedAt: t(index) });
     }
 
-    const result = await service.run(tenantId);
+    const result = await service.run(tenantId, { limit });
 
-    expect(result.inserted).toBe(CHZ_CODE_STATUS_INGEST_LIMIT);
+    expect(result.inserted).toBe(limit);
     expect(result.caughtUp).toBe(false);
-  }, 180_000);
+  });
 
   it("also picks up codes that arrived through an inventory export, not a scan", async () => {
     // A tenant whose history predates Markiro is bootstrapped from an ordered
@@ -470,8 +474,12 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
     // the loop this would never advance and the pass would spin forever.
     // The sweep runs first on the initial pass and will consume budget,
     // so we force it to not be due by giving the tenant an old lastFullSweepAt.
+    // The loop's behaviour depends only on the batch filling a small limit
+    // exactly, not on the limit being `CHZ_CODE_STATUS_INGEST_LIMIT` --
+    // `limit + 1` rows sharing one timestamp is enough to force it.
+    const limit = 5;
     const sharedScannedAt = t(0);
-    for (let index = 0; index < CHZ_CODE_STATUS_INGEST_LIMIT + 1; index += 1) {
+    for (let index = 0; index < limit + 1; index += 1) {
       await seedCode({ codeHash: hash(index), gtin14: PRODUCT_GTIN, scannedAt: sharedScannedAt });
     }
 
@@ -481,12 +489,12 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
       lastFullSweepAt: new Date(),
     });
 
-    const result = await service.run(tenantId);
+    const result = await service.run(tenantId, { limit });
 
     // The loop drains the whole degenerate batch rather than looping
     // forever -- forward progress on the cursor takes priority over the
     // pass's nominal budget when the two conflict (see walkCodes's doc).
-    expect(result.inserted).toBe(CHZ_CODE_STATUS_INGEST_LIMIT + 1);
+    expect(result.inserted).toBe(limit + 1);
     expect(result.watermark?.getTime()).toBe(sharedScannedAt.getTime());
     // The escalation spent more than the pass's nominal budget on the
     // cursor walk alone, so the other two phases correctly report
@@ -496,11 +504,11 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
     // A later-timestamped row must not be skipped by wherever the cursor
     // landed.
     await seedCode({ codeHash: HASH_A, gtin14: PRODUCT_GTIN, scannedAt: t(1) });
-    const second = await service.run(tenantId);
+    const second = await service.run(tenantId, { limit });
 
     expect(second.inserted).toBe(1);
     expect((await rowsFor(tenantId)).map((row) => row.codeHash)).toContain(HASH_A);
-  }, 180_000);
+  });
 
   it("runs the due sweep even when the cursor walk fills the budget on consecutive passes", async () => {
     // A tenant backfilling from deep history can fill the cursor walk's
@@ -510,9 +518,14 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
     // entire backfill. The sweep runs first so it gets first claim on the
     // budget, cost-free in the steady state because it is rare.
 
+    // A small, explicit budget reproduces "the cursor walk fills the budget"
+    // just as well as `CHZ_CODE_STATUS_INGEST_LIMIT` rows would -- the phase
+    // ordering this test pins down does not depend on the budget's size.
+    const limit = 5;
+
     // Prime the cursor, marking the first sweep as done and cursor at t(-1).
     // Use t(-1) so that the walk starts from before all the codes.
-    for (let index = 0; index < CHZ_CODE_STATUS_INGEST_LIMIT; index += 1) {
+    for (let index = 0; index < limit; index += 1) {
       await seedCode({ codeHash: hash(index), gtin14: PRODUCT_GTIN, scannedAt: t(index) });
     }
 
@@ -523,8 +536,8 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
       lastFullSweepAt: new Date(),
     });
 
-    const first = await service.run(tenantId);
-    expect(first.inserted).toBe(CHZ_CODE_STATUS_INGEST_LIMIT);
+    const first = await service.run(tenantId, { limit });
+    expect(first.inserted).toBe(limit);
 
     // Simulate an offline-then-sync device: a code committed with a
     // `scanned_at` behind the cursor. The cursor walk's strict `>` would
@@ -532,17 +545,13 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
     await seedCode({ codeHash: HASH_A, gtin14: PRODUCT_GTIN, scannedAt: t(0) });
 
     // Add more codes after the cursor to fill the walk budget again.
-    for (
-      let index = CHZ_CODE_STATUS_INGEST_LIMIT;
-      index < 2 * CHZ_CODE_STATUS_INGEST_LIMIT;
-      index += 1
-    ) {
+    for (let index = limit; index < 2 * limit; index += 1) {
       await seedCode({ codeHash: hash(index), gtin14: PRODUCT_GTIN, scannedAt: t(index) });
     }
 
     // The second pass: the cursor walk fills the budget on its own, the
     // sweep is still hot, so it should not run. HASH_A stays undetected.
-    await service.run(tenantId);
+    await service.run(tenantId, { limit });
     expect((await rowsFor(tenantId)).map((row) => row.codeHash)).not.toContain(HASH_A);
 
     // Force the sweep to be due.
@@ -551,10 +560,10 @@ describe.skipIf(!ready)("ChzCodeStatusIngestService", () => {
     // The third pass: the cursor walk would fill the budget, but the sweep
     // is now due. Because the sweep runs first, it gets budget and executes
     // before the walk could fill everything. The sweep runs and finds HASH_A.
-    const third = await service.run(tenantId);
+    const third = await service.run(tenantId, { limit });
     expect(third.inserted).toBeGreaterThanOrEqual(1);
     expect((await rowsFor(tenantId)).map((row) => row.codeHash)).toContain(HASH_A);
-  }, 300_000);
+  });
 
   it("discriminates sweep-first from cursor-first: finds a code planted behind the cursor even though the cursor walk alone could fill the whole budget", async () => {
     // The test above does not actually pin down phase order: by the pass the
