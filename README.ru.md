@@ -105,9 +105,6 @@ pnpm install --frozen-lockfile
 pnpm --filter '@markiro/api^...' --filter '@markiro/admin^...' build
 if [ ! -e .env ]; then
   cp .env.example .env
-  # PLATFORM_AUTH_SECRET намеренно пуст в примере: API требует не менее
-  # 32 символов и отклоняет значение, совпадающее с BETTER_AUTH_SECRET.
-  printf 'PLATFORM_AUTH_SECRET=%s\n' "$(openssl rand -base64 32)" >> .env
 fi
 docker compose -f docker-compose.dev.yml up -d
 set -a
