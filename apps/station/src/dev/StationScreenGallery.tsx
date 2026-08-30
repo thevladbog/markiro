@@ -129,30 +129,39 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
 
   const syncVariant = fixture.kind === "sync" ? fixture.variant : null;
   const headerVariant = fixture.kind === "floor-header" ? fixture.variant : null;
-  // Single source of truth for every fixture that renders `WorkFixture` as an
-  // ordinary mid-shift work screen -- "work" itself, plus "box-full" and
-  // "offline", which were re-platformed onto the real work screen instead of
-  // their own standalone wrapper (see the "box"/"sync" cases in
-  // `GalleryState` below). Drives BOTH chrome decisions production ties to
-  // an active shift, so the two can never drift apart again: App.tsx sets
+  // Single source of truth for every fixture that mirrors an actively-worked
+  // PRODUCTION shift the way App.tsx ties chrome to `shift !== null` -- "work"
+  // itself, plus "box-full" and "offline", which were re-platformed onto the
+  // real work screen instead of their own standalone wrapper (see the
+  // "box"/"sync" cases in `GalleryState` below). Drives BOTH chrome decisions
+  // production ties to that exact condition: App.tsx sets
   // `statusBarCollapsible={shift !== null}` (collapsed once a shift is
-  // active) and unconditionally passes `operatorControl`/`windowControl`
-  // whenever authenticated -- the latter is also true during plain shift
-  // selection (no WorkFixture yet), which is why `withActiveShiftControls`
-  // below still ORs in `fixture.kind === "shift"` on top of this. The same
-  // holds for "inventory": `task-selection` renders the real `TaskSelection`
-  // component, the exact same mount App.tsx uses for shift selection (just
-  // switched to its warehouse category), so it gets the same unconditional
-  // header controls; `other-line-confirmation` renders `InventoryTaskConfirmation`,
-  // a `FullScreenDialog` that covers the header regardless, but is included
-  // here too for consistency with how production always mounts it.
+  // active) AND only ever passes a non-null `shiftLabel` while `shift` is
+  // non-null (App.tsx:1390-1398) -- so this predicate must stay a precise
+  // mirror of `shift !== null`, not a broader "has some active floor task"
+  // check. Critically, `shift` (App.tsx:216) derives ONLY from
+  // `activeFloorTask?.kind === "production"`, so it is ALWAYS null while an
+  // inventory floor task is active OR while browsing/confirming inventory
+  // tasks in TaskSelection (which itself only ever renders while
+  // `activeFloorTask` is null -- see the `floorView === "select"` branch).
+  // Inventory must therefore be excluded from this predicate entirely, for
+  // every variant uniformly (not per-variant), so the collapsed bar and the
+  // fabricated shift label can never appear on an inventory screen the way
+  // they never can in production.
   const rendersActiveShiftWorkScreen =
     fixture.kind === "work" ||
     (fixture.kind === "box" && fixture.variant === "full") ||
-    syncVariant === "offline" ||
-    (fixture.kind === "inventory" &&
-      fixture.variant !== "task-selection" &&
-      fixture.variant !== "other-line-confirmation");
+    syncVariant === "offline";
+  // Unconditional operatorControl/windowControl/update is a SEPARATE fact
+  // App.tsx establishes independent of `shift`: it passes those to
+  // `FloorShell` unconditionally once authenticated, for every screen
+  // mounted past login/pairing -- including plain shift selection (no
+  // WorkFixture yet, hence the extra `fixture.kind === "shift"` OR here) and
+  // every inventory screen (TaskSelection's warehouse category,
+  // InventoryTaskConfirmation, and InventoryWorkScreen alike, hence
+  // `fixture.kind === "inventory"` OR here too). Keeping this predicate and
+  // `rendersActiveShiftWorkScreen` above separate is exactly what lets
+  // inventory have header controls WITHOUT the shift-tied collapsed bar/label.
   const withActiveShiftControls =
     headerVariant !== null ||
     fixture.kind === "shift" ||
@@ -198,7 +207,9 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
         stationName={headerVariant ? copy.longStation : copy.station}
         lineName={headerVariant ? copy.longLine : copy.line}
         operatorName={headerVariant ? copy.longOperator : copy.operator}
-        shiftLabel={headerVariant ? copy.longShift : copy.shift}
+        shiftLabel={
+          headerVariant ? copy.longShift : fixture.kind === "inventory" ? null : copy.shift
+        }
         serverReachability={syncVariant === "offline" ? "unreachable" : "reachable"}
         scanner="connected"
         printerConfigured
