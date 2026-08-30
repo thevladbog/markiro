@@ -202,6 +202,12 @@ function CheckInventoryWorkScreen({
   const mounted = useRef(true);
   const [heldScan, setHeldScan] = useState<HeldInventoryScan | null>(gallery?.heldScan ?? null);
   const heldRef = useRef(false);
+  const heldScanRef = useRef<HeldInventoryScan | null>(gallery?.heldScan ?? null);
+  useEffect(() => {
+    heldScanRef.current = heldScan;
+  }, [heldScan]);
+  const [dialogBusy, setDialogBusy] = useState(false);
+  const dialogBusyRef = useRef(false);
   const bypassRef = useRef<string | null>(null);
   const queueRef = useRef<ScanQueue | null>(null);
   const refresh = useCallback(async () => {
@@ -397,11 +403,9 @@ function CheckInventoryWorkScreen({
     setHeldScan(null);
   };
 
-  const adoptHeldDate = async () => {
-    const held = heldScan;
-    if (!held || held.codeDate === null) return;
-    const codeDate = held.codeDate;
-    await new Promise<void>((resolve, reject) => {
+  /** Queues a terminal-date write behind any buffered scans/jobs, same as `applyDate`. */
+  const writeActiveProductionDate = (productionDate: string) =>
+    new Promise<void>((resolve, reject) => {
       const accepted = queue.enqueueJob(async () => {
         try {
           await setInventoryProductionDate(exec, {
@@ -409,7 +413,7 @@ function CheckInventoryWorkScreen({
             snapshotId: inventory.snapshotId,
             deviceId,
             operatorId,
-            productionDate: codeDate,
+            productionDate,
             updatedAt: now(),
           });
           resolve();
@@ -420,19 +424,56 @@ function CheckInventoryWorkScreen({
       });
       if (!accepted) reject(new Error("inventory scan queue is closed"));
     });
-    if (!mounted.current) return;
-    setProductionDate(codeDate);
-    setDateDraft(codeDate);
-    releaseHeldScan();
-    queue.enqueue(held.raw);
+
+  const adoptHeldDate = async () => {
+    // Reentrancy guard for a double-tap landing before React disables the
+    // button (finding 2): checked synchronously, so a second invocation in
+    // the same tick as the first is a no-op regardless of render timing.
+    if (dialogBusyRef.current) return;
+    const held = heldScan;
+    if (!held || held.codeDate === null) return;
+    const codeDate = held.codeDate;
+    dialogBusyRef.current = true;
+    setDialogBusy(true);
+    try {
+      await writeActiveProductionDate(codeDate);
+      if (!mounted.current) return;
+      if (heldScanRef.current !== held) {
+        // The operator skipped (or a new hold replaced this one) while this
+        // write was in flight. `mounted.current` alone cannot catch this —
+        // the component stays mounted through the whole sequence — so the
+        // held scan captured at the top of this function is compared
+        // against the latest one. Undo the adoption so the code the
+        // operator chose to skip is never resurrected via queue.enqueue,
+        // and the terminal's active date ends up exactly as it was before
+        // this attempt, honoring "skip leaves nothing behind."
+        await writeActiveProductionDate(held.activeDate);
+        return;
+      }
+      setProductionDate(codeDate);
+      setDateDraft(codeDate);
+      releaseHeldScan();
+      queue.enqueue(held.raw);
+    } finally {
+      dialogBusyRef.current = false;
+      if (mounted.current) setDialogBusy(false);
+    }
   };
 
   const acceptHeldScan = () => {
+    if (dialogBusyRef.current) return;
     const held = heldScan;
     if (!held) return;
-    bypassRef.current = held.raw;
-    releaseHeldScan();
-    queue.enqueue(held.raw);
+    dialogBusyRef.current = true;
+    setDialogBusy(true);
+    try {
+      bypassRef.current = held.raw;
+      releaseHeldScan();
+      queue.enqueue(held.raw);
+    } finally {
+      dialogBusyRef.current = false;
+      setDialogBusy(false);
+    }
   };
 
   const locale = i18n.language === "ru" ? "ru-RU" : "en-US";
@@ -644,12 +685,13 @@ function CheckInventoryWorkScreen({
         onClose={releaseHeldScan}
         footer={
           heldScan?.mixed ? (
-            <Button size="floor" onClick={acceptHeldScan}>
+            <Button size="floor" disabled={dialogBusy} onClick={acceptHeldScan}>
               {t("inventory.work.sourceDate.accept")}
             </Button>
           ) : codeDateInRange ? (
             <Button
               size="floor"
+              disabled={dialogBusy}
               onClick={() =>
                 void adoptHeldDate().catch((error: unknown) => {
                   console.error("station: inventory date adoption failed", error);
