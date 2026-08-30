@@ -1,9 +1,10 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { schema, type Db } from "@markiro/db";
 import { eq, sql } from "drizzle-orm";
 
 import { DB } from "../../auth/auth.module";
 import { describeChannel, type IntegrationChannelType } from "../integrations/channel-registry";
+import { CHZ_CHANNEL_TYPE } from "../signer-agents/chz-constants";
 import type { ChzCodeStatusSummaryDto } from "./dto";
 
 /**
@@ -24,13 +25,21 @@ function safeDescribeChannel(type: IntegrationChannelType): void {
 /**
  * Backs `GET /integrations/:type/code-statuses` (Task 6). `chz_code_statuses`
  * carries no channel column at all -- see its own doc, packages/db/src/schema/chz.ts:
- * one row per `(tenantId, codeHash)`, not one per integration channel -- so the
- * summary is identical for every registered channel type, `chestny_znak`
- * included. `type` exists here only so an unregistered type still answers 404,
- * the same as `:type/candidates` and `:type/journal` do (`safeDescribeChannel`
- * above); a registered type that isn't `chestny_znak` gets the real summary,
- * just like `:type/candidates` runs its real (if empty) query for any
- * registered channel rather than refusing non-`commerceml` types.
+ * one row per `(tenantId, codeHash)`, not one per integration channel. That
+ * does NOT mean any registered channel should get this summary, though: the
+ * data is Chestny ZNAK's, and answering it for e.g. `commerceml` would hand
+ * that channel's own freshness line ЧЗ's numbers, which have nothing to do
+ * with it.
+ *
+ * So `type` is checked twice, the same shape `IntegrationsService.issueCredentials`/
+ * `deleteChannel` already use for narrowing a route to the one channel that
+ * supports it: `safeDescribeChannel` first, 404 for a type the registry has
+ * never heard of at all (mirrors `:type/candidates` and `:type/journal`);
+ * then a 409 `ConflictException` for a type that IS registered but isn't
+ * `chestny_znak` -- the same "channel exists, but this action does not apply
+ * to it" shape `usesExchangeCredentials` already uses there, rather than a
+ * blanket 404 that would also hide a genuinely unknown type behind the same
+ * status code.
  */
 @Injectable()
 export class ChzCodeStatusReadService {
@@ -38,6 +47,9 @@ export class ChzCodeStatusReadService {
 
   async summary(tenantId: string, type: IntegrationChannelType): Promise<ChzCodeStatusSummaryDto> {
     safeDescribeChannel(type);
+    if (type !== CHZ_CHANNEL_TYPE) {
+      throw new ConflictException("Channel does not carry Chestny ZNAK code statuses");
+    }
 
     // A bare aggregate with no GROUP BY always returns exactly one row, even
     // when nothing matches the WHERE clause -- so a tenant that has never run

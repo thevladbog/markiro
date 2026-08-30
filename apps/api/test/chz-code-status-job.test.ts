@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as MarkiroDb from "@markiro/db";
 import type { Db } from "@markiro/db";
 
-import { PgBossService, REFRESH_CHZ_CODE_STATUSES_QUEUE } from "../src/jobs/jobs.module";
+import {
+  PgBossService,
+  REFRESH_CHZ_CODE_STATUSES_QUEUE,
+  REFRESH_CHZ_CODE_STATUSES_TENANT_CAP,
+} from "../src/jobs/jobs.module";
 import type { ExchangeSessionService } from "../src/modules/exchange/exchange-session.service";
 import type { JournalService } from "../src/modules/integrations/journal.service";
 import type { MailJobsService } from "../src/modules/mail/mail-jobs.service";
@@ -196,5 +200,38 @@ describe("PgBossService refresh-chz-code-statuses queue", () => {
     expect(ingest.run).toHaveBeenCalledTimes(2);
     expect(refresh.run).toHaveBeenCalledOnce();
     expect(refresh.run).toHaveBeenCalledWith("tenant-b");
+  });
+
+  it("bounds one pass to the tenant cap and rotates so a backlog beyond it still drains", async () => {
+    // Zero-padded so lexicographic order (what the rotation sorts by, since
+    // the tenant-selection query makes no ordering promise of its own)
+    // matches numeric order.
+    const total = REFRESH_CHZ_CODE_STATUSES_TENANT_CAP + 50;
+    const tenantIds = Array.from(
+      { length: total },
+      (_, index) => `tenant-${String(index).padStart(4, "0")}`,
+    );
+    await seedTenantsWithChzChannel(tenantIds);
+
+    await handler();
+    const firstPass = refresh.run.mock.calls.map(([id]) => id as string);
+    expect(firstPass).toHaveLength(REFRESH_CHZ_CODE_STATUSES_TENANT_CAP);
+    // No prior rotation state: the first pass covers the
+    // lexicographically-first CAP tenants, in order.
+    expect(firstPass).toEqual(tenantIds.slice(0, REFRESH_CHZ_CODE_STATUSES_TENANT_CAP));
+
+    refresh.run.mockClear();
+    ingest.run.mockClear();
+    await handler();
+    const secondPass = refresh.run.mock.calls.map(([id]) => id as string);
+    expect(secondPass).toHaveLength(REFRESH_CHZ_CODE_STATUSES_TENANT_CAP);
+    // Rotated to start right past where the first pass stopped, wrapping
+    // around once it reaches the end of the sorted list -- so the 50 tenants
+    // the first pass never reached are covered here, and the pass does not
+    // just replay the same prefix forever and starve the tail.
+    expect(secondPass.slice(0, 50)).toEqual(tenantIds.slice(REFRESH_CHZ_CODE_STATUSES_TENANT_CAP));
+    expect(secondPass.slice(50)).toEqual(
+      tenantIds.slice(0, REFRESH_CHZ_CODE_STATUSES_TENANT_CAP - 50),
+    );
   });
 });

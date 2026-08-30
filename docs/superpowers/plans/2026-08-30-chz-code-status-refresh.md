@@ -652,12 +652,27 @@ were found and fixed in a follow-up commit, before Task 4 began.
    designed above, `run()` bounded the `codes` walk and the snapshot anti-join
    by `CHZ_CODE_STATUS_INGEST_LIMIT` independently, so one pass could insert up
    to twice the intended bound — more once the escalation loop enlarges the
-   first phase's own limit. Fixed by giving the pass one shared budget, spent
-   in order (cursor walk, then the sweep if due, then the snapshot anti-join),
-   each phase receiving whatever the previous phases left of it and being
-   skipped once it hits zero. A phase skipped this way is counted as "not
-   caught up", since with no budget left there is no way to check whether it
-   had more rows waiting without spending more than the pass is allowed.
+   first phase's own limit. Fixed, as of this commit, by giving the pass one
+   shared budget, spent in order (cursor walk, then the sweep if due, then the
+   snapshot anti-join), each phase receiving whatever the previous phases left
+   of it and being skipped once it hits zero. A phase skipped this way is
+   counted as "not caught up", since with no budget left there is no way to
+   check whether it had more rows waiting without spending more than the pass
+   is allowed.
+
+   **Historical — superseded by the very next commit, do not implement this
+   order:** spending the cursor walk before the sweep, as just described,
+   turned out to reopen the problem Fix 1 above exists to close. A tenant
+   backfilling from deep history can fill the cursor walk's entire per-pass
+   budget on every consecutive pass, which starves the sweep — the sweep is
+   the mechanism that catches a `scanned_at` behind the cursor — for exactly
+   the duration of the backfill it is meant to protect. The very next commit
+   reordered the shared budget to spend on the sweep **first** (if due), then
+   the cursor walk, then the snapshot anti-join. Step 1's text above already
+   describes that final order and its rationale ("Giving the sweep first
+   claim on the budget..."), and `ChzCodeStatusIngestService.run` as shipped
+   matches it — treat those, not the order named in this bullet, as
+   normative.
 
 The degenerate-cursor escalation loop (this task's Step 3, "One subtlety to
 handle explicitly") also gained a dedicated test: `CHZ_CODE_STATUS_INGEST_LIMIT

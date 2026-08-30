@@ -32,7 +32,7 @@ One table, `chz_code_statuses`, keyed by `(tenant_id, code_hash)` — one row pe
 
 **The raw code is deliberately not stored here.** `codes.canonical_raw` already holds it, and duplicating roughly a hundred bytes per code would enlarge the very thing this store exists to avoid re-reading. The refresh job joins `codes` for the batch it is about to send.
 
-That has a consequence worth naming, because it is a feature rather than an oversight: `codes` is partitioned monthly, so when an old partition is eventually detached, the raw code goes with it and the status row can no longer be refreshed. Archived codes stop being polled by construction, without anyone writing a rule for it.
+That has a consequence worth naming, because it is a feature rather than an oversight: `codes` is partitioned monthly, so when an old partition is eventually detached, a status row loses that source's raw code. That makes the row unrefreshable only once **no** source has a raw left for it — a row also present in `inventory_snapshot_codes` (the ordered-export bootstrap population; see "How codes enter the store" below) keeps a raw to send from there even after its `codes` partition is gone, and the refresh job is written to fall back to it (`ChzCodeStatusRefreshService`'s raw resolution prefers `codes`, then `inventory_snapshot_codes`). A code that was only ever scanned, never exported, does become unrefreshable the moment its partition is detached. Either way, a row with no remaining raw stops being polled by construction, without anyone writing a rule for it.
 
 The table is not partitioned. Rows are small and are reached by hash, not by time.
 
@@ -79,7 +79,7 @@ A failed batch never advances `checked_at`. Staleness must be visible rather tha
 
 ## Interface
 
-One line in the Chestny ZNAK integration card: how many codes are known, how many were refreshed in the last day, and how long ago the last pass ran. Enough to answer "is this working" and "is the data I am about to rely on fresh".
+One line in the Chestny ZNAK integration card: how many codes are known, how many were refreshed in the last day, and how long ago a code was last checked. Not "how long ago the last pass ran" — a healthy scheduler pass with nothing due does not advance any row's `checked_at`, so the two can diverge while everything is working. Enough to answer "is this working" and "is the data I am about to rely on fresh".
 
 Per-code lookup is not in this slice. It is the obvious next request and it is cheap to add later, but nothing here needs it.
 

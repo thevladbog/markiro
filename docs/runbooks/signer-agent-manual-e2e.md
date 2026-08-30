@@ -233,10 +233,10 @@ refreshed in the last day.
   stays null. The response is shaped differently than assumed: the rows are
   arriving but `cis` is not the field the code matches on, so nothing pairs up.
   Fix `cisesInfo`'s parser with the real field names.
-- _The whole batch is refused_ — the journal shows a `rejected` entry carrying
-  ЧЗ's own message, and the affected codes are parked at a 30-day interval.
-  That is a product-group or contract problem, not a parsing one; the message
-  names it.
+- _The whole batch is refused_ — the journal shows a `warn` entry ("Честный
+  Знак отказал в запросе статусов кодов") carrying ЧЗ's own message, and the
+  affected codes are parked at a 30-day interval. That is a product-group or
+  contract problem, not a parsing one; the message names it.
 - _Nothing happens at all_ — the journal shows a `warn` entry naming the token
   status. The agent has not delivered a usable token; that is the signer
   runbook above, not this section.
@@ -248,13 +248,17 @@ without reading the database.
 ### While you are here: how big is the population?
 
 The design deliberately left retention and archival out, because the volumes
-were unknown. Record them now that a real tenant exists:
+were unknown. Record them now that a real tenant exists — filtered to that one
+tenant, not summed across every tenant in the table, since `chz_code_statuses`
+is shared and the volume question is "how big is this tenant's population",
+not the platform's:
 
 ```sql
 select count(*) as total,
        count(*) filter (where chz_product_group_code is null) as unaskable,
        count(*) filter (where status is null) as never_answered
-from chz_code_statuses;
+from chz_code_statuses
+where tenant_id = '<tenant id>';
 ```
 
 A tenant in the hundreds of thousands needs nothing further. Millions is the

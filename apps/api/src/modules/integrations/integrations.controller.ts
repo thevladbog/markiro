@@ -172,7 +172,7 @@ export class IntegrationsController {
   })
   @ApiParam({ name: "type", enum: INTEGRATION_CHANNEL_TYPES })
   @ApiOkResponse({ schema: chzCodeStatusSummaryOpenApiSchema })
-  @ApiHttpErrors(401, 403, 404)
+  @ApiHttpErrors(401, 403, 404, 409)
   async codeStatuses(
     @Req() req: RequestWithTenant,
     @Param("type") type: IntegrationChannelType,

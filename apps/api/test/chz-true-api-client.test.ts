@@ -211,6 +211,51 @@ describe("TrueApiClient", () => {
     });
   });
 
+  it("skips a null row instead of losing the whole batch to a throw", async () => {
+    // `null` in the array is malformed, but it must not take the surviving
+    // row down with it: `record.cis` on `null` would throw, and `request()`
+    // converts any throw from `parse` into `unavailable` for the ENTIRE
+    // batch -- losing the answer for every other code over one bad row.
+    const client = new TrueApiClient(
+      deps(
+        async () =>
+          new Response(
+            JSON.stringify([null, { cis: "01046000000000172150", status: "INTRODUCED" }]),
+            { status: 200 },
+          ),
+      ),
+    );
+    await expect(client.cisesInfo(auth, 8, ["01046000000000172150"])).resolves.toEqual({
+      status: "ok",
+      value: [
+        {
+          cis: "01046000000000172150",
+          status: "INTRODUCED",
+          statusEx: null,
+          ownerInn: null,
+          withdrawReason: null,
+        },
+      ],
+    });
+  });
+
+  it("drops a row with no usable status rather than persisting an empty one", async () => {
+    // An absent/non-string `status` is ЧЗ not answering, not ЧЗ answering
+    // with "". Keeping the row would let the caller persist `status: ""` as
+    // though it were a real fact, and `intervalFor("")` would then treat it
+    // as freshly in-circulation instead of unknown.
+    const client = new TrueApiClient(
+      deps(
+        async () =>
+          new Response(JSON.stringify([{ cis: "01046000000000172150" }]), { status: 200 }),
+      ),
+    );
+    await expect(client.cisesInfo(auth, 8, ["01046000000000172150"])).resolves.toEqual({
+      status: "ok",
+      value: [],
+    });
+  });
+
   it("treats a non-array 200 response as a parse failure and retries", async () => {
     // A non-array response (object, null, string, etc.) is malformed and must
     // not be treated as an empty answer. Silently converting it to an empty

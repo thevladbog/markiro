@@ -162,16 +162,31 @@ export class TrueApiClient {
           return null;
         }
         return payload.flatMap((row) => {
+          // A `null`/`undefined`/non-object row cannot carry a `cis` at all --
+          // reading `.cis` off it would throw, and `request()` turns any
+          // throw from `parse` into `unavailable` for the WHOLE batch, losing
+          // the answers for every other code in it over one malformed row.
+          if (row === null || typeof row !== "object") return [];
           const record = row as Record<string, unknown>;
           const cis = typeof record.cis === "string" ? record.cis : "";
           // A row we cannot attribute to a code we asked about is worse than
           // absent: the caller matches on `cis`, and an empty string would
           // match nothing while looking like an answer.
           if (cis.length === 0) return [];
+          // Same reasoning for `status`: an absent/non-string status is not
+          // ЧЗ answering "" -- it is ЧЗ not answering. `stringOrEmpty` would
+          // turn it into a persisted `status: ""`, which `intervalFor` reads
+          // as freshly in-circulation and the refresh service writes down as
+          // though ЧЗ had responded. Dropping the row instead leaves it
+          // exactly where the caller's "unknown" handling already expects an
+          // absent answer to be.
+          const status =
+            typeof record.status === "string" && record.status.length > 0 ? record.status : "";
+          if (status.length === 0) return [];
           return [
             {
               cis,
-              status: stringOrEmpty(record.status),
+              status,
               statusEx: typeof record.statusEx === "string" ? record.statusEx : null,
               ownerInn: typeof record.ownerInn === "string" ? record.ownerInn : null,
               withdrawReason:
