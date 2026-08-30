@@ -59,6 +59,10 @@ const DESCRIPTION_BY_CODE = {
     ru: "Печатная инструкция менеджера: создание задания инвентаризации, выписки Честного Знака, фиксация снимка, терминалы и запуск.",
     en: "Printable manager instruction: creating a stock-count task, Chestny Znak exports, fixing the snapshot, terminals, and launch.",
   },
+  "MKR-INS-07": {
+    ru: "Печатная инструкция менеджера: ход инвентаризации, исправления, закрытие, поздние события, итоговые документы и завершение.",
+    en: "Printable manager instruction: stock-count progress, corrections, closing, late events, final documents, and completion.",
+  },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 
 export interface LegalDocumentPageDefinition {
