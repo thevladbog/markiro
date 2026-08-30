@@ -13,7 +13,8 @@ export type LegalDocumentCode =
   | "MKR-INS-02"
   | "MKR-INS-03"
   | "MKR-INS-04"
-  | "MKR-INS-05";
+  | "MKR-INS-05"
+  | "MKR-INS-06";
 
 export type LegalDocumentKind = "legal" | "template" | "instruction";
 
