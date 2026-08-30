@@ -234,6 +234,8 @@ describe("simple inventory work screen", () => {
     expect(await screen.findByText("Код не участвует в инвентаризации")).toBeDefined();
     scan.emit(raw("EXPECTED"));
     expect(await screen.findByText("Код уже проверен на этом терминале")).toBeDefined();
+    expect(screen.getByText(/Этот терминал · \d{2}:\d{2}:\d{2}/)).toBeDefined();
+    expect(screen.queryByText(new RegExp(DEVICE_ID))).toBeNull();
 
     expect(screen.getByText("1", { selector: "[data-testid='inventory-verified']" })).toBeDefined();
     expect(
