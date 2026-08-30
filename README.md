@@ -16,7 +16,7 @@
   <a href="https://github.com/thevladbog/markiro/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/thevladbog/markiro/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/thevladbog/markiro/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/thevladbog/markiro/actions/workflows/codeql.yml/badge.svg"></a>
   <img alt="Node.js 24+" src="https://img.shields.io/badge/Node.js-24%2B-339933?logo=nodedotjs&logoColor=white">
-  <img alt="pnpm 11.10" src="https://img.shields.io/badge/pnpm-11.10-F69220?logo=pnpm&logoColor=white">
+  <img alt="pnpm 11.22" src="https://img.shields.io/badge/pnpm-11.22-F69220?logo=pnpm&logoColor=white">
   <img alt="TypeScript 6" src="https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white">
   <img alt="Docker" src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white">
   <img alt="PostgreSQL 17" src="https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white">
@@ -38,9 +38,10 @@ The platform is built for real production constraints: multiple terminals in one
 
 - **Keep the line moving.** Station and kiosk workflows retain local state and recover after connectivity returns.
 - **Reject bad input at the edge.** Shared GS1/GTIN/KM logic catches malformed, duplicate, and wrong-product codes before they become reporting problems.
-- **Aggregate and print consistently.** SSCC allocation, box/pallet workflows, and ZPL/TSPL output use shared domain rules.
+- **Aggregate and print consistently.** SSCC allocation, box workflows, and ZPL/TSPL output use shared domain rules.
+- **Close the inventory loop.** Inventory tasks, station recount and repack, and generated GISMT documents replace manual file exchange with the state system.
 - **Keep every boundary explicit.** Tenant data, cabinet sessions, device credentials, and operator identity have separate enforcement paths.
-- **Integrate with existing operations.** The API and CommerceML/1C flows connect Markiro to surrounding systems without moving factory recovery online-only.
+- **Integrate with existing operations.** The API, CommerceML/1C exchange, and the Chestny ZNAK True API agent connect Markiro to surrounding systems without moving factory recovery online-only.
 
 ## Product surfaces
 
@@ -50,23 +51,25 @@ The platform is built for real production constraints: multiple terminals in one
     <td width="50%"><a href="./docs/assets/readme/kiosk.webp"><img alt="Markiro pickup kiosk screenshot" src="./docs/assets/readme/kiosk.webp"></a></td>
   </tr>
   <tr>
-    <td><strong>Admin panel.</strong> Products, shifts, label templates, integrations, teams, pickup orders, and operational audit.</td>
+    <td><strong>Admin panel.</strong> Dashboard, products, shifts, inventories, label templates, integrations, billing, teams, and operational audit.</td>
     <td><strong>Disposal kiosk.</strong> Badge-based employee pickup with local limits, offline snapshots, queued orders, and recovery.</td>
   </tr>
 </table>
 
-<p align="center"><em>Screenshots of the live application running in a local development environment with demo data.</em></p>
+<p align="center"><em>The admin panel runs against a seeded local API; the kiosk screen is rendered from the app's own components with fixture data.</em></p>
 
 ## Core capabilities
 
-| Area                  | What is implemented                                                                                      |
-| --------------------- | -------------------------------------------------------------------------------------------------------- |
-| Codes and validation  | GS1 check digits, GTIN normalization, KM parsing, scan classification, duplicate/error handling          |
-| Production            | Shifts, multi-terminal scanning, offline journals, synchronization, conflicts, operator recovery actions |
-| Aggregation           | SSCC pools, boxes, box labels, disassembly/reprint audit, shared aggregation state                       |
-| Labels                | WYSIWYG templates, Cyrillic rasterization, ZPL/TSPL generation, product/shift bindings                   |
-| Disposal              | Paired kiosks, badge resolution, daily limits, offline queue/quarantine, cabinet reconciliation          |
-| SaaS and integrations | Multi-tenant cabinet, roles/capabilities, CommerceML/1C exchange, mail delivery, private object storage  |
+| Area                  | What is implemented                                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Codes and validation  | GS1 check digits, GTIN normalization, KM parsing, scan classification, duplicate/error handling                     |
+| Production            | Shifts, multi-terminal scanning, offline journals, synchronization, conflicts, operator recovery actions, dashboard |
+| Aggregation           | SSCC pools, boxes, box labels, disassembly/reprint audit, shared aggregation state                                  |
+| Inventory             | Inventory tasks, station recount and repack, corrections and late events, GISMT aggregation XML and report package  |
+| Labels                | WYSIWYG templates, Cyrillic rasterization, ZPL/TSPL generation, product/shift bindings                              |
+| Disposal              | Paired kiosks, badge resolution, daily limits, offline queue/quarantine, cabinet reconciliation                     |
+| Chestny ZNAK          | Signer agent for the True API authentication flow, encrypted token storage, product groups, code-status exports     |
+| SaaS and integrations | Multi-tenant cabinet, roles/capabilities, billing and limits, CommerceML/1C exchange, mail, private object storage  |
 
 ## Architecture
 
@@ -76,10 +79,13 @@ flowchart LR
   Kiosk["Kiosk · React/Vite PWA"] --> API
   Station["Station · Tauri 2 + React"] -. "sync when connected" .-> API
   Station --> SQLite["Local SQLite journal"]
+  Signer["Signer · Tauri 2 + React"] -- "True API token" --> API
+  API -. "True API" .-> CHZ["Chestny ZNAK"]
   API --> PG["PostgreSQL 17"]
-  Shared["domain · db · ui · email"] --> Admin
+  Shared["domain · db · ui · email · platform-contracts"] --> Admin
   Shared --> Kiosk
   Shared --> Station
+  Shared --> Signer
   Shared --> API
 ```
 
@@ -90,7 +96,7 @@ Read [the architecture document](./docs/architecture.md) for tenant boundaries, 
 ### Prerequisites
 
 - Node.js 24 or newer
-- Corepack and pnpm 11.10.0
+- Corepack and pnpm 11.22.0
 - Docker with Docker Compose
 
 ```bash
@@ -99,6 +105,9 @@ pnpm install --frozen-lockfile
 pnpm --filter '@markiro/api^...' --filter '@markiro/admin^...' build
 if [ ! -e .env ]; then
   cp .env.example .env
+  # PLATFORM_AUTH_SECRET ships empty on purpose; the API requires at least
+  # 32 characters and rejects a value equal to BETTER_AUTH_SECRET.
+  printf 'PLATFORM_AUTH_SECRET=%s\n' "$(openssl rand -base64 32)" >> .env
 fi
 docker compose -f docker-compose.dev.yml up -d
 set -a
@@ -140,14 +149,16 @@ apps/
   admin/       React/Vite production cabinet
   kiosk/       Offline-first pickup PWA
   station/     Tauri/React line workstation
+  signer/      Tauri/React Chestny ZNAK signing agent (Windows)
   landing/     Public marketing website
   saas-admin/  SaaS operator panel
 packages/
-  domain/           GS1, KM, SSCC, labels, shared policy
-  db/               PostgreSQL schema, migrations, SQLite mirror
-  email/            Transactional email templates
-  ui/               Shared design tokens and React components
-  legal-documents/  Legal document sources and rendering
+  domain/              GS1, KM, SSCC, labels, shared policy
+  db/                  PostgreSQL schema, migrations, SQLite mirror
+  platform-contracts/  Shared platform, tenant, and agent API schemas
+  email/               Transactional email templates
+  ui/                  Shared design tokens and React components
+  legal-documents/     Legal document sources and rendering
 ```
 
 Focused iteration:
@@ -171,6 +182,7 @@ Database-backed tests require the exported `DATABASE_URL`. Report intentional sk
 - [Agent guide](./AGENTS.md)
 - [Architecture](./docs/architecture.md)
 - [Design briefs](./docs/design-briefs/)
+- [Operational runbooks](./docs/runbooks/)
 - [Implementation plans](./docs/superpowers/plans/)
 - [MVP roadmap](./docs/superpowers/plans/2026-07-21-markiro-mvp-roadmap.md)
 - [OpenAPI explorer](http://localhost:3000/docs) when the API is running

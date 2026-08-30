@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Monorepo: pnpm + turbo. API tests: `set -a; source .env; set +a` then `pnpm --filter @markiro/api exec vitest run test/<file>`. **Never use `git stash`** — the stash stack is shared across sessions and worktrees.
-- Migration flow (AGENTS.md): `set -a; source .env; set +a` → `db:generate` → rename the generated file **and** its `meta/_journal.json` tag → `build` → `test` → `db:migrate`. Never edit an applied migration. **Next migration number: 0101** (last applied: `0100_chz_export_runs`) — verify with `ls packages/db/migrations/*.sql | tail -1` before generating, because `main` moves.
+- Migration flow (AGENTS.md): `set -a; source .env; set +a` → `db:generate` → rename the generated file **and** its `meta/_journal.json` tag → `build` → `test` → `db:migrate`. Never edit an applied migration. **Next migration number: 0101** (last applied: `0100_chz_export_runs`) — verify with `ls packages/db/migrations/*.sql | tail -1` before generating, because `main` moves. (Superseded — see the addendum after Task 1: `main` landed its own `0101`/`0102` first, so this branch's two migrations now live as a single `0103_chz_code_statuses`.)
 - **`packages/db/src/schema/codes.ts` is query-only.** Its DDL lives in `migrations/0002_partitioned_codes.sql` and the file is excluded from `drizzle.config.ts`'s schema list. Do not alter `codes`, and do not let drizzle-kit try to.
 - **The Station is not touched.** `apps/station/**` and `packages/db/src/sqlite/**` must have zero diff.
 - **Token values must never reach a log, the integrations journal, or any UI error message.** Journal entries use `channelType: "chestny_znak"` via `JournalService.append`, each wrapped in its own try/catch that logs and continues.
@@ -37,7 +37,7 @@
 | File                                                                        | Responsibility                                             |
 | --------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | `packages/db/src/schema/chz.ts`                                             | `chzCodeStatuses` and `chzCodeStatusCursors` tables        |
-| `packages/db/migrations/0101_chz_code_statuses.sql`                         | Create both tables                                         |
+| `packages/db/migrations/0103_chz_code_statuses.sql`                         | Create both tables                                         |
 | `apps/api/src/modules/chz-exports/true-api.types.ts`                        | `CisInfo` and the `cisesInfo` result type                  |
 | `apps/api/src/modules/chz-exports/true-api.client.ts`                       | `cisesInfo` method                                         |
 | `apps/api/src/modules/chz-code-statuses/chz-code-status-ingest.service.ts`  | Watermark walk over `codes`, inserting missing status rows |
@@ -57,7 +57,7 @@
 **Files:**
 
 - Modify: `packages/db/src/schema/chz.ts`
-- Create (generated, then renamed): `packages/db/migrations/0101_chz_code_statuses.sql`
+- Create (generated, then renamed): `packages/db/migrations/0103_chz_code_statuses.sql`
 - Modify: `packages/db/migrations/meta/_journal.json`
 - Test: `packages/db/test/chz-code-statuses.test.ts`
 
@@ -76,6 +76,21 @@ review found the cursor-only design insufficient (see Task 3's addendum for why)
 The column is a single nullable `timestamp with time zone`, added with a plain
 `ALTER TABLE ... ADD COLUMN`; nothing about `chzCodeStatuses` or the existing
 `lastScannedAt` cursor changed.
+
+**Addendum, added after a migration-number collision with `main`:** `main` landed
+its own `0101_inventory_cancellation` and `0102_billing_print_variants` while this
+branch's `0101_chz_code_statuses` and `0102_chz_code_status_full_sweep_cursor`
+were still unreleased. Both of this branch's migrations were unreleased and the
+second only added one column to a table the first created, so rather than take a
+number after main's two, the two were squashed into a single
+`packages/db/migrations/0103_chz_code_statuses.sql`, with `last_full_sweep_at`
+folded directly into `chz_code_status_cursors`'s `CREATE TABLE` instead of arriving
+by a later `ALTER TABLE`. `meta/0103_snapshot.json` was built programmatically
+(main's newest snapshot as the base, plus the two tables' final shape from this
+branch's old `0102_snapshot.json`, a fresh `id`, and `prevId` set to the base
+snapshot's `id`) since `drizzle-kit generate` cannot run non-interactively in this
+environment. Every other reference to `0101`/`0102` for this feature elsewhere in
+this plan now means `0103`; the design otherwise did not change.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -195,7 +210,7 @@ ls packages/db/migrations/*.sql | tail -1   # confirm the next free number
 pnpm --filter @markiro/db db:generate
 ```
 
-Rename the generated SQL to `packages/db/migrations/0101_chz_code_statuses.sql` and its `meta/_journal.json` tag to `0101_chz_code_statuses` (both must match, `"version": "7"`, `"breakpoints": true`, and `"idx"` matching the number you used). Then:
+Rename the generated SQL to `packages/db/migrations/0103_chz_code_statuses.sql` (see the addendum above — a `main` collision on `0101`/`0102` moved this feature's migration to `0103`) and its `meta/_journal.json` tag to `0103_chz_code_statuses` (both must match, `"version": "7"`, `"breakpoints": true`, and `"idx"` matching the number you used). Then:
 
 ```bash
 pnpm --filter @markiro/db build

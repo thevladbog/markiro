@@ -1,5 +1,15 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  getTableColumns,
+  ilike,
+  inArray,
+  isNull,
+  notExists,
+} from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   platformCommercialContracts,
@@ -7,6 +17,7 @@ import {
   type PlatformBillingRequestEvent,
   type PlatformBillingRequestLink,
   type PlatformBillingRequestLinkDto,
+  type PlatformBillingRequestLinkTargetQueryDto,
   type PlatformBillingRequestListQueryDto,
   type PlatformBillingRequestOfferCreateDto,
   type PlatformBillingRequestStatusMutationDto,
@@ -29,7 +40,11 @@ import { TenantBillingNotificationsService } from "../tenant-billing/tenant-bill
 type RequestStatus = typeof schema.tenantBillingRequests.$inferSelect.status;
 type LinkType = PlatformBillingRequestLinkDto["type"];
 type RequestReadExecutor = Pick<Db, "select">;
+type RequestWithTenantName = typeof schema.tenantBillingRequests.$inferSelect & {
+  tenantName: string;
+};
 const registryLimit = 100;
+const linkTargetLimit = 20;
 
 const transitions: Record<RequestStatus, readonly RequestStatus[]> = {
   new: ["under_review", "cancelled"],
@@ -56,8 +71,15 @@ export class PlatformBillingRequestsService {
     if (query.status) conditions.push(eq(schema.tenantBillingRequests.status, query.status));
     if (query.type) conditions.push(eq(schema.tenantBillingRequests.type, query.type));
     const requestWindow = await this.db
-      .select()
+      .select({
+        ...getTableColumns(schema.tenantBillingRequests),
+        tenantName: schema.organization.name,
+      })
       .from(schema.tenantBillingRequests)
+      .innerJoin(
+        schema.organization,
+        eq(schema.organization.id, schema.tenantBillingRequests.tenantId),
+      )
       .where(conditions.length === 0 ? undefined : and(...conditions))
       .orderBy(desc(schema.tenantBillingRequests.updatedAt), desc(schema.tenantBillingRequests.id))
       .limit(registryLimit + 1);
@@ -105,6 +127,55 @@ export class PlatformBillingRequestsService {
 
   async detail(_actor: PlatformPrincipal, requestId: string) {
     return this.detailWith(this.db, requestId);
+  }
+
+  async linkTargets(
+    _actor: PlatformPrincipal,
+    requestId: string,
+    query: PlatformBillingRequestLinkTargetQueryDto,
+  ) {
+    const canonicalRequestId = canonicalBillingUuid(requestId);
+    const located = await this.locate(canonicalRequestId);
+    const table = linkTable(query.type);
+    const label = linkLabelColumn(query.type);
+    const linkedTarget = linkColumn(query.type);
+    const candidates = await this.db
+      .select({ id: table.id, label })
+      .from(table)
+      .where(
+        and(
+          eq(table.tenantId, located.tenantId),
+          ilike(label, `%${escapeLikePattern(query.q)}%`),
+          notExists(
+            this.db
+              .select({ id: schema.tenantBillingRequestLinks.id })
+              .from(schema.tenantBillingRequestLinks)
+              .where(
+                and(
+                  eq(schema.tenantBillingRequestLinks.tenantId, located.tenantId),
+                  eq(linkedTarget, table.id),
+                ),
+              ),
+          ),
+        ),
+      )
+      .orderBy(asc(label), asc(table.id))
+      .limit(linkTargetLimit + 1);
+    const truncated = candidates.length > linkTargetLimit;
+    return {
+      items: candidates.slice(0, linkTargetLimit).flatMap((candidate) =>
+        candidate.label
+          ? [
+              {
+                id: candidate.id,
+                label: candidate.label,
+                href: linkTargetHref(query.type, candidate.id, located.tenantId),
+              },
+            ]
+          : [],
+      ),
+      truncated,
+    };
   }
 
   async comment(
@@ -278,7 +349,7 @@ export class PlatformBillingRequestsService {
       ]);
       const request = await lockRequest(tx, located.tenantId, canonicalRequestId);
       await rejectExistingEventKey(tx, located.tenantId, input.idempotencyKey);
-      await assertTarget(tx, request.tenantId, input.type, canonicalTargetId);
+      const targetLabel = await assertTarget(tx, request.tenantId, input.type, canonicalTargetId);
       if (input.type === "act") {
         await alignActRequest(tx, request.tenantId, request.id, canonicalTargetId);
       }
@@ -313,7 +384,7 @@ export class PlatformBillingRequestsService {
         })
         .returning();
       if (!event) throw new Error("platform billing request link event insert failed");
-      const result = linkSource(link, input.type, canonicalTargetId);
+      const result = linkSource(link, input.type, canonicalTargetId, targetLabel);
       await this.audit.record(tx, {
         actorPlatformUserId: actor.userId,
         actorRole: actor.role,
@@ -405,7 +476,7 @@ export class PlatformBillingRequestsService {
         requestId: request.id,
         tenantId: request.tenantId,
         offerId,
-        link: linkSource(link, "offer", offerId),
+        link: linkSource(link, "offer", offerId, null),
       };
       await this.audit.record(tx, {
         actorPlatformUserId: actor.userId,
@@ -437,8 +508,15 @@ export class PlatformBillingRequestsService {
 
   private async detailWith(db: Pick<Db, "select">, requestId: string) {
     const [request] = await db
-      .select()
+      .select({
+        ...getTableColumns(schema.tenantBillingRequests),
+        tenantName: schema.organization.name,
+      })
       .from(schema.tenantBillingRequests)
+      .innerJoin(
+        schema.organization,
+        eq(schema.organization.id, schema.tenantBillingRequests.tenantId),
+      )
       .where(eq(schema.tenantBillingRequests.id, requestId))
       .limit(1);
     if (!request) requestNotFound();
@@ -472,12 +550,13 @@ export class PlatformBillingRequestsService {
     const offerAction = linkedOfferId
       ? await resolveRequestOfferAction(db, request.tenantId, linkedOfferId)
       : null;
+    const linkLabels = await resolveLinkLabels(db, request.tenantId, links);
     return {
       ...requestSource(request),
       allowedTransitions: transitions[request.status],
       offerAction,
       events: events.map(eventSource),
-      links: links.map(inferLinkSource),
+      links: links.map((link) => inferLinkSource(link, linkLabels)),
     };
   }
 }
@@ -580,13 +659,15 @@ async function assertTarget(
   targetId: string,
 ) {
   const table = linkTable(type);
+  const label = linkLabelColumn(type);
   const [target] = await tx
-    .select({ id: table.id })
+    .select({ id: table.id, label })
     .from(table)
     .where(and(eq(table.tenantId, tenantId), eq(table.id, targetId)))
     .for("share")
     .limit(1);
   if (!target) throw new NotFoundException({ code: linkNotFoundCode(type) });
+  return target.label;
 }
 
 async function assertTargetNotLinked(
@@ -666,6 +747,14 @@ function linkTable(type: LinkType) {
   return schema.orderedServices;
 }
 
+function linkLabelColumn(type: LinkType) {
+  if (type === "offer") return schema.commercialOffers.number;
+  if (type === "invoice") return schema.invoices.number;
+  if (type === "payment") return schema.billingPayments.bankReference;
+  if (type === "act") return schema.billingActs.number;
+  return schema.orderedServices.nameRu;
+}
+
 function linkColumn(type: LinkType) {
   if (type === "offer") return schema.tenantBillingRequestLinks.offerId;
   if (type === "invoice") return schema.tenantBillingRequestLinks.invoiceId;
@@ -703,10 +792,83 @@ function responsibleSide(status: RequestStatus) {
   return "markiro" as const;
 }
 
-function requestSource(request: typeof schema.tenantBillingRequests.$inferSelect) {
+function escapeLikePattern(value: string) {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+async function resolveLinkLabels(
+  db: RequestReadExecutor,
+  tenantId: string,
+  links: readonly (typeof schema.tenantBillingRequestLinks.$inferSelect)[],
+) {
+  const labels = new Map<string, string | null>();
+  const offerIds = links.flatMap((link) => (link.offerId ? [link.offerId] : []));
+  const invoiceIds = links.flatMap((link) => (link.invoiceId ? [link.invoiceId] : []));
+  const paymentIds = links.flatMap((link) => (link.paymentId ? [link.paymentId] : []));
+  const actIds = links.flatMap((link) => (link.actId ? [link.actId] : []));
+  const serviceIds = links.flatMap((link) =>
+    link.orderedServiceId ? [link.orderedServiceId] : [],
+  );
+  if (offerIds.length > 0) {
+    const rows = await db
+      .select({ id: schema.commercialOffers.id, label: schema.commercialOffers.number })
+      .from(schema.commercialOffers)
+      .where(
+        and(
+          eq(schema.commercialOffers.tenantId, tenantId),
+          inArray(schema.commercialOffers.id, offerIds),
+        ),
+      );
+    for (const row of rows) labels.set(row.id, row.label);
+  }
+  if (invoiceIds.length > 0) {
+    const rows = await db
+      .select({ id: schema.invoices.id, label: schema.invoices.number })
+      .from(schema.invoices)
+      .where(and(eq(schema.invoices.tenantId, tenantId), inArray(schema.invoices.id, invoiceIds)));
+    for (const row of rows) labels.set(row.id, row.label);
+  }
+  if (paymentIds.length > 0) {
+    const rows = await db
+      .select({ id: schema.billingPayments.id, label: schema.billingPayments.bankReference })
+      .from(schema.billingPayments)
+      .where(
+        and(
+          eq(schema.billingPayments.tenantId, tenantId),
+          inArray(schema.billingPayments.id, paymentIds),
+        ),
+      );
+    for (const row of rows) labels.set(row.id, row.label);
+  }
+  if (actIds.length > 0) {
+    const rows = await db
+      .select({ id: schema.billingActs.id, label: schema.billingActs.number })
+      .from(schema.billingActs)
+      .where(
+        and(eq(schema.billingActs.tenantId, tenantId), inArray(schema.billingActs.id, actIds)),
+      );
+    for (const row of rows) labels.set(row.id, row.label);
+  }
+  if (serviceIds.length > 0) {
+    const rows = await db
+      .select({ id: schema.orderedServices.id, label: schema.orderedServices.nameRu })
+      .from(schema.orderedServices)
+      .where(
+        and(
+          eq(schema.orderedServices.tenantId, tenantId),
+          inArray(schema.orderedServices.id, serviceIds),
+        ),
+      );
+    for (const row of rows) labels.set(row.id, row.label);
+  }
+  return labels;
+}
+
+function requestSource(request: RequestWithTenantName) {
   return {
     id: request.id,
     tenantId: request.tenantId,
+    tenantName: request.tenantName,
     number: request.number,
     type: request.type,
     status: request.status,
@@ -745,6 +907,7 @@ function linkSource(
   link: typeof schema.tenantBillingRequestLinks.$inferSelect,
   type: LinkType,
   targetId: string,
+  targetLabel: string | null,
 ): PlatformBillingRequestLink {
   return {
     id: link.id,
@@ -752,16 +915,38 @@ function linkSource(
     requestId: link.requestId,
     type,
     targetId,
+    targetLabel,
+    targetHref: linkTargetHref(type, targetId, link.tenantId),
     createdAt: link.createdAt.toISOString(),
   };
 }
 
-function inferLinkSource(link: typeof schema.tenantBillingRequestLinks.$inferSelect) {
-  if (link.offerId) return linkSource(link, "offer", link.offerId);
-  if (link.invoiceId) return linkSource(link, "invoice", link.invoiceId);
-  if (link.paymentId) return linkSource(link, "payment", link.paymentId);
-  if (link.actId) return linkSource(link, "act", link.actId);
-  if (link.orderedServiceId) return linkSource(link, "ordered_service", link.orderedServiceId);
+function linkTargetHref(type: LinkType, targetId: string, tenantId: string): string {
+  if (type === "offer") return `/offers?selected=${targetId}`;
+  if (type === "invoice") return `/invoices/${targetId}`;
+  if (type === "payment") return `/payments?selected=${targetId}`;
+  if (type === "act") return `/billing-acts/${targetId}`;
+  return `/tenants/${encodeURIComponent(tenantId)}?section=services&selected=${targetId}`;
+}
+
+function inferLinkSource(
+  link: typeof schema.tenantBillingRequestLinks.$inferSelect,
+  labels: ReadonlyMap<string, string | null>,
+) {
+  if (link.offerId)
+    return linkSource(link, "offer", link.offerId, labels.get(link.offerId) ?? null);
+  if (link.invoiceId)
+    return linkSource(link, "invoice", link.invoiceId, labels.get(link.invoiceId) ?? null);
+  if (link.paymentId)
+    return linkSource(link, "payment", link.paymentId, labels.get(link.paymentId) ?? null);
+  if (link.actId) return linkSource(link, "act", link.actId, labels.get(link.actId) ?? null);
+  if (link.orderedServiceId)
+    return linkSource(
+      link,
+      "ordered_service",
+      link.orderedServiceId,
+      labels.get(link.orderedServiceId) ?? null,
+    );
   throw new Error("Unsupported platform billing request link target");
 }
 

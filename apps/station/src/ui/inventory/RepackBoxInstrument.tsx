@@ -20,6 +20,7 @@ export interface RepackBoxInstrumentProps {
     oldSelected: string;
     accepted: string;
     discrepancy: string;
+    sourceDateMismatch: string;
     writeFailed: string;
     position: (position: number, filled: boolean) => string;
     formatDate: (value: string) => string;
@@ -50,9 +51,11 @@ export function RepackBoxInstrument({
       ? labels.oldSelected
       : result?.verdict === "expected" || result?.verdict === "capacity-closed"
         ? labels.accepted
-        : result
-          ? labels.discrepancy
-          : null;
+        : result?.verdict === "source-date-mismatch"
+          ? labels.sourceDateMismatch
+          : result
+            ? labels.discrepancy
+            : null;
   const capacity = box?.capacity ?? configuredCapacity;
   const count = box?.itemCount ?? 0;
 

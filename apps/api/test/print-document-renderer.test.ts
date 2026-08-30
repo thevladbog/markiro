@@ -67,6 +67,14 @@ describe("print document HTML renderer", () => {
     }
   });
 
+  it("ships the private server-side signature and legal seal assets", () => {
+    for (const file of ["vb-signature-ink.png", "vb-seal-legal-logo-duo-mci.png"]) {
+      const path = join(process.cwd(), "src/modules/billing/assets", file);
+      expect(existsSync(path)).toBe(true);
+      expect(readFileSync(path).subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+    }
+  });
+
   it("renders a deterministic Cyrillic legal invoice", () => {
     expect(
       renderPrintHtml({
@@ -87,18 +95,42 @@ describe("print document HTML renderer", () => {
   });
 
   it("renders the approved invoice hierarchy without duplicate labels", () => {
-    const html = renderPrintHtml(baseInvoice);
+    const html = renderPrintHtml({ ...baseInvoice, number: "MRK-INV-000184" });
     const screenPage = html.match(/<article class="print-page">[\s\S]*<\/article>/)?.[0] ?? "";
 
     expect(count(screenPage, "СЧЁТ НА ОПЛАТУ")).toBe(1);
-    expect(html).toContain("№ 184 · 24.08.2026");
+    expect(html).toContain("№ MRK-INV-000184 · 24.08.2026");
     expect(html).toContain("Лицензия и услуги платформы Markiro");
     expect(html).not.toContain("Основной расчётный счёт");
     expect(html).not.toContain("Оплатить по QR");
     expect(html).toContain('aria-label="QR-код для оплаты счёта"');
     expect(html).toContain('aria-label="Штрихкод формы"');
+    expect(html).toContain('data-barcode-value="MRK-INV-000184"');
+    expect(html).toContain(">MRK-INV-000184</span>");
     expect(count(screenPage, "Сформировано системой Markiro")).toBe(1);
     expect(count(html, 'aria-hidden="true"')).toBe(2);
+  });
+
+  it("renders an authorized seller signature and seal only for the signed variant", () => {
+    const authorizedInvoice = {
+      ...baseInvoice,
+      seller: { ...baseInvoice.seller, taxId: "234190622844" },
+    };
+
+    const clean = renderPrintHtml(authorizedInvoice, { printVariant: "clean" });
+    const signed = renderPrintHtml(authorizedInvoice, { printVariant: "signed" });
+
+    expect(clean).not.toContain('class="authorized-signature"');
+    expect(clean).not.toContain('class="legal-seal"');
+    expect(signed).toContain('data-print-variant="signed"');
+    expect(signed).toContain('class="authorized-signature"');
+    expect(signed).toContain('class="legal-seal"');
+  });
+
+  it("rejects a signed form when the seller tax id does not match the legal seal", () => {
+    expect(() => renderPrintHtml(baseInvoice, { printVariant: "signed" })).toThrow(
+      "signed_print_seller_not_authorized",
+    );
   });
 
   it("renders the approved eight-module Markiro lockup in the print header", () => {
@@ -199,6 +231,13 @@ describe("print document HTML renderer", () => {
     );
   });
 
+  it.each([
+    ["invoice", "MRK-INV-000184"],
+    ["act", "MRK-ACT-000184"],
+  ] as const)("encodes the %s form business number without a duplicate prefix", (kind, number) => {
+    expect(documentBarcodeValue({ ...baseInvoice, kind, number })).toBe(number);
+  });
+
   it("renders a line comment below the item name in HTML", () => {
     const html = renderPrintHtml({
       kind: "invoice",
@@ -249,6 +288,20 @@ describe("print document HTML renderer", () => {
     });
     expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
     expect(pdf.byteLength).toBeLessThan(10 * 1024 * 1024);
+  });
+
+  it("renders distinct clean and signed PDF bytes for the authorized seller", async () => {
+    const authorizedInvoice = {
+      ...baseInvoice,
+      seller: { ...baseInvoice.seller, taxId: "234190622844" },
+    };
+
+    const clean = await renderPrintPdf(authorizedInvoice, { printVariant: "clean" });
+    const signed = await renderPrintPdf(authorizedInvoice, { printVariant: "signed" });
+
+    expect(clean.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(signed.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(signed.equals(clean)).toBe(false);
   });
 
   it("includes a line comment in the PDF output", async () => {

@@ -1,5 +1,4 @@
 import {
-  billingActUploadTooLargeErrorSchema,
   platformAuditContracts,
   platformAuthContracts,
   platformCatalogContracts,
@@ -222,12 +221,14 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/invoices/{id}/issue",
     "201",
     platformCommercialContracts.invoices.issue.response,
+    { body: platformCommercialContracts.invoices.issue.body },
   ),
   route(
     "post",
     "/platform/invoices/{id}/document",
     "201",
     platformCommercialContracts.invoices.document.response,
+    { body: platformCommercialContracts.invoices.document.body },
   ),
   route(
     "get",
@@ -240,6 +241,7 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/invoices/{id}/documents",
     "201",
     platformCommercialContracts.invoices.documents.render.response,
+    { body: platformCommercialContracts.invoices.documents.render.body },
   ),
   route(
     "get",
@@ -284,6 +286,13 @@ export const CURRENT_SAAS_ROUTES = [
     "/platform/billing/requests/{id}",
     "200",
     platformCommercialContracts.billingRequests.detail.response,
+  ),
+  route(
+    "get",
+    "/platform/billing/requests/{id}/link-targets",
+    "200",
+    platformCommercialContracts.billingRequests.linkTargets.response,
+    { query: platformCommercialContracts.billingRequests.linkTargets.query },
   ),
   route(
     "post",
@@ -342,8 +351,6 @@ export const CURRENT_SAAS_ROUTES = [
     platformCommercialContracts.billingActs.issue.response,
     {
       body: platformCommercialContracts.billingActs.issue.body,
-      multipart: true,
-      errors: [{ status: "413", schema: billingActUploadTooLargeErrorSchema }],
     },
   ),
   route(

@@ -22,6 +22,7 @@ export const inventoryStatusSchema = z.enum([
   "draft",
   "preparing",
   "ready",
+  "cancelled",
   "running",
   "closed",
   "completed",

@@ -131,6 +131,8 @@ describe("tenant billing workflow schema", () => {
       "billing_act_documents_tenant_act_state_idx",
     );
     expect(schema.billingActDocuments.state).toBeDefined();
+    expect(schema.billingActDocuments.printVariant).toBeDefined();
+    expect(schema.invoiceDocuments.printVariant).toBeDefined();
     expect(schema.billingActDocuments.readyAt).toBeDefined();
     expect(schema.billingActDocuments.updatedAt).toBeDefined();
     expect(constraintNames(schema.platformBillingMutationIdempotency).uniqueConstraints).toContain(

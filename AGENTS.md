@@ -36,15 +36,38 @@ analogous fixes before editing.
   flows and device authentication.
 - `apps/station`: React/Vite line-station UI plus the Tauri/Rust hardware shell in
   `src-tauri` for scanners, printers, local storage, and updates.
+- `apps/signer`: React/Vite tray UI plus a Tauri 2 shell over the `signer-core`
+  Rust crate. Runs on a tenant's UKEP machine and keeps a fresh Chestny ZNAK
+  True API token in the cloud by signing the auth challenge with a GOST
+  certificate. Windows-only; its Cargo workspace is `signer-core` + `src-tauri`.
+- `apps/saas-admin`: platform operator panel for tenants, catalog, billing,
+  acts, payments, offers, legal documents, platform team, and audit. It has its
+  own auth boundary and client; it is not a tenant-admin route set.
+- `apps/landing`: Astro public site with localized content, SEO, the demo form,
+  and published legal artifacts.
 - `packages/domain`: shared GS1/KM/GTIN/SSCC validation, label models,
   ZPL/TSPL, rasterization, and other framework-independent rules.
 - `packages/db`: Drizzle models, Postgres migrations, the station SQLite mirror,
   and runtime migration helpers.
+- `packages/platform-contracts`: shared Zod schemas for the platform, tenant,
+  and agent APIs, including catalog, commercial, tenant, platform-auth, and
+  CHZ-signer contracts.
 - `packages/email`: React Email templates and rendering helpers.
 - `packages/ui`: shared design tokens, styles, themes, and React components.
+- `packages/legal-documents`: controlled legal-document sources plus DOCX/PDF
+  artifact generation, manifests, and verification.
 - `deploy/production`: production Compose, images, preflight, deployment, smoke,
   and contract tests.
-- `tools/production-browser`: isolated Playwright checks for production docs.
+- `deploy/yandex`: runtime inventory, remote deployment, and diagnostics for the
+  Yandex Cloud host.
+- `infra/yandex`: Terraform for Yandex Cloud — IAM, network, compute, managed
+  Postgres, object storage, and station-release buckets, plus the production
+  stack's variables and outputs.
+- `tools/station-release`: station release artifacts, changelog, promotion, and
+  object-storage/GitHub mirror contracts.
+- `tools/evidence-package`: evidence package init, seal, and verification.
+- `tools/production-browser`: isolated Playwright checks for production docs,
+  the landing site, kiosk touch flows, and station inventory.
 - `docs/architecture.md`: accepted system-level decisions and invariants.
 - `docs/design-briefs/`: product/UX reference. HTML handoff artifacts are
   reference material; production design tokens live in `packages/ui`.
@@ -291,17 +314,32 @@ browser deployment work.
 | `apps/admin`                     | focused component/API-client test, package test, typecheck, lint, build      | automated DOM tests are not visual browser confirmation                               |
 | `apps/kiosk`                     | focused IndexedDB/sync/UI tests, package test, typecheck, lint, build        | build domain/UI first in fresh worktrees; exercise offline restart and old queues     |
 | `apps/station`                   | focused journal/sync/hardware/UI tests, package test, typecheck, lint, build | Rust, Windows, scanner, printer, sound, and updater behavior need separate checks     |
+| `apps/signer`                    | focused UI test, package test, typecheck, lint, build, plus Cargo tests      | host Cargo tests do not prove CryptoAPI signing, DPAPI storage, or Windows behavior   |
+| `apps/saas-admin`                | focused component/API-client test, package test, typecheck, lint, build      | assert the platform auth boundary and capabilities separately from tenant routes      |
+| `apps/landing`                   | focused test, package test, typecheck, lint, build                           | SEO, Lighthouse, CSP, and legal-artifact publication are separate browser checks      |
+| `packages/platform-contracts`    | focused schema test, package test, typecheck, lint, build                    | run affected API and saas-admin consumers; schemas are `.strict()`, so fields break   |
 | `packages/ui` / `packages/email` | focused render/component test, package test, typecheck, lint, build          | check consuming surfaces and email-client/browser rendering when material             |
+| `packages/legal-documents`       | focused test, package test, typecheck, lint, build, `artifacts:verify`       | regenerating PDFs also means updating the production attestation; see below           |
 | `deploy/production`              | production bundle contracts and affected focused Node tests                  | live DNS/TLS/registry/cloud verification remains external                             |
 
-For Rust changes under `apps/station/src-tauri`, also use the appropriate Cargo
-checks, for example:
+For Rust changes under `apps/station/src-tauri` or in the `apps/signer` Cargo
+workspace, also use the appropriate Cargo checks, for example:
 
 ```bash
 cargo test --manifest-path apps/station/src-tauri/Cargo.toml
+cargo test --manifest-path apps/signer/Cargo.toml --workspace
 ```
 
 Do not claim Windows or hardware confirmation from a host-only Cargo test.
+`signer-core` keeps every OS- and network-touching capability behind a trait, so
+a green host run proves the runtime loop and nothing about CryptoAPI signing,
+DPAPI storage, or a real certificate.
+
+Regenerating `packages/legal-documents` artifacts is wider than the package.
+`deploy/production/verify-legal-artifacts.mjs` pins `RELEASE_ID` and the exact
+PDF list, and `deploy/production/legal-artifacts-attestation.json` pins the
+manifest sha256 plus a sha256 per PDF. Changing the artifact set or its bytes
+means updating both, and the gate is `pnpm test:production-bundle:contract`.
 
 ## Dependencies and generated artifacts
 

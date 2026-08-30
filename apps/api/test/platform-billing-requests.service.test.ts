@@ -354,13 +354,12 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
 
     const list = await requests.list(actor, { tenantId: tenantA, status: "under_review" });
     expect(list.truncated).toBe(false);
-    expect(list.items.find((item) => item.id === request.id)?.allowedTransitions).toEqual([
-      "clarification_required",
-      "offer_prepared",
-      "in_progress",
-      "cancelled",
-    ]);
+    expect(list.items.find((item) => item.id === request.id)).toMatchObject({
+      tenantName: `Subscription fixture ${tenantA}`,
+      allowedTransitions: ["clarification_required", "offer_prepared", "in_progress", "cancelled"],
+    });
     await expect(requests.detail(actor, request.id)).resolves.toMatchObject({
+      tenantName: `Subscription fixture ${tenantA}`,
       allowedTransitions: ["clarification_required", "offer_prepared", "in_progress", "cancelled"],
     });
   });
@@ -921,6 +920,17 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
       requestId: request.id,
       type: "offer",
       targetId: offer!.id,
+      targetLabel: offer!.number,
+      targetHref: `/offers?selected=${offer!.id}`,
+    });
+    await expect(requests.detail(actor, request.id)).resolves.toMatchObject({
+      links: [
+        expect.objectContaining({
+          targetId: offer!.id,
+          targetLabel: offer!.number,
+          targetHref: `/offers?selected=${offer!.id}`,
+        }),
+      ],
     });
     const linkedEvents = await connection.db
       .select()
@@ -928,6 +938,52 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
       .where(eq(schema.tenantBillingRequestEvents.idempotencyKey, idempotencyKey));
     expect(linkedEvents).toHaveLength(1);
     expect(linkedEvents[0]).toMatchObject({ kind: "offer_linked", actorPlatformUserId: actorId });
+  });
+
+  it("suggests only unlinked request-tenant targets matching their display number", async () => {
+    const request = await insertRequest(connection.db, tenantA, tenantUser, "under_review");
+    const suffix = randomUUID();
+    const [localOffer] = await connection.db
+      .insert(schema.commercialOffers)
+      .values({
+        tenantId: tenantA,
+        revision: 1,
+        status: "published",
+        number: `KP-SUGGEST-${suffix}`,
+        publishedAt: new Date(),
+        createdByPlatformUserId: actorId,
+      })
+      .returning();
+    await connection.db.insert(schema.commercialOffers).values({
+      tenantId: tenantB,
+      revision: 1,
+      status: "published",
+      number: `KP-SUGGEST-FOREIGN-${suffix}`,
+      publishedAt: new Date(),
+      createdByPlatformUserId: actorId,
+    });
+
+    await expect(
+      requests.linkTargets(actor, request.id, { type: "offer", q: `suggest-${suffix}` }),
+    ).resolves.toEqual({
+      items: [
+        {
+          id: localOffer!.id,
+          label: localOffer!.number,
+          href: `/offers?selected=${localOffer!.id}`,
+        },
+      ],
+      truncated: false,
+    });
+
+    await requests.link(actor, request.id, {
+      type: "offer",
+      targetId: localOffer!.id,
+      idempotencyKey: randomUUID(),
+    });
+    await expect(
+      requests.linkTargets(actor, request.id, { type: "offer", q: `suggest-${suffix}` }),
+    ).resolves.toEqual({ items: [], truncated: false });
   });
 
   it("serializes different-request claims for the same target into one link and one exact conflict", async () => {
@@ -1280,6 +1336,8 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
       if (outcomes[0]?.status !== "fulfilled" || outcomes[1]?.status !== "fulfilled") {
         throw new Error("invoice allocation did not complete for both tenants");
       }
+      expect(outcomes[0].value.number).toMatch(/^MRK-INV-[0-9]+$/);
+      expect(outcomes[1].value.number).toMatch(/^MRK-INV-[0-9]+$/);
       expect(outcomes[0].value.number).not.toBe(outcomes[1].value.number);
     } finally {
       await connection.pool.query(`
@@ -1292,12 +1350,12 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
   it("allocates after arbitrary-length numeric suffixes and ignores malformed invoice numbers", async () => {
     const fixtureNumbers = [
       "INV-9223372036854775808",
-      "INV-00009223372036854775809",
-      "INV-999999999999999999999999999999x",
+      "MRK-INV-00009223372036854775809",
+      "MRK-INV-999999999999999999999999999999x",
       "MANUAL-999999999999999999999999999999999999",
-      "INV-9223372036854775810",
-      "INV-999999999999999999999999999999",
-      "INV-1000000000000000000000000000000",
+      "MRK-INV-9223372036854775810",
+      "MRK-INV-999999999999999999999999999999",
+      "MRK-INV-1000000000000000000000000000000",
     ];
     await connection.db.insert(schema.invoices).values(
       fixtureNumbers.slice(0, 4).map((number) => ({
@@ -1309,16 +1367,16 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
 
     try {
       await expect(billing.create(actor, invoiceInput(tenantA))).resolves.toMatchObject({
-        number: "INV-9223372036854775810",
+        number: "MRK-INV-9223372036854775810",
       });
 
       await connection.db.insert(schema.invoices).values({
         tenantId: tenantB,
-        number: "INV-999999999999999999999999999999",
+        number: "MRK-INV-999999999999999999999999999999",
         createdByPlatformUserId: actorId,
       });
       await expect(billing.create(actor, invoiceInput(tenantB))).resolves.toMatchObject({
-        number: "INV-1000000000000000000000000000000",
+        number: "MRK-INV-1000000000000000000000000000000",
       });
     } finally {
       await connection.pool.query(

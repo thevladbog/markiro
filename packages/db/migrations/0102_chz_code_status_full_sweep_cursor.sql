@@ -1,1 +1,0 @@
-ALTER TABLE "chz_code_status_cursors" ADD COLUMN "last_full_sweep_at" timestamp with time zone;

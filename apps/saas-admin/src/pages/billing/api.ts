@@ -7,6 +7,7 @@ import {
   type InvoiceApplicationResult,
   type InvoiceDetail,
   type ManualPaymentInput,
+  type PrintDocumentVariant,
 } from "@markiro/platform-contracts";
 
 import { platformApiFetch } from "../../api/client.js";
@@ -29,12 +30,13 @@ export function createInvoice(input: CreateInvoiceInput) {
   });
 }
 
-export function issueInvoice(id: string) {
+export function issueInvoice(id: string, printVariant: PrintDocumentVariant = "clean") {
   const validatedId = platformCommercialContracts.invoices.issue.params.parse(id);
+  const body = platformCommercialContracts.invoices.issue.body.parse({ printVariant });
   return platformApiFetch(`/invoices/${validatedId}/issue`, {
     responseSchema: platformCommercialContracts.invoices.issue.response,
     method: "POST",
-    body: "{}",
+    body: JSON.stringify(body),
   });
 }
 
@@ -88,12 +90,13 @@ export function applyInvoice(
   });
 }
 
-export function renderInvoice(id: string) {
+export function renderInvoice(id: string, printVariant: PrintDocumentVariant = "clean") {
   const validatedId = platformCommercialContracts.invoices.documents.render.params.parse(id);
+  const body = platformCommercialContracts.invoices.documents.render.body.parse({ printVariant });
   return platformApiFetch(`/invoices/${validatedId}/documents`, {
     responseSchema: platformCommercialContracts.invoices.documents.render.response,
     method: "POST",
-    body: "{}",
+    body: JSON.stringify(body),
   });
 }
 

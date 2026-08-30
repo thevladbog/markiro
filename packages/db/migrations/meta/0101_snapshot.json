@@ -1,5 +1,5 @@
 {
-  "id": "1360e866-714b-4a04-a9ac-371eb9cb36ba",
+  "id": "ccebb7b0-94a9-45bd-9016-b2f131ac7d77",
   "prevId": "cbe4c3e6-7770-4b2a-aaa9-1d38890522d3",
   "version": "7",
   "dialect": "postgresql",
@@ -16146,6 +16146,18 @@
           "primaryKey": false,
           "notNull": true
         },
+        "cancelled_by_user_id": {
+          "name": "cancelled_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancelled_at": {
+          "name": "cancelled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "started_by_user_id": {
           "name": "started_by_user_id",
           "type": "text",
@@ -16282,6 +16294,19 @@
           "tableTo": "user",
           "columnsFrom": [
             "created_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "inventories_cancelled_by_user_id_user_id_fk": {
+          "name": "inventories_cancelled_by_user_id_user_id_fk",
+          "tableFrom": "inventories",
+          "tableTo": "user",
+          "columnsFrom": [
+            "cancelled_by_user_id"
           ],
           "columnsTo": [
             "id"
@@ -16460,11 +16485,19 @@
         },
         "inventories_active_snapshot_lifecycle_check": {
           "name": "inventories_active_snapshot_lifecycle_check",
-          "value": "(\"inventories\".\"status\" in ('draft', 'preparing') and \"inventories\".\"active_snapshot_id\" is null)\n        or (\"inventories\".\"status\" in ('ready', 'running', 'closed', 'completed') and \"inventories\".\"active_snapshot_id\" is not null)"
+          "value": "(\"inventories\".\"status\" in ('draft', 'preparing') and \"inventories\".\"active_snapshot_id\" is null)\n        or (\"inventories\".\"status\" = 'cancelled')\n        or (\"inventories\".\"status\" in ('ready', 'running', 'closed', 'completed') and \"inventories\".\"active_snapshot_id\" is not null)"
         },
         "inventories_station_manifest_lifecycle_check": {
           "name": "inventories_station_manifest_lifecycle_check",
-          "value": "(\"inventories\".\"status\" in ('draft', 'preparing', 'ready') and \"inventories\".\"station_manifest\" is null)\n        or (\"inventories\".\"status\" in ('running', 'closed', 'completed') and \"inventories\".\"station_manifest\" is not null)"
+          "value": "(\"inventories\".\"status\" in ('draft', 'preparing', 'ready', 'cancelled') and \"inventories\".\"station_manifest\" is null)\n        or (\"inventories\".\"status\" in ('running', 'closed', 'completed') and \"inventories\".\"station_manifest\" is not null)"
+        },
+        "inventories_cancelled_fields_check": {
+          "name": "inventories_cancelled_fields_check",
+          "value": "(\"inventories\".\"cancelled_by_user_id\" is null and \"inventories\".\"cancelled_at\" is null)\n          or (\"inventories\".\"cancelled_by_user_id\" is not null and \"inventories\".\"cancelled_at\" is not null)"
+        },
+        "inventories_cancelled_lifecycle_check": {
+          "name": "inventories_cancelled_lifecycle_check",
+          "value": "(\"inventories\".\"status\" = 'cancelled'\n            and \"inventories\".\"cancelled_by_user_id\" is not null\n            and \"inventories\".\"cancelled_at\" is not null)\n          or (\"inventories\".\"status\" <> 'cancelled'\n            and \"inventories\".\"cancelled_by_user_id\" is null\n            and \"inventories\".\"cancelled_at\" is null)"
         },
         "inventories_emergency_close_fields_check": {
           "name": "inventories_emergency_close_fields_check",
@@ -20735,208 +20768,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.chz_code_status_cursors": {
-      "name": "chz_code_status_cursors",
-      "schema": "",
-      "columns": {
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "last_scanned_at": {
-          "name": "last_scanned_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "chz_code_status_cursors_tenant_id_organization_id_fk": {
-          "name": "chz_code_status_cursors_tenant_id_organization_id_fk",
-          "tableFrom": "chz_code_status_cursors",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.chz_code_statuses": {
-      "name": "chz_code_statuses",
-      "schema": "",
-      "columns": {
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "code_hash": {
-          "name": "code_hash",
-          "type": "char(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "chz_product_group_code": {
-          "name": "chz_product_group_code",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status_ex": {
-          "name": "status_ex",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "owner_inn": {
-          "name": "owner_inn",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "withdraw_reason": {
-          "name": "withdraw_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "unknown_attempts": {
-          "name": "unknown_attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "first_seen_at": {
-          "name": "first_seen_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "checked_at": {
-          "name": "checked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "next_refresh_at": {
-          "name": "next_refresh_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "chz_code_statuses_due_idx": {
-          "name": "chz_code_statuses_due_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "next_refresh_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"chz_code_statuses\".\"chz_product_group_code\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "chz_code_statuses_tenant_id_organization_id_fk": {
-          "name": "chz_code_statuses_tenant_id_organization_id_fk",
-          "tableFrom": "chz_code_statuses",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "chz_code_statuses_chz_product_group_code_chz_product_groups_code_fk": {
-          "name": "chz_code_statuses_chz_product_group_code_chz_product_groups_code_fk",
-          "tableFrom": "chz_code_statuses",
-          "tableTo": "chz_product_groups",
-          "columnsFrom": [
-            "chz_product_group_code"
-          ],
-          "columnsTo": [
-            "code"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "chz_code_statuses_tenant_id_code_hash_pk": {
-          "name": "chz_code_statuses_tenant_id_code_hash_pk",
-          "columns": [
-            "tenant_id",
-            "code_hash"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "chz_code_statuses_hash_check": {
-          "name": "chz_code_statuses_hash_check",
-          "value": "\"chz_code_statuses\".\"code_hash\" ~ '^[0-9a-f]{64}$'"
-        },
-        "chz_code_statuses_unknown_attempts_check": {
-          "name": "chz_code_statuses_unknown_attempts_check",
-          "value": "\"chz_code_statuses\".\"unknown_attempts\" >= 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.chz_export_runs": {
       "name": "chz_export_runs",
       "schema": "",
@@ -22182,6 +22013,7 @@
         "draft",
         "preparing",
         "ready",
+        "cancelled",
         "running",
         "closed",
         "completed"

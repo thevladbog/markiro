@@ -1,6 +1,7 @@
 CREATE TABLE "chz_code_status_cursors" (
 	"tenant_id" text PRIMARY KEY NOT NULL,
 	"last_scanned_at" timestamp with time zone,
+	"last_full_sweep_at" timestamp with time zone,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint

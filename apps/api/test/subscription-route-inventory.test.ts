@@ -240,6 +240,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /integrations/:type/candidates/:id/unhide (IntegrationsController.unhideCandidate)",
       "POST /integrations/:type/credentials (IntegrationsController.issueCredentials)",
       "POST /inventories (InventoriesController.create)",
+      "POST /inventories/:id/cancel (InventoriesController.cancel)",
       "POST /inventories/:id/chz-exports (ChzExportsController.order)",
       "POST /inventories/:id/chz-exports/retry (ChzExportsController.retry)",
       "POST /inventories/:id/close (InventoriesController.close)",

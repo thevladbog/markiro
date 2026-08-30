@@ -16,6 +16,7 @@ import { applyMigrations } from "../src/lib/mirror.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import { InventoryWorkScreen } from "../src/pages/InventoryWorkScreen.js";
+import { deferred } from "./support/deferred.js";
 import { makeExec } from "./support/sqlite-exec.js";
 
 const INVENTORY_ID = "11111111-1111-4111-8111-111111111111";
@@ -82,14 +83,6 @@ function scanner() {
   };
 }
 
-function deferred() {
-  let release!: () => void;
-  const promise = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  return { promise, release };
-}
-
 async function fixture() {
   const db = new DatabaseSync(":memory:");
   const exec = makeExec(db);
@@ -97,17 +90,18 @@ async function fixture() {
   db.prepare(
     "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0042', ?)",
   ).run(INVENTORY_ID, SNAPSHOT_ID);
-  for (const [serial, sourceStatus, sourceState, expected, protectedFlag] of [
-    ["EXPECTED", "INTRODUCED", null, 1, 0],
-    ["PROTECTED", "INTRODUCED", "MOVING_BY_UD", 0, 1],
-    ["INELIGIBLE", "APPLIED", null, 0, 0],
+  for (const [serial, sourceStatus, sourceState, expected, protectedFlag, productionDate] of [
+    ["EXPECTED", "INTRODUCED", null, 1, 0, "2026-08-19"],
+    ["PROTECTED", "INTRODUCED", "MOVING_BY_UD", 0, 1, "2026-08-19"],
+    ["INELIGIBLE", "APPLIED", null, 0, 0, "2026-08-19"],
+    ["NEXTDAY", "INTRODUCED", null, 1, 0, "2026-08-20"],
   ] as const) {
     const km = canonicalizeKm(raw(serial));
     db.prepare(
       `INSERT INTO inventory_snapshot_codes_mirror
        (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status, source_state,
         source_production_date, parent_sscc, expected, protected)
-       VALUES (?, ?, ?, ?, ?, ?, ?, '2026-08-19', NULL, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
     ).run(
       SNAPSHOT_ID,
       kmHash(km),
@@ -116,6 +110,7 @@ async function fixture() {
       km.serial,
       sourceStatus,
       sourceState,
+      productionDate,
       expected,
       protectedFlag,
     );
@@ -321,6 +316,14 @@ describe("simple inventory work screen", () => {
 
   it("persists a changed date and applies it to the next accepted scan", async () => {
     const { db, exec } = await fixture();
+    // The snapshot's own known date for this code must match the date the
+    // operator is about to apply: otherwise the terminal's first-ever scan
+    // silently adopts the code's own date instead (see the source production
+    // date guard), which would mask the manual date change under test here.
+    db.prepare(
+      `UPDATE inventory_snapshot_codes_mirror SET source_production_date = '2026-08-20'
+        WHERE snapshot_id = ? AND code_hash = ?`,
+    ).run(SNAPSHOT_ID, kmHash(canonicalizeKm(raw("EXPECTED"))));
     const scan = scanner();
     render(
       <InventoryWorkScreen
@@ -401,5 +404,375 @@ describe("simple inventory work screen", () => {
       { observed_production_date: "2026-08-19" },
       { observed_production_date: "2026-08-20" },
     ]);
+  });
+
+  it("holds a mismatching scan, then counts it after the operator adopts the code's date", async () => {
+    const { db, exec } = await fixture();
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', 1, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    scan.emit(raw("EXPECTED"));
+    await waitFor(() => expect(screen.getByText("Код принят")).toBeTruthy());
+
+    scan.emit(raw("NEXTDAY"));
+    await waitFor(() =>
+      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+    );
+    expect(scan.isListening()).toBe(false);
+    expect(
+      (
+        db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get() as {
+          count: number;
+        }
+      ).count,
+    ).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /Установить/ }));
+
+    await waitFor(() =>
+      expect(
+        (
+          db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get() as {
+            count: number;
+          }
+        ).count,
+      ).toBe(2),
+    );
+    const stored = db
+      .prepare("SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?")
+      .get(DEVICE_ID) as { active_production_date: string };
+    expect(stored.active_production_date).toBe("2026-08-20");
+  });
+
+  it("leaves nothing behind when the operator skips a mismatching code", async () => {
+    const { db, exec } = await fixture();
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', 1, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+    scan.emit(raw("EXPECTED"));
+    await waitFor(() => expect(screen.getByText("Код принят")).toBeTruthy());
+    scan.emit(raw("NEXTDAY"));
+    await waitFor(() =>
+      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить код" }));
+
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+    expect(
+      (
+        db.prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror").get() as {
+          count: number;
+        }
+      ).count,
+    ).toBe(1);
+    const stored = db
+      .prepare("SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?")
+      .get(DEVICE_ID) as { active_production_date: string };
+    expect(stored.active_production_date).toBe("2026-08-19");
+  });
+
+  it("keeps skip disabled and inert while an adopt's write is in flight, then lets the adopt land normally", async () => {
+    const { db, exec } = await fixture();
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', 1, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+    const gate = deferred();
+    let gated = false;
+    // Holds open only the terminal-date upsert `adoptHeldDate` issues
+    // (distinguished by its `active_production_date = excluded...` clause),
+    // not the sequence-allocation upsert every scan also issues against the
+    // same table.
+    const suspended: SqlExecutor = {
+      run: async (sql, params) => {
+        if (
+          !gated &&
+          /INSERT INTO inventory_terminal_state[\s\S]*active_production_date = excluded\.active_production_date/i.test(
+            sql,
+          )
+        ) {
+          gated = true;
+          await gate.promise;
+        }
+        return exec.run(sql, params);
+      },
+      all: <T,>(sql: string, params?: unknown[]) => exec.all<T>(sql, params),
+    };
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={suspended}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    scan.emit(raw("EXPECTED"));
+    await waitFor(() => expect(screen.getByText("Код принят")).toBeTruthy());
+
+    scan.emit(raw("NEXTDAY"));
+    await waitFor(() =>
+      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Установить/ }));
+    await waitFor(() => expect(gated).toBe(true));
+
+    // The write is still suspended on `gate.promise`. Proving the overlap
+    // cannot happen means proving skip has no way to release the hold while
+    // that write is in flight — not just that a click "does nothing" by
+    // accident.
+    const skipButton = screen.getByRole("button", {
+      name: "Пропустить код",
+    }) as HTMLButtonElement;
+    expect(skipButton.disabled).toBe(true);
+
+    // A disabled native button never dispatches its click handler, so this
+    // must be a no-op: the dialog stays open and the scanner stays held.
+    fireEvent.click(skipButton);
+    expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy();
+    expect(scan.isListening()).toBe(false);
+
+    // Escape is the dialog's other release path, gated inside
+    // `FullScreenDialog` by the same `backDisabled` flag — it must be inert
+    // too while the write is pending.
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy();
+    expect(scan.isListening()).toBe(false);
+
+    gate.release();
+
+    // Once the write lands, the adopt completes exactly as an uncontested
+    // adopt would: NEXTDAY is recorded under the adopted date, and the
+    // terminal's active date stays at the adopted value — there is nothing
+    // to revert, because the overlap the old compensating write guarded
+    // against was never possible.
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+    await waitFor(() =>
+      expect(
+        (
+          db.prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror").get() as {
+            count: number;
+          }
+        ).count,
+      ).toBe(2),
+    );
+    const nextDayHash = kmHash(canonicalizeKm(raw("NEXTDAY")));
+    const nextDayResult = db
+      .prepare(
+        "SELECT observed_production_date FROM inventory_code_results_mirror WHERE code_hash = ?",
+      )
+      .get(nextDayHash) as { observed_production_date: string };
+    expect(nextDayResult.observed_production_date).toBe("2026-08-20");
+    const stored = db
+      .prepare("SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?")
+      .get(DEVICE_ID) as { active_production_date: string };
+    expect(stored.active_production_date).toBe("2026-08-20");
+  });
+
+  it("shows the mixed-dates dialog for a box whose children disagree, then counts it against the active date", async () => {
+    const { db, exec } = await fixture();
+    // A valid, unrelated 18-digit SSCC (mirrors the one used in
+    // inventory-journal.test.ts's own mixed-box unit test).
+    const SSCC = "346006820000000014";
+    const children = ["CHILD-A", "CHILD-B"].map((serial, index) => {
+      const km = canonicalizeKm(raw(serial));
+      db.prepare(
+        `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status, source_state,
+          source_production_date, parent_sscc, expected, protected)
+         VALUES (?, ?, ?, ?, ?, 'INTRODUCED', NULL, ?, ?, 1, 0)`,
+      ).run(
+        SNAPSHOT_ID,
+        kmHash(km),
+        km.raw,
+        km.gtin14,
+        km.serial,
+        index === 0 ? "2026-08-21" : "2026-08-22",
+        SSCC,
+      );
+      return { serial, codeHash: kmHash(km) };
+    });
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    scan.emit(raw("EXPECTED"));
+    await waitFor(() => expect(screen.getByText("Код принят")).toBeTruthy());
+
+    scan.emit(SSCC);
+    await waitFor(() => expect(screen.getByText("В коробе несколько дат розлива")).toBeTruthy());
+    expect(scan.isListening()).toBe(false);
+    expect(screen.getByText(/Подставить одну дату нельзя/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Установить/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Зачесть как есть" }));
+
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+    const stored = db
+      .prepare(
+        `SELECT code_hash, observed_production_date FROM inventory_code_results_mirror
+          WHERE code_hash IN (?, ?)`,
+      )
+      .all(children[0]!.codeHash, children[1]!.codeHash) as {
+      code_hash: string;
+      observed_production_date: string;
+    }[];
+    expect(stored).toHaveLength(2);
+    for (const row of stored) {
+      expect(row.observed_production_date).toBe("2026-08-19");
+    }
+    const terminalDate = db
+      .prepare("SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?")
+      .get(DEVICE_ID) as { active_production_date: string };
+    expect(terminalDate.active_production_date).toBe("2026-08-19");
+  });
+
+  it("clears a stale accepted result behind a held mismatching scan", async () => {
+    const { db, exec } = await fixture();
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', 1, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    scan.emit(raw("EXPECTED"));
+    await waitFor(() => expect(screen.getByText("Код принят")).toBeTruthy());
+
+    scan.emit(raw("NEXTDAY"));
+    await waitFor(() =>
+      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить код" }));
+
+    // NEXTDAY was never recorded, so the floor screen must not keep showing
+    // the previous scan's accepted verdict behind the (now closed) dialog —
+    // otherwise the operator would believe the skipped code was counted.
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+    expect(screen.queryByText("Код принят")).toBeNull();
+  });
+
+  it("holds only the first of two back-to-back mismatching scans and drops the second from the queue", async () => {
+    const { db, exec } = await fixture();
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', 1, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    scan.emit(raw("EXPECTED"));
+    await waitFor(() => expect(screen.getByText("Код принят")).toBeTruthy());
+
+    // Back to back, with no `await` in between: a keyboard-wedge scanner
+    // delivers a burst of codes into `source.start`'s callback inside one
+    // macrotask, before React commits `heldScan` and tears the listener
+    // down — both land in the scan queue's buffer before NEXTDAY's mismatch
+    // outcome has a chance to hold the queue. PROTECTED needs no date match
+    // to be accepted, so if it is silently processed behind the dialog it is
+    // unambiguously recorded.
+    scan.emit(raw("NEXTDAY"));
+    scan.emit(raw("PROTECTED"));
+
+    await waitFor(() =>
+      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+    );
+    expect(scan.isListening()).toBe(false);
+    // Only EXPECTED has ever been committed: NEXTDAY's mismatch writes
+    // nothing, and PROTECTED must not have been silently processed while
+    // the dialog for NEXTDAY is open.
+    expect(
+      (
+        db.prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror").get() as {
+          count: number;
+        }
+      ).count,
+    ).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить код" }));
+
+    // The scanner resumes intake with nothing queued behind it: PROTECTED
+    // was dropped entirely, not silently recorded and not held as a second
+    // dialog.
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+    expect(screen.queryByText("Дата в коде отличается от активной")).toBeNull();
+    expect(
+      (
+        db.prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror").get() as {
+          count: number;
+        }
+      ).count,
+    ).toBe(1);
+
+    // PROTECTED can still be scanned normally afterward.
+    scan.emit(raw("PROTECTED"));
+    expect(await screen.findByText("Код не учтён: уже в отгрузке")).toBeDefined();
   });
 });

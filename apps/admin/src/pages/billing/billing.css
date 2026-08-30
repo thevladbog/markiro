@@ -107,6 +107,33 @@
   justify-self: start;
 }
 
+.mk-billing-selected-files {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mk-billing-selected-files > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+}
+
+.mk-billing-selected-files span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mk-billing-request-context {
   margin: 0;
   padding: var(--sp-2) var(--sp-3);

@@ -495,6 +495,7 @@ function billingRequestDetail() {
   return {
     id: REQUEST_ID,
     tenantId: TENANT_ID,
+    tenantName: "Первый завод",
     number: "BR-42",
     type: "renewal",
     status: "under_review",

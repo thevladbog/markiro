@@ -66,7 +66,12 @@ async function setup(capacity = 2) {
   });
   const seed = (
     serial: string,
-    values: { expected?: number; state?: string | null; parent?: string | null } = {},
+    values: {
+      expected?: number;
+      state?: string | null;
+      parent?: string | null;
+      productionDate?: string;
+    } = {},
   ) => {
     const km = canonicalizeKm(raw(serial));
     const hash = kmHash(km);
@@ -74,7 +79,7 @@ async function setup(capacity = 2) {
       `INSERT INTO inventory_snapshot_codes_mirror
          (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status, source_state,
           source_production_date, parent_sscc, expected, protected)
-       VALUES (?, ?, ?, ?, ?, 'INTRODUCED', ?, '2026-08-20', ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, 'INTRODUCED', ?, ?, ?, ?, ?)`,
     ).run(
       SNAPSHOT_ID,
       hash,
@@ -82,6 +87,7 @@ async function setup(capacity = 2) {
       GTIN,
       serial,
       values.state ?? null,
+      values.productionDate ?? "2026-08-20",
       values.parent ?? OLD_SSCC,
       values.expected ?? 1,
       values.state === "MOVING_BY_UD" ? 1 : 0,
@@ -564,6 +570,152 @@ describe("durable inventory repacking", () => {
       phase: "closed-pending-print",
       box: { newSscc: before.box?.newSscc, itemCount: 1, printState: "pending" },
     });
+  });
+
+  it("opens the new box at the terminal's active date when the old box has no matching snapshot codes", async () => {
+    const { db, exec, capacity } = await setup();
+    const result = await recordInventoryRepackScan(
+      exec,
+      input(OLD_SSCC, "77777777-7777-4777-8777-777777777777", capacity),
+    );
+    expect(result).toMatchObject({ verdict: "old-box-selected", boxId: BOX_ID });
+    expect(
+      db
+        .prepare("SELECT production_date FROM inventory_repack_boxes_mirror WHERE box_id = ?")
+        .get(BOX_ID),
+    ).toEqual({ production_date: "2026-08-20" });
+  });
+
+  it("opens the new box at the terminal's active date when the old box's contents carry more than one production date", async () => {
+    const { db, exec, capacity, seed } = await setup();
+    seed("MIXED-1", { productionDate: "2026-08-21" });
+    seed("MIXED-2", { productionDate: "2026-08-22" });
+    const result = await recordInventoryRepackScan(
+      exec,
+      input(OLD_SSCC, "77777777-7777-4777-8777-777777777777", capacity),
+    );
+    expect(result).toMatchObject({ verdict: "old-box-selected", boxId: BOX_ID });
+    expect(
+      db
+        .prepare("SELECT production_date FROM inventory_repack_boxes_mirror WHERE box_id = ?")
+        .get(BOX_ID),
+    ).toEqual({ production_date: "2026-08-20" });
+    expect(
+      db
+        .prepare("SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?")
+        .get(DEVICE_ID),
+    ).toEqual({ active_production_date: "2026-08-20" });
+  });
+
+  it("rejects a bottle dated differently than the box and writes nothing", async () => {
+    const { db, exec, capacity, seed } = await setup();
+    await recordInventoryRepackScan(
+      exec,
+      input(OLD_SSCC, "77777777-7777-4777-8777-777777777777", capacity),
+    );
+    const mismatched = seed("MISMATCH", { productionDate: "2026-08-21" });
+    const sequenceBefore = db
+      .prepare("SELECT next_device_sequence FROM inventory_terminal_state WHERE device_id = ?")
+      .get(DEVICE_ID);
+    const journalCountBefore = db
+      .prepare("SELECT COUNT(*) AS n FROM inventory_repack_journal")
+      .get();
+
+    const result = await recordInventoryRepackScan(exec, {
+      ...input(mismatched.km.raw, "88888888-8888-4888-8888-888888888888", capacity),
+      createItemId: () => ITEM_ID,
+    });
+
+    expect(result).toMatchObject({
+      verdict: "source-date-mismatch",
+      itemCount: 0,
+      sourceProductionDate: "2026-08-21",
+    });
+    expect(
+      db
+        .prepare("SELECT next_device_sequence FROM inventory_terminal_state WHERE device_id = ?")
+        .get(DEVICE_ID),
+    ).toEqual(sequenceBefore);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM inventory_repack_journal").get()).toEqual(
+      journalCountBefore,
+    );
+    expect(db.prepare("SELECT COUNT(*) AS n FROM inventory_repack_items_mirror").get()).toEqual({
+      n: 0,
+    });
+  });
+
+  it("adds a mismatched bottle once the operator explicitly accepts the source date", async () => {
+    const { db, exec, capacity, seed } = await setup();
+    await recordInventoryRepackScan(
+      exec,
+      input(OLD_SSCC, "77777777-7777-4777-8777-777777777777", capacity),
+    );
+    const mismatched = seed("MISMATCH-ACCEPT", { productionDate: "2026-08-21" });
+
+    const result = await recordInventoryRepackScan(exec, {
+      ...input(mismatched.km.raw, "88888888-8888-4888-8888-888888888888", capacity),
+      createItemId: () => ITEM_ID,
+      acceptSourceDateMismatch: true,
+    });
+
+    expect(result).toMatchObject({ verdict: "expected", itemCount: 1 });
+    expect(
+      db
+        .prepare("SELECT code_hash FROM inventory_repack_items_mirror WHERE removed_at IS NULL")
+        .get(),
+    ).toEqual({ code_hash: mismatched.hash });
+  });
+
+  it("re-checks the source date when a code is re-attached after remove-last", async () => {
+    const { db, exec, capacity, seed } = await setup();
+    await recordInventoryRepackScan(
+      exec,
+      input(OLD_SSCC, "77777777-7777-4777-8777-777777777777", capacity),
+    );
+    const mismatched = seed("REATTACH", { productionDate: "2026-08-21" });
+    await recordInventoryRepackScan(exec, {
+      ...input(mismatched.km.raw, "88888888-8888-4888-8888-888888888888", capacity),
+      createItemId: () => ITEM_ID,
+      acceptSourceDateMismatch: true,
+    });
+    await removeLastInventoryRepackItem(exec, {
+      inventoryId: INVENTORY_ID,
+      snapshotId: SNAPSHOT_ID,
+      deviceId: DEVICE_ID,
+      operatorId: OPERATOR_ID,
+      eventId: "99999999-9999-4999-8999-999999999999",
+      changedAt: "2026-08-25T11:00:00.000Z",
+    });
+    const sequenceBefore = db
+      .prepare("SELECT next_device_sequence FROM inventory_terminal_state WHERE device_id = ?")
+      .get(DEVICE_ID);
+    const journalCountBefore = db
+      .prepare("SELECT COUNT(*) AS n FROM inventory_repack_journal")
+      .get();
+
+    const result = await recordInventoryRepackScan(exec, {
+      ...input(mismatched.km.raw, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", capacity),
+      createItemId: () => "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+
+    expect(result).toMatchObject({
+      verdict: "source-date-mismatch",
+      itemCount: 0,
+      sourceProductionDate: "2026-08-21",
+    });
+    expect(
+      db
+        .prepare("SELECT next_device_sequence FROM inventory_terminal_state WHERE device_id = ?")
+        .get(DEVICE_ID),
+    ).toEqual(sequenceBefore);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM inventory_repack_journal").get()).toEqual(
+      journalCountBefore,
+    );
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS n FROM inventory_repack_items_mirror WHERE removed_at IS NULL")
+        .get(),
+    ).toEqual({ n: 0 });
   });
 });
 
