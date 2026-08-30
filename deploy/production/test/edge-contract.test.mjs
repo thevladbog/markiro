@@ -505,7 +505,16 @@ function assertAuthorityContract(adapted, { alb }) {
     ["/api/auth/*"],
     ["/api/*"],
     ["/1c_exchange"],
-    ["/station/*", "/kiosk/*", "/health", "/health/*", "/openapi.json", "/docs", "/docs/*"],
+    [
+      "/station/*",
+      "/kiosk/*",
+      "/signer-agent/*",
+      "/health",
+      "/health/*",
+      "/openapi.json",
+      "/docs",
+      "/docs/*",
+    ],
     ["/shifts", "/shifts/box-label-templates", "/products", "/products/gtin-check"],
     ["/shifts", "/shifts/box-label-templates", "/products", "/products/gtin-check"],
     ["^/shifts/[^/]+/(open|bundle|reference-bundle)$"],
@@ -1078,6 +1087,7 @@ test("device proxy matcher retains exact infrastructure boundaries", async () =>
   assert.deepEqual(patterns, [
     "/station/*",
     "/kiosk/*",
+    "/signer-agent/*",
     "/health",
     "/health/*",
     "/openapi.json",
@@ -1087,6 +1097,7 @@ test("device proxy matcher retains exact infrastructure boundaries", async () =>
   for (const path of [
     "/station/bootstrap",
     "/kiosk/bootstrap",
+    "/signer-agent/pair",
     "/health",
     "/health/ready",
     "/openapi.json",

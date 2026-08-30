@@ -27,6 +27,7 @@ import {
   type SignerPairingCodeResult,
   type SignerTokenStatus,
 } from "./api.js";
+import { SignerDownloadLink } from "./SignerDownloadLink.js";
 
 const TOKEN_CHIP_STATUS: Record<SignerTokenStatus["status"], StatusChipStatus> = {
   none: "neutral",
@@ -169,6 +170,29 @@ export function SignerAgentsPanel() {
   return (
     <Card title={t("pages.integrations.channel.signer.title")}>
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-start",
+            gap: "var(--sp-2)",
+            padding: "var(--sp-3)",
+            border: "1px solid var(--line)",
+            borderRadius: "var(--r-2)",
+            background: "var(--surface-panel)",
+          }}
+        >
+          <p style={{ margin: 0, font: "var(--text-body-sm)", color: "var(--fg-2)" }}>
+            {t("pages.integrations.channel.signer.downloadHint")}
+          </p>
+          <SignerDownloadLink
+            data-analytics="signer_download_click"
+            data-placement="chestny-znak-signer"
+          >
+            {t("pages.integrations.channel.signer.downloadAction")}
+          </SignerDownloadLink>
+        </div>
+
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
             {t("pages.integrations.channel.signer.tokenLabel")}

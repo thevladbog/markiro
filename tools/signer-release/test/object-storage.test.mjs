@@ -4,7 +4,9 @@ import test from "node:test";
 
 import {
   assertSignerKey,
+  copySignerInstallerToDownload,
   createSignerObjectStore,
+  SIGNER_DOWNLOAD_KEY,
   SIGNER_MANIFEST_KEY,
   signerObjectKey,
   signerPublicUrl,
@@ -24,6 +26,7 @@ test("places a release artifact under the stable channel", () => {
     "signer/stable/releases/0.1.0/markiro-signer-0.1.0-setup.exe",
   );
   assert.equal(SIGNER_MANIFEST_KEY, "signer/stable/latest.json");
+  assert.equal(SIGNER_DOWNLOAD_KEY, "signer/download");
 });
 
 test("maps a key onto the public URL the agent fetches", () => {
@@ -60,6 +63,56 @@ test("refuses to build a store when a credential is missing", () => {
       }),
     /credential/,
   );
+});
+
+test("copies the exact immutable stable installer to the versionless download", async () => {
+  const commands = [];
+  const client = { send: async (command) => commands.push(command) };
+  const immutableKey = "signer/stable/releases/0.1.0/markiro-signer-0.1.0-windows-x86_64-setup.exe";
+
+  await copySignerInstallerToDownload({
+    client,
+    bucket: ENV.YANDEX_STATION_RELEASE_BUCKET,
+    immutableKey,
+    attachmentFilename: "markiro-signer-0.1.0-windows-x86_64-setup.exe",
+  });
+
+  assert.equal(commands[0].constructor.name, "CopyObjectCommand");
+  assert.deepEqual(commands[0].input, {
+    Bucket: ENV.YANDEX_STATION_RELEASE_BUCKET,
+    Key: "signer/download",
+    CopySource: `${ENV.YANDEX_STATION_RELEASE_BUCKET}/${immutableKey}`,
+    MetadataDirective: "REPLACE",
+    ContentType: "application/vnd.microsoft.portable-executable",
+    ContentDisposition: 'attachment; filename="markiro-signer-0.1.0-windows-x86_64-setup.exe"',
+    CacheControl: "public, max-age=0, must-revalidate",
+    Metadata: { "signer-source-key": immutableKey },
+  });
+});
+
+test("refuses to copy a beta or mismatched installer to the stable download", async () => {
+  const commands = [];
+  const client = { send: async (command) => commands.push(command) };
+
+  await assert.rejects(
+    copySignerInstallerToDownload({
+      client,
+      bucket: ENV.YANDEX_STATION_RELEASE_BUCKET,
+      immutableKey: "signer/beta/releases/0.1.0/markiro-signer-0.1.0-windows-x86_64-setup.exe",
+      attachmentFilename: "markiro-signer-0.1.0-windows-x86_64-setup.exe",
+    }),
+    /stable installer/,
+  );
+  await assert.rejects(
+    copySignerInstallerToDownload({
+      client,
+      bucket: ENV.YANDEX_STATION_RELEASE_BUCKET,
+      immutableKey: "signer/stable/releases/0.1.0/markiro-signer-0.1.0-windows-x86_64-setup.exe",
+      attachmentFilename: "different.exe",
+    }),
+    /stable installer/,
+  );
+  assert.equal(commands.length, 0);
 });
 
 test("accepts a published object whose bytes hash to what was uploaded", async () => {
