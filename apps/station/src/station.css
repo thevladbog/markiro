@@ -1541,7 +1541,7 @@ body,
   padding: var(--sp-2);
   gap: 2px;
   border-radius: var(--r-1);
-  background: var(--surface-raised);
+  background: var(--surface-panel);
 }
 
 .repack-box-facts span {
@@ -1614,7 +1614,7 @@ body,
   gap: var(--sp-2);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-2);
-  background: var(--surface-raised);
+  background: var(--surface-panel);
   grid-template-rows: auto minmax(0, 1fr);
 }
 
@@ -1752,7 +1752,7 @@ body,
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--r-2);
-  background: var(--surface-raised);
+  background: var(--surface-panel);
 }
 
 .repack-reprint__placeholder {
@@ -1846,7 +1846,7 @@ body,
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: var(--surface-raised);
+  background: var(--surface-panel);
   font: var(--floor-title);
   place-items: center;
 }
@@ -1877,7 +1877,7 @@ body,
   min-width: 0;
   padding: var(--sp-2);
   border-radius: var(--r-1);
-  background: var(--surface-raised);
+  background: var(--surface-panel);
 }
 
 .inventory-box-print dt {
@@ -2021,6 +2021,64 @@ body,
   margin: 0;
   color: var(--fg-2);
   font: var(--floor-body);
+}
+
+/* Source-date mismatch dialogs (check + repack): the operator's entire task
+   is comparing two dates, so this variant widens the shared dialog column to
+   fit two floor-counter-sm blocks side by side instead of the single-line
+   date-input form the base `.inventory-date-dialog` was built for. */
+.inventory-date-dialog--compare {
+  width: min(880px, 100%);
+}
+
+/* The hint sits under a centred comparison, so it centres with it rather than
+   ranging left against the block's edge. */
+.inventory-date-dialog--compare p {
+  text-align: center;
+}
+
+.inventory-date-compare {
+  display: grid;
+  gap: var(--sp-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.inventory-date-compare--single {
+  max-width: 420px;
+  margin: 0 auto;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.inventory-date-compare__block {
+  display: grid;
+  min-width: 0;
+  padding: var(--sp-4) var(--sp-3);
+  gap: var(--sp-2);
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+  text-align: center;
+}
+
+.inventory-date-compare__block span {
+  color: var(--fg-2);
+  font: var(--floor-body-strong);
+}
+
+.inventory-date-compare__block strong {
+  overflow: hidden;
+  font: var(--floor-counter-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inventory-date-compare__block--warn {
+  border: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+}
+
+.inventory-date-compare__block--warn span,
+.inventory-date-compare__block--warn strong {
+  color: var(--warn-fg);
 }
 
 .shift-selection__slot,

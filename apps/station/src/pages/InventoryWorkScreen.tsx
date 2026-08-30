@@ -214,6 +214,12 @@ function CheckInventoryWorkScreen({
     gallery?.productionDate ?? inventory.productionDateFrom,
   );
   const [dateDialog, setDateDialog] = useState(gallery?.dateDialog ?? false);
+  // Read synchronously (not via effect) so refresh()'s active-date reload
+  // below always sees the dialog state as of the render that is current when
+  // its promise resolves, not one render behind (mirrors the repack screen's
+  // `old-box-selected` reload).
+  const dateDialogOpenRef = useRef(dateDialog);
+  dateDialogOpenRef.current = dateDialog;
   const [progress, setProgress] = useState<InventoryProgress>(gallery?.progress ?? EMPTY_PROGRESS);
   const [recent, setRecent] = useState<RecentInventoryOperation[]>(gallery?.recent ?? []);
   const [result, setResult] = useState<RecordInventoryScanResult | null>(gallery?.result ?? null);
@@ -227,15 +233,64 @@ function CheckInventoryWorkScreen({
   const dialogBusyRef = useRef(false);
   const bypassRef = useRef<string | null>(null);
   const queueRef = useRef<ScanQueue | null>(null);
+  // Bumped by every local, authoritative date write (applyDate, adoptHeldDate)
+  // right when its state lands. refresh()'s active-date read below can start
+  // before such a write is even queued and resolve after that write's own
+  // setProductionDate call — a fired-and-forget refresh from one scan's
+  // onOutcome racing a date change queued right behind it in the same scan
+  // queue. Comparing versions lets refresh() detect "a fresher local write
+  // happened while I was reading" and drop its now-stale result instead of
+  // clobbering the newer state.
+  const dateWriteVersionRef = useRef(0);
+  // Bumped at the start of every refresh() call. `refresh()` is fire-and-
+  // forget from a scan's onOutcome/onError and is also invoked by the sync
+  // engine's onProgressApplied and its own mount/heartbeat pollProgress —
+  // none of those call sites are serialized against each other, and (unlike
+  // the test harness's strictly FIFO SQLite wrapper) the real tauriExecutor
+  // is genuinely concurrent IPC, so an older-started refresh's read can
+  // resolve after a newer one's. Comparing the sequence number lets a
+  // refresh detect "a fresher refresh has since started" and drop its own
+  // now-stale results (progress, recent, and date alike) instead of
+  // reverting the screen to an earlier state.
+  const refreshSeqRef = useRef(0);
   const refresh = useCallback(async () => {
-    const [nextProgress, nextRecent] = await Promise.all([
+    const seq = (refreshSeqRef.current += 1);
+    const dateVersionAtStart = dateWriteVersionRef.current;
+    const [nextProgress, nextRecent, activeDate] = await Promise.all([
       readInventoryProgress(exec, inventory.inventoryId, inventory.snapshotId, deviceId),
       listRecentInventoryOperations(exec, inventory.inventoryId, inventory.snapshotId),
+      // The journal's guardSourceProductionDate can silently move the
+      // terminal's active date on a scan's first-ever code (see
+      // inventory-journal.ts), with no dialog and no other signal to this
+      // screen. refresh() is the one path every scan outcome and every sync
+      // pull already goes through, so re-reading the persisted date here
+      // keeps the toolbar (and the date dialog's draft) self-healing instead
+      // of relying on a special case tied to a particular scan verdict.
+      loadInventoryProductionDate(exec, {
+        inventoryId: inventory.inventoryId,
+        snapshotId: inventory.snapshotId,
+        deviceId,
+      }),
     ]);
-    if (mounted.current) {
-      setProgress(nextProgress);
-      setRecent(nextRecent);
-      setResult((current) => current ?? (nextRecent[0] ? restoredResult(nextRecent[0]) : null));
+    if (!mounted.current || refreshSeqRef.current !== seq) return;
+    setProgress(nextProgress);
+    setRecent(nextRecent);
+    setResult((current) => current ?? (nextRecent[0] ? restoredResult(nextRecent[0]) : null));
+    if (activeDate !== null && dateWriteVersionRef.current === dateVersionAtStart) {
+      // Never *establish* productionDate here, only update it: queue.open()
+      // and the source.start effect both gate scanner intake on
+      // `productionDate !== null`, and that gate is deliberately owned by
+      // the hydration effect, which only sets it after
+      // reconcilePendingInventoryEvents has run. A sync-driven refresh can
+      // otherwise land first (e.g. pollProgress on mount, racing hydration)
+      // and open the gate early, letting a physical scan be journaled while
+      // the screen's own reconciliation of orphan pending events is still
+      // in flight.
+      setProductionDate((current) => (current === null ? current : activeDate));
+      // This read can resolve after the operator has since opened the date
+      // dialog and started typing; only the toolbar display is refreshed
+      // here, never an in-progress, unsaved draft.
+      if (!dateDialogOpenRef.current) setDateDraft(activeDate);
     }
   }, [deviceId, exec, inventory.inventoryId, inventory.snapshotId]);
 
@@ -352,6 +407,14 @@ function CheckInventoryWorkScreen({
         onError: (_raw, error) => {
           console.error("station: inventory scan write failed", error);
           if (mounted.current) setWriteFailed(true);
+          // guardSourceProductionDate can commit a silent date adoption
+          // before reserveEvent/the projection insert throws, so a failed
+          // scan can still leave the terminal's persisted date ahead of the
+          // toolbar and dateDraft. A later sync poll would self-heal this,
+          // but not while offline — exactly when writes are failing.
+          void refresh().catch((refreshError: unknown) => {
+            console.error("station: inventory progress refresh failed", refreshError);
+          });
         },
       }),
     [
@@ -400,6 +463,7 @@ function CheckInventoryWorkScreen({
       }),
     );
     if (mounted.current) {
+      dateWriteVersionRef.current += 1;
       setProductionDate(dateDraft);
       setDateDialog(false);
     }
@@ -442,6 +506,7 @@ function CheckInventoryWorkScreen({
     try {
       await writeActiveProductionDate(codeDate);
       if (!mounted.current) return;
+      dateWriteVersionRef.current += 1;
       setProductionDate(codeDate);
       setDateDraft(codeDate);
       releaseHeldScan();
@@ -696,20 +761,34 @@ function CheckInventoryWorkScreen({
           ) : null
         }
       >
-        <div className="inventory-date-dialog">
-          <p>
-            {heldScan?.mixed
-              ? t("inventory.work.sourceDate.mixedBody", {
-                  active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
-                })
-              : t("inventory.work.sourceDate.body", {
-                  code: heldScan?.codeDate ? formatCivilDate(heldScan.codeDate, locale) : "",
-                  active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
-                })}
-          </p>
-          {!heldScan?.mixed && !codeDateInRange ? (
-            <p>{t("inventory.work.sourceDate.outOfRange")}</p>
-          ) : null}
+        <div className="inventory-date-dialog inventory-date-dialog--compare">
+          {heldScan?.mixed ? (
+            <>
+              <div className="inventory-date-compare inventory-date-compare--single">
+                <div className="inventory-date-compare__block">
+                  <span>{t("inventory.work.sourceDate.activeLabel")}</span>
+                  <strong>{heldScan ? formatCivilDate(heldScan.activeDate, locale) : "—"}</strong>
+                </div>
+              </div>
+              <p>{t("inventory.work.sourceDate.mixedBody")}</p>
+            </>
+          ) : (
+            <>
+              <div className="inventory-date-compare">
+                <div className="inventory-date-compare__block inventory-date-compare__block--warn">
+                  <span>{t("inventory.work.sourceDate.codeLabel")}</span>
+                  <strong>
+                    {heldScan?.codeDate ? formatCivilDate(heldScan.codeDate, locale) : "—"}
+                  </strong>
+                </div>
+                <div className="inventory-date-compare__block">
+                  <span>{t("inventory.work.sourceDate.activeLabel")}</span>
+                  <strong>{heldScan ? formatCivilDate(heldScan.activeDate, locale) : "—"}</strong>
+                </div>
+              </div>
+              {!codeDateInRange ? <p>{t("inventory.work.sourceDate.outOfRange")}</p> : null}
+            </>
+          )}
         </div>
       </FullScreenDialog>
     </StationScreen>
@@ -1843,23 +1922,23 @@ function RepackInventoryWorkScreen({
           ) : null
         }
       >
-        <div className="inventory-date-dialog">
-          <p>
-            {t("inventory.repack.sourceDate.body", {
-              code: heldScan ? formatCivilDate(heldScan.codeDate, locale) : "",
-              // `boxDate` is not carried by the scan outcome (see
-              // `HeldRepackScan`), only mirrored from React state via
-              // `boxDateRef`, which can still be empty right after a
-              // back-to-back old-box + first-bottle scan; fall back instead
-              // of formatting an empty string, matching
-              // `RepackBoxInstrument`'s own guard on the same field.
-              box: heldScan
-                ? heldScan.boxDate
-                  ? formatCivilDate(heldScan.boxDate, locale)
-                  : "—"
-                : "",
-            })}
-          </p>
+        <div className="inventory-date-dialog inventory-date-dialog--compare">
+          <div className="inventory-date-compare">
+            <div className="inventory-date-compare__block inventory-date-compare__block--warn">
+              <span>{t("inventory.repack.sourceDate.codeLabel")}</span>
+              <strong>{heldScan ? formatCivilDate(heldScan.codeDate, locale) : "—"}</strong>
+            </div>
+            <div className="inventory-date-compare__block">
+              <span>{t("inventory.repack.sourceDate.boxLabel")}</span>
+              {/* `boxDate` is not carried by the scan outcome (see
+                  `HeldRepackScan`), only mirrored from React state via
+                  `boxDateRef`, which can still be empty right after a
+                  back-to-back old-box + first-bottle scan; fall back instead
+                  of formatting an empty string, matching
+                  `RepackBoxInstrument`'s own guard on the same field. */}
+              <strong>{heldScan?.boxDate ? formatCivilDate(heldScan.boxDate, locale) : "—"}</strong>
+            </div>
+          </div>
           {heldScan && heldScan.itemCount > 0 ? (
             <>
               <p>{t("inventory.repack.sourceDateBlocked")}</p>

@@ -435,7 +435,11 @@ describe("simple inventory work screen", () => {
     await waitFor(() =>
       expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
     );
-    expect(scan.isListening()).toBe(false);
+    // Waited for, not asserted outright: the dialog text commits with the
+    // `heldScan` render set from this scan's async `onOutcome`, while the
+    // listener's teardown rides the passive effect that reacts to `heldScan`
+    // — a later flush that can still be pending on a loaded machine.
+    await waitFor(() => expect(scan.isListening()).toBe(false));
     expect(
       (
         db.prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror").get() as {
@@ -647,7 +651,11 @@ describe("simple inventory work screen", () => {
 
     scan.emit(SSCC);
     await waitFor(() => expect(screen.getByText("В коробе несколько дат розлива")).toBeTruthy());
-    expect(scan.isListening()).toBe(false);
+    // Waited for, not asserted outright: the dialog text commits with the
+    // `heldScan` render set from this scan's async `onOutcome`, while the
+    // listener's teardown rides the passive effect that reacts to `heldScan`
+    // — a later flush that can still be pending on a loaded machine.
+    await waitFor(() => expect(scan.isListening()).toBe(false));
     expect(screen.getByText(/Подставить одну дату нельзя/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Установить/ })).toBeNull();
 
@@ -782,5 +790,270 @@ describe("simple inventory work screen", () => {
     // PROTECTED can still be scanned normally afterward.
     scan.emit(raw("PROTECTED"));
     expect(await screen.findByText("Код не учтён: уже в отгрузке")).toBeDefined();
+  });
+
+  it("shows the scanned code's own date after it silently adopts on the terminal's very first scan", async () => {
+    // Fresh terminal: no inventory_terminal_state row and no prior scan
+    // events. NEXTDAY's source_production_date (2026-08-20) differs from the
+    // manifest's productionDateFrom (2026-08-19), so the very first scan
+    // trips the source-date guard's silent single-scan adoption path in
+    // guardSourceProductionDate (apps/station/src/lib/inventory-journal.ts):
+    // the terminal's active date moves to the code's own date without ever
+    // raising the mismatch dialog. The toolbar must reflect that move.
+    const { db, exec } = await fixture();
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await screen.findByText("19.08.2026");
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    scan.emit(raw("NEXTDAY"));
+
+    await waitFor(() => expect(screen.getByText("Код принят")).toBeTruthy());
+    // The dialog never appears: adoption on a fresh terminal is silent.
+    expect(screen.queryByText("Дата в коде отличается от активной")).toBeNull();
+    await waitFor(() => expect(screen.getByText("20.08.2026")).toBeTruthy());
+    expect(screen.queryByText("19.08.2026")).toBeNull();
+    const stored = db
+      .prepare("SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?")
+      .get(DEVICE_ID) as { active_production_date: string };
+    expect(stored.active_production_date).toBe("2026-08-20");
+  });
+
+  it("shows the adopted date, not the stale default, when opening the date dialog after a silent first-scan adoption", async () => {
+    // Regression guard for the stale-draft trap: before the fix, `dateDraft`
+    // stayed pinned to the manifest default after a silent adoption, so
+    // opening the date dialog and pressing "Применить дату" without editing
+    // anything would write the old default back over the just-adopted date.
+    const { exec } = await fixture();
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await screen.findByText("19.08.2026");
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    scan.emit(raw("NEXTDAY"));
+    await waitFor(() => expect(screen.getByText("20.08.2026")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить дату производства" }));
+
+    expect((screen.getByLabelText("Дата производства") as HTMLInputElement).value).toBe(
+      "2026-08-20",
+    );
+  });
+
+  it("keeps a typed date draft when a scan's background refresh lands while the dialog is open", async () => {
+    // Direct regression guard for the dateDialogOpenRef guard: a silent
+    // first-scan adoption's own onOutcome refresh() reads the newly-adopted
+    // date asynchronously and must never overwrite an in-progress, unsaved
+    // dateDraft — only the toolbar's own display may update from it.
+    const { exec } = await fixture();
+    const gate = deferred();
+    let seen = 0;
+    let held = false;
+    const suspended: SqlExecutor = {
+      run: (sql, params) => exec.run(sql, params),
+      all: async <T,>(sql: string, params?: unknown[]) => {
+        if (/WITH committed_events AS/i.test(sql)) {
+          seen += 1;
+          // The first match is the hydration effect's own refresh() call at
+          // mount; hold only the second, the scan's onOutcome refresh().
+          if (seen === 2 && !held) {
+            held = true;
+            await gate.promise;
+          }
+        }
+        return exec.all<T>(sql, params);
+      },
+    };
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={suspended}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await screen.findByText("19.08.2026");
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    // Fresh terminal: NEXTDAY's own date differs from the manifest default,
+    // so this scan silently adopts 2026-08-20 (guardSourceProductionDate)
+    // before its onOutcome's refresh() even starts reading.
+    scan.emit(raw("NEXTDAY"));
+    await waitFor(() => expect(held).toBe(true));
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить дату производства" }));
+    fireEvent.change(screen.getByLabelText("Дата производства"), {
+      target: { value: "2026-08-25" },
+    });
+
+    gate.release();
+
+    await screen.findByText("20.08.2026");
+    expect((screen.getByLabelText("Дата производства") as HTMLInputElement).value).toBe(
+      "2026-08-25",
+    );
+  });
+
+  it("does not let a scan's background refresh clobber a date change that lands mid-read", async () => {
+    // Direct regression guard for dateWriteVersionRef: the pre-existing
+    // "orders a date change..." test above only exercises this guard
+    // transitively (it holds the scan's own write, not refresh()'s read).
+    // Here the read that must be discarded is refresh()'s own active-date
+    // query, read eagerly but held before delivery — mirroring genuinely
+    // concurrent IPC, where the query executes promptly but its response
+    // can arrive late — so releasing it delivers a value captured *before*
+    // the operator's date change lands.
+    const { db, exec } = await fixture();
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', 1, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+    const gate = deferred();
+    let count = 0;
+    let gated = false;
+    const suspended: SqlExecutor = {
+      run: (sql, params) => exec.run(sql, params),
+      all: async <T,>(sql: string, params?: unknown[]) => {
+        const isActiveDateQuery =
+          /SELECT active_production_date\s+FROM inventory_terminal_state/i.test(sql);
+        if (isActiveDateQuery) count += 1;
+        const result = await exec.all<T>(sql, params);
+        // Matches, in order: the hydration effect's own initial read (1),
+        // its refresh() call's internal read (2), the EXPECTED scan's own
+        // guardSourceProductionDate read (3) and reserveEvent read (4)
+        // inside recordInventoryScan (a matching date still reads
+        // activeDate() twice — once to compare, once to stamp the event),
+        // and finally that same scan's onOutcome refresh() read (5) — the
+        // one this test holds.
+        if (isActiveDateQuery && count === 5 && !gated) {
+          gated = true;
+          await gate.promise;
+        }
+        return result;
+      },
+    };
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={suspended}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await screen.findByText("19.08.2026");
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    scan.emit(raw("EXPECTED"));
+    await waitFor(() => expect(screen.getByText("Код принят")).toBeTruthy());
+    await waitFor(() => expect(gated).toBe(true));
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить дату производства" }));
+    fireEvent.change(screen.getByLabelText("Дата производства"), {
+      target: { value: "2026-08-20" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Применить дату" }));
+    await screen.findByText("20.08.2026");
+
+    gate.release();
+    // Flush the now-unblocked refresh's continuation: without the version
+    // guard it would apply the stale "2026-08-19" it captured before the
+    // operator's change landed, reverting the toolbar right back.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(screen.getByText("20.08.2026")).toBeTruthy();
+    expect(screen.queryByText("19.08.2026")).toBeNull();
+  });
+
+  it("discards an older refresh's stale progress once a newer refresh already applied fresher results", async () => {
+    // Direct regression guard for the refreshSeqRef ordering guard: two
+    // overlapping refresh() calls — one from each of two back-to-back
+    // scans' onOutcome — must apply in start order, not resolution order.
+    // The first scan's refresh reads (and captures) progress before the
+    // second scan is even recorded; its delivery is then held so the second
+    // scan's own refresh (started later, unheld) can resolve and render
+    // first, the way a genuinely concurrent backend could reorder them.
+    const { db, exec } = await fixture();
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', 1, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+    const gate = deferred();
+    let count = 0;
+    let gated = false;
+    const suspended: SqlExecutor = {
+      run: (sql, params) => exec.run(sql, params),
+      all: async <T,>(sql: string, params?: unknown[]) => {
+        const isProgressQuery = /WITH committed_events AS/i.test(sql);
+        if (isProgressQuery) count += 1;
+        const result = await exec.all<T>(sql, params);
+        // The first match is the hydration effect's own refresh() at mount;
+        // hold only the second, the first scan's (EXPECTED) onOutcome
+        // refresh().
+        if (isProgressQuery && count === 2 && !gated) {
+          gated = true;
+          await gate.promise;
+        }
+        return result;
+      },
+    };
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={suspended}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await screen.findByText("19.08.2026");
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    scan.emit(raw("EXPECTED"));
+    await waitFor(() => expect(gated).toBe(true));
+
+    scan.emit(raw("PROTECTED"));
+    await waitFor(() =>
+      expect(
+        screen.getByText("1", { selector: "[data-testid='inventory-protected']" }),
+      ).toBeTruthy(),
+    );
+
+    gate.release();
+    // Flush the now-unblocked, older refresh's delivery of its stale
+    // (pre-PROTECTED) snapshot; without the sequence guard it would
+    // overwrite the freshly-rendered counts back down.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(screen.getByText("1", { selector: "[data-testid='inventory-verified']" })).toBeTruthy();
+    expect(screen.getByText("1", { selector: "[data-testid='inventory-protected']" })).toBeTruthy();
   });
 });

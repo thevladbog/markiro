@@ -37,11 +37,52 @@ describe("renderInventoryTaskFormHtml", () => {
     expect(html).toContain("Отсканируйте на терминале, чтобы открыть задание");
   });
 
-  it("keeps the long task token in a full-width, tall linear scan area", () => {
+  it("renders the task token as a compact Data Matrix for production scanners", () => {
     const html = renderInventoryTaskFormHtml(fixture());
 
-    expect(html).toContain('preserveAspectRatio="none"');
-    expect(html).toMatch(/\.barcode\s*\{[^}]*width:\s*150mm[^}]*height:\s*17mm/s);
+    expect(html).toContain('data-barcode-symbology="datamatrix"');
+    expect(html).not.toContain('preserveAspectRatio="none"');
+    expect(html).toMatch(/\.barcode\s*\{[^}]*width:\s*32mm[^}]*height:\s*32mm/s);
+  });
+
+  it("uses a pure white page background for monochrome printing", () => {
+    const html = renderInventoryTaskFormHtml(fixture());
+
+    expect(html).toMatch(/html, body\s*\{[^}]*background:\s*#fff/s);
+    expect(html).toMatch(/\.page\s*\{[^}]*background:\s*#fff/s);
+    expect(html).not.toContain("background: #fafaf8");
+  });
+
+  it("integrates the scan target into the task passport instead of a full-width barcode panel", () => {
+    const html = renderInventoryTaskFormHtml(fixture());
+
+    expect(html).toMatch(
+      /<section class="task-passport">.*<section class="hero">.*<section class="scan-zone"/s,
+    );
+    expect(html).toMatch(
+      /\.task-passport\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+48mm/s,
+    );
+  });
+
+  it("separates the launch status from the task heading in both layouts", () => {
+    const html = renderInventoryTaskFormHtml(fixture());
+
+    expect(html).toMatch(/\.status\s*\{[^}]*margin-top:\s*3mm/s);
+    expect(html).toMatch(/\.compact \.status\s*\{[^}]*margin-top:\s*2mm/s);
+  });
+
+  it("optically centers the step numbers inside their circular markers", () => {
+    const html = renderInventoryTaskFormHtml(fixture());
+
+    expect(html).toMatch(/\.step-number\s*\{[^}]*line-height:\s*1;[^}]*padding-top:\s*\.25mm/s);
+  });
+
+  it("uses the remaining page area for handwritten operator comments on a dot grid", () => {
+    const html = renderInventoryTaskFormHtml(fixture());
+
+    expect(html).toContain('<section class="comments" aria-label="Комментарии оператора">');
+    expect(html).toContain("Комментарии оператора");
+    expect(html).toMatch(/\.comments\s*\{[^}]*background-image:\s*radial-gradient/s);
   });
 
   it("renders the fixed snapshot parameters and repack instructions without raw code material", () => {
@@ -110,7 +151,7 @@ describe("renderInventoryTaskFormHtml", () => {
     expect(html).toContain(productName);
     expect(html).toContain(lineName);
     expect(html.match(new RegExp(lineName, "g"))).toHaveLength(1);
-    expect(html).toMatch(/\.compact \.barcode\s*\{[^}]*width:\s*150mm[^}]*height:\s*17mm/s);
+    expect(html).toMatch(/\.compact \.barcode\s*\{[^}]*width:\s*28mm[^}]*height:\s*28mm/s);
   });
 
   it("bounds unbounded names by Unicode code points without retaining the raw tail", () => {

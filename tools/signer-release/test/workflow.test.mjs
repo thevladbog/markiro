@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const workflow = await readFile(".github/workflows/signer-stable-release.yml", "utf8");
+// Normalised, because this file's guard runs inside the very workflow it
+// guards — on a Windows runner, where git checks the YAML out with CRLF and
+// every `^`/`\n` anchor below would otherwise miss.
+const workflow = (await readFile(".github/workflows/signer-stable-release.yml", "utf8")).replaceAll(
+  "\r\n",
+  "\n",
+);
 
 test("is dispatch-only", () => {
   // A release is a deliberate act; nothing about a merge to main should ship one.
@@ -60,6 +66,17 @@ test("writes the mirror before creating the GitHub Release", () => {
   assert.ok(mirror > 0, "the mirror publish step must exist");
   assert.ok(release > 0, "the GitHub Release step must exist");
   assert.ok(mirror < release, "the mirror publish must precede the GitHub Release");
+});
+
+test("looks for the bundle where this crate layout actually puts it", async () => {
+  // The Station's src-tauri is a standalone crate, so its bundle lands under
+  // src-tauri/target. The signer's is a workspace member, so cargo shares one
+  // target dir at the workspace root. Copying the Station's path here builds
+  // the installer successfully and then fails to find it.
+  const cargo = await readFile("apps/signer/Cargo.toml", "utf8");
+  assert.match(cargo, /^\[workspace\]/m, "apps/signer is expected to be a cargo workspace");
+  assert.match(workflow, /bundle_dir="apps\/signer\/target\/release\/bundle\/nsis"/);
+  assert.doesNotMatch(workflow, /apps\/signer\/src-tauri\/target/);
 });
 
 test("runs the tooling contract before it builds anything", () => {
