@@ -775,4 +775,68 @@ describe("simple inventory work screen", () => {
     scan.emit(raw("PROTECTED"));
     expect(await screen.findByText("Код не учтён: уже в отгрузке")).toBeDefined();
   });
+
+  it("shows the scanned code's own date after it silently adopts on the terminal's very first scan", async () => {
+    // Fresh terminal: no inventory_terminal_state row and no prior scan
+    // events. NEXTDAY's source_production_date (2026-08-20) differs from the
+    // manifest's productionDateFrom (2026-08-19), so the very first scan
+    // trips the source-date guard's silent single-scan adoption path in
+    // guardSourceProductionDate (apps/station/src/lib/inventory-journal.ts):
+    // the terminal's active date moves to the code's own date without ever
+    // raising the mismatch dialog. The toolbar must reflect that move.
+    const { db, exec } = await fixture();
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await screen.findByText("19.08.2026");
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    scan.emit(raw("NEXTDAY"));
+
+    await waitFor(() => expect(screen.getByText("Код принят")).toBeTruthy());
+    // The dialog never appears: adoption on a fresh terminal is silent.
+    expect(screen.queryByText("Дата в коде отличается от активной")).toBeNull();
+    await waitFor(() => expect(screen.getByText("20.08.2026")).toBeTruthy());
+    expect(screen.queryByText("19.08.2026")).toBeNull();
+    const stored = db
+      .prepare("SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?")
+      .get(DEVICE_ID) as { active_production_date: string };
+    expect(stored.active_production_date).toBe("2026-08-20");
+  });
+
+  it("shows the adopted date, not the stale default, when opening the date dialog after a silent first-scan adoption", async () => {
+    // Regression guard for the stale-draft trap: before the fix, `dateDraft`
+    // stayed pinned to the manifest default after a silent adoption, so
+    // opening the date dialog and pressing "Применить дату" without editing
+    // anything would write the old default back over the just-adopted date.
+    const { exec } = await fixture();
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await screen.findByText("19.08.2026");
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    scan.emit(raw("NEXTDAY"));
+    await waitFor(() => expect(screen.getByText("20.08.2026")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить дату производства" }));
+
+    expect((screen.getByLabelText("Дата производства") as HTMLInputElement).value).toBe(
+      "2026-08-20",
+    );
+  });
 });

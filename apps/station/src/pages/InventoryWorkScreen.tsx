@@ -214,6 +214,12 @@ function CheckInventoryWorkScreen({
     gallery?.productionDate ?? inventory.productionDateFrom,
   );
   const [dateDialog, setDateDialog] = useState(gallery?.dateDialog ?? false);
+  // Read synchronously (not via effect) so refresh()'s active-date reload
+  // below always sees the dialog state as of the render that is current when
+  // its promise resolves, not one render behind (mirrors the repack screen's
+  // `old-box-selected` reload).
+  const dateDialogOpenRef = useRef(dateDialog);
+  dateDialogOpenRef.current = dateDialog;
   const [progress, setProgress] = useState<InventoryProgress>(gallery?.progress ?? EMPTY_PROGRESS);
   const [recent, setRecent] = useState<RecentInventoryOperation[]>(gallery?.recent ?? []);
   const [result, setResult] = useState<RecordInventoryScanResult | null>(gallery?.result ?? null);
@@ -227,15 +233,44 @@ function CheckInventoryWorkScreen({
   const dialogBusyRef = useRef(false);
   const bypassRef = useRef<string | null>(null);
   const queueRef = useRef<ScanQueue | null>(null);
+  // Bumped by every local, authoritative date write (applyDate, adoptHeldDate)
+  // right when its state lands. refresh()'s active-date read below can start
+  // before such a write is even queued and resolve after that write's own
+  // setProductionDate call — a fired-and-forget refresh from one scan's
+  // onOutcome racing a date change queued right behind it in the same scan
+  // queue. Comparing versions lets refresh() detect "a fresher local write
+  // happened while I was reading" and drop its now-stale result instead of
+  // clobbering the newer state.
+  const dateWriteVersionRef = useRef(0);
   const refresh = useCallback(async () => {
-    const [nextProgress, nextRecent] = await Promise.all([
+    const dateVersionAtStart = dateWriteVersionRef.current;
+    const [nextProgress, nextRecent, activeDate] = await Promise.all([
       readInventoryProgress(exec, inventory.inventoryId, inventory.snapshotId, deviceId),
       listRecentInventoryOperations(exec, inventory.inventoryId, inventory.snapshotId),
+      // The journal's guardSourceProductionDate can silently move the
+      // terminal's active date on a scan's first-ever code (see
+      // inventory-journal.ts), with no dialog and no other signal to this
+      // screen. refresh() is the one path every scan outcome and every sync
+      // pull already goes through, so re-reading the persisted date here
+      // keeps the toolbar (and the date dialog's draft) self-healing instead
+      // of relying on a special case tied to a particular scan verdict.
+      loadInventoryProductionDate(exec, {
+        inventoryId: inventory.inventoryId,
+        snapshotId: inventory.snapshotId,
+        deviceId,
+      }),
     ]);
     if (mounted.current) {
       setProgress(nextProgress);
       setRecent(nextRecent);
       setResult((current) => current ?? (nextRecent[0] ? restoredResult(nextRecent[0]) : null));
+      if (activeDate !== null && dateWriteVersionRef.current === dateVersionAtStart) {
+        setProductionDate(activeDate);
+        // This read can resolve after the operator has since opened the date
+        // dialog and started typing; only the toolbar display is refreshed
+        // here, never an in-progress, unsaved draft.
+        if (!dateDialogOpenRef.current) setDateDraft(activeDate);
+      }
     }
   }, [deviceId, exec, inventory.inventoryId, inventory.snapshotId]);
 
@@ -400,6 +435,7 @@ function CheckInventoryWorkScreen({
       }),
     );
     if (mounted.current) {
+      dateWriteVersionRef.current += 1;
       setProductionDate(dateDraft);
       setDateDialog(false);
     }
@@ -442,6 +478,7 @@ function CheckInventoryWorkScreen({
     try {
       await writeActiveProductionDate(codeDate);
       if (!mounted.current) return;
+      dateWriteVersionRef.current += 1;
       setProductionDate(codeDate);
       setDateDraft(codeDate);
       releaseHeldScan();
