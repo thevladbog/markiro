@@ -45,3 +45,11 @@ export interface DispenserResult {
   resultId: string | null;
   status: string;
 }
+
+export interface CisInfo {
+  cis: string;
+  status: string;
+  statusEx: string | null;
+  ownerInn: string | null;
+  withdrawReason: string | null;
+}

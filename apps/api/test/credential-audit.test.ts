@@ -666,7 +666,11 @@ describe("credential mutation audit", () => {
       issueCredentials: vi.fn().mockResolvedValue({ login: "plain-login", secret: "plain-secret" }),
     };
     const audit = auditDouble();
-    const controller = new IntegrationsController(integrations as never, audit as never);
+    const controller = new IntegrationsController(
+      integrations as never,
+      audit as never,
+      {} as never,
+    );
 
     const result = await controller.issueCredentials(req, "commerceml");
 
@@ -688,7 +692,11 @@ describe("credential mutation audit", () => {
       issueCredentials: vi.fn().mockRejectedValue(new Error("issuance failed")),
     };
     const audit = auditDouble();
-    const controller = new IntegrationsController(integrations as never, audit as never);
+    const controller = new IntegrationsController(
+      integrations as never,
+      audit as never,
+      {} as never,
+    );
 
     await expect(controller.issueCredentials(req, "commerceml")).rejects.toThrow("issuance failed");
     expect(audit.credentialMutation).not.toHaveBeenCalled();

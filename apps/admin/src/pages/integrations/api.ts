@@ -530,3 +530,38 @@ export function useRevokeSignerAgent(): UseMutationResult<void, Error, string> {
     },
   });
 }
+
+/**
+ * Mirrors `apps/api/src/modules/chz-code-statuses/dto.ts`'s
+ * `ChzCodeStatusSummaryDto` -- the freshness line under `SignerAgentsPanel`'s
+ * agent table (Task 6): how many marking codes `chz_code_statuses` knows
+ * about tenant-wide, how many ЧЗ answered for in the last day, and how many
+ * carry no ЧЗ product group (stuck until their product gets one).
+ */
+export interface ChzCodeStatusSummary {
+  total: number;
+  refreshedLastDay: number;
+  withoutProductGroup: number;
+  lastCheckedAt: string | null;
+}
+
+/** Cache key for the `chestny_znak` channel's code-status summary. */
+export const CHZ_CODE_STATUS_SUMMARY_QUERY_KEY = [
+  "integrations",
+  "chestny_znak",
+  "code-statuses",
+] as const;
+
+/**
+ * `GET /integrations/chestny_znak/code-statuses` -- feeds `SignerAgentsPanel`'s
+ * freshness line. Hardcoded to `chestny_znak` the same way `useApiKeys` above
+ * is hardcoded to `public_api`: `SignerAgentsPanel` is only ever mounted for
+ * that one channel (`ChannelPage.tsx`), so there is no second `type` this
+ * hook would ever need to take as a parameter.
+ */
+export function useChzCodeStatusSummary(): UseQueryResult<ChzCodeStatusSummary> {
+  return useQuery({
+    queryKey: CHZ_CODE_STATUS_SUMMARY_QUERY_KEY,
+    queryFn: () => apiFetch<ChzCodeStatusSummary>("/integrations/chestny_znak/code-statuses"),
+  });
+}

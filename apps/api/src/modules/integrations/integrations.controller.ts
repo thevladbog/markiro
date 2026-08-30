@@ -38,6 +38,11 @@ import {
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
+import { ChzCodeStatusReadService } from "../chz-code-statuses/chz-code-status-read.service";
+import {
+  chzCodeStatusSummaryOpenApiSchema,
+  type ChzCodeStatusSummaryDto,
+} from "../chz-code-statuses/dto";
 import type { IntegrationChannelType } from "./channel-registry";
 import {
   candidatesPageOpenApiSchema,
@@ -71,6 +76,17 @@ export class IntegrationsController {
   constructor(
     private readonly integrations: IntegrationsService,
     private readonly audit: SecurityAuditService,
+    // Named `codeStatusRead`, not `codeStatuses` -- a same-named constructor
+    // property would shadow the `codeStatuses` route handler method below on
+    // the instance (TS emits `this.codeStatuses = codeStatuses` in the
+    // constructor body), and Nest looks up the handler via `instance[name]`
+    // at request time, not just the prototype. That would route requests
+    // correctly (the path decorator lives on the prototype method, found at
+    // class-definition time) but invoke the injected service instead of the
+    // handler when the request actually arrives -- a 403 "missing_policy"
+    // deny, since the service instance carries none of the handler's
+    // `@RequirePermissions`/`@ApiOperation` metadata.
+    private readonly codeStatusRead: ChzCodeStatusReadService,
   ) {}
 
   @Get()
@@ -141,6 +157,27 @@ export class IntegrationsController {
     @Param("type") type: IntegrationChannelType,
   ): Promise<JournalPageDto> {
     return this.integrations.readJournal(req.tenantId!, type);
+  }
+
+  @Get(":type/code-statuses")
+  @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_READ)
+  @ApiOperation({
+    summary: "Summarize Chestny ZNAK code status freshness",
+    description:
+      "The freshness line: how many codes `chz_code_statuses` knows about, how many ЧЗ answered " +
+      "for in the last day, and how many carry no ЧЗ product group -- those are unaskable until " +
+      "their product gets one, since `cises/info` takes the group as a query parameter. Once it " +
+      "does, they are re-resolved the next time the code is scanned, or, failing that, within a " +
+      "day via the ingest job's full sweep.",
+  })
+  @ApiParam({ name: "type", enum: INTEGRATION_CHANNEL_TYPES })
+  @ApiOkResponse({ schema: chzCodeStatusSummaryOpenApiSchema })
+  @ApiHttpErrors(401, 403, 404, 409)
+  async codeStatuses(
+    @Req() req: RequestWithTenant,
+    @Param("type") type: IntegrationChannelType,
+  ): Promise<ChzCodeStatusSummaryDto> {
+    return this.codeStatusRead.summary(req.tenantId!, type);
   }
 
   // Секрет отдаётся ровно здесь и ровно один раз — ChannelDetailDto его

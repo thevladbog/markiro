@@ -210,3 +210,65 @@ task twice.
 If it carries the report filter (product group, status, or the `params` the task
 was created with), the rule can widen to match on it and the double-pay case
 disappears. Note the answer here either way.
+
+## Code status refresh — the response shape of `cises/info`
+
+The refresh job asks Chestny ZNAK about up to 1000 codes per call and records
+`status`, `statusEx`, `ownerInn` and `withdrawReason` against each. The exact
+field names in the response are not verifiable from the repository, so the
+parsing is confined to one function — `TrueApiClient.cisesInfo` — and settling
+this changes that function and nothing else.
+
+**Do:** let one refresh pass run for a tenant that has codes. The job runs on a
+ten-minute cron and once at boot, so restarting the API is the quickest way to
+trigger it.
+
+**Pass:** rows in `chz_code_statuses` move from `status = null` to a real
+status, and the Chestny ZNAK integration panel's freshness line reports codes
+refreshed in the last day.
+
+**Fail, and how to tell which:**
+
+- _Every code comes back unknown_ — `unknown_attempts` climbs while `status`
+  stays null. The response is shaped differently than assumed: the rows are
+  arriving but `cis` is not the field the code matches on, so nothing pairs up.
+  Fix `cisesInfo`'s parser with the real field names.
+- _The whole batch is refused_ — the journal shows a `warn` entry ("Честный
+  Знак отказал в запросе статусов кодов") carrying ЧЗ's own message, and the
+  affected codes are parked at a 30-day interval. That is a product-group or
+  contract problem, not a parsing one; the message names it.
+- _Nothing happens at all_ — the journal shows a `warn` entry naming the token
+  status. The agent has not delivered a usable token; that is the signer
+  runbook above, not this section.
+
+Note that a wrong `pg` surfaces as the second case, not the first — a rejection
+rather than silence — so the three are distinguishable from the journal alone
+without reading the database.
+
+### While you are here: how big is the population?
+
+The design deliberately left retention and archival out, because the volumes
+were unknown. Record them now that a real tenant exists — filtered to that one
+tenant, not summed across every tenant in the table, since `chz_code_statuses`
+is shared and the volume question is "how big is this tenant's population",
+not the platform's:
+
+```sql
+select count(*) as total,
+       count(*) filter (where chz_product_group_code is null) as unaskable,
+       count(*) filter (where status is null) as never_answered
+from chz_code_statuses
+where tenant_id = '<tenant id>';
+```
+
+A tenant in the hundreds of thousands needs nothing further. Millions is the
+point at which detaching and archiving an old monthly partition of `codes`
+becomes worth designing — and the number in the second column is the one that
+needs an operator rather than an engineer, because those codes are unaskable
+until their product is given a Chestny ZNAK group. Giving the product a group
+does not resolve them instantly: the ingest job re-resolves a null group the
+next time that exact code is scanned, or, for a row already sitting in the
+table with nothing left to scan it again (e.g. one that only ever arrived
+through a bootstrap inventory export), within the next daily full sweep
+(`CHZ_CODE_STATUS_FULL_SWEEP_INTERVAL_MS`, currently 24 hours). So the remedy
+does reach every row already in the table — just not instantly.

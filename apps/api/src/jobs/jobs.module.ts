@@ -40,6 +40,8 @@ import { InventorySnapshotService } from "../modules/inventories/inventory-snaps
 import { ChzExportRunnerService } from "../modules/chz-exports/chz-export-runner.service";
 import { ChzTokenService } from "../modules/chz-exports/chz-token.service";
 import { TrueApiClient } from "../modules/chz-exports/true-api.client";
+import { ChzCodeStatusIngestService } from "../modules/chz-code-statuses/chz-code-status-ingest.service";
+import { ChzCodeStatusRefreshService } from "../modules/chz-code-statuses/chz-code-status-refresh.service";
 import { currentMonthUTC, nextMonthUTC } from "./months";
 import {
   MATERIALIZE_SUBSCRIPTION_STATUSES_CRON,
@@ -151,11 +153,15 @@ const RUN_CHZ_EXPORT_QUEUE_POLICY = "stately";
  * those environments one clear, actionable boot failure instead of costing
  * every environment a silent one.
  */
-async function assertChzExportQueuePolicy(boss: PgBoss): Promise<void> {
+async function queuePolicy(boss: PgBoss, queueName: string): Promise<string | undefined> {
   const { rows } = await boss
     .getDb()
-    .executeSql("select policy from pgboss.queue where name = $1", [RUN_CHZ_EXPORT_QUEUE]);
-  const actual = (rows[0] as { policy?: string } | undefined)?.policy;
+    .executeSql("select policy from pgboss.queue where name = $1", [queueName]);
+  return (rows[0] as { policy?: string } | undefined)?.policy;
+}
+
+async function assertChzExportQueuePolicy(boss: PgBoss): Promise<void> {
+  const actual = await queuePolicy(boss, RUN_CHZ_EXPORT_QUEUE);
   if (actual !== RUN_CHZ_EXPORT_QUEUE_POLICY) {
     throw new Error(
       `${RUN_CHZ_EXPORT_QUEUE} queue policy is "${actual ?? "unknown"}", expected ` +
@@ -164,6 +170,33 @@ async function assertChzExportQueuePolicy(boss: PgBoss): Promise<void> {
         `database. Fix by confirming the queue has no jobs, then running: ` +
         `delete from pgboss.queue where name = '${RUN_CHZ_EXPORT_QUEUE}'; -- createQueue ` +
         `will recreate it under the right policy on the next boot.`,
+    );
+  }
+}
+
+const REFRESH_CHZ_CODE_STATUSES_QUEUE_POLICY = "stately";
+
+/**
+ * Same reasoning and same `createQueue`-cannot-fix-it caveat as
+ * `assertChzExportQueuePolicy` above, for `refresh-chz-code-statuses`
+ * (final review, Finding 4): that queue carries no per-job singleton key --
+ * every job on it does the same thing (walk every enabled tenant) -- so
+ * `stately` with no key is what stops two passes from ever being `active`
+ * at once. A queue stuck on `standard` would let two cron ticks overlap when
+ * a pass outlasts the ten-minute interval, doubling `cises/info` traffic
+ * against True API's 50 requests/second participant-wide limit until the
+ * client starts reporting `unavailable`.
+ */
+async function assertRefreshChzCodeStatusesQueuePolicy(boss: PgBoss): Promise<void> {
+  const actual = await queuePolicy(boss, REFRESH_CHZ_CODE_STATUSES_QUEUE);
+  if (actual !== REFRESH_CHZ_CODE_STATUSES_QUEUE_POLICY) {
+    throw new Error(
+      `${REFRESH_CHZ_CODE_STATUSES_QUEUE} queue policy is "${actual ?? "unknown"}", expected ` +
+        `"${REFRESH_CHZ_CODE_STATUSES_QUEUE_POLICY}". createQueue cannot change an existing ` +
+        `queue's policy, so overlap protection between passes is silently inert on this ` +
+        `database. Fix by confirming the queue has no jobs, then running: ` +
+        `delete from pgboss.queue where name = '${REFRESH_CHZ_CODE_STATUSES_QUEUE}'; -- ` +
+        `createQueue will recreate it under the right policy on the next boot.`,
     );
   }
 }
@@ -229,9 +262,43 @@ const PRUNE_EMAIL_DELIVERIES_QUEUE_CRON = "30 2 * * *";
 const CHZ_SIGNER_SCHEDULER_QUEUE_NAME = "chz-signer-token-scheduler";
 const CHZ_SIGNER_SCHEDULER_QUEUE_CRON = "*/15 * * * *";
 
+export const REFRESH_CHZ_CODE_STATUSES_QUEUE = "refresh-chz-code-statuses";
+/**
+ * Ten minutes, not one: `cises/info` answers about 1000 codes per request, so
+ * even a large population is minutes of traffic, and the data it reports
+ * changes on the order of hours. The pass is bounded per tenant, so a backlog
+ * drains over several ticks rather than in one long hold on the worker.
+ */
+const REFRESH_CHZ_CODE_STATUSES_CRON = "*/10 * * * *";
+/**
+ * How many tenants with an active Chestny ZNAK signer agent one pass
+ * processes, out of however many there are. `ChzCodeStatusIngestService.run`
+ * and `ChzCodeStatusRefreshService.run` already bound each TENANT's own work
+ * per call, but nothing bounded the PASS itself before this: `runRefreshChzCodeStatuses`
+ * walked every enabled tenant serially, and this queue's `stately` policy (see
+ * `assertRefreshChzCodeStatusesQueuePolicy`) means the next cron tick cannot
+ * start until this pass returns. A large enough tenant count, or a run of slow
+ * True API responses, would degrade freshness for every tenant queued behind
+ * whichever one is currently running -- silently, since nothing here would
+ * error, just get later.
+ *
+ * This is the bounded stopgap, not the real fix: a cap plus the rotation in
+ * `runRefreshChzCodeStatuses` (remembering the last tenant processed and
+ * starting the next pass just past it) keeps one pass's worst case finite and
+ * guarantees a backlog beyond the cap drains over several ticks rather than
+ * always serving the same prefix of tenants while the tail starves. The real
+ * fix -- a durable per-tenant cursor (so restarts don't reset rotation) or,
+ * better, partitioning this into one pg-boss job per tenant so a slow tenant
+ * cannot hold up any other -- is a redesign of this queue's shape and does
+ * not belong in this change; this cap is a follow-up marker for that work; the
+ * number itself is not load-bearing and can move if a real tenant count makes
+ * it wrong.
+ */
+export const REFRESH_CHZ_CODE_STATUSES_TENANT_CAP = 200;
+
 /**
  * Boots a dedicated pg-boss instance (its own `pgboss` schema, same
- * database as the app), four request-driven workers, and ten schedules on it:
+ * database as the app), four request-driven workers, and eleven schedules on it:
  *  - keeps the `codes`/`scan_events` monthly partitions ahead of traffic:
  *    ensures the current + next month exist once at startup, then again
  *    every day at 04:00 UTC.
@@ -263,6 +330,26 @@ const CHZ_SIGNER_SCHEDULER_QUEUE_CRON = "*/15 * * * *";
  *  - orders and imports the six Chestny ZNAK code-status exports for an
  *    inventory on demand, one pass per invocation, re-enqueuing itself with a
  *    delay until every run is terminal or `MAX_EXPORT_PASSES` is reached.
+ *  - for every tenant with an active Chestny ZNAK signer agent (same
+ *    tenant-selection query as `SignerSchedulerService.enqueueRefreshTasks`),
+ *    ingests newly-known marking codes into `chz_code_statuses`
+ *    (`ChzCodeStatusIngestService`, Task 3) and then asks ЧЗ what it
+ *    currently says about codes due for a check (`ChzCodeStatusRefreshService`,
+ *    Task 4), every ten minutes. Ingest runs before refresh in the same pass
+ *    so a code discovered this tick is asked about this tick rather than the
+ *    next one. Both phases already bound themselves per tenant per pass;
+ *    `runRefreshChzCodeStatuses` additionally bounds and rotates the tenant
+ *    COUNT one pass covers (`REFRESH_CHZ_CODE_STATUSES_TENANT_CAP`), so this
+ *    job does not loop to exhaustion at either level -- a backlog, whether
+ *    per-tenant or across tenants, drains over several ticks. One tenant's
+ *    failure (either phase) is caught and logged
+ *    without stopping the rest of the tenants. Unlike every other schedule
+ *    above, this one talks to a third party, so it is the one queue besides
+ *    `run-chz-export` carrying a `stately` policy (final review, Finding 4):
+ *    with no per-job key, that stops two cron ticks from ever being `active`
+ *    together if a backlog makes one pass outlast the ten-minute interval.
+ *    Unlike every other schedule above, it is also deliberately not run once
+ *    at boot -- see this queue's own `createQueue` call for why.
  *
  * pg-boss v12 requires a queue to be created (`createQueue`) before it can
  * be scheduled or worked -- scheduling against a queue that doesn't exist
@@ -277,6 +364,17 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
   private boss?: PgBoss;
   private started = false;
   private workerIds: string[] = [];
+  /**
+   * Rotation state for `runRefreshChzCodeStatuses`'s tenant cap -- the
+   * (sorted) tenant id this instance last processed, or `null` before the
+   * first pass. In-memory only, not written to Postgres: a restart resetting
+   * rotation to the start of the (sorted) tenant list is an acceptable cost
+   * for a stopgap cap (see `REFRESH_CHZ_CODE_STATUSES_TENANT_CAP`'s doc for
+   * what a durable version would need) -- restarts are rare next to the
+   * ten-minute cron cadence, and losing rotation state costs at most one
+   * pass's worth of fairness, never correctness.
+   */
+  private lastRefreshedChzTenantId: string | null = null;
 
   constructor(
     @Inject(DB) private readonly db: Db,
@@ -290,6 +388,8 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     private readonly inventoryDocumentRunner: InventoryDocumentRunnerService,
     @Inject(SignerSchedulerService) private readonly signerScheduler: SignerScheduler,
     private readonly chzExportRunner: ChzExportRunnerService,
+    private readonly chzCodeStatusIngest: ChzCodeStatusIngestService,
+    private readonly chzCodeStatusRefresh: ChzCodeStatusRefreshService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -548,6 +648,46 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       );
       await this.reconcileUnfinishedChzExports(boss);
 
+      await boss.createQueue(REFRESH_CHZ_CODE_STATUSES_QUEUE, {
+        // No singleton key: every job on this queue does the same thing (walk
+        // every enabled tenant), so `stately` alone is what stops two cron
+        // ticks from ever being `active` together if a backlog makes one pass
+        // outlast the ten-minute interval -- see
+        // `assertRefreshChzCodeStatusesQueuePolicy` below for why that
+        // matters against True API's rate limit (final review, Finding 4).
+        //
+        // Deliberately not also run once at boot, unlike every other
+        // schedule in this file -- tried twice, reverted both times:
+        //   1. Awaiting it inline blocked the server from listening on a
+        //      third party's availability: a serial per-tenant loop of
+        //      ingest scans plus up to twenty `cises/info` calls at a
+        //      fifteen-second timeout each (final review, Finding 2).
+        //   2. Enqueueing it instead (`boss.send` in the boot block, same as
+        //      `reconcileUnfinishedChzExports`'s pattern) got the work off
+        //      the boot path, but let it land at an arbitrary moment during
+        //      startup -- arbitrary enough that pg-boss's own worker could
+        //      pick the job up mid-run of an unrelated e2e suite
+        //      (`inventories.e2e.test.ts`) and execute this pass's
+        //      `db.transaction` calls against a spy that suite requires to
+        //      stay untouched, intermittently failing it.
+        // Neither attempt bought anything real: unlike partitions that must
+        // exist before a write, an outbox that must drain, or a token that
+        // must refresh before it expires, a missed tick here costs nothing --
+        // the cron below is ten minutes precisely because the data it
+        // reports (ЧЗ code status) changes on the order of hours, so waiting
+        // one tick after a deploy is free.
+        policy: REFRESH_CHZ_CODE_STATUSES_QUEUE_POLICY,
+      });
+      // `createQueue` above is a no-op if this queue already existed under a
+      // different policy -- see `assertRefreshChzCodeStatusesQueuePolicy`.
+      await assertRefreshChzCodeStatusesQueuePolicy(boss);
+      await boss.schedule(REFRESH_CHZ_CODE_STATUSES_QUEUE, REFRESH_CHZ_CODE_STATUSES_CRON);
+      this.workerIds.push(
+        await boss.work(REFRESH_CHZ_CODE_STATUSES_QUEUE, async () => {
+          await this.runRefreshChzCodeStatuses();
+        }),
+      );
+
       // Also run all ten maintenance paths once immediately at boot rather
       // than waiting for the first tick of any schedule.
       await this.runEnsurePartitions();
@@ -739,7 +879,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 14 ||
+      this.workerIds.length !== 15 ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {
@@ -819,6 +959,69 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     this.logger.log("Pruned integrations journal");
   }
 
+  /**
+   * One pass per tenant per tick, not a loop to exhaustion: both
+   * `ChzCodeStatusIngestService.run` and `ChzCodeStatusRefreshService.run`
+   * already bound themselves per call (see their own docs), so a backlog
+   * drains over several ten-minute ticks instead of holding this worker for
+   * as long as the backlog takes.
+   *
+   * Tenant selection copies `SignerSchedulerService.enqueueRefreshTasks`'s
+   * query rather than inventing a new one: a tenant with no active Chestny
+   * ZNAK signer agent has no way to obtain a True API token, so there is
+   * nothing for either phase to usefully do for it.
+   *
+   * The tenant count itself is also bounded, at
+   * `REFRESH_CHZ_CODE_STATUSES_TENANT_CAP` -- see that constant's doc for
+   * why the per-tenant bounds above are not enough on their own. Tenants are
+   * sorted deterministically (their id is the only thing to sort by; the
+   * query itself makes no ordering promise) and rotated so this pass starts
+   * just past whichever tenant `lastRefreshedChzTenantId` says the previous
+   * pass ended on, wrapping back to the front once the sorted list is
+   * exhausted -- so a tenant count over the cap still gets fully covered
+   * over several ticks, and the same prefix is never favoured forever.
+   *
+   * Ingest runs before refresh for the same tenant so a code discovered by
+   * this tick's ingest is asked about by this same tick's refresh, rather
+   * than waiting for the next one. Each tenant's pair of calls is wrapped in
+   * its own try/catch: one tenant's failure (in either phase) must not stop
+   * the rest of the tenants from being processed this tick.
+   */
+  private async runRefreshChzCodeStatuses(): Promise<void> {
+    const rows = await this.db
+      .selectDistinct({ tenantId: schema.chzSignerAgents.tenantId })
+      .from(schema.chzSignerAgents)
+      .where(eq(schema.chzSignerAgents.status, "active"));
+
+    // Sorted in JS rather than via the query's own `.orderBy()`: the
+    // rotation below only needs SOME fixed order to reason about "past the
+    // last one processed", and a plain string sort is enough for that --
+    // pushing it into SQL would buy nothing here.
+    const tenantIds = rows.map((row) => row.tenantId).sort();
+    const lastId = this.lastRefreshedChzTenantId;
+    const pastLastIndex =
+      lastId === null ? 0 : tenantIds.findIndex((tenantId) => tenantId > lastId);
+    // `findIndex` returns -1 when every remaining tenant sorts at or before
+    // the last one processed -- it was the last entry in the list, or has
+    // since dropped out of it -- either way the rotation wraps to the front.
+    const rotateFrom = pastLastIndex === -1 ? 0 : pastLastIndex;
+    const rotated = [...tenantIds.slice(rotateFrom), ...tenantIds.slice(0, rotateFrom)];
+    const batch = rotated.slice(0, REFRESH_CHZ_CODE_STATUSES_TENANT_CAP);
+
+    for (const tenantId of batch) {
+      try {
+        await this.chzCodeStatusIngest.run(tenantId);
+        await this.chzCodeStatusRefresh.run(tenantId);
+      } catch (error) {
+        this.logger.error(
+          `ChZ code status refresh failed for tenant ${tenantId}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+      this.lastRefreshedChzTenantId = tenantId;
+    }
+  }
+
   private mailQueue(boss: PgBoss): MailQueue {
     return {
       send: (name, data, options) => boss.send(name, data, options),
@@ -875,6 +1078,12 @@ export class JobsModule {
         { provide: TrueApiClient, useFactory: () => new TrueApiClient() },
         ChzTokenService,
         ChzExportRunnerService,
+        // `ChzCodeStatusIngestService`/`ChzCodeStatusRefreshService` (this
+        // module's `refresh-chz-code-statuses` cron) reuse the `ChzTokenService`
+        // and `TrueApiClient` provided above for `ChzExportRunnerService`
+        // rather than duplicating them again.
+        ChzCodeStatusIngestService,
+        ChzCodeStatusRefreshService,
       ],
       exports: [PgBossService, INVENTORY_DOCUMENT_GENERATOR_REGISTRY],
     };

@@ -408,6 +408,63 @@ describe("STATION_MIGRATIONS", () => {
     expect(() => applyStationMigrations(db)).not.toThrow();
   });
 
+  it("recovers a station interrupted before the acknowledgement trigger without losing queued work", () => {
+    const applyTriggerIndex = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("CREATE TRIGGER inventory_sync_apply_ack"),
+    );
+    expect(applyTriggerIndex).toBeGreaterThan(0);
+
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, applyTriggerIndex));
+    const payload = JSON.stringify({
+      eventId: "event-queued",
+      deviceSequence: 1,
+      operatorId: "operator-queued",
+      scannedAt: "2026-08-30T09:35:00.022Z",
+      kind: "item",
+      normalizedIdentity: "item:queued-hash",
+      codeHash: "queued-hash",
+      canonicalRaw: "queued-raw",
+      activeProductionDate: "2026-08-30",
+      localVerdict: "expected",
+    });
+    db.prepare(
+      `INSERT INTO inventory_outbox
+         (inventory_id, snapshot_id, event_id, device_sequence, payload_json, created_at)
+       VALUES ('inventory-queued', 'snapshot-queued', 'event-queued', 1, ?,
+               '2026-08-30T09:35:00.022Z')`,
+    ).run(payload);
+    db.prepare("INSERT INTO station_meta (key, value) VALUES (?, ?)").run(
+      "inventory_sync_batch_v1:inventory-queued:snapshot-queued",
+      "pinned-batch-must-survive",
+    );
+
+    expect(() => applyStationMigrations(db)).not.toThrow();
+    expect(db.prepare("SELECT event_id, payload_json FROM inventory_outbox").get()).toEqual({
+      event_id: "event-queued",
+      payload_json: payload,
+    });
+    expect(
+      db.prepare("SELECT value FROM station_meta WHERE key LIKE 'inventory_sync_batch_v1:%'").get(),
+    ).toEqual({ value: "pinned-batch-must-survive" });
+    expect(
+      db
+        .prepare(
+          `SELECT name FROM sqlite_master
+            WHERE type = 'trigger' AND name = 'inventory_sync_apply_ack'`,
+        )
+        .get(),
+    ).toEqual({ name: "inventory_sync_apply_ack" });
+    expect(
+      db
+        .prepare(
+          `SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name = 'inventory_sync_ack_receipts_v3'`,
+        )
+        .get(),
+    ).toEqual({ name: "inventory_sync_ack_receipts_v3" });
+  });
+
   it("adds nullable duplicate chronology without inventing a legacy winner", () => {
     const chronologyMigration = STATION_MIGRATIONS.findIndex((statement) =>
       statement.includes("ADD COLUMN duplicate_winner_code_hash"),
