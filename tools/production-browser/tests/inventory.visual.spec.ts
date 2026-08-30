@@ -255,6 +255,35 @@ const EVENT_ID_4 = "a0000000-0000-4000-8000-000000000004";
 const CODE_RESULT_ID_1 = "b0000000-0000-4000-8000-000000000001";
 const CODE_RESULT_ID_2 = "b0000000-0000-4000-8000-000000000002";
 const CODE_RESULT_ID_3 = "b0000000-0000-4000-8000-000000000003";
+
+/**
+ * Scan identities exactly as the API hands them to the cabinet. Both event
+ * endpoints select `e.normalized_identity as "displayIdentity"`
+ * (`inventory-reconciliation.service.ts`, recent events and evidence), and
+ * `InventoryLivePage.tsx`/`InventoryCorrections.tsx` print that string
+ * verbatim inside `.mk-inventory-mono` -- nothing anywhere formats it into a
+ * GTIN/serial pair, so a mock must not either.
+ *
+ * The shape is enforced on ingest by `station-inventory-sync.service.ts`: an
+ * item event is rejected unless `normalized_identity === 'item:' + codeHash`,
+ * and a box event unless it is `` `${kind}:${sscc}` ``. `codeHash` is
+ * `kmHash` = sha256("01" + gtin14 + "21" + serial)
+ * (packages/domain/src/gs1/km.ts), so the three hashes below are the real
+ * SHA-256 digests of `010460000000000621000123` / `...000512` / `...000456`
+ * -- the three KMs of «Сироп «Клюква», 0.5 л» this document's frames follow.
+ */
+const ITEM_IDENTITY_1 = "item:9eb9ec097a5da25a489f27b955909d59d144090c0406a8820ace3811d1e6a706";
+const ITEM_IDENTITY_2 = "item:b0ae53fb623d55c4a282101b19890fc9ad1df089479fac91f7b3042777e20561";
+const ITEM_IDENTITY_3 = "item:638bb42b587121368f550d8ab81a99b4d21c7cb7c26937056d1fd22ed3454d61";
+/**
+ * The old box Терминал 2 opened to start repacking. An `old_box` event carries
+ * the *source* box's SSCC (`applyRepackMutation` stores it as the new box's
+ * `old_sscc_context`), which is a different physical box from the repack box
+ * the cabinet lists under «Короба» -- that panel shows `new_sscc`. Valid GS1
+ * check digit, since a scan with a bad one never becomes an event
+ * (`parseScannedSscc` -> `isValidSscc`).
+ */
+const OLD_BOX_IDENTITY = "old_box:046012345600000016";
 const LATE_EVENT_ID_1 = "c0000000-0000-4000-8000-000000000001";
 const LATE_EVENT_ID_2 = "c0000000-0000-4000-8000-000000000002";
 const DOC_RUN_FIRST_ID = "d0000000-0000-4000-8000-000000000002";
@@ -542,7 +571,7 @@ const RECENT_EVENTS_RUNNING = [
     eventId: EVENT_ID_1,
     codeResultId: CODE_RESULT_ID_1,
     kind: "item",
-    displayIdentity: "04600000000006 · 000123",
+    displayIdentity: ITEM_IDENTITY_1,
     authoritativeVerdict: "applied",
     terminalId: DEVICE_ID_1,
     terminalName: "Терминал 1",
@@ -554,7 +583,7 @@ const RECENT_EVENTS_RUNNING = [
     eventId: EVENT_ID_4,
     codeResultId: CODE_RESULT_ID_3,
     kind: "item",
-    displayIdentity: "04600000000006 · 000512",
+    displayIdentity: ITEM_IDENTITY_2,
     authoritativeVerdict: "applied",
     terminalId: DEVICE_ID_1,
     terminalName: "Терминал 1",
@@ -566,7 +595,7 @@ const RECENT_EVENTS_RUNNING = [
     eventId: EVENT_ID_2,
     codeResultId: CODE_RESULT_ID_2,
     kind: "item",
-    displayIdentity: "04600000000006 · 000456",
+    displayIdentity: ITEM_IDENTITY_3,
     authoritativeVerdict: "applied",
     terminalId: DEVICE_ID_2,
     terminalName: "Терминал 2",
@@ -710,7 +739,7 @@ const EVIDENCE_RESPONSE = {
       eventId: EVENT_ID_3,
       codeResultId: null,
       kind: "old_box",
-      displayIdentity: "SSCC 223456789012345670",
+      displayIdentity: OLD_BOX_IDENTITY,
       authoritativeVerdict: "applied",
       terminalId: DEVICE_ID_2,
       terminalName: "Терминал 2",
@@ -1313,7 +1342,7 @@ test("renders the corrections list with its filters", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 2, name: "События и коды" })).toBeVisible();
   await expect(page.getByLabel("Тип события")).toBeVisible();
   await expect(page.getByLabel("Классификация")).toBeVisible();
-  await expect(page.getByText("04600000000006 · 000123")).toBeVisible();
+  await expect(page.getByText(ITEM_IDENTITY_1)).toBeVisible();
   expect(unexpected).toEqual([]);
   await screenshotFullMain(page, screenshotPath07("corrections-list"));
 });
@@ -1335,7 +1364,7 @@ test("renders the correction form for a selected item", async ({ page }) => {
   // network call.
   await page.getByRole("button", { name: "Изменить дату" }).click();
   await expect(
-    page.getByRole("heading", { level: 2, name: "Исправление · 04600000000006 · 000123" }),
+    page.getByRole("heading", { level: 2, name: `Исправление · ${ITEM_IDENTITY_1}` }),
   ).toBeVisible();
   await expect(page.getByLabel("Причина исправления")).toBeVisible();
   await expect(page.getByLabel("Наблюдаемая дата производства")).toBeVisible();
