@@ -101,7 +101,12 @@ export { buildBitmapCommand, generateTspl } from "./labels/tspl.js";
 export type { GenerateTsplDeps } from "./labels/tspl.js";
 export { bitmapToTsplBytes, bitmapToZplHex, convertToMonochrome } from "./labels/raster.js";
 export type { TsplBytesPacking, ZplHexPacking } from "./labels/raster.js";
-export { renderCode128Svg, renderDataMatrixSvg, renderQrSvg } from "./barcodes/svg.js";
+export {
+  renderCode128Svg,
+  renderDataMatrixSvg,
+  renderLiteralDataMatrixSvg,
+  renderQrSvg,
+} from "./barcodes/svg.js";
 export {
   deriveDigestB64,
   formatPhc,
