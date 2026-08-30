@@ -761,20 +761,34 @@ function CheckInventoryWorkScreen({
           ) : null
         }
       >
-        <div className="inventory-date-dialog">
-          <p>
-            {heldScan?.mixed
-              ? t("inventory.work.sourceDate.mixedBody", {
-                  active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
-                })
-              : t("inventory.work.sourceDate.body", {
-                  code: heldScan?.codeDate ? formatCivilDate(heldScan.codeDate, locale) : "",
-                  active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
-                })}
-          </p>
-          {!heldScan?.mixed && !codeDateInRange ? (
-            <p>{t("inventory.work.sourceDate.outOfRange")}</p>
-          ) : null}
+        <div className="inventory-date-dialog inventory-date-dialog--compare">
+          {heldScan?.mixed ? (
+            <>
+              <div className="inventory-date-compare inventory-date-compare--single">
+                <div className="inventory-date-compare__block">
+                  <span>{t("inventory.work.sourceDate.activeLabel")}</span>
+                  <strong>{heldScan ? formatCivilDate(heldScan.activeDate, locale) : "—"}</strong>
+                </div>
+              </div>
+              <p>{t("inventory.work.sourceDate.mixedBody")}</p>
+            </>
+          ) : (
+            <>
+              <div className="inventory-date-compare">
+                <div className="inventory-date-compare__block inventory-date-compare__block--warn">
+                  <span>{t("inventory.work.sourceDate.codeLabel")}</span>
+                  <strong>
+                    {heldScan?.codeDate ? formatCivilDate(heldScan.codeDate, locale) : "—"}
+                  </strong>
+                </div>
+                <div className="inventory-date-compare__block">
+                  <span>{t("inventory.work.sourceDate.activeLabel")}</span>
+                  <strong>{heldScan ? formatCivilDate(heldScan.activeDate, locale) : "—"}</strong>
+                </div>
+              </div>
+              {!codeDateInRange ? <p>{t("inventory.work.sourceDate.outOfRange")}</p> : null}
+            </>
+          )}
         </div>
       </FullScreenDialog>
     </StationScreen>
@@ -1908,23 +1922,23 @@ function RepackInventoryWorkScreen({
           ) : null
         }
       >
-        <div className="inventory-date-dialog">
-          <p>
-            {t("inventory.repack.sourceDate.body", {
-              code: heldScan ? formatCivilDate(heldScan.codeDate, locale) : "",
-              // `boxDate` is not carried by the scan outcome (see
-              // `HeldRepackScan`), only mirrored from React state via
-              // `boxDateRef`, which can still be empty right after a
-              // back-to-back old-box + first-bottle scan; fall back instead
-              // of formatting an empty string, matching
-              // `RepackBoxInstrument`'s own guard on the same field.
-              box: heldScan
-                ? heldScan.boxDate
-                  ? formatCivilDate(heldScan.boxDate, locale)
-                  : "—"
-                : "",
-            })}
-          </p>
+        <div className="inventory-date-dialog inventory-date-dialog--compare">
+          <div className="inventory-date-compare">
+            <div className="inventory-date-compare__block inventory-date-compare__block--warn">
+              <span>{t("inventory.repack.sourceDate.codeLabel")}</span>
+              <strong>{heldScan ? formatCivilDate(heldScan.codeDate, locale) : "—"}</strong>
+            </div>
+            <div className="inventory-date-compare__block">
+              <span>{t("inventory.repack.sourceDate.boxLabel")}</span>
+              {/* `boxDate` is not carried by the scan outcome (see
+                  `HeldRepackScan`), only mirrored from React state via
+                  `boxDateRef`, which can still be empty right after a
+                  back-to-back old-box + first-bottle scan; fall back instead
+                  of formatting an empty string, matching
+                  `RepackBoxInstrument`'s own guard on the same field. */}
+              <strong>{heldScan?.boxDate ? formatCivilDate(heldScan.boxDate, locale) : "—"}</strong>
+            </div>
+          </div>
           {heldScan && heldScan.itemCount > 0 ? (
             <>
               <p>{t("inventory.repack.sourceDateBlocked")}</p>
