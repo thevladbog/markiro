@@ -32,12 +32,30 @@ function screenshotPath(name: string): string {
  * definition, and by screenshot time the content they cover has loaded.
  */
 async function settle(page: Page): Promise<void> {
+  // An assertion resolves on the frame the element appears, which can be
+  // before its entrance transition has been registered -- so give the browser
+  // one frame to start animating before waiting for animations to finish.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
   await page.waitForFunction(() =>
     document
       .getAnimations()
       .filter((animation) => (animation.effect?.getTiming().iterations ?? 1) !== Infinity)
       .every((animation) => animation.playState === "finished"),
   );
+  // The text caret blinks forever, so whether it is drawn depends purely on
+  // when the capture lands: two runs of the same test produced files differing
+  // by an 8x40 sliver at the focused field. Hiding it keeps the frames
+  // reproducible and costs nothing -- no step in this document is about a
+  // cursor.
+  // Overlay scrollbars fade on their own schedule and are not reported by
+  // `getAnimations()`, so a capture can land mid-fade -- two runs differed by
+  // a 2px sliver at a container edge. The viewport is grown past the overflow
+  // before capturing anyway, so by then the bars carry no information.
+  await page.addStyleTag({
+    content:
+      "* { caret-color: transparent !important; }\n" +
+      "::-webkit-scrollbar { display: none !important; }",
+  });
 }
 
 /**
@@ -427,7 +445,9 @@ test("device drawer assigns the line", async ({ page }) => {
   const unexpected = await installApi(page, "deviceDrawer");
   await openHarness(page, "/devices");
   await page.getByRole("button", { name: "Добавить устройство" }).click();
-  await expect(page.getByText("Выбранная линия задаёт для станции", { exact: false })).toBeVisible();
+  await expect(
+    page.getByText("Выбранная линия задаёт для станции", { exact: false }),
+  ).toBeVisible();
   await screenshotFullMain(page, screenshotPath("device-line"));
   expect(unexpected).toEqual([]);
 });
