@@ -187,7 +187,9 @@ function inlineRow(rowNumber: number, values: readonly string[]): string {
 
 function xlsxBytes(
   options: {
+    emptySheetData?: "missing" | "self-closing";
     formulaCell?: "missing-cache" | "empty-v" | "empty-is";
+    sequentialRowIds?: boolean;
     sparseDataRow?: boolean;
     worksheetPaddingBytes?: number;
     dataRowCount?: number;
@@ -205,6 +207,10 @@ function xlsxBytes(
       .filter(({ value }) => !options.sparseDataRow || value !== "")
       .map(({ value, index }) => {
         const ref = `${columnName(index)}${rowNumber}`;
+        const cellValue =
+          index === 0 && options.sequentialRowIds
+            ? `01${GTIN}21BATCH-${String(rowNumber - 2).padStart(6, "0")}`
+            : value;
         if (index === 0 && options.formulaCell === "missing-cache") {
           return `<c r="${ref}" t="str"><f>1+1</f></c>`;
         }
@@ -214,22 +220,35 @@ function xlsxBytes(
         if (index === 0 && options.formulaCell === "empty-is") {
           return `<c r="${ref}" t="inlineStr"><f>1+1</f><is/></c>`;
         }
-        if (index === 0) return `<c r="${ref}" t="s"><v>0</v></c>`;
-        return `<c r="${ref}" t="inlineStr"><is><t>${xml(value)}</t></is></c>`;
+        if (index === 0 && !options.sequentialRowIds) {
+          return `<c r="${ref}" t="s"><v>0</v></c>`;
+        }
+        return `<c r="${ref}" t="inlineStr"><is><t>${xml(cellValue)}</t></is></c>`;
       })
       .join("");
   const dataRows = Array.from({ length: options.dataRowCount ?? 1 }, (_, index) => {
     const rowNumber = index + 3;
     return `<row r="${rowNumber}">${rowCells(rowNumber)}</row>`;
   });
+  const padding = `<!--${"x".repeat(options.worksheetPaddingBytes ?? 0)}-->`;
+  const sheetData =
+    options.emptySheetData === "missing"
+      ? padding
+      : options.emptySheetData === "self-closing"
+        ? `<sheetData/>${padding}`
+        : [
+            "<sheetData>",
+            inlineRow(1, [filter("INTRODUCED")]),
+            inlineRow(2, HEADER),
+            ...dataRows,
+            padding,
+            "</sheetData>",
+          ].join("");
   const worksheet = [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>',
-    inlineRow(1, [filter("INTRODUCED")]),
-    inlineRow(2, HEADER),
-    ...dataRows,
-    `<!--${"x".repeat(options.worksheetPaddingBytes ?? 0)}-->`,
-    "</sheetData></worksheet>",
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    sheetData,
+    "</worksheet>",
   ].join("");
   const workbook = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -707,13 +726,31 @@ describe("Chestny ZNAK inventory import parser", () => {
   });
 
   it("preserves row order and limits across XLSX worksheet batches", () => {
-    const result = parse(xlsxBytes({ dataRowCount: 513 }), {
+    const result = parse(xlsxBytes({ dataRowCount: 513, sequentialRowIds: true }), {
       filename: "status.xlsx",
       mimeType: MIME_XLSX,
     });
 
     expect(result.rows).toHaveLength(513);
+    expect(result.rows.map((row) => row.serial)).toEqual(
+      Array.from({ length: 513 }, (_, index) => `BATCH-${String(index + 1).padStart(6, "0")}`),
+    );
   });
+
+  it.each(["missing", "self-closing"] as const)(
+    "applies the metadata limit to a worksheet with %s sheetData",
+    (emptySheetData) => {
+      expectImportError(
+        () =>
+          readChzTabular({
+            filename: "status.xlsx",
+            mimeType: MIME_XLSX,
+            bytes: xlsxBytes({ emptySheetData, worksheetPaddingBytes: 2 * 1024 * 1024 }),
+          }),
+        "CHZ_XLSX_METADATA_LIMIT",
+      );
+    },
+  );
 
   it("reconstructs a genuinely sparse XLSX data row from cell references", () => {
     const result = parse(xlsxBytes({ sparseDataRow: true }), {

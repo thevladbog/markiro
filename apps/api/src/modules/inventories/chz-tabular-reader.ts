@@ -614,9 +614,11 @@ function worksheetSkeleton(
 ): { contentStart: number; contentEnd: number; worksheetOpenTag: string } | null {
   if (bytes.length > CHZ_MAX_WORKSHEET_BYTES) fail("CHZ_WORKSHEET_LIMIT");
   assertUtf8(bytes, "CHZ_XLSX_INVALID");
-  if (asciiCaseInsensitiveIndexOf(bytes, "<!DOCTYPE") >= 0) fail("CHZ_XLSX_INVALID");
   const worksheetStart = xmlOpeningTagIndex(bytes, "worksheet");
   if (worksheetStart < 0) fail("CHZ_XLSX_INVALID");
+  if (asciiCaseInsensitiveIndexOf(bytes.subarray(0, worksheetStart), "<!DOCTYPE") >= 0) {
+    fail("CHZ_XLSX_INVALID");
+  }
   const worksheetEnd = xmlTagEnd(bytes, worksheetStart, bytes.length);
   const worksheetOpenTag = utf8(
     bytes.subarray(worksheetStart, worksheetEnd + 1),
@@ -624,12 +626,12 @@ function worksheetSkeleton(
   );
   const sheetDataStart = xmlOpeningTagIndex(bytes, "sheetData", worksheetEnd + 1);
   if (sheetDataStart < 0) {
-    parseXml(bytes, CHZ_MAX_WORKSHEET_BYTES, "CHZ_WORKSHEET_LIMIT");
+    parseXml(bytes, CHZ_MAX_XML_METADATA_BYTES, "CHZ_XLSX_METADATA_LIMIT");
     return null;
   }
   const sheetDataEnd = xmlTagEnd(bytes, sheetDataStart, bytes.length);
   if (isSelfClosingXmlTag(bytes, sheetDataStart, sheetDataEnd)) {
-    parseXml(bytes, CHZ_MAX_WORKSHEET_BYTES, "CHZ_WORKSHEET_LIMIT");
+    parseXml(bytes, CHZ_MAX_XML_METADATA_BYTES, "CHZ_XLSX_METADATA_LIMIT");
     return null;
   }
   const closingStart = asciiIndexOf(bytes, "</sheetData>", sheetDataEnd + 1);
