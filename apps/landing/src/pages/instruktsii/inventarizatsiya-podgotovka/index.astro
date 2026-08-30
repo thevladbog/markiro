@@ -1,0 +1,26 @@
+---
+import list from "@markiro/legal-documents/assets/instructions/mkr-ins-06/list.png?url";
+import parameters from "@markiro/legal-documents/assets/instructions/mkr-ins-06/parameters.png?url";
+import exports from "@markiro/legal-documents/assets/instructions/mkr-ins-06/exports.png?url";
+import exportsBlocked from "@markiro/legal-documents/assets/instructions/mkr-ins-06/exports-blocked.png?url";
+import snapshot from "@markiro/legal-documents/assets/instructions/mkr-ins-06/snapshot.png?url";
+import terminals from "@markiro/legal-documents/assets/instructions/mkr-ins-06/terminals.png?url";
+import taskForm from "@markiro/legal-documents/assets/instructions/mkr-ins-06/task-form.png?url";
+import launch from "@markiro/legal-documents/assets/instructions/mkr-ins-06/launch.png?url";
+
+import { getLegalDocumentPage } from "../../../content/legal-pages";
+import InstructionDocument from "../../../components/InstructionDocument.astro";
+
+const images = {
+  list,
+  parameters,
+  exports,
+  "exports-blocked": exportsBlocked,
+  snapshot,
+  terminals,
+  "task-form": taskForm,
+  launch,
+};
+---
+
+<InstructionDocument page={getLegalDocumentPage("MKR-INS-06", "ru")} images={images} />
