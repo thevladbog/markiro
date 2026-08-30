@@ -479,8 +479,17 @@
   font: var(--text-caption);
 }
 
+/**
+ * Scan identities are the API's raw `normalized_identity`
+ * (`item:<64 hex chars>`), a 69-character string with no break opportunity in
+ * it. Without `anywhere` its min-content width (662px) becomes the minimum
+ * width of the whole row, which pushes the corrections list's action buttons
+ * out of their card and under the neighbouring one. `anywhere` (not
+ * `break-word`) is required: only it lets the intrinsic minimum collapse.
+ */
 .mk-inventory-mono {
   font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
 
 .mk-inventory-correction-list__actions {

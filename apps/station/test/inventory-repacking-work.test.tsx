@@ -358,7 +358,12 @@ describe("repack inventory work screen", () => {
     await screen.findByText("Старый короб выбран");
     scan.emit(km.raw);
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
-    expect(scan.active()).toBe(false);
+    // Waited for, not asserted outright: `print` fires from `runPrint`, which
+    // the box-closed effect invokes only after this scan's own `onOutcome`
+    // render has already committed — the listener's teardown (gated on
+    // `printBusy`) rides that same later effect flush, so on a loaded machine
+    // it can still be pending when `print`'s call becomes observable.
+    await waitFor(() => expect(scan.active()).toBe(false));
     expect(screen.queryByText(/пропустить/i)).toBeNull();
     expect(screen.queryByText(/следующий короб/i)).toBeNull();
 
@@ -545,7 +550,11 @@ describe("repack inventory work screen", () => {
     await waitFor(() =>
       expect(screen.getByText("Дата кода отличается от даты короба")).toBeTruthy(),
     );
-    expect(scan.active()).toBe(false);
+    // Waited for, not asserted outright: the dialog text commits with the
+    // `heldScan` render set from this scan's async `onOutcome`, while the
+    // listener's teardown rides the passive effect that reacts to `heldScan`
+    // — a later flush that can still be pending on a loaded machine.
+    await waitFor(() => expect(scan.active()).toBe(false));
 
     fireEvent.click(screen.getByRole("button", { name: /Установить/ }));
 
@@ -607,7 +616,11 @@ describe("repack inventory work screen", () => {
     await waitFor(() =>
       expect(screen.getByText("Дата кода отличается от даты короба")).toBeTruthy(),
     );
-    expect(scan.active()).toBe(false);
+    // Waited for, not asserted outright: the dialog text commits with the
+    // `heldScan` render set from this scan's async `onOutcome`, while the
+    // listener's teardown rides the passive effect that reacts to `heldScan`
+    // — a later flush that can still be pending on a loaded machine.
+    await waitFor(() => expect(scan.active()).toBe(false));
 
     fireEvent.click(screen.getByRole("button", { name: /Установить/ }));
 
@@ -938,6 +951,12 @@ describe("repack inventory work screen", () => {
     await waitFor(() =>
       expect(screen.getByText("Дата кода отличается от даты короба")).toBeTruthy(),
     );
+    // Waited for, not asserted outright: the dialog text commits with the
+    // `heldScan` render, while the listener is torn down by the passive effect
+    // that reacts to it. The second back-to-back scan leaves extra queued work
+    // pending across that gap, so on a loaded machine the text can be observed
+    // a tick before the teardown runs. A timeout here still means the listener
+    // was never torn down.
     await waitFor(() => expect(scan.active()).toBe(false));
     // MATCH must not have been silently added behind the open dialog.
     expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20");
