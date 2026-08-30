@@ -42,4 +42,10 @@ describe("inventory.css contracts", () => {
       /\.mk-inventory-live-metric--link:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\);[^}]*outline-offset:\s*2px;/s,
     );
   });
+
+  it("keeps bulk correction actions reachable while scrolling", () => {
+    expect(css).toMatch(
+      /\.mk-inventory-correction-bulk-bar\s*\{[^}]*position:\s*sticky;[^}]*bottom:\s*0;/s,
+    );
+  });
 });
