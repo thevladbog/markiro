@@ -552,7 +552,7 @@ describe("repack inventory work screen", () => {
     scan.emit(canonicalizeKm(`01${GTIN}21REPACK-MIX-A`).raw);
 
     await waitFor(() =>
-      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+      expect(screen.getByText("Дата кода отличается от даты короба")).toBeTruthy(),
     );
     expect(scan.active()).toBe(false);
 
@@ -616,7 +616,7 @@ describe("repack inventory work screen", () => {
     scan.emit(km.raw);
 
     await waitFor(() =>
-      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+      expect(screen.getByText("Дата кода отличается от даты короба")).toBeTruthy(),
     );
     expect(scan.active()).toBe(false);
 
@@ -708,7 +708,7 @@ describe("repack inventory work screen", () => {
 
     scan.emit(canonicalizeKm(`01${GTIN}21REPACK-GATE-A`).raw);
     await waitFor(() =>
-      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+      expect(screen.getByText("Дата кода отличается от даты короба")).toBeTruthy(),
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Установить/ }));
@@ -726,14 +726,14 @@ describe("repack inventory work screen", () => {
     // A disabled native button never dispatches its click handler, so this
     // must be a no-op: the dialog stays open and the scanner stays held.
     fireEvent.click(skipButton);
-    expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy();
+    expect(screen.getByText("Дата кода отличается от даты короба")).toBeTruthy();
     expect(scan.active()).toBe(false);
 
     // Escape is the dialog's other release path, gated inside
     // `FullScreenDialog` by the same `backDisabled` flag — it must be inert
     // too while the write is pending.
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
-    expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy();
+    expect(screen.getByText("Дата кода отличается от даты короба")).toBeTruthy();
     expect(scan.active()).toBe(false);
 
     gate.release();
@@ -817,7 +817,7 @@ describe("repack inventory work screen", () => {
       within(screen.getByRole("dialog")).getByRole("button", { name: "Исправления" }),
     );
     expect(await screen.findByRole("button", { name: "Убрать последнюю бутылку" })).toBeTruthy();
-    expect(screen.queryByText("Дата в коде отличается от активной")).toBeNull();
+    expect(screen.queryByText("Дата кода отличается от даты короба")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(scan.active()).toBe(true));
@@ -961,7 +961,7 @@ describe("repack inventory work screen", () => {
     scan.emit(match.raw);
 
     await waitFor(() =>
-      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+      expect(screen.getByText("Дата кода отличается от даты короба")).toBeTruthy(),
     );
     expect(scan.active()).toBe(false);
     // MATCH must not have been silently added behind the open dialog.
@@ -972,7 +972,7 @@ describe("repack inventory work screen", () => {
     // The scanner resumes with nothing queued behind it: MATCH was dropped
     // entirely, not silently added and not held as a second dialog.
     await waitFor(() => expect(scan.active()).toBe(true));
-    expect(screen.queryByText("Дата в коде отличается от активной")).toBeNull();
+    expect(screen.queryByText("Дата кода отличается от даты короба")).toBeNull();
     expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20");
 
     // MATCH can still be scanned normally afterward.

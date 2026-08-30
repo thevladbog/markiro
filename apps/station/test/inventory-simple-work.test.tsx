@@ -688,6 +688,43 @@ describe("simple inventory work screen", () => {
     expect(terminalDate.active_production_date).toBe("2026-08-19");
   });
 
+  it("clears a stale accepted result behind a held mismatching scan", async () => {
+    const { db, exec } = await fixture();
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', 1, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+    const scan = scanner();
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+      />,
+    );
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+
+    scan.emit(raw("EXPECTED"));
+    await waitFor(() => expect(screen.getByText("Код принят")).toBeTruthy());
+
+    scan.emit(raw("NEXTDAY"));
+    await waitFor(() =>
+      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить код" }));
+
+    // NEXTDAY was never recorded, so the floor screen must not keep showing
+    // the previous scan's accepted verdict behind the (now closed) dialog —
+    // otherwise the operator would believe the skipped code was counted.
+    await waitFor(() => expect(scan.isListening()).toBe(true));
+    expect(screen.queryByText("Код принят")).toBeNull();
+  });
+
   it("holds only the first of two back-to-back mismatching scans and drops the second from the queue", async () => {
     const { db, exec } = await fixture();
     db.prepare(

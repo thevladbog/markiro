@@ -45,7 +45,6 @@ export interface RecordInventoryScanResult extends InventoryScanPresentation {
 
 export interface InventoryScanDateMismatch {
   outcome: "date-mismatch";
-  scanKind: "item" | "known_box";
   activeDate: string;
   /** null для смешанного короба — подставлять нечего. */
   codeDate: string | null;
@@ -1370,6 +1369,10 @@ async function guardSourceProductionDate(
   if (source.kind === "single") {
     if (source.productionDate === active) return null;
     if (!(await hasDeviceScans(exec, input))) {
+      // Not range-checked against [productionDateFrom, productionDateTo]
+      // here: `source.productionDate` only ever comes from an `expected` row,
+      // and inventory-mirror.ts's bundle validation (classifyInventorySnapshotRow
+      // against the manifest's range) already guarantees those are in range.
       await setInventoryProductionDate(exec, {
         inventoryId: input.inventoryId,
         snapshotId: input.snapshotId,
@@ -1383,7 +1386,6 @@ async function guardSourceProductionDate(
   }
   return {
     outcome: "date-mismatch",
-    scanKind: source.scanKind,
     activeDate: active,
     codeDate: source.kind === "single" ? source.productionDate : null,
     mixed: source.kind === "mixed",

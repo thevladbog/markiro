@@ -409,6 +409,15 @@ async function snapshotFacts(
  * бутылкой и девятнадцатью без даты всё равно даст эту одну дату. Возвращает
  * null, если пригодных датированных строк нет или встречается больше одной
  * разной даты.
+ *
+ * В отличие от `resolveInventoryScanSourceDate` в
+ * `packages/domain/src/inventory/scan.ts`, здесь не исключаются уже зачтённые
+ * дети — эта функция читает содержимое **старого** короба целиком, а не то,
+ * что ещё предстоит зачесть в новый. На частично переложенном старом коробе
+ * (перенесённые бутылки одной датой X, остаток другой Y) это даёт null и
+ * открывает новый короб с устаревшей активной датой терминала вместо X —
+ * первая же бутылка тогда вызывает диалог расхождения. Осознанный компромисс,
+ * поведение не меняется.
  */
 async function oldBoxSourceDate(
   exec: SqlExecutor,
@@ -459,6 +468,10 @@ async function recordInternal(
     const seeded = await oldBoxSourceDate(exec, input, oldSscc);
     const boxDate = seeded ?? terminalState.active_production_date!;
     if (seeded !== null && seeded !== terminalState.active_production_date) {
+      // Not range-checked against [productionDateFrom, productionDateTo]
+      // here: `seeded` only ever comes from `expected = 1` rows, and
+      // inventory-mirror.ts's bundle validation (classifyInventorySnapshotRow
+      // against the manifest's range) already guarantees those are in range.
       // SqlExecutor exposes only run/all — no transactions — so this UPDATE to
       // inventory_terminal_state commits independently of the open-box journal
       // INSERT a few lines below. If burnSerial then returns null (SSCC pool

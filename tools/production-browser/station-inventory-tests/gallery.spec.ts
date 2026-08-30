@@ -24,6 +24,8 @@ const states = [
   "inventory-repack-corrections",
   "inventory-production-date-change",
   "inventory-source-date-mismatch",
+  "inventory-mixed-box",
+  "inventory-repack-source-date-mismatch",
   "inventory-leave-open-box",
   "inventory-print-recovery",
   "inventory-same-sscc-reprint-confirmation",

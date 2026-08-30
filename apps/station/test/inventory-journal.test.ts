@@ -1830,7 +1830,6 @@ describe("inventory scan source production date guard", () => {
 
     expect(outcome).toEqual({
       outcome: "date-mismatch",
-      scanKind: "item",
       activeDate: "2026-08-20",
       codeDate: "2026-08-23",
       mixed: false,
@@ -1907,7 +1906,6 @@ describe("inventory scan source production date guard", () => {
 
     expect(outcome).toEqual({
       outcome: "date-mismatch",
-      scanKind: "known_box",
       activeDate: "2026-08-20",
       codeDate: null,
       mixed: true,
@@ -1982,7 +1980,6 @@ describe("inventory scan source production date guard", () => {
 
     expect(outcome).toEqual({
       outcome: "date-mismatch",
-      scanKind: "item",
       activeDate: "2026-08-25",
       codeDate: "2026-08-20",
       mixed: false,

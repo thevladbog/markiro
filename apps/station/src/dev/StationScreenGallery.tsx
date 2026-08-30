@@ -399,6 +399,7 @@ function InventoryFixture({ variant }: { variant: string }) {
     case "protected-moving-by-ud":
     case "not-in-snapshot":
     case "source-date-mismatch":
+    case "mixed-box":
     case "production-date-change":
       return <SimpleInventoryFixture variant={variant} />;
     default:
@@ -473,13 +474,20 @@ function SimpleInventoryFixture({ variant }: { variant: string }) {
           variant === "source-date-mismatch"
             ? {
                 outcome: "date-mismatch",
-                scanKind: "item",
                 activeDate: GALLERY_INVENTORY_DATE,
                 codeDate: "2026-08-18",
                 mixed: false,
                 raw: "gallery-held-scan",
               }
-            : null,
+            : variant === "mixed-box"
+              ? {
+                  outcome: "date-mismatch",
+                  activeDate: GALLERY_INVENTORY_DATE,
+                  codeDate: null,
+                  mixed: true,
+                  raw: "gallery-held-scan-mixed",
+                }
+              : null,
       }}
     />
   );
@@ -552,6 +560,7 @@ function RepackInventoryFixture({ variant }: { variant: string }) {
   const reprint = variant === "same-sscc-reprint-confirmation";
   const printRecovery = variant === "print-recovery";
   const leaveOpen = variant === "leave-open-box";
+  const sourceDateMismatch = variant === "repack-source-date-mismatch";
   return (
     <InventoryWorkScreen
       exec={galleryInventoryExecutor}
@@ -569,6 +578,14 @@ function RepackInventoryFixture({ variant }: { variant: string }) {
         result,
         leaveFailed: leaveOpen,
         correctionsDialog: corrections || reprint,
+        heldScan: sourceDateMismatch
+          ? {
+              raw: "gallery-held-repack-scan",
+              boxDate: GALLERY_INVENTORY_DATE,
+              codeDate: "2026-08-18",
+              itemCount: 0,
+            }
+          : null,
         printDisplay: printRecovery
           ? {
               attemptId: "gallery-print-attempt",
@@ -628,7 +645,9 @@ function galleryRepackState(variant: string): InventoryRepackStateView {
         : 12
       : variant === "leave-open-box"
         ? 4
-        : 7;
+        : variant === "repack-source-date-mismatch"
+          ? 0
+          : 7;
   return {
     phase: variant === "repack-box-ready" ? "closed-pending-print" : "scanning",
     box: {
@@ -669,6 +688,17 @@ function galleryRepackResult(variant: string): InventoryRepackScanResult | null 
       printState: "not_ready",
       sourceParentMismatch: false,
       sourceProductionDate: null,
+    };
+  }
+  if (variant === "repack-source-date-mismatch") {
+    return {
+      verdict: "source-date-mismatch",
+      boxId: "gallery-repack-box",
+      newSscc: GALLERY_INVENTORY_SSCC,
+      itemCount: 0,
+      printState: "not_ready",
+      sourceParentMismatch: false,
+      sourceProductionDate: "2026-08-18",
     };
   }
   if (variant === "repack-box-ready") {
