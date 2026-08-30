@@ -58,7 +58,11 @@ const invoiceBase = {
   issueDate: "2026-08-21T10:00:00.000Z",
   dueDate: "2026-08-28T10:00:00.000Z",
   currency: "RUB",
-  sellerSnapshot: { displayName: "Markiro", taxId: "234190622844" },
+  sellerSnapshot: {
+    kind: "sole_proprietor",
+    displayName: "Markiro",
+    inn: "234190622844",
+  },
   buyerSnapshot: { displayName: "Factory" },
   subtotal: "12500.00",
   vatTotal: "2500.00",
@@ -756,7 +760,9 @@ describe("invoice commercial lifecycle", () => {
     renderSaasApp({ initialEntry: `/invoices/${INVOICE_ID}` });
 
     await user.click(await screen.findByRole("button", { name: "Повторить формирование" }));
-    await user.click(screen.getByRole("checkbox", { name: "Добавить подпись и печать" }));
+    const signedPrint = screen.getByRole("checkbox", { name: "Добавить подпись и печать" });
+    expect(signedPrint.hasAttribute("disabled")).toBe(false);
+    await user.click(signedPrint);
     await user.click(screen.getByRole("button", { name: "Сформировать новую версию" }));
 
     await waitFor(() => expect(api.calls()).toHaveLength(1));

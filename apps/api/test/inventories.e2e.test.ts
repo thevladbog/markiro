@@ -319,7 +319,7 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     ]);
     const numbers = [first.body.number as string, second.body.number as string].sort();
     const yy = String(new Date().getUTCFullYear() % 100).padStart(2, "0");
-    expect(numbers).toEqual([`IVN-${yy}-0001`, `IVN-${yy}-0002`]);
+    expect(numbers).toEqual([`INVENTORY-${yy}-0001`, `INVENTORY-${yy}-0002`]);
     expect(first.body).toMatchObject({
       status: "draft",
       mode: "check",
@@ -347,28 +347,31 @@ describe.skipIf(!ready)("tenant-admin inventories e2e", () => {
     expect(rows.map((row) => row.number).sort()).toEqual(numbers);
   });
 
-  it("continues the tenant sequence past inventories numbered in the legacy Cyrillic format", async () => {
+  it("continues the tenant sequence across Cyrillic, IVN, and INVENTORY formats", async () => {
     const agent = request.agent(app!.getHttpServer());
     const { tenantId, productId, lineId } = await seedPreparation(agent);
-    await db.insert(schema.inventories).values({
-      id: randomUUID(),
-      tenantId,
-      number: "ИНВ-00042",
-      productId,
-      gtin14Snapshot: FIXTURE_GTIN,
-      lineId,
-      mode: "check",
-      productionDateFrom: "2026-08-01",
-      productionDateTo: "2026-08-31",
-      createdByUserId: await actorUserId(tenantId),
-    });
+    const createdByUserId = await actorUserId(tenantId);
+    await db.insert(schema.inventories).values(
+      ["ИНВ-00040", "IVN-25-0041", "INVENTORY-26-0042"].map((number) => ({
+        id: randomUUID(),
+        tenantId,
+        number,
+        productId,
+        gtin14Snapshot: FIXTURE_GTIN,
+        lineId,
+        mode: "check" as const,
+        productionDateFrom: "2026-08-01",
+        productionDateTo: "2026-08-31",
+        createdByUserId,
+      })),
+    );
 
     const created = await agent
       .post("/inventories")
       .send(createBody(productId, lineId))
       .expect(201);
     const yy = String(new Date().getUTCFullYear() % 100).padStart(2, "0");
-    expect(created.body.number).toBe(`IVN-${yy}-0043`);
+    expect(created.body.number).toBe(`INVENTORY-${yy}-0043`);
   });
 
   it("projects tenant-scoped station close blockers through the cabinet inventory detail", async () => {
