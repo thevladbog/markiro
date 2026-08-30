@@ -71,6 +71,12 @@ describe("renderInventoryTaskFormHtml", () => {
     expect(html).toMatch(/\.compact \.status\s*\{[^}]*margin-top:\s*2mm/s);
   });
 
+  it("optically centers the step numbers inside their circular markers", () => {
+    const html = renderInventoryTaskFormHtml(fixture());
+
+    expect(html).toMatch(/\.step-number\s*\{[^}]*line-height:\s*1;[^}]*padding-top:\s*\.25mm/s);
+  });
+
   it("uses the remaining page area for handwritten operator comments on a dot grid", () => {
     const html = renderInventoryTaskFormHtml(fixture());
 

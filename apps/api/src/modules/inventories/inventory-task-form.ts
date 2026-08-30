@@ -178,7 +178,7 @@ export function renderInventoryTaskFormHtml(data: InventoryTaskFormData): string
     .steps { margin-top: 4mm; padding-top: 1mm; border-top: .2mm solid #d8d5cf; }
     .steps ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2.5mm 7mm; margin: 0; padding: 0; list-style: none; }
     .steps li { display: grid; grid-template-columns: 7mm 1fr; gap: 3mm; align-items: start; color: #4f4c47; font-size: 8.5pt; line-height: 1.28; }
-    .step-number { width: 6mm; height: 6mm; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: #17161a; color: #fff; font-size: 7pt; font-weight: 800; }
+    .step-number { width: 6mm; height: 6mm; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: #17161a; color: #fff; font-size: 7pt; font-weight: 800; line-height: 1; padding-top: .25mm; }
     .rules { margin-top: 5mm; padding: 3mm 4mm; border: .3mm solid #17161a; background: #fff; color: #17161a; }
     .rules h2 { margin: 0 0 2mm; color: #17161a; }
     .rules ul { margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2mm 6mm; list-style: none; font-size: 7.5pt; line-height: 1.25; }
