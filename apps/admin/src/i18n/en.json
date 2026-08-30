@@ -2940,6 +2940,8 @@
         },
         "signer": {
           "title": "Signer agent",
+          "downloadHint": "Install the app on the Windows computer holding the qualified certificate. This link always downloads the current stable version.",
+          "downloadAction": "Download Markiro Signer for Windows",
           "tokenLabel": "True API token:",
           "token": {
             "none": "no token",

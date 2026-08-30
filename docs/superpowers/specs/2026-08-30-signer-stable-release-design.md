@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-30
 
-**Status:** Proposed for implementation
+**Status:** Implemented; extended with the versionless first-install alias on 2026-08-31
 
 **Scope:** Publishing a signed, installable Windows build of the Chestny ZNAK signer agent, and teaching the installed agent to update itself. One channel, `stable`.
 
@@ -32,8 +32,14 @@ The Station is a fleet of terminals where a bad build strands a production line,
 
 Two targets:
 
-- **the mirror** — the installer, the updater artifacts and `latest.json`, which is what the running agent reads;
-- **a GitHub Release** — the installer attached, as the human-readable page to send a customer for a first install.
+- **the mirror** — the installer, the updater artifacts and `latest.json`, which is what the running agent reads, plus `https://releases.markiro.app/signer/download`, the versionless stable URL shown in the cabinet;
+- **a GitHub Release** — the installer attached and release notes pointing to the same versionless URL.
+
+There is no beta alias. A stable publication copies the exact immutable signed
+installer to `signer/download` and publicly verifies both URLs before advancing
+`latest.json`. A separate owner-gated workflow can rebuild only this alias from
+the exact installer named by the current validated stable manifest; it neither
+creates nor changes a release and exists for bootstrap and recovery.
 
 **The mirror is written first.** The updater endpoint reads from it, so a failure after the mirror but before GitHub leaves clients with a consistent, fetchable update; the reverse order would announce a release the updater cannot download.
 

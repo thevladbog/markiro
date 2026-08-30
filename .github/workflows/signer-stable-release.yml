@@ -128,6 +128,7 @@ jobs:
             | tee "$RUNNER_TEMP/published.txt"
           printf 'manifest_url=%s\n' "$(sed -n 1p "$RUNNER_TEMP/published.txt")" >> "$GITHUB_OUTPUT"
           printf 'installer_url=%s\n' "$(sed -n 2p "$RUNNER_TEMP/published.txt")" >> "$GITHUB_OUTPUT"
+          printf 'download_url=%s\n' "$(sed -n 3p "$RUNNER_TEMP/published.txt")" >> "$GITHUB_OUTPUT"
 
       - name: Announce the GitHub Release
         shell: bash
@@ -136,7 +137,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           BUNDLE_DIR: ${{ steps.build.outputs.bundle_dir }}
-          INSTALLER_URL: ${{ steps.mirror.outputs.installer_url }}
+          DOWNLOAD_URL: ${{ steps.mirror.outputs.download_url }}
         run: |
           set -euo pipefail
           installer="$(find "$BUNDLE_DIR" -maxdepth 1 -type f -name '*-setup.exe' -print -quit)"
@@ -145,7 +146,7 @@ jobs:
           notes="$RUNNER_TEMP/notes.md"
           {
             printf 'Установщик агента подписи Честного ЗНАКа для Windows.\n\n'
-            printf 'Прямая ссылка: %s\n\n' "$INSTALLER_URL"
+            printf 'Постоянная ссылка: %s\n\n' "$DOWNLOAD_URL"
             printf 'Установленный агент обновляется сам, с подтверждением оператора.\n'
           } > "$notes"
           gh release create "$RELEASE_TAG" "$named" \

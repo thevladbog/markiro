@@ -35,19 +35,23 @@ export function Pairing({ hostname, onPair, onPaired }: PairingProps): ReactElem
 
   return (
     <Card title={t("pairing.title")}>
-      <p>{t("pairing.hint", { hostname })}</p>
-      <Input
-        label={t("pairing.codeLabel")}
-        value={code}
-        inputMode="numeric"
-        maxLength={8}
-        autoComplete="one-time-code"
-        onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
-      />
-      {error ? <Alert tone="error">{t(`pairing.error.${error}`)}</Alert> : null}
-      <Button onClick={() => void submit()} disabled={!complete} loading={busy}>
-        {t("pairing.submit")}
-      </Button>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <p style={{ margin: 0, lineHeight: 1.45 }}>{t("pairing.hint", { hostname })}</p>
+        <Input
+          label={t("pairing.codeLabel")}
+          value={code}
+          inputMode="numeric"
+          maxLength={8}
+          autoComplete="one-time-code"
+          onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
+        />
+        {error ? <Alert tone="error">{t(`pairing.error.${error}`)}</Alert> : null}
+        <div>
+          <Button onClick={() => void submit()} disabled={!complete} loading={busy}>
+            {t("pairing.submit")}
+          </Button>
+        </div>
+      </div>
     </Card>
   );
 }
