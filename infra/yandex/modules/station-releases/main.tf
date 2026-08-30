@@ -46,41 +46,54 @@ resource "yandex_iam_service_account_static_access_key" "publisher" {
 
 # Object Storage requires an IAM baseline before evaluating a bucket policy.
 # storage.uploader permits read and overwrite but not object deletion or bucket
-# configuration; the policy below further limits the identity to station/*.
+# configuration; the policy below further limits the identity to the two
+# release prefixes this bucket serves.
 resource "yandex_storage_bucket_iam_binding" "publisher_uploader" {
   bucket  = yandex_storage_bucket.releases.bucket
   role    = "storage.uploader"
   members = ["serviceAccount:${yandex_iam_service_account.station_release_publisher.id}"]
 }
 
+# The bucket serves two products from one identity: the Station terminal app
+# under station/*, and the Chestny ZNAK signer agent under signer/*. They share
+# a service account and a static access key, so splitting the grants into
+# per-product statements would buy no independent revocation — there is nothing
+# to revoke separately. Both prefixes are listed on each statement instead, and
+# anything outside them stays denied.
 resource "yandex_storage_bucket_policy" "releases" {
   bucket = yandex_storage_bucket.releases.bucket
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid       = "AllowPublicStationReleaseObjects"
+        Sid       = "AllowPublicReleaseObjects"
         Effect    = "Allow"
         Principal = "*"
         Action    = ["s3:GetObject"]
-        Resource  = ["arn:aws:s3:::${yandex_storage_bucket.releases.bucket}/station/*"]
+        Resource = [
+          "arn:aws:s3:::${yandex_storage_bucket.releases.bucket}/station/*",
+          "arn:aws:s3:::${yandex_storage_bucket.releases.bucket}/signer/*",
+        ]
       },
       {
-        Sid       = "AllowPublisherStationObjects"
+        Sid       = "AllowPublisherReleaseObjects"
         Effect    = "Allow"
         Principal = { CanonicalUser = yandex_iam_service_account.station_release_publisher.id }
         Action    = ["s3:GetObject", "s3:PutObject"]
-        Resource  = ["arn:aws:s3:::${yandex_storage_bucket.releases.bucket}/station/*"]
+        Resource = [
+          "arn:aws:s3:::${yandex_storage_bucket.releases.bucket}/station/*",
+          "arn:aws:s3:::${yandex_storage_bucket.releases.bucket}/signer/*",
+        ]
       },
       {
-        Sid       = "AllowPublisherStationBucketPreflight"
+        Sid       = "AllowPublisherReleaseBucketPreflight"
         Effect    = "Allow"
         Principal = { CanonicalUser = yandex_iam_service_account.station_release_publisher.id }
         Action    = ["s3:GetBucketLocation", "s3:ListBucket"]
         Resource  = ["arn:aws:s3:::${yandex_storage_bucket.releases.bucket}"]
         Condition = {
           StringLike = {
-            "s3:prefix" = ["station/*"]
+            "s3:prefix" = ["station/*", "signer/*"]
           }
         }
       },

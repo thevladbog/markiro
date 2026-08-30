@@ -815,9 +815,13 @@ function validateReleasePolicy(plan, resource, bucketName, expectedTerraformId, 
   });
 
   const bucketArn = `arn:aws:s3:::${bucketName}`;
-  const stationArn = `${bucketArn}/station/*`;
+  // One bucket, one publisher identity, two release prefixes: station/* for
+  // the terminal app and signer/* for the Chestny ZNAK signer agent. Anything
+  // outside these two must stay denied, so the arrays are matched exactly.
+  const releaseArns = [`${bucketArn}/station/*`, `${bucketArn}/signer/*`];
+  const releasePrefixes = ["station/*", "signer/*"];
   const publicRead = releasePolicyScoped("public-statement", () =>
-    statement(policy, "AllowPublicStationReleaseObjects", [
+    statement(policy, "AllowPublicReleaseObjects", [
       "Sid",
       "Effect",
       "Principal",
@@ -829,10 +833,10 @@ function validateReleasePolicy(plan, resource, bucketName, expectedTerraformId, 
     if (publicRead.Principal !== "*") rejected();
   });
   releasePolicyScoped("public-action", () => exactStrings(publicRead.Action, ["s3:GetObject"]));
-  releasePolicyScoped("public-resource", () => exactStrings(publicRead.Resource, [stationArn]));
+  releasePolicyScoped("public-resource", () => exactStrings(publicRead.Resource, releaseArns));
 
   const publisherObjects = releasePolicyScoped("publisher-objects-statement", () =>
-    statement(policy, "AllowPublisherStationObjects", [
+    statement(policy, "AllowPublisherReleaseObjects", [
       "Sid",
       "Effect",
       "Principal",
@@ -847,11 +851,11 @@ function validateReleasePolicy(plan, resource, bucketName, expectedTerraformId, 
     exactStrings(publisherObjects.Action, ["s3:GetObject", "s3:PutObject"]),
   );
   releasePolicyScoped("publisher-objects-resource", () =>
-    exactStrings(publisherObjects.Resource, [stationArn]),
+    exactStrings(publisherObjects.Resource, releaseArns),
   );
 
   const publisherBucket = releasePolicyScoped("publisher-bucket-statement", () =>
-    statement(policy, "AllowPublisherStationBucketPreflight", [
+    statement(policy, "AllowPublisherReleaseBucketPreflight", [
       "Sid",
       "Effect",
       "Principal",
@@ -872,7 +876,7 @@ function validateReleasePolicy(plan, resource, bucketName, expectedTerraformId, 
   releasePolicyScoped("publisher-bucket-condition", () => {
     exactKeys(publisherBucket.Condition, ["StringLike"]);
     exactKeys(publisherBucket.Condition.StringLike, ["s3:prefix"]);
-    exactStrings(publisherBucket.Condition.StringLike["s3:prefix"], ["station/*"]);
+    exactStrings(publisherBucket.Condition.StringLike["s3:prefix"], releasePrefixes);
   });
 
   const terraform = releasePolicyScoped("terraform-statement", () =>
