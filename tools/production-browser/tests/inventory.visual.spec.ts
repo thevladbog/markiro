@@ -433,24 +433,30 @@ const NO_DOCUMENT_RUNS = { items: [] };
  * the box is open, `pending` the moment it closes, `printed` once the label
  * came out. `itemCount` never exceeds the product's `boxCapacity` (12) --
  * `applyRepackMutation` closes a box at capacity and rejects anything past it.
+ *
+ * Every `sscc` below ends in the GS1 mod-10 check digit of its own first 17
+ * digits (`gs1CheckDigit`, packages/domain/src/gs1/check-digit.ts). A repack
+ * box only ever gets its SSCC from `buildSscc`, and a scanned one has to pass
+ * `parseScannedSscc` -> `isValidSscc`, so a box whose check digit is wrong
+ * cannot exist in any inventory.
  */
 const BOX_1_BASE = {
   id: BOX_ID_1,
-  sscc: "123456789012345670",
+  sscc: "123456789012345675",
   terminalId: DEVICE_ID_1,
   terminalName: "Терминал 1",
   productionDate: "2026-08-15",
 } as const;
 const BOX_2_BASE = {
   id: BOX_ID_2,
-  sscc: "223456789012345670",
+  sscc: "223456789012345672",
   terminalId: DEVICE_ID_2,
   terminalName: "Терминал 2",
   productionDate: "2026-08-16",
 } as const;
 const BOX_3_BASE = {
   id: BOX_ID_3,
-  sscc: "323456789012345670",
+  sscc: "323456789012345679",
   terminalId: DEVICE_ID_2,
   terminalName: "Терминал 2",
   productionDate: "2026-08-16",
