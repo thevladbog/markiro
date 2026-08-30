@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const workflow = await readFile(".github/workflows/signer-stable-release.yml", "utf8");
+// Normalised, because this file's guard runs inside the very workflow it
+// guards — on a Windows runner, where git checks the YAML out with CRLF and
+// every `^`/`\n` anchor below would otherwise miss.
+const workflow = (await readFile(".github/workflows/signer-stable-release.yml", "utf8")).replaceAll(
+  "\r\n",
+  "\n",
+);
 
 test("is dispatch-only", () => {
   // A release is a deliberate act; nothing about a merge to main should ship one.
