@@ -1,11 +1,13 @@
 import {
+  ConflictException,
   Inject,
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
-import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { loadEnv } from "../../env";
@@ -17,11 +19,18 @@ import {
   pairAttemptWindowStart,
 } from "../device-pairing/pairing-policy";
 import { PairAttemptsService } from "../device-pairing/pair-attempts.service";
+import { chzSignerSettingsSchema } from "../integrations/channel-registry";
 import { JournalService } from "../integrations/journal.service";
-import { CHZ_CHANNEL_TYPE, CHZ_TOKEN_REFRESH_LEAD_MS } from "./chz-constants";
+import {
+  CHZ_CHANNEL_TYPE,
+  CHZ_TOKEN_REFRESH_LEAD_MS,
+  CHZ_TRUE_API_BASE_URLS,
+} from "./chz-constants";
+import { ChzCryptoService } from "./chz-crypto.service";
 import type {
   IssueSignerPairingCodeResultDto,
   PairSignerAgentResultDto,
+  RequestSignerTokenRefreshResultDto,
   SignerAgentsOverviewDto,
   SignerTokenStatusDto,
 } from "./dto";
@@ -48,6 +57,7 @@ export class SignerAgentsService {
     @Inject(DB) private readonly db: Db,
     private readonly pairAttempts: PairAttemptsService,
     private readonly journal: JournalService,
+    private readonly crypto: ChzCryptoService,
   ) {}
 
   async overview(tenantId: string): Promise<SignerAgentsOverviewDto> {
@@ -154,6 +164,81 @@ export class SignerAgentsService {
   private isUniqueViolation(error: unknown): boolean {
     const err = error as { code?: string; cause?: { code?: string } };
     return err?.code === "23505" || err?.cause?.code === "23505";
+  }
+
+  async requestTokenRefresh(tenantId: string): Promise<RequestSignerTokenRefreshResultDto> {
+    if (!this.crypto.isConfigured()) {
+      throw new ServiceUnavailableException("CHZ token encryption key is not configured");
+    }
+
+    const [activeAgent] = await this.db
+      .select({ id: schema.chzSignerAgents.id })
+      .from(schema.chzSignerAgents)
+      .where(
+        and(
+          eq(schema.chzSignerAgents.tenantId, tenantId),
+          eq(schema.chzSignerAgents.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (!activeAgent) throw new ConflictException("No active signer agent is paired");
+
+    const [openTask] = await this.db
+      .select({ id: schema.chzSignerTasks.id })
+      .from(schema.chzSignerTasks)
+      .where(
+        and(
+          eq(schema.chzSignerTasks.tenantId, tenantId),
+          eq(schema.chzSignerTasks.type, "true_api_auth"),
+          inArray(schema.chzSignerTasks.status, ["pending", "claimed"]),
+        ),
+      )
+      .limit(1);
+    if (openTask) return { status: "already_pending" };
+
+    const [channel] = await this.db
+      .select({ settings: schema.integrationChannels.settings })
+      .from(schema.integrationChannels)
+      .where(
+        and(
+          eq(schema.integrationChannels.tenantId, tenantId),
+          eq(schema.integrationChannels.type, CHZ_CHANNEL_TYPE),
+        ),
+      );
+    const parsedSettings = chzSignerSettingsSchema.safeParse(channel?.settings ?? {});
+    const settings = parsedSettings.success
+      ? parsedSettings.data
+      : { environment: "production" as const };
+
+    const [inserted] = await this.db
+      .insert(schema.chzSignerTasks)
+      .values({
+        tenantId,
+        type: "true_api_auth",
+        payload: {
+          trueApiBaseUrl: CHZ_TRUE_API_BASE_URLS[settings.environment],
+          ...(settings.mchdInn ? { inn: settings.mchdInn } : {}),
+        },
+      })
+      .onConflictDoNothing()
+      .returning({ id: schema.chzSignerTasks.id });
+    if (!inserted) return { status: "already_pending" };
+
+    await this.journal
+      .append({
+        tenantId,
+        channelType: CHZ_CHANNEL_TYPE,
+        sessionId: null,
+        direction: "local",
+        outcome: "ok",
+        grain: "item",
+        message: "True API token refresh requested from cabinet",
+        details: { taskId: inserted.id },
+      })
+      .catch((error) =>
+        this.logger.warn(`manual signer token refresh journal append failed: ${error}`),
+      );
+    return { status: "queued" };
   }
 
   async revoke(tenantId: string, agentId: string): Promise<void> {

@@ -2950,8 +2950,18 @@
             "expired": "expired"
           },
           "tokenExpires": "valid until {{at}}",
+          "refreshToken": "Refresh token",
+          "refreshError": "Could not request a token refresh",
+          "refreshComplete": "True API token refreshed",
+          "refresh": {
+            "queued": "The task was sent to the agent. Keep Markiro Signer running; the status will update automatically.",
+            "already_pending": "A task is already waiting for the agent. Keep Markiro Signer running; the status will update automatically."
+          },
           "issueCode": "Get pairing code",
           "issueError": "Could not get a pairing code",
+          "codeLabel": "Pairing code",
+          "copyCode": "Copy",
+          "copyError": "Could not copy the code. Select the eight digits manually.",
           "codeExpires": "valid until {{at}}",
           "emptyTitle": "No agents connected yet",
           "emptyHint": "Install the \"Markiro Signer\" app on the computer holding the qualified certificate and enter the pairing code.",

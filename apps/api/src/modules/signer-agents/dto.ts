@@ -40,6 +40,10 @@ export interface IssueSignerPairingCodeResultDto {
   expiresAt: Date;
 }
 
+export interface RequestSignerTokenRefreshResultDto {
+  status: "queued" | "already_pending";
+}
+
 const signerAgentSummaryOpenApiSchema: SchemaObject = {
   type: "object",
   additionalProperties: false,

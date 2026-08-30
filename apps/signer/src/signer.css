@@ -2,6 +2,96 @@ body {
   margin: 0;
   font-family: "IBM Plex Sans", system-ui, sans-serif;
 }
+
 #root {
-  padding: 16px;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.signer-pairing__content,
+.signer-status__content,
+.signer-certificate {
+  display: flex;
+  flex-direction: column;
+}
+
+.signer-pairing__content {
+  gap: 20px;
+}
+
+.signer-pairing__hint,
+.signer-status__token,
+.signer-status__error {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.signer-status__content {
+  gap: 28px;
+}
+
+.signer-status__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.signer-status__tenant {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.signer-status__tenant strong {
+  font: var(--text-h3);
+  color: var(--fg-1);
+}
+
+.signer-status__token {
+  color: var(--fg-2);
+}
+
+.signer-status__error {
+  padding: 12px 14px;
+  border: 1px solid var(--err-border);
+  border-radius: var(--r-2);
+  background: var(--err-bg);
+  color: var(--err-fg);
+}
+
+.signer-status__section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.signer-status__section-title {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--text-caption);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.signer-certificate {
+  gap: 12px;
+}
+
+.signer-journal {
+  margin: 0;
+  padding-left: 22px;
+  color: var(--fg-2);
+  line-height: 1.55;
+}
+
+.signer-journal li + li {
+  margin-top: 6px;
+}
+
+.signer-status__actions {
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
 }

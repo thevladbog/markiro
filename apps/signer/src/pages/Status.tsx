@@ -21,24 +21,43 @@ export function Status({
 }): ReactElement {
   const { t } = useTranslation();
   return (
-    <Card title={t("status.title")}>
-      <p>
-        {status.tenantName}{" "}
-        <StatusChip status={PHASE_TONE[status.phase]} label={t(`status.phase.${status.phase}`)} />
-      </p>
-      {status.lastTokenExpiresAt ? (
-        <p>
-          {t("status.tokenExpires", { at: new Date(status.lastTokenExpiresAt).toLocaleString() })}
-        </p>
-      ) : (
-        <p>{t("status.noToken")}</p>
-      )}
-      {status.lastError ? <p>{status.lastError}</p> : null}
-      <CertificatePicker selected={status.certThumbprint} onSelected={onChanged} />
-      <JournalList entries={status.journal} />
-      <Button variant="destructive" onClick={() => void bridge.unpair().then(onChanged)}>
-        {t("status.unpair")}
-      </Button>
+    <Card title={t("status.title")} className="signer-status">
+      <div className="signer-status__content">
+        <section className="signer-status__summary" aria-label={t("status.summaryLabel")}>
+          <div className="signer-status__tenant">
+            <strong>{status.tenantName}</strong>
+            <StatusChip
+              status={PHASE_TONE[status.phase]}
+              label={t(`status.phase.${status.phase}`)}
+            />
+          </div>
+          <p className="signer-status__token">
+            {status.lastTokenExpiresAt
+              ? t("status.tokenExpires", {
+                  at: new Date(status.lastTokenExpiresAt).toLocaleString(),
+                })
+              : t("status.noToken")}
+          </p>
+          {status.lastError ? <p className="signer-status__error">{status.lastError}</p> : null}
+        </section>
+
+        <section className="signer-status__section">
+          <CertificatePicker selected={status.certThumbprint} onSelected={onChanged} />
+        </section>
+
+        <section className="signer-status__section" aria-labelledby="signer-journal-title">
+          <h2 id="signer-journal-title" className="signer-status__section-title">
+            {t("journal.title")}
+          </h2>
+          <JournalList entries={status.journal} />
+        </section>
+
+        <div className="signer-status__actions">
+          <Button variant="destructive" onClick={() => void bridge.unpair().then(onChanged)}>
+            {t("status.unpair")}
+          </Button>
+        </div>
+      </div>
     </Card>
   );
 }

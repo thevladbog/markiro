@@ -10,7 +10,7 @@ export function JournalList({
   const { t } = useTranslation();
   if (entries.length === 0) return <EmptyState title={t("journal.empty")} />;
   return (
-    <ul>
+    <ul className="signer-journal">
       {entries
         .slice()
         .reverse()

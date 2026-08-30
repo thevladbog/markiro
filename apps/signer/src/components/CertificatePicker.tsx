@@ -60,7 +60,7 @@ export function CertificatePicker({
   const warning = chosen ? expiryWarning(chosen.notAfter) : null;
 
   return (
-    <div>
+    <div className="signer-certificate">
       {warning ? (
         <Alert tone={warning === "expired" ? "error" : "warn"}>
           {t(`certificates.${warning}`, {
@@ -79,13 +79,15 @@ export function CertificatePicker({
           label: `${certificate.subject} · ${new Date(certificate.notAfter).toLocaleDateString()}`,
         }))}
       />
-      <Button
-        onClick={() =>
-          void bridge.listCertificates().then((list) => setCertificates(usableCertificates(list)))
-        }
-      >
-        {t("certificates.refresh")}
-      </Button>
+      <div>
+        <Button
+          onClick={() =>
+            void bridge.listCertificates().then((list) => setCertificates(usableCertificates(list)))
+          }
+        >
+          {t("certificates.refresh")}
+        </Button>
+      </div>
     </div>
   );
 }
