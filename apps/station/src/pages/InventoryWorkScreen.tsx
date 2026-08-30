@@ -439,15 +439,15 @@ function CheckInventoryWorkScreen({
       await writeActiveProductionDate(codeDate);
       if (!mounted.current) return;
       if (heldScanRef.current !== held) {
-        // The operator skipped (or a new hold replaced this one) while this
-        // write was in flight. `mounted.current` alone cannot catch this —
-        // the component stays mounted through the whole sequence — so the
-        // held scan captured at the top of this function is compared
-        // against the latest one. Undo the adoption so the code the
-        // operator chose to skip is never resurrected via queue.enqueue,
-        // and the terminal's active date ends up exactly as it was before
-        // this attempt, honoring "skip leaves nothing behind."
-        await writeActiveProductionDate(held.activeDate);
+        // Defensive guard only: the dialog's skip control (and its Escape
+        // path, gated by the same `backDisabled` flag inside
+        // `FullScreenDialog`) stays disabled for this write's entire
+        // duration, so nothing can change `heldScan` out from under this
+        // call while it is in flight — this branch should be unreachable.
+        // If it nonetheless fires, decline to resurrect the held scan: do
+        // not enqueue it, and do not write anything back. There is no
+        // longer any prior state a compensating write would need to
+        // restore, since the overlap it used to compensate for cannot occur.
         return;
       }
       setProductionDate(codeDate);
@@ -461,19 +461,11 @@ function CheckInventoryWorkScreen({
   };
 
   const acceptHeldScan = () => {
-    if (dialogBusyRef.current) return;
     const held = heldScan;
     if (!held) return;
-    dialogBusyRef.current = true;
-    setDialogBusy(true);
-    try {
-      bypassRef.current = held.raw;
-      releaseHeldScan();
-      queue.enqueue(held.raw);
-    } finally {
-      dialogBusyRef.current = false;
-      setDialogBusy(false);
-    }
+    bypassRef.current = held.raw;
+    releaseHeldScan();
+    queue.enqueue(held.raw);
   };
 
   const locale = i18n.language === "ru" ? "ru-RU" : "en-US";
@@ -682,6 +674,7 @@ function CheckInventoryWorkScreen({
         }
         backLabel={t("inventory.work.sourceDate.skip")}
         backPlacement="footer"
+        backDisabled={dialogBusy}
         onClose={releaseHeldScan}
         footer={
           heldScan?.mixed ? (

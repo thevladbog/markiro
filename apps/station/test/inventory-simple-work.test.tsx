@@ -512,7 +512,7 @@ describe("simple inventory work screen", () => {
     expect(stored.active_production_date).toBe("2026-08-19");
   });
 
-  it("does not resurrect a skipped code when skip lands while an adopt's write is still in flight", async () => {
+  it("keeps skip disabled and inert while an adopt's write is in flight, then lets the adopt land normally", async () => {
     const { db, exec } = await fixture();
     db.prepare(
       `INSERT INTO inventory_terminal_state
@@ -564,16 +564,36 @@ describe("simple inventory work screen", () => {
     fireEvent.click(screen.getByRole("button", { name: /Установить/ }));
     await waitFor(() => expect(gated).toBe(true));
 
-    // The write is still suspended on `gate.promise` at this point: skip is
-    // tapped before the in-flight adopt resolves.
-    fireEvent.click(screen.getByRole("button", { name: "Пропустить код" }));
-    await waitFor(() => expect(scan.isListening()).toBe(true));
+    // The write is still suspended on `gate.promise`. Proving the overlap
+    // cannot happen means proving skip has no way to release the hold while
+    // that write is in flight — not just that a click "does nothing" by
+    // accident.
+    const skipButton = screen.getByRole("button", {
+      name: "Пропустить код",
+    }) as HTMLButtonElement;
+    expect(skipButton.disabled).toBe(true);
+
+    // A disabled native button never dispatches its click handler, so this
+    // must be a no-op: the dialog stays open and the scanner stays held.
+    fireEvent.click(skipButton);
+    expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy();
+    expect(scan.isListening()).toBe(false);
+
+    // Escape is the dialog's other release path, gated inside
+    // `FullScreenDialog` by the same `backDisabled` flag — it must be inert
+    // too while the write is pending.
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy();
+    expect(scan.isListening()).toBe(false);
 
     gate.release();
 
-    // Once the stale write settles, the fix must undo it: NEXTDAY must never
-    // be re-enqueued, and the terminal's active date must end up exactly as
-    // it was before the adopt attempt.
+    // Once the write lands, the adopt completes exactly as an uncontested
+    // adopt would: NEXTDAY is recorded under the adopted date, and the
+    // terminal's active date stays at the adopted value — there is nothing
+    // to revert, because the overlap the old compensating write guarded
+    // against was never possible.
+    await waitFor(() => expect(scan.isListening()).toBe(true));
     await waitFor(() =>
       expect(
         (
@@ -581,23 +601,21 @@ describe("simple inventory work screen", () => {
             .prepare("SELECT COUNT(*) AS count FROM inventory_scan_events_mirror")
             .get() as { count: number }
         ).count,
-      ).toBe(1),
+      ).toBe(2),
     );
-    expect(
-      (
-        db
-          .prepare("SELECT COUNT(*) AS count FROM inventory_code_results_mirror")
-          .get() as { count: number }
-      ).count,
-    ).toBe(1);
-    await waitFor(() => {
-      const stored = db
-        .prepare(
-          "SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?",
-        )
-        .get(DEVICE_ID) as { active_production_date: string };
-      expect(stored.active_production_date).toBe("2026-08-19");
-    });
+    const nextDayHash = kmHash(canonicalizeKm(raw("NEXTDAY")));
+    const nextDayResult = db
+      .prepare(
+        "SELECT observed_production_date FROM inventory_code_results_mirror WHERE code_hash = ?",
+      )
+      .get(nextDayHash) as { observed_production_date: string };
+    expect(nextDayResult.observed_production_date).toBe("2026-08-20");
+    const stored = db
+      .prepare(
+        "SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?",
+      )
+      .get(DEVICE_ID) as { active_production_date: string };
+    expect(stored.active_production_date).toBe("2026-08-20");
   });
 
   it("shows the mixed-dates dialog for a box whose children disagree, then counts it against the active date", async () => {
