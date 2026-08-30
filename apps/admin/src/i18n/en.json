@@ -2942,6 +2942,12 @@
           "cancel": "Cancel",
           "loadError": "Could not load the agent list"
         },
+        "codeStatuses": {
+          "line": "Chestny ZNAK codes: {{total}}. Refreshed in the last day: {{refreshedLastDay}}. {{lastChecked}}",
+          "lastCheckedAt": "Last checked: {{at}}",
+          "neverChecked": "No checks yet",
+          "withoutProductGroup": "With no Chestny ZNAK product group: {{count}} — refreshing is stuck until their product gets one"
+        },
         "danger": {
           "title": "Delete integration",
           "body": "Disconnect the exchange if you are switching to another system. Settings, exchange credentials, the journal and the unmatched queue will be deleted.",
