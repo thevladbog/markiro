@@ -45,7 +45,7 @@
   "plugins": {
     "updater": {
       "endpoints": ["https://releases.markiro.app/signer/beta/latest.json"],
-      "pubkey": "REPLACE_WITH_SIGNER_MINISIGN_PUBLIC_KEY"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUyM0Y0OTgwMERBMDM3QwpSV1I4QTlvQW1QUWpCY21yNXZrMGNOM1ZWbkFUdWR4K2UyL0ErenNGOFdJOVNBL2hpRFhYMFlRawo="
     }
   }
 }

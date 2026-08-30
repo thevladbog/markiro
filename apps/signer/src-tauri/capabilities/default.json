@@ -3,5 +3,10 @@
   "identifier": "default",
   "description": "Signer webview capabilities",
   "windows": ["main"],
-  "permissions": ["core:default", "process:allow-restart", "notification:default"]
+  "permissions": [
+    "core:default",
+    "process:allow-restart",
+    "notification:default",
+    "updater:default"
+  ]
 }
