@@ -182,10 +182,10 @@ const REFRESH_CHZ_CODE_STATUSES_QUEUE_POLICY = "stately";
  * (final review, Finding 4): that queue carries no per-job singleton key --
  * every job on it does the same thing (walk every enabled tenant) -- so
  * `stately` with no key is what stops two passes from ever being `active`
- * at once. A queue stuck on `standard` would let a boot-time enqueue and the
- * next cron tick overlap, doubling `cises/info` traffic against True API's
- * 50 requests/second participant-wide limit until the client starts
- * reporting `unavailable`.
+ * at once. A queue stuck on `standard` would let two cron ticks overlap when
+ * a pass outlasts the ten-minute interval, doubling `cises/info` traffic
+ * against True API's 50 requests/second participant-wide limit until the
+ * client starts reporting `unavailable`.
  */
 async function assertRefreshChzCodeStatusesQueuePolicy(boss: PgBoss): Promise<void> {
   const actual = await queuePolicy(boss, REFRESH_CHZ_CODE_STATUSES_QUEUE);
@@ -318,10 +318,10 @@ const REFRESH_CHZ_CODE_STATUSES_CRON = "*/10 * * * *";
  *    without stopping the rest of the tenants. Unlike every other schedule
  *    above, this one talks to a third party, so it is the one queue besides
  *    `run-chz-export` carrying a `stately` policy (final review, Finding 4):
- *    with no per-job key, that stops a boot-time run and a cron tick from
- *    ever being `active` at once, which matters because this is also the one
- *    schedule the boot block enqueues rather than awaits inline (final
- *    review, Finding 2) -- see the boot block's own comment for why.
+ *    with no per-job key, that stops two cron ticks from ever being `active`
+ *    together if a backlog makes one pass outlast the ten-minute interval.
+ *    Unlike every other schedule above, it is also deliberately not run once
+ *    at boot -- see this queue's own `createQueue` call for why.
  *
  * pg-boss v12 requires a queue to be created (`createQueue`) before it can
  * be scheduled or worked -- scheduling against a queue that doesn't exist
@@ -611,10 +611,32 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
 
       await boss.createQueue(REFRESH_CHZ_CODE_STATUSES_QUEUE, {
         // No singleton key: every job on this queue does the same thing (walk
-        // every enabled tenant), so `stately` alone is what stops a boot-time
-        // enqueue and the next cron tick from ever being `active` together --
-        // see `assertRefreshChzCodeStatusesQueuePolicy` below for why that
+        // every enabled tenant), so `stately` alone is what stops two cron
+        // ticks from ever being `active` together if a backlog makes one pass
+        // outlast the ten-minute interval -- see
+        // `assertRefreshChzCodeStatusesQueuePolicy` below for why that
         // matters against True API's rate limit (final review, Finding 4).
+        //
+        // Deliberately not also run once at boot, unlike every other
+        // schedule in this file -- tried twice, reverted both times:
+        //   1. Awaiting it inline blocked the server from listening on a
+        //      third party's availability: a serial per-tenant loop of
+        //      ingest scans plus up to twenty `cises/info` calls at a
+        //      fifteen-second timeout each (final review, Finding 2).
+        //   2. Enqueueing it instead (`boss.send` in the boot block, same as
+        //      `reconcileUnfinishedChzExports`'s pattern) got the work off
+        //      the boot path, but let it land at an arbitrary moment during
+        //      startup -- arbitrary enough that pg-boss's own worker could
+        //      pick the job up mid-run of an unrelated e2e suite
+        //      (`inventories.e2e.test.ts`) and execute this pass's
+        //      `db.transaction` calls against a spy that suite requires to
+        //      stay untouched, intermittently failing it.
+        // Neither attempt bought anything real: unlike partitions that must
+        // exist before a write, an outbox that must drain, or a token that
+        // must refresh before it expires, a missed tick here costs nothing --
+        // the cron below is ten minutes precisely because the data it
+        // reports (ЧЗ code status) changes on the order of hours, so waiting
+        // one tick after a deploy is free.
         policy: REFRESH_CHZ_CODE_STATUSES_QUEUE_POLICY,
       });
       // `createQueue` above is a no-op if this queue already existed under a
@@ -627,19 +649,8 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         }),
       );
 
-      // Also run ten of these eleven maintenance paths once immediately at
-      // boot rather than waiting for the first tick of any schedule. The
-      // eleventh -- refreshing Chestny ZNAK code statuses -- is the only one
-      // of the eleven that talks to a third party (True API's `cises/info`,
-      // up to `CHZ_STATUS_MAX_BATCHES_PER_PASS` calls per tenant at a
-      // 15-second timeout each) rather than just this database, so it is
-      // enqueued instead of awaited here: Nest awaits `onModuleInit` before
-      // the server starts listening, and running it inline would block
-      // startup on a serial per-tenant loop against ЧЗ (final review,
-      // Finding 2). The cron above fires within ten minutes regardless, so
-      // nothing is lost by not running it inline -- same reasoning as
-      // `reconcileUnfinishedChzExports`, the only other boot path that
-      // enqueues rather than runs.
+      // Also run all ten maintenance paths once immediately at boot rather
+      // than waiting for the first tick of any schedule.
       await this.runEnsurePartitions();
       await this.runPruneKioskPairAttempts();
       await this.runPruneExchangeAttempts();
@@ -650,7 +661,6 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       await this.mailRetention.prune();
       await this.subscriptionStatus.run();
       await this.signerScheduler.run();
-      await boss.send(REFRESH_CHZ_CODE_STATUSES_QUEUE, {});
       this.started = true;
     } catch (e) {
       // Bootstrap failed partway through: stop whatever pg-boss managed to

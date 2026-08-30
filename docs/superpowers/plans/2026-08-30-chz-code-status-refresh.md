@@ -1091,6 +1091,60 @@ git add apps/api/src/jobs apps/api/test/chz-code-status-job.test.ts apps/api/tes
 git commit -m "fix(chz): enqueue the boot-time code status refresh and give its queue a stately policy"
 ```
 
+**Addendum, added while fixing an inventories.e2e.test.ts regression this
+branch introduced:** the boot pass from the addendum above was tried twice,
+and both attempts were removed rather than repaired.
+
+The enqueue fix above (`await boss.send(REFRESH_CHZ_CODE_STATUSES_QUEUE, {})`
+in the boot block) moved the third-party call off the boot path, but not off
+an arbitrary moment in time: pg-boss's own worker could pick that job up
+during an unrelated e2e run and execute the ingest phase's `db.transaction`
+calls against a spy `apps/api/test/inventories.e2e.test.ts` requires to stay
+untouched, intermittently failing two of that suite's tests
+(`AssertionError: expected "transaction" to not be called at all` / a 500
+becoming a 201). This was not dev-database pollution — it reproduced from a
+clean `origin/main` checkout every time the two suites' timing lined up.
+
+Both boot-time attempts are now gone:
+
+1. The first attempt (inline `await this.runRefreshChzCodeStatuses()`,
+   blocking startup on a serial per-tenant loop against True API) — already
+   reverted by the enqueue fix above.
+2. The second attempt (`await boss.send(REFRESH_CHZ_CODE_STATUSES_QUEUE, {})`)
+   — reverted here, along with the boot block's comment and the class-level
+   doc comment's bullet for this queue, both of which had been updated to
+   describe it.
+
+Neither attempt bought anything real. The other boot-time paths matter
+because a missed tick costs something concrete: partitions must exist before
+a write arrives, the mail outbox must drain, a token must refresh before it
+expires. Status refresh is not one of those — its own cron is ten minutes
+precisely because the data it reports changes on the order of hours, so
+waiting one tick after a deploy is free. The reasoning, including why this
+was tried twice, is now recorded as a comment at the queue's own
+`createQueue` call in `jobs.module.ts`, so it doesn't get added back a third
+time. The queue keeps its `stately` policy and boot-time policy assertion
+(`assertRefreshChzCodeStatusesQueuePolicy`) — those guard against two cron
+ticks overlapping when a backlog makes one pass outlast the ten-minute
+interval, which is a real, still-open concern independent of whether boot
+also enqueues a pass.
+
+`apps/api/test/jobs-shift-exports.test.ts`'s "rejects an enqueue when pg-boss
+does not return a job id" test had a `boss.send.mockResolvedValueOnce(null)`
+moved to *after* `onModuleInit()`, with a comment explaining that the boot
+block's own `boss.send` call would otherwise consume it. With that boot-time
+call gone, the mock moved back to before `onModuleInit()` and the comment was
+removed, matching this test's shape from before either boot-pass attempt.
+`jobs-readiness.test.ts`'s `selectDistinct` mock and
+`chz-code-status-job.test.ts`'s handler-invocation tests were left as they
+were: neither asserts anything about boot-time behavior, so removing them
+would have been pure churn.
+
+```bash
+git add apps/api/src/jobs/jobs.module.ts apps/api/test/jobs-shift-exports.test.ts docs/superpowers/plans/2026-08-30-chz-code-status-refresh.md
+git commit -m "fix(chz): drop the boot-time code status refresh pass for good"
+```
+
 ---
 
 ### Task 6: The freshness line
