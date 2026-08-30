@@ -44,6 +44,7 @@ export const bridge = {
   selectCertificate: (thumbprint: string) =>
     invoke<void>("signer_select_certificate", { thumbprint }),
   setServerUrl: (url: string) => invoke<void>("signer_set_server_url", { url }),
+  notifyUpdateAvailable: (version: string) => invoke<void>("signer_notify_update", { version }),
   onStatus: (listener: (status: AgentStatus) => void) =>
     listen<AgentStatus>("signer://status", (event) => listener(event.payload)),
 };

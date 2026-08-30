@@ -116,6 +116,7 @@ pub fn run() {
             commands::signer_list_certificates,
             commands::signer_select_certificate,
             commands::signer_set_server_url,
+            commands::signer_notify_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Markiro signer");
