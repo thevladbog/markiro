@@ -837,4 +837,71 @@ describe("repack inventory work screen", () => {
     await waitFor(() => expect(scan.active()).toBe(true));
     expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20");
   });
+
+  it("moves the terminal date together with the box date when applying a date to an open empty box", async () => {
+    const db = new DatabaseSync(":memory:");
+    const exec = makeExec(db);
+    await applyMigrations(exec);
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0043', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    db.prepare(
+      `INSERT INTO sscc_pool
+         (issuer_prefix, extension_digit, from_serial, to_serial, next_serial)
+       VALUES ('460068200', 0, 1, 100, 1)`,
+    ).run();
+    // Parented to an unrelated SSCC so opening OLD_SSCC finds no children to
+    // seed the box's date from: the box opens at the terminal's current date
+    // (2026-08-19, from productionDateFrom), leaving the date applied below
+    // genuinely different from where the box started.
+    const km = canonicalizeKm(`01${GTIN}21REPACK-DATEMOVE`);
+    db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+          source_production_date, parent_sscc, expected, protected)
+       VALUES (?, ?, ?, ?, ?, 'INTRODUCED', '2026-08-21', '346006820000000098', 1, 0)`,
+    ).run(SNAPSHOT_ID, kmHash(km), km.raw, GTIN, km.serial);
+    const scan = scanner();
+
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+        createEventId={() => crypto.randomUUID()}
+        now={() => "2026-08-25T10:00:01.000Z"}
+      />,
+    );
+    await waitFor(() => expect(scan.active()).toBe(true));
+    scan.emit(OLD_SSCC);
+    await waitFor(() =>
+      expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    fireEvent.change(screen.getByLabelText("Дата производства"), {
+      target: { value: "2026-08-21" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Применить дату" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    const box = db
+      .prepare("SELECT production_date FROM inventory_repack_boxes_mirror LIMIT 1")
+      .get() as { production_date: string };
+    expect(box.production_date).toBe("2026-08-21");
+    const terminal = db
+      .prepare("SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?")
+      .get(DEVICE_ID) as { active_production_date: string };
+    expect(terminal.active_production_date).toBe("2026-08-21");
+
+    // The box and terminal now agree, so a bottle carrying the box's new
+    // date must actually be added — not silently degrade to observe-only
+    // because the terminal is still lagging behind the box.
+    scan.emit(km.raw);
+    await waitFor(() =>
+      expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"),
+    );
+  });
 });

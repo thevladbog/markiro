@@ -1468,6 +1468,20 @@ function RepackInventoryWorkScreen({
                 changedAt: now(),
                 productionDate: dateDraft,
               });
+              // Keep the terminal's active date in lockstep with the box's own
+              // date, same as `adoptHeldDate` below. Otherwise the box moves but
+              // the terminal stays behind, and the very next bottle at the box's
+              // new date fails the terminal-vs-box `dateMatches` check in
+              // inventory-repacking.ts and silently degrades to observe-only
+              // instead of being added.
+              await setInventoryProductionDate(exec, {
+                inventoryId: inventory.inventoryId,
+                snapshotId: inventory.snapshotId,
+                deviceId,
+                operatorId,
+                productionDate: dateDraft,
+                updatedAt: now(),
+              });
               nudge();
             } else {
               await setInventoryProductionDate(exec, {
