@@ -3,6 +3,8 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   generateInventoryBalancesByProductionDateCsv,
   generateInventoryCurrentStockCsv,
+  generateInventoryCurrentStockCsvV1,
+  generateInventoryCurrentStockTxt,
   generateInventoryFinalBoxContentsCsv,
   generateInventoryFinalBoxesTxt,
   generateInventoryWriteOffCsv,
@@ -158,19 +160,36 @@ describe("inventory tabular document generators", () => {
     });
   });
 
-  it("renders only sorted verified current codes with their GS and crypto tails", () => {
-    const [part] = generateInventoryCurrentStockCsv(source(), metadata);
+  it("renders headerless CSV and TXT current-stock files from the same sorted verified codes", () => {
+    const [csv] = generateInventoryCurrentStockCsv(source(), metadata);
+    const [txt] = generateInventoryCurrentStockTxt(source(), metadata);
 
-    expect(decodeCsv(part)).toBe(`code\r\n${km("VERIFIED-A")}\r\n${km("VERIFIED-B")}\r\n`);
-    expect(part).toMatchObject({
+    expect(decodeCsv(csv)).toBe(`${km("VERIFIED-A")}\r\n${km("VERIFIED-B")}\r\n`);
+    expect(decode(txt)).toBe(`${km("VERIFIED-A")}\n${km("VERIFIED-B")}\n`);
+    expect(csv).toMatchObject({
       partNumber: 1,
       filename: "inventory-INV-2026-0001-current-stock.csv",
       mimeType: "text/csv; charset=utf-8",
-      rowCount: 3,
+      rowCount: 2,
       codeCount: 2,
       boxCount: 0,
     });
-    expect(decodeCsv(part)).not.toMatch(/PROTECTED|INELIGIBLE|UNKNOWN|VOIDED/);
+    expect(txt).toMatchObject({
+      partNumber: 1,
+      filename: "inventory-INV-2026-0001-current-stock.txt",
+      mimeType: "text/plain; charset=utf-8",
+      rowCount: 2,
+      codeCount: 2,
+      boxCount: 0,
+    });
+    expect(decodeCsv(csv)).not.toMatch(/PROTECTED|INELIGIBLE|UNKNOWN|VOIDED/);
+  });
+
+  it("keeps the version 1 current-stock CSV bytes available for historical runs", () => {
+    const [legacy] = generateInventoryCurrentStockCsvV1(source(), metadata);
+
+    expect(decodeCsv(legacy)).toBe(`code\r\n${km("VERIFIED-A")}\r\n${km("VERIFIED-B")}\r\n`);
+    expect(legacy).toMatchObject({ rowCount: 3, codeCount: 2, boxCount: 0 });
   });
 
   it("sorts write-off and current-stock codes by full canonical UTF-8 bytes", () => {
@@ -200,9 +219,7 @@ describe("inventory tabular document generators", () => {
     expect(decodeCsv(writeOffCsv)).toBe(
       `code\r\n${km(BMP_SERIAL)}\r\n${km(SUPPLEMENTARY_SERIAL)}\r\n`,
     );
-    expect(decodeCsv(currentStockCsv)).toBe(
-      `code\r\n${km(BMP_SERIAL)}\r\n${km(SUPPLEMENTARY_SERIAL)}\r\n`,
-    );
+    expect(decodeCsv(currentStockCsv)).toBe(`${km(BMP_SERIAL)}\r\n${km(SUPPLEMENTARY_SERIAL)}\r\n`);
   });
 
   it("renders only eligible final boxes with 00-prefixed SSCCs and full canonical codes", () => {
@@ -269,24 +286,27 @@ describe("inventory tabular document generators", () => {
     });
   });
 
-  it("emits zero-byte TXT and BOM-plus-header CSV artifacts for an empty source", () => {
+  it("emits zero-byte TXT and valid minimal CSV artifacts for an empty source", () => {
     const empty = emptySource();
     const [writeOffTxt] = generateInventoryWriteOffTxt(empty, metadata);
     const [writeOffCsv] = generateInventoryWriteOffCsv(empty, metadata);
     const [currentStock] = generateInventoryCurrentStockCsv(empty, metadata);
+    const [currentStockTxt] = generateInventoryCurrentStockTxt(empty, metadata);
     const [boxContents] = generateInventoryFinalBoxContentsCsv(empty, metadata);
     const [finalBoxes] = generateInventoryFinalBoxesTxt(empty, metadata);
     const [balances] = generateInventoryBalancesByProductionDateCsv(empty, metadata);
 
     expect(writeOffTxt?.bytes).toHaveLength(0);
+    expect(currentStockTxt?.bytes).toHaveLength(0);
     expect(finalBoxes?.bytes).toHaveLength(0);
     expect(decodeCsv(writeOffCsv)).toBe("code\r\n");
-    expect(decodeCsv(currentStock)).toBe("code\r\n");
+    expect(decodeCsv(currentStock)).toBe("");
     expect(decodeCsv(boxContents)).toBe("box_sscc;code\r\n");
     expect(decodeCsv(balances)).toBe("production_date;code_count;box_count\r\n");
     expect(writeOffTxt).toMatchObject({ rowCount: 0, codeCount: 0, boxCount: 0 });
     expect(writeOffCsv).toMatchObject({ rowCount: 1, codeCount: 0, boxCount: 0 });
-    expect(currentStock).toMatchObject({ rowCount: 1, codeCount: 0, boxCount: 0 });
+    expect(currentStock).toMatchObject({ rowCount: 0, codeCount: 0, boxCount: 0 });
+    expect(currentStockTxt).toMatchObject({ rowCount: 0, codeCount: 0, boxCount: 0 });
     expect(boxContents).toMatchObject({ rowCount: 1, codeCount: 0, boxCount: 0 });
     expect(finalBoxes).toMatchObject({ rowCount: 0, codeCount: 0, boxCount: 0 });
     expect(balances).toMatchObject({ rowCount: 1, codeCount: 0, boxCount: 0 });

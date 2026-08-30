@@ -37,7 +37,10 @@ export interface InventoryDocumentGeneratedPart {
   partNumber: number;
   filename: string;
   mimeType:
-    "application/xml; charset=utf-8" | "text/csv; charset=utf-8" | "text/plain; charset=utf-8";
+    | "application/pdf"
+    | "application/xml; charset=utf-8"
+    | "text/csv; charset=utf-8"
+    | "text/plain; charset=utf-8";
   bytes: Uint8Array;
   rowCount: number;
   codeCount: number;

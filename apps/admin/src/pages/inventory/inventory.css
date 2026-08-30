@@ -440,6 +440,16 @@
   gap: 12px;
 }
 
+.mk-inventory-correction-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.mk-inventory-correction-layout--repack {
+  grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr);
+}
+
 .mk-inventory-evidence-list,
 .mk-inventory-correction-list {
   display: grid;
@@ -497,6 +507,22 @@
   justify-content: flex-end;
 }
 
+.mk-inventory-correction-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 12px 0;
+}
+
+.mk-inventory-correction-list li > span:first-child {
+  overflow-wrap: anywhere;
+}
+
+.mk-inventory-correction-list__actions {
+  justify-content: flex-start;
+}
+
 .mk-inventory-correction-filters {
   display: grid;
   grid-template-columns: minmax(180px, 2fr) repeat(2, minmax(150px, 1fr));
@@ -534,6 +560,7 @@
   }
   .mk-inventory-live__metrics,
   .mk-inventory-live__columns,
+  .mk-inventory-correction-layout--repack,
   .mk-inventory-document-formats {
     grid-template-columns: 1fr;
   }

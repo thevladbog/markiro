@@ -5,6 +5,7 @@ import {
   createUtf8ByteComparator,
   encodeLfText,
   encodeSemicolonCsv,
+  encodeSemicolonCsvRows,
 } from "../document-text-encoding.js";
 import { DomainError } from "../errors.js";
 import { formatSsccWithAi } from "../gs1/sscc.js";
@@ -58,7 +59,7 @@ export function generateInventoryWriteOffCsv(
   ];
 }
 
-export function generateInventoryCurrentStockCsv(
+export function generateInventoryCurrentStockCsvV1(
   source: InventoryDocumentGenerationSource,
   metadata: InventoryDocumentGenerationMetadata,
 ): InventoryDocumentGeneratedPart[] {
@@ -72,6 +73,40 @@ export function generateInventoryCurrentStockCsv(
         codes.map((code) => [code]),
       ),
       1 + codes.length,
+      codes.length,
+      0,
+    ),
+  ];
+}
+
+export function generateInventoryCurrentStockCsv(
+  source: InventoryDocumentGenerationSource,
+  metadata: InventoryDocumentGenerationMetadata,
+): InventoryDocumentGeneratedPart[] {
+  const codes = verifiedCodes(source);
+  return [
+    generatedPart(
+      `${inventoryDocumentFilenamePrefix(metadata.inventoryNumber)}-current-stock.csv`,
+      CSV_MIME_TYPE,
+      encodeSemicolonCsvRows(codes.map((code) => [code])),
+      codes.length,
+      codes.length,
+      0,
+    ),
+  ];
+}
+
+export function generateInventoryCurrentStockTxt(
+  source: InventoryDocumentGenerationSource,
+  metadata: InventoryDocumentGenerationMetadata,
+): InventoryDocumentGeneratedPart[] {
+  const codes = verifiedCodes(source);
+  return [
+    generatedPart(
+      `${inventoryDocumentFilenamePrefix(metadata.inventoryNumber)}-current-stock.txt`,
+      TXT_MIME_TYPE,
+      encodeLfText(codes),
+      codes.length,
       codes.length,
       0,
     ),

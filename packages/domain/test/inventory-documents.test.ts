@@ -26,6 +26,27 @@ describe("inventory document format registry", () => {
   it("advertises the current operational document catalog", () => {
     expect(INVENTORY_DOCUMENT_FORMATS).toEqual([
       {
+        id: "inventory_pdf_act",
+        version: 1,
+        label: "[PDF] Акт об инвентаризации",
+        extension: "pdf",
+        mimeType: "application/pdf",
+        requiredSourceCategories: [
+          "expected",
+          "verified",
+          "writeOffCandidates",
+          "protected",
+          "ineligible",
+          "unknown",
+          "oldBoxes",
+          "newBoxes",
+          "observedDateGroups",
+        ],
+        supportsParts: false,
+        availability: "available",
+        requiresOrganizationInn: true,
+      },
+      {
         id: "inventory_xml_gismt_aggregation",
         version: 2,
         label: "[XML][ГИСМТ] Формирование упаковки",
@@ -69,10 +90,20 @@ describe("inventory document format registry", () => {
       },
       {
         id: "inventory_csv_current_stock",
-        version: 1,
+        version: 2,
         label: "[CSV] Коды на учёт",
         extension: "csv",
         mimeType: "text/csv; charset=utf-8",
+        requiredSourceCategories: ["verified", "protected"],
+        supportsParts: false,
+        availability: "available",
+      },
+      {
+        id: "inventory_txt_current_stock",
+        version: 1,
+        label: "[TXT] Коды на учёт",
+        extension: "txt",
+        mimeType: "text/plain; charset=utf-8",
         requiredSourceCategories: ["verified", "protected"],
         supportsParts: false,
         availability: "available",
@@ -177,6 +208,10 @@ describe("inventory document format registry", () => {
     expect(getRegisteredInventoryDocumentFormat("inventory_xml_gismt_aggregation", 1)).toEqual(
       getInventoryDocumentFormat("inventory_xml_gismt_aggregation", 1),
     );
+    expect(getRegisteredInventoryDocumentFormat("inventory_csv_current_stock", 1)).toMatchObject({
+      version: 1,
+      availability: "unavailable",
+    });
   });
 
   it("does not advertise or resolve unavailable formats", () => {

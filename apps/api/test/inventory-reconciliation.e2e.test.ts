@@ -460,6 +460,7 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
         expect.objectContaining({
           eventId: unknownEventId,
           codeResultId: expect.any(String),
+          displayIdentity: `(01)${GTIN} (21)FOUND-6`,
           terminalId: terminalAId,
           terminalName: "Terminal A",
           classification: "unknown",
@@ -495,7 +496,7 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
       .expect(200);
     expect(first.body).toMatchObject({ page: 1, pageSize: 3, total: 8, hasMore: true });
     const duplicate = await agent
-      .get(`/inventories/${inventoryId}/evidence?search=${verifiedHash}&pageSize=20`)
+      .get(`/inventories/${inventoryId}/evidence?search=FOUND-1&pageSize=20`)
       .expect(200);
     expect(duplicate.body.items).toEqual(
       expect.arrayContaining([
@@ -510,6 +511,15 @@ describe.skipIf(!ready)("tenant inventory reconciliation endpoints", () => {
         }),
       ]),
     );
+    const oldBox = await agent
+      .get(`/inventories/${inventoryId}/evidence?kind=old_box&pageSize=20`)
+      .expect(200);
+    expect(oldBox.body.items).toEqual([
+      expect.objectContaining({
+        kind: "old_box",
+        displayIdentity: `(00)${sourceSscc}`,
+      }),
+    ]);
     const actionableMember = await agent
       .get(`/inventories/${inventoryId}/evidence?classification=unknown&kind=item`)
       .expect(200);
