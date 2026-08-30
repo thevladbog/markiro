@@ -938,7 +938,7 @@ describe("repack inventory work screen", () => {
     await waitFor(() =>
       expect(screen.getByText("Дата кода отличается от даты короба")).toBeTruthy(),
     );
-    expect(scan.active()).toBe(false);
+    await waitFor(() => expect(scan.active()).toBe(false));
     // MATCH must not have been silently added behind the open dialog.
     expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20");
 
