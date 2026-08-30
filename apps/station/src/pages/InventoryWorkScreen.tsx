@@ -725,7 +725,7 @@ function CheckInventoryWorkScreen({
 
 const EMPTY_REPACK_STATE: InventoryRepackStateView = { phase: "awaiting-old-box", box: null };
 
-type HeldRepackScan = { raw: string; activeDate: string; codeDate: string };
+type HeldRepackScan = { raw: string; activeDate: string; codeDate: string; itemCount: number };
 
 function RepackInventoryWorkScreen({
   exec,
@@ -762,6 +762,11 @@ function RepackInventoryWorkScreen({
   const [recent, setRecent] = useState<RecentInventoryOperation[]>(gallery?.recent ?? []);
   const [writeFailed, setWriteFailed] = useState(gallery?.writeFailed ?? false);
   const [dateDialog, setDateDialog] = useState(gallery?.dateDialog ?? false);
+  // Read synchronously (not via effect) so the `old-box-selected` date
+  // reload below always sees the dialog state as of the render that is
+  // current when its promise resolves, not one render behind.
+  const dateDialogOpenRef = useRef(dateDialog);
+  dateDialogOpenRef.current = dateDialog;
   const [correctionsDialog, setCorrectionsDialog] = useState(gallery?.correctionsDialog ?? false);
   const [busy, setBusy] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -792,7 +797,6 @@ function RepackInventoryWorkScreen({
   }, [heldScan]);
   const [dialogBusy, setDialogBusy] = useState(false);
   const dialogBusyRef = useRef(false);
-  const bypassRef = useRef<string | null>(null);
   const queueRef = useRef<ScanQueue | null>(null);
   const boxDateRef = useRef("");
 
@@ -884,10 +888,8 @@ function RepackInventoryWorkScreen({
     () =>
       createScanQueue<{ outcome: InventoryRepackScanResult; raw: string }>({
         shouldProcess: () => !heldRef.current,
-        process: async (raw) => {
-          const bypass = bypassRef.current === raw;
-          if (bypass) bypassRef.current = null;
-          return recordInventoryRepackScan(exec, {
+        process: async (raw) =>
+          recordInventoryRepackScan(exec, {
             inventoryId: inventory.inventoryId,
             snapshotId: inventory.snapshotId,
             deviceId,
@@ -898,11 +900,10 @@ function RepackInventoryWorkScreen({
             raw,
             eventId: createEventId(),
             scannedAt: now(),
-            ...(bypass ? { acceptSourceDateMismatch: true } : {}),
-          }).then((outcome) => ({ outcome, raw }));
-        },
+          }).then((outcome) => ({ outcome, raw })),
         onOutcome: ({ outcome, raw }) => {
           if (!mounted.current) return;
+          setWriteFailed(false);
           if (outcome.verdict === "source-date-mismatch" && outcome.sourceProductionDate) {
             heldRef.current = true;
             queueRef.current?.discardBufferedScans();
@@ -911,19 +912,18 @@ function RepackInventoryWorkScreen({
               raw,
               activeDate: boxDateRef.current,
               codeDate: outcome.sourceProductionDate,
+              // Authoritative as of this outcome's own DB read — unlike
+              // `state.box.itemCount`, which can still be lagging behind an
+              // accepted add or a just-opened box (see the back-to-back scan
+              // test), because `refresh()` is fired-and-forget from the
+              // previous outcome and may not have committed yet.
+              itemCount: outcome.itemCount,
             });
             return;
           }
           if (outcome.verdict === "old-box-selected") {
             setPrintResult(null);
             setProvisionalPrintFailure(null);
-          }
-          if (outcome.verdict === "capacity-closed") setPrintBusy(true);
-          setResult(outcome);
-          setWriteFailed(false);
-          nudge();
-          void refresh();
-          if (outcome.verdict === "old-box-selected") {
             // Task 4's seeding can move the terminal's active date to the old
             // box's own content date; refresh() only reloads box/recent/print
             // state, so the toolbar's productionDate/dateDraft must be synced
@@ -934,13 +934,26 @@ function RepackInventoryWorkScreen({
               inventoryId: inventory.inventoryId,
               snapshotId: inventory.snapshotId,
               deviceId,
-            }).then((date) => {
-              if (mounted.current && date !== null) {
-                setProductionDate(date);
-                setDateDraft(date);
-              }
-            });
+            })
+              .then((date) => {
+                if (mounted.current && date !== null) {
+                  setProductionDate(date);
+                  // Scans (and therefore this reload) cannot be enqueued
+                  // while the date dialog is open, but this read can still
+                  // resolve after the operator has since opened it and
+                  // started typing; only the toolbar display is refreshed
+                  // here, never an in-progress, unsaved draft.
+                  if (!dateDialogOpenRef.current) setDateDraft(date);
+                }
+              })
+              .catch((error: unknown) => {
+                console.error("station: repack toolbar date refresh failed", error);
+              });
           }
+          if (outcome.verdict === "capacity-closed") setPrintBusy(true);
+          setResult(outcome);
+          nudge();
+          void refresh();
         },
         onError: (_raw, error) => {
           console.error("station: repack scan write failed", error);
@@ -1494,7 +1507,7 @@ function RepackInventoryWorkScreen({
     // as the first is a no-op regardless of render timing.
     if (dialogBusyRef.current) return;
     const held = heldScan;
-    if (!held || !state.box || state.box.itemCount > 0) return;
+    if (!held || held.itemCount > 0) return;
     dialogBusyRef.current = true;
     setDialogBusy(true);
     try {
@@ -1844,7 +1857,7 @@ function RepackInventoryWorkScreen({
         backDisabled={dialogBusy}
         onClose={releaseHeldScan}
         footer={
-          state.box && state.box.itemCount === 0 ? (
+          heldScan && heldScan.itemCount === 0 ? (
             <Button
               size="floor"
               disabled={dialogBusy}
@@ -1859,7 +1872,7 @@ function RepackInventoryWorkScreen({
               }
             >
               {t("inventory.work.sourceDate.apply", {
-                date: heldScan ? formatCivilDate(heldScan.codeDate, locale) : "",
+                date: formatCivilDate(heldScan.codeDate, locale),
               })}
             </Button>
           ) : null
@@ -1869,24 +1882,34 @@ function RepackInventoryWorkScreen({
           <p>
             {t("inventory.work.sourceDate.body", {
               code: heldScan ? formatCivilDate(heldScan.codeDate, locale) : "",
-              active: heldScan ? formatCivilDate(heldScan.activeDate, locale) : "",
+              // `activeDate` is not carried by the scan outcome (see
+              // `HeldRepackScan`), only mirrored from React state via
+              // `boxDateRef`, which can still be empty right after a
+              // back-to-back old-box + first-bottle scan; fall back instead
+              // of formatting an empty string, matching
+              // `RepackBoxInstrument`'s own guard on the same field.
+              active: heldScan
+                ? heldScan.activeDate
+                  ? formatCivilDate(heldScan.activeDate, locale)
+                  : "—"
+                : "",
             })}
           </p>
-          {state.box && state.box.itemCount > 0 ? (
-            <p>{t("inventory.repack.sourceDateBlocked")}</p>
-          ) : null}
-          {state.box && state.box.itemCount > 0 ? (
-            <Button
-              variant="secondary"
-              size="floor"
-              disabled={dialogBusy}
-              onClick={() => {
-                releaseHeldScan();
-                setCorrectionsDialog(true);
-              }}
-            >
-              {t("inventory.repack.corrections")}
-            </Button>
+          {heldScan && heldScan.itemCount > 0 ? (
+            <>
+              <p>{t("inventory.repack.sourceDateBlocked")}</p>
+              <Button
+                variant="secondary"
+                size="floor"
+                disabled={dialogBusy}
+                onClick={() => {
+                  releaseHeldScan();
+                  setCorrectionsDialog(true);
+                }}
+              >
+                {t("inventory.repack.corrections")}
+              </Button>
+            </>
           ) : null}
         </div>
       </FullScreenDialog>

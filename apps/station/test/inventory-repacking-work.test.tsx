@@ -81,6 +81,14 @@ function scanner() {
   };
 }
 
+function deferred() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
 beforeAll(async () => i18n.changeLanguage("ru"));
 afterEach(cleanup);
 
@@ -560,6 +568,193 @@ describe("repack inventory work screen", () => {
     await waitFor(() => expect(scan.active()).toBe(true));
   });
 
+  it("holds a mismatch without crashing when it lands on the first bottle scanned right after the old box", async () => {
+    const db = new DatabaseSync(":memory:");
+    const exec = makeExec(db);
+    await applyMigrations(exec);
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0043', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    db.prepare(
+      `INSERT INTO sscc_pool
+         (issuer_prefix, extension_digit, from_serial, to_serial, next_serial)
+       VALUES ('460068200', 0, 1, 100, 1)`,
+    ).run();
+    // No code carries OLD_SSCC as its parent, so `oldBoxSourceDate` finds
+    // nothing to seed from and the new box opens with the terminal's current
+    // active date (2026-08-19, from productionDateFrom) — leaving room for
+    // the very first bottle scanned into it to disagree.
+    const km = canonicalizeKm(`01${GTIN}21REPACK-RACE`);
+    db.prepare(
+      `INSERT INTO inventory_snapshot_codes_mirror
+         (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+          source_production_date, parent_sscc, expected, protected)
+       VALUES (?, ?, ?, ?, ?, 'INTRODUCED', '2026-08-21', ?, 1, 0)`,
+    ).run(SNAPSHOT_ID, kmHash(km), km.raw, GTIN, km.serial, "346006820000000098");
+    const scan = scanner();
+
+    render(
+      <InventoryWorkScreen
+        exec={exec}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+        createEventId={() => crypto.randomUUID()}
+        now={() => "2026-08-25T10:00:01.000Z"}
+      />,
+    );
+    await waitFor(() => expect(scan.active()).toBe(true));
+
+    // Back to back, with no `await` in between: both scans land in the scan
+    // queue's buffer before the old box's own `refresh()` — fired but not
+    // awaited by `onOutcome` — has any chance to commit `state.box`, so the
+    // mismatch outcome for the very next scan is judged while `state.box` is
+    // still `null`. Before the fix, the held dialog's active-date fallback
+    // read that stale, empty box date and crashed formatting it.
+    scan.emit(OLD_SSCC);
+    scan.emit(km.raw);
+
+    await waitFor(() =>
+      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+    );
+    expect(scan.active()).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: /Установить/ }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"),
+    );
+    const box = db
+      .prepare("SELECT production_date FROM inventory_repack_boxes_mirror LIMIT 1")
+      .get() as { production_date: string };
+    expect(box.production_date).toBe("2026-08-21");
+    await waitFor(() => expect(scan.active()).toBe(true));
+  });
+
+  it("keeps skip disabled and inert while a repack date adoption's write is in flight", async () => {
+    const db = new DatabaseSync(":memory:");
+    const baseExec = makeExec(db);
+    await applyMigrations(baseExec);
+    db.prepare(
+      "INSERT INTO inventory_task_mirror (inventory_id, inventory_number, active_snapshot_id) VALUES (?, 'IVN-26-0043', ?)",
+    ).run(INVENTORY_ID, SNAPSHOT_ID);
+    db.prepare(
+      `INSERT INTO sscc_pool
+         (issuer_prefix, extension_digit, from_serial, to_serial, next_serial)
+       VALUES ('460068200', 0, 1, 100, 1)`,
+    ).run();
+    // Pre-seed the terminal row directly (bypassing the gated executor below)
+    // so mount hydration's `loadInventoryProductionDate` finds a non-null
+    // date and never itself calls `setInventoryProductionDate` — the only
+    // write that must trip the gate is `adoptHeldDate`'s.
+    db.prepare(
+      `INSERT INTO inventory_terminal_state
+         (inventory_id, snapshot_id, device_id, operator_id, active_production_date,
+          next_device_sequence, updated_at)
+       VALUES (?, ?, ?, ?, '2026-08-19', 1, '2026-08-25T10:00:00.000Z')`,
+    ).run(INVENTORY_ID, SNAPSHOT_ID, DEVICE_ID, OPERATOR_ID);
+    // Two conflicting dates under the old box means `oldBoxSourceDate` finds
+    // no single seedable date, so opening the old box does not itself write
+    // to `inventory_terminal_state` either — the gate's first hit is
+    // guaranteed to be `adoptHeldDate`'s.
+    for (const [serial, productionDate] of [
+      ["REPACK-GATE-A", "2026-08-21"],
+      ["REPACK-GATE-B", "2026-08-22"],
+    ] as const) {
+      const km = canonicalizeKm(`01${GTIN}21${serial}`);
+      db.prepare(
+        `INSERT INTO inventory_snapshot_codes_mirror
+           (snapshot_id, code_hash, canonical_raw, gtin14, serial, source_status,
+            source_production_date, parent_sscc, expected, protected)
+         VALUES (?, ?, ?, ?, ?, 'INTRODUCED', ?, ?, 1, 0)`,
+      ).run(SNAPSHOT_ID, kmHash(km), km.raw, GTIN, km.serial, productionDate, OLD_SSCC);
+    }
+    const gate = deferred();
+    let gated = false;
+    const suspended: SqlExecutor = {
+      run: async (sql, params) => {
+        if (
+          !gated &&
+          /INSERT INTO inventory_terminal_state[\s\S]*active_production_date = excluded\.active_production_date/i.test(
+            sql,
+          )
+        ) {
+          gated = true;
+          await gate.promise;
+        }
+        return baseExec.run(sql, params);
+      },
+      all: <T,>(sql: string, params?: unknown[]) => baseExec.all<T>(sql, params),
+    };
+    const scan = scanner();
+
+    render(
+      <InventoryWorkScreen
+        exec={suspended}
+        inventory={manifest}
+        deviceId={DEVICE_ID}
+        operatorId={OPERATOR_ID}
+        source={scan.source}
+        createEventId={() => crypto.randomUUID()}
+        now={() => "2026-08-25T10:00:01.000Z"}
+      />,
+    );
+    await waitFor(() => expect(scan.active()).toBe(true));
+    scan.emit(OLD_SSCC);
+    await waitFor(() =>
+      expect(screen.getByTestId("repack-count").textContent).toContain("0 / 20"),
+    );
+
+    scan.emit(canonicalizeKm(`01${GTIN}21REPACK-GATE-A`).raw);
+    await waitFor(() =>
+      expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Установить/ }));
+    await waitFor(() => expect(gated).toBe(true));
+
+    // The write is still suspended on `gate.promise`. Proving the overlap
+    // cannot happen means proving skip has no way to release the hold while
+    // that write is in flight — not just that a click "does nothing" by
+    // accident.
+    const skipButton = screen.getByRole("button", {
+      name: "Пропустить код",
+    }) as HTMLButtonElement;
+    expect(skipButton.disabled).toBe(true);
+
+    // A disabled native button never dispatches its click handler, so this
+    // must be a no-op: the dialog stays open and the scanner stays held.
+    fireEvent.click(skipButton);
+    expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy();
+    expect(scan.active()).toBe(false);
+
+    // Escape is the dialog's other release path, gated inside
+    // `FullScreenDialog` by the same `backDisabled` flag — it must be inert
+    // too while the write is pending.
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.getByText("Дата в коде отличается от активной")).toBeTruthy();
+    expect(scan.active()).toBe(false);
+
+    gate.release();
+
+    // Once the write lands, the adoption completes exactly as an
+    // uncontested one would: the held bottle is counted under the adopted
+    // date and the scanner resumes.
+    await waitFor(() => expect(scan.active()).toBe(true));
+    await waitFor(() =>
+      expect(screen.getByTestId("repack-count").textContent).toContain("1 / 20"),
+    );
+    const box = db
+      .prepare("SELECT production_date FROM inventory_repack_boxes_mirror LIMIT 1")
+      .get() as { production_date: string };
+    expect(box.production_date).toBe("2026-08-21");
+    const terminal = db
+      .prepare("SELECT active_production_date FROM inventory_terminal_state WHERE device_id = ?")
+      .get(DEVICE_ID) as { active_production_date: string };
+    expect(terminal.active_production_date).toBe("2026-08-21");
+  });
+
   it("offers only skip and corrections when the repack box is not empty", async () => {
     const db = new DatabaseSync(":memory:");
     const exec = makeExec(db);
@@ -613,6 +808,29 @@ describe("repack inventory work screen", () => {
     );
     expect(screen.queryByRole("button", { name: /Установить/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Пропустить код" })).toBeTruthy();
+
+    // The corrections shortcut must actually route into the corrections
+    // dialog, not just render inertly — otherwise the control could be
+    // deleted with the suite still green. Scoped to the held-scan dialog:
+    // the toolbar behind it has its own same-labelled "Исправления" button.
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Исправления" }),
+    );
+    expect(await screen.findByRole("button", { name: "Убрать последнюю бутылку" })).toBeTruthy();
+    expect(screen.queryByText("Дата в коде отличается от активной")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(scan.active()).toBe(true));
+
+    // REPACK-OTHER was never journalled by the earlier mismatch (it "writes
+    // nothing"), so re-scanning it re-triggers the same held dialog, letting
+    // the same test also cover skip.
+    scan.emit(canonicalizeKm(`01${GTIN}21REPACK-OTHER`).raw);
+    await waitFor(() =>
+      expect(
+        screen.getByText("В коробе уже есть бутылки другой даты. Закройте или очистите короб."),
+      ).toBeTruthy(),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Пропустить код" }));
 
